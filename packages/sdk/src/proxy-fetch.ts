@@ -32,9 +32,8 @@ export function createProxyFetch(
         reject(new Error('Proxy request timed out'));
       }, 120_000);
 
-      function handleMessage(event: MessageEvent) {
-        if (event.source !== window) return;
-        const data = event.data;
+      function handleEvent(event: Event) {
+        const data = (event as CustomEvent).detail ?? (event as MessageEvent).data;
         if (data?.requestId !== requestId) return;
 
         switch (data.type) {
@@ -83,10 +82,10 @@ export function createProxyFetch(
 
       function cleanup() {
         clearTimeout(timeout);
-        window.removeEventListener('message', handleMessage);
+        document.removeEventListener('byoky-message', handleEvent);
       }
 
-      window.addEventListener('message', handleMessage);
+      document.addEventListener('byoky-message', handleEvent);
 
       window.postMessage(
         {

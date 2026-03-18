@@ -51,8 +51,8 @@ export class Byoky {
         );
       }, this.timeout);
 
-      function handleMessage(event: MessageEvent) {
-        const msg = event.data;
+      function handleEvent(event: Event) {
+        const msg = (event as CustomEvent).detail;
         if (typeof msg?.type !== 'string' || !msg.type.startsWith('BYOKY_')) return;
         if (msg.requestId !== requestId) return;
 
@@ -71,10 +71,10 @@ export class Byoky {
 
       function cleanup() {
         clearTimeout(timeoutId);
-        window.removeEventListener('message', handleMessage);
+        document.removeEventListener('byoky-message', handleEvent);
       }
 
-      window.addEventListener('message', handleMessage);
+      document.addEventListener('byoky-message', handleEvent);
 
       window.postMessage(
         {

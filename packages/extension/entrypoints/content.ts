@@ -17,21 +17,24 @@ export default defineContentScript({
         port.postMessage(data);
 
         port.onMessage.addListener((msg) => {
-          window.postMessage(msg, '*');
+          document.dispatchEvent(
+            new CustomEvent('byoky-message', { detail: msg }),
+          );
         });
 
         port.onDisconnect.addListener(() => {
-          window.postMessage(
-            {
-              type: 'BYOKY_PROXY_RESPONSE_ERROR',
-              requestId: data.requestId,
-              status: 500,
-              error: {
-                code: 'PROXY_ERROR',
-                message: 'Extension disconnected',
+          document.dispatchEvent(
+            new CustomEvent('byoky-message', {
+              detail: {
+                type: 'BYOKY_PROXY_RESPONSE_ERROR',
+                requestId: data.requestId,
+                status: 500,
+                error: {
+                  code: 'PROXY_ERROR',
+                  message: 'Extension disconnected',
+                },
               },
-            },
-            '*',
+            }),
           );
         });
       } else if (
@@ -41,9 +44,11 @@ export default defineContentScript({
         // Simple message passing for connect/disconnect
         console.log('[byoky:content] forwarding to background:', data.type);
         browser.runtime.sendMessage(data).then((response) => {
-          console.log('[byoky:content] got response from background:', response);
+          console.log('[byoky:content] dispatching response via CustomEvent');
           if (response) {
-            window.postMessage(response, '*');
+            document.dispatchEvent(
+              new CustomEvent('byoky-message', { detail: response }),
+            );
           }
         }).catch((err) => {
           console.error('[byoky:content] error from background:', err);
