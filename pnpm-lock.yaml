@@ -30,8 +30,8 @@ importers:
   packages/demo:
     dependencies:
       '@byoky/sdk':
-        specifier: workspace:*
-        version: link:../sdk
+        specifier: ^0.1.0
+        version: 0.1.0
       react:
         specifier: ^19.0.0
         version: 19.2.4
@@ -241,6 +241,9 @@ packages:
   '@bramus/specificity@2.4.2':
     resolution: {integrity: sha512-ctxtJ/eA+t+6q2++vj5j7FYX3nRu311q1wfYH3xjlLOsczhlhxAg2FWNUXhpGvAw3BWo1xBcvOV6/YLc2r5FJw==}
     hasBin: true
+
+  '@byoky/sdk@0.1.0':
+    resolution: {integrity: sha512-f5cE2JvzH05mTQnHBNpYlDT8iKLDV6GMU1jTHushAKywIvXVGhijKaAoqPGIQNkoNWdc9sXVEV6VZg+rdAmQcw==}
 
   '@csstools/color-helpers@6.0.2':
     resolution: {integrity: sha512-LMGQLS9EuADloEFkcTBR3BwV/CGHV7zyDxVRtVDTwdI2Ca4it0CCVTT9wCkxSgokjE5Ho41hEPgb8OEUwoXr6Q==}
@@ -3033,6 +3036,10 @@ snapshots:
   '@bramus/specificity@2.4.2':
     dependencies:
       css-tree: 3.2.1
+
+  '@byoky/sdk@0.1.0':
+    dependencies:
+      '@byoky/core': link:packages/core
 
   '@csstools/color-helpers@6.0.2': {}
 
