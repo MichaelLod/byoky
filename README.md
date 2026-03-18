@@ -21,6 +21,7 @@
   <a href="https://github.com/MichaelLod/byoky/stargazers"><img src="https://img.shields.io/github/stars/MichaelLod/byoky?style=flat&color=7c3aed" alt="Stars" /></a>
   <a href="https://github.com/MichaelLod/byoky/issues"><img src="https://img.shields.io/github/issues/MichaelLod/byoky?style=flat&color=7c3aed" alt="Issues" /></a>
   <a href="https://github.com/MichaelLod/byoky/pulls"><img src="https://img.shields.io/badge/PRs-welcome-7c3aed?style=flat" alt="PRs Welcome" /></a>
+  <a href="https://www.npmjs.com/package/@byoky/sdk"><img src="https://img.shields.io/npm/v/@byoky/sdk?style=flat&color=7c3aed&label=npm" alt="npm" /></a>
 </p>
 
 ---
@@ -53,6 +54,10 @@ cd byoky && pnpm install && pnpm dev
 ```
 
 ### For Developers
+
+```bash
+npm install @byoky/sdk
+```
 
 ```typescript
 import Anthropic from '@anthropic-ai/sdk';

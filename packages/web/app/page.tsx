@@ -133,6 +133,9 @@ function ForDevelopers() {
             Use your favorite provider SDK with byoky&apos;s fetch proxy. Two
             extra lines. Full API compatibility. Keys never touch your app.
           </p>
+          <div className="install-cmd">
+            <code>npm install @byoky/sdk</code>
+          </div>
         </FadeIn>
         <div className="dev-layout">
           <div>
