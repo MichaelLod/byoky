@@ -1,0 +1,1 @@
+self.__NEXT_FONT_MANIFEST='{"pages":{},"app":{"/Users/michael/Work/byoky/packages/web/app/layout":["static/media/f3f7e95f2dbc4fe4-s.p.woff2","static/media/bb3ef058b751a6ad-s.p.woff2"]},"appUsingSizeAdjust":true,"pagesUsingSizeAdjust":false}';
