@@ -140,10 +140,6 @@ describe('Byoky', () => {
   });
 
   function simulateResponse(data: Record<string, unknown>) {
-    const event = new MessageEvent('message', {
-      data,
-      source: window,
-    });
-    window.dispatchEvent(event);
+    document.dispatchEvent(new CustomEvent('byoky-message', { detail: data }));
   }
 });
