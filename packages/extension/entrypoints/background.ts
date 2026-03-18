@@ -18,12 +18,8 @@ export default defineBackground(() => {
   // --- Message handling ---
 
   browser.runtime.onMessage.addListener((message, sender) => {
-    console.log('[byoky:bg] received message:', message.type);
     if (message.type === 'BYOKY_CONNECT_REQUEST') {
-      return handleConnect(message, sender).then((res) => {
-        console.log('[byoky:bg] connect response:', res?.type);
-        return res;
-      });
+      return handleConnect(message, sender);
     }
 
     if (message.type === 'BYOKY_DISCONNECT') {
