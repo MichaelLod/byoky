@@ -2,6 +2,7 @@ node_modules/
 dist/
 .output/
 .wxt/
+.next/
 *.tsbuildinfo
 .DS_Store
 .env
