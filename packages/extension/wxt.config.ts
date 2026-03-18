@@ -12,5 +12,15 @@ export default defineConfig({
       'https://generativelanguage.googleapis.com/*',
       'https://console.anthropic.com/*',
     ],
+    browser_specific_settings: {
+      gecko: {
+        id: 'byoky@byoky.com',
+        strict_min_version: '109.0',
+        data_collection_permissions: {
+          required: ['none'],
+          optional: [],
+        },
+      },
+    },
   },
 });
