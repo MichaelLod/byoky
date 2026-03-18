@@ -17,10 +17,9 @@ export default defineBackground(() => {
 
   // --- Message handling ---
 
-  browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  browser.runtime.onMessage.addListener((message, sender) => {
     if (message.type === 'BYOKY_CONNECT_REQUEST') {
-      handleConnect(message, sender).then(sendResponse);
-      return true;
+      return handleConnect(message, sender);
     }
 
     if (message.type === 'BYOKY_DISCONNECT') {
@@ -30,8 +29,7 @@ export default defineBackground(() => {
     }
 
     if (message.type === 'BYOKY_INTERNAL') {
-      handleInternal(message).then(sendResponse);
-      return true;
+      return handleInternal(message);
     }
   });
 
