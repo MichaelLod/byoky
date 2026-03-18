@@ -159,6 +159,16 @@ pnpm --filter @byoky/extension build:all     # Chrome + Firefox + Safari
 - [ ] Browser extension store listings
 - [x] Landing page at [byoky.com](https://byoky.com)
 
+## Star History
+
+<a href="https://star-history.com/#MichaelLod/byoky&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=MichaelLod/byoky&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=MichaelLod/byoky&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=MichaelLod/byoky&type=Date" />
+ </picture>
+</a>
+
 ## Contributing
 
 Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
