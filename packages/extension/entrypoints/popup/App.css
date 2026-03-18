@@ -296,10 +296,14 @@ body {
 
 .status-dot {
   display: inline-block;
-  width: 6px;
-  height: 6px;
+  width: 6px !important;
+  height: 6px !important;
+  min-width: 6px;
+  max-width: 6px;
+  min-height: 6px;
+  max-height: 6px;
   border-radius: 50%;
-  margin-right: 6px;
+  margin-right: 8px;
   flex-shrink: 0;
   margin-top: 7px;
 }
