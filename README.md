@@ -1,18 +1,58 @@
-# byoky
+<p align="center">
+  <br />
+  <a href="https://byoky.com">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://github.com/MichaelLod/byoky/raw/main/.github/banner-dark.svg">
+      <img alt="byoky" src="https://github.com/MichaelLod/byoky/raw/main/.github/banner-dark.svg" width="480">
+    </picture>
+  </a>
+  <br />
+  <strong>MetaMask for AI</strong>
+  <br />
+  A secure browser wallet for your LLM API keys and auth tokens.
+  <br />
+  Your keys never leave the extension.
+  <br />
+  <br />
+  <a href="https://byoky.com">Website</a> · <a href="#quick-start">Quick Start</a> · <a href="#for-developers">SDK Docs</a> · <a href="https://github.com/MichaelLod/byoky/issues">Issues</a>
+  <br />
+  <br />
+  <a href="https://github.com/MichaelLod/byoky/blob/main/LICENSE"><img src="https://img.shields.io/github/license/MichaelLod/byoky?style=flat&color=7c3aed" alt="License" /></a>
+  <a href="https://github.com/MichaelLod/byoky/stargazers"><img src="https://img.shields.io/github/stars/MichaelLod/byoky?style=flat&color=7c3aed" alt="Stars" /></a>
+  <a href="https://github.com/MichaelLod/byoky/issues"><img src="https://img.shields.io/github/issues/MichaelLod/byoky?style=flat&color=7c3aed" alt="Issues" /></a>
+  <a href="https://github.com/MichaelLod/byoky/pulls"><img src="https://img.shields.io/badge/PRs-welcome-7c3aed?style=flat" alt="PRs Welcome" /></a>
+</p>
 
-**Bring Your Own Key** — A secure browser wallet for your AI credentials.
+---
 
-byoky lets users store API keys and OAuth tokens for LLM providers (Anthropic, OpenAI, Gemini, etc.) in a single, encrypted browser extension. Developers integrate via an SDK so their apps can use the user's credentials — without ever seeing them.
+## What is byoky?
 
-Think MetaMask, but for AI.
+**byoky** (Bring Your Own Key) is an open-source browser extension that stores your AI API keys and OAuth tokens in an encrypted vault. Developers integrate via `@byoky/sdk` — their apps can use your credentials without ever seeing them.
 
-## How it works
+- **For users** — One wallet for all your AI credentials. Add keys, approve apps, revoke access. Full visibility into every request.
+- **For developers** — Two lines of code. Use your favorite provider SDK. Keys never touch your app.
 
-1. **User** installs the byoky browser extension
-2. **User** adds their API keys or signs in via OAuth
-3. **Developer** integrates `@byoky/sdk` into their app
-4. **App** requests access → user approves in the wallet popup
-5. **App** makes API calls through byoky's proxy — keys never leave the extension
+### How it works
+
+```
+1. Install the byoky wallet → set a master password
+2. Add your API keys or sign in via OAuth → encrypted locally
+3. Visit any byoky-enabled app → approve access → keys stay in the vault
+```
+
+## Quick Start
+
+### For Users
+
+```bash
+# Coming soon to browser extension stores
+# For now, build from source:
+git clone https://github.com/MichaelLod/byoky.git
+cd byoky && pnpm install && pnpm dev
+# Load unpacked extension from packages/extension/.output/chrome-mv3
+```
+
+### For Developers
 
 ```typescript
 import Anthropic from '@anthropic-ai/sdk';
@@ -23,13 +63,13 @@ const session = await byoky.connect({
   providers: [{ id: 'anthropic', required: true }],
 });
 
-// Use the native Anthropic SDK — just swap in byoky's proxy fetch
+// Use the native Anthropic SDK — just swap in byoky's fetch
 const client = new Anthropic({
   apiKey: session.sessionKey,
   fetch: session.createFetch('anthropic'),
 });
 
-// Works exactly like normal, including streaming
+// Everything works exactly like normal, including streaming
 const message = await client.messages.create({
   model: 'claude-sonnet-4-20250514',
   max_tokens: 1024,
@@ -37,115 +77,92 @@ const message = await client.messages.create({
 });
 ```
 
-## Security model
+> **Two lines changed.** Full API compatibility. Streaming works. Keys never exposed.
 
-- API keys are encrypted locally with AES-256-GCM (PBKDF2-derived key, 600K iterations)
-- Keys **never leave the extension** — the extension proxies requests on behalf of apps
-- Apps receive temporary, revocable session keys
-- All requests are logged and visible to the user
-- No cloud sync, no telemetry — everything stays on your device
+## Security
 
-## Project structure
+| | |
+|---|---|
+| **AES-256-GCM** | Keys encrypted with PBKDF2-derived key (600K iterations) via Web Crypto API |
+| **Zero exposure** | API keys never leave the extension. Apps get temporary session tokens |
+| **Audit log** | Every request logged — app origin, provider, status, timestamp |
+| **Local only** | No cloud. No telemetry. No tracking. Your device, your keys |
+
+## Supported Providers
+
+| Provider | API Key | OAuth | Status |
+|----------|:-------:|:-----:|--------|
+| Anthropic | ✓ | ✓ | Available |
+| OpenAI | ✓ | — | Available |
+| Google Gemini | ✓ | — | Available |
+| *Custom* | ✓ | — | Extensible |
+
+## Architecture
+
+byoky uses a **proxy model** (like MetaMask's transaction signing). Keys never leave the extension:
+
+```
+App → SDK (createFetch) → window.postMessage → Content Script
+  → chrome.runtime.Port → Background Script → fetch(real API + real key)
+  → streams response back through the same chain
+```
+
+The SDK provides `createFetch()` — a drop-in `fetch` replacement that routes through the extension. Works with **any provider's native SDK**.
+
+## Project Structure
 
 ```
 byoky/
 ├── packages/
-│   ├── core/          # Shared types, crypto, protocol
+│   ├── core/          # Shared types, crypto, protocol, provider registry
 │   ├── sdk/           # @byoky/sdk — npm package for developers
-│   └── extension/     # Browser extension (Chrome, Firefox, Safari)
+│   ├── extension/     # Browser extension (Chrome, Firefox, Safari) — WXT
+│   └── web/           # Landing page — byoky.com
 ```
 
 ## Development
 
 ```bash
-# Install dependencies
-pnpm install
-
-# Start extension in dev mode (Chrome)
-pnpm dev
-
-# Start for Firefox
-pnpm --filter @byoky/extension dev:firefox
-
-# Build all packages
-pnpm build
-
-# Build extension for all browsers
-pnpm --filter @byoky/extension build:all
-
-# Type check
-pnpm typecheck
+pnpm install              # Install dependencies
+pnpm dev                  # Start extension in dev mode (Chrome)
+pnpm build                # Build all packages
+pnpm typecheck            # Type check everything
 ```
 
-### Loading the extension in Chrome
+**Browser-specific builds:**
 
-1. Run `pnpm dev`
-2. Open `chrome://extensions`
+```bash
+pnpm --filter @byoky/extension dev:firefox
+pnpm --filter @byoky/extension build:all     # Chrome + Firefox + Safari
+```
+
+**Load in Chrome:**
+1. `pnpm dev`
+2. Navigate to `chrome://extensions`
 3. Enable "Developer mode"
 4. Click "Load unpacked" → select `packages/extension/.output/chrome-mv3`
 
-## Architecture
+## Tech Stack
 
-### Proxy model
-
-byoky uses a proxy architecture (like MetaMask's transaction signing). When an app makes an API call:
-
-```
-App → window.postMessage → Content Script → chrome.runtime.Port → Background Script
-Background Script → fetch(LLM API with real credentials) → streams response back
-Background Script → Content Script → window.postMessage → App
-```
-
-The background script is the only context that ever holds decrypted API keys.
-
-### Custom fetch
-
-The SDK provides a `createFetch()` function that returns a drop-in replacement for `fetch`. This means developers can use **any provider's native SDK** (Anthropic, OpenAI, etc.) — they just pass byoky's fetch as a custom transport:
-
-```typescript
-const client = new Anthropic({
-  apiKey: session.sessionKey,     // byoky session key (not the real API key)
-  fetch: session.createFetch('anthropic'),  // routes through the extension
-});
-```
-
-### Supported providers
-
-| Provider | API Key | OAuth |
-|----------|---------|-------|
-| Anthropic | Yes | Yes |
-| OpenAI | Yes | — |
-| Google Gemini | Yes | — |
-
-More providers can be added by extending the provider registry in `@byoky/core`.
-
-## Packages
-
-### `@byoky/core`
-
-Shared types, encryption utilities (Web Crypto API), message protocol, and provider definitions.
-
-### `@byoky/sdk`
-
-The developer-facing npm package. Provides the `Byoky` class for connecting to the wallet and `createFetch()` for proxying API calls through the extension.
-
-### `@byoky/extension`
-
-The browser extension built with [WXT](https://wxt.dev). Includes:
-
-- **Popup UI** (React + Zustand) — manage credentials, approve connections, view history
-- **Background script** — session management, request proxy, encryption
-- **Content script** — message relay between web pages and the extension
+| | |
+|---|---|
+| **Extension** | [WXT](https://wxt.dev) · React · Zustand · Web Crypto API |
+| **SDK** | TypeScript · zero dependencies (except @byoky/core) |
+| **Monorepo** | pnpm workspaces · TypeScript strict mode |
+| **Browsers** | Chrome (MV3) · Firefox · Safari |
 
 ## Roadmap
 
 - [ ] Claude OAuth flow (authorization code)
 - [ ] Spending caps and rate limits per app
-- [ ] Multiple credential profiles (personal/work)
 - [ ] Export/import encrypted vault backup
-- [ ] Browser extension store listings (Chrome, Firefox, Safari)
-- [ ] Landing page at [byoky.com](https://byoky.com)
+- [ ] Browser extension store listings
+- [x] Landing page at [byoky.com](https://byoky.com)
+
+## Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) — free forever.
