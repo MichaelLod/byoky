@@ -15,6 +15,12 @@ export default defineBackground(() => {
   const sessions = new Map<string, Session>();
   let masterPassword: string | null = null;
 
+  // --- Open side panel on icon click (Chrome) ---
+
+  if (typeof chrome !== 'undefined' && chrome.sidePanel) {
+    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  }
+
   // --- Message handling ---
 
   browser.runtime.onMessage.addListener((message, sender) => {

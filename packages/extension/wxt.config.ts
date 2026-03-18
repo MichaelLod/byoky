@@ -5,7 +5,7 @@ export default defineConfig({
   manifest: {
     name: 'byoky',
     description: 'Bring Your Own Key — Secure wallet for your AI credentials',
-    permissions: ['storage'],
+    permissions: ['storage', 'sidePanel'],
     host_permissions: [
       'https://api.anthropic.com/*',
       'https://api.openai.com/*',
