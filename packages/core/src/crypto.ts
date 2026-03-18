@@ -69,11 +69,30 @@ export async function decrypt(
   return new TextDecoder().decode(plaintext);
 }
 
+async function deriveRawHash(
+  password: string,
+  salt: Uint8Array,
+): Promise<Uint8Array> {
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(password),
+    'PBKDF2',
+    false,
+    ['deriveBits'],
+  );
+
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt, iterations: ITERATIONS, hash: 'SHA-256' },
+    keyMaterial,
+    KEY_LENGTH,
+  );
+
+  return new Uint8Array(bits);
+}
+
 export async function hashPassword(password: string): Promise<string> {
   const salt = crypto.getRandomValues(new Uint8Array(SALT_LENGTH));
-  const key = await deriveKey(password, salt);
-  const exported = await crypto.subtle.exportKey('raw', key);
-  const hash = new Uint8Array(exported);
+  const hash = await deriveRawHash(password, salt);
 
   const combined = new Uint8Array(salt.length + hash.length);
   combined.set(salt, 0);
@@ -90,9 +109,7 @@ export async function verifyPassword(
   const salt = combined.slice(0, SALT_LENGTH);
   const originalHash = combined.slice(SALT_LENGTH);
 
-  const key = await deriveKey(password, salt);
-  const exported = await crypto.subtle.exportKey('raw', key);
-  const newHash = new Uint8Array(exported);
+  const newHash = await deriveRawHash(password, salt);
 
   if (originalHash.length !== newHash.length) return false;
   return originalHash.every((byte, i) => byte === newHash[i]);

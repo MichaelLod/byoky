@@ -27,6 +27,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Run tests
+        run: pnpm test
+
       - name: Build extension
         run: pnpm --filter @byoky/extension build
 
