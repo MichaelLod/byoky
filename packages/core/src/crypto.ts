@@ -16,7 +16,7 @@ export async function deriveKey(
   );
 
   return crypto.subtle.deriveKey(
-    { name: 'PBKDF2', salt, iterations: ITERATIONS, hash: 'SHA-256' },
+    { name: 'PBKDF2', salt: salt as BufferSource, iterations: ITERATIONS, hash: 'SHA-256' },
     keyMaterial,
     { name: 'AES-GCM', length: KEY_LENGTH },
     false,
@@ -82,7 +82,7 @@ async function deriveRawHash(
   );
 
   const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', salt, iterations: ITERATIONS, hash: 'SHA-256' },
+    { name: 'PBKDF2', salt: salt as BufferSource, iterations: ITERATIONS, hash: 'SHA-256' },
     keyMaterial,
     KEY_LENGTH,
   );
