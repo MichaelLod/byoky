@@ -296,26 +296,17 @@ body {
 
 .status-dot {
   display: inline-block;
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   margin-right: 6px;
+  flex-shrink: 0;
+  margin-top: 7px;
 }
 
-.status-dot.success {
-  background: var(--success);
-  box-shadow: 0 0 6px rgba(52, 211, 153, 0.4);
-}
-
-.status-dot.error {
-  background: var(--danger);
-  box-shadow: 0 0 6px rgba(244, 63, 94, 0.4);
-}
-
-.status-dot.warning {
-  background: var(--warning);
-  box-shadow: 0 0 6px rgba(251, 191, 36, 0.4);
-}
+.status-dot.success { background: var(--success); }
+.status-dot.error { background: var(--danger); }
+.status-dot.warning { background: var(--warning); }
 
 /* ── Empty state ── */
 
