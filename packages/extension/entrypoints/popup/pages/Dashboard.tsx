@@ -38,7 +38,9 @@ export function Dashboard() {
                       <span className="badge badge-provider">
                         {provider?.name ?? cred.providerId}
                       </span>
-                      <span className="badge badge-method">{cred.authMethod}</span>
+                      <span className="badge badge-method">
+                        {cred.authMethod === 'oauth' ? 'Setup Token' : 'API Key'}
+                      </span>
                     </div>
                   </div>
                   <button

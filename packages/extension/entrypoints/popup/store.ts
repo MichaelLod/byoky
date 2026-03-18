@@ -31,6 +31,8 @@ interface WalletState {
   lock: () => Promise<void>;
   navigate: (page: Page) => void;
   addApiKey: (providerId: string, label: string, apiKey: string) => Promise<void>;
+  addSetupToken: (providerId: string, label: string, token: string) => Promise<void>;
+  startOAuth: (providerId: string, label: string) => Promise<void>;
   removeCredential: (id: string) => Promise<void>;
   revokeSession: (sessionId: string) => Promise<void>;
   refreshData: () => Promise<void>;
@@ -119,7 +121,8 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       // We need the password to encrypt — request it from background
       // For now, we encrypt client-side by asking user to enter password again
       // TODO: Use session-stored derived key
-      const encryptedKey = await encrypt(apiKey, await getSessionPassword());
+      const cleanKey = apiKey.replace(/\s+/g, '');
+      const encryptedKey = await encrypt(cleanKey, await getSessionPassword());
 
       const newCred = {
         id: crypto.randomUUID(),
@@ -133,6 +136,48 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       credentials.push(newCred);
       await browser.storage.local.set({ credentials });
 
+      await get().refreshData();
+      set({ currentPage: 'dashboard', loading: false });
+    } catch (e) {
+      set({ error: (e as Error).message, loading: false });
+    }
+  },
+
+  addSetupToken: async (providerId: string, label: string, token: string) => {
+    set({ loading: true, error: null });
+    try {
+      const data = await browser.storage.local.get('credentials');
+      const credentials = (data.credentials ?? []) as Array<Record<string, unknown>>;
+
+      const cleanToken = token.replace(/\s+/g, '');
+      const encryptedAccessToken = await encrypt(cleanToken, await getSessionPassword());
+
+      const newCred = {
+        id: crypto.randomUUID(),
+        providerId,
+        label,
+        authMethod: 'oauth' as const,
+        encryptedAccessToken,
+        createdAt: Date.now(),
+      };
+
+      credentials.push(newCred);
+      await browser.storage.local.set({ credentials });
+
+      await get().refreshData();
+      set({ currentPage: 'dashboard', loading: false });
+    } catch (e) {
+      set({ error: (e as Error).message, loading: false });
+    }
+  },
+
+  startOAuth: async (providerId: string, label: string) => {
+    set({ loading: true, error: null });
+    try {
+      const result = await sendInternal('startOAuth', { providerId, label });
+      if (!result.success) {
+        throw new Error(result.error || 'OAuth flow failed');
+      }
       await get().refreshData();
       set({ currentPage: 'dashboard', loading: false });
     } catch (e) {
@@ -169,7 +214,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
         authMethod: c.authMethod,
         createdAt: c.createdAt,
         lastUsedAt: c.lastUsedAt,
-        maskedKey: c.authMethod === 'api_key' ? '••••••••' : undefined,
+        maskedKey: c.authMethod === 'api_key' ? '••••••••' : c.authMethod === 'oauth' ? 'Setup Token' : undefined,
       }),
     );
 

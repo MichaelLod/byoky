@@ -11,6 +11,7 @@ export interface ProviderConfig {
 }
 
 export interface OAuthConfig {
+  clientId: string;
   authorizationUrl: string;
   tokenUrl: string;
   scopes: string[];

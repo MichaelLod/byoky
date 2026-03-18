@@ -15,20 +15,20 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'byoky — MetaMask for AI',
+  title: 'Byoky — MetaMask for AI',
   description:
     'A secure browser wallet for your LLM API keys and auth tokens. Your keys never leave the extension.',
   openGraph: {
-    title: 'byoky — MetaMask for AI',
+    title: 'Byoky — MetaMask for AI',
     description:
       'A secure browser wallet for your LLM API keys. Install once, connect everywhere.',
     url: 'https://byoky.com',
-    siteName: 'byoky',
+    siteName: 'Byoky',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'byoky — MetaMask for AI',
+    title: 'Byoky — MetaMask for AI',
     description:
       'A secure browser wallet for your LLM API keys. Your keys never leave the extension.',
   },

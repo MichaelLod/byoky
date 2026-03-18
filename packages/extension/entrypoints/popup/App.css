@@ -393,6 +393,25 @@ body {
   position: relative;
 }
 
+/* Mascot peeking from bottom (like MetaMask fox) */
+.mascot-peek {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 280px;
+  pointer-events: none;
+  opacity: 0.85;
+  z-index: 0;
+}
+
+.mascot-peek img {
+  width: 100%;
+  height: auto;
+  display: block;
+  transform: translateY(45%);
+}
+
 /* ── Footer actions ── */
 
 .footer-action {
@@ -412,6 +431,98 @@ body {
 
 .text-link:hover {
   color: var(--accent-hover);
+}
+
+/* ── Auth method toggle ── */
+
+.auth-method-toggle {
+  display: flex;
+  background: var(--bg-input);
+  border-radius: var(--radius-sm);
+  padding: 3px;
+  border: 1.5px solid var(--border);
+}
+
+.auth-toggle-btn {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+
+.auth-toggle-btn:hover {
+  color: var(--text);
+}
+
+.auth-toggle-btn.active {
+  color: var(--text);
+  background: var(--accent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.oauth-info {
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+
+.oauth-info p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.oauth-info code {
+  background: var(--bg-input);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 12px;
+  color: var(--accent-hover);
+}
+
+.setup-steps {
+  padding-left: 18px;
+  margin: 4px 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.8;
+}
+
+.form-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 6px;
+  line-height: 1.5;
+}
+
+.hint-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.hint-link:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+.warning-note {
+  background: rgba(251, 191, 36, 0.08);
+  border-left: 3px solid var(--warning);
+  padding: 10px 12px;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: 16px;
 }
 
 /* ── Request history ── */

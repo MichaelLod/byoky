@@ -12,10 +12,10 @@ export function ConnectWallet({ onConnect }: Props) {
             <path d="M9 12l2 2 4-4" />
           </svg>
         </div>
-        <h2>Connect your byoky wallet</h2>
+        <h2>Connect your Byoky wallet</h2>
         <p>
-          This demo app uses the byoky SDK to chat with AI models using your own
-          API keys. Your keys never leave the byoky extension.
+          This demo app uses the Byoky SDK to chat with AI models using your own
+          API keys. Your keys never leave the Byoky extension.
         </p>
         <button className="btn btn-primary btn-lg" onClick={onConnect}>
           Connect Wallet
@@ -38,7 +38,7 @@ export function ConnectWallet({ onConnect }: Props) {
 
       <div className="connect-install">
         <p>
-          Don&apos;t have byoky?{' '}
+          Don&apos;t have Byoky?{' '}
           <a href="https://byoky.com" target="_blank" rel="noopener noreferrer">
             Install the extension
           </a>

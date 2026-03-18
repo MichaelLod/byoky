@@ -24,7 +24,7 @@
     <path d="M14 20l4 4 8-8" stroke="#a78bfa" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
   </g>
   <!-- Logo text -->
-  <text x="204" y="55" font-family="system-ui, -apple-system, sans-serif" font-size="36" font-weight="700" fill="url(#textGrad)" letter-spacing="-1">byoky</text>
+  <text x="204" y="55" font-family="system-ui, -apple-system, sans-serif" font-size="36" font-weight="700" fill="url(#textGrad)" letter-spacing="-1">Byoky</text>
   <!-- Tagline -->
   <text x="240" y="82" font-family="system-ui, -apple-system, sans-serif" font-size="14" fill="#7a7a9c" text-anchor="middle" letter-spacing="0.5">Bring Your Own Key</text>
   <!-- Subtitle -->

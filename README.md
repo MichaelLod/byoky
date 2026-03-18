@@ -1,9 +1,13 @@
 <p align="center">
   <br />
   <a href="https://byoky.com">
+    <img src="https://github.com/MichaelLod/byoky/raw/main/.github/icon.svg" alt="Muninn" width="80" />
+  </a>
+  <br />
+  <a href="https://byoky.com">
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset="https://github.com/MichaelLod/byoky/raw/main/.github/banner-dark.svg">
-      <img alt="byoky" src="https://github.com/MichaelLod/byoky/raw/main/.github/banner-dark.svg" width="480">
+      <img alt="Byoky" src="https://github.com/MichaelLod/byoky/raw/main/.github/banner-dark.svg" width="480">
     </picture>
   </a>
   <br />
@@ -26,9 +30,9 @@
 
 ---
 
-## What is byoky?
+## What is Byoky?
 
-**byoky** (Bring Your Own Key) is an open-source browser extension that stores your AI API keys and OAuth tokens in an encrypted vault. Developers integrate via `@byoky/sdk` — their apps can use your credentials without ever seeing them.
+**Byoky** (Bring Your Own Key) is an open-source browser extension that stores your AI API keys and OAuth tokens in an encrypted vault. Developers integrate via `@byoky/sdk` — their apps can use your credentials without ever seeing them.
 
 - **For users** — One wallet for all your AI credentials. Add keys, approve apps, revoke access. Full visibility into every request.
 - **For developers** — Two lines of code. Use your favorite provider SDK. Keys never touch your app.
@@ -36,9 +40,9 @@
 ### How it works
 
 ```
-1. Install the byoky wallet → set a master password
+1. Install the Byoky wallet → set a master password
 2. Add your API keys or sign in via OAuth → encrypted locally
-3. Visit any byoky-enabled app → approve access → keys stay in the vault
+3. Visit any Byoky-enabled app → approve access → keys stay in the vault
 ```
 
 ## Quick Start
@@ -68,7 +72,7 @@ const session = await byoky.connect({
   providers: [{ id: 'anthropic', required: true }],
 });
 
-// Use the native Anthropic SDK — just swap in byoky's fetch
+// Use the native Anthropic SDK — just swap in Byoky's fetch
 const client = new Anthropic({
   apiKey: session.sessionKey,
   fetch: session.createFetch('anthropic'),
@@ -95,19 +99,21 @@ const message = await client.messages.create({
 
 ## Supported Providers
 
-| Provider | API Key | OAuth | Status |
-|----------|:-------:|:-----:|--------|
+| Provider | API Key | Setup Token | Status |
+|----------|:-------:|:-----------:|--------|
 | Anthropic | ✓ | ✓ | Available |
 | OpenAI | ✓ | — | Available |
 | Google Gemini | ✓ | — | Available |
 | *Custom* | ✓ | — | Extensible |
 
+> **Setup Token**: Use your Claude Pro/Max subscription via `claude setup-token`. API keys use pay-per-use billing from the provider console.
+
 ## Architecture
 
-byoky uses a **proxy model** (like MetaMask's transaction signing). Keys never leave the extension:
+Byoky uses a **proxy model** (like MetaMask's transaction signing). Keys never leave the extension:
 
 ```
-App → SDK (createFetch) → window.postMessage → Content Script
+App → SDK (createFetch) → CustomEvent → Content Script
   → chrome.runtime.Port → Background Script → fetch(real API + real key)
   → streams response back through the same chain
 ```

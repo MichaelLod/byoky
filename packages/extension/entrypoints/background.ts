@@ -7,6 +7,7 @@ import {
   type ConnectResponse,
   type ProxyRequest,
   decrypt,
+  encrypt,
   verifyPassword,
   PROVIDERS,
 } from '@byoky/core';
@@ -71,7 +72,7 @@ export default defineBackground(() => {
 
       try {
         const apiKey = await decryptCredentialKey(credential);
-        const realHeaders = buildHeaders(msg.providerId, msg.headers, apiKey);
+        const realHeaders = buildHeaders(msg.providerId, msg.headers, apiKey, credential.authMethod);
 
         const response = await fetch(msg.url, {
           method: msg.method,
@@ -133,6 +134,8 @@ export default defineBackground(() => {
     const origin = sender.tab?.url ? new URL(sender.tab.url).origin : 'unknown';
 
     if (!masterPassword) {
+      // Auto-open the wallet so the user can unlock (like MetaMask)
+      openWalletUI(sender.tab?.id);
       return {
         type: 'BYOKY_ERROR',
         requestId: message.id,
@@ -251,9 +254,173 @@ export default defineBackground(() => {
         return { success: true };
       }
 
+      case 'startOAuth': {
+        const { providerId, label } = message.payload as {
+          providerId: string;
+          label: string;
+        };
+        return handleOAuthFlow(providerId, label);
+      }
+
       default:
         return { error: 'Unknown action' };
     }
+  }
+
+  async function handleOAuthFlow(
+    providerId: string,
+    label: string,
+  ): Promise<{ success: boolean; error?: string }> {
+    if (!masterPassword) {
+      return { success: false, error: 'Wallet is locked' };
+    }
+
+    const provider = PROVIDERS[providerId];
+    if (!provider?.oauthConfig) {
+      return { success: false, error: 'Provider does not support OAuth' };
+    }
+
+    const { clientId, authorizationUrl, tokenUrl, scopes } = provider.oauthConfig;
+
+    if (!clientId) {
+      return { success: false, error: 'OAuth client_id not configured for this provider' };
+    }
+
+    const redirectUrl = browser.identity.getRedirectURL();
+    const state = crypto.randomUUID();
+
+    // PKCE: generate code_verifier and code_challenge (S256)
+    const codeVerifier = generateCodeVerifier();
+    const codeChallenge = await generateCodeChallenge(codeVerifier);
+
+    const authUrl = new URL(authorizationUrl);
+    authUrl.searchParams.set('client_id', clientId);
+    authUrl.searchParams.set('response_type', 'code');
+    authUrl.searchParams.set('redirect_uri', redirectUrl);
+    authUrl.searchParams.set('state', state);
+    authUrl.searchParams.set('code_challenge', codeChallenge);
+    authUrl.searchParams.set('code_challenge_method', 'S256');
+    if (scopes.length > 0) {
+      authUrl.searchParams.set('scope', scopes.join(' '));
+    }
+
+    try {
+      const responseUrl = await browser.identity.launchWebAuthFlow({
+        url: authUrl.toString(),
+        interactive: true,
+      });
+
+      const params = new URL(responseUrl).searchParams;
+
+      if (params.get('state') !== state) {
+        return { success: false, error: 'OAuth state mismatch' };
+      }
+
+      const code = params.get('code');
+      if (!code) {
+        const error = params.get('error') || 'No authorization code received';
+        return { success: false, error };
+      }
+
+      // Exchange code for tokens (with PKCE code_verifier, no client_secret needed)
+      const tokenResponse = await fetch(tokenUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'authorization_code',
+          client_id: clientId,
+          code,
+          code_verifier: codeVerifier,
+          redirect_uri: redirectUrl,
+        }),
+      });
+
+      if (!tokenResponse.ok) {
+        const err = await tokenResponse.text();
+        return { success: false, error: `Token exchange failed: ${err}` };
+      }
+
+      const tokens = (await tokenResponse.json()) as {
+        access_token: string;
+        refresh_token?: string;
+        expires_in?: number;
+      };
+
+      // Encrypt and store
+      const encryptedAccessToken = await encrypt(
+        tokens.access_token,
+        masterPassword,
+      );
+      const encryptedRefreshToken = tokens.refresh_token
+        ? await encrypt(tokens.refresh_token, masterPassword)
+        : undefined;
+
+      const newCred: Credential = {
+        id: crypto.randomUUID(),
+        providerId,
+        label,
+        authMethod: 'oauth',
+        encryptedAccessToken,
+        encryptedRefreshToken,
+        expiresAt: tokens.expires_in
+          ? Date.now() + tokens.expires_in * 1000
+          : undefined,
+        createdAt: Date.now(),
+      };
+
+      const data = await browser.storage.local.get('credentials');
+      const credentials = (data.credentials as Credential[]) ?? [];
+      credentials.push(newCred);
+      await browser.storage.local.set({ credentials });
+
+      return { success: true };
+    } catch (e) {
+      const msg = (e as Error).message;
+      if (msg.includes('canceled') || msg.includes('cancelled')) {
+        return { success: false, error: 'OAuth flow was cancelled' };
+      }
+      return { success: false, error: msg };
+    }
+  }
+
+  // --- PKCE helpers (RFC 7636) ---
+
+  function generateCodeVerifier(): string {
+    const array = new Uint8Array(32);
+    crypto.getRandomValues(array);
+    return base64UrlEncode(array);
+  }
+
+  async function generateCodeChallenge(verifier: string): Promise<string> {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(verifier);
+    const digest = await crypto.subtle.digest('SHA-256', data);
+    return base64UrlEncode(new Uint8Array(digest));
+  }
+
+  function base64UrlEncode(buffer: Uint8Array): string {
+    let binary = '';
+    for (const byte of buffer) {
+      binary += String.fromCharCode(byte);
+    }
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  function openWalletUI(tabId?: number) {
+    // Chrome: open side panel
+    if (typeof chrome !== 'undefined' && chrome.sidePanel && tabId) {
+      chrome.sidePanel.open({ tabId }).catch(() => {});
+      return;
+    }
+
+    // Firefox/Safari fallback: open popup as a window
+    const popupUrl = browser.runtime.getURL('/popup.html');
+    browser.windows.create({
+      url: popupUrl,
+      type: 'popup',
+      width: 400,
+      height: 600,
+    }).catch(() => {});
   }
 
   async function getStoredCredentials(): Promise<Credential[]> {
@@ -287,6 +454,7 @@ export default defineBackground(() => {
     providerId: string,
     requestHeaders: Record<string, string>,
     apiKey: string,
+    authMethod: string = 'api_key',
   ): Record<string, string> {
     const headers = { ...requestHeaders };
 
@@ -295,6 +463,7 @@ export default defineBackground(() => {
     delete headers['x-api-key'];
 
     if (providerId === 'anthropic') {
+      // Both API keys and setup tokens use x-api-key for Anthropic
       headers['x-api-key'] = apiKey;
       headers['anthropic-version'] = headers['anthropic-version'] ?? '2023-06-01';
     } else {

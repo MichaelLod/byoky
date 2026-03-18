@@ -164,7 +164,7 @@ export function Chat({ session }: Props) {
           <div className="chat-empty">
             <p>Send a message to start chatting.</p>
             <p className="chat-empty-sub">
-              Powered by byoky — your API keys stay in the wallet extension.
+              Powered by Byoky — your API keys stay in the wallet extension.
             </p>
           </div>
         )}

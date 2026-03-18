@@ -6,11 +6,6 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     name: 'Anthropic',
     authMethods: ['api_key', 'oauth'],
     baseUrl: 'https://api.anthropic.com',
-    oauthConfig: {
-      authorizationUrl: 'https://console.anthropic.com/oauth/authorize',
-      tokenUrl: 'https://console.anthropic.com/oauth/token',
-      scopes: [],
-    },
   },
   openai: {
     id: 'openai',

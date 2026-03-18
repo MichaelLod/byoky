@@ -3,9 +3,9 @@ import { defineConfig } from 'wxt';
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   manifest: {
-    name: 'byoky',
+    name: 'Byoky',
     description: 'Bring Your Own Key — Secure wallet for your AI credentials',
-    permissions: ['storage', 'sidePanel'],
+    permissions: ['storage', 'sidePanel', 'identity'],
     host_permissions: [
       'https://api.anthropic.com/*',
       'https://api.openai.com/*',

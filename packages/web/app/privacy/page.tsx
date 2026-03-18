@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Privacy Policy — byoky',
+  title: 'Privacy Policy — Byoky',
 };
 
 export default function Privacy() {
@@ -14,21 +14,21 @@ export default function Privacy() {
 
       <Section title="Summary">
         <p>
-          byoky stores everything locally on your device. We do not collect, transmit, or store any
+          Byoky stores everything locally on your device. We do not collect, transmit, or store any
           personal data, API keys, usage data, or analytics. Period.
         </p>
       </Section>
 
-      <Section title="What byoky stores">
+      <Section title="What Byoky stores">
         <ul>
           <li>Your API keys and OAuth tokens — encrypted with AES-256-GCM, stored in your browser&apos;s local storage</li>
           <li>Your master password hash — stored locally for vault unlock verification</li>
           <li>A request log — stored locally so you can audit which apps used your credentials</li>
         </ul>
-        <p>All of this data stays on your device. None of it is ever sent to byoky, our servers, or any third party.</p>
+        <p>All of this data stays on your device. None of it is ever sent to Byoky, our servers, or any third party.</p>
       </Section>
 
-      <Section title="What byoky does NOT do">
+      <Section title="What Byoky does NOT do">
         <ul>
           <li>We do not collect analytics or telemetry</li>
           <li>We do not track your browsing activity</li>
@@ -40,23 +40,23 @@ export default function Privacy() {
 
       <Section title="Network requests">
         <p>
-          The byoky extension makes network requests only when you explicitly use it to connect to
+          The Byoky extension makes network requests only when you explicitly use it to connect to
           an LLM provider (Anthropic, OpenAI, Google Gemini, etc.). These requests go directly from
-          your browser to the provider&apos;s API — byoky does not proxy through any intermediate server.
+          your browser to the provider&apos;s API — Byoky does not proxy through any intermediate server.
         </p>
       </Section>
 
       <Section title="Third-party services">
         <p>
-          When you use byoky to make API calls, your prompts and data are sent to the LLM provider
+          When you use Byoky to make API calls, your prompts and data are sent to the LLM provider
           you selected (e.g., Anthropic, OpenAI). These providers have their own privacy policies.
-          byoky does not control or monitor what these providers do with your data.
+          Byoky does not control or monitor what these providers do with your data.
         </p>
       </Section>
 
       <Section title="Open source">
         <p>
-          byoky is fully open source under the MIT license. You can audit the entire codebase at{' '}
+          Byoky is fully open source under the MIT license. You can audit the entire codebase at{' '}
           <a href="https://github.com/MichaelLod/byoky" style={{ color: 'var(--violet-light)' }}>
             github.com/MichaelLod/byoky
           </a>

@@ -21,8 +21,8 @@ export function RequestHistory() {
 
           return (
             <div key={entry.id} className="log-entry">
-              <span
-                className={`status-dot ${isError ? (isRateLimit ? 'warning' : 'error') : 'success'}`}
+              <div
+                style={{ width: 6, height: 6, minWidth: 6, borderRadius: '50%', marginTop: 7, marginRight: 8, background: isError ? (isRateLimit ? 'var(--warning)' : 'var(--danger)') : 'var(--success)' }}
               />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>

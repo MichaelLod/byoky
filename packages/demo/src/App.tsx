@@ -24,7 +24,7 @@ export function App() {
     } catch (e) {
       const err = e as Error;
       if (err.message.includes('not installed')) {
-        setError('byoky wallet not found. Install the extension first.');
+        setError('Byoky wallet not found. Install the extension first.');
       } else if (err.message.includes('rejected')) {
         setError('Connection rejected by user.');
       } else {
@@ -42,8 +42,8 @@ export function App() {
     <div className="app">
       <header className="header">
         <div className="header-left">
-          <h1 className="logo">byoky <span className="logo-sub">demo</span></h1>
-          <p className="header-desc">Example app showing byoky wallet integration</p>
+          <h1 className="logo">Byoky <span className="logo-sub">demo</span></h1>
+          <p className="header-desc">Example app showing Byoky wallet integration</p>
         </div>
         <div className="header-right">
           {session ? (
@@ -57,7 +57,7 @@ export function App() {
           ) : (
             <button className="btn btn-primary" onClick={handleConnect}>
               <WalletIcon />
-              Connect byoky
+              Connect Byoky
             </button>
           )}
         </div>
@@ -86,7 +86,7 @@ export function App() {
         <span>
           Built with{' '}
           <a href="https://byoky.com" target="_blank" rel="noopener noreferrer">
-            byoky
+            Byoky
           </a>
         </span>
         <a

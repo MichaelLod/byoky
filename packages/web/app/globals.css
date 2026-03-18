@@ -233,6 +233,10 @@ section {
   letter-spacing: 0.02em;
 }
 
+.hero-mascot {
+  margin-bottom: 24px;
+}
+
 .hero-badge-dot {
   width: 6px;
   height: 6px;

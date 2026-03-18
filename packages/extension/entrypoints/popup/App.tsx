@@ -24,7 +24,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="header">
-        <h1 className="logo">byoky</h1>
+        <h1 className="logo">Byoky</h1>
         {currentPage !== 'setup' && currentPage !== 'unlock' && (
           <nav className="nav">
             <button

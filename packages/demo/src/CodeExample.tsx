@@ -4,7 +4,7 @@ export function CodeExample() {
       <h2>How this demo works</h2>
       <p className="code-desc">
         This entire app runs on your browser. API calls are proxied through the
-        byoky extension — this page never sees your API keys.
+        Byoky extension — this page never sees your API keys.
       </p>
 
       <div className="code-window">

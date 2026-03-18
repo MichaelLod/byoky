@@ -28,7 +28,7 @@ export function Setup() {
 
   return (
     <div className="center-page">
-      <div className="logo-large">byoky</div>
+      <div className="logo-large">Byoky</div>
       <div className="tagline">Bring Your Own Key</div>
 
       <form onSubmit={handleSubmit}>
@@ -65,6 +65,10 @@ export function Setup() {
           Create Wallet
         </button>
       </form>
+
+      <div className="mascot-peek">
+        <img src="/mascot.svg" alt="" />
+      </div>
     </div>
   );
 }

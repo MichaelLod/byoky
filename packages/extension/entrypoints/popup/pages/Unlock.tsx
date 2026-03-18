@@ -14,7 +14,7 @@ export function Unlock() {
 
   return (
     <div className="center-page">
-      <div className="logo-large">byoky</div>
+      <div className="logo-large">Byoky</div>
       <div className="tagline">Welcome back</div>
 
       <form onSubmit={handleSubmit}>
@@ -36,6 +36,10 @@ export function Unlock() {
           Unlock
         </button>
       </form>
+
+      <div className="mascot-peek">
+        <img src="/mascot.svg" alt="" />
+      </div>
     </div>
   );
 }

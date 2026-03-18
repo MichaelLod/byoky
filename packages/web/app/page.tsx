@@ -34,6 +34,66 @@ function Hero() {
           </div>
         </FadeIn>
         <FadeIn delay={0.1}>
+          <div className="hero-mascot">
+            <svg width="80" height="80" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <polygon points="40,5 64,3 88,5 64,14" fill="#7c3aed"/>
+              <polygon points="40,5 22,12 44,18" fill="#6d28d9"/>
+              <polygon points="88,5 106,12 84,18" fill="#6d28d9"/>
+              <polygon points="40,5 44,18 64,14" fill="#5b21b6"/>
+              <polygon points="88,5 84,18 64,14" fill="#5b21b6"/>
+              <polygon points="22,12 12,26 36,26" fill="#4c1d95"/>
+              <polygon points="22,12 36,26 44,18" fill="#5b21b6"/>
+              <polygon points="106,12 116,26 92,26" fill="#4c1d95"/>
+              <polygon points="106,12 92,26 84,18" fill="#5b21b6"/>
+              <polygon points="44,18 36,26 56,30" fill="#3b1580"/>
+              <polygon points="84,18 92,26 72,30" fill="#3b1580"/>
+              <polygon points="44,18 56,30 64,14" fill="#4c1d95"/>
+              <polygon points="84,18 72,30 64,14" fill="#4c1d95"/>
+              <polygon points="64,14 56,30 64,28" fill="#3b1580"/>
+              <polygon points="64,14 72,30 64,28" fill="#3b1580"/>
+              <polygon points="12,26 6,42 30,40" fill="#2e1065"/>
+              <polygon points="12,26 30,40 36,26" fill="#2e1065"/>
+              <polygon points="116,26 122,42 98,40" fill="#2e1065"/>
+              <polygon points="116,26 98,40 92,26" fill="#2e1065"/>
+              <polygon points="36,26 30,40 48,38" fill="#1e0a4a"/>
+              <polygon points="36,26 48,38 56,30" fill="#251055"/>
+              <polygon points="92,26 98,40 80,38" fill="#1e0a4a"/>
+              <polygon points="92,26 80,38 72,30" fill="#251055"/>
+              <polygon points="56,30 64,28 60,44" fill="#9494a6"/>
+              <polygon points="72,30 64,28 68,44" fill="#8a8a9c"/>
+              <polygon points="60,44 64,28 68,44" fill="#7a7a8c"/>
+              <polygon points="58,64 70,64 64,90" fill="#3f3f4a"/>
+              <polygon points="56,30 60,44 46,42" fill="#7a7a8c"/>
+              <polygon points="72,30 68,44 82,42" fill="#6b6b7d"/>
+              <polygon points="46,42 60,44 52,56" fill="#5e5e6e"/>
+              <polygon points="82,42 68,44 76,56" fill="#52525e"/>
+              <polygon points="60,44 68,44 64,60" fill="#6b6b7d"/>
+              <polygon points="52,56 60,44 64,60" fill="#52525e"/>
+              <polygon points="76,56 68,44 64,60" fill="#4a4a56"/>
+              <polygon points="52,56 64,60 64,88" fill="#3f3f4a"/>
+              <polygon points="76,56 64,60 64,88" fill="#353540"/>
+              <polygon points="30,40 6,42 8,58" fill="#1e0a4a"/>
+              <polygon points="30,40 8,58 32,54" fill="#1a0840"/>
+              <polygon points="98,40 122,42 120,58" fill="#1e0a4a"/>
+              <polygon points="98,40 120,58 96,54" fill="#1a0840"/>
+              <polygon points="8,58 4,72 26,66" fill="#1a0840"/>
+              <polygon points="120,58 124,72 102,66" fill="#1a0840"/>
+              <polygon points="16,66 24,80 8,86" fill="#150835"/>
+              <polygon points="112,66 104,80 120,86" fill="#150835"/>
+              <polygon points="8,86 24,80 14,106" fill="#110730"/>
+              <polygon points="120,86 104,80 114,106" fill="#110730"/>
+              <polygon points="40,92 54,96 46,118" fill="#0d0525"/>
+              <polygon points="88,92 74,96 82,118" fill="#0d0525"/>
+              <polygon points="54,96 64,100 56,122" fill="#0a0420"/>
+              <polygon points="74,96 64,100 72,122" fill="#0a0420"/>
+              <polygon points="56,122 64,100 64,128" fill="#0d0525"/>
+              <polygon points="72,122 64,100 64,128" fill="#0d0525"/>
+              <circle cx="24" cy="46" r="4.5" fill="#a78bfa"/>
+              <circle cx="24" cy="46" r="2.2" fill="#e0d4ff"/>
+              <circle cx="104" cy="46" r="4.5" fill="#a78bfa"/>
+              <circle cx="104" cy="46" r="2.2" fill="#e0d4ff"/>
+            </svg>
+          </div>
           <h1>
             <span className="hero-gradient">MetaMask for AI.</span>
           </h1>
@@ -86,7 +146,7 @@ function HowItWorks() {
               </div>
               <h3>Install the wallet</h3>
               <p>
-                Add the byoky extension to Chrome, Firefox, or Safari. Set a
+                Add the Byoky extension to Chrome, Firefox, or Safari. Set a
                 master password to encrypt your vault.
               </p>
             </div>
@@ -110,7 +170,7 @@ function HowItWorks() {
               </div>
               <h3>Connect to any app</h3>
               <p>
-                Visit any byoky-enabled app. Approve access in one click. Your
+                Visit any Byoky-enabled app. Approve access in one click. Your
                 keys stay in the vault — always.
               </p>
             </div>
@@ -130,7 +190,7 @@ function ForDevelopers() {
         <FadeIn>
           <h2>Integrate in minutes.</h2>
           <p className="subtitle">
-            Use your favorite provider SDK with byoky&apos;s fetch proxy. Two
+            Use your favorite provider SDK with Byoky&apos;s fetch proxy. Two
             extra lines. Full API compatibility. Keys never touch your app.
           </p>
           <div className="install-cmd">
@@ -149,7 +209,7 @@ function ForDevelopers() {
                     <h4>Native SDK compatibility</h4>
                     <p>
                       Works with the official Anthropic, OpenAI, and Gemini SDKs.
-                      Just swap in byoky&apos;s fetch.
+                      Just swap in Byoky&apos;s fetch.
                     </p>
                   </div>
                 </div>
@@ -342,7 +402,7 @@ function OpenSource() {
         <FadeIn>
           <h2>Built in the open.</h2>
           <p className="subtitle">
-            byoky is fully open source under the MIT license. Audit the code,
+            Byoky is fully open source under the MIT license. Audit the code,
             contribute, or fork it.
           </p>
           <a
@@ -368,7 +428,7 @@ function Footer() {
     <footer className="footer">
       <div className="container">
         <div className="footer-inner">
-          <span className="footer-brand">byoky</span>
+          <span className="footer-brand">Byoky</span>
           <div className="footer-links">
             <a
               href="https://github.com/MichaelLod/byoky"
