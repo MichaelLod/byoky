@@ -39,10 +39,14 @@ export default defineContentScript({
         data.type === 'BYOKY_DISCONNECT'
       ) {
         // Simple message passing for connect/disconnect
+        console.log('[byoky:content] forwarding to background:', data.type);
         browser.runtime.sendMessage(data).then((response) => {
+          console.log('[byoky:content] got response from background:', response);
           if (response) {
             window.postMessage(response, '*');
           }
+        }).catch((err) => {
+          console.error('[byoky:content] error from background:', err);
         });
       }
     });

@@ -52,10 +52,8 @@ export class Byoky {
       }, this.timeout);
 
       function handleMessage(event: MessageEvent) {
-        if (event.source !== window) return;
-        if (!isByokyMessage(event.data)) return;
-
         const msg = event.data;
+        if (typeof msg?.type !== 'string' || !msg.type.startsWith('BYOKY_')) return;
         if (msg.requestId !== requestId) return;
 
         cleanup();

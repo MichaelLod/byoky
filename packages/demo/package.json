@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@byoky/sdk": "^0.1.0",
+    "@byoky/sdk": "workspace:*",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
