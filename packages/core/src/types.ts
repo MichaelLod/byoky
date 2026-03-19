@@ -15,6 +15,7 @@ export interface OAuthConfig {
   authorizationUrl: string;
   tokenUrl: string;
   scopes: string[];
+  extraAuthParams?: Record<string, string>;
 }
 
 // --- Credentials ---

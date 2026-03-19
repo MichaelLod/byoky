@@ -11,6 +11,9 @@ export default defineConfig({
       'https://api.openai.com/*',
       'https://generativelanguage.googleapis.com/*',
       'https://console.anthropic.com/*',
+      'https://api-inference.huggingface.co/*',
+      'https://huggingface.co/oauth/*',
+      'https://oauth2.googleapis.com/*',
     ],
     browser_specific_settings: {
       gecko: {

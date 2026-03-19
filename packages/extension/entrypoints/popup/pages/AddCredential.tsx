@@ -119,13 +119,15 @@ export function AddCredential() {
                 className={`auth-toggle-btn ${authMethod === 'oauth' ? 'active' : ''}`}
                 onClick={() => setAuthMethod('oauth')}
               >
-                Setup Token
+                {hasOAuthConfig ? 'OAuth' : 'Setup Token'}
               </button>
             </div>
             <p className="form-hint">
               {authMethod === 'api_key'
                 ? 'Pay-per-use. Get one from your provider console.'
-                : 'Uses your Claude Pro/Max subscription credits.'}
+                : hasOAuthConfig
+                  ? `Sign in with your ${provider?.name} account.`
+                  : 'Uses your Claude Pro/Max subscription credits.'}
             </p>
           </div>
         )}

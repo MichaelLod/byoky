@@ -181,7 +181,7 @@ export default defineBackground(() => {
         return;
       }
 
-      const credential = await resolveCredential(session, msg.providerId);
+      let credential = await resolveCredential(session, msg.providerId);
       if (!credential) {
         port.postMessage({
           type: 'BYOKY_PROXY_RESPONSE_ERROR',
@@ -190,6 +190,19 @@ export default defineBackground(() => {
           error: { code: 'PROVIDER_UNAVAILABLE', message: `No credential for ${msg.providerId}` },
         });
         return;
+      }
+
+      // Refresh OAuth token if expired or about to expire
+      if (
+        credential.authMethod === 'oauth' &&
+        (credential as { expiresAt?: number }).expiresAt &&
+        (credential as { expiresAt: number }).expiresAt < Date.now() + 60_000 &&
+        PROVIDERS[msg.providerId]?.oauthConfig
+      ) {
+        const refreshed = await refreshOAuthToken(credential);
+        if (refreshed) {
+          credential = (await resolveCredential(session, msg.providerId))!;
+        }
       }
 
       try {
@@ -664,6 +677,12 @@ export default defineBackground(() => {
     if (scopes.length > 0) {
       authUrl.searchParams.set('scope', scopes.join(' '));
     }
+    // Apply provider-specific extra params (e.g., Google's access_type=offline)
+    if (provider.oauthConfig.extraAuthParams) {
+      for (const [key, value] of Object.entries(provider.oauthConfig.extraAuthParams)) {
+        authUrl.searchParams.set(key, value);
+      }
+    }
 
     try {
       const responseUrl = await browser.identity.launchWebAuthFlow({
@@ -765,6 +784,65 @@ export default defineBackground(() => {
       binary += String.fromCharCode(byte);
     }
     return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  // --- OAuth token refresh ---
+
+  async function refreshOAuthToken(
+    credential: Credential,
+  ): Promise<boolean> {
+    if (!masterPassword) return false;
+    if (credential.authMethod !== 'oauth') return false;
+
+    const provider = PROVIDERS[credential.providerId];
+    if (!provider?.oauthConfig) return false;
+
+    const oauthCred = credential as { encryptedRefreshToken?: string; id: string; providerId: string; authMethod: string; encryptedAccessToken: string; label: string; createdAt: number };
+    if (!oauthCred.encryptedRefreshToken) return false;
+
+    try {
+      const refreshToken = await decrypt(oauthCred.encryptedRefreshToken, masterPassword);
+      const { clientId, tokenUrl } = provider.oauthConfig;
+
+      const response = await fetch(tokenUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'refresh_token',
+          client_id: clientId,
+          refresh_token: refreshToken,
+        }),
+      });
+
+      if (!response.ok) return false;
+
+      const tokens = (await response.json()) as {
+        access_token: string;
+        expires_in?: number;
+        refresh_token?: string;
+      };
+
+      const encryptedAccessToken = await encrypt(tokens.access_token, masterPassword);
+      const encryptedRefreshToken = tokens.refresh_token
+        ? await encrypt(tokens.refresh_token, masterPassword)
+        : oauthCred.encryptedRefreshToken;
+
+      const credentials = await getStoredCredentials();
+      const idx = credentials.findIndex((c) => c.id === credential.id);
+      if (idx === -1) return false;
+
+      credentials[idx] = {
+        ...credentials[idx],
+        encryptedAccessToken,
+        encryptedRefreshToken,
+        expiresAt: tokens.expires_in ? Date.now() + tokens.expires_in * 1000 : undefined,
+      } as Credential;
+
+      await browser.storage.local.set({ credentials });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   // --- Bridge for setup tokens (native messaging → Claude Code CLI) ---

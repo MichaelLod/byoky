@@ -22,8 +22,20 @@ describe('PROVIDERS', () => {
     expect(PROVIDERS.openai.authMethods).toEqual(['api_key']);
   });
 
-  it('gemini supports api_key only', () => {
-    expect(PROVIDERS.gemini.authMethods).toEqual(['api_key']);
+  it('gemini supports api_key and oauth', () => {
+    expect(PROVIDERS.gemini.authMethods).toContain('api_key');
+    expect(PROVIDERS.gemini.authMethods).toContain('oauth');
+    expect(PROVIDERS.gemini.oauthConfig).toBeDefined();
+    expect(PROVIDERS.gemini.oauthConfig?.authorizationUrl).toContain('google.com');
+    expect(PROVIDERS.gemini.oauthConfig?.scopes).toContain('https://www.googleapis.com/auth/generative-language');
+  });
+
+  it('huggingface supports api_key and oauth', () => {
+    expect(PROVIDERS.huggingface.authMethods).toContain('api_key');
+    expect(PROVIDERS.huggingface.authMethods).toContain('oauth');
+    expect(PROVIDERS.huggingface.oauthConfig).toBeDefined();
+    expect(PROVIDERS.huggingface.oauthConfig?.authorizationUrl).toContain('huggingface.co');
+    expect(PROVIDERS.huggingface.oauthConfig?.scopes).toContain('inference-api');
   });
 
   it('all providers have required fields', () => {
@@ -45,11 +57,11 @@ describe('PROVIDERS', () => {
     }
   });
 
-  it('new providers support api_key only', () => {
+  it('api_key-only providers have no oauth', () => {
     const apiKeyOnly = [
       'mistral', 'cohere', 'xai', 'deepseek', 'perplexity',
       'groq', 'together', 'fireworks', 'replicate', 'openrouter',
-      'huggingface', 'azure_openai',
+      'azure_openai',
     ];
     for (const id of apiKeyOnly) {
       expect(PROVIDERS[id].authMethods).toEqual(['api_key']);
