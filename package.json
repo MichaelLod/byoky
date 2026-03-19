@@ -13,7 +13,9 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "typecheck": "pnpm -r typecheck",
-    "clean": "pnpm -r clean"
+    "clean": "pnpm -r clean",
+    "test:e2e": "pnpm build:core && pnpm build:sdk && pnpm build:extension && npx playwright test --config e2e/playwright.config.ts",
+    "test:e2e:headed": "pnpm build:core && pnpm build:sdk && pnpm build:extension && npx playwright test --config e2e/playwright.config.ts --headed"
   },
   "license": "MIT",
   "engines": {
@@ -28,6 +30,7 @@
     ]
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@vitest/coverage-v8": "^4.1.0",
     "jsdom": "^29.0.0",
     "tsup": "^8.5.1",
