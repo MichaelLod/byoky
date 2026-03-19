@@ -7,6 +7,6 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src", "entrypoints", "components", "*.ts"],
-  "exclude": ["node_modules", ".output", ".wxt"]
+  "include": ["src", "entrypoints", "components", "*.ts", ".wxt/types"],
+  "exclude": ["node_modules", ".output"]
 }

@@ -5,24 +5,33 @@ export default defineConfig({
   manifest: {
     name: 'Byoky',
     description: 'Bring Your Own Key — Secure wallet for your AI credentials',
-    permissions: ['storage', 'sidePanel', 'identity'],
+    permissions: ['storage', 'sidePanel', 'identity', 'nativeMessaging'],
     host_permissions: [
+      // Provider API hosts
       'https://api.anthropic.com/*',
       'https://api.openai.com/*',
       'https://generativelanguage.googleapis.com/*',
-      'https://console.anthropic.com/*',
+      'https://api.mistral.ai/*',
+      'https://api.cohere.com/*',
+      'https://api.x.ai/*',
+      'https://api.deepseek.com/*',
+      'https://api.perplexity.ai/*',
+      'https://api.groq.com/*',
+      'https://api.together.xyz/*',
+      'https://api.fireworks.ai/*',
+      'https://api.replicate.com/*',
+      'https://openrouter.ai/*',
       'https://api-inference.huggingface.co/*',
-      'https://huggingface.co/oauth/*',
+      'https://*.openai.azure.com/*',
+      // OAuth endpoints
+      'https://console.anthropic.com/*',
       'https://oauth2.googleapis.com/*',
+      'https://huggingface.co/oauth/*',
     ],
     browser_specific_settings: {
       gecko: {
         id: 'byoky@byoky.com',
         strict_min_version: '109.0',
-        data_collection_permissions: {
-          required: ['none'],
-          optional: [],
-        },
       },
     },
   },

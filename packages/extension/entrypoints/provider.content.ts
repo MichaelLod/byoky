@@ -7,7 +7,7 @@ export default defineContentScript({
     // Inject the byoky provider into the page context
     Object.defineProperty(window, '__byoky__', {
       value: Object.freeze({
-        version: '0.1.0',
+        version: '0.2.1',
         isByoky: true,
       }),
       writable: false,
