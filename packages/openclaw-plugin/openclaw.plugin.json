@@ -1,0 +1,36 @@
+{
+  "id": "byoky",
+  "enabledByDefault": false,
+  "providers": [
+    "byoky",
+    "byoky-anthropic",
+    "byoky-openai",
+    "byoky-gemini",
+    "byoky-mistral",
+    "byoky-cohere",
+    "byoky-xai",
+    "byoky-deepseek",
+    "byoky-perplexity",
+    "byoky-groq",
+    "byoky-together",
+    "byoky-fireworks",
+    "byoky-openrouter"
+  ],
+  "providerAuthChoices": [
+    {
+      "provider": "byoky",
+      "method": "browser",
+      "choiceId": "byoky",
+      "choiceLabel": "Byoky Wallet (all providers)",
+      "choiceHint": "Export all keys from your browser wallet",
+      "groupId": "byoky",
+      "groupLabel": "Byoky Wallet",
+      "groupHint": "Manage all AI keys from one place"
+    }
+  ],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

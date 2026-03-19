@@ -1,8 +1,20 @@
-import { useState, type FormEvent } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { useWalletStore } from '../store';
 import { PROVIDERS } from '@byoky/core';
 
 const providerOptions = Object.values(PROVIDERS);
+
+async function checkBridge(): Promise<boolean> {
+  try {
+    const result = await browser.runtime.sendMessage({
+      type: 'BYOKY_INTERNAL',
+      action: 'checkBridge',
+    });
+    return result?.available ?? false;
+  } catch {
+    return false;
+  }
+}
 
 export function AddCredential() {
   const { addApiKey, addSetupToken, startOAuth, navigate, error, loading } = useWalletStore();
@@ -10,10 +22,17 @@ export function AddCredential() {
   const [authMethod, setAuthMethod] = useState<'api_key' | 'oauth'>('api_key');
   const [label, setLabel] = useState('');
   const [apiKey, setApiKey] = useState('');
+  const [bridgeOnline, setBridgeOnline] = useState<boolean | null>(null);
 
   const provider = PROVIDERS[providerId];
   const supportsOAuth = provider?.authMethods.includes('oauth');
   const hasOAuthConfig = !!provider?.oauthConfig;
+
+  useEffect(() => {
+    if (authMethod === 'oauth' && !hasOAuthConfig) {
+      checkBridge().then(setBridgeOnline);
+    }
+  }, [authMethod, hasOAuthConfig]);
 
   function handleProviderChange(id: string) {
     setProviderId(id);
@@ -40,11 +59,24 @@ export function AddCredential() {
     }
   }
 
-  const apiKeyHint = providerId === 'anthropic'
-    ? 'console.anthropic.com'
-    : providerId === 'openai'
-      ? 'platform.openai.com'
-      : 'aistudio.google.com';
+  const apiKeyHints: Record<string, string> = {
+    anthropic: 'console.anthropic.com',
+    openai: 'platform.openai.com',
+    gemini: 'aistudio.google.com',
+    mistral: 'console.mistral.ai',
+    cohere: 'dashboard.cohere.com',
+    xai: 'console.x.ai',
+    deepseek: 'platform.deepseek.com',
+    perplexity: 'docs.perplexity.ai',
+    groq: 'console.groq.com',
+    together: 'api.together.ai',
+    fireworks: 'fireworks.ai/account',
+    replicate: 'replicate.com/account',
+    openrouter: 'openrouter.ai/keys',
+    huggingface: 'huggingface.co/settings/tokens',
+    azure_openai: 'portal.azure.com',
+  };
+  const apiKeyHint = apiKeyHints[providerId] ?? 'your provider console';
 
   return (
     <div>
@@ -116,7 +148,13 @@ export function AddCredential() {
               id="apiKey"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder={providerId === 'anthropic' ? 'sk-ant-api03-...' : providerId === 'openai' ? 'sk-...' : 'AI...'}
+              placeholder={
+                providerId === 'anthropic' ? 'sk-ant-api03-...'
+                : providerId === 'openai' ? 'sk-...'
+                : providerId === 'huggingface' ? 'hf_...'
+                : providerId === 'replicate' ? 'r8_...'
+                : 'Your API key'
+              }
               rows={3}
             />
             <p className="form-hint">
@@ -160,10 +198,20 @@ export function AddCredential() {
                 Requires Claude Code CLI and an active Claude Pro or Max subscription.
               </p>
             </div>
-            <div className="warning-note">
-              Setup tokens may be unreliable — Anthropic restricts their use
-              outside of Claude Code. If you get auth errors, use an API key instead.
-            </div>
+            {bridgeOnline === false && (
+              <div className="warning-note" style={{ marginTop: '10px' }}>
+                <strong>Byoky Bridge required.</strong> Setup tokens route through
+                Claude Code CLI via the bridge. Install it:
+                <code style={{ display: 'block', marginTop: '6px' }}>
+                  npm i -g @byoky/bridge && byoky-bridge install
+                </code>
+              </div>
+            )}
+            {bridgeOnline === true && (
+              <div className="bridge-status online" style={{ marginTop: '10px' }}>
+                Bridge connected
+              </div>
+            )}
           </div>
         )}
 

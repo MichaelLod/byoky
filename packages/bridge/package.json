@@ -1,0 +1,35 @@
+{
+  "name": "@byoky/bridge",
+  "version": "0.2.0",
+  "description": "Native messaging bridge for Byoky — routes setup token requests through Claude Code CLI",
+  "type": "module",
+  "main": "dist/host.js",
+  "bin": {
+    "byoky-bridge": "./bin/byoky-bridge.js"
+  },
+  "files": [
+    "dist",
+    "bin"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch"
+  },
+  "keywords": [
+    "byoky",
+    "claude",
+    "native-messaging",
+    "bridge"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MichaelLod/byoky.git",
+    "directory": "packages/bridge"
+  },
+  "devDependencies": {
+    "@types/node": "25.5.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.5.0"
+  }
+}
