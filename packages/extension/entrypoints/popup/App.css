@@ -1015,3 +1015,115 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--bg-hover);
 }
+
+/* ─── Password Meter ─── */
+
+.password-meter {
+  margin-top: 8px;
+}
+
+.password-meter-bars {
+  display: flex;
+  gap: 4px;
+}
+
+.password-meter-bar {
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--bg-card);
+  transition: background 0.2s;
+}
+
+.password-meter-label {
+  font-size: 11px;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.password-meter-feedback {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* ─── Vault Export/Import ─── */
+
+.settings-section {
+  margin-bottom: 24px;
+}
+
+.settings-section h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 12px;
+}
+
+.settings-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.warning-box {
+  background: rgba(244, 63, 94, 0.08);
+  border: 1px solid rgba(244, 63, 94, 0.2);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.warning-box strong {
+  color: var(--danger);
+}
+
+.export-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 16px;
+}
+
+.export-modal {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  width: 100%;
+  max-width: 360px;
+}
+
+.export-modal h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.export-modal p {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+}
+
+.export-modal .form-group {
+  margin-bottom: 12px;
+}
+
+.export-modal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.export-modal-actions .btn {
+  flex: 1;
+}

@@ -19,7 +19,8 @@ type Page =
   | 'connected-apps'
   | 'usage'
   | 'request-history'
-  | 'approval';
+  | 'approval'
+  | 'settings';
 
 interface WalletState {
   isInitialized: boolean;
@@ -295,4 +296,8 @@ export function setSessionPassword(pw: string) {
 async function getSessionPassword(): Promise<string> {
   if (cachedPassword) return cachedPassword;
   throw new Error('Session password not available');
+}
+
+export async function getSessionPasswordForExport(): Promise<string> {
+  return getSessionPassword();
 }

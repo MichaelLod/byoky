@@ -1,5 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { useWalletStore, setSessionPassword } from '../store';
+import { checkPasswordStrength, MIN_PASSWORD_LENGTH } from '@byoky/core';
+import { PasswordMeter } from '../components/PasswordMeter';
 
 export function Setup() {
   const { setup, error } = useWalletStore();
@@ -7,12 +9,18 @@ export function Setup() {
   const [confirm, setConfirm] = useState('');
   const [localError, setLocalError] = useState('');
 
+  const strength = checkPasswordStrength(password);
+
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setLocalError('');
 
-    if (password.length < 8) {
-      setLocalError('Password must be at least 8 characters');
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      setLocalError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
+      return;
+    }
+    if (strength.score < 2) {
+      setLocalError('Password is too weak. ' + (strength.feedback[0] || ''));
       return;
     }
     if (password !== confirm) {
@@ -45,9 +53,10 @@ export function Setup() {
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="At least 8 characters"
+            placeholder="At least 12 characters"
             autoFocus
           />
+          {password.length > 0 && <PasswordMeter strength={strength} />}
         </div>
 
         <div className="form-group">
@@ -61,7 +70,11 @@ export function Setup() {
           />
         </div>
 
-        <button type="submit" className="btn btn-primary">
+        <button
+          type="submit"
+          className="btn btn-primary"
+          disabled={password.length < MIN_PASSWORD_LENGTH || strength.score < 2}
+        >
           Create Wallet
         </button>
       </form>

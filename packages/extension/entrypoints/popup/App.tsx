@@ -8,6 +8,7 @@ import { ConnectedApps } from './pages/ConnectedApps';
 import { ApprovalRequest } from './pages/ApprovalRequest';
 import { Usage } from './pages/Usage';
 import { RequestHistory } from './pages/RequestHistory';
+import { Settings } from './pages/Settings';
 
 export default function App() {
   const { currentPage, sessions, pendingApprovals, loading, init } = useWalletStore();
@@ -82,6 +83,13 @@ export default function App() {
             >
               History
             </button>
+            <button
+              className={currentPage === 'settings' ? 'active' : ''}
+              onClick={() => useWalletStore.getState().navigate('settings')}
+              title="Settings"
+            >
+              Settings
+            </button>
           </nav>
         )}
       </header>
@@ -94,6 +102,7 @@ export default function App() {
         {currentPage === 'approval' && <ApprovalRequest />}
         {currentPage === 'usage' && <Usage />}
         {currentPage === 'request-history' && <RequestHistory />}
+        {currentPage === 'settings' && <Settings />}
       </main>
     </div>
   );
