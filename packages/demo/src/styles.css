@@ -913,6 +913,85 @@ body {
   gap: 12px;
 }
 
+/* ── Backend Relay ── */
+
+.relay-log {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-surface);
+  overflow: hidden;
+}
+
+.relay-log-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.relay-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  font-size: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  font-family: var(--font-mono);
+}
+
+.relay-step:last-child {
+  border-bottom: none;
+}
+
+.relay-arrow {
+  font-size: 14px;
+  width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.relay-step-client .relay-arrow { color: var(--teal); }
+.relay-step-server .relay-arrow { color: #a78bfa; }
+
+.relay-from {
+  font-size: 11px;
+  font-weight: 500;
+  width: 60px;
+  flex-shrink: 0;
+  font-family: var(--font-sans);
+}
+
+.relay-step-client .relay-from { color: var(--teal); }
+.relay-step-server .relay-from { color: #a78bfa; }
+
+.relay-type {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+}
+
+.relay-type-hello { color: var(--green); background: rgba(34, 197, 94, 0.08); }
+.relay-type-request { color: var(--teal); background: rgba(14, 165, 233, 0.08); }
+.relay-type-meta { color: #fbbf24; background: rgba(251, 191, 36, 0.08); }
+.relay-type-chunk { color: var(--text-muted); }
+.relay-type-done { color: var(--green); background: rgba(34, 197, 94, 0.08); }
+.relay-type-error { color: var(--red); background: rgba(239, 68, 68, 0.08); }
+
+.relay-preview {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
 /* ── Footer ── */
 
 .footer {
