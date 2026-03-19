@@ -459,7 +459,7 @@ function Providers() {
               <div className="provider-logo provider-logo-gemini">G</div>
               <div>
                 <div className="provider-name">Google Gemini</div>
-                <div className="provider-type">API Key</div>
+                <div className="provider-type">API Key + OAuth</div>
               </div>
             </div>
             <div className="provider-card">
@@ -529,7 +529,7 @@ function Providers() {
               <div className="provider-logo provider-logo-huggingface">H</div>
               <div>
                 <div className="provider-name">Hugging Face</div>
-                <div className="provider-type">API Key</div>
+                <div className="provider-type">API Key + OAuth</div>
               </div>
             </div>
             <div className="provider-card">

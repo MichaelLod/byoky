@@ -155,11 +155,11 @@ The [OpenClaw plugin](packages/openclaw-plugin) uses this to let OpenClaw make A
 
 ## Supported Providers
 
-| Provider | API Key | Setup Token | Status |
-|----------|:-------:|:-----------:|--------|
-| Anthropic | ✓ | ✓ | Available |
+| Provider | API Key | OAuth | Status |
+|----------|:-------:|:-----:|--------|
+| Anthropic | ✓ | Setup Token | Available |
 | OpenAI | ✓ | — | Available |
-| Google Gemini | ✓ | — | Available |
+| Google Gemini | ✓ | Google OAuth | Available |
 | Mistral | ✓ | — | Available |
 | Cohere | ✓ | — | Available |
 | xAI (Grok) | ✓ | — | Available |
@@ -170,11 +170,11 @@ The [OpenClaw plugin](packages/openclaw-plugin) uses this to let OpenClaw make A
 | Fireworks AI | ✓ | — | Available |
 | Replicate | ✓ | — | Available |
 | OpenRouter | ✓ | — | Available |
-| Hugging Face | ✓ | — | Available |
+| Hugging Face | ✓ | HF OAuth | Available |
 | Azure OpenAI | ✓ | — | Available |
 | *Custom* | ✓ | — | Extensible |
 
-> **Setup Token**: Use your Claude Pro/Max subscription via `claude setup-token`. API keys use pay-per-use billing from the provider console.
+> **OAuth**: Sign in with your Google or Hugging Face account — no API key needed. **Setup Token**: Use your Claude Pro/Max subscription via `claude setup-token`. API keys use pay-per-use billing from the provider console.
 
 ## Architecture
 
