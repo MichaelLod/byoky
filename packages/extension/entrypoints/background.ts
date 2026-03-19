@@ -60,6 +60,11 @@ export default defineBackground(() => {
     if (message.type === 'BYOKY_DISCONNECT') {
       const { sessionKey } = message.payload as { sessionKey: string };
       sessions.delete(sessionKey);
+      // Notify extension popup to refresh session list
+      browser.runtime.sendMessage({
+        type: 'BYOKY_INTERNAL',
+        action: 'sessionChanged',
+      }).catch(() => {});
       return;
     }
 

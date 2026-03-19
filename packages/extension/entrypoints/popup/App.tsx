@@ -20,12 +20,16 @@ export default function App() {
   useEffect(() => {
     function listener(message: unknown) {
       const msg = message as Record<string, string> | null;
-      if (!msg || msg.type !== 'BYOKY_INTERNAL' || msg.action !== 'newPendingApproval') return;
-      useWalletStore.getState().refreshData().then(() => {
-        if (useWalletStore.getState().pendingApprovals.length > 0) {
-          useWalletStore.getState().navigate('approval');
-        }
-      });
+      if (!msg || msg.type !== 'BYOKY_INTERNAL') return;
+      if (msg.action === 'newPendingApproval') {
+        useWalletStore.getState().refreshData().then(() => {
+          if (useWalletStore.getState().pendingApprovals.length > 0) {
+            useWalletStore.getState().navigate('approval');
+          }
+        });
+      } else if (msg.action === 'sessionChanged') {
+        useWalletStore.getState().refreshData();
+      }
     }
     try {
       browser.runtime.onMessage.addListener(listener);
