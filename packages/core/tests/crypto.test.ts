@@ -94,6 +94,25 @@ describe('hashPassword / verifyPassword', () => {
     const hash = await hashPassword('test');
     expect(() => atob(hash)).not.toThrow();
   });
+
+  it('rejects when hash length is tampered (shorter)', async () => {
+    const hash = await hashPassword('my-password');
+    const truncated = btoa(atob(hash).slice(0, 10));
+    const valid = await verifyPassword('my-password', truncated);
+    expect(valid).toBe(false);
+  });
+
+  it('rejects when hash bytes are all wrong', async () => {
+    const hash = await hashPassword('my-password');
+    const combined = Uint8Array.from(atob(hash), (c) => c.charCodeAt(0));
+    // Keep salt (first 16 bytes), corrupt all hash bytes
+    for (let i = 16; i < combined.length; i++) {
+      combined[i] = combined[i] ^ 0xff;
+    }
+    const corrupted = btoa(String.fromCharCode(...combined));
+    const valid = await verifyPassword('my-password', corrupted);
+    expect(valid).toBe(false);
+  });
 });
 
 describe('maskKey', () => {

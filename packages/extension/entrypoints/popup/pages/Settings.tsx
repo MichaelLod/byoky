@@ -1,11 +1,19 @@
 import { useState, useRef, type FormEvent } from 'react';
-import { useWalletStore, getSessionPasswordForExport } from '../store';
+import { useWalletStore } from '../store';
 import {
   encrypt,
   decrypt,
   checkPasswordStrength,
   MIN_PASSWORD_LENGTH,
 } from '@byoky/core';
+
+async function sendInternal(action: string, payload?: unknown): Promise<Record<string, unknown>> {
+  return browser.runtime.sendMessage({
+    type: 'BYOKY_INTERNAL',
+    action,
+    payload,
+  }) as Promise<Record<string, unknown>>;
+}
 import { PasswordMeter } from '../components/PasswordMeter';
 
 const VAULT_VERSION = 1;
@@ -102,20 +110,21 @@ function ExportModal({ onClose }: { onClose: () => void }) {
       const data = await browser.storage.local.get('credentials');
       const rawCredentials = (data.credentials ?? []) as unknown[];
 
-      // Re-encrypt each credential with the export password
-      const sessionPw = await getSessionPasswordForExport();
+      // Re-encrypt each credential with the export password (decrypt via background)
       const reEncrypted = await Promise.all(
         rawCredentials.map(async (cred: unknown) => {
           const c = cred as Record<string, unknown>;
           const result = { ...c };
 
           if (c.encryptedKey && typeof c.encryptedKey === 'string') {
-            const plainKey = await decrypt(c.encryptedKey, sessionPw);
-            result.encryptedKey = await encrypt(plainKey, exportPassword);
+            const dec = await sendInternal('decryptValue', { encrypted: c.encryptedKey });
+            if (dec.error) throw new Error(dec.error as string);
+            result.encryptedKey = await encrypt(dec.decrypted as string, exportPassword);
           }
           if (c.encryptedAccessToken && typeof c.encryptedAccessToken === 'string') {
-            const plainToken = await decrypt(c.encryptedAccessToken, sessionPw);
-            result.encryptedAccessToken = await encrypt(plainToken, exportPassword);
+            const dec = await sendInternal('decryptValue', { encrypted: c.encryptedAccessToken });
+            if (dec.error) throw new Error(dec.error as string);
+            result.encryptedAccessToken = await encrypt(dec.decrypted as string, exportPassword);
           }
 
           return result;
@@ -261,20 +270,23 @@ function ImportModal({ onClose }: { onClose: () => void }) {
         return;
       }
 
-      // Re-encrypt each credential with the current session password
-      const sessionPw = await getSessionPasswordForExport();
+      // Re-encrypt each credential with the master password (via background)
       const reEncrypted = await Promise.all(
         vault.credentials.map(async (cred: unknown) => {
           const c = cred as Record<string, unknown>;
-          const result = { ...c, id: crypto.randomUUID() }; // new IDs to avoid conflicts
+          const result: Record<string, unknown> = { ...c, id: crypto.randomUUID() };
 
           if (c.encryptedKey && typeof c.encryptedKey === 'string') {
             const plainKey = await decrypt(c.encryptedKey, importPassword);
-            result.encryptedKey = await encrypt(plainKey, sessionPw);
+            const enc = await sendInternal('encryptValue', { value: plainKey });
+            if (enc.error) throw new Error(enc.error as string);
+            result.encryptedKey = enc.encrypted as string;
           }
           if (c.encryptedAccessToken && typeof c.encryptedAccessToken === 'string') {
             const plainToken = await decrypt(c.encryptedAccessToken, importPassword);
-            result.encryptedAccessToken = await encrypt(plainToken, sessionPw);
+            const enc = await sendInternal('encryptValue', { value: plainToken });
+            if (enc.error) throw new Error(enc.error as string);
+            result.encryptedAccessToken = enc.encrypted as string;
           }
 
           return result;

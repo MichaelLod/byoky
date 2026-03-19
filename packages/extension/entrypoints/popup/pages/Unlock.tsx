@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { useWalletStore, setSessionPassword } from '../store';
+import { useWalletStore } from '../store';
 
 export function Unlock() {
   const { unlock, error } = useWalletStore();
@@ -8,7 +8,6 @@ export function Unlock() {
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!password) return;
-    setSessionPassword(password);
     unlock(password);
   }
 

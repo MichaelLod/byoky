@@ -9,8 +9,8 @@ async function checkBridge(): Promise<boolean> {
     const result = await browser.runtime.sendMessage({
       type: 'BYOKY_INTERNAL',
       action: 'checkBridge',
-    });
-    return result?.available ?? false;
+    }) as Record<string, unknown> | undefined;
+    return (result?.available as boolean) ?? false;
   } catch {
     return false;
   }

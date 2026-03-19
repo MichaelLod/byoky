@@ -122,6 +122,27 @@ export const test = base.extend<TestFixtures>({
         });
       });
 
+      // Mock Gemini API
+      await sharedContext.route('https://generativelanguage.googleapis.com/**', async (route) => {
+        const request = route.request();
+        let body: Record<string, unknown> = {};
+        try { body = request.postDataJSON(); } catch {}
+        const contents = body.contents as Array<{ parts: Array<{ text: string }> }> | undefined;
+        const inputText = contents?.[0]?.parts?.[0]?.text ?? 'unknown';
+
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            candidates: [{
+              content: { parts: [{ text: `Gemini mock: ${inputText}` }], role: 'model' },
+              finishReason: 'STOP',
+            }],
+            usageMetadata: { promptTokenCount: 12, candidatesTokenCount: 18, totalTokenCount: 30 },
+          }),
+        });
+      });
+
       // Get extension ID from service worker
       let extensionId = '';
       const workers = sharedContext.serviceWorkers();

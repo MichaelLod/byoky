@@ -549,6 +549,218 @@ test.describe.serial('Byoky wallet E2E flow', () => {
     await expect(extensionPage.locator('button:has-text("Lock Wallet")')).toBeVisible();
   });
 
+  // ── Auth Method UI ────────────────────────────────────
+
+  test('auth toggle shows Setup Token for Anthropic', async ({ extensionPage }) => {
+    await extensionPage.bringToFront();
+    await extensionPage.click('button[title="Wallet"]');
+    await extensionPage.click('button:has-text("Add credential")');
+    await extensionPage.waitForSelector('#provider');
+    await extensionPage.selectOption('#provider', 'anthropic');
+    await expect(extensionPage.locator('.auth-toggle-btn:has-text("Setup Token")')).toBeVisible();
+    await expect(extensionPage.locator('.auth-toggle-btn:has-text("API Key")')).toBeVisible();
+    await extensionPage.click('button:has-text("Cancel")');
+  });
+
+  test('auth toggle shows OAuth for Gemini', async ({ extensionPage }) => {
+    await extensionPage.bringToFront();
+    await extensionPage.click('button:has-text("Add credential")');
+    await extensionPage.waitForSelector('#provider');
+    await extensionPage.selectOption('#provider', 'gemini');
+    await expect(extensionPage.locator('.auth-toggle-btn:has-text("OAuth")')).toBeVisible();
+    await expect(extensionPage.locator('.auth-toggle-btn:has-text("API Key")')).toBeVisible();
+    await extensionPage.click('button:has-text("Cancel")');
+  });
+
+  test('auth toggle shows OAuth for HuggingFace', async ({ extensionPage }) => {
+    await extensionPage.bringToFront();
+    await extensionPage.click('button:has-text("Add credential")');
+    await extensionPage.waitForSelector('#provider');
+    await extensionPage.selectOption('#provider', 'huggingface');
+    await expect(extensionPage.locator('.auth-toggle-btn:has-text("OAuth")')).toBeVisible();
+    await expect(extensionPage.locator('.auth-toggle-btn:has-text("API Key")')).toBeVisible();
+    await extensionPage.click('button:has-text("Cancel")');
+  });
+
+  test('OpenAI does not show auth method toggle', async ({ extensionPage }) => {
+    await extensionPage.bringToFront();
+    await extensionPage.click('button:has-text("Add credential")');
+    await extensionPage.waitForSelector('#provider');
+    await extensionPage.selectOption('#provider', 'openai');
+    await expect(extensionPage.locator('.auth-method-toggle')).not.toBeVisible();
+    await extensionPage.click('button:has-text("Cancel")');
+  });
+
+  // ── Setup Token Flow ─────────────────────────────────
+
+  test('setup token form shows instructions', async ({ extensionPage }) => {
+    await extensionPage.bringToFront();
+    await extensionPage.click('button:has-text("Add credential")');
+    await extensionPage.waitForSelector('#provider');
+    await extensionPage.selectOption('#provider', 'anthropic');
+    await extensionPage.click('.auth-toggle-btn:has-text("Setup Token")');
+    await expect(extensionPage.locator('label:has-text("Setup Token")')).toBeVisible();
+    await expect(extensionPage.locator('text=How to get a setup token')).toBeVisible();
+    await expect(extensionPage.locator('text=claude setup-token')).toBeVisible();
+    await expect(extensionPage.locator('ol.setup-steps')).toBeVisible();
+    await extensionPage.click('button:has-text("Cancel")');
+  });
+
+  test('save setup token credential', async ({ extensionPage }) => {
+    await extensionPage.bringToFront();
+    await extensionPage.click('button:has-text("Add credential")');
+    await extensionPage.waitForSelector('#provider');
+    await extensionPage.selectOption('#provider', 'anthropic');
+    await extensionPage.click('.auth-toggle-btn:has-text("Setup Token")');
+    await extensionPage.fill('#label', 'E2E Setup Token');
+    await extensionPage.fill('#apiKey', 'sk-ant-oat01-test-setup-token-for-e2e');
+    await extensionPage.click('button:has-text("Save")');
+    await expect(extensionPage.locator('text=E2E Setup Token')).toBeVisible({ timeout: 30_000 });
+  });
+
+  test('setup token proxy returns BRIDGE_UNAVAILABLE', async ({ testPage, extensionPage }) => {
+    // Disconnect if connected
+    await testPage.bringToFront();
+    const status = await testPage.locator('#status').textContent();
+    if (status === 'Connected') {
+      await testPage.click('#disconnect');
+      await expect(testPage.locator('#status')).toHaveText('Disconnected');
+    }
+
+    // Remove the API key so setup token is the only Anthropic credential
+    await extensionPage.bringToFront();
+    await extensionPage.click('button[title="Wallet"]');
+    const apiKeyCard = extensionPage.locator('.card:has-text("E2E Test Key")');
+    await apiKeyCard.locator('button:has-text("Remove")').click();
+    await expect(extensionPage.locator('text=E2E Test Key')).not.toBeVisible({ timeout: 5_000 });
+
+    // Connect — session will pick the setup token credential
+    await testPage.bringToFront();
+    await testPage.click('#connect');
+    await extensionPage.bringToFront();
+    await expect(extensionPage.locator('text=wants to connect')).toBeVisible({ timeout: 15_000 });
+    await extensionPage.click('button:has-text("Approve")');
+    await testPage.bringToFront();
+    await testPage.waitForFunction(
+      () => (window as unknown as { _testState: { connected: boolean } })._testState?.connected === true,
+      { timeout: 15_000 },
+    );
+
+    // Send request — routes through bridge, fails with BRIDGE_UNAVAILABLE
+    await testPage.evaluate(() => {
+      (window as unknown as { _testState: { proxyError: null } })._testState.proxyError = null;
+    });
+    await testPage.click('#send-request');
+    await testPage.waitForFunction(
+      () => (window as unknown as { _testState: { proxyError: unknown } })._testState?.proxyError != null,
+      { timeout: 15_000 },
+    );
+    const error = await testPage.evaluate(
+      () => (window as unknown as { _testState: { proxyError: { status: number; code: string } } })._testState.proxyError,
+    );
+    expect(error.status).toBe(503);
+    expect(error.code).toBe('BRIDGE_UNAVAILABLE');
+  });
+
+  // ── OAuth Flow ───────────────────────────────────────
+
+  test('OAuth sign-in for Gemini returns client_id error', async ({ extensionPage }) => {
+    await extensionPage.bringToFront();
+    await extensionPage.click('button[title="Wallet"]');
+    await extensionPage.click('button:has-text("Add credential")');
+    await extensionPage.waitForSelector('#provider');
+    await extensionPage.selectOption('#provider', 'gemini');
+    await extensionPage.click('.auth-toggle-btn:has-text("OAuth")');
+    await extensionPage.fill('#label', 'E2E Gemini OAuth');
+    await extensionPage.click('button:has-text("Sign in with Google Gemini")');
+    await expect(extensionPage.locator('.error')).toContainText(
+      'OAuth client_id not configured',
+      { timeout: 10_000 },
+    );
+    await extensionPage.click('button:has-text("Cancel")');
+  });
+
+  test('OAuth sign-in for HuggingFace returns client_id error', async ({ extensionPage }) => {
+    await extensionPage.bringToFront();
+    await extensionPage.click('button:has-text("Add credential")');
+    await extensionPage.waitForSelector('#provider');
+    await extensionPage.selectOption('#provider', 'huggingface');
+    await extensionPage.click('.auth-toggle-btn:has-text("OAuth")');
+    await extensionPage.fill('#label', 'E2E HF OAuth');
+    await extensionPage.click('button:has-text("Sign in with Hugging Face")');
+    await expect(extensionPage.locator('.error')).toContainText(
+      'OAuth client_id not configured',
+      { timeout: 10_000 },
+    );
+    await extensionPage.click('button:has-text("Cancel")');
+  });
+
+  // ── Gemini API Key Proxy ─────────────────────────────
+
+  test('add Gemini API key and proxy request', async ({ testPage, extensionPage }) => {
+    // Disconnect from setup token session
+    await testPage.bringToFront();
+    const status = await testPage.locator('#status').textContent();
+    if (status === 'Connected') {
+      await testPage.click('#disconnect');
+      await expect(testPage.locator('#status')).toHaveText('Disconnected');
+    }
+
+    // Add Gemini API key
+    await extensionPage.bringToFront();
+    await extensionPage.click('button[title="Wallet"]');
+    await extensionPage.click('button:has-text("Add credential")');
+    await extensionPage.waitForSelector('#provider');
+    await extensionPage.selectOption('#provider', 'gemini');
+    await extensionPage.fill('#label', 'E2E Gemini Key');
+    await extensionPage.fill('#apiKey', 'AIza-test-gemini-key-not-real');
+    await extensionPage.click('button:has-text("Save")');
+    await expect(extensionPage.locator('text=E2E Gemini Key')).toBeVisible({ timeout: 30_000 });
+
+    // Connect with gemini + anthropic providers
+    await testPage.bringToFront();
+    await testPage.click('#connect-multi');
+    await extensionPage.bringToFront();
+    await expect(extensionPage.locator('text=wants to connect')).toBeVisible({ timeout: 15_000 });
+    await extensionPage.click('button:has-text("Approve")');
+    await testPage.bringToFront();
+    await testPage.waitForFunction(
+      () => (window as unknown as { _testState: { connected: boolean } })._testState?.connected === true,
+      { timeout: 15_000 },
+    );
+
+    // Send Gemini request
+    await testPage.evaluate(() => {
+      const s = window as unknown as { _testState: { response: null; proxyError: null } };
+      s._testState.response = null;
+      s._testState.proxyError = null;
+    });
+    await testPage.click('#send-gemini');
+    await testPage.waitForFunction(
+      () => {
+        const s = (window as unknown as { _testState: { response: unknown; proxyError: unknown } })._testState;
+        return s?.response != null || s?.proxyError != null;
+      },
+      { timeout: 15_000 },
+    );
+
+    const hasError = await testPage.evaluate(
+      () => (window as unknown as { _testState: { proxyError: unknown } })._testState.proxyError,
+    );
+    if (!hasError) {
+      const response = await testPage.evaluate(
+        () => (window as unknown as { _testState: { response: { candidates: Array<{ content: { parts: Array<{ text: string }> } }>; usageMetadata: { promptTokenCount: number } } } })._testState.response,
+      );
+      expect(response.candidates[0].content.parts[0].text).toContain('Gemini mock');
+      expect(response.usageMetadata.promptTokenCount).toBe(12);
+    } else {
+      const proxyErr = await testPage.evaluate(
+        () => (window as unknown as { _testState: { proxyError: { status: number; code: string } } })._testState.proxyError,
+      );
+      expect([403, 502]).toContain(proxyErr.status);
+    }
+  });
+
   // ── Credential Management ──────────────────────────────
 
   test('remove a credential', async ({ extensionPage }) => {

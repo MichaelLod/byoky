@@ -38,6 +38,48 @@ describe('relay protocol', () => {
     it('returns null for objects without type field', () => {
       expect(parseRelayMessage(JSON.stringify({ foo: 'bar' }))).toBeNull();
     });
+
+    it('rejects relay:hello missing sessionId', () => {
+      expect(parseRelayMessage({ type: 'relay:hello', providers: {} })).toBeNull();
+    });
+
+    it('rejects relay:request missing required fields', () => {
+      expect(parseRelayMessage({ type: 'relay:request', requestId: '1' })).toBeNull();
+      expect(parseRelayMessage({ type: 'relay:request', requestId: '1', providerId: 'x' })).toBeNull();
+      expect(parseRelayMessage({ type: 'relay:request', requestId: '1', providerId: 'x', url: 'u' })).toBeNull();
+    });
+
+    it('accepts relay:request with all required fields', () => {
+      const msg = parseRelayMessage({
+        type: 'relay:request', requestId: '1', providerId: 'x', url: 'u', method: 'POST', headers: {},
+      });
+      expect(msg).not.toBeNull();
+      expect(msg!.type).toBe('relay:request');
+    });
+
+    it('rejects relay:response:meta missing status', () => {
+      expect(parseRelayMessage({ type: 'relay:response:meta', requestId: '1' })).toBeNull();
+    });
+
+    it('rejects relay:response:chunk missing chunk', () => {
+      expect(parseRelayMessage({ type: 'relay:response:chunk', requestId: '1' })).toBeNull();
+    });
+
+    it('rejects relay:response:done missing requestId', () => {
+      expect(parseRelayMessage({ type: 'relay:response:done' })).toBeNull();
+    });
+
+    it('rejects relay:ping missing ts', () => {
+      expect(parseRelayMessage({ type: 'relay:ping' })).toBeNull();
+    });
+
+    it('rejects relay:pong missing ts', () => {
+      expect(parseRelayMessage({ type: 'relay:pong' })).toBeNull();
+    });
+
+    it('rejects unknown relay subtypes', () => {
+      expect(parseRelayMessage({ type: 'relay:unknown', foo: 'bar' })).toBeNull();
+    });
   });
 
   describe('sendRelayMessage', () => {

@@ -269,7 +269,15 @@ async function startCallbackServer(
     let resolved = false;
 
     const server = createServer((req, res) => {
-      res.setHeader('Access-Control-Allow-Origin', '*');
+      // Only allow requests from localhost (the auth page we serve)
+      const reqOrigin = req.headers.origin || '';
+      const isLocalhost =
+        reqOrigin.startsWith('http://127.0.0.1') ||
+        reqOrigin.startsWith('http://localhost');
+      res.setHeader(
+        'Access-Control-Allow-Origin',
+        isLocalhost ? reqOrigin : 'http://127.0.0.1',
+      );
       res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 

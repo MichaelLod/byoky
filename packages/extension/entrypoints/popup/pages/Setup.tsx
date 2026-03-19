@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { useWalletStore, setSessionPassword } from '../store';
+import { useWalletStore } from '../store';
 import { checkPasswordStrength, MIN_PASSWORD_LENGTH } from '@byoky/core';
 import { PasswordMeter } from '../components/PasswordMeter';
 
@@ -28,7 +28,6 @@ export function Setup() {
       return;
     }
 
-    setSessionPassword(password);
     setup(password);
   }
 

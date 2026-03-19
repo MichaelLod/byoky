@@ -74,11 +74,8 @@ export function startProxyServer(config: ProxyConfig): Server {
   const { port, sessionKey, providers, sendToExtension } = config;
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-    // CORS for local tools
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', '*');
-
+    // No CORS headers — CLI tools don't need them, and allowing cross-origin
+    // requests would let any website use the proxy to make authenticated API calls.
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
       res.end();
@@ -139,7 +136,7 @@ export function startProxyServer(config: ProxyConfig): Server {
     }
 
     const realUrl = `${baseUrl}${path}`;
-    const requestId = `proxy-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const requestId = `proxy-${crypto.randomUUID()}`;
 
     // Forward headers (strip host)
     const headers: Record<string, string> = {};
@@ -194,10 +191,22 @@ export function startProxyServer(config: ProxyConfig): Server {
   return server;
 }
 
+const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10 MB
+
 function readBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let body = '';
-    req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+    let size = 0;
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > MAX_BODY_SIZE) {
+        req.destroy();
+        reject(new Error('Request body too large'));
+        return;
+      }
+      body += chunk.toString();
+    });
     req.on('end', () => resolve(body));
+    req.on('error', reject);
   });
 }

@@ -12,7 +12,20 @@ import {
   encrypt,
   verifyPassword,
   PROVIDERS,
+  buildHeaders,
+  parseModel,
+  parseUsage,
+  computeAllowanceCheck,
+  validateProxyUrl,
 } from '@byoky/core';
+import type { Runtime } from 'wxt/browser';
+
+declare const chrome: {
+  sidePanel?: {
+    setPanelBehavior(opts: { openPanelOnActionClick: boolean }): void;
+    open(opts: { tabId: number }): Promise<void>;
+  };
+};
 
 export default defineBackground(() => {
   const sessions = new Map<string, Session>();
@@ -52,15 +65,17 @@ export default defineBackground(() => {
 
   // --- Message handling ---
 
-  browser.runtime.onMessage.addListener((message, sender) => {
+  browser.runtime.onMessage.addListener((raw: unknown, sender: unknown) => {
+    const message = raw as Record<string, unknown>;
+    const senderInfo = sender as Runtime.MessageSender;
+
     if (message.type === 'BYOKY_CONNECT_REQUEST') {
-      return handleConnect(message, sender);
+      return handleConnect(message as { id: string; payload: ConnectRequest }, senderInfo);
     }
 
     if (message.type === 'BYOKY_DISCONNECT') {
       const { sessionKey } = message.payload as { sessionKey: string };
       sessions.delete(sessionKey);
-      // Notify extension popup to refresh session list
       browser.runtime.sendMessage({
         type: 'BYOKY_INTERNAL',
         action: 'sessionChanged',
@@ -99,13 +114,13 @@ export default defineBackground(() => {
     }
 
     if (message.type === 'BYOKY_INTERNAL') {
-      return handleInternal(message);
+      return handleInternal(message as { action: string; payload?: unknown });
     }
   });
 
   // --- Notification ports (for broadcasting revocations to content scripts) ---
 
-  const notifyPorts = new Set<browser.Runtime.Port>();
+  const notifyPorts = new Set<Runtime.Port>();
 
   // --- Proxy via Port (streaming) ---
 
@@ -122,7 +137,8 @@ export default defineBackground(() => {
     const senderUrl = port.sender?.url || port.sender?.tab?.url;
     const portOrigin = senderUrl ? new URL(senderUrl).origin : null;
 
-    port.onMessage.addListener(async (msg: ProxyRequest) => {
+    port.onMessage.addListener(async (raw: unknown) => {
+      const msg = raw as ProxyRequest;
       if (msg.sessionKey == null) return;
 
       const session = sessions.get(msg.sessionKey);
@@ -149,7 +165,7 @@ export default defineBackground(() => {
       }
 
       // Verify the requesting origin matches the session's approved origin
-      if (portOrigin && portOrigin !== session.appOrigin) {
+      if (!portOrigin || portOrigin !== session.appOrigin) {
         port.postMessage({
           type: 'BYOKY_PROXY_RESPONSE_ERROR',
           requestId: msg.requestId,
@@ -211,6 +227,16 @@ export default defineBackground(() => {
         // Setup tokens (OAuth) route through the native bridge → Claude Code CLI
         if (credential.authMethod === 'oauth' && msg.providerId === 'anthropic') {
           await proxyViaBridge(port, msg, apiKey);
+          return;
+        }
+
+        if (!validateProxyUrl(msg.providerId, msg.url)) {
+          port.postMessage({
+            type: 'BYOKY_PROXY_RESPONSE_ERROR',
+            requestId: msg.requestId,
+            status: 403,
+            error: { code: 'INVALID_URL', message: 'Request URL does not match the provider\'s registered base URL' },
+          });
           return;
         }
 
@@ -284,7 +310,7 @@ export default defineBackground(() => {
 
   // --- Helpers ---
 
-  function resolveOrigin(sender: browser.Runtime.MessageSender): string {
+  function resolveOrigin(sender: Runtime.MessageSender): string {
     // sender.url is always available for content scripts (no tabs permission needed)
     const url = sender.url || sender.tab?.url;
     return url ? new URL(url).origin : 'unknown';
@@ -318,7 +344,7 @@ export default defineBackground(() => {
 
   async function handleConnect(
     message: { id: string; payload: ConnectRequest },
-    sender: browser.Runtime.MessageSender,
+    sender: Runtime.MessageSender,
   ): Promise<unknown> {
     const origin = resolveOrigin(sender);
 
@@ -621,6 +647,24 @@ export default defineBackground(() => {
         return { success: true };
       }
 
+      case 'encryptValue': {
+        if (!masterPassword) return { error: 'Wallet is locked' };
+        const { value } = message.payload as { value: string };
+        const encrypted = await encrypt(value, masterPassword);
+        return { encrypted };
+      }
+
+      case 'decryptValue': {
+        if (!masterPassword) return { error: 'Wallet is locked' };
+        const { encrypted: enc } = message.payload as { encrypted: string };
+        try {
+          const decrypted = await decrypt(enc, masterPassword);
+          return { decrypted };
+        } catch {
+          return { error: 'Failed to decrypt' };
+        }
+      }
+
       case 'getAllowances':
         return { allowances: await getAllowances() };
 
@@ -861,7 +905,8 @@ export default defineBackground(() => {
           resolve(false);
         }, 2000);
 
-        port.onMessage.addListener((msg: { type: string }) => {
+        port.onMessage.addListener((raw: unknown) => {
+          const msg = raw as { type: string };
           clearTimeout(timeout);
           port.disconnect();
           bridgeAvailable = msg.type === 'pong';
@@ -883,7 +928,7 @@ export default defineBackground(() => {
   }
 
   async function proxyViaBridge(
-    responsePort: browser.Runtime.Port,
+    responsePort: Runtime.Port,
     msg: ProxyRequest,
     setupToken: string,
   ): Promise<void> {
@@ -915,7 +960,8 @@ export default defineBackground(() => {
       });
 
       nativePort.onMessage.addListener(
-        (response: { type: string; requestId: string; status?: number; headers?: Record<string, string>; body?: string; error?: string }) => {
+        (raw: unknown) => {
+          const response = raw as { type: string; requestId: string; status?: number; headers?: Record<string, string>; body?: string; error?: string };
           if (response.requestId !== msg.requestId) return;
 
           if (response.type === 'proxy_response') {
@@ -973,7 +1019,7 @@ export default defineBackground(() => {
 
   // --- Bridge HTTP proxy (generic local gateway for CLI/desktop apps) ---
 
-  let bridgeProxyPort: browser.Runtime.Port | null = null;
+  let bridgeProxyPort: Runtime.Port | null = null;
 
   async function startBridgeProxy(
     sessionKey: string,
@@ -1010,7 +1056,8 @@ export default defineBackground(() => {
       });
 
       // Listen for messages from the bridge
-      bridgeProxyPort.onMessage.addListener(async (msg: Record<string, unknown>) => {
+      bridgeProxyPort.onMessage.addListener(async (raw: unknown) => {
+        const msg = raw as Record<string, unknown>;
         if (msg.type === 'proxy_http') {
           await handleBridgeProxyRequest(msg);
         }
@@ -1055,6 +1102,15 @@ export default defineBackground(() => {
       return;
     }
 
+    if (!validateProxyUrl(providerId, url)) {
+      bridgeProxyPort?.postMessage({
+        type: 'proxy_http_error',
+        requestId,
+        error: 'Request URL does not match the provider\'s registered base URL',
+      });
+      return;
+    }
+
     try {
       const apiKey = await decryptCredentialKey(credential);
       const realHeaders = buildHeaders(providerId, headers, apiKey, credential.authMethod);
@@ -1081,14 +1137,8 @@ export default defineBackground(() => {
       });
 
       // Log the request
-      await logRequest({
-        sessionId: session.id,
-        appOrigin: 'bridge-proxy',
-        providerId,
-        url,
-        method,
-        status: response.status,
-      });
+      const bridgeSession = { ...session, appOrigin: 'bridge-proxy' } as Session;
+      await logRequest(bridgeSession, { providerId, url, method } as ProxyRequest, response.status);
     } catch (e) {
       bridgeProxyPort?.postMessage({
         type: 'proxy_http_error',
@@ -1142,29 +1192,7 @@ export default defineBackground(() => {
     return decrypt(credential.encryptedAccessToken, masterPassword);
   }
 
-  function buildHeaders(
-    providerId: string,
-    requestHeaders: Record<string, string>,
-    apiKey: string,
-    authMethod: string = 'api_key',
-  ): Record<string, string> {
-    const headers = { ...requestHeaders };
-
-    // Remove any auth headers the SDK might have set (they're fake session keys)
-    delete headers['authorization'];
-    delete headers['x-api-key'];
-
-    if (providerId === 'anthropic') {
-      headers['x-api-key'] = apiKey;
-      headers['anthropic-version'] = headers['anthropic-version'] ?? '2023-06-01';
-    } else if (providerId === 'azure_openai') {
-      headers['api-key'] = apiKey;
-    } else {
-      headers['authorization'] = `Bearer ${apiKey}`;
-    }
-
-    return headers;
-  }
+  // buildHeaders, parseModel, parseUsage, computeAllowanceCheck imported from @byoky/core
 
   async function logRequest(
     session: Session,
@@ -1207,79 +1235,6 @@ export default defineBackground(() => {
     if (updates.outputTokens != null) entry.outputTokens = updates.outputTokens;
     if (updates.model) entry.model = updates.model;
     await browser.storage.local.set({ requestLog: log });
-  }
-
-  function parseModel(body?: string): string | undefined {
-    if (!body) return undefined;
-    try {
-      const parsed = JSON.parse(body);
-      return parsed.model ?? undefined;
-    } catch {
-      return undefined;
-    }
-  }
-
-  function parseUsage(
-    providerId: string,
-    body: string,
-  ): { inputTokens: number; outputTokens: number } | undefined {
-    try {
-      // For streaming responses (SSE), try to find usage in the last data chunk
-      if (body.includes('data: ')) {
-        const lines = body.split('\n').filter((l) => l.startsWith('data: ') && !l.includes('[DONE]'));
-        // Anthropic streaming: message_stop event has usage in a preceding message_delta
-        // OpenAI streaming: last chunk may include usage
-        for (let i = lines.length - 1; i >= 0; i--) {
-          const json = lines[i].replace('data: ', '');
-          try {
-            const parsed = JSON.parse(json);
-            const usage = extractUsageFromParsed(providerId, parsed);
-            if (usage) return usage;
-          } catch {
-            continue;
-          }
-        }
-        return undefined;
-      }
-
-      const parsed = JSON.parse(body);
-      return extractUsageFromParsed(providerId, parsed);
-    } catch {
-      return undefined;
-    }
-  }
-
-  function extractUsageFromParsed(
-    providerId: string,
-    parsed: Record<string, unknown>,
-  ): { inputTokens: number; outputTokens: number } | undefined {
-    // Anthropic: { usage: { input_tokens, output_tokens } }
-    if (providerId === 'anthropic') {
-      const usage = parsed.usage as Record<string, number> | undefined;
-      if (usage?.input_tokens != null && usage?.output_tokens != null) {
-        return { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens };
-      }
-    }
-
-    // Gemini: { usageMetadata: { promptTokenCount, candidatesTokenCount } }
-    if (providerId === 'gemini') {
-      const meta = parsed.usageMetadata as Record<string, number> | undefined;
-      if (meta?.promptTokenCount != null) {
-        return {
-          inputTokens: meta.promptTokenCount,
-          outputTokens: meta.candidatesTokenCount ?? 0,
-        };
-      }
-    }
-
-    // OpenAI-compatible (openai, groq, together, deepseek, xai, perplexity, fireworks, openrouter, mistral, azure_openai):
-    // { usage: { prompt_tokens, completion_tokens } }
-    const usage = parsed.usage as Record<string, number> | undefined;
-    if (usage?.prompt_tokens != null && usage?.completion_tokens != null) {
-      return { inputTokens: usage.prompt_tokens, outputTokens: usage.completion_tokens };
-    }
-
-    return undefined;
   }
 
   async function getSessionUsage(sessionId: string) {
@@ -1397,23 +1352,6 @@ export default defineBackground(() => {
     const log = (data.requestLog as RequestLogEntry[]) ?? [];
     const entries = log.filter((e) => e.appOrigin === origin && e.status < 400);
 
-    let totalUsed = 0;
-    const byProvider: Record<string, number> = {};
-    for (const entry of entries) {
-      const tokens = (entry.inputTokens ?? 0) + (entry.outputTokens ?? 0);
-      totalUsed += tokens;
-      byProvider[entry.providerId] = (byProvider[entry.providerId] ?? 0) + tokens;
-    }
-
-    if (allowance.totalLimit != null && totalUsed >= allowance.totalLimit) {
-      return { allowed: false, reason: `Token allowance exceeded for ${origin}` };
-    }
-
-    const providerLimit = allowance.providerLimits?.[providerId];
-    if (providerLimit != null && (byProvider[providerId] ?? 0) >= providerLimit) {
-      return { allowed: false, reason: `Token allowance for ${providerId} exceeded` };
-    }
-
-    return { allowed: true };
+    return computeAllowanceCheck(allowance, entries, providerId);
   }
 });

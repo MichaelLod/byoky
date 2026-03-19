@@ -112,7 +112,11 @@ export async function verifyPassword(
   const newHash = await deriveRawHash(password, salt);
 
   if (originalHash.length !== newHash.length) return false;
-  return originalHash.every((byte, i) => byte === newHash[i]);
+  let result = 0;
+  for (let i = 0; i < originalHash.length; i++) {
+    result |= originalHash[i] ^ newHash[i];
+  }
+  return result === 0;
 }
 
 export function maskKey(key: string): string {

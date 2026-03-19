@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import {
+  type AuthMethod,
   type CredentialMeta,
   type Session,
   type RequestLogEntry,
@@ -7,8 +8,6 @@ import {
   type TrustedSite,
   type TokenAllowance,
   hashPassword,
-  encrypt,
-  maskKey,
 } from '@byoky/core';
 
 type Page =
@@ -54,12 +53,12 @@ interface WalletState {
   clearError: () => void;
 }
 
-async function sendInternal(action: string, payload?: unknown) {
+async function sendInternal(action: string, payload?: unknown): Promise<Record<string, unknown>> {
   return browser.runtime.sendMessage({
     type: 'BYOKY_INTERNAL',
     action,
     payload,
-  });
+  }) as Promise<Record<string, unknown>>;
 }
 
 export const useWalletStore = create<WalletState>((set, get) => ({
@@ -76,8 +75,10 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   error: null,
 
   init: async () => {
-    const { initialized } = await sendInternal('isInitialized');
-    const { unlocked } = await sendInternal('isUnlocked');
+    const initResult = await sendInternal('isInitialized');
+    const unlockResult = await sendInternal('isUnlocked');
+    const initialized = initResult.initialized as boolean;
+    const unlocked = unlockResult.unlocked as boolean;
 
     let page: Page = 'unlock';
     if (!initialized) page = 'setup';
@@ -98,8 +99,8 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     try {
       const hash = await hashPassword(password);
       await browser.storage.local.set({ passwordHash: hash, credentials: [] });
-      const { success } = await sendInternal('unlock', { password });
-      if (success) {
+      const setupResult = await sendInternal('unlock', { password });
+      if (setupResult.success) {
         set({ isInitialized: true, isUnlocked: true, currentPage: 'dashboard', loading: false });
       }
     } catch (e) {
@@ -109,8 +110,8 @@ export const useWalletStore = create<WalletState>((set, get) => ({
 
   unlock: async (password: string) => {
     set({ loading: true, error: null });
-    const { success } = await sendInternal('unlock', { password });
-    if (success) {
+    const unlockResult = await sendInternal('unlock', { password });
+    if (unlockResult.success) {
       set({ isUnlocked: true, currentPage: 'dashboard', loading: false });
       await get().refreshData();
       return true;
@@ -143,7 +144,9 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       // For now, we encrypt client-side by asking user to enter password again
       // TODO: Use session-stored derived key
       const cleanKey = apiKey.replace(/\s+/g, '');
-      const encryptedKey = await encrypt(cleanKey, await getSessionPassword());
+      const encResult = await sendInternal('encryptValue', { value: cleanKey });
+      if (encResult.error) throw new Error(encResult.error as string);
+      const encryptedKey = encResult.encrypted as string;
 
       const newCred = {
         id: crypto.randomUUID(),
@@ -171,7 +174,9 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       const credentials = (data.credentials ?? []) as Array<Record<string, unknown>>;
 
       const cleanToken = token.replace(/\s+/g, '');
-      const encryptedAccessToken = await encrypt(cleanToken, await getSessionPassword());
+      const encResult = await sendInternal('encryptValue', { value: cleanToken });
+      if (encResult.error) throw new Error(encResult.error as string);
+      const encryptedAccessToken = encResult.encrypted as string;
 
       const newCred = {
         id: crypto.randomUUID(),
@@ -195,9 +200,9 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   startOAuth: async (providerId: string, label: string) => {
     set({ loading: true, error: null });
     try {
-      const result = await sendInternal('startOAuth', { providerId, label });
-      if (!result.success) {
-        throw new Error(result.error || 'OAuth flow failed');
+      const oauthResult = await sendInternal('startOAuth', { providerId, label });
+      if (!oauthResult.success) {
+        throw new Error((oauthResult.error as string) || 'OAuth flow failed');
       }
       await get().refreshData();
       set({ currentPage: 'dashboard', loading: false });
@@ -261,43 +266,28 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       sendInternal('getAllowances'),
     ]);
 
-    const metas: CredentialMeta[] = (credResult.credentials ?? []).map(
+    const metas: CredentialMeta[] = ((credResult.credentials ?? []) as Array<Record<string, unknown>>).map(
       (c: Record<string, unknown>) => ({
-        id: c.id,
-        providerId: c.providerId,
-        label: c.label,
-        authMethod: c.authMethod,
-        createdAt: c.createdAt,
-        lastUsedAt: c.lastUsedAt,
+        id: c.id as string,
+        providerId: c.providerId as string,
+        label: c.label as string,
+        authMethod: c.authMethod as AuthMethod,
+        createdAt: c.createdAt as number,
+        lastUsedAt: c.lastUsedAt as number | undefined,
         maskedKey: c.authMethod === 'api_key' ? '••••••••' : c.authMethod === 'oauth' ? 'Setup Token' : undefined,
       }),
     );
 
     set({
       credentials: metas,
-      sessions: sessionResult.sessions ?? [],
-      requestLog: logResult.log ?? [],
-      pendingApprovals: approvalResult.approvals ?? [],
-      trustedSites: trustedResult.sites ?? [],
-      tokenAllowances: allowanceResult.allowances ?? [],
+      sessions: (sessionResult.sessions ?? []) as Session[],
+      requestLog: (logResult.log ?? []) as RequestLogEntry[],
+      pendingApprovals: (approvalResult.approvals ?? []) as PendingApproval[],
+      trustedSites: (trustedResult.sites ?? []) as TrustedSite[],
+      tokenAllowances: (allowanceResult.allowances ?? []) as TokenAllowance[],
     });
   },
 
   clearError: () => set({ error: null }),
 }));
 
-// Temporary helper — in production this would use a session-stored derived key
-let cachedPassword: string | null = null;
-
-export function setSessionPassword(pw: string) {
-  cachedPassword = pw;
-}
-
-async function getSessionPassword(): Promise<string> {
-  if (cachedPassword) return cachedPassword;
-  throw new Error('Session password not available');
-}
-
-export async function getSessionPasswordForExport(): Promise<string> {
-  return getSessionPassword();
-}

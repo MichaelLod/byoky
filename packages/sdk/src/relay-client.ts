@@ -28,6 +28,15 @@ export function createRelayClient(
   let ws: WebSocket;
   let pingInterval: ReturnType<typeof setInterval> | undefined;
 
+  if (!wsUrl.startsWith('wss://') && !wsUrl.startsWith('ws://localhost') && !wsUrl.startsWith('ws://127.0.0.1')) {
+    status = 'disconnected';
+    return {
+      get status() { return status; },
+      close() {},
+      onClose(cb) { cb('Insecure WebSocket URL rejected — use wss:// for non-localhost connections'); return () => {}; },
+    };
+  }
+
   try {
     ws = new WebSocket(wsUrl);
   } catch {

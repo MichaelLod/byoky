@@ -22,9 +22,11 @@
   <button id="send-request" disabled>Send Request</button>
   <button id="send-openai" disabled>Send OpenAI</button>
   <button id="send-missing" disabled>Send Missing Provider</button>
+  <button id="send-gemini" disabled>Send Gemini</button>
   <button id="check-usage" disabled>Check Usage</button>
   <button id="check-connected" disabled>Check Connected</button>
   <button id="disconnect" disabled>Disconnect</button>
+  <button id="connect-multi">Connect Multi-Provider</button>
 
   <script type="module">
     import { Byoky } from '@byoky/sdk';
@@ -48,20 +50,24 @@
       document.getElementById('send-request').disabled = false;
       document.getElementById('send-openai').disabled = false;
       document.getElementById('send-missing').disabled = false;
+      document.getElementById('send-gemini').disabled = false;
       document.getElementById('check-usage').disabled = false;
       document.getElementById('check-connected').disabled = false;
       document.getElementById('disconnect').disabled = false;
       document.getElementById('connect').disabled = true;
+      document.getElementById('connect-multi').disabled = true;
     }
 
     function disableButtons() {
       document.getElementById('send-request').disabled = true;
       document.getElementById('send-openai').disabled = true;
       document.getElementById('send-missing').disabled = true;
+      document.getElementById('send-gemini').disabled = true;
       document.getElementById('check-usage').disabled = true;
       document.getElementById('check-connected').disabled = true;
       document.getElementById('disconnect').disabled = true;
       document.getElementById('connect').disabled = false;
+      document.getElementById('connect-multi').disabled = false;
     }
 
     document.getElementById('connect').addEventListener('click', async () => {
@@ -72,6 +78,43 @@
         document.getElementById('status').textContent = 'Connecting...';
         session = await byoky.connect({
           providers: [{ id: 'anthropic', required: false }],
+        });
+
+        window._testState.connected = true;
+        window._testState.session = {
+          sessionKey: session.sessionKey,
+          providers: session.providers,
+        };
+
+        session.onDisconnect(() => {
+          window._testState.connected = false;
+          window._testState.disconnectedByWallet = true;
+          session = null;
+          document.getElementById('status').textContent = 'Disconnected by wallet';
+          disableButtons();
+        });
+
+        document.getElementById('status').textContent = 'Connected';
+        document.getElementById('session-key').textContent = session.sessionKey.slice(0, 16) + '...';
+        enableButtons();
+      } catch (e) {
+        window._testState.error = e.message;
+        window._testState.lastError = { code: e.code, message: e.message };
+        document.getElementById('status').textContent = 'Error: ' + e.message;
+      }
+    });
+
+    document.getElementById('connect-multi').addEventListener('click', async () => {
+      try {
+        window._testState.error = null;
+        window._testState.lastError = null;
+        window._testState.disconnectedByWallet = false;
+        document.getElementById('status').textContent = 'Connecting...';
+        session = await byoky.connect({
+          providers: [
+            { id: 'anthropic', required: false },
+            { id: 'gemini', required: false },
+          ],
         });
 
         window._testState.connected = true;
@@ -179,6 +222,34 @@
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ contents: [{ parts: [{ text: 'Hello' }] }] }),
+        });
+
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          window._testState.proxyError = {
+            status: response.status,
+            code: errData.error?.code ?? errData.code,
+            message: errData.error?.message ?? errData.message,
+          };
+          return;
+        }
+        const data = await response.json();
+        window._testState.response = data;
+      } catch (e) {
+        window._testState.proxyError = { message: e.message };
+      }
+    });
+
+    document.getElementById('send-gemini').addEventListener('click', async () => {
+      if (!session) return;
+      window._testState.response = null;
+      window._testState.proxyError = null;
+      try {
+        const proxyFetch = session.createFetch('gemini');
+        const response = await proxyFetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts: [{ text: 'Hello from Gemini E2E test!' }] }] }),
         });
 
         if (!response.ok) {

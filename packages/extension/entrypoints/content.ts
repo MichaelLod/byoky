@@ -51,7 +51,14 @@ export default defineContentScript({
           }
         }).catch(() => {});
       } else if (data.type === 'BYOKY_INTERNAL_FROM_PAGE') {
-        // Bridge proxy requests from auth pages (localhost only)
+        // Only allow internal messages from localhost/127.0.0.1
+        const origin = window.location.origin;
+        if (
+          !origin.startsWith('http://localhost') &&
+          !origin.startsWith('http://127.0.0.1')
+        ) {
+          return;
+        }
         browser.runtime.sendMessage({
           type: 'BYOKY_INTERNAL',
           action: data.action,
