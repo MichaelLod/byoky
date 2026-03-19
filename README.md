@@ -92,6 +92,40 @@ const message = await client.messages.create({
 
 > **Two lines changed.** Full API compatibility. Streaming works. Keys never exposed.
 
+### Backend Relay
+
+Need LLM calls from your server? The user's browser relays requests through the extension — your backend never sees the API key.
+
+```
+Backend ←WebSocket→ User's Frontend ←Extension→ LLM API
+```
+
+```typescript
+// Frontend — open a relay so the backend can make LLM calls
+const session = await new Byoky().connect({ providers: [{ id: 'anthropic' }] });
+const relay = session.createRelay('wss://your-app.com/ws/relay');
+```
+
+```typescript
+// Backend (Node.js)
+import { ByokyServer } from '@byoky/sdk/server';
+
+const byoky = new ByokyServer();
+wss.on('connection', async (ws) => {
+  const client = await byoky.handleConnection(ws);
+  const fetch = client.createFetch('anthropic');
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1024,
+      messages: [{ role: 'user', content: 'Hello!' }],
+    }),
+  });
+});
+```
+
 ## Security
 
 | | |
@@ -99,6 +133,7 @@ const message = await client.messages.create({
 | **AES-256-GCM** | Keys encrypted with PBKDF2-derived key (600K iterations) via Web Crypto API |
 | **Zero exposure** | API keys never leave the extension. Apps get temporary session tokens |
 | **Audit log** | Every request logged — app origin, provider, status, timestamp |
+| **Spending caps** | Token allowances per app — total and per-provider limits, enforced at the proxy |
 | **Local only** | No cloud. No telemetry. No tracking. Your device, your keys |
 
 ## Supported Providers
@@ -136,14 +171,18 @@ App → SDK (createFetch) → CustomEvent → Content Script
 
 The SDK provides `createFetch()` — a drop-in `fetch` replacement that routes through the extension. Works with **any provider's native SDK**.
 
+For server-side apps, `createRelay()` opens a WebSocket channel so the backend can make LLM calls through the user's browser. The backend gets a `fetch`-like API via `@byoky/sdk/server`.
+
 ## Project Structure
 
 ```
 byoky/
 ├── packages/
 │   ├── core/          # Shared types, crypto, protocol, provider registry
-│   ├── sdk/           # @byoky/sdk — npm package for developers
+│   ├── sdk/           # @byoky/sdk (+ @byoky/sdk/server for backend relay)
 │   ├── extension/     # Browser extension (Chrome, Firefox, Safari) — WXT
+│   ├── bridge/        # @byoky/bridge — native messaging for setup tokens
+│   ├── demo/          # Demo app — demo.byoky.com
 │   └── web/           # Landing page — byoky.com
 ```
 
@@ -180,8 +219,8 @@ pnpm --filter @byoky/extension build:all     # Chrome + Firefox + Safari
 
 ## Roadmap
 
-- [ ] Claude OAuth flow (authorization code)
-- [ ] Spending caps and rate limits per app
+- [x] Backend relay (`@byoky/sdk/server`)
+- [x] Token allowances per app (total + per-provider limits)
 - [ ] Export/import encrypted vault backup
 - [ ] Browser extension store listings
 

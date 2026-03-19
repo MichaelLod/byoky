@@ -144,6 +144,50 @@ const response = await client.messages.create({
 // Handle the tool_use block, run your function, send results back`,
   },
   {
+    id: 'backend-relay',
+    label: 'Backend Relay',
+    filename: 'relay.ts',
+    description:
+      'Let your backend make LLM calls through the user\'s browser. Keys never leave the extension — even from the server.',
+    code: `// === Frontend (browser) ===
+import { Byoky } from '@byoky/sdk';
+
+const session = await new Byoky().connect({
+  providers: [{ id: 'anthropic', required: true }],
+});
+
+// Open relay — backend can now make LLM calls through this session
+const relay = session.createRelay('wss://your-app.com/ws/relay');
+
+// === Backend (Node.js) ===
+import { ByokyServer } from '@byoky/sdk/server';
+import { WebSocketServer } from 'ws';
+
+const wss = new WebSocketServer({ port: 3001 });
+const byoky = new ByokyServer();
+
+wss.on('connection', async (ws) => {
+  const client = await byoky.handleConnection(ws);
+  console.log('Providers:', Object.keys(client.providers));
+
+  // Make LLM calls as if you had the API key
+  const fetch = client.createFetch('anthropic');
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1024,
+      messages: [{ role: 'user', content: 'Hello!' }],
+    }),
+  });
+  const data = await res.json();
+});`,
+  },
+  {
     id: 'multi-provider',
     label: 'Multi-Provider',
     filename: 'multi-provider.ts',

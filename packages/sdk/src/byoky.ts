@@ -2,10 +2,13 @@ import type { ConnectRequest, ConnectResponse, SessionUsage } from '@byoky/core'
 import { ByokyError, ByokyErrorCode, isByokyMessage } from '@byoky/core';
 import { isExtensionInstalled, getStoreUrl } from './detect.js';
 import { createProxyFetch } from './proxy-fetch.js';
+import { createRelayClient, type RelayConnection } from './relay-client.js';
 
 export interface ByokySession extends ConnectResponse {
   /** Create a fetch function that proxies requests through the wallet for the given provider. */
   createFetch(providerId: string): typeof fetch;
+  /** Open a relay channel so a backend server can make LLM calls through this session. */
+  createRelay(wsUrl: string): RelayConnection;
   /** Disconnect this session from the wallet. */
   disconnect(): void;
   /** Check if this session is still connected and valid. */
@@ -62,6 +65,8 @@ export class Byoky {
       ...response,
       createFetch: (providerId: string) =>
         createProxyFetch(providerId, sessionKey),
+      createRelay: (wsUrl: string) =>
+        createRelayClient(wsUrl, sessionKey, response.providers),
       disconnect: () => {
         document.removeEventListener('byoky-message', handleRevocation);
         this.sendDisconnect(sessionKey);

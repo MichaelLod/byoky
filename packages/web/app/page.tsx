@@ -273,6 +273,18 @@ function ForDevelopers() {
                     <CheckIcon />
                   </div>
                   <div>
+                    <h4>Backend relay</h4>
+                    <p>
+                      Your server makes LLM calls through the user&apos;s browser
+                      via WebSocket. Keys never leave the extension — even server-side.
+                    </p>
+                  </div>
+                </div>
+                <div className="dev-feature">
+                  <div className="dev-feature-icon">
+                    <CheckIcon />
+                  </div>
+                  <div>
                     <h4>Provider discovery</h4>
                     <p>
                       Detect which providers the user has. Request specific

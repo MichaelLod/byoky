@@ -70,4 +70,18 @@ export class ByokyError extends Error {
       { providerId },
     );
   }
+
+  static relayConnectionFailed(reason?: string) {
+    return new ByokyError(
+      ByokyErrorCode.RELAY_CONNECTION_FAILED,
+      `Relay connection failed${reason ? `: ${reason}` : ''}`,
+    );
+  }
+
+  static relayDisconnected() {
+    return new ByokyError(
+      ByokyErrorCode.RELAY_DISCONNECTED,
+      'Relay connection was closed',
+    );
+  }
 }
