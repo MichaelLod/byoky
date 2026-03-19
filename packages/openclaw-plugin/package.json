@@ -15,7 +15,9 @@
     "dev": "tsup --watch"
   },
   "openclaw": {
-    "extensions": ["./dist/index.js"]
+    "extensions": [
+      "./dist/index.js"
+    ]
   },
   "keywords": [
     "byoky",
@@ -32,6 +34,7 @@
     "directory": "packages/openclaw-plugin"
   },
   "devDependencies": {
+    "@types/node": "25.5.0",
     "tsup": "^8.0.0",
     "typescript": "^5.5.0"
   }
