@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "pnpm --filter @byoky/core build && pnpm --filter @byoky/sdk build && next build",
     "start": "next start"
   },
   "dependencies": {
