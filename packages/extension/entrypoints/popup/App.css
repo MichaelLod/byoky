@@ -43,6 +43,8 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  overflow: hidden;
+  height: 100vh;
 }
 
 /* ── Header ── */
@@ -401,23 +403,23 @@ body {
   position: relative;
 }
 
-/* Mascot peeking from bottom (like MetaMask fox) */
+/* Mascot pinned to the bottom of the app viewport.
+   Lives outside .content so it never overlaps the form.
+   .app has overflow:hidden so the mascot clips naturally
+   when the viewport is too short. */
 .mascot-peek {
-  position: fixed;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 280px;
+  margin-top: auto;
+  flex-shrink: 0;
+  text-align: center;
   pointer-events: none;
-  opacity: 0.85;
+  opacity: 0.7;
   z-index: 0;
 }
 
 .mascot-peek img {
-  width: 100%;
+  width: 240px;
   height: auto;
-  display: block;
-  transform: translateY(45%);
+  display: inline-block;
 }
 
 /* ── Footer actions ── */
@@ -1133,4 +1135,189 @@ body {
 
 .export-modal-actions .btn {
   flex: 1;
+}
+
+/* ─── Animations ─── */
+
+/* Page transition — fade + subtle slide up */
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.page-enter {
+  animation: page-enter 0.18s ease-out both;
+}
+
+/* Card staggered entrance */
+@keyframes card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.card {
+  animation: card-enter 0.2s ease-out both;
+}
+
+.card:nth-child(1) { animation-delay: 0s; }
+.card:nth-child(2) { animation-delay: 0.04s; }
+.card:nth-child(3) { animation-delay: 0.08s; }
+.card:nth-child(4) { animation-delay: 0.12s; }
+.card:nth-child(5) { animation-delay: 0.16s; }
+.card:nth-child(6) { animation-delay: 0.2s; }
+
+/* Button press feedback */
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
+  transition-duration: 0.06s;
+}
+
+.btn-primary:active:not(:disabled) {
+  transform: scale(0.97) translateY(0);
+  box-shadow: 0 1px 4px rgba(14, 165, 233, 0.2);
+}
+
+/* Nav active indicator — smooth background slide */
+.nav button {
+  transition: color 0.15s, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* Error banner slide in */
+@keyframes error-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.error {
+  animation: error-enter 0.2s ease-out both;
+}
+
+/* Modal overlay + content transition */
+@keyframes modal-overlay-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modal-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.export-modal-overlay {
+  animation: modal-overlay-enter 0.15s ease-out both;
+}
+
+.export-modal {
+  animation: modal-enter 0.2s ease-out both;
+}
+
+/* Empty state fade in */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.empty-state {
+  animation: fade-in 0.25s ease-out both;
+  animation-delay: 0.05s;
+}
+
+/* Loading pulse */
+@keyframes pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+.loading {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+/* Badge pop in */
+@keyframes badge-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.nav-badge {
+  animation: badge-pop 0.2s ease-out both;
+}
+
+/* Approval card entrance */
+@keyframes approval-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.approval-card {
+  animation: approval-enter 0.25s ease-out both;
+}
+
+/* Log entry stagger */
+.log-entry {
+  animation: card-enter 0.15s ease-out both;
+}
+
+.log-entry:nth-child(1) { animation-delay: 0s; }
+.log-entry:nth-child(2) { animation-delay: 0.03s; }
+.log-entry:nth-child(3) { animation-delay: 0.06s; }
+.log-entry:nth-child(4) { animation-delay: 0.09s; }
+.log-entry:nth-child(5) { animation-delay: 0.12s; }
+
+/* Usage stat cards stagger */
+.usage-stat-card {
+  animation: card-enter 0.2s ease-out both;
+}
+
+.usage-stat-card:nth-child(1) { animation-delay: 0.03s; }
+.usage-stat-card:nth-child(2) { animation-delay: 0.08s; }
+.usage-stat-card:nth-child(3) { animation-delay: 0.13s; }
+
+/* Bridge status fade in */
+.bridge-status {
+  animation: fade-in 0.2s ease-out both;
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }

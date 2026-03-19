@@ -65,6 +65,10 @@ export async function translateRequest(
 
   const { process: proc, output } = runClaude(claudeRequest, setupToken);
 
+  // Capture stderr for error reporting
+  let stderrText = '';
+  proc.stderr?.on('data', (chunk: Buffer) => { stderrText += chunk.toString(); });
+
   // Collect the full response
   let fullText = '';
   let inputTokens = 0;
@@ -73,13 +77,18 @@ export async function translateRequest(
 
   try {
     for await (const event of output) {
-      if (event.type === 'assistant' && event.content) {
-        fullText += event.content;
+      if (event.type === 'assistant') {
+        const text = event.message?.content
+            ?.filter((c) => c.type === 'text')
+            .map((c) => c.text)
+            .join('')
+          ?? '';
 
-        if (request.stream) {
-          streamChunks.push(
-            buildStreamChunk(event.content, request.model),
-          );
+        if (text) {
+          fullText += text;
+          if (request.stream) {
+            streamChunks.push(buildStreamChunk(text, request.model));
+          }
         }
       }
 
@@ -90,6 +99,10 @@ export async function translateRequest(
         if (event.tokens) {
           inputTokens = event.tokens.input;
           outputTokens = event.tokens.output;
+        }
+        if (event.usage) {
+          inputTokens = event.usage.input_tokens ?? inputTokens;
+          outputTokens = event.usage.output_tokens ?? outputTokens;
         }
       }
     }
@@ -112,7 +125,7 @@ export async function translateRequest(
         type: 'error',
         error: {
           type: 'api_error',
-          message: 'Claude Code process failed. Is Claude Code installed and is the setup token valid?',
+          message: `Claude Code process failed (exit ${proc.exitCode}): ${stderrText.trim() || 'unknown error'}`,
         },
       }),
       isStream: false,

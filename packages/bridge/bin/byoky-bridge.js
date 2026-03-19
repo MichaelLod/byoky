@@ -8,7 +8,12 @@ if (command === 'install' || command === 'uninstall' || command === 'status') {
 
   console.log('Byoky Bridge\n');
 
-  if (command === 'install') install();
+  if (command === 'install') {
+    // --extension-id <id> for custom/unpacked extension IDs
+    const idIdx = process.argv.indexOf('--extension-id');
+    const extensionId = idIdx !== -1 ? process.argv[idIdx + 1] : undefined;
+    install(extensionId);
+  }
   else if (command === 'uninstall') uninstall();
   else if (command === 'status') status();
 } else if (!command || command === 'host') {

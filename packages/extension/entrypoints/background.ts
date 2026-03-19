@@ -253,13 +253,13 @@ export default defineBackground(() => {
           return;
         }
 
-        // Setup tokens (OAuth) route through the native bridge → Claude Code CLI
+        const realHeaders = buildHeaders(msg.providerId, msg.headers, apiKey, credential.authMethod);
+
+        // Setup tokens for Anthropic route through the bridge (Node.js) to avoid browser CORS
         if (credential.authMethod === 'oauth' && msg.providerId === 'anthropic') {
-          await proxyViaBridge(port, msg, apiKey);
+          await proxyViaBridge(port, msg, realHeaders);
           return;
         }
-
-        const realHeaders = buildHeaders(msg.providerId, msg.headers, apiKey, credential.authMethod);
 
         const response = await fetch(msg.url, {
           method: msg.method,
@@ -620,6 +620,10 @@ export default defineBackground(() => {
       }
 
       case 'setupWallet': {
+        const existing = await browser.storage.local.get('passwordHash');
+        if (existing.passwordHash) {
+          return { error: 'Wallet already initialized' };
+        }
         const { passwordHash: setupHash } = message.payload as { passwordHash: string };
         await browser.storage.local.set({ passwordHash: setupHash, credentials: [] });
         return { success: true };
@@ -1032,7 +1036,6 @@ export default defineBackground(() => {
   let bridgeAvailable: boolean | null = null;
 
   async function checkBridgeAvailable(): Promise<boolean> {
-    if (bridgeAvailable !== null) return bridgeAvailable;
     try {
       const port = browser.runtime.connectNative(BRIDGE_HOST);
       return new Promise((resolve) => {
@@ -1067,7 +1070,7 @@ export default defineBackground(() => {
   async function proxyViaBridge(
     responsePort: Runtime.Port,
     msg: ProxyRequest,
-    setupToken: string,
+    headers: Record<string, string>,
   ): Promise<void> {
     const available = await checkBridgeAvailable();
     if (!available) {
@@ -1089,10 +1092,9 @@ export default defineBackground(() => {
       nativePort.postMessage({
         type: 'proxy',
         requestId: msg.requestId,
-        setupToken,
         url: msg.url,
         method: msg.method,
-        headers: msg.headers,
+        headers,
         body: msg.body,
       });
 

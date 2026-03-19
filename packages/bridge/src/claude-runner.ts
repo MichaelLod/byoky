@@ -4,7 +4,7 @@
  * Claude Code's own authentication, which accepts setup tokens.
  */
 
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, execSync, type ChildProcess } from 'node:child_process';
 
 export interface ClaudeRequest {
   model?: string;
@@ -15,11 +15,12 @@ export interface ClaudeRequest {
 
 export interface ClaudeStreamEvent {
   type: string;
-  content?: string;
   result?: string;
-  cost_usd?: number;
-  duration_ms?: number;
-  tokens?: { input: number; output: number };
+  message?: {
+    content?: Array<{ type: string; text?: string }>;
+    usage?: { input_tokens?: number; output_tokens?: number };
+  };
+  usage?: { input_tokens?: number; output_tokens?: number };
 }
 
 export function runClaude(
@@ -30,17 +31,16 @@ export function runClaude(
   // claude -p accepts a single prompt string — we format the conversation
   const prompt = formatMessagesAsPrompt(request);
 
-  const args = ['-p', '--output-format', 'stream-json'];
+  const args = ['-p', '--output-format', 'stream-json', '--verbose'];
 
-  if (request.max_tokens) {
-    args.push('--max-tokens', String(request.max_tokens));
-  }
+  // Resolve the absolute path to `claude` since native messaging hosts
+  // run with a minimal PATH that may not include homebrew/nvm/etc.
+  let claudePath = 'claude';
+  try {
+    claudePath = execSync('which claude', { encoding: 'utf-8', env: { ...process.env, PATH: `${process.env.PATH}:/opt/homebrew/bin:/usr/local/bin` } }).trim();
+  } catch { /* fallback to bare name */ }
 
-  if (request.model) {
-    args.push('--model', request.model);
-  }
-
-  const proc = spawn('claude', args, {
+  const proc = spawn(claudePath, args, {
     env: {
       ...process.env,
       ANTHROPIC_AUTH_TOKEN: setupToken,

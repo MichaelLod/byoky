@@ -36,9 +36,6 @@ export function Unlock() {
         </button>
       </form>
 
-      <div className="mascot-peek">
-        <img src="/mascot.svg" alt="" />
-      </div>
     </div>
   );
 }

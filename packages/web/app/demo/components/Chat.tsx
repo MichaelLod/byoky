@@ -73,8 +73,13 @@ export function Chat({ session }: Props) {
           headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' },
           body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1024, messages: allMessages }),
         });
-        if (!response.ok) throw new Error((await response.json()).error?.message || `API error: ${response.status}`);
-        const data = await response.json();
+        const text = await response.text();
+        if (!response.ok) {
+          let errMsg = `API error: ${response.status}`;
+          try { errMsg = JSON.parse(text).error?.message || errMsg; } catch {}
+          throw new Error(errMsg);
+        }
+        const data = JSON.parse(text);
         assistantContent = data.content?.[0]?.text || 'No response.';
       } else if (selectedProvider === 'gemini') {
         const response = await proxyFetch(

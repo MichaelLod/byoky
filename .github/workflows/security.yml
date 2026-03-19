@@ -1,0 +1,128 @@
+name: Security
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --audit-level=high
+
+  security-tests:
+    name: Security tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @byoky/core build && pnpm --filter @byoky/sdk build
+      - run: npx vitest run packages/core/tests/security.test.ts packages/core/tests/crypto.test.ts packages/core/tests/proxy-utils.test.ts packages/core/tests/relay.test.ts
+
+  static-analysis:
+    name: Static security checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for secrets in code
+        run: |
+          echo "Scanning for potential secrets..."
+          FAIL=0
+          # Check for hardcoded API keys
+          if grep -rn --include='*.ts' --include='*.tsx' -E '(sk-ant-|sk-proj-|AIzaSy|ghp_|gho_)' packages/ --exclude-dir=node_modules; then
+            echo "::error::Potential hardcoded API key found"
+            FAIL=1
+          fi
+          # Check for console.log in extension code (could leak secrets)
+          if grep -rn 'console\.\(log\|debug\|info\)' packages/extension/entrypoints/background.ts packages/extension/entrypoints/content.ts; then
+            echo "::error::console.log found in extension security-critical code"
+            FAIL=1
+          fi
+          # Check for eval or Function constructor
+          if grep -rn --include='*.ts' --include='*.tsx' -E '\beval\s*\(|new\s+Function\s*\(' packages/ --exclude-dir=node_modules; then
+            echo "::error::eval() or new Function() found"
+            FAIL=1
+          fi
+          # Check for dangerouslySetInnerHTML
+          if grep -rn 'dangerouslySetInnerHTML' packages/ --exclude-dir=node_modules; then
+            echo "::error::dangerouslySetInnerHTML found"
+            FAIL=1
+          fi
+          exit $FAIL
+
+      - name: Verify security invariants
+        run: |
+          echo "Checking security invariants..."
+          FAIL=0
+
+          # 1. Content script must have action allowlist
+          if ! grep -q 'ALLOWED_PAGE_ACTIONS' packages/extension/entrypoints/content.ts; then
+            echo "::error::Content script missing ALLOWED_PAGE_ACTIONS allowlist"
+            FAIL=1
+          fi
+
+          # 2. Content script must use exact hostname match (not startsWith)
+          if grep -q "startsWith.*localhost" packages/extension/entrypoints/content.ts; then
+            echo "::error::Content script uses startsWith for localhost — must use exact hostname match"
+            FAIL=1
+          fi
+
+          # 3. validateProxyUrl must be called before every fetch with API keys
+          FETCH_COUNT=$(grep -c 'await fetch(msg\.\|await fetch(url' packages/extension/entrypoints/background.ts || true)
+          VALIDATE_COUNT=$(grep -c 'validateProxyUrl' packages/extension/entrypoints/background.ts || true)
+          if [ "$VALIDATE_COUNT" -lt "$FETCH_COUNT" ]; then
+            echo "::error::Not all fetch() calls are guarded by validateProxyUrl ($VALIDATE_COUNT guards < $FETCH_COUNT fetches)"
+            FAIL=1
+          fi
+
+          # 4. No wildcard CORS headers in bridge or plugin
+          if grep -q "Access-Control-Allow-Origin.*\*" packages/bridge/src/proxy-server.ts packages/openclaw-plugin/src/index.ts 2>/dev/null; then
+            echo "::error::Wildcard CORS header found in bridge or plugin"
+            FAIL=1
+          fi
+
+          # 5. Popup must not write to browser.storage.local
+          if grep -q 'browser\.storage\.local\.set' packages/extension/entrypoints/popup/; then
+            echo "::error::Popup writes directly to browser.storage.local — use background actions"
+            FAIL=1
+          fi
+
+          # 6. No plaintext password caching in popup
+          if grep -q 'cachedPassword\|masterPassword' packages/extension/entrypoints/popup/; then
+            echo "::error::Plaintext password found in popup code"
+            FAIL=1
+          fi
+
+          # 7. Bridge proxy must not have CORS
+          if grep -q 'Access-Control-Allow-Origin' packages/bridge/src/proxy-server.ts; then
+            echo "::error::CORS headers found in bridge proxy server"
+            FAIL=1
+          fi
+
+          # 8. portOrigin must be deny-by-default
+          if grep -q 'portOrigin &&' packages/extension/entrypoints/background.ts; then
+            echo "::error::portOrigin check allows null — must be deny-by-default (!portOrigin ||)"
+            FAIL=1
+          fi
+
+          exit $FAIL

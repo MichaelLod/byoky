@@ -40,7 +40,14 @@ export function buildHeaders(
   delete headers['api-key'];
 
   if (providerId === 'anthropic') {
-    headers['x-api-key'] = apiKey;
+    if (authMethod === 'oauth') {
+      headers['authorization'] = `Bearer ${apiKey}`;
+      headers['user-agent'] = 'claude-cli/2.1.75';
+      headers['x-app'] = 'cli';
+      headers['anthropic-beta'] = 'claude-code-20250219,oauth-2025-04-20';
+    } else {
+      headers['x-api-key'] = apiKey;
+    }
     headers['anthropic-version'] = headers['anthropic-version'] ?? '2023-06-01';
   } else if (providerId === 'azure_openai') {
     headers['api-key'] = apiKey;

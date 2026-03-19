@@ -11,7 +11,6 @@
  *    extension makes the actual API call. Keys never touch the bridge.
  */
 
-import { translateRequest, type AnthropicRequest } from './translator.js';
 import {
   startProxyServer,
   handleProxyResponse,
@@ -175,18 +174,22 @@ async function handleMessage(msg: unknown): Promise<void> {
 
 async function handleSetupTokenProxy(req: BridgeRequest): Promise<void> {
   try {
-    // Parse the Anthropic request body
-    const apiRequest: AnthropicRequest = JSON.parse(req.body);
+    const res = await fetch(req.url, {
+      method: req.method,
+      headers: req.headers,
+      body: req.body || undefined,
+    });
 
-    // Route through Claude Code CLI
-    const result = await translateRequest(apiRequest, req.setupToken);
+    const body = await res.text();
+    const headers: Record<string, string> = {};
+    res.headers.forEach((v, k) => { headers[k] = v; });
 
     writeMessage({
       type: 'proxy_response',
       requestId: req.requestId,
-      status: result.status,
-      headers: result.headers,
-      body: result.body,
+      status: res.status,
+      headers,
+      body,
     } satisfies BridgeResponse);
   } catch (e) {
     writeMessage({

@@ -131,7 +131,13 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     });
   },
 
-  navigate: (page: Page) => set({ currentPage: page, error: null }),
+  navigate: (page: Page) => {
+    if (!get().isUnlocked && page !== 'setup' && page !== 'unlock') {
+      set({ currentPage: 'unlock', error: null });
+      return;
+    }
+    set({ currentPage: page, error: null });
+  },
 
   addApiKey: async (providerId: string, label: string, apiKey: string) => {
     set({ loading: true, error: null });

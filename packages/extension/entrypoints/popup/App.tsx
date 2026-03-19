@@ -117,16 +117,23 @@ export default function App() {
         )}
       </header>
       <main className="content">
-        {currentPage === 'setup' && <Setup />}
-        {currentPage === 'unlock' && <Unlock />}
-        {currentPage === 'dashboard' && <Dashboard />}
-        {currentPage === 'add-credential' && <AddCredential />}
-        {currentPage === 'connected-apps' && <ConnectedApps />}
-        {currentPage === 'approval' && <ApprovalRequest />}
-        {currentPage === 'usage' && <Usage />}
-        {currentPage === 'request-history' && <RequestHistory />}
-        {currentPage === 'settings' && <Settings />}
+        <div key={currentPage} className="page-enter">
+          {currentPage === 'setup' && <Setup />}
+          {currentPage === 'unlock' && <Unlock />}
+          {currentPage === 'dashboard' && <Dashboard />}
+          {currentPage === 'add-credential' && <AddCredential />}
+          {currentPage === 'connected-apps' && <ConnectedApps />}
+          {currentPage === 'approval' && <ApprovalRequest />}
+          {currentPage === 'usage' && <Usage />}
+          {currentPage === 'request-history' && <RequestHistory />}
+          {currentPage === 'settings' && <Settings />}
+        </div>
       </main>
+      {(currentPage === 'setup' || currentPage === 'unlock') && (
+        <div className="mascot-peek">
+          <img src="/mascot.svg" alt="" />
+        </div>
+      )}
     </div>
   );
 }

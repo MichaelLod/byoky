@@ -7,7 +7,7 @@
  *   byoky-bridge status     — check if registered
  */
 
-import { writeFileSync, mkdirSync, unlinkSync, existsSync } from 'node:fs';
+import { writeFileSync, mkdirSync, unlinkSync, existsSync, chmodSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { homedir, platform } from 'node:os';
 import { execSync } from 'node:child_process';
@@ -24,7 +24,25 @@ function getHostPath(): string {
   }
 }
 
-function buildManifest(hostPath: string, browserType: 'chrome' | 'firefox'): object {
+/**
+ * Create a native messaging wrapper script that uses the absolute node path.
+ * Chrome/Brave launch native hosts with a minimal PATH that doesn't include
+ * nvm/fnm/volta/etc, so `#!/usr/bin/env node` often fails.
+ */
+function createNativeWrapper(hostPath: string, manifestDir: string): string {
+  const nodePath = process.execPath;
+  const wrapperPath = resolve(manifestDir, 'byoky-bridge-host');
+  const userPath = process.env.PATH || '';
+  const script = `#!/bin/bash\nexport PATH="${userPath}"\nexec "${nodePath}" "${hostPath}" host "$@"\n`;
+  writeFileSync(wrapperPath, script);
+  chmodSync(wrapperPath, 0o755);
+  return wrapperPath;
+}
+
+// TODO: Replace with the real Chrome Web Store extension ID once published
+const DEFAULT_EXTENSION_ID = 'ahhecmfcclkjdgjnmackoacldnmgmipl';
+
+function buildManifest(hostPath: string, browserType: 'chrome' | 'firefox', extensionId?: string): object {
   const base = {
     name: HOST_NAME,
     description: 'Byoky Bridge — routes setup token requests through Claude Code CLI',
@@ -33,11 +51,11 @@ function buildManifest(hostPath: string, browserType: 'chrome' | 'firefox'): obj
   };
 
   if (browserType === 'chrome') {
+    const id = extensionId || DEFAULT_EXTENSION_ID;
     return {
       ...base,
       allowed_origins: [
-        // Chrome uses extension IDs — we allow all since the ID varies per install
-        'chrome-extension://*/',
+        `chrome-extension://${id}/`,
       ],
     };
   }
@@ -123,7 +141,7 @@ function getManifestLocations(): ManifestLocation[] {
   return [];
 }
 
-export function install(): void {
+export function install(extensionId?: string): void {
   const hostPath = getHostPath();
   const locations = getManifestLocations();
 
@@ -136,8 +154,10 @@ export function install(): void {
 
   for (const loc of locations) {
     try {
-      const manifest = buildManifest(hostPath, loc.type);
-      mkdirSync(dirname(loc.path), { recursive: true });
+      const manifestDir = dirname(loc.path);
+      mkdirSync(manifestDir, { recursive: true });
+      const wrapperPath = createNativeWrapper(hostPath, manifestDir);
+      const manifest = buildManifest(wrapperPath, loc.type, extensionId);
       writeFileSync(loc.path, JSON.stringify(manifest, null, 2));
       console.log(`  Registered with ${loc.browser}`);
       installed++;
