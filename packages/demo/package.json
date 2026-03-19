@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "pnpm --filter @byoky/core run build && pnpm --filter @byoky/sdk run build && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
