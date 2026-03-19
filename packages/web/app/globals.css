@@ -588,23 +588,21 @@ section {
   margin-bottom: 56px;
 }
 
-.providers-row {
-  display: flex;
-  justify-content: center;
-  gap: 20px;
-  flex-wrap: wrap;
+.providers-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
 }
 
 .provider-card {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 20px 32px;
+  gap: 12px;
+  padding: 16px 20px;
   border-radius: 14px;
   background: var(--bg-card);
   border: 1px solid var(--border);
   transition: border-color 0.25s;
-  min-width: 200px;
 }
 
 .provider-card:hover {
@@ -678,9 +676,24 @@ section {
   color: #6f42c1;
 }
 
-.provider-logo-more {
-  background: rgba(14, 165, 233, 0.1);
-  color: var(--teal-light);
+.provider-logo-together {
+  background: rgba(38, 92, 255, 0.15);
+  color: #265cff;
+}
+
+.provider-logo-fireworks {
+  background: rgba(255, 87, 34, 0.15);
+  color: #ff5722;
+}
+
+.provider-logo-replicate {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e4e4ec;
+}
+
+.provider-logo-azure {
+  background: rgba(0, 120, 212, 0.15);
+  color: #0078d4;
 }
 
 .provider-name {
@@ -859,6 +872,10 @@ section {
     grid-template-columns: 1fr;
   }
 
+  .providers-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
   .steps-section h2,
   .dev-section h2,
   .security-section h2,
@@ -893,9 +910,8 @@ section {
     max-width: 280px;
   }
 
-  .provider-card {
-    min-width: 160px;
-    padding: 16px 20px;
+  .providers-grid {
+    grid-template-columns: repeat(2, 1fr);
   }
 
   .footer-inner {

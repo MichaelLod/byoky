@@ -35,7 +35,7 @@ function Hero() {
         </FadeIn>
         <FadeIn delay={0.1}>
           <div className="hero-mascot">
-            <svg width="80" height="80" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <svg width="96" height="96" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
               <polygon points="40,5 64,3 88,5 64,14" fill="#0ea5e9"/>
               <polygon points="40,5 22,12 44,18" fill="#0284c7"/>
               <polygon points="88,5 106,12 84,18" fill="#0284c7"/>
@@ -62,7 +62,6 @@ function Hero() {
               <polygon points="56,30 64,28 60,44" fill="#9494a6"/>
               <polygon points="72,30 64,28 68,44" fill="#8a8a9c"/>
               <polygon points="60,44 64,28 68,44" fill="#7a7a8c"/>
-              <polygon points="58,64 70,64 64,90" fill="#3f3f4a"/>
               <polygon points="56,30 60,44 46,42" fill="#7a7a8c"/>
               <polygon points="72,30 68,44 82,42" fill="#6b6b7d"/>
               <polygon points="46,42 60,44 52,56" fill="#5e5e6e"/>
@@ -74,20 +73,58 @@ function Hero() {
               <polygon points="76,56 64,60 64,88" fill="#353540"/>
               <polygon points="30,40 6,42 8,58" fill="#1e0a4a"/>
               <polygon points="30,40 8,58 32,54" fill="#1a0840"/>
+              <polygon points="48,38 30,40 32,54" fill="#1e0a4a"/>
+              <polygon points="48,38 32,54 46,42" fill="#251055"/>
               <polygon points="98,40 122,42 120,58" fill="#1e0a4a"/>
               <polygon points="98,40 120,58 96,54" fill="#1a0840"/>
+              <polygon points="80,38 98,40 96,54" fill="#1e0a4a"/>
+              <polygon points="80,38 96,54 82,42" fill="#251055"/>
               <polygon points="8,58 4,72 26,66" fill="#1a0840"/>
+              <polygon points="8,58 26,66 32,54" fill="#1e0a4a"/>
               <polygon points="120,58 124,72 102,66" fill="#1a0840"/>
-              <polygon points="16,66 24,80 8,86" fill="#150835"/>
-              <polygon points="112,66 104,80 120,86" fill="#150835"/>
-              <polygon points="8,86 24,80 14,106" fill="#110730"/>
-              <polygon points="120,86 104,80 114,106" fill="#110730"/>
-              <polygon points="40,92 54,96 46,118" fill="#0d0525"/>
-              <polygon points="88,92 74,96 82,118" fill="#0d0525"/>
-              <polygon points="54,96 64,100 56,122" fill="#0a0420"/>
-              <polygon points="74,96 64,100 72,122" fill="#0a0420"/>
-              <polygon points="56,122 64,100 64,128" fill="#0d0525"/>
-              <polygon points="72,122 64,100 64,128" fill="#0d0525"/>
+              <polygon points="120,58 102,66 96,54" fill="#1e0a4a"/>
+              <polygon points="32,54 26,66 42,68" fill="#150835"/>
+              <polygon points="32,54 42,68 46,42" fill="#1e0a4a"/>
+              <polygon points="96,54 102,66 86,68" fill="#150835"/>
+              <polygon points="96,54 86,68 82,42" fill="#1e0a4a"/>
+              <polygon points="46,42 42,68 52,56" fill="#1e0a4a"/>
+              <polygon points="82,42 86,68 76,56" fill="#1e0a4a"/>
+              <polygon points="52,56 42,68 54,78" fill="#150835"/>
+              <polygon points="76,56 86,68 74,78" fill="#150835"/>
+              <polygon points="52,56 64,88 54,78" fill="#1a0840"/>
+              <polygon points="76,56 64,88 74,78" fill="#1a0840"/>
+              <polygon points="26,66 4,72 14,86" fill="#150835"/>
+              <polygon points="26,66 14,86 36,80" fill="#110730"/>
+              <polygon points="42,68 26,66 36,80" fill="#150835"/>
+              <polygon points="42,68 36,80 48,82" fill="#110730"/>
+              <polygon points="102,66 124,72 114,86" fill="#150835"/>
+              <polygon points="102,66 114,86 92,80" fill="#110730"/>
+              <polygon points="86,68 102,66 92,80" fill="#150835"/>
+              <polygon points="86,68 92,80 80,82" fill="#110730"/>
+              <polygon points="54,78 42,68 48,82" fill="#110730"/>
+              <polygon points="74,78 86,68 80,82" fill="#110730"/>
+              <polygon points="54,78 48,82 58,88" fill="#0d0525"/>
+              <polygon points="74,78 80,82 70,88" fill="#0d0525"/>
+              <polygon points="54,78 64,88 58,88" fill="#150835"/>
+              <polygon points="74,78 64,88 70,88" fill="#150835"/>
+              <polygon points="4,72 14,86 0,90" fill="#110730"/>
+              <polygon points="124,72 114,86 128,90" fill="#110730"/>
+              <polygon points="0,90 14,86 4,108" fill="#0d0525"/>
+              <polygon points="128,90 114,86 124,108" fill="#0d0525"/>
+              <polygon points="14,86 36,80 22,102" fill="#0d0525"/>
+              <polygon points="14,86 22,102 6,106" fill="#0a0420"/>
+              <polygon points="114,86 92,80 106,102" fill="#0d0525"/>
+              <polygon points="114,86 106,102 122,106" fill="#0a0420"/>
+              <polygon points="36,80 48,82 38,104" fill="#0d0525"/>
+              <polygon points="36,80 38,104 24,108" fill="#0a0420"/>
+              <polygon points="92,80 80,82 90,104" fill="#0d0525"/>
+              <polygon points="92,80 90,104 104,108" fill="#0a0420"/>
+              <polygon points="48,82 58,88 48,110" fill="#0a0420"/>
+              <polygon points="48,82 48,110 36,112" fill="#0d0525"/>
+              <polygon points="80,82 70,88 80,110" fill="#0a0420"/>
+              <polygon points="80,82 80,110 92,112" fill="#0d0525"/>
+              <polygon points="58,88 64,88 60,114" fill="#0a0420"/>
+              <polygon points="70,88 64,88 68,114" fill="#0a0420"/>
               <circle cx="24" cy="46" r="4.5" fill="#7dd3fc"/>
               <circle cx="24" cy="46" r="2.2" fill="#e0d4ff"/>
               <circle cx="104" cy="46" r="4.5" fill="#7dd3fc"/>
@@ -100,7 +137,7 @@ function Hero() {
         </FadeIn>
         <FadeIn delay={0.2}>
           <p>
-            A secure browser wallet for your LLM API keys and auth tokens.
+            A secure browser wallet for your LLM API keys and setup tokens.
             Connect to any app — your keys never leave the extension.
           </p>
         </FadeIn>
@@ -112,6 +149,12 @@ function Hero() {
             >
               <DownloadIcon />
               Install Extension
+            </a>
+            <a
+              href="https://demo.byoky.com"
+              className="btn btn-secondary"
+            >
+              Try the Demo
             </a>
             <a
               href="https://github.com/MichaelLod/byoky"
@@ -158,8 +201,8 @@ function HowItWorks() {
               </div>
               <h3>Add your keys</h3>
               <p>
-                Paste API keys or sign in with OAuth. Everything is encrypted
-                locally with AES-256-GCM. Multiple keys per provider.
+                Paste API keys or add a Claude setup token. Everything is
+                encrypted locally with AES-256-GCM. Multiple keys per provider.
               </p>
             </div>
           </FadeIn>
@@ -208,8 +251,8 @@ function ForDevelopers() {
                   <div>
                     <h4>Native SDK compatibility</h4>
                     <p>
-                      Works with the official Anthropic, OpenAI, and Gemini SDKs.
-                      Just swap in Byoky&apos;s fetch.
+                      Works with official SDKs from Anthropic, OpenAI, Gemini,
+                      Mistral, and 11 more providers. Just swap in Byoky&apos;s fetch.
                     </p>
                   </div>
                 </div>
@@ -357,16 +400,16 @@ function Providers() {
         <FadeIn>
           <h2>Your providers.</h2>
           <p className="subtitle">
-            Bring credentials from any supported provider.
+            15 providers supported. Bring credentials from any of them.
           </p>
         </FadeIn>
         <FadeIn delay={0.1}>
-          <div className="providers-row">
+          <div className="providers-grid">
             <div className="provider-card">
               <div className="provider-logo provider-logo-anthropic">A</div>
               <div>
                 <div className="provider-name">Anthropic</div>
-                <div className="provider-type">API Key + OAuth</div>
+                <div className="provider-type">API Key + Setup Token</div>
               </div>
             </div>
             <div className="provider-card">
@@ -404,8 +447,6 @@ function Providers() {
                 <div className="provider-type">API Key</div>
               </div>
             </div>
-          </div>
-          <div className="providers-row" style={{ marginTop: '12px' }}>
             <div className="provider-card">
               <div className="provider-logo provider-logo-cohere">C</div>
               <div>
@@ -428,9 +469,16 @@ function Providers() {
               </div>
             </div>
             <div className="provider-card">
-              <div className="provider-logo provider-logo-huggingface">H</div>
+              <div className="provider-logo provider-logo-together">T</div>
               <div>
-                <div className="provider-name">Hugging Face</div>
+                <div className="provider-name">Together AI</div>
+                <div className="provider-type">API Key</div>
+              </div>
+            </div>
+            <div className="provider-card">
+              <div className="provider-logo provider-logo-fireworks">F</div>
+              <div>
+                <div className="provider-name">Fireworks AI</div>
                 <div className="provider-type">API Key</div>
               </div>
             </div>
@@ -442,10 +490,24 @@ function Providers() {
               </div>
             </div>
             <div className="provider-card">
-              <div className="provider-logo provider-logo-more">+</div>
+              <div className="provider-logo provider-logo-huggingface">H</div>
               <div>
-                <div className="provider-name">+ 5 more</div>
-                <div className="provider-type">Together, Fireworks, Replicate, Azure, Custom</div>
+                <div className="provider-name">Hugging Face</div>
+                <div className="provider-type">API Key</div>
+              </div>
+            </div>
+            <div className="provider-card">
+              <div className="provider-logo provider-logo-replicate">R</div>
+              <div>
+                <div className="provider-name">Replicate</div>
+                <div className="provider-type">API Key</div>
+              </div>
+            </div>
+            <div className="provider-card">
+              <div className="provider-logo provider-logo-azure">A</div>
+              <div>
+                <div className="provider-name">Azure OpenAI</div>
+                <div className="provider-type">API Key</div>
               </div>
             </div>
           </div>
@@ -498,6 +560,9 @@ function Footer() {
               rel="noopener noreferrer"
             >
               GitHub
+            </a>
+            <a href="https://demo.byoky.com">
+              Demo
             </a>
             <a
               href="https://github.com/MichaelLod/byoky/blob/main/LICENSE"
