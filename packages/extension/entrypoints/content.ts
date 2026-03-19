@@ -50,6 +50,19 @@ export default defineContentScript({
             );
           }
         }).catch(() => {});
+      } else if (data.type === 'BYOKY_INTERNAL_FROM_PAGE') {
+        // Bridge proxy requests from auth pages (localhost only)
+        browser.runtime.sendMessage({
+          type: 'BYOKY_INTERNAL',
+          action: data.action,
+          payload: data.payload,
+        }).then((response) => {
+          document.dispatchEvent(
+            new CustomEvent('byoky-message', {
+              detail: { requestId: data.requestId, payload: response },
+            }),
+          );
+        }).catch(() => {});
       }
     });
 

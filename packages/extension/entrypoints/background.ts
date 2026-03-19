@@ -539,6 +539,14 @@ export default defineBackground(() => {
         return { available };
       }
 
+      case 'startBridgeProxy': {
+        const { sessionKey, port } = message.payload as {
+          sessionKey: string;
+          port: number;
+        };
+        return startBridgeProxy(sessionKey, port ?? 19280);
+      }
+
       case 'startOAuth': {
         const { providerId, label } = message.payload as {
           providerId: string;
@@ -881,6 +889,133 @@ export default defineBackground(() => {
         requestId: msg.requestId,
         status: 502,
         error: { code: 'BRIDGE_ERROR', message: (e as Error).message },
+      });
+    }
+  }
+
+  // --- Bridge HTTP proxy (generic local gateway for CLI/desktop apps) ---
+
+  let bridgeProxyPort: browser.Runtime.Port | null = null;
+
+  async function startBridgeProxy(
+    sessionKey: string,
+    port: number,
+  ): Promise<{ success: boolean; port?: number; error?: string }> {
+    const session = sessions.get(sessionKey);
+    if (!session) return { success: false, error: 'Invalid session' };
+    if (!masterPassword) return { success: false, error: 'Wallet is locked' };
+
+    const available = await checkBridgeAvailable();
+    if (!available) return { success: false, error: 'Bridge not installed' };
+
+    const providerIds = session.providers
+      .filter((p) => p.available)
+      .map((p) => p.providerId);
+
+    if (providerIds.length === 0) return { success: false, error: 'No providers available' };
+
+    try {
+      // Close existing proxy connection if any
+      if (bridgeProxyPort) {
+        bridgeProxyPort.disconnect();
+        bridgeProxyPort = null;
+      }
+
+      bridgeProxyPort = browser.runtime.connectNative(BRIDGE_HOST);
+
+      // Tell bridge to start the HTTP proxy server
+      bridgeProxyPort.postMessage({
+        type: 'start-proxy',
+        port,
+        sessionKey,
+        providers: providerIds,
+      });
+
+      // Listen for messages from the bridge
+      bridgeProxyPort.onMessage.addListener(async (msg: Record<string, unknown>) => {
+        if (msg.type === 'proxy_http') {
+          await handleBridgeProxyRequest(msg);
+        }
+      });
+
+      bridgeProxyPort.onDisconnect.addListener(() => {
+        bridgeProxyPort = null;
+      });
+
+      return { success: true, port };
+    } catch (e) {
+      return { success: false, error: (e as Error).message };
+    }
+  }
+
+  async function handleBridgeProxyRequest(msg: Record<string, unknown>): Promise<void> {
+    const requestId = msg.requestId as string;
+    const sessionKey = msg.sessionKey as string;
+    const providerId = msg.providerId as string;
+    const url = msg.url as string;
+    const method = msg.method as string;
+    const headers = msg.headers as Record<string, string>;
+    const body = msg.body as string | undefined;
+
+    const session = sessions.get(sessionKey);
+    if (!session || !masterPassword) {
+      bridgeProxyPort?.postMessage({
+        type: 'proxy_http_error',
+        requestId,
+        error: 'Session not found or wallet locked',
+      });
+      return;
+    }
+
+    const credential = await resolveCredential(session, providerId);
+    if (!credential) {
+      bridgeProxyPort?.postMessage({
+        type: 'proxy_http_error',
+        requestId,
+        error: `No credential for provider "${providerId}"`,
+      });
+      return;
+    }
+
+    try {
+      const apiKey = await decryptCredentialKey(credential);
+      const realHeaders = buildHeaders(providerId, headers, apiKey, credential.authMethod);
+
+      const response = await fetch(url, {
+        method,
+        headers: realHeaders,
+        body: body || undefined,
+      });
+
+      // Read the full response body
+      const responseBody = await response.text();
+      const responseHeaders: Record<string, string> = {};
+      response.headers.forEach((value, key) => {
+        responseHeaders[key] = value;
+      });
+
+      bridgeProxyPort?.postMessage({
+        type: 'proxy_http_response',
+        requestId,
+        status: response.status,
+        headers: responseHeaders,
+        body: responseBody,
+      });
+
+      // Log the request
+      await logRequest({
+        sessionId: session.id,
+        appOrigin: 'bridge-proxy',
+        providerId,
+        url,
+        method,
+        status: response.status,
+      });
+    } catch (e) {
+      bridgeProxyPort?.postMessage({
+        type: 'proxy_http_error',
+        requestId,
+        error: (e as Error).message,
       });
     }
   }

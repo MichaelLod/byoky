@@ -14,7 +14,10 @@
     "byoky-groq",
     "byoky-together",
     "byoky-fireworks",
-    "byoky-openrouter"
+    "byoky-openrouter",
+    "byoky-replicate",
+    "byoky-huggingface",
+    "byoky-azure_openai"
   ],
   "providerAuthChoices": [
     {
@@ -22,7 +25,7 @@
       "method": "browser",
       "choiceId": "byoky",
       "choiceLabel": "Byoky Wallet (all providers)",
-      "choiceHint": "Export all keys from your browser wallet",
+      "choiceHint": "Route API calls through your browser wallet — keys never leave the extension",
       "groupId": "byoky",
       "groupLabel": "Byoky Wallet",
       "groupHint": "Manage all AI keys from one place"

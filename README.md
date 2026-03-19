@@ -226,7 +226,7 @@ pnpm --filter @byoky/extension build:all     # Chrome + Firefox + Safari
 - [x] Token allowances per app (total + per-provider limits)
 - [x] Encrypted vault export/import (`.byoky` files)
 - [ ] Browser extension store listings (Chrome, Firefox, Safari)
-- [ ] OpenClaw provider plugin
+- [x] OpenClaw provider plugin (bridge proxy — keys stay in extension)
 - [ ] Password change (re-encrypt vault with new master password)
 
 ## Star History

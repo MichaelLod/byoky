@@ -4,11 +4,21 @@
  * Communicates with the Byoky browser extension via Chrome/Firefox native
  * messaging protocol (stdin/stdout with length-prefixed JSON).
  *
- * Receives Anthropic Messages API requests, routes them through Claude Code CLI
- * using the user's setup token, and returns standard API responses.
+ * Two modes:
+ * 1. Setup token proxy: Routes Anthropic requests through Claude Code CLI
+ * 2. HTTP proxy: Local gateway for any CLI/desktop/server app to make LLM
+ *    calls through the user's wallet. The bridge is a dumb relay — the
+ *    extension makes the actual API call. Keys never touch the bridge.
  */
 
 import { translateRequest, type AnthropicRequest } from './translator.js';
+import {
+  startProxyServer,
+  handleProxyResponse,
+  type ProxyRequestOut,
+  type ProxyResponseIn,
+  type ProxyErrorIn,
+} from './proxy-server.js';
 
 interface BridgeRequest {
   type: 'proxy';
@@ -41,6 +51,18 @@ interface BridgePing {
 interface BridgePong {
   type: 'pong';
   version: string;
+}
+
+interface StartProxyRequest {
+  type: 'start-proxy';
+  port: number;
+  sessionKey: string;
+  providers: string[];
+}
+
+interface StartProxyResponse {
+  type: 'proxy-started';
+  port: number;
 }
 
 // --- Native messaging I/O ---
@@ -126,14 +148,28 @@ async function handleMessage(msg: unknown): Promise<void> {
     return;
   }
 
+  // Setup token proxy (Anthropic → Claude Code CLI)
   if (message.type === 'proxy') {
     const req = msg as BridgeRequest;
-    await handleProxy(req);
+    await handleSetupTokenProxy(req);
+    return;
+  }
+
+  // Start HTTP proxy server for CLI tools (OpenClaw)
+  if (message.type === 'start-proxy') {
+    const req = msg as StartProxyRequest;
+    handleStartProxy(req);
+    return;
+  }
+
+  // Response from extension for an HTTP proxy request
+  if (message.type === 'proxy_http_response' || message.type === 'proxy_http_error') {
+    handleProxyResponse(msg as ProxyResponseIn | ProxyErrorIn);
     return;
   }
 }
 
-async function handleProxy(req: BridgeRequest): Promise<void> {
+async function handleSetupTokenProxy(req: BridgeRequest): Promise<void> {
   try {
     // Parse the Anthropic request body
     const apiRequest: AnthropicRequest = JSON.parse(req.body);
@@ -154,6 +190,28 @@ async function handleProxy(req: BridgeRequest): Promise<void> {
       requestId: req.requestId,
       error: (e as Error).message,
     } satisfies BridgeError);
+  }
+}
+
+function handleStartProxy(req: StartProxyRequest): void {
+  try {
+    startProxyServer({
+      port: req.port,
+      sessionKey: req.sessionKey,
+      providers: req.providers,
+      sendToExtension: (msg: ProxyRequestOut) => writeMessage(msg),
+    });
+
+    writeMessage({
+      type: 'proxy-started',
+      port: req.port,
+    } satisfies StartProxyResponse);
+  } catch (e) {
+    writeMessage({
+      type: 'proxy_error',
+      requestId: 'start-proxy',
+      error: (e as Error).message,
+    });
   }
 }
 

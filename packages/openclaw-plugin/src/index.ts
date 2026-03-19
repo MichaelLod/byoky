@@ -1,17 +1,15 @@
 /**
  * Byoky OpenClaw Provider Plugin
  *
- * Connects OpenClaw to the Byoky browser wallet for API key management.
- * Instead of pasting API keys into OpenClaw config files, users authenticate
- * through their Byoky wallet — keys are managed in one place.
+ * Connects OpenClaw to the Byoky browser wallet via the Bridge HTTP proxy.
+ * Keys NEVER leave the browser extension — the bridge is a dumb relay.
  *
  * Flow:
  * 1. `openclaw models auth login --provider byoky`
- * 2. Plugin starts a local callback server and opens the browser
- * 3. User unlocks their Byoky wallet and approves the export
- * 4. The browser page connects via Byoky SDK and retrieves the key
- * 5. Key is sent back to the CLI via localhost callback
- * 6. Plugin stores the credential in OpenClaw's auth-profiles.json
+ * 2. Plugin opens browser for user to approve in their Byoky wallet
+ * 3. Extension starts the Bridge HTTP proxy via native messaging
+ * 4. Plugin configures OpenClaw to route API calls through the proxy
+ * 5. Bridge relays requests to the extension, which injects keys and calls the real API
  */
 
 import { definePluginEntry } from 'openclaw/plugin-sdk/core';
@@ -28,6 +26,8 @@ interface ByokyProvider {
   api: string;
 }
 
+const DEFAULT_BRIDGE_PORT = 19280;
+
 const PROVIDERS: ByokyProvider[] = [
   { id: 'anthropic', name: 'Anthropic', baseUrl: 'https://api.anthropic.com', api: 'anthropic-messages' },
   { id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', api: 'openai-completions' },
@@ -41,16 +41,19 @@ const PROVIDERS: ByokyProvider[] = [
   { id: 'together', name: 'Together AI', baseUrl: 'https://api.together.xyz/v1', api: 'openai-completions' },
   { id: 'fireworks', name: 'Fireworks AI', baseUrl: 'https://api.fireworks.ai/inference/v1', api: 'openai-completions' },
   { id: 'openrouter', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', api: 'openai-completions' },
+  { id: 'replicate', name: 'Replicate', baseUrl: 'https://api.replicate.com/v1', api: 'openai-completions' },
+  { id: 'huggingface', name: 'Hugging Face', baseUrl: 'https://api-inference.huggingface.co', api: 'openai-completions' },
+  { id: 'azure_openai', name: 'Azure OpenAI', baseUrl: 'https://YOUR_RESOURCE.openai.azure.com', api: 'openai-completions' },
 ];
 
 export default definePluginEntry({
   id: 'byoky',
   name: 'Byoky Wallet',
   description:
-    'Manage AI API keys from your Byoky browser wallet — one wallet for all providers',
+    'Route LLM API calls through your Byoky browser wallet — keys never leave the extension',
 
   register(api) {
-    // Register a single "byoky" meta-provider for the auth flow
+    // Register the main "byoky" provider for the wallet-wide auth flow
     api.registerProvider({
       id: 'byoky',
       label: 'Byoky Wallet',
@@ -60,15 +63,15 @@ export default definePluginEntry({
         {
           id: 'browser',
           label: 'Byoky Wallet (browser)',
-          hint: 'Opens browser to export keys from your Byoky wallet',
+          hint: 'Connect your Byoky wallet — keys stay in the extension',
           kind: 'custom' as const,
           wizard: {
             choiceId: 'byoky',
             choiceLabel: 'Byoky Wallet',
-            choiceHint: 'Export API keys from your browser wallet',
+            choiceHint: 'Route API calls through your browser wallet',
             groupId: 'byoky',
             groupLabel: 'Byoky Wallet',
-            groupHint: 'Manage all AI keys from one place',
+            groupHint: 'Keys never leave the extension',
           },
           run: runByokyAuth,
         },
@@ -79,7 +82,7 @@ export default definePluginEntry({
       },
     });
 
-    // Register each provider that Byoky supports as a routable provider
+    // Register each provider that routes through the Byoky bridge proxy
     for (const provider of PROVIDERS) {
       const openclawId = `byoky-${provider.id}`;
 
@@ -92,15 +95,15 @@ export default definePluginEntry({
           {
             id: 'browser',
             label: `${provider.name} (via Byoky)`,
-            hint: 'Opens browser to export key from Byoky wallet',
+            hint: 'Route through Byoky wallet — key stays in extension',
             kind: 'custom' as const,
             wizard: {
               choiceId: openclawId,
               choiceLabel: `${provider.name} (via Byoky)`,
-              choiceHint: 'Export from Byoky wallet',
+              choiceHint: 'Route through Byoky wallet',
               groupId: 'byoky',
               groupLabel: 'Byoky Wallet',
-              groupHint: 'Manage all AI keys from one place',
+              groupHint: 'Keys never leave the extension',
             },
             run: (ctx: ProviderAuthContext) =>
               runSingleProviderAuth(ctx, provider),
@@ -112,9 +115,10 @@ export default definePluginEntry({
             const auth = ctx.resolveProviderAuth(openclawId, {});
             if (!auth?.apiKey) return null;
 
+            // apiKey here is "byoky-proxy" — the real key is injected by the bridge
             return {
               provider: {
-                baseUrl: provider.baseUrl,
+                baseUrl: `http://127.0.0.1:${DEFAULT_BRIDGE_PORT}/${provider.id}`,
                 api: provider.api,
                 apiKey: auth.apiKey,
                 models: [],
@@ -122,9 +126,10 @@ export default definePluginEntry({
             };
           },
         },
-        formatApiKey: (profile) => {
-          if (profile?.credential?.type === 'api_key') {
-            return (profile.credential as { key: string }).key;
+        formatApiKey: (profile: Record<string, unknown> | null) => {
+          const cred = profile?.credential as Record<string, unknown> | undefined;
+          if (cred?.type === 'api_key') {
+            return cred.key as string;
           }
           return undefined;
         },
@@ -133,72 +138,85 @@ export default definePluginEntry({
   },
 });
 
-// --- Auth flow: export all available keys from Byoky ---
+// --- Auth flow: connect wallet and start bridge proxy ---
 
 async function runByokyAuth(
   ctx: ProviderAuthContext,
 ): Promise<ProviderAuthResult> {
   ctx.prompter.note(
     'Opening your browser to connect the Byoky wallet.\n' +
-      'Unlock your wallet and select which keys to export.',
+      'Unlock your wallet and approve the connection.\n' +
+      'The Byoky Bridge must be installed: npm i -g @byoky/bridge && byoky-bridge install',
   );
 
-  const { credentials, server } = await startCallbackServer(ctx, 'all');
+  const result = await startCallbackServer(ctx, 'all');
 
   try {
-    if (!credentials || credentials.length === 0) {
-      throw new Error('No credentials received from Byoky wallet');
+    if (!result.providers || result.providers.length === 0) {
+      throw new Error('No providers received from Byoky wallet');
     }
 
-    const profiles = credentials.map(
-      (cred: { providerId: string; apiKey: string }) => ({
-        profileId: `byoky-${cred.providerId}:byoky`,
-        credential: {
-          type: 'api_key' as const,
-          provider: `byoky-${cred.providerId}`,
-          key: cred.apiKey,
-        },
-      }),
-    );
+    // Configure each available provider to route through the bridge proxy
+    const profiles = result.providers.map((providerId: string) => ({
+      profileId: `byoky-${providerId}:byoky`,
+      credential: {
+        type: 'api_key' as const,
+        provider: `byoky-${providerId}`,
+        key: 'byoky-proxy', // Dummy key — bridge injects the real one
+      },
+    }));
 
-    const providerNames = credentials
-      .map((c: { providerId: string }) => c.providerId)
-      .join(', ');
+    // Build configPatch to point providers at the bridge proxy
+    const configPatch: Record<string, unknown> = {
+      models: {
+        providers: Object.fromEntries(
+          result.providers.map((id: string) => {
+            const provider = PROVIDERS.find((p) => p.id === id);
+            return [
+              `byoky-${id}`,
+              {
+                baseUrl: `http://127.0.0.1:${result.port}/${id}`,
+                api: provider?.api ?? 'openai-completions',
+                apiKey: 'byoky-proxy',
+                models: [],
+              },
+            ];
+          }),
+        ),
+      },
+    };
 
     return {
       profiles,
       defaultModel: undefined,
-      configPatch: {},
+      configPatch,
       notes: [
-        `Connected ${credentials.length} provider(s) via Byoky: ${providerNames}`,
-        'Keys are stored locally in your OpenClaw auth profiles.',
-        'To update, re-run: openclaw models auth login --provider byoky',
+        `Connected ${result.providers.length} provider(s) via Byoky Bridge on port ${result.port}.`,
+        'API calls are routed through the bridge — keys never leave your browser extension.',
+        'The bridge must be running for API calls to work.',
+        'To reconnect: openclaw models auth login --provider byoky',
       ],
     };
   } finally {
-    server.close();
+    result.server.close();
   }
 }
 
-// --- Auth flow: export a single provider key ---
+// --- Auth flow: single provider ---
 
 async function runSingleProviderAuth(
   ctx: ProviderAuthContext,
   provider: ByokyProvider,
 ): Promise<ProviderAuthResult> {
   ctx.prompter.note(
-    `Opening your browser to export your ${provider.name} key from Byoky.`,
+    `Opening your browser to connect ${provider.name} via Byoky wallet.`,
   );
 
-  const { credentials, server } = await startCallbackServer(
-    ctx,
-    provider.id,
-  );
+  const result = await startCallbackServer(ctx, provider.id);
 
   try {
-    const cred = credentials?.[0];
-    if (!cred?.apiKey) {
-      throw new Error(`No ${provider.name} key received from Byoky wallet`);
+    if (!result.providers || !result.providers.includes(provider.id)) {
+      throw new Error(`${provider.name} not available in your Byoky wallet`);
     }
 
     return {
@@ -208,36 +226,47 @@ async function runSingleProviderAuth(
           credential: {
             type: 'api_key' as const,
             provider: `byoky-${provider.id}`,
-            key: cred.apiKey,
+            key: 'byoky-proxy',
           },
         },
       ],
       defaultModel: undefined,
-      configPatch: {},
+      configPatch: {
+        models: {
+          providers: {
+            [`byoky-${provider.id}`]: {
+              baseUrl: `http://127.0.0.1:${result.port}/${provider.id}`,
+              api: provider.api,
+              apiKey: 'byoky-proxy',
+              models: [],
+            },
+          },
+        },
+      },
       notes: [
-        `Connected ${provider.name} via Byoky wallet.`,
-        'To update, re-run: openclaw models auth login --provider byoky-' +
-          provider.id,
+        `Connected ${provider.name} via Byoky Bridge on port ${result.port}.`,
+        'Key stays in your browser extension — the bridge relays requests.',
       ],
     };
   } finally {
-    server.close();
+    result.server.close();
   }
 }
 
 // --- Local callback server ---
 
-interface ExportedCredential {
-  providerId: string;
-  apiKey: string;
+interface AuthResult {
+  providers: string[];
+  port: number;
+  server: Server;
 }
 
 async function startCallbackServer(
   ctx: ProviderAuthContext,
   requestProviders: string,
-): Promise<{ credentials: ExportedCredential[] | null; server: Server }> {
+): Promise<AuthResult> {
   return new Promise((resolve) => {
-    let credentials: ExportedCredential[] | null = null;
+    let resolved = false;
 
     const server = createServer((req, res) => {
       res.setHeader('Access-Control-Allow-Origin', '*');
@@ -258,10 +287,16 @@ async function startCallbackServer(
         req.on('end', () => {
           try {
             const data = JSON.parse(body);
-            credentials = data.credentials || null;
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ ok: true }));
-            resolve({ credentials, server });
+            if (!resolved) {
+              resolved = true;
+              resolve({
+                providers: data.providers || [],
+                port: data.bridgePort || DEFAULT_BRIDGE_PORT,
+                server,
+              });
+            }
           } catch {
             res.writeHead(400);
             res.end('Invalid JSON');
@@ -288,7 +323,10 @@ async function startCallbackServer(
     });
 
     setTimeout(() => {
-      if (!credentials) resolve({ credentials: null, server });
+      if (!resolved) {
+        resolved = true;
+        resolve({ providers: [], port: DEFAULT_BRIDGE_PORT, server });
+      }
     }, 120_000);
   });
 }
@@ -306,7 +344,7 @@ function buildAuthPage(requestProviders: string): string {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Byoky — Export to OpenClaw</title>
+  <title>Byoky — Connect to OpenClaw</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -334,29 +372,35 @@ function buildAuthPage(requestProviders: string): string {
     .success { background: rgba(52,211,153,0.1); color: #34d399; }
     .error { background: rgba(244,63,94,0.1); color: #f43f5e; }
     .info { color: #55555f; font-size: 12px; line-height: 1.6; }
+    .security { color: #34d399; font-size: 12px; margin-top: 16px; line-height: 1.6; }
   </style>
 </head>
 <body>
   <div class="card">
     <h1>Byoky</h1>
-    <p class="subtitle">Export keys to OpenClaw</p>
+    <p class="subtitle">Connect wallet to OpenClaw</p>
     <div id="status" class="status waiting">
       Connecting to Byoky wallet...
     </div>
     <p class="info">
       Your Byoky extension must be installed and unlocked.<br />
-      Keys are sent to OpenClaw on your local machine only.
+      The Byoky Bridge must be installed for the proxy to work.
+    </p>
+    <p class="security">
+      🔒 Keys never leave your browser extension.<br />
+      API calls are proxied through the local Byoky Bridge.
     </p>
   </div>
   <script>
     (async () => {
       const status = document.getElementById('status');
       try {
-        // Connect to Byoky wallet via SDK protocol
+        // Step 1: Connect to Byoky wallet
         const requestId = crypto.randomUUID();
         window.postMessage({
           type: 'BYOKY_CONNECT_REQUEST',
           id: requestId,
+          requestId,
           payload: { providers: ${providerFilter} },
         }, '*');
 
@@ -374,7 +418,6 @@ function buildAuthPage(requestProviders: string): string {
           setTimeout(() => reject(new Error('Timeout — is Byoky installed and unlocked?')), 30000);
         });
 
-        // Extract available providers and their session keys
         const providers = response.providers || {};
         const available = Object.entries(providers)
           .filter(([, v]) => v.available)
@@ -384,23 +427,44 @@ function buildAuthPage(requestProviders: string): string {
           throw new Error('No matching providers found in your Byoky wallet');
         }
 
-        // For each provider, we pass the session info back
-        // The proxy approach: session key acts as the credential
-        const credentials = available.map(id => ({
-          providerId: id,
-          apiKey: response.sessionKey,
-        }));
+        status.textContent = 'Wallet connected! Starting bridge proxy...';
 
-        status.textContent = 'Connected! Exporting ' + available.length + ' provider(s): ' + available.join(', ');
+        // Step 2: Tell the extension to start the bridge proxy
+        const bridgeRequestId = crypto.randomUUID();
+        window.postMessage({
+          type: 'BYOKY_INTERNAL_FROM_PAGE',
+          requestId: bridgeRequestId,
+          action: 'startBridgeProxy',
+          payload: { sessionKey: response.sessionKey, port: ${DEFAULT_BRIDGE_PORT} },
+        }, '*');
+
+        // Wait for bridge proxy confirmation
+        const bridgeResult = await new Promise((resolve, reject) => {
+          function handler(event) {
+            const msg = event instanceof CustomEvent ? event.detail : event.data;
+            if (!msg || msg.requestId !== bridgeRequestId) return;
+            document.removeEventListener('byoky-message', handler);
+            window.removeEventListener('message', handler);
+            resolve(msg.payload);
+          }
+          document.addEventListener('byoky-message', handler);
+          window.addEventListener('message', handler);
+          setTimeout(() => reject(new Error('Bridge proxy start timed out')), 15000);
+        });
+
+        const bridgePort = bridgeResult?.port || ${DEFAULT_BRIDGE_PORT};
+
+        status.textContent = 'Bridge proxy active on port ' + bridgePort + '. Connected ' + available.length + ' provider(s): ' + available.join(', ');
         status.className = 'status success';
 
+        // Step 3: Send result back to OpenClaw callback server
         await fetch('/callback', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ credentials }),
+          body: JSON.stringify({ providers: available, bridgePort: bridgePort }),
         });
 
-        setTimeout(() => { status.textContent = 'Done — you can close this tab.'; }, 1500);
+        setTimeout(() => { status.textContent = 'Done — you can close this tab.'; }, 2000);
       } catch (err) {
         status.textContent = 'Error: ' + err.message;
         status.className = 'status error';

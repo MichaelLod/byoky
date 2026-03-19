@@ -208,9 +208,17 @@ export function AddCredential() {
               </div>
             )}
             {bridgeOnline === true && (
-              <div className="bridge-status online" style={{ marginTop: '10px' }}>
-                Bridge connected
-              </div>
+              <>
+                <div className="bridge-status online" style={{ marginTop: '10px' }}>
+                  Bridge connected
+                </div>
+                <p style={{ marginTop: '8px', fontSize: '11px', color: 'var(--text-muted)', lineHeight: '1.5' }}>
+                  <strong style={{ color: 'var(--text-secondary)' }}>Security note:</strong> Setup
+                  tokens are decrypted and sent to the local Byoky Bridge process
+                  via native messaging to authenticate with Claude Code CLI.
+                  The token is held in memory only and never written to disk.
+                </p>
+              </>
             )}
           </div>
         )}
