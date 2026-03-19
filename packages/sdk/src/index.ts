@@ -6,6 +6,7 @@ export {
   type ConnectRequest,
   type ConnectResponse,
   type ProviderRequirement,
+  type SessionUsage,
   ByokyError,
   ByokyErrorCode,
 } from '@byoky/core';

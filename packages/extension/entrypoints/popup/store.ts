@@ -3,6 +3,8 @@ import {
   type CredentialMeta,
   type Session,
   type RequestLogEntry,
+  type PendingApproval,
+  type TrustedSite,
   hashPassword,
   encrypt,
   maskKey,
@@ -13,7 +15,10 @@ type Page =
   | 'unlock'
   | 'dashboard'
   | 'add-credential'
-  | 'request-history';
+  | 'connected-apps'
+  | 'usage'
+  | 'request-history'
+  | 'approval';
 
 interface WalletState {
   isInitialized: boolean;
@@ -21,6 +26,8 @@ interface WalletState {
   credentials: CredentialMeta[];
   sessions: Session[];
   requestLog: RequestLogEntry[];
+  pendingApprovals: PendingApproval[];
+  trustedSites: TrustedSite[];
   currentPage: Page;
   loading: boolean;
   error: string | null;
@@ -35,6 +42,9 @@ interface WalletState {
   startOAuth: (providerId: string, label: string) => Promise<void>;
   removeCredential: (id: string) => Promise<void>;
   revokeSession: (sessionId: string) => Promise<void>;
+  approveConnect: (approvalId: string, trust: boolean) => Promise<void>;
+  rejectConnect: (approvalId: string) => Promise<void>;
+  removeTrustedSite: (origin: string) => Promise<void>;
   refreshData: () => Promise<void>;
   clearError: () => void;
 }
@@ -53,6 +63,8 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   credentials: [],
   sessions: [],
   requestLog: [],
+  pendingApprovals: [],
+  trustedSites: [],
   currentPage: 'unlock',
   loading: true,
   error: null,
@@ -69,6 +81,9 @@ export const useWalletStore = create<WalletState>((set, get) => ({
 
     if (unlocked) {
       await get().refreshData();
+      if (get().pendingApprovals.length > 0) {
+        set({ currentPage: 'approval' });
+      }
     }
   },
 
@@ -103,8 +118,8 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     set({
       isUnlocked: false,
       credentials: [],
-      sessions: [],
       requestLog: [],
+      pendingApprovals: [],
       currentPage: 'unlock',
     });
   },
@@ -199,11 +214,34 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     await get().refreshData();
   },
 
+  approveConnect: async (approvalId: string, trust: boolean) => {
+    await sendInternal('approveConnect', { approvalId, trust });
+    await get().refreshData();
+    if (get().pendingApprovals.length === 0) {
+      set({ currentPage: 'dashboard' });
+    }
+  },
+
+  rejectConnect: async (approvalId: string) => {
+    await sendInternal('rejectConnect', { approvalId });
+    await get().refreshData();
+    if (get().pendingApprovals.length === 0) {
+      set({ currentPage: 'dashboard' });
+    }
+  },
+
+  removeTrustedSite: async (origin: string) => {
+    await sendInternal('removeTrustedSite', { origin });
+    await get().refreshData();
+  },
+
   refreshData: async () => {
-    const [credResult, sessionResult, logResult] = await Promise.all([
+    const [credResult, sessionResult, logResult, approvalResult, trustedResult] = await Promise.all([
       sendInternal('getCredentials'),
       sendInternal('getSessions'),
       sendInternal('getRequestLog'),
+      sendInternal('getPendingApprovals'),
+      sendInternal('getTrustedSites'),
     ]);
 
     const metas: CredentialMeta[] = (credResult.credentials ?? []).map(
@@ -221,7 +259,9 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     set({
       credentials: metas,
       sessions: sessionResult.sessions ?? [],
-      requestLog: (logResult.log ?? []).slice(0, 50),
+      requestLog: logResult.log ?? [],
+      pendingApprovals: approvalResult.approvals ?? [],
+      trustedSites: trustedResult.sites ?? [],
     });
   },
 

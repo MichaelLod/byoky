@@ -1,11 +1,19 @@
-import type { ConnectRequest, ConnectResponse } from '@byoky/core';
+import type { ConnectRequest, ConnectResponse, SessionUsage } from '@byoky/core';
 import { ByokyError, ByokyErrorCode, isByokyMessage } from '@byoky/core';
 import { isExtensionInstalled, getStoreUrl } from './detect.js';
 import { createProxyFetch } from './proxy-fetch.js';
 
 export interface ByokySession extends ConnectResponse {
+  /** Create a fetch function that proxies requests through the wallet for the given provider. */
   createFetch(providerId: string): typeof fetch;
+  /** Disconnect this session from the wallet. */
   disconnect(): void;
+  /** Check if this session is still connected and valid. */
+  isConnected(): Promise<boolean>;
+  /** Get token usage stats for this session only. */
+  getUsage(): Promise<SessionUsage>;
+  /** Register a callback for when the wallet revokes this session. */
+  onDisconnect(callback: () => void): () => void;
 }
 
 export interface ByokyOptions {
@@ -20,6 +28,13 @@ export class Byoky {
   }
 
   async connect(request: ConnectRequest = {}): Promise<ByokySession> {
+    if (typeof window === 'undefined') {
+      throw new ByokyError(
+        ByokyErrorCode.UNKNOWN,
+        'Byoky SDK requires a browser environment. On the server, use your API key directly.',
+      );
+    }
+
     if (!isExtensionInstalled()) {
       const storeUrl = getStoreUrl();
       if (storeUrl) {
@@ -29,12 +44,34 @@ export class Byoky {
     }
 
     const response = await this.sendConnectRequest(request);
+    const sessionKey = response.sessionKey;
+    const disconnectCallbacks = new Set<() => void>();
+
+    // Listen for wallet-initiated revocations
+    function handleRevocation(event: Event) {
+      const msg = (event as CustomEvent).detail;
+      if (msg?.type === 'BYOKY_SESSION_REVOKED' && msg.payload?.sessionKey === sessionKey) {
+        for (const cb of disconnectCallbacks) cb();
+        disconnectCallbacks.clear();
+        document.removeEventListener('byoky-message', handleRevocation);
+      }
+    }
+    document.addEventListener('byoky-message', handleRevocation);
 
     return {
       ...response,
       createFetch: (providerId: string) =>
-        createProxyFetch(providerId, response.sessionKey),
-      disconnect: () => this.disconnect(response.sessionKey),
+        createProxyFetch(providerId, sessionKey),
+      disconnect: () => {
+        document.removeEventListener('byoky-message', handleRevocation);
+        this.sendDisconnect(sessionKey);
+      },
+      isConnected: () => this.querySessionStatus(sessionKey),
+      getUsage: () => this.querySessionUsage(sessionKey),
+      onDisconnect: (callback: () => void) => {
+        disconnectCallbacks.add(callback);
+        return () => { disconnectCallbacks.delete(callback); };
+      },
     };
   }
 
@@ -88,10 +125,73 @@ export class Byoky {
     });
   }
 
-  private disconnect(sessionKey: string): void {
+  private sendDisconnect(sessionKey: string): void {
     window.postMessage(
       { type: 'BYOKY_DISCONNECT', payload: { sessionKey } },
       '*',
     );
+  }
+
+  private querySessionStatus(sessionKey: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      const requestId = crypto.randomUUID();
+      const timeout = setTimeout(() => { cleanup(); resolve(false); }, 5000);
+
+      function handleEvent(event: Event) {
+        const msg = (event as CustomEvent).detail;
+        if (msg?.requestId !== requestId) return;
+        if (msg.type === 'BYOKY_SESSION_STATUS_RESPONSE') {
+          cleanup();
+          resolve(!!msg.payload?.connected);
+        }
+      }
+
+      function cleanup() {
+        clearTimeout(timeout);
+        document.removeEventListener('byoky-message', handleEvent);
+      }
+
+      document.addEventListener('byoky-message', handleEvent);
+      window.postMessage({
+        type: 'BYOKY_SESSION_STATUS',
+        requestId,
+        payload: { sessionKey },
+      }, '*');
+    });
+  }
+
+  private querySessionUsage(sessionKey: string): Promise<SessionUsage> {
+    return new Promise((resolve, reject) => {
+      const requestId = crypto.randomUUID();
+      const timeout = setTimeout(() => {
+        cleanup();
+        reject(new Error('Usage query timed out'));
+      }, 5000);
+
+      function handleEvent(event: Event) {
+        const msg = (event as CustomEvent).detail;
+        if (msg?.requestId !== requestId) return;
+        if (msg.type === 'BYOKY_SESSION_USAGE_RESPONSE') {
+          cleanup();
+          if (msg.payload) {
+            resolve(msg.payload as SessionUsage);
+          } else {
+            reject(new Error('Session not found'));
+          }
+        }
+      }
+
+      function cleanup() {
+        clearTimeout(timeout);
+        document.removeEventListener('byoky-message', handleEvent);
+      }
+
+      document.addEventListener('byoky-message', handleEvent);
+      window.postMessage({
+        type: 'BYOKY_SESSION_USAGE',
+        requestId,
+        payload: { sessionKey },
+      }, '*');
+    });
   }
 }

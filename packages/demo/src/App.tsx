@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Byoky, type ByokySession } from '@byoky/sdk';
 import { ConnectWallet } from './ConnectWallet';
-import { Chat } from './Chat';
+import { Playground } from './Playground';
 import { CodeExample } from './CodeExample';
 
 const byoky = new Byoky({ timeout: 120_000 });
@@ -20,6 +20,12 @@ export function App() {
           { id: 'gemini', required: false },
         ],
       });
+
+      // Listen for wallet-initiated disconnects
+      s.onDisconnect(() => {
+        setSession(null);
+      });
+
       setSession(s);
     } catch (e) {
       const err = e as Error;
@@ -74,7 +80,7 @@ export function App() {
         {!session ? (
           <ConnectWallet onConnect={handleConnect} />
         ) : (
-          <Chat session={session} />
+          <Playground session={session} />
         )}
       </main>
 

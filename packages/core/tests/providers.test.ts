@@ -2,10 +2,15 @@ import { describe, it, expect } from 'vitest';
 import { PROVIDERS, getProvider, getProviderIds } from '../src/providers.js';
 
 describe('PROVIDERS', () => {
-  it('includes anthropic, openai, and gemini', () => {
-    expect(PROVIDERS).toHaveProperty('anthropic');
-    expect(PROVIDERS).toHaveProperty('openai');
-    expect(PROVIDERS).toHaveProperty('gemini');
+  it('includes all supported providers', () => {
+    const expected = [
+      'anthropic', 'openai', 'gemini', 'mistral', 'cohere', 'xai',
+      'deepseek', 'perplexity', 'groq', 'together', 'fireworks',
+      'replicate', 'openrouter', 'huggingface', 'azure_openai',
+    ];
+    for (const id of expected) {
+      expect(PROVIDERS).toHaveProperty(id);
+    }
   });
 
   it('anthropic supports api_key and oauth', () => {
@@ -39,6 +44,17 @@ describe('PROVIDERS', () => {
       expect(provider.baseUrl).toMatch(/^https:\/\//);
     }
   });
+
+  it('new providers support api_key only', () => {
+    const apiKeyOnly = [
+      'mistral', 'cohere', 'xai', 'deepseek', 'perplexity',
+      'groq', 'together', 'fireworks', 'replicate', 'openrouter',
+      'huggingface', 'azure_openai',
+    ];
+    for (const id of apiKeyOnly) {
+      expect(PROVIDERS[id].authMethods).toEqual(['api_key']);
+    }
+  });
 });
 
 describe('getProvider', () => {
@@ -59,6 +75,9 @@ describe('getProviderIds', () => {
     expect(ids).toContain('anthropic');
     expect(ids).toContain('openai');
     expect(ids).toContain('gemini');
+    expect(ids).toContain('groq');
+    expect(ids).toContain('deepseek');
+    expect(ids).toContain('openrouter');
   });
 
   it('returns the correct count', () => {

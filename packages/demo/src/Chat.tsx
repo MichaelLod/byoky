@@ -10,6 +10,25 @@ interface Props {
   session: ByokySession;
 }
 
+const openaiCompatible: Record<string, { url: string; model: string; name: string }> = {
+  openai:       { url: 'https://api.openai.com/v1/chat/completions',       model: 'gpt-4o',                        name: 'OpenAI (GPT-4o)' },
+  groq:         { url: 'https://api.groq.com/openai/v1/chat/completions',  model: 'llama-3.3-70b-versatile',       name: 'Groq (Llama 3.3)' },
+  deepseek:     { url: 'https://api.deepseek.com/chat/completions',        model: 'deepseek-chat',                 name: 'DeepSeek' },
+  xai:          { url: 'https://api.x.ai/v1/chat/completions',             model: 'grok-3-mini',                   name: 'xAI (Grok)' },
+  mistral:      { url: 'https://api.mistral.ai/v1/chat/completions',       model: 'mistral-large-latest',          name: 'Mistral' },
+  together:     { url: 'https://api.together.xyz/v1/chat/completions',     model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', name: 'Together AI' },
+  fireworks:    { url: 'https://api.fireworks.ai/inference/v1/chat/completions', model: 'accounts/fireworks/models/llama-v3p3-70b-instruct', name: 'Fireworks AI' },
+  perplexity:   { url: 'https://api.perplexity.ai/chat/completions',       model: 'sonar',                         name: 'Perplexity' },
+  openrouter:   { url: 'https://openrouter.ai/api/v1/chat/completions',    model: 'anthropic/claude-sonnet-4',     name: 'OpenRouter' },
+  cohere:       { url: 'https://api.cohere.com/v2/chat',                   model: 'command-r-plus',                name: 'Cohere' },
+};
+
+function getProviderLabel(id: string): string {
+  if (id === 'anthropic') return 'Anthropic (Claude)';
+  if (id === 'gemini') return 'Google (Gemini)';
+  return openaiCompatible[id]?.name ?? id;
+}
+
 export function Chat({ session }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -41,42 +60,24 @@ export function Chat({ session }: Props) {
 
     try {
       const proxyFetch = session.createFetch(selectedProvider);
-
       const allMessages = [...messages, userMessage].map((m) => ({
         role: m.role,
         content: m.content,
       }));
 
-      let response: Response;
+      let assistantContent = '';
 
       if (selectedProvider === 'anthropic') {
-        response = await proxyFetch('https://api.anthropic.com/v1/messages', {
+        const response = await proxyFetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            'anthropic-version': '2023-06-01',
-          },
-          body: JSON.stringify({
-            model: 'claude-sonnet-4-20250514',
-            max_tokens: 1024,
-            messages: allMessages,
-          }),
+          headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' },
+          body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1024, messages: allMessages }),
         });
-      } else if (selectedProvider === 'openai') {
-        response = await proxyFetch(
-          'https://api.openai.com/v1/chat/completions',
-          {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({
-              model: 'gpt-4o',
-              messages: allMessages,
-              max_tokens: 1024,
-            }),
-          },
-        );
+        if (!response.ok) throw new Error((await response.json()).error?.message || `API error: ${response.status}`);
+        const data = await response.json();
+        assistantContent = data.content?.[0]?.text || 'No response.';
       } else if (selectedProvider === 'gemini') {
-        response = await proxyFetch(
+        const response = await proxyFetch(
           'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
           {
             method: 'POST',
@@ -89,44 +90,26 @@ export function Chat({ session }: Props) {
             }),
           },
         );
+        if (!response.ok) throw new Error((await response.json()).error?.message || `API error: ${response.status}`);
+        const data = await response.json();
+        assistantContent = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response.';
+      } else if (selectedProvider in openaiCompatible) {
+        const config = openaiCompatible[selectedProvider];
+        const response = await proxyFetch(config.url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ model: config.model, messages: allMessages, max_tokens: 1024 }),
+        });
+        if (!response.ok) throw new Error((await response.json()).error?.message || `API error: ${response.status}`);
+        const data = await response.json();
+        assistantContent = data.choices?.[0]?.message?.content || 'No response.';
       } else {
-        throw new Error(`Unknown provider: ${selectedProvider}`);
+        throw new Error(`Unsupported provider: ${selectedProvider}`);
       }
 
-      if (!response.ok) {
-        const err = await response.json();
-        throw new Error(
-          err.error?.message || err.message || `API error: ${response.status}`,
-        );
-      }
-
-      const data = await response.json();
-      let assistantContent = '';
-
-      if (selectedProvider === 'anthropic') {
-        assistantContent =
-          data.content?.[0]?.text || 'No response from Claude.';
-      } else if (selectedProvider === 'openai') {
-        assistantContent =
-          data.choices?.[0]?.message?.content || 'No response from OpenAI.';
-      } else if (selectedProvider === 'gemini') {
-        assistantContent =
-          data.candidates?.[0]?.content?.parts?.[0]?.text ||
-          'No response from Gemini.';
-      }
-
-      setMessages((prev) => [
-        ...prev,
-        { role: 'assistant', content: assistantContent },
-      ]);
+      setMessages((prev) => [...prev, { role: 'assistant', content: assistantContent }]);
     } catch (e) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: `Error: ${(e as Error).message}`,
-        },
-      ]);
+      setMessages((prev) => [...prev, { role: 'assistant', content: `Error: ${(e as Error).message}` }]);
     } finally {
       setLoading(false);
     }
@@ -137,20 +120,9 @@ export function Chat({ session }: Props) {
       <div className="chat-header">
         <div className="provider-select">
           <label>Provider:</label>
-          <select
-            value={selectedProvider}
-            onChange={(e) => setSelectedProvider(e.target.value)}
-          >
+          <select value={selectedProvider} onChange={(e) => setSelectedProvider(e.target.value)}>
             {availableProviders.map((id) => (
-              <option key={id} value={id}>
-                {id === 'anthropic'
-                  ? 'Anthropic (Claude)'
-                  : id === 'openai'
-                    ? 'OpenAI (GPT-4o)'
-                    : id === 'gemini'
-                      ? 'Google (Gemini)'
-                      : id}
-              </option>
+              <option key={id} value={id}>{getProviderLabel(id)}</option>
             ))}
           </select>
         </div>
@@ -163,41 +135,27 @@ export function Chat({ session }: Props) {
         {messages.length === 0 && (
           <div className="chat-empty">
             <p>Send a message to start chatting.</p>
-            <p className="chat-empty-sub">
-              Powered by Byoky — your API keys stay in the wallet extension.
-            </p>
+            <p className="chat-empty-sub">Powered by Byoky — your API keys stay in the wallet extension.</p>
           </div>
         )}
         {messages.map((msg, i) => (
           <div key={i} className={`message message-${msg.role}`}>
-            <div className="message-avatar">
-              {msg.role === 'user' ? 'You' : 'AI'}
-            </div>
-            <div className="message-content">
-              <p>{msg.content}</p>
-            </div>
+            <div className="message-avatar">{msg.role === 'user' ? 'You' : 'AI'}</div>
+            <div className="message-content"><p>{msg.content}</p></div>
           </div>
         ))}
         {loading && (
           <div className="message message-assistant">
             <div className="message-avatar">AI</div>
             <div className="message-content">
-              <div className="typing-indicator">
-                <span /><span /><span />
-              </div>
+              <div className="typing-indicator"><span /><span /><span /></div>
             </div>
           </div>
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      <form
-        className="chat-input"
-        onSubmit={(e) => {
-          e.preventDefault();
-          handleSend();
-        }}
-      >
+      <form className="chat-input" onSubmit={(e) => { e.preventDefault(); handleSend(); }}>
         <input
           type="text"
           value={input}
@@ -206,9 +164,7 @@ export function Chat({ session }: Props) {
           disabled={loading}
           autoFocus
         />
-        <button type="submit" className="btn btn-primary" disabled={loading || !input.trim()}>
-          Send
-        </button>
+        <button type="submit" className="btn btn-primary" disabled={loading || !input.trim()}>Send</button>
       </form>
     </div>
   );

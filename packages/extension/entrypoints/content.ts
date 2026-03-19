@@ -39,9 +39,10 @@ export default defineContentScript({
         });
       } else if (
         data.type === 'BYOKY_CONNECT_REQUEST' ||
-        data.type === 'BYOKY_DISCONNECT'
+        data.type === 'BYOKY_DISCONNECT' ||
+        data.type === 'BYOKY_SESSION_STATUS' ||
+        data.type === 'BYOKY_SESSION_USAGE'
       ) {
-        // Simple message passing for connect/disconnect
         browser.runtime.sendMessage(data).then((response) => {
           if (response) {
             document.dispatchEvent(
@@ -49,6 +50,15 @@ export default defineContentScript({
             );
           }
         }).catch(() => {});
+      }
+    });
+
+    // Listen for revocation broadcasts from background
+    browser.runtime.onMessage.addListener((message) => {
+      if (message?.type === 'BYOKY_SESSION_REVOKED') {
+        document.dispatchEvent(
+          new CustomEvent('byoky-message', { detail: message }),
+        );
       }
     });
   },

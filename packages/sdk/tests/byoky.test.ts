@@ -78,6 +78,9 @@ describe('Byoky', () => {
     expect(session.providers.anthropic.available).toBe(true);
     expect(typeof session.createFetch).toBe('function');
     expect(typeof session.disconnect).toBe('function');
+    expect(typeof session.isConnected).toBe('function');
+    expect(typeof session.getUsage).toBe('function');
+    expect(typeof session.onDisconnect).toBe('function');
   });
 
   it('rejects when user denies connection', async () => {
@@ -137,6 +140,132 @@ describe('Byoky', () => {
     expect(
       (disconnectMsg.payload as Record<string, string>).sessionKey,
     ).toBe('byk_disconnect_test');
+  });
+
+  it('session.onDisconnect fires when wallet revokes session', async () => {
+    const byoky = new Byoky();
+    const connectPromise = byoky.connect();
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    const msg = postedMessages[0];
+    simulateResponse({
+      type: 'BYOKY_CONNECT_RESPONSE',
+      requestId: msg.requestId,
+      payload: {
+        sessionKey: 'byk_revoke_test',
+        proxyUrl: 'extension-proxy',
+        providers: {},
+      },
+    });
+
+    const session = await connectPromise;
+    const callback = vi.fn();
+    session.onDisconnect(callback);
+
+    // Simulate wallet revoking the session
+    simulateResponse({
+      type: 'BYOKY_SESSION_REVOKED',
+      payload: { sessionKey: 'byk_revoke_test' },
+    });
+
+    expect(callback).toHaveBeenCalledTimes(1);
+  });
+
+  it('session.onDisconnect returns an unsubscribe function', async () => {
+    const byoky = new Byoky();
+    const connectPromise = byoky.connect();
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    const msg = postedMessages[0];
+    simulateResponse({
+      type: 'BYOKY_CONNECT_RESPONSE',
+      requestId: msg.requestId,
+      payload: {
+        sessionKey: 'byk_unsub_test',
+        proxyUrl: 'extension-proxy',
+        providers: {},
+      },
+    });
+
+    const session = await connectPromise;
+    const callback = vi.fn();
+    const unsub = session.onDisconnect(callback);
+    unsub();
+
+    simulateResponse({
+      type: 'BYOKY_SESSION_REVOKED',
+      payload: { sessionKey: 'byk_unsub_test' },
+    });
+
+    expect(callback).not.toHaveBeenCalled();
+  });
+
+  it('session.isConnected sends a status query', async () => {
+    const byoky = new Byoky();
+    const connectPromise = byoky.connect();
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    const msg = postedMessages[0];
+    simulateResponse({
+      type: 'BYOKY_CONNECT_RESPONSE',
+      requestId: msg.requestId,
+      payload: {
+        sessionKey: 'byk_status_test',
+        proxyUrl: 'extension-proxy',
+        providers: {},
+      },
+    });
+
+    const session = await connectPromise;
+    const statusPromise = session.isConnected();
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Find the status request
+    const statusMsg = postedMessages.find(
+      (m) => m.type === 'BYOKY_SESSION_STATUS',
+    );
+    expect(statusMsg).toBeDefined();
+
+    simulateResponse({
+      type: 'BYOKY_SESSION_STATUS_RESPONSE',
+      requestId: statusMsg!.requestId,
+      payload: { connected: true },
+    });
+
+    expect(await statusPromise).toBe(true);
+  });
+
+  it('session.onDisconnect ignores revocations for other sessions', async () => {
+    const byoky = new Byoky();
+    const connectPromise = byoky.connect();
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    const msg = postedMessages[0];
+    simulateResponse({
+      type: 'BYOKY_CONNECT_RESPONSE',
+      requestId: msg.requestId,
+      payload: {
+        sessionKey: 'byk_mine',
+        proxyUrl: 'extension-proxy',
+        providers: {},
+      },
+    });
+
+    const session = await connectPromise;
+    const callback = vi.fn();
+    session.onDisconnect(callback);
+
+    simulateResponse({
+      type: 'BYOKY_SESSION_REVOKED',
+      payload: { sessionKey: 'byk_other' },
+    });
+
+    expect(callback).not.toHaveBeenCalled();
   });
 
   function simulateResponse(data: Record<string, unknown>) {

@@ -2,7 +2,7 @@ import { useWalletStore } from '../store';
 import { PROVIDERS } from '@byoky/core';
 
 export function Dashboard() {
-  const { credentials, sessions, navigate, lock, removeCredential, revokeSession } =
+  const { credentials, navigate, lock, removeCredential } =
     useWalletStore();
 
   return (
@@ -67,31 +67,6 @@ export function Dashboard() {
         </>
       )}
 
-      {sessions.length > 0 && (
-        <>
-          <h2 className="page-title" style={{ marginTop: '24px' }}>
-            Active Sessions
-          </h2>
-          {sessions.map((session) => (
-            <div key={session.id} className="card">
-              <div className="card-header">
-                <div>
-                  <span className="card-title">{session.appOrigin}</span>
-                  <div className="card-subtitle">
-                    {session.providers.length} provider(s)
-                  </div>
-                </div>
-                <button
-                  className="btn btn-danger btn-sm"
-                  onClick={() => revokeSession(session.id)}
-                >
-                  Revoke
-                </button>
-              </div>
-            </div>
-          ))}
-        </>
-      )}
     </div>
   );
 }

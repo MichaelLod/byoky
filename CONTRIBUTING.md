@@ -22,7 +22,7 @@ pnpm dev  # Start extension in Chrome dev mode
 
 ## Making changes
 
-1. Fork the repo and create a branch from `main`
+1. Fork the repo and create a branch from `dev`
 2. Make your changes
 3. Ensure everything builds: `pnpm build`
 4. Open a pull request

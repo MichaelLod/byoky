@@ -136,6 +136,11 @@ export type MessageType =
   | 'BYOKY_PROXY_RESPONSE_CHUNK'
   | 'BYOKY_PROXY_RESPONSE_DONE'
   | 'BYOKY_PROXY_RESPONSE_ERROR'
+  | 'BYOKY_SESSION_STATUS'
+  | 'BYOKY_SESSION_STATUS_RESPONSE'
+  | 'BYOKY_SESSION_USAGE'
+  | 'BYOKY_SESSION_USAGE_RESPONSE'
+  | 'BYOKY_SESSION_REVOKED'
   | 'BYOKY_ERROR';
 
 export interface ByokyMessage {
@@ -143,6 +148,19 @@ export interface ByokyMessage {
   id: string;
   requestId?: string;
   payload: unknown;
+}
+
+// --- Session queries ---
+
+export interface SessionUsage {
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+  byProvider: Record<string, {
+    requests: number;
+    inputTokens: number;
+    outputTokens: number;
+  }>;
 }
 
 // --- Errors ---
@@ -172,6 +190,9 @@ export interface RequestLogEntry {
   status: number;
   timestamp: number;
   error?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  model?: string;
 }
 
 // --- Pending approval ---
@@ -182,4 +203,11 @@ export interface PendingApproval {
   appName?: string;
   providers: ProviderRequirement[];
   timestamp: number;
+}
+
+// --- Trusted sites ---
+
+export interface TrustedSite {
+  origin: string;
+  trustedAt: number;
 }
