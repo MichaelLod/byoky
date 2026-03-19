@@ -113,9 +113,8 @@ export default defineBackground(() => {
     if (port.name !== 'byoky-proxy') return;
 
     // Capture the origin from the port sender (set by Chrome, can't be spoofed)
-    const portOrigin = port.sender?.tab?.url
-      ? new URL(port.sender.tab.url).origin
-      : null;
+    const senderUrl = port.sender?.url || port.sender?.tab?.url;
+    const portOrigin = senderUrl ? new URL(senderUrl).origin : null;
 
     port.onMessage.addListener(async (msg: ProxyRequest) => {
       if (msg.sessionKey == null) return;
@@ -254,29 +253,57 @@ export default defineBackground(() => {
 
   // --- Helpers ---
 
+  function resolveOrigin(sender: browser.Runtime.MessageSender): string {
+    // sender.url is always available for content scripts (no tabs permission needed)
+    const url = sender.url || sender.tab?.url;
+    return url ? new URL(url).origin : 'unknown';
+  }
+
+  function findActiveSession(origin: string): Session | undefined {
+    if (origin === 'unknown') return undefined;
+    for (const session of sessions.values()) {
+      if (session.appOrigin === origin && session.expiresAt > Date.now()) {
+        return session;
+      }
+    }
+    return undefined;
+  }
+
+  function buildSessionResponse(session: Session, requestId: string) {
+    const providerMap: ConnectResponse['providers'] = {};
+    for (const sp of session.providers) {
+      providerMap[sp.providerId] = { available: sp.available, authMethod: sp.authMethod };
+    }
+    return {
+      type: 'BYOKY_CONNECT_RESPONSE',
+      requestId,
+      payload: {
+        sessionKey: session.sessionKey,
+        proxyUrl: 'extension-proxy',
+        providers: providerMap,
+      } as ConnectResponse,
+    };
+  }
+
   async function handleConnect(
     message: { id: string; payload: ConnectRequest },
     sender: browser.Runtime.MessageSender,
   ): Promise<unknown> {
-    const origin = sender.tab?.url ? new URL(sender.tab.url).origin : 'unknown';
+    const origin = resolveOrigin(sender);
 
     // If there's already an active session for this origin, reuse it
-    for (const session of sessions.values()) {
-      if (session.appOrigin === origin && session.expiresAt > Date.now()) {
-        const providerMap: ConnectResponse['providers'] = {};
-        for (const sp of session.providers) {
-          providerMap[sp.providerId] = { available: sp.available, authMethod: sp.authMethod };
-        }
-        return {
-          type: 'BYOKY_CONNECT_RESPONSE',
-          requestId: message.id,
-          payload: {
-            sessionKey: session.sessionKey,
-            proxyUrl: 'extension-proxy',
-            providers: providerMap,
-          } as ConnectResponse,
-        };
-      }
+    const existing = findActiveSession(origin);
+    if (existing) {
+      return buildSessionResponse(existing, message.id);
+    }
+
+    // If there's already a pending approval for this origin, wait for its result
+    const existingPending = [...pendingApprovals.values()].find(
+      (e) => e.approval.appOrigin === origin,
+    );
+    if (existingPending) {
+      openWalletUI(sender.tab?.id);
+      return waitForSessionOrReject(origin, message.id);
     }
 
     // Queue for user approval (whether locked or unlocked)
@@ -332,10 +359,51 @@ export default defineBackground(() => {
     });
   }
 
+  function waitForSessionOrReject(origin: string, messageId: string): Promise<unknown> {
+    return new Promise((resolve) => {
+      const interval = setInterval(() => {
+        const session = findActiveSession(origin);
+        if (session) {
+          clearInterval(interval);
+          clearTimeout(timeout);
+          resolve(buildSessionResponse(session, messageId));
+          return;
+        }
+        // If no more pending approvals for this origin and no session, it was rejected
+        const stillPending = [...pendingApprovals.values()].some(
+          (e) => e.approval.appOrigin === origin,
+        );
+        if (!stillPending) {
+          clearInterval(interval);
+          clearTimeout(timeout);
+          resolve({
+            type: 'BYOKY_ERROR',
+            requestId: messageId,
+            payload: { code: 'USER_REJECTED', message: 'Connection request was rejected' },
+          });
+        }
+      }, 300);
+      const timeout = setTimeout(() => {
+        clearInterval(interval);
+        resolve({
+          type: 'BYOKY_ERROR',
+          requestId: messageId,
+          payload: { code: 'USER_REJECTED', message: 'Connection request timed out' },
+        });
+      }, 120_000);
+    });
+  }
+
   async function createSession(
     message: { id: string; payload: ConnectRequest },
     origin: string,
   ): Promise<unknown> {
+    // Reuse existing active session for this origin
+    const existing = findActiveSession(origin);
+    if (existing) {
+      return buildSessionResponse(existing, message.id);
+    }
+
     const credentials = await getStoredCredentials();
     const request = message.payload;
     const sessionKey = `byk_${crypto.randomUUID().replace(/-/g, '')}`;
