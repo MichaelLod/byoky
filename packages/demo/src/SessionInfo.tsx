@@ -133,7 +133,11 @@ console.log(usage.requests, usage.inputTokens);
 // Listen for disconnects
 session.onDisconnect(() => {
   showReconnectPrompt();
-});`}</code></pre>
+});
+
+// Token allowances are enforced by the wallet.
+// If a limit is exceeded, requests return 429
+// with code: 'QUOTA_EXCEEDED'.`}</code></pre>
         </div>
       </div>
     </div>
