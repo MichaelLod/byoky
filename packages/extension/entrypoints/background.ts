@@ -250,6 +250,25 @@ export default defineBackground(() => {
   ): Promise<unknown> {
     const origin = sender.tab?.url ? new URL(sender.tab.url).origin : 'unknown';
 
+    // If there's already an active session for this origin, reuse it
+    for (const session of sessions.values()) {
+      if (session.appOrigin === origin && session.expiresAt > Date.now()) {
+        const providerMap: ConnectResponse['providers'] = {};
+        for (const sp of session.providers) {
+          providerMap[sp.providerId] = { available: sp.available, authMethod: sp.authMethod };
+        }
+        return {
+          type: 'BYOKY_CONNECT_RESPONSE',
+          requestId: message.id,
+          payload: {
+            sessionKey: session.sessionKey,
+            proxyUrl: 'extension-proxy',
+            providers: providerMap,
+          } as ConnectResponse,
+        };
+      }
+    }
+
     // Queue for user approval (whether locked or unlocked)
     const approval: PendingApproval = {
       id: crypto.randomUUID(),
@@ -412,7 +431,7 @@ export default defineBackground(() => {
         for (const [key, s] of sessions) {
           if (s.id === sessionId) {
             sessions.delete(key);
-            broadcastRevocation(key, s.appOrigin);
+            broadcastRevocation(key);
             break;
           }
         }
@@ -993,21 +1012,14 @@ export default defineBackground(() => {
     }
   }
 
-  function broadcastRevocation(sessionKey: string, appOrigin: string) {
+  function broadcastRevocation(sessionKey: string) {
     browser.tabs.query({}).then((tabs) => {
       for (const tab of tabs) {
-        if (!tab.id || !tab.url) continue;
-        try {
-          const tabOrigin = new URL(tab.url).origin;
-          if (tabOrigin === appOrigin) {
-            browser.tabs.sendMessage(tab.id, {
-              type: 'BYOKY_SESSION_REVOKED',
-              payload: { sessionKey },
-            }).catch(() => {});
-          }
-        } catch {
-          // skip tabs with invalid URLs
-        }
+        if (!tab.id) continue;
+        browser.tabs.sendMessage(tab.id, {
+          type: 'BYOKY_SESSION_REVOKED',
+          payload: { sessionKey },
+        }).catch(() => {});
       }
     });
   }
