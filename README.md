@@ -38,9 +38,7 @@
 - **For developers** — Two lines of code. Use your favorite provider SDK. Keys never touch your app.
 
 <p align="center">
-  <img src="https://github.com/MichaelLod/byoky/raw/main/.github/screenshots/screenshot-1.png" alt="Byoky Wallet" width="600" />
-  <br />
-  <img src="https://github.com/MichaelLod/byoky/raw/main/.github/screenshots/screenshot-2.png" alt="Byoky Add Credential" width="600" />
+  <img src="https://github.com/MichaelLod/byoky/raw/main/.github/screenshots/screenshot-1.png" alt="Byoky Wallet" width="400" />&nbsp;&nbsp;<img src="https://github.com/MichaelLod/byoky/raw/main/.github/screenshots/screenshot-2.png" alt="Byoky Unlock" width="400" />
 </p>
 
 ### How it works
@@ -110,6 +108,18 @@ const message = await client.messages.create({
 | Anthropic | ✓ | ✓ | Available |
 | OpenAI | ✓ | — | Available |
 | Google Gemini | ✓ | — | Available |
+| Mistral | ✓ | — | Available |
+| Cohere | ✓ | — | Available |
+| xAI (Grok) | ✓ | — | Available |
+| DeepSeek | ✓ | — | Available |
+| Perplexity | ✓ | — | Available |
+| Groq | ✓ | — | Available |
+| Together AI | ✓ | — | Available |
+| Fireworks AI | ✓ | — | Available |
+| Replicate | ✓ | — | Available |
+| OpenRouter | ✓ | — | Available |
+| Hugging Face | ✓ | — | Available |
+| Azure OpenAI | ✓ | — | Available |
 | *Custom* | ✓ | — | Extensible |
 
 > **Setup Token**: Use your Claude Pro/Max subscription via `claude setup-token`. API keys use pay-per-use billing from the provider console.
