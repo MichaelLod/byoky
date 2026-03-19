@@ -1,13 +1,13 @@
 <p align="center">
   <br />
   <a href="https://byoky.com">
-    <img src="https://github.com/MichaelLod/byoky/raw/main/.github/icon.svg" alt="Muninn" width="80" />
+    <img src="https://github.com/MichaelLod/byoky/raw/main/.github/icon.svg?v=2" alt="Muninn" width="80" />
   </a>
   <br />
   <a href="https://byoky.com">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://github.com/MichaelLod/byoky/raw/main/.github/banner-dark.svg">
-      <img alt="Byoky" src="https://github.com/MichaelLod/byoky/raw/main/.github/banner-dark.svg" width="480">
+      <source media="(prefers-color-scheme: dark)" srcset="https://github.com/MichaelLod/byoky/raw/main/.github/banner-dark.svg?v=2">
+      <img alt="Byoky" src="https://github.com/MichaelLod/byoky/raw/main/.github/banner-dark.svg?v=2" width="480">
     </picture>
   </a>
   <br />
