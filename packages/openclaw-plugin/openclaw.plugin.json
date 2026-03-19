@@ -2,7 +2,6 @@
   "id": "byoky",
   "enabledByDefault": false,
   "providers": [
-    "byoky",
     "byoky-anthropic",
     "byoky-openai",
     "byoky-gemini",
@@ -18,18 +17,6 @@
     "byoky-replicate",
     "byoky-huggingface",
     "byoky-azure_openai"
-  ],
-  "providerAuthChoices": [
-    {
-      "provider": "byoky",
-      "method": "browser",
-      "choiceId": "byoky",
-      "choiceLabel": "Byoky Wallet (all providers)",
-      "choiceHint": "Route API calls through your browser wallet — keys never leave the extension",
-      "groupId": "byoky",
-      "groupLabel": "Byoky Wallet",
-      "groupHint": "Manage all AI keys from one place"
-    }
   ],
   "configSchema": {
     "type": "object",

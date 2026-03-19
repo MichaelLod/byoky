@@ -35,6 +35,7 @@
   },
   "devDependencies": {
     "@types/node": "25.5.0",
+    "openclaw": "^2026.3.13",
     "tsup": "^8.0.0",
     "typescript": "^5.5.0"
   }
