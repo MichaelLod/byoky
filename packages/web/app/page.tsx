@@ -356,8 +356,8 @@ function Security() {
               </div>
               <h3>AES-256-GCM encryption</h3>
               <p>
-                Keys are encrypted with a password-derived key using PBKDF2 with
-                600,000 iterations. Web Crypto API — no dependencies.
+                Keys encrypted with PBKDF2 (600K iterations). 12-character minimum
+                with real-time strength meter. Web Crypto API — no dependencies.
               </p>
             </div>
           </FadeIn>
@@ -398,6 +398,18 @@ function Security() {
             </div>
           </FadeIn>
           <FadeIn delay={0.2}>
+            <div className="security-card">
+              <div className="security-icon">
+                <ArchiveIcon />
+              </div>
+              <h3>Encrypted vault backup</h3>
+              <p>
+                Export your vault as an encrypted .byoky file with a separate
+                backup password. Import on any device.
+              </p>
+            </div>
+          </FadeIn>
+          <FadeIn delay={0.25}>
             <div className="security-card">
               <div className="security-icon">
                 <CloudOffIcon />
@@ -676,6 +688,16 @@ function EyeIcon() {
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
       <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function ArchiveIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="21 8 21 21 3 21 3 8" />
+      <rect x="1" y="3" width="22" height="5" />
+      <line x1="10" y1="12" x2="14" y2="12" />
     </svg>
   );
 }

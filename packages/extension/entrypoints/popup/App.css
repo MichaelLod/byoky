@@ -78,12 +78,20 @@ body {
   background: none;
   border: none;
   color: var(--text-secondary);
-  padding: 6px 14px;
+  padding: 8px 10px;
   border-radius: 8px;
   cursor: pointer;
   font-size: 13px;
   font-weight: 500;
   transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.nav button svg {
+  display: block;
 }
 
 .nav button:hover {
@@ -562,19 +570,18 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 14px;
-  height: 14px;
-  padding: 0 3px;
-  margin-left: 4px;
-  border-radius: 7px;
+  min-width: 12px;
+  height: 12px;
+  padding: 0 2px;
+  border-radius: 6px;
   background: var(--accent);
   color: white;
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 700;
   line-height: 1;
-  vertical-align: middle;
-  position: relative;
-  top: -1px;
+  position: absolute;
+  top: 2px;
+  right: 0px;
 }
 
 /* ── Connected Apps ── */

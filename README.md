@@ -132,6 +132,8 @@ wss.on('connection', async (ws) => {
 |---|---|
 | **AES-256-GCM** | Keys encrypted with PBKDF2-derived key (600K iterations) via Web Crypto API |
 | **Zero exposure** | API keys never leave the extension. Apps get temporary session tokens |
+| **Password strength** | 12-char minimum with real-time strength meter (entropy, patterns, common passwords) |
+| **Vault backup** | Encrypted export/import (`.byoky` files) with separate export password |
 | **Audit log** | Every request logged — app origin, provider, status, timestamp |
 | **Spending caps** | Token allowances per app — total and per-provider limits, enforced at the proxy |
 | **Local only** | No cloud. No telemetry. No tracking. Your device, your keys |
@@ -221,7 +223,7 @@ pnpm --filter @byoky/extension build:all     # Chrome + Firefox + Safari
 
 - [x] Backend relay (`@byoky/sdk/server`)
 - [x] Token allowances per app (total + per-provider limits)
-- [ ] Export/import encrypted vault backup
+- [x] Encrypted vault export/import (`.byoky` files)
 - [ ] Browser extension store listings
 
 ## Star History
