@@ -47,10 +47,27 @@ export class Byoky {
     }
 
     const response = await this.sendConnectRequest(request);
+    return this.buildSession(response);
+  }
+
+  /**
+   * Reconnect to an existing session using previously stored response data.
+   * Returns null if the session is no longer valid.
+   */
+  async reconnect(savedResponse: ConnectResponse): Promise<ByokySession | null> {
+    if (typeof window === 'undefined') return null;
+    if (!isExtensionInstalled()) return null;
+
+    const connected = await this.querySessionStatus(savedResponse.sessionKey);
+    if (!connected) return null;
+
+    return this.buildSession(savedResponse);
+  }
+
+  private buildSession(response: ConnectResponse): ByokySession {
     const sessionKey = response.sessionKey;
     const disconnectCallbacks = new Set<() => void>();
 
-    // Listen for wallet-initiated revocations
     function handleRevocation(event: Event) {
       const msg = (event as CustomEvent).detail;
       if (msg?.type === 'BYOKY_SESSION_REVOKED' && msg.payload?.sessionKey === sessionKey) {

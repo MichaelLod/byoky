@@ -1,16 +1,47 @@
 'use client';
 
-import { useState } from 'react';
-import { Byoky, type ByokySession } from '@byoky/sdk';
+import { useState, useEffect } from 'react';
+import { Byoky, type ByokySession, type ConnectResponse } from '@byoky/sdk';
 import { ConnectWallet } from './components/ConnectWallet';
 import { Playground } from './components/Playground';
 import { CodeExample } from './components/CodeExample';
 
 const byoky = new Byoky({ timeout: 120_000 });
+const SESSION_KEY = 'byoky-demo-session';
+
+function saveSession(response: ConnectResponse) {
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify(response)); } catch {}
+}
+
+function clearSavedSession() {
+  try { localStorage.removeItem(SESSION_KEY); } catch {}
+}
+
+function loadSavedSession(): ConnectResponse | null {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
 
 export function DemoApp() {
   const [session, setSession] = useState<ByokySession | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState(true);
+
+  useEffect(() => {
+    const saved = loadSavedSession();
+    if (!saved) { setRestoring(false); return; }
+    byoky.reconnect(saved).then((s) => {
+      if (s) {
+        s.onDisconnect(() => { clearSavedSession(); setSession(null); });
+        setSession(s);
+      } else {
+        clearSavedSession();
+      }
+      setRestoring(false);
+    });
+  }, []);
 
   async function handleConnect() {
     setError(null);
@@ -23,11 +54,8 @@ export function DemoApp() {
         ],
       });
 
-      // Listen for wallet-initiated disconnects
-      s.onDisconnect(() => {
-        setSession(null);
-      });
-
+      s.onDisconnect(() => { clearSavedSession(); setSession(null); });
+      saveSession({ sessionKey: s.sessionKey, proxyUrl: s.proxyUrl, providers: s.providers });
       setSession(s);
     } catch (e) {
       const err = e as Error;
@@ -43,6 +71,7 @@ export function DemoApp() {
 
   function handleDisconnect() {
     session?.disconnect();
+    clearSavedSession();
     setSession(null);
   }
 
@@ -79,7 +108,7 @@ export function DemoApp() {
       )}
 
       <main className="main">
-        {!session ? (
+        {restoring ? null : !session ? (
           <ConnectWallet onConnect={handleConnect} />
         ) : (
           <Playground session={session} />
