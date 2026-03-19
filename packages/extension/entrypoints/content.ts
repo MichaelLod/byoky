@@ -53,13 +53,12 @@ export default defineContentScript({
       }
     });
 
-    // Listen for revocation broadcasts from background
-    browser.runtime.onMessage.addListener((message) => {
-      if (message?.type === 'BYOKY_SESSION_REVOKED') {
-        document.dispatchEvent(
-          new CustomEvent('byoky-message', { detail: message }),
-        );
-      }
+    // Persistent port for receiving notifications (revocations) from background
+    const notifyPort = browser.runtime.connect({ name: 'byoky-notify' });
+    notifyPort.onMessage.addListener((msg) => {
+      document.dispatchEvent(
+        new CustomEvent('byoky-message', { detail: msg }),
+      );
     });
   },
 });

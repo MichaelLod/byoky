@@ -97,9 +97,19 @@ export default defineBackground(() => {
     }
   });
 
+  // --- Notification ports (for broadcasting revocations to content scripts) ---
+
+  const notifyPorts = new Set<browser.Runtime.Port>();
+
   // --- Proxy via Port (streaming) ---
 
   browser.runtime.onConnect.addListener((port) => {
+    if (port.name === 'byoky-notify') {
+      notifyPorts.add(port);
+      port.onDisconnect.addListener(() => notifyPorts.delete(port));
+      return;
+    }
+
     if (port.name !== 'byoky-proxy') return;
 
     // Capture the origin from the port sender (set by Chrome, can't be spoofed)
@@ -1013,15 +1023,10 @@ export default defineBackground(() => {
   }
 
   function broadcastRevocation(sessionKey: string) {
-    browser.tabs.query({}).then((tabs) => {
-      for (const tab of tabs) {
-        if (!tab.id) continue;
-        browser.tabs.sendMessage(tab.id, {
-          type: 'BYOKY_SESSION_REVOKED',
-          payload: { sessionKey },
-        }).catch(() => {});
-      }
-    });
+    const msg = { type: 'BYOKY_SESSION_REVOKED', payload: { sessionKey } };
+    for (const port of notifyPorts) {
+      try { port.postMessage(msg); } catch { /* port may have disconnected */ }
+    }
   }
 
   async function getTrustedSites(): Promise<TrustedSite[]> {
