@@ -257,7 +257,18 @@ export default defineBackground(() => {
 
         // Setup tokens for Anthropic route through the bridge (Node.js) to avoid browser CORS
         if (credential.authMethod === 'oauth' && msg.providerId === 'anthropic') {
-          await proxyViaBridge(port, msg, realHeaders);
+          // Inject Claude Code system prompt required for OAuth token auth
+          let body = msg.body;
+          if (body) {
+            try {
+              const parsed = JSON.parse(body);
+              if (!parsed.system) {
+                parsed.system = "You are Claude Code, Anthropic's official CLI for Claude.";
+              }
+              body = JSON.stringify(parsed);
+            } catch {}
+          }
+          await proxyViaBridge(port, { ...msg, body }, realHeaders);
           return;
         }
 
