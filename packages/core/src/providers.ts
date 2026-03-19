@@ -19,7 +19,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     authMethods: ['api_key', 'oauth'],
     baseUrl: 'https://generativelanguage.googleapis.com',
     oauthConfig: {
-      clientId: '', // Register at console.cloud.google.com → APIs & Services → Credentials
+      clientId: '699663966637-gr4d994198r4g6jvip25ffg85kree6ck.apps.googleusercontent.com',
       authorizationUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
       tokenUrl: 'https://oauth2.googleapis.com/token',
       scopes: ['https://www.googleapis.com/auth/generative-language'],
@@ -92,7 +92,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     authMethods: ['api_key', 'oauth'],
     baseUrl: 'https://api-inference.huggingface.co',
     oauthConfig: {
-      clientId: '', // Register at huggingface.co/settings/connected-applications
+      clientId: '031aeb11-725b-498a-93f9-d3599d84f57c',
       authorizationUrl: 'https://huggingface.co/oauth/authorize',
       tokenUrl: 'https://huggingface.co/oauth/token',
       scopes: ['inference-api'],

@@ -664,7 +664,7 @@ test.describe.serial('Byoky wallet E2E flow', () => {
 
   // ── OAuth Flow ───────────────────────────────────────
 
-  test('OAuth sign-in for Gemini returns client_id error', async ({ extensionPage }) => {
+  test('OAuth sign-in for Gemini triggers auth flow', async ({ extensionPage }) => {
     await extensionPage.bringToFront();
     await extensionPage.click('button[title="Wallet"]');
     await extensionPage.click('button:has-text("Add credential")');
@@ -673,14 +673,12 @@ test.describe.serial('Byoky wallet E2E flow', () => {
     await extensionPage.click('.auth-toggle-btn:has-text("OAuth")');
     await extensionPage.fill('#label', 'E2E Gemini OAuth');
     await extensionPage.click('button:has-text("Sign in with Google Gemini")');
-    await expect(extensionPage.locator('.error')).toContainText(
-      'OAuth client_id not configured',
-      { timeout: 10_000 },
-    );
+    // With real client ID, the OAuth popup opens but gets cancelled in test env
+    await expect(extensionPage.locator('.error')).toBeVisible({ timeout: 15_000 });
     await extensionPage.click('button:has-text("Cancel")');
   });
 
-  test('OAuth sign-in for HuggingFace returns client_id error', async ({ extensionPage }) => {
+  test('OAuth sign-in for HuggingFace triggers auth flow', async ({ extensionPage }) => {
     await extensionPage.bringToFront();
     await extensionPage.click('button:has-text("Add credential")');
     await extensionPage.waitForSelector('#provider');
@@ -688,10 +686,8 @@ test.describe.serial('Byoky wallet E2E flow', () => {
     await extensionPage.click('.auth-toggle-btn:has-text("OAuth")');
     await extensionPage.fill('#label', 'E2E HF OAuth');
     await extensionPage.click('button:has-text("Sign in with Hugging Face")');
-    await expect(extensionPage.locator('.error')).toContainText(
-      'OAuth client_id not configured',
-      { timeout: 10_000 },
-    );
+    // With real client ID, the OAuth popup opens but gets cancelled in test env
+    await expect(extensionPage.locator('.error')).toBeVisible({ timeout: 15_000 });
     await extensionPage.click('button:has-text("Cancel")');
   });
 

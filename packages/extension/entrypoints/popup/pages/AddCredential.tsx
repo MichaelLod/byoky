@@ -17,7 +17,7 @@ async function checkBridge(): Promise<boolean> {
 }
 
 export function AddCredential() {
-  const { addApiKey, addSetupToken, startOAuth, navigate, error, loading } = useWalletStore();
+  const { addApiKey, addSetupToken, startOAuth, navigate, error, loading, clearError } = useWalletStore();
   const [providerId, setProviderId] = useState('anthropic');
   const [authMethod, setAuthMethod] = useState<'api_key' | 'oauth'>('api_key');
   const [label, setLabel] = useState('');
@@ -36,6 +36,7 @@ export function AddCredential() {
 
   function handleProviderChange(id: string) {
     setProviderId(id);
+    clearError();
     const p = PROVIDERS[id];
     if (!p?.authMethods.includes('oauth')) {
       setAuthMethod('api_key');
