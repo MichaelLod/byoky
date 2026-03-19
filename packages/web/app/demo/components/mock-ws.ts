@@ -19,8 +19,8 @@ export interface MockWebSocketPair {
 export function createMockWebSocketPair(
   onMessage?: (from: 'client' | 'server', data: string) => void,
 ): MockWebSocketPair {
-  let clientState = WS_READY_STATE.CONNECTING;
-  let serverState = WS_READY_STATE.CONNECTING;
+  let clientState: number = WS_READY_STATE.CONNECTING;
+  let serverState: number = WS_READY_STATE.CONNECTING;
 
   const client: WebSocketLike = {
     get readyState() { return clientState; },

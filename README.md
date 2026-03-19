@@ -34,7 +34,7 @@
 
 **Byoky** (Bring Your Own Key) is an open-source browser extension that stores your AI API keys and setup tokens in an encrypted vault. Developers integrate via `@byoky/sdk` — their apps can use your credentials without ever seeing them.
 
-- **For users** — One wallet for all your AI credentials. Add keys, approve apps, revoke access. Full visibility into every request.
+- **For users** — One wallet for all your AI credentials. Add keys, approve apps, revoke access, export encrypted backups. Full visibility into every request.
 - **For developers** — Two lines of code. Use your favorite provider SDK. Keys never touch your app.
 
 <p align="center">
@@ -126,6 +126,21 @@ wss.on('connection', async (ws) => {
 });
 ```
 
+### CLI / Local Apps (Bridge Proxy)
+
+CLI tools and desktop apps can route API calls through the bridge — a local HTTP proxy that relays requests to the extension. Keys never leave the extension.
+
+```
+CLI App → HTTP → Bridge (localhost) → Native Messaging → Extension → LLM API
+```
+
+```bash
+npm install -g @byoky/bridge
+byoky-bridge install   # register native messaging host
+```
+
+The [OpenClaw plugin](packages/openclaw-plugin) uses this to let OpenClaw make API calls through your Byoky wallet.
+
 ## Security
 
 | | |
@@ -163,17 +178,15 @@ wss.on('connection', async (ws) => {
 
 ## Architecture
 
-Byoky uses a **proxy model** (like MetaMask's transaction signing). Keys never leave the extension:
+Byoky uses a **proxy model** (like MetaMask's transaction signing). Keys never leave the extension. Three integration paths, same guarantee:
 
 ```
-App → SDK (createFetch) → CustomEvent → Content Script
-  → chrome.runtime.Port → Background Script → fetch(real API + real key)
-  → streams response back through the same chain
+Browser apps  → SDK (createFetch) → Content Script → Extension → LLM API
+Backend apps  → SDK/server (WebSocket) → User's Browser → Extension → LLM API
+CLI/desktop   → HTTP → Bridge (localhost) → Native Messaging → Extension → LLM API
 ```
 
 The SDK provides `createFetch()` — a drop-in `fetch` replacement that routes through the extension. Works with **any provider's native SDK**.
-
-For server-side apps, `createRelay()` opens a WebSocket channel so the backend can make LLM calls through the user's browser. The backend gets a `fetch`-like API via `@byoky/sdk/server`.
 
 ## Project Structure
 
@@ -183,7 +196,7 @@ byoky/
 │   ├── core/          # Shared types, crypto, protocol, provider registry
 │   ├── sdk/           # @byoky/sdk (+ @byoky/sdk/server for backend relay)
 │   ├── extension/     # Browser extension (Chrome, Firefox, Safari) — WXT
-│   ├── bridge/        # @byoky/bridge — native messaging for setup tokens
+│   ├── bridge/        # @byoky/bridge — HTTP proxy + native messaging for CLI/desktop apps
 │   ├── openclaw-plugin/ # OpenClaw provider plugin
 │   ├── demo/          # Demo app — demo.byoky.com
 │   └── web/           # Landing page — byoky.com

@@ -285,10 +285,10 @@ function ForDevelopers() {
                     <CheckIcon />
                   </div>
                   <div>
-                    <h4>Provider discovery</h4>
+                    <h4>CLI &amp; local apps</h4>
                     <p>
-                      Detect which providers the user has. Request specific
-                      providers or accept any available one.
+                      The Byoky Bridge lets CLI tools and desktop apps route
+                      through the wallet via a local HTTP proxy. Keys stay in the extension.
                     </p>
                   </div>
                 </div>

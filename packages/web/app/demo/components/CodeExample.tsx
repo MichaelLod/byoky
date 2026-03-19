@@ -244,6 +244,37 @@ const results = await Promise.all(
   available.map((p) => ask(p, 'Summarize this doc...')),
 );`,
   },
+  {
+    id: 'bridge-proxy',
+    label: 'Bridge Proxy',
+    filename: 'bridge-proxy.sh',
+    description:
+      'CLI and desktop apps route API calls through the local Byoky Bridge. Keys never leave the extension.',
+    code: `# Install the bridge
+npm install -g @byoky/bridge
+byoky-bridge install
+
+# The bridge starts an HTTP proxy on localhost
+# CLI tools send requests to the bridge instead of the real API:
+#
+#   POST http://127.0.0.1:19280/anthropic/v1/messages
+#
+# The bridge relays to the extension via native messaging.
+# The extension injects the real key and calls the actual API.
+# The response flows back through the same chain.
+#
+# Keys NEVER leave the browser extension.
+#
+# Example with curl:
+curl http://127.0.0.1:19280/anthropic/v1/messages \\
+  -H "content-type: application/json" \\
+  -H "anthropic-version: 2023-06-01" \\
+  -d '{
+    "model": "claude-sonnet-4-20250514",
+    "max_tokens": 1024,
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'`,
+  },
 ];
 
 export function CodeExample() {
