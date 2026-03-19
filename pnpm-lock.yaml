@@ -42,34 +42,6 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
-  packages/demo:
-    dependencies:
-      '@byoky/sdk':
-        specifier: workspace:*
-        version: link:../sdk
-      react:
-        specifier: ^19.0.0
-        version: 19.2.4
-      react-dom:
-        specifier: ^19.0.0
-        version: 19.2.4(react@19.2.4)
-    devDependencies:
-      '@types/react':
-        specifier: ^19.0.0
-        version: 19.2.14
-      '@types/react-dom':
-        specifier: ^19.0.0
-        version: 19.2.3(@types/react@19.2.14)
-      '@vitejs/plugin-react':
-        specifier: ^4.4.0
-        version: 4.7.0(vite@6.4.1(@types/node@25.5.0)(jiti@2.6.1))
-      typescript:
-        specifier: ^5.7.0
-        version: 5.9.3
-      vite:
-        specifier: ^6.0.0
-        version: 6.4.1(@types/node@25.5.0)(jiti@2.6.1)
-
   packages/extension:
     dependencies:
       '@byoky/core':
@@ -125,6 +97,9 @@ importers:
 
   packages/web:
     dependencies:
+      '@byoky/sdk':
+        specifier: workspace:*
+        version: link:../sdk
       next:
         specifier: ^15.0.0
         version: 15.5.13(@playwright/test@1.58.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)

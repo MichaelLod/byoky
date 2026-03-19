@@ -151,7 +151,7 @@ function Hero() {
               Install Extension
             </a>
             <a
-              href="https://demo.byoky.com"
+              href="/demo"
               className="btn btn-secondary"
             >
               Try the Demo
@@ -597,7 +597,7 @@ function Footer() {
             >
               GitHub
             </a>
-            <a href="https://demo.byoky.com">
+            <a href="/demo">
               Demo
             </a>
             <a

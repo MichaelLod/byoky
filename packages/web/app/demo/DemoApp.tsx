@@ -1,12 +1,14 @@
+'use client';
+
 import { useState } from 'react';
 import { Byoky, type ByokySession } from '@byoky/sdk';
-import { ConnectWallet } from './ConnectWallet';
-import { Playground } from './Playground';
-import { CodeExample } from './CodeExample';
+import { ConnectWallet } from './components/ConnectWallet';
+import { Playground } from './components/Playground';
+import { CodeExample } from './components/CodeExample';
 
 const byoky = new Byoky({ timeout: 120_000 });
 
-export function App() {
+export function DemoApp() {
   const [session, setSession] = useState<ByokySession | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,7 +47,7 @@ export function App() {
   }
 
   return (
-    <div className="app">
+    <div className="demo-app">
       <header className="header">
         <div className="header-left">
           <h1 className="logo">Byoky <span className="logo-sub">demo</span></h1>
