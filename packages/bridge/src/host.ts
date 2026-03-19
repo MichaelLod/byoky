@@ -92,6 +92,10 @@ function readMessage(): Promise<unknown> {
         resolve(null);
         return;
       }
+      if (msgLength > 1_048_576) {
+        reject(new Error(`Message too large: ${msgLength} bytes (max 1MB)`));
+        return;
+      }
 
       readBody(msgLength);
     }

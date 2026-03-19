@@ -98,7 +98,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     set({ loading: true, error: null });
     try {
       const hash = await hashPassword(password);
-      await browser.storage.local.set({ passwordHash: hash, credentials: [] });
+      await sendInternal('setupWallet', { passwordHash: hash });
       const setupResult = await sendInternal('unlock', { password });
       if (setupResult.success) {
         set({ isInitialized: true, isUnlocked: true, currentPage: 'dashboard', loading: false });
@@ -136,30 +136,10 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   addApiKey: async (providerId: string, label: string, apiKey: string) => {
     set({ loading: true, error: null });
     try {
-      // Get password from background to encrypt
-      const data = await browser.storage.local.get('credentials');
-      const credentials = (data.credentials ?? []) as Array<Record<string, unknown>>;
-
-      // We need the password to encrypt — request it from background
-      // For now, we encrypt client-side by asking user to enter password again
-      // TODO: Use session-stored derived key
-      const cleanKey = apiKey.replace(/\s+/g, '');
-      const encResult = await sendInternal('encryptValue', { value: cleanKey });
-      if (encResult.error) throw new Error(encResult.error as string);
-      const encryptedKey = encResult.encrypted as string;
-
-      const newCred = {
-        id: crypto.randomUUID(),
-        providerId,
-        label,
-        authMethod: 'api_key' as const,
-        encryptedKey,
-        createdAt: Date.now(),
-      };
-
-      credentials.push(newCred);
-      await browser.storage.local.set({ credentials });
-
+      const result = await sendInternal('addCredential', {
+        providerId, label, value: apiKey, authMethod: 'api_key',
+      });
+      if (result.error) throw new Error(result.error as string);
       await get().refreshData();
       set({ currentPage: 'dashboard', loading: false });
     } catch (e) {
@@ -170,26 +150,10 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   addSetupToken: async (providerId: string, label: string, token: string) => {
     set({ loading: true, error: null });
     try {
-      const data = await browser.storage.local.get('credentials');
-      const credentials = (data.credentials ?? []) as Array<Record<string, unknown>>;
-
-      const cleanToken = token.replace(/\s+/g, '');
-      const encResult = await sendInternal('encryptValue', { value: cleanToken });
-      if (encResult.error) throw new Error(encResult.error as string);
-      const encryptedAccessToken = encResult.encrypted as string;
-
-      const newCred = {
-        id: crypto.randomUUID(),
-        providerId,
-        label,
-        authMethod: 'oauth' as const,
-        encryptedAccessToken,
-        createdAt: Date.now(),
-      };
-
-      credentials.push(newCred);
-      await browser.storage.local.set({ credentials });
-
+      const result = await sendInternal('addCredential', {
+        providerId, label, value: token, authMethod: 'oauth',
+      });
+      if (result.error) throw new Error(result.error as string);
       await get().refreshData();
       set({ currentPage: 'dashboard', loading: false });
     } catch (e) {
@@ -212,11 +176,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   },
 
   removeCredential: async (id: string) => {
-    const data = await browser.storage.local.get('credentials');
-    const credentials = (data.credentials ?? []) as Array<{ id: string }>;
-    await browser.storage.local.set({
-      credentials: credentials.filter((c) => c.id !== id),
-    });
+    await sendInternal('removeCredential', { id });
     await get().refreshData();
   },
 

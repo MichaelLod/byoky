@@ -271,9 +271,11 @@ async function startCallbackServer(
     const server = createServer((req, res) => {
       // Only allow requests from localhost (the auth page we serve)
       const reqOrigin = req.headers.origin || '';
-      const isLocalhost =
-        reqOrigin.startsWith('http://127.0.0.1') ||
-        reqOrigin.startsWith('http://localhost');
+      let isLocalhost = false;
+      try {
+        const parsed = new URL(reqOrigin);
+        isLocalhost = parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost';
+      } catch {}
       res.setHeader(
         'Access-Control-Allow-Origin',
         isLocalhost ? reqOrigin : 'http://127.0.0.1',
@@ -341,11 +343,17 @@ async function startCallbackServer(
 
 // --- Auth page served to the browser ---
 
+const VALID_PROVIDER_IDS = new Set(PROVIDERS.map((p) => p.id));
+
 function buildAuthPage(requestProviders: string): string {
-  const providerFilter =
-    requestProviders === 'all'
-      ? '[]'
-      : `[{ id: '${requestProviders}', required: true }]`;
+  let providerFilter: string;
+  if (requestProviders === 'all') {
+    providerFilter = '[]';
+  } else if (VALID_PROVIDER_IDS.has(requestProviders)) {
+    providerFilter = `[{ id: ${JSON.stringify(requestProviders)}, required: true }]`;
+  } else {
+    providerFilter = '[]';
+  }
 
   return `<!DOCTYPE html>
 <html lang="en">

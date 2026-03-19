@@ -139,7 +139,15 @@ npm install -g @byoky/bridge
 byoky-bridge install   # register native messaging host
 ```
 
-The [OpenClaw plugin](packages/openclaw-plugin) uses this to let OpenClaw make API calls through your Byoky wallet.
+### OpenClaw Integration
+
+Use your Byoky wallet as the key provider for [OpenClaw](https://openclaw.dev). The plugin connects through the bridge — your keys never leave the extension, even from the CLI.
+
+```
+OpenClaw → HTTP → Bridge (localhost) → Native Messaging → Extension → LLM API
+```
+
+All 15 providers are available through the plugin. Install the bridge, connect your wallet, and OpenClaw uses your Byoky credentials transparently. See the [OpenClaw plugin](packages/openclaw-plugin) for setup instructions.
 
 ## Security
 

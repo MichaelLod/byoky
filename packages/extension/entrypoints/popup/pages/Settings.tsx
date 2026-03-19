@@ -1,8 +1,6 @@
 import { useState, useRef, type FormEvent } from 'react';
 import { useWalletStore } from '../store';
 import {
-  encrypt,
-  decrypt,
   checkPasswordStrength,
   MIN_PASSWORD_LENGTH,
 } from '@byoky/core';
@@ -15,14 +13,6 @@ async function sendInternal(action: string, payload?: unknown): Promise<Record<s
   }) as Promise<Record<string, unknown>>;
 }
 import { PasswordMeter } from '../components/PasswordMeter';
-
-const VAULT_VERSION = 1;
-
-interface VaultExport {
-  version: number;
-  exportedAt: number;
-  credentials: unknown[];
-}
 
 export function Settings() {
   const { credentials, navigate, lock } = useWalletStore();
@@ -106,43 +96,11 @@ function ExportModal({ onClose }: { onClose: () => void }) {
 
     setExporting(true);
     try {
-      // Get raw credentials from storage
-      const data = await browser.storage.local.get('credentials');
-      const rawCredentials = (data.credentials ?? []) as unknown[];
-
-      // Re-encrypt each credential with the export password (decrypt via background)
-      const reEncrypted = await Promise.all(
-        rawCredentials.map(async (cred: unknown) => {
-          const c = cred as Record<string, unknown>;
-          const result = { ...c };
-
-          if (c.encryptedKey && typeof c.encryptedKey === 'string') {
-            const dec = await sendInternal('decryptValue', { encrypted: c.encryptedKey });
-            if (dec.error) throw new Error(dec.error as string);
-            result.encryptedKey = await encrypt(dec.decrypted as string, exportPassword);
-          }
-          if (c.encryptedAccessToken && typeof c.encryptedAccessToken === 'string') {
-            const dec = await sendInternal('decryptValue', { encrypted: c.encryptedAccessToken });
-            if (dec.error) throw new Error(dec.error as string);
-            result.encryptedAccessToken = await encrypt(dec.decrypted as string, exportPassword);
-          }
-
-          return result;
-        }),
-      );
-
-      const vault: VaultExport = {
-        version: VAULT_VERSION,
-        exportedAt: Date.now(),
-        credentials: reEncrypted,
-      };
-
-      // Encrypt the entire vault JSON with the export password
-      const vaultJson = JSON.stringify(vault);
-      const encryptedVault = await encrypt(vaultJson, exportPassword);
+      const exportResult = await sendInternal('exportVault', { exportPassword });
+      if (exportResult.error) throw new Error(exportResult.error as string);
 
       // Download as .byoky file
-      const blob = new Blob([encryptedVault], { type: 'application/octet-stream' });
+      const blob = new Blob([exportResult.encryptedVault as string], { type: 'application/octet-stream' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -253,48 +211,15 @@ function ImportModal({ onClose }: { onClose: () => void }) {
 
     setImporting(true);
     try {
-      // Decrypt the vault file
-      let vaultJson: string;
-      try {
-        vaultJson = await decrypt(fileData.trim(), importPassword);
-      } catch {
-        setError('Wrong password or corrupted file');
+      const importResult = await sendInternal('importVault', {
+        encryptedVault: fileData,
+        importPassword,
+      });
+      if (importResult.error) {
+        setError(importResult.error as string);
         setImporting(false);
         return;
       }
-
-      const vault = JSON.parse(vaultJson) as VaultExport;
-      if (!vault.version || !vault.credentials) {
-        setError('Invalid vault file format');
-        setImporting(false);
-        return;
-      }
-
-      // Re-encrypt each credential with the master password (via background)
-      const reEncrypted = await Promise.all(
-        vault.credentials.map(async (cred: unknown) => {
-          const c = cred as Record<string, unknown>;
-          const result: Record<string, unknown> = { ...c, id: crypto.randomUUID() };
-
-          if (c.encryptedKey && typeof c.encryptedKey === 'string') {
-            const plainKey = await decrypt(c.encryptedKey, importPassword);
-            const enc = await sendInternal('encryptValue', { value: plainKey });
-            if (enc.error) throw new Error(enc.error as string);
-            result.encryptedKey = enc.encrypted as string;
-          }
-          if (c.encryptedAccessToken && typeof c.encryptedAccessToken === 'string') {
-            const plainToken = await decrypt(c.encryptedAccessToken, importPassword);
-            const enc = await sendInternal('encryptValue', { value: plainToken });
-            if (enc.error) throw new Error(enc.error as string);
-            result.encryptedAccessToken = enc.encrypted as string;
-          }
-
-          return result;
-        }),
-      );
-
-      // Replace vault
-      await browser.storage.local.set({ credentials: reEncrypted });
       await refreshData();
       onClose();
     } catch (err) {

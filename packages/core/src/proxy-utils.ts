@@ -10,6 +10,7 @@ export function validateProxyUrl(providerId: string, url: string): boolean {
   if (!provider) return false;
   try {
     const target = new URL(url);
+    if (target.protocol !== 'https:') return false;
     const base = new URL(provider.baseUrl);
     return target.origin === base.origin;
   } catch {
@@ -27,11 +28,16 @@ export function buildHeaders(
   apiKey: string,
   authMethod: string = 'api_key',
 ): Record<string, string> {
-  const headers = { ...requestHeaders };
+  // Normalize header keys to lowercase to prevent case-sensitive bypass
+  const headers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(requestHeaders)) {
+    headers[key.toLowerCase()] = value;
+  }
 
   // Remove any auth headers the SDK might have set (they're fake session keys)
   delete headers['authorization'];
   delete headers['x-api-key'];
+  delete headers['api-key'];
 
   if (providerId === 'anthropic') {
     headers['x-api-key'] = apiKey;

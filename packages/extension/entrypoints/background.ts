@@ -56,6 +56,8 @@ export default defineBackground(() => {
     [Symbol.iterator]() { return _pendingMap[Symbol.iterator](); },
   };
   let masterPassword: string | null = null;
+  let unlockFailures = 0;
+  let unlockLockedUntil = 0;
 
   // --- Open side panel on icon click (Chrome) ---
 
@@ -75,17 +77,32 @@ export default defineBackground(() => {
 
     if (message.type === 'BYOKY_DISCONNECT') {
       const { sessionKey } = message.payload as { sessionKey: string };
-      sessions.delete(sessionKey);
-      browser.runtime.sendMessage({
-        type: 'BYOKY_INTERNAL',
-        action: 'sessionChanged',
-      }).catch(() => {});
+      const session = sessions.get(sessionKey);
+      if (session) {
+        const disconnectOrigin = resolveOrigin(senderInfo);
+        if (disconnectOrigin === session.appOrigin) {
+          sessions.delete(sessionKey);
+          browser.runtime.sendMessage({
+            type: 'BYOKY_INTERNAL',
+            action: 'sessionChanged',
+          }).catch(() => {});
+        }
+      }
       return;
     }
 
     if (message.type === 'BYOKY_SESSION_STATUS') {
       const { sessionKey } = message.payload as { sessionKey: string };
       const session = sessions.get(sessionKey);
+      // Verify the requesting origin owns this session
+      const statusOrigin = resolveOrigin(senderInfo);
+      if (session && statusOrigin !== 'unknown' && statusOrigin !== session.appOrigin) {
+        return Promise.resolve({
+          type: 'BYOKY_SESSION_STATUS_RESPONSE',
+          requestId: message.requestId,
+          payload: { connected: false },
+        });
+      }
       return Promise.resolve({
         type: 'BYOKY_SESSION_STATUS_RESPONSE',
         requestId: message.requestId,
@@ -99,7 +116,9 @@ export default defineBackground(() => {
     if (message.type === 'BYOKY_SESSION_USAGE') {
       const { sessionKey } = message.payload as { sessionKey: string };
       const session = sessions.get(sessionKey);
-      if (!session) {
+      // Verify the requesting origin owns this session
+      const usageOrigin = resolveOrigin(senderInfo);
+      if (!session || (usageOrigin !== 'unknown' && usageOrigin !== session.appOrigin)) {
         return Promise.resolve({
           type: 'BYOKY_SESSION_USAGE_RESPONSE',
           requestId: message.requestId,
@@ -224,12 +243,6 @@ export default defineBackground(() => {
       try {
         const apiKey = await decryptCredentialKey(credential);
 
-        // Setup tokens (OAuth) route through the native bridge → Claude Code CLI
-        if (credential.authMethod === 'oauth' && msg.providerId === 'anthropic') {
-          await proxyViaBridge(port, msg, apiKey);
-          return;
-        }
-
         if (!validateProxyUrl(msg.providerId, msg.url)) {
           port.postMessage({
             type: 'BYOKY_PROXY_RESPONSE_ERROR',
@@ -237,6 +250,12 @@ export default defineBackground(() => {
             status: 403,
             error: { code: 'INVALID_URL', message: 'Request URL does not match the provider\'s registered base URL' },
           });
+          return;
+        }
+
+        // Setup tokens (OAuth) route through the native bridge → Claude Code CLI
+        if (credential.authMethod === 'oauth' && msg.providerId === 'anthropic') {
+          await proxyViaBridge(port, msg, apiKey);
           return;
         }
 
@@ -527,13 +546,24 @@ export default defineBackground(() => {
   }): Promise<unknown> {
     switch (message.action) {
       case 'unlock': {
+        if (Date.now() < unlockLockedUntil) {
+          const remaining = Math.ceil((unlockLockedUntil - Date.now()) / 1000);
+          return { success: false, error: `Too many attempts. Try again in ${remaining}s` };
+        }
         const { password } = message.payload as { password: string };
         const data = await browser.storage.local.get('passwordHash');
         if (!data.passwordHash) return { success: false };
         const valid = await verifyPassword(password, data.passwordHash as string);
         if (valid) {
           masterPassword = password;
+          unlockFailures = 0;
+          unlockLockedUntil = 0;
           processPendingAfterUnlock();
+        } else {
+          unlockFailures++;
+          if (unlockFailures >= 5) {
+            unlockLockedUntil = Date.now() + 60_000 * Math.min(unlockFailures - 4, 5);
+          }
         }
         return { success: valid };
       }
@@ -553,8 +583,55 @@ export default defineBackground(() => {
       case 'getCredentials':
         return { credentials: await getStoredCredentials() };
 
+      case 'addCredential': {
+        if (!masterPassword) return { error: 'Wallet is locked' };
+        const { providerId: cpId, label: cLabel, value: cValue, authMethod: cAuth } = message.payload as {
+          providerId: string; label: string; value: string; authMethod: 'api_key' | 'oauth';
+        };
+        const cleanValue = cValue.replace(/\s+/g, '');
+        const encValue = await encrypt(cleanValue, masterPassword);
+        const data = await browser.storage.local.get('credentials');
+        const creds = (data.credentials ?? []) as Array<Record<string, unknown>>;
+        const newCred: Record<string, unknown> = {
+          id: crypto.randomUUID(),
+          providerId: cpId,
+          label: cLabel,
+          authMethod: cAuth,
+          createdAt: Date.now(),
+        };
+        if (cAuth === 'api_key') {
+          newCred.encryptedKey = encValue;
+        } else {
+          newCred.encryptedAccessToken = encValue;
+        }
+        creds.push(newCred);
+        await browser.storage.local.set({ credentials: creds });
+        return { success: true };
+      }
+
+      case 'removeCredential': {
+        const { id: rmId } = message.payload as { id: string };
+        const rmData = await browser.storage.local.get('credentials');
+        const rmCreds = (rmData.credentials ?? []) as Array<{ id: string }>;
+        await browser.storage.local.set({
+          credentials: rmCreds.filter((c) => c.id !== rmId),
+        });
+        return { success: true };
+      }
+
+      case 'setupWallet': {
+        const { passwordHash: setupHash } = message.payload as { passwordHash: string };
+        await browser.storage.local.set({ passwordHash: setupHash, credentials: [] });
+        return { success: true };
+      }
+
       case 'getSessions':
-        return { sessions: Array.from(sessions.values()) };
+        return {
+          sessions: Array.from(sessions.values()).map(
+            ({ id, appOrigin, providers, createdAt, expiresAt }) =>
+              ({ id, appOrigin, providers, createdAt, expiresAt }),
+          ),
+        };
 
       case 'getRequestLog': {
         const data = await browser.storage.local.get('requestLog');
@@ -645,6 +722,66 @@ export default defineBackground(() => {
         const { origin } = message.payload as { origin: string };
         await removeTrustedSite(origin);
         return { success: true };
+      }
+
+      case 'exportVault': {
+        if (!masterPassword) return { error: 'Wallet is locked' };
+        const { exportPassword } = message.payload as { exportPassword: string };
+        const pw = masterPassword;
+        const allCreds = await getStoredCredentials();
+        const reEncrypted = await Promise.all(
+          allCreds.map(async (c) => {
+            const result: Record<string, unknown> = { ...c };
+            if ('encryptedKey' in c && typeof c.encryptedKey === 'string') {
+              const plain = await decrypt(c.encryptedKey, pw);
+              result.encryptedKey = await encrypt(plain, exportPassword);
+            }
+            if ('encryptedAccessToken' in c && typeof c.encryptedAccessToken === 'string') {
+              const plain = await decrypt(c.encryptedAccessToken, pw);
+              result.encryptedAccessToken = await encrypt(plain, exportPassword);
+            }
+            return result;
+          }),
+        );
+        const vault = { version: 1, exportedAt: Date.now(), credentials: reEncrypted };
+        const vaultJson = JSON.stringify(vault);
+        const encryptedVault = await encrypt(vaultJson, exportPassword);
+        return { encryptedVault };
+      }
+
+      case 'importVault': {
+        if (!masterPassword) return { error: 'Wallet is locked' };
+        const pw = masterPassword;
+        const { encryptedVault: impVault, importPassword: impPw } = message.payload as {
+          encryptedVault: string; importPassword: string;
+        };
+        let vaultJson: string;
+        try {
+          vaultJson = await decrypt(impVault.trim(), impPw);
+        } catch {
+          return { error: 'Wrong password or corrupted file' };
+        }
+        const vault = JSON.parse(vaultJson) as { version?: number; credentials?: unknown[] };
+        if (!vault.version || !vault.credentials) {
+          return { error: 'Invalid vault file format' };
+        }
+        const imported = await Promise.all(
+          vault.credentials.map(async (cred: unknown) => {
+            const c = cred as Record<string, unknown>;
+            const result: Record<string, unknown> = { ...c, id: crypto.randomUUID() };
+            if (c.encryptedKey && typeof c.encryptedKey === 'string') {
+              const plain = await decrypt(c.encryptedKey, impPw);
+              result.encryptedKey = await encrypt(plain, pw);
+            }
+            if (c.encryptedAccessToken && typeof c.encryptedAccessToken === 'string') {
+              const plain = await decrypt(c.encryptedAccessToken, impPw);
+              result.encryptedAccessToken = await encrypt(plain, pw);
+            }
+            return result;
+          }),
+        );
+        await browser.storage.local.set({ credentials: imported });
+        return { success: true, count: imported.length };
       }
 
       case 'encryptValue': {
@@ -959,13 +1096,15 @@ export default defineBackground(() => {
         body: msg.body,
       });
 
+      let bridgeResponded = false;
+
       nativePort.onMessage.addListener(
         (raw: unknown) => {
           const response = raw as { type: string; requestId: string; status?: number; headers?: Record<string, string>; body?: string; error?: string };
           if (response.requestId !== msg.requestId) return;
 
           if (response.type === 'proxy_response') {
-            // Send meta
+            bridgeResponded = true;
             responsePort.postMessage({
               type: 'BYOKY_PROXY_RESPONSE_META',
               requestId: msg.requestId,
@@ -974,7 +1113,6 @@ export default defineBackground(() => {
               headers: response.headers ?? {},
             });
 
-            // Send body as a single chunk
             if (response.body) {
               responsePort.postMessage({
                 type: 'BYOKY_PROXY_RESPONSE_CHUNK',
@@ -990,6 +1128,7 @@ export default defineBackground(() => {
 
             nativePort.disconnect();
           } else if (response.type === 'proxy_error') {
+            bridgeResponded = true;
             responsePort.postMessage({
               type: 'BYOKY_PROXY_RESPONSE_ERROR',
               requestId: msg.requestId,
@@ -1005,7 +1144,14 @@ export default defineBackground(() => {
       );
 
       nativePort.onDisconnect.addListener(() => {
-        // Bridge disconnected unexpectedly
+        if (!bridgeResponded) {
+          responsePort.postMessage({
+            type: 'BYOKY_PROXY_RESPONSE_ERROR',
+            requestId: msg.requestId,
+            status: 502,
+            error: { code: 'BRIDGE_ERROR', message: 'Bridge disconnected unexpectedly' },
+          });
+        }
       });
     } catch (e) {
       responsePort.postMessage({
@@ -1020,6 +1166,7 @@ export default defineBackground(() => {
   // --- Bridge HTTP proxy (generic local gateway for CLI/desktop apps) ---
 
   let bridgeProxyPort: Runtime.Port | null = null;
+  let authorizedBridgeSessionKey: string | null = null;
 
   async function startBridgeProxy(
     sessionKey: string,
@@ -1047,6 +1194,8 @@ export default defineBackground(() => {
 
       bridgeProxyPort = browser.runtime.connectNative(BRIDGE_HOST);
 
+      authorizedBridgeSessionKey = sessionKey;
+
       // Tell bridge to start the HTTP proxy server
       bridgeProxyPort.postMessage({
         type: 'start-proxy',
@@ -1065,6 +1214,7 @@ export default defineBackground(() => {
 
       bridgeProxyPort.onDisconnect.addListener(() => {
         bridgeProxyPort = null;
+        authorizedBridgeSessionKey = null;
       });
 
       return { success: true, port };
@@ -1082,12 +1232,42 @@ export default defineBackground(() => {
     const headers = msg.headers as Record<string, string>;
     const body = msg.body as string | undefined;
 
+    // Validate the session key matches the one authorized at proxy start
+    if (sessionKey !== authorizedBridgeSessionKey) {
+      bridgeProxyPort?.postMessage({
+        type: 'proxy_http_error',
+        requestId,
+        error: 'Unauthorized session key',
+      });
+      return;
+    }
+
     const session = sessions.get(sessionKey);
     if (!session || !masterPassword) {
       bridgeProxyPort?.postMessage({
         type: 'proxy_http_error',
         requestId,
         error: 'Session not found or wallet locked',
+      });
+      return;
+    }
+
+    if (session.expiresAt < Date.now()) {
+      sessions.delete(sessionKey);
+      bridgeProxyPort?.postMessage({
+        type: 'proxy_http_error',
+        requestId,
+        error: 'Session has expired',
+      });
+      return;
+    }
+
+    const allowanceCheck = await checkAllowance(session.appOrigin, providerId);
+    if (!allowanceCheck.allowed) {
+      bridgeProxyPort?.postMessage({
+        type: 'proxy_http_error',
+        requestId,
+        error: allowanceCheck.reason ?? 'Token allowance exceeded',
       });
       return;
     }
@@ -1136,9 +1316,7 @@ export default defineBackground(() => {
         body: responseBody,
       });
 
-      // Log the request
-      const bridgeSession = { ...session, appOrigin: 'bridge-proxy' } as Session;
-      await logRequest(bridgeSession, { providerId, url, method } as ProxyRequest, response.status);
+      await logRequest(session, { providerId, url, method } as ProxyRequest, response.status);
     } catch (e) {
       bridgeProxyPort?.postMessage({
         type: 'proxy_http_error',
@@ -1200,12 +1378,20 @@ export default defineBackground(() => {
     status: number,
   ): Promise<string> {
     const id = crypto.randomUUID();
+    // Strip query params from URL to avoid logging secrets (e.g. API keys in query strings)
+    let sanitizedUrl = req.url;
+    try {
+      const parsed = new URL(req.url);
+      parsed.search = '';
+      sanitizedUrl = parsed.toString();
+    } catch {}
+
     const entry: RequestLogEntry = {
       id,
       sessionId: session.id,
       appOrigin: session.appOrigin,
       providerId: req.providerId,
-      url: req.url,
+      url: sanitizedUrl,
       method: req.method,
       status,
       timestamp: Date.now(),

@@ -13,6 +13,8 @@ export default function Home() {
       <div className="divider" />
       <Providers />
       <div className="divider" />
+      <OpenClawIntegration />
+      <div className="divider" />
       <OpenSource />
       <Footer />
     </>
@@ -553,6 +555,76 @@ function Providers() {
   );
 }
 
+/* ─── OpenClaw Integration ─────────────────────── */
+
+function OpenClawIntegration() {
+  return (
+    <section className="openclaw-section">
+      <div className="container">
+        <FadeIn>
+          <div className="openclaw-card">
+            <div className="openclaw-badge">Integration</div>
+            <div className="openclaw-content">
+              <div className="openclaw-header">
+                <div className="openclaw-logo">
+                  <TerminalIcon />
+                </div>
+                <div>
+                  <h3>Works with OpenClaw</h3>
+                  <p className="openclaw-tagline">
+                    Use your Byoky wallet as the key provider for OpenClaw.
+                  </p>
+                </div>
+              </div>
+              <p className="openclaw-desc">
+                The OpenClaw plugin connects through the Byoky Bridge — a local
+                HTTP proxy that routes every API call through your extension. Your
+                keys never leave the wallet, even when OpenClaw makes requests
+                from the CLI.
+              </p>
+              <div className="openclaw-flow">
+                <div className="openclaw-flow-step">
+                  <span className="openclaw-flow-label">OpenClaw</span>
+                </div>
+                <span className="openclaw-flow-arrow">&rarr;</span>
+                <div className="openclaw-flow-step">
+                  <span className="openclaw-flow-label">Bridge</span>
+                </div>
+                <span className="openclaw-flow-arrow">&rarr;</span>
+                <div className="openclaw-flow-step openclaw-flow-highlight">
+                  <span className="openclaw-flow-label">Extension</span>
+                </div>
+                <span className="openclaw-flow-arrow">&rarr;</span>
+                <div className="openclaw-flow-step">
+                  <span className="openclaw-flow-label">LLM API</span>
+                </div>
+              </div>
+              <div className="openclaw-actions">
+                <a
+                  href="https://github.com/MichaelLod/byoky/tree/main/packages/openclaw-plugin"
+                  className="btn btn-secondary btn-sm"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  View Plugin
+                </a>
+                <a
+                  href="https://github.com/MichaelLod/byoky/tree/main/packages/bridge"
+                  className="btn btn-secondary btn-sm"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Bridge Docs
+                </a>
+              </div>
+            </div>
+          </div>
+        </FadeIn>
+      </div>
+    </section>
+  );
+}
+
 /* ─── Open Source ───────────────────────────────── */
 
 function OpenSource() {
@@ -715,6 +787,15 @@ function CheckIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+
+function TerminalIcon() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="4 17 10 11 4 5" />
+      <line x1="12" y1="19" x2="20" y2="19" />
     </svg>
   );
 }

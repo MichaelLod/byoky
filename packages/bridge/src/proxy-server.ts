@@ -52,6 +52,7 @@ type PendingResponse = {
   reject: (error: Error) => void;
 };
 
+const MAX_PENDING_REQUESTS = 100;
 const pendingRequests = new Map<string, PendingResponse>();
 
 export function handleProxyResponse(msg: ProxyResponseIn | ProxyErrorIn): void {
@@ -74,8 +75,15 @@ export function startProxyServer(config: ProxyConfig): Server {
   const { port, sessionKey, providers, sendToExtension } = config;
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-    // No CORS headers — CLI tools don't need them, and allowing cross-origin
-    // requests would let any website use the proxy to make authenticated API calls.
+    // Reject DNS rebinding: only accept requests with a localhost Host header
+    const host = req.headers.host || '';
+    const hostWithoutPort = host.split(':')[0];
+    if (hostWithoutPort !== '127.0.0.1' && hostWithoutPort !== 'localhost') {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Forbidden: invalid Host header' }));
+      return;
+    }
+
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
       res.end();
@@ -156,6 +164,12 @@ export function startProxyServer(config: ProxyConfig): Server {
       headers,
       body: body || undefined,
     };
+
+    if (pendingRequests.size >= MAX_PENDING_REQUESTS) {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Too many concurrent requests' }));
+      return;
+    }
 
     try {
       const response = await new Promise<ProxyResponseIn>((resolve, reject) => {

@@ -51,12 +51,14 @@ export default defineContentScript({
           }
         }).catch(() => {});
       } else if (data.type === 'BYOKY_INTERNAL_FROM_PAGE') {
-        // Only allow internal messages from localhost/127.0.0.1
-        const origin = window.location.origin;
-        if (
-          !origin.startsWith('http://localhost') &&
-          !origin.startsWith('http://127.0.0.1')
-        ) {
+        // Only allow from localhost/127.0.0.1, checked by exact hostname match
+        const hostname = window.location.hostname;
+        if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+          return;
+        }
+        // Only allow safe actions — never expose admin/crypto actions to web pages
+        const ALLOWED_PAGE_ACTIONS = ['startBridgeProxy', 'checkBridge', 'startOAuth'];
+        if (!ALLOWED_PAGE_ACTIONS.includes(data.action)) {
           return;
         }
         browser.runtime.sendMessage({

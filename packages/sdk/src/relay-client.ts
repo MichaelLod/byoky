@@ -28,12 +28,25 @@ export function createRelayClient(
   let ws: WebSocket;
   let pingInterval: ReturnType<typeof setInterval> | undefined;
 
-  if (!wsUrl.startsWith('wss://') && !wsUrl.startsWith('ws://localhost') && !wsUrl.startsWith('ws://127.0.0.1')) {
+  try {
+    const parsed = new URL(wsUrl);
+    const isSecure = parsed.protocol === 'wss:';
+    const isLocalWs = parsed.protocol === 'ws:' &&
+      (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1');
+    if (!isSecure && !isLocalWs) {
+      status = 'disconnected';
+      return {
+        get status() { return status; },
+        close() {},
+        onClose(cb) { cb('Insecure WebSocket URL rejected — use wss:// for non-localhost connections'); return () => {}; },
+      };
+    }
+  } catch {
     status = 'disconnected';
     return {
       get status() { return status; },
       close() {},
-      onClose(cb) { cb('Insecure WebSocket URL rejected — use wss:// for non-localhost connections'); return () => {}; },
+      onClose(cb) { cb('Invalid WebSocket URL'); return () => {}; },
     };
   }
 
@@ -51,10 +64,11 @@ export function createRelayClient(
   ws.onopen = () => {
     status = 'connected';
 
-    // Send hello with session info
+    // Send hello with a relay-specific ID (never expose the real session key to the relay server)
+    const relayId = `relay_${crypto.randomUUID().replace(/-/g, '')}`;
     ws.send(JSON.stringify({
       type: 'relay:hello',
-      sessionId: sessionKey,
+      sessionId: relayId,
       providers,
     }));
 
