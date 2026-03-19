@@ -36,25 +36,25 @@ function Hero() {
         <FadeIn delay={0.1}>
           <div className="hero-mascot">
             <svg width="80" height="80" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <polygon points="40,5 64,3 88,5 64,14" fill="#7c3aed"/>
-              <polygon points="40,5 22,12 44,18" fill="#6d28d9"/>
-              <polygon points="88,5 106,12 84,18" fill="#6d28d9"/>
-              <polygon points="40,5 44,18 64,14" fill="#5b21b6"/>
-              <polygon points="88,5 84,18 64,14" fill="#5b21b6"/>
-              <polygon points="22,12 12,26 36,26" fill="#4c1d95"/>
-              <polygon points="22,12 36,26 44,18" fill="#5b21b6"/>
-              <polygon points="106,12 116,26 92,26" fill="#4c1d95"/>
-              <polygon points="106,12 92,26 84,18" fill="#5b21b6"/>
-              <polygon points="44,18 36,26 56,30" fill="#3b1580"/>
-              <polygon points="84,18 92,26 72,30" fill="#3b1580"/>
-              <polygon points="44,18 56,30 64,14" fill="#4c1d95"/>
-              <polygon points="84,18 72,30 64,14" fill="#4c1d95"/>
-              <polygon points="64,14 56,30 64,28" fill="#3b1580"/>
-              <polygon points="64,14 72,30 64,28" fill="#3b1580"/>
-              <polygon points="12,26 6,42 30,40" fill="#2e1065"/>
-              <polygon points="12,26 30,40 36,26" fill="#2e1065"/>
-              <polygon points="116,26 122,42 98,40" fill="#2e1065"/>
-              <polygon points="116,26 98,40 92,26" fill="#2e1065"/>
+              <polygon points="40,5 64,3 88,5 64,14" fill="#f59e0b"/>
+              <polygon points="40,5 22,12 44,18" fill="#d97706"/>
+              <polygon points="88,5 106,12 84,18" fill="#d97706"/>
+              <polygon points="40,5 44,18 64,14" fill="#b45309"/>
+              <polygon points="88,5 84,18 64,14" fill="#b45309"/>
+              <polygon points="22,12 12,26 36,26" fill="#92400e"/>
+              <polygon points="22,12 36,26 44,18" fill="#b45309"/>
+              <polygon points="106,12 116,26 92,26" fill="#92400e"/>
+              <polygon points="106,12 92,26 84,18" fill="#b45309"/>
+              <polygon points="44,18 36,26 56,30" fill="#78350f"/>
+              <polygon points="84,18 92,26 72,30" fill="#78350f"/>
+              <polygon points="44,18 56,30 64,14" fill="#92400e"/>
+              <polygon points="84,18 72,30 64,14" fill="#92400e"/>
+              <polygon points="64,14 56,30 64,28" fill="#78350f"/>
+              <polygon points="64,14 72,30 64,28" fill="#78350f"/>
+              <polygon points="12,26 6,42 30,40" fill="#451a03"/>
+              <polygon points="12,26 30,40 36,26" fill="#451a03"/>
+              <polygon points="116,26 122,42 98,40" fill="#451a03"/>
+              <polygon points="116,26 98,40 92,26" fill="#451a03"/>
               <polygon points="36,26 30,40 48,38" fill="#1e0a4a"/>
               <polygon points="36,26 48,38 56,30" fill="#251055"/>
               <polygon points="92,26 98,40 80,38" fill="#1e0a4a"/>
@@ -88,9 +88,9 @@ function Hero() {
               <polygon points="74,96 64,100 72,122" fill="#0a0420"/>
               <polygon points="56,122 64,100 64,128" fill="#0d0525"/>
               <polygon points="72,122 64,100 64,128" fill="#0d0525"/>
-              <circle cx="24" cy="46" r="4.5" fill="#a78bfa"/>
+              <circle cx="24" cy="46" r="4.5" fill="#fcd34d"/>
               <circle cx="24" cy="46" r="2.2" fill="#e0d4ff"/>
-              <circle cx="104" cy="46" r="4.5" fill="#a78bfa"/>
+              <circle cx="104" cy="46" r="4.5" fill="#fcd34d"/>
               <circle cx="104" cy="46" r="2.2" fill="#e0d4ff"/>
             </svg>
           </div>
@@ -383,10 +383,72 @@ function Providers() {
                 <div className="provider-type">API Key</div>
               </div>
             </div>
+            <div className="provider-card">
+              <div className="provider-logo provider-logo-mistral">M</div>
+              <div>
+                <div className="provider-name">Mistral</div>
+                <div className="provider-type">API Key</div>
+              </div>
+            </div>
+            <div className="provider-card">
+              <div className="provider-logo provider-logo-xai">X</div>
+              <div>
+                <div className="provider-name">xAI (Grok)</div>
+                <div className="provider-type">API Key</div>
+              </div>
+            </div>
+            <div className="provider-card">
+              <div className="provider-logo provider-logo-deepseek">D</div>
+              <div>
+                <div className="provider-name">DeepSeek</div>
+                <div className="provider-type">API Key</div>
+              </div>
+            </div>
           </div>
-          <p className="providers-more">
-            More providers coming. Or add any provider with a custom API key.
-          </p>
+          <div className="providers-row" style={{ marginTop: '12px' }}>
+            <div className="provider-card">
+              <div className="provider-logo provider-logo-cohere">C</div>
+              <div>
+                <div className="provider-name">Cohere</div>
+                <div className="provider-type">API Key</div>
+              </div>
+            </div>
+            <div className="provider-card">
+              <div className="provider-logo provider-logo-groq">G</div>
+              <div>
+                <div className="provider-name">Groq</div>
+                <div className="provider-type">API Key</div>
+              </div>
+            </div>
+            <div className="provider-card">
+              <div className="provider-logo provider-logo-perplexity">P</div>
+              <div>
+                <div className="provider-name">Perplexity</div>
+                <div className="provider-type">API Key</div>
+              </div>
+            </div>
+            <div className="provider-card">
+              <div className="provider-logo provider-logo-huggingface">H</div>
+              <div>
+                <div className="provider-name">Hugging Face</div>
+                <div className="provider-type">API Key</div>
+              </div>
+            </div>
+            <div className="provider-card">
+              <div className="provider-logo provider-logo-openrouter">O</div>
+              <div>
+                <div className="provider-name">OpenRouter</div>
+                <div className="provider-type">API Key</div>
+              </div>
+            </div>
+            <div className="provider-card">
+              <div className="provider-logo provider-logo-more">+</div>
+              <div>
+                <div className="provider-name">+ 5 more</div>
+                <div className="provider-type">Together, Fireworks, Replicate, Azure, Custom</div>
+              </div>
+            </div>
+          </div>
         </FadeIn>
       </div>
     </section>

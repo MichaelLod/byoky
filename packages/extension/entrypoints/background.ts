@@ -3,6 +3,7 @@ import {
   type Session,
   type RequestLogEntry,
   type PendingApproval,
+  type TrustedSite,
   type ConnectRequest,
   type ConnectResponse,
   type ProxyRequest,
@@ -14,6 +15,32 @@ import {
 
 export default defineBackground(() => {
   const sessions = new Map<string, Session>();
+  function updateBadge() {
+    const count = _pendingMap.size;
+    const text = count > 0 ? String(count) : '';
+    try {
+      browser.action.setBadgeText({ text });
+      browser.action.setBadgeBackgroundColor({ color: '#f59e0b' });
+    } catch {
+      // Fallback for older APIs
+    }
+  }
+
+  type PendingEntry = {
+    approval: PendingApproval;
+    originalMessageId: string;
+    resolve: (response: unknown) => void;
+    tabId?: number;
+  };
+  const _pendingMap = new Map<string, PendingEntry>();
+  const pendingApprovals = {
+    get size() { return _pendingMap.size; },
+    get(id: string) { return _pendingMap.get(id); },
+    set(id: string, entry: PendingEntry) { _pendingMap.set(id, entry); updateBadge(); },
+    delete(id: string) { const r = _pendingMap.delete(id); updateBadge(); return r; },
+    values() { return _pendingMap.values(); },
+    [Symbol.iterator]() { return _pendingMap[Symbol.iterator](); },
+  };
   let masterPassword: string | null = null;
 
   // --- Open side panel on icon click (Chrome) ---
@@ -35,6 +62,36 @@ export default defineBackground(() => {
       return;
     }
 
+    if (message.type === 'BYOKY_SESSION_STATUS') {
+      const { sessionKey } = message.payload as { sessionKey: string };
+      const session = sessions.get(sessionKey);
+      return Promise.resolve({
+        type: 'BYOKY_SESSION_STATUS_RESPONSE',
+        requestId: message.requestId,
+        payload: {
+          connected: !!session && session.expiresAt > Date.now(),
+          expiresAt: session?.expiresAt,
+        },
+      });
+    }
+
+    if (message.type === 'BYOKY_SESSION_USAGE') {
+      const { sessionKey } = message.payload as { sessionKey: string };
+      const session = sessions.get(sessionKey);
+      if (!session) {
+        return Promise.resolve({
+          type: 'BYOKY_SESSION_USAGE_RESPONSE',
+          requestId: message.requestId,
+          payload: null,
+        });
+      }
+      return getSessionUsage(session.id).then((usage) => ({
+        type: 'BYOKY_SESSION_USAGE_RESPONSE',
+        requestId: message.requestId,
+        payload: usage,
+      }));
+    }
+
     if (message.type === 'BYOKY_INTERNAL') {
       return handleInternal(message);
     }
@@ -44,6 +101,11 @@ export default defineBackground(() => {
 
   browser.runtime.onConnect.addListener((port) => {
     if (port.name !== 'byoky-proxy') return;
+
+    // Capture the origin from the port sender (set by Chrome, can't be spoofed)
+    const portOrigin = port.sender?.tab?.url
+      ? new URL(port.sender.tab.url).origin
+      : null;
 
     port.onMessage.addListener(async (msg: ProxyRequest) => {
       if (msg.sessionKey == null) return;
@@ -55,6 +117,39 @@ export default defineBackground(() => {
           requestId: msg.requestId,
           status: 401,
           error: { code: 'SESSION_EXPIRED', message: 'Invalid or expired session' },
+        });
+        return;
+      }
+
+      // Check session expiry
+      if (session.expiresAt < Date.now()) {
+        sessions.delete(msg.sessionKey);
+        port.postMessage({
+          type: 'BYOKY_PROXY_RESPONSE_ERROR',
+          requestId: msg.requestId,
+          status: 401,
+          error: { code: 'SESSION_EXPIRED', message: 'Session has expired' },
+        });
+        return;
+      }
+
+      // Verify the requesting origin matches the session's approved origin
+      if (portOrigin && portOrigin !== session.appOrigin) {
+        port.postMessage({
+          type: 'BYOKY_PROXY_RESPONSE_ERROR',
+          requestId: msg.requestId,
+          status: 403,
+          error: { code: 'PROVIDER_UNAVAILABLE', message: 'Origin mismatch — request rejected' },
+        });
+        return;
+      }
+
+      if (!masterPassword) {
+        port.postMessage({
+          type: 'BYOKY_PROXY_RESPONSE_ERROR',
+          requestId: msg.requestId,
+          status: 423,
+          error: { code: 'WALLET_LOCKED', message: 'Wallet is locked' },
         });
         return;
       }
@@ -72,6 +167,13 @@ export default defineBackground(() => {
 
       try {
         const apiKey = await decryptCredentialKey(credential);
+
+        // Setup tokens (OAuth) route through the native bridge → Claude Code CLI
+        if (credential.authMethod === 'oauth' && msg.providerId === 'anthropic') {
+          await proxyViaBridge(port, msg, apiKey);
+          return;
+        }
+
         const realHeaders = buildHeaders(msg.providerId, msg.headers, apiKey, credential.authMethod);
 
         const response = await fetch(msg.url, {
@@ -93,8 +195,9 @@ export default defineBackground(() => {
           headers: respHeaders,
         });
 
-        await logRequest(session, msg, response.status);
+        const logEntryId = await logRequest(session, msg, response.status);
 
+        const chunks: string[] = [];
         if (response.body) {
           const reader = response.body.getReader();
           const decoder = new TextDecoder();
@@ -102,10 +205,12 @@ export default defineBackground(() => {
           for (;;) {
             const { done, value } = await reader.read();
             if (done) break;
+            const text = decoder.decode(value, { stream: true });
+            chunks.push(text);
             port.postMessage({
               type: 'BYOKY_PROXY_RESPONSE_CHUNK',
               requestId: msg.requestId,
-              chunk: decoder.decode(value, { stream: true }),
+              chunk: text,
             });
           }
         }
@@ -114,6 +219,18 @@ export default defineBackground(() => {
           type: 'BYOKY_PROXY_RESPONSE_DONE',
           requestId: msg.requestId,
         });
+
+        // Parse token usage from the buffered response
+        const fullBody = chunks.join('');
+        const model = parseModel(msg.body);
+        const usage = parseUsage(msg.providerId, fullBody);
+        if (usage || model) {
+          await updateLogEntry(logEntryId, {
+            inputTokens: usage?.inputTokens,
+            outputTokens: usage?.outputTokens,
+            model,
+          });
+        }
       } catch (error) {
         port.postMessage({
           type: 'BYOKY_PROXY_RESPONSE_ERROR',
@@ -133,16 +250,63 @@ export default defineBackground(() => {
   ): Promise<unknown> {
     const origin = sender.tab?.url ? new URL(sender.tab.url).origin : 'unknown';
 
-    if (!masterPassword) {
-      // Auto-open the wallet so the user can unlock (like MetaMask)
-      openWalletUI(sender.tab?.id);
-      return {
-        type: 'BYOKY_ERROR',
-        requestId: message.id,
-        payload: { code: 'WALLET_LOCKED', message: 'Wallet is locked' },
-      };
-    }
+    // Queue for user approval (whether locked or unlocked)
+    const approval: PendingApproval = {
+      id: crypto.randomUUID(),
+      appOrigin: origin,
+      providers: message.payload.providers ?? [],
+      timestamp: Date.now(),
+    };
 
+    openWalletUI(sender.tab?.id);
+
+    return new Promise((resolve) => {
+      pendingApprovals.set(approval.id, {
+        approval,
+        originalMessageId: message.id,
+        resolve,
+        tabId: sender.tab?.id,
+      });
+
+      // If already unlocked, check trusted sites and either auto-approve or notify for approval
+      if (masterPassword) {
+        getTrustedSites().then((trustedSites) => {
+          const entry = pendingApprovals.get(approval.id);
+          if (!entry) return;
+          if (trustedSites.some((s) => s.origin === origin)) {
+            // Auto-approve trusted origin
+            pendingApprovals.delete(approval.id);
+            createSession(message, origin).then((response) => entry.resolve(response));
+            return;
+          }
+          // Notify popup to show approval UI
+          browser.runtime.sendMessage({
+            type: 'BYOKY_INTERNAL',
+            action: 'newPendingApproval',
+          }).catch(() => {});
+        });
+      }
+      // If locked, the approval stays queued. When user unlocks, processPendingAfterUnlock() runs.
+
+      // Auto-reject after 2 minutes
+      setTimeout(() => {
+        const entry = pendingApprovals.get(approval.id);
+        if (entry) {
+          pendingApprovals.delete(approval.id);
+          entry.resolve({
+            type: 'BYOKY_ERROR',
+            requestId: entry.originalMessageId,
+            payload: { code: 'USER_REJECTED', message: 'Connection request timed out' },
+          });
+        }
+      }, 120_000);
+    });
+  }
+
+  async function createSession(
+    message: { id: string; payload: ConnectRequest },
+    origin: string,
+  ): Promise<unknown> {
     const credentials = await getStoredCredentials();
     const request = message.payload;
     const sessionKey = `byk_${crypto.randomUUID().replace(/-/g, '')}`;
@@ -192,16 +356,14 @@ export default defineBackground(() => {
 
     sessions.set(sessionKey, session);
 
-    const response: ConnectResponse = {
-      sessionKey,
-      proxyUrl: 'extension-proxy',
-      providers: providerMap,
-    };
-
     return {
       type: 'BYOKY_CONNECT_RESPONSE',
       requestId: message.id,
-      payload: response,
+      payload: {
+        sessionKey,
+        proxyUrl: 'extension-proxy',
+        providers: providerMap,
+      } as ConnectResponse,
     };
   }
 
@@ -215,13 +377,15 @@ export default defineBackground(() => {
         const data = await browser.storage.local.get('passwordHash');
         if (!data.passwordHash) return { success: false };
         const valid = await verifyPassword(password, data.passwordHash as string);
-        if (valid) masterPassword = password;
+        if (valid) {
+          masterPassword = password;
+          processPendingAfterUnlock();
+        }
         return { success: valid };
       }
 
       case 'lock':
         masterPassword = null;
-        sessions.clear();
         return { success: true };
 
       case 'isUnlocked':
@@ -248,10 +412,16 @@ export default defineBackground(() => {
         for (const [key, s] of sessions) {
           if (s.id === sessionId) {
             sessions.delete(key);
+            broadcastRevocation(key, s.appOrigin);
             break;
           }
         }
         return { success: true };
+      }
+
+      case 'checkBridge': {
+        const available = await checkBridgeAvailable();
+        return { available };
       }
 
       case 'startOAuth': {
@@ -260,6 +430,59 @@ export default defineBackground(() => {
           label: string;
         };
         return handleOAuthFlow(providerId, label);
+      }
+
+      case 'getPendingApprovals':
+        return {
+          approvals: [...pendingApprovals.values()].map((p) => p.approval),
+        };
+
+      case 'approveConnect': {
+        const { approvalId, trust } = message.payload as {
+          approvalId: string;
+          trust: boolean;
+        };
+        const pending = pendingApprovals.get(approvalId);
+        if (!pending) return { success: false, error: 'Approval not found' };
+
+        pendingApprovals.delete(approvalId);
+
+        if (trust) {
+          await addTrustedSite(pending.approval.appOrigin);
+        }
+
+        const response = await createSession(
+          {
+            id: pending.originalMessageId,
+            payload: { providers: pending.approval.providers } as ConnectRequest,
+          },
+          pending.approval.appOrigin,
+        );
+        pending.resolve(response);
+        return { success: true };
+      }
+
+      case 'rejectConnect': {
+        const { approvalId } = message.payload as { approvalId: string };
+        const pending = pendingApprovals.get(approvalId);
+        if (!pending) return { success: false, error: 'Approval not found' };
+
+        pendingApprovals.delete(approvalId);
+        pending.resolve({
+          type: 'BYOKY_ERROR',
+          requestId: pending.originalMessageId,
+          payload: { code: 'USER_REJECTED', message: 'User rejected the connection request' },
+        });
+        return { success: true };
+      }
+
+      case 'getTrustedSites':
+        return { sites: await getTrustedSites() };
+
+      case 'removeTrustedSite': {
+        const { origin } = message.payload as { origin: string };
+        await removeTrustedSite(origin);
+        return { success: true };
       }
 
       default:
@@ -406,6 +629,132 @@ export default defineBackground(() => {
     return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   }
 
+  // --- Bridge for setup tokens (native messaging → Claude Code CLI) ---
+
+  const BRIDGE_HOST = 'com.byoky.bridge';
+  let bridgeAvailable: boolean | null = null;
+
+  async function checkBridgeAvailable(): Promise<boolean> {
+    if (bridgeAvailable !== null) return bridgeAvailable;
+    try {
+      const port = browser.runtime.connectNative(BRIDGE_HOST);
+      return new Promise((resolve) => {
+        const timeout = setTimeout(() => {
+          port.disconnect();
+          bridgeAvailable = false;
+          resolve(false);
+        }, 2000);
+
+        port.onMessage.addListener((msg: { type: string }) => {
+          clearTimeout(timeout);
+          port.disconnect();
+          bridgeAvailable = msg.type === 'pong';
+          resolve(bridgeAvailable);
+        });
+
+        port.onDisconnect.addListener(() => {
+          clearTimeout(timeout);
+          bridgeAvailable = false;
+          resolve(false);
+        });
+
+        port.postMessage({ type: 'ping' });
+      });
+    } catch {
+      bridgeAvailable = false;
+      return false;
+    }
+  }
+
+  async function proxyViaBridge(
+    responsePort: browser.Runtime.Port,
+    msg: ProxyRequest,
+    setupToken: string,
+  ): Promise<void> {
+    const available = await checkBridgeAvailable();
+    if (!available) {
+      responsePort.postMessage({
+        type: 'BYOKY_PROXY_RESPONSE_ERROR',
+        requestId: msg.requestId,
+        status: 503,
+        error: {
+          code: 'BRIDGE_UNAVAILABLE',
+          message: 'Byoky Bridge not installed. Run: npm install -g @byoky/bridge && byoky-bridge install',
+        },
+      });
+      return;
+    }
+
+    try {
+      const nativePort = browser.runtime.connectNative(BRIDGE_HOST);
+
+      nativePort.postMessage({
+        type: 'proxy',
+        requestId: msg.requestId,
+        setupToken,
+        url: msg.url,
+        method: msg.method,
+        headers: msg.headers,
+        body: msg.body,
+      });
+
+      nativePort.onMessage.addListener(
+        (response: { type: string; requestId: string; status?: number; headers?: Record<string, string>; body?: string; error?: string }) => {
+          if (response.requestId !== msg.requestId) return;
+
+          if (response.type === 'proxy_response') {
+            // Send meta
+            responsePort.postMessage({
+              type: 'BYOKY_PROXY_RESPONSE_META',
+              requestId: msg.requestId,
+              status: response.status,
+              statusText: response.status === 200 ? 'OK' : 'Error',
+              headers: response.headers ?? {},
+            });
+
+            // Send body as a single chunk
+            if (response.body) {
+              responsePort.postMessage({
+                type: 'BYOKY_PROXY_RESPONSE_CHUNK',
+                requestId: msg.requestId,
+                chunk: response.body,
+              });
+            }
+
+            responsePort.postMessage({
+              type: 'BYOKY_PROXY_RESPONSE_DONE',
+              requestId: msg.requestId,
+            });
+
+            nativePort.disconnect();
+          } else if (response.type === 'proxy_error') {
+            responsePort.postMessage({
+              type: 'BYOKY_PROXY_RESPONSE_ERROR',
+              requestId: msg.requestId,
+              status: 502,
+              error: {
+                code: 'BRIDGE_ERROR',
+                message: response.error || 'Bridge request failed',
+              },
+            });
+            nativePort.disconnect();
+          }
+        },
+      );
+
+      nativePort.onDisconnect.addListener(() => {
+        // Bridge disconnected unexpectedly
+      });
+    } catch (e) {
+      responsePort.postMessage({
+        type: 'BYOKY_PROXY_RESPONSE_ERROR',
+        requestId: msg.requestId,
+        status: 502,
+        error: { code: 'BRIDGE_ERROR', message: (e as Error).message },
+      });
+    }
+  }
+
   function openWalletUI(tabId?: number) {
     // Chrome: open side panel
     if (typeof chrome !== 'undefined' && chrome.sidePanel && tabId) {
@@ -463,9 +812,10 @@ export default defineBackground(() => {
     delete headers['x-api-key'];
 
     if (providerId === 'anthropic') {
-      // Both API keys and setup tokens use x-api-key for Anthropic
       headers['x-api-key'] = apiKey;
       headers['anthropic-version'] = headers['anthropic-version'] ?? '2023-06-01';
+    } else if (providerId === 'azure_openai') {
+      headers['api-key'] = apiKey;
     } else {
       headers['authorization'] = `Bearer ${apiKey}`;
     }
@@ -477,9 +827,10 @@ export default defineBackground(() => {
     session: Session,
     req: ProxyRequest,
     status: number,
-  ) {
+  ): Promise<string> {
+    const id = crypto.randomUUID();
     const entry: RequestLogEntry = {
-      id: crypto.randomUUID(),
+      id,
       sessionId: session.id,
       appOrigin: session.appOrigin,
       providerId: req.providerId,
@@ -496,6 +847,188 @@ export default defineBackground(() => {
     // Keep last 500 entries
     await browser.storage.local.set({
       requestLog: log.slice(0, 500),
+    });
+
+    return id;
+  }
+
+  async function updateLogEntry(
+    entryId: string,
+    updates: { inputTokens?: number; outputTokens?: number; model?: string },
+  ) {
+    const data = await browser.storage.local.get('requestLog');
+    const log = (data.requestLog as RequestLogEntry[]) ?? [];
+    const entry = log.find((e) => e.id === entryId);
+    if (!entry) return;
+    if (updates.inputTokens != null) entry.inputTokens = updates.inputTokens;
+    if (updates.outputTokens != null) entry.outputTokens = updates.outputTokens;
+    if (updates.model) entry.model = updates.model;
+    await browser.storage.local.set({ requestLog: log });
+  }
+
+  function parseModel(body?: string): string | undefined {
+    if (!body) return undefined;
+    try {
+      const parsed = JSON.parse(body);
+      return parsed.model ?? undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  function parseUsage(
+    providerId: string,
+    body: string,
+  ): { inputTokens: number; outputTokens: number } | undefined {
+    try {
+      // For streaming responses (SSE), try to find usage in the last data chunk
+      if (body.includes('data: ')) {
+        const lines = body.split('\n').filter((l) => l.startsWith('data: ') && !l.includes('[DONE]'));
+        // Anthropic streaming: message_stop event has usage in a preceding message_delta
+        // OpenAI streaming: last chunk may include usage
+        for (let i = lines.length - 1; i >= 0; i--) {
+          const json = lines[i].replace('data: ', '');
+          try {
+            const parsed = JSON.parse(json);
+            const usage = extractUsageFromParsed(providerId, parsed);
+            if (usage) return usage;
+          } catch {
+            continue;
+          }
+        }
+        return undefined;
+      }
+
+      const parsed = JSON.parse(body);
+      return extractUsageFromParsed(providerId, parsed);
+    } catch {
+      return undefined;
+    }
+  }
+
+  function extractUsageFromParsed(
+    providerId: string,
+    parsed: Record<string, unknown>,
+  ): { inputTokens: number; outputTokens: number } | undefined {
+    // Anthropic: { usage: { input_tokens, output_tokens } }
+    if (providerId === 'anthropic') {
+      const usage = parsed.usage as Record<string, number> | undefined;
+      if (usage?.input_tokens != null && usage?.output_tokens != null) {
+        return { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens };
+      }
+    }
+
+    // Gemini: { usageMetadata: { promptTokenCount, candidatesTokenCount } }
+    if (providerId === 'gemini') {
+      const meta = parsed.usageMetadata as Record<string, number> | undefined;
+      if (meta?.promptTokenCount != null) {
+        return {
+          inputTokens: meta.promptTokenCount,
+          outputTokens: meta.candidatesTokenCount ?? 0,
+        };
+      }
+    }
+
+    // OpenAI-compatible (openai, groq, together, deepseek, xai, perplexity, fireworks, openrouter, mistral, azure_openai):
+    // { usage: { prompt_tokens, completion_tokens } }
+    const usage = parsed.usage as Record<string, number> | undefined;
+    if (usage?.prompt_tokens != null && usage?.completion_tokens != null) {
+      return { inputTokens: usage.prompt_tokens, outputTokens: usage.completion_tokens };
+    }
+
+    return undefined;
+  }
+
+  async function getSessionUsage(sessionId: string) {
+    const data = await browser.storage.local.get('requestLog');
+    const log = (data.requestLog as RequestLogEntry[]) ?? [];
+    const entries = log.filter((e) => e.sessionId === sessionId && e.status < 400);
+
+    const byProvider: Record<string, { requests: number; inputTokens: number; outputTokens: number }> = {};
+    let totalRequests = 0;
+    let totalInput = 0;
+    let totalOutput = 0;
+
+    for (const entry of entries) {
+      totalRequests++;
+      const input = entry.inputTokens ?? 0;
+      const output = entry.outputTokens ?? 0;
+      totalInput += input;
+      totalOutput += output;
+
+      if (!byProvider[entry.providerId]) {
+        byProvider[entry.providerId] = { requests: 0, inputTokens: 0, outputTokens: 0 };
+      }
+      byProvider[entry.providerId].requests++;
+      byProvider[entry.providerId].inputTokens += input;
+      byProvider[entry.providerId].outputTokens += output;
+    }
+
+    return { requests: totalRequests, inputTokens: totalInput, outputTokens: totalOutput, byProvider };
+  }
+
+  async function processPendingAfterUnlock() {
+    if (pendingApprovals.size === 0) return;
+
+    const trustedSites = await getTrustedSites();
+
+    for (const [id, entry] of pendingApprovals) {
+      if (trustedSites.some((s) => s.origin === entry.approval.appOrigin)) {
+        // Auto-approve trusted origins
+        pendingApprovals.delete(id);
+        const response = await createSession(
+          { id: entry.originalMessageId, payload: { providers: entry.approval.providers } as ConnectRequest },
+          entry.approval.appOrigin,
+        );
+        entry.resolve(response);
+      }
+    }
+
+    // Notify popup about remaining pending approvals
+    if (pendingApprovals.size > 0) {
+      browser.runtime.sendMessage({
+        type: 'BYOKY_INTERNAL',
+        action: 'newPendingApproval',
+      }).catch(() => {});
+    }
+  }
+
+  function broadcastRevocation(sessionKey: string, appOrigin: string) {
+    browser.tabs.query({}).then((tabs) => {
+      for (const tab of tabs) {
+        if (!tab.id || !tab.url) continue;
+        try {
+          const tabOrigin = new URL(tab.url).origin;
+          if (tabOrigin === appOrigin) {
+            browser.tabs.sendMessage(tab.id, {
+              type: 'BYOKY_SESSION_REVOKED',
+              payload: { sessionKey },
+            }).catch(() => {});
+          }
+        } catch {
+          // skip tabs with invalid URLs
+        }
+      }
+    });
+  }
+
+  async function getTrustedSites(): Promise<TrustedSite[]> {
+    const data = await browser.storage.local.get('trustedSites');
+    return (data.trustedSites as TrustedSite[]) ?? [];
+  }
+
+  async function addTrustedSite(origin: string) {
+    const sites = await getTrustedSites();
+    if (!sites.some((s) => s.origin === origin)) {
+      sites.push({ origin, trustedAt: Date.now() });
+      await browser.storage.local.set({ trustedSites: sites });
+    }
+  }
+
+  async function removeTrustedSite(origin: string) {
+    const sites = await getTrustedSites();
+    await browser.storage.local.set({
+      trustedSites: sites.filter((s) => s.origin !== origin),
     });
   }
 });

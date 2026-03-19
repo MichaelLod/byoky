@@ -57,7 +57,7 @@ export default function Privacy() {
       <Section title="Open source">
         <p>
           Byoky is fully open source under the MIT license. You can audit the entire codebase at{' '}
-          <a href="https://github.com/MichaelLod/byoky" style={{ color: 'var(--violet-light)' }}>
+          <a href="https://github.com/MichaelLod/byoky" style={{ color: 'var(--teal-light)' }}>
             github.com/MichaelLod/byoky
           </a>
           .
@@ -67,7 +67,7 @@ export default function Privacy() {
       <Section title="Contact">
         <p>
           If you have questions about this policy, open an issue on{' '}
-          <a href="https://github.com/MichaelLod/byoky/issues" style={{ color: 'var(--violet-light)' }}>
+          <a href="https://github.com/MichaelLod/byoky/issues" style={{ color: 'var(--teal-light)' }}>
             GitHub
           </a>
           .
