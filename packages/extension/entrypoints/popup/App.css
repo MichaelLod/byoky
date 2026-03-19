@@ -609,6 +609,125 @@ body {
   white-space: nowrap;
 }
 
+/* ── Token Allowances ── */
+
+.allowance-section {
+  margin-top: 10px;
+}
+
+.allowance-usage-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.allowance-used {
+  color: var(--text-secondary);
+}
+
+.allowance-limit {
+  color: var(--text-muted);
+}
+
+.allowance-limit.over {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.allowance-edit-btn {
+  margin-left: auto;
+  font-size: 11px;
+}
+
+.allowance-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-card);
+  margin-top: 6px;
+  overflow: hidden;
+}
+
+.allowance-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width 0.3s;
+}
+
+.allowance-bar-fill.over {
+  background: var(--danger);
+}
+
+.allowance-form {
+  margin-top: 10px;
+  padding: 10px;
+  background: var(--bg-card);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.allowance-field {
+  margin-bottom: 8px;
+}
+
+.allowance-field label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+
+.allowance-field input[type="number"] {
+  width: 100%;
+  padding: 6px 8px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.allowance-field input[type="number"]::placeholder {
+  color: var(--text-muted);
+}
+
+.allowance-sub-label {
+  display: block;
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+
+.allowance-field-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.allowance-field-inline .allowance-provider-name {
+  font-size: 11px;
+  color: var(--text-secondary);
+  min-width: 70px;
+}
+
+.allowance-field-inline input[type="number"] {
+  flex: 1;
+}
+
+.allowance-provider-limits {
+  margin-bottom: 8px;
+}
+
+.allowance-actions {
+  display: flex;
+  gap: 6px;
+}
+
 .empty-icon {
   color: var(--text-muted);
   margin-bottom: 12px;

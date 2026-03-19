@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { useWalletStore } from '../store';
-import { PROVIDERS } from '@byoky/core';
+import { PROVIDERS, type TokenAllowance } from '@byoky/core';
 
 function timeAgo(timestamp: number): string {
   const seconds = Math.floor((Date.now() - timestamp) / 1000);
@@ -20,8 +21,30 @@ function formatOrigin(origin: string): string {
   }
 }
 
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
 export function ConnectedApps() {
-  const { sessions, revokeSession, trustedSites, removeTrustedSite } = useWalletStore();
+  const {
+    sessions, revokeSession, trustedSites, removeTrustedSite,
+    requestLog, tokenAllowances, setAllowance, removeAllowance,
+  } = useWalletStore();
+  const [editingOrigin, setEditingOrigin] = useState<string | null>(null);
+
+  function getOriginUsage(origin: string) {
+    const entries = requestLog.filter((e) => e.appOrigin === origin && e.status < 400);
+    let total = 0;
+    const byProvider: Record<string, number> = {};
+    for (const entry of entries) {
+      const tokens = (entry.inputTokens ?? 0) + (entry.outputTokens ?? 0);
+      total += tokens;
+      byProvider[entry.providerId] = (byProvider[entry.providerId] ?? 0) + tokens;
+    }
+    return { total, byProvider };
+  }
 
   return (
     <div>
@@ -53,48 +76,93 @@ export function ConnectedApps() {
         </div>
       )}
 
-      {sessions.map((session) => (
-        <div key={session.id} className="card connected-app-card">
-          <div className="card-header" style={{ marginBottom: '10px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-              <div className="app-favicon">
-                {formatOrigin(session.appOrigin).charAt(0).toUpperCase()}
-              </div>
-              <div style={{ minWidth: 0 }}>
-                <span className="card-title" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {formatOrigin(session.appOrigin)}
-                </span>
-                <div className="card-subtitle">
-                  Connected {timeAgo(session.createdAt)}
+      {sessions.map((session) => {
+        const usage = getOriginUsage(session.appOrigin);
+        const allowance = tokenAllowances.find((a) => a.origin === session.appOrigin);
+        const isEditing = editingOrigin === session.appOrigin;
+        const pct = allowance?.totalLimit ? Math.min(100, (usage.total / allowance.totalLimit) * 100) : 0;
+        const isOver = allowance?.totalLimit != null && usage.total >= allowance.totalLimit;
+
+        return (
+          <div key={session.id} className="card connected-app-card">
+            <div className="card-header" style={{ marginBottom: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                <div className="app-favicon">
+                  {formatOrigin(session.appOrigin).charAt(0).toUpperCase()}
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <span className="card-title" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {formatOrigin(session.appOrigin)}
+                  </span>
+                  <div className="card-subtitle">
+                    Connected {timeAgo(session.createdAt)}
+                  </div>
                 </div>
               </div>
+              <button
+                className="btn btn-danger btn-sm"
+                onClick={() => revokeSession(session.id)}
+              >
+                Disconnect
+              </button>
             </div>
-            <button
-              className="btn btn-danger btn-sm"
-              onClick={() => revokeSession(session.id)}
-            >
-              Disconnect
-            </button>
-          </div>
 
-          <div className="connected-providers">
-            {session.providers
-              .filter((p) => p.available)
-              .map((p) => {
-                const provider = PROVIDERS[p.providerId];
-                return (
-                  <span key={p.providerId} className="badge badge-provider">
-                    {provider?.name ?? p.providerId}
+            <div className="connected-providers">
+              {session.providers
+                .filter((p) => p.available)
+                .map((p) => {
+                  const provider = PROVIDERS[p.providerId];
+                  return (
+                    <span key={p.providerId} className="badge badge-provider">
+                      {provider?.name ?? p.providerId}
+                    </span>
+                  );
+                })}
+            </div>
+
+            {/* Token usage & allowance */}
+            <div className="allowance-section">
+              <div className="allowance-usage-row">
+                <span className="allowance-used">{formatTokens(usage.total)} tokens used</span>
+                {allowance?.totalLimit != null && (
+                  <span className={`allowance-limit ${isOver ? 'over' : ''}`}>
+                    / {formatTokens(allowance.totalLimit)}
                   </span>
-                );
-              })}
-          </div>
+                )}
+                <button
+                  className="text-link allowance-edit-btn"
+                  onClick={() => setEditingOrigin(isEditing ? null : session.appOrigin)}
+                >
+                  {allowance ? 'Edit limit' : 'Set limit'}
+                </button>
+              </div>
+              {allowance?.totalLimit != null && (
+                <div className="allowance-bar">
+                  <div
+                    className={`allowance-bar-fill ${isOver ? 'over' : ''}`}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              )}
+            </div>
 
-          <div className="connected-meta">
-            <span>{session.appOrigin}</span>
+            {isEditing && (
+              <AllowanceForm
+                origin={session.appOrigin}
+                providers={session.providers.filter((p) => p.available).map((p) => p.providerId)}
+                allowance={allowance}
+                onSave={(a) => { setAllowance(a); setEditingOrigin(null); }}
+                onRemove={() => { removeAllowance(session.appOrigin); setEditingOrigin(null); }}
+                onCancel={() => setEditingOrigin(null)}
+              />
+            )}
+
+            <div className="connected-meta">
+              <span>{session.appOrigin}</span>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
 
       {trustedSites.length > 0 && (
         <div style={{ marginTop: sessions.length > 0 ? '24px' : '0' }}>
@@ -126,6 +194,85 @@ export function ConnectedApps() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function AllowanceForm({
+  origin,
+  providers,
+  allowance,
+  onSave,
+  onRemove,
+  onCancel,
+}: {
+  origin: string;
+  providers: string[];
+  allowance?: TokenAllowance;
+  onSave: (a: TokenAllowance) => void;
+  onRemove: () => void;
+  onCancel: () => void;
+}) {
+  const [totalLimit, setTotalLimit] = useState(
+    allowance?.totalLimit != null ? String(allowance.totalLimit) : '',
+  );
+  const [providerLimits, setProviderLimits] = useState<Record<string, string>>(
+    Object.fromEntries(
+      providers.map((id) => [id, allowance?.providerLimits?.[id] != null ? String(allowance.providerLimits[id]) : '']),
+    ),
+  );
+
+  function handleSave() {
+    const parsed: TokenAllowance = { origin };
+    const total = parseInt(totalLimit, 10);
+    if (!isNaN(total) && total > 0) parsed.totalLimit = total;
+
+    const pLimits: Record<string, number> = {};
+    for (const [id, val] of Object.entries(providerLimits)) {
+      const n = parseInt(val, 10);
+      if (!isNaN(n) && n > 0) pLimits[id] = n;
+    }
+    if (Object.keys(pLimits).length > 0) parsed.providerLimits = pLimits;
+
+    onSave(parsed);
+  }
+
+  return (
+    <div className="allowance-form">
+      <div className="allowance-field">
+        <label>Total token limit</label>
+        <input
+          type="number"
+          placeholder="Unlimited"
+          value={totalLimit}
+          onChange={(e) => setTotalLimit(e.target.value)}
+          min="0"
+        />
+      </div>
+      {providers.length > 0 && (
+        <div className="allowance-provider-limits">
+          <label className="allowance-sub-label">Per provider</label>
+          {providers.map((id) => (
+            <div key={id} className="allowance-field allowance-field-inline">
+              <span className="allowance-provider-name">{PROVIDERS[id]?.name ?? id}</span>
+              <input
+                type="number"
+                placeholder="Unlimited"
+                value={providerLimits[id] ?? ''}
+                onChange={(e) => setProviderLimits({ ...providerLimits, [id]: e.target.value })}
+                min="0"
+              />
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="allowance-actions">
+        <button className="btn btn-primary btn-sm" onClick={handleSave}>Save</button>
+        {allowance && (
+          <button className="btn btn-danger btn-sm" onClick={onRemove}>Remove limit</button>
+        )}
+        <button className="btn btn-ghost btn-sm" onClick={onCancel}>Cancel</button>
+      </div>
     </div>
   );
 }

@@ -5,6 +5,7 @@ import {
   type RequestLogEntry,
   type PendingApproval,
   type TrustedSite,
+  type TokenAllowance,
   hashPassword,
   encrypt,
   maskKey,
@@ -28,6 +29,7 @@ interface WalletState {
   requestLog: RequestLogEntry[];
   pendingApprovals: PendingApproval[];
   trustedSites: TrustedSite[];
+  tokenAllowances: TokenAllowance[];
   currentPage: Page;
   loading: boolean;
   error: string | null;
@@ -45,6 +47,8 @@ interface WalletState {
   approveConnect: (approvalId: string, trust: boolean) => Promise<void>;
   rejectConnect: (approvalId: string) => Promise<void>;
   removeTrustedSite: (origin: string) => Promise<void>;
+  setAllowance: (allowance: TokenAllowance) => Promise<void>;
+  removeAllowance: (origin: string) => Promise<void>;
   refreshData: () => Promise<void>;
   clearError: () => void;
 }
@@ -65,6 +69,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   requestLog: [],
   pendingApprovals: [],
   trustedSites: [],
+  tokenAllowances: [],
   currentPage: 'unlock',
   loading: true,
   error: null,
@@ -235,13 +240,24 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     await get().refreshData();
   },
 
+  setAllowance: async (allowance: TokenAllowance) => {
+    await sendInternal('setAllowance', { allowance });
+    await get().refreshData();
+  },
+
+  removeAllowance: async (origin: string) => {
+    await sendInternal('removeAllowance', { origin });
+    await get().refreshData();
+  },
+
   refreshData: async () => {
-    const [credResult, sessionResult, logResult, approvalResult, trustedResult] = await Promise.all([
+    const [credResult, sessionResult, logResult, approvalResult, trustedResult, allowanceResult] = await Promise.all([
       sendInternal('getCredentials'),
       sendInternal('getSessions'),
       sendInternal('getRequestLog'),
       sendInternal('getPendingApprovals'),
       sendInternal('getTrustedSites'),
+      sendInternal('getAllowances'),
     ]);
 
     const metas: CredentialMeta[] = (credResult.credentials ?? []).map(
@@ -262,6 +278,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       requestLog: logResult.log ?? [],
       pendingApprovals: approvalResult.approvals ?? [],
       trustedSites: trustedResult.sites ?? [],
+      tokenAllowances: allowanceResult.allowances ?? [],
     });
   },
 

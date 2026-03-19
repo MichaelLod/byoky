@@ -4,6 +4,7 @@ import {
   type RequestLogEntry,
   type PendingApproval,
   type TrustedSite,
+  type TokenAllowance,
   type ConnectRequest,
   type ConnectResponse,
   type ProxyRequest,
@@ -159,6 +160,18 @@ export default defineBackground(() => {
           requestId: msg.requestId,
           status: 423,
           error: { code: 'WALLET_LOCKED', message: 'Wallet is locked' },
+        });
+        return;
+      }
+
+      // Check token allowance before proxying
+      const allowanceCheck = await checkAllowance(session.appOrigin, msg.providerId);
+      if (!allowanceCheck.allowed) {
+        port.postMessage({
+          type: 'BYOKY_PROXY_RESPONSE_ERROR',
+          requestId: msg.requestId,
+          status: 429,
+          error: { code: 'QUOTA_EXCEEDED', message: allowanceCheck.reason ?? 'Token allowance exceeded' },
         });
         return;
       }
@@ -579,6 +592,21 @@ export default defineBackground(() => {
       case 'removeTrustedSite': {
         const { origin } = message.payload as { origin: string };
         await removeTrustedSite(origin);
+        return { success: true };
+      }
+
+      case 'getAllowances':
+        return { allowances: await getAllowances() };
+
+      case 'setAllowance': {
+        const { allowance } = message.payload as { allowance: TokenAllowance };
+        await setAllowance(allowance);
+        return { success: true };
+      }
+
+      case 'removeAllowance': {
+        const { origin } = message.payload as { origin: string };
+        await removeAllowance(origin);
         return { success: true };
       }
 
@@ -1115,5 +1143,59 @@ export default defineBackground(() => {
     await browser.storage.local.set({
       trustedSites: sites.filter((s) => s.origin !== origin),
     });
+  }
+
+  // --- Token allowances ---
+
+  async function getAllowances(): Promise<TokenAllowance[]> {
+    const data = await browser.storage.local.get('tokenAllowances');
+    return (data.tokenAllowances as TokenAllowance[]) ?? [];
+  }
+
+  async function setAllowance(allowance: TokenAllowance) {
+    const allowances = await getAllowances();
+    const idx = allowances.findIndex((a) => a.origin === allowance.origin);
+    if (idx >= 0) allowances[idx] = allowance;
+    else allowances.push(allowance);
+    await browser.storage.local.set({ tokenAllowances: allowances });
+  }
+
+  async function removeAllowance(origin: string) {
+    const allowances = await getAllowances();
+    await browser.storage.local.set({
+      tokenAllowances: allowances.filter((a) => a.origin !== origin),
+    });
+  }
+
+  async function checkAllowance(
+    origin: string,
+    providerId: string,
+  ): Promise<{ allowed: boolean; reason?: string }> {
+    const allowances = await getAllowances();
+    const allowance = allowances.find((a) => a.origin === origin);
+    if (!allowance) return { allowed: true };
+
+    const data = await browser.storage.local.get('requestLog');
+    const log = (data.requestLog as RequestLogEntry[]) ?? [];
+    const entries = log.filter((e) => e.appOrigin === origin && e.status < 400);
+
+    let totalUsed = 0;
+    const byProvider: Record<string, number> = {};
+    for (const entry of entries) {
+      const tokens = (entry.inputTokens ?? 0) + (entry.outputTokens ?? 0);
+      totalUsed += tokens;
+      byProvider[entry.providerId] = (byProvider[entry.providerId] ?? 0) + tokens;
+    }
+
+    if (allowance.totalLimit != null && totalUsed >= allowance.totalLimit) {
+      return { allowed: false, reason: `Token allowance exceeded for ${origin}` };
+    }
+
+    const providerLimit = allowance.providerLimits?.[providerId];
+    if (providerLimit != null && (byProvider[providerId] ?? 0) >= providerLimit) {
+      return { allowed: false, reason: `Token allowance for ${providerId} exceeded` };
+    }
+
+    return { allowed: true };
   }
 });

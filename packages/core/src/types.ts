@@ -175,6 +175,8 @@ export enum ByokyErrorCode {
   INVALID_KEY = 'INVALID_KEY',
   TOKEN_EXPIRED = 'TOKEN_EXPIRED',
   PROXY_ERROR = 'PROXY_ERROR',
+  RELAY_CONNECTION_FAILED = 'RELAY_CONNECTION_FAILED',
+  RELAY_DISCONNECTED = 'RELAY_DISCONNECTED',
   UNKNOWN = 'UNKNOWN',
 }
 
@@ -210,4 +212,12 @@ export interface PendingApproval {
 export interface TrustedSite {
   origin: string;
   trustedAt: number;
+}
+
+// --- Token allowances ---
+
+export interface TokenAllowance {
+  origin: string;
+  totalLimit?: number;
+  providerLimits?: Record<string, number>;
 }
