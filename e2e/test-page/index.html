@@ -21,6 +21,7 @@
   <button id="connect">Connect Wallet</button>
   <button id="send-request" disabled>Send Request</button>
   <button id="check-usage" disabled>Check Usage</button>
+  <button id="check-connected" disabled>Check Connected</button>
   <button id="disconnect" disabled>Disconnect</button>
 
   <script type="module">
@@ -32,14 +33,36 @@
       response: null,
       usage: null,
       error: null,
+      lastError: null,
       disconnectedByWallet: false,
+      isConnectedResult: null,
+      proxyError: null,
     };
 
     const byoky = new Byoky({ timeout: 120_000 });
     let session = null;
 
+    function enableButtons() {
+      document.getElementById('send-request').disabled = false;
+      document.getElementById('check-usage').disabled = false;
+      document.getElementById('check-connected').disabled = false;
+      document.getElementById('disconnect').disabled = false;
+      document.getElementById('connect').disabled = true;
+    }
+
+    function disableButtons() {
+      document.getElementById('send-request').disabled = true;
+      document.getElementById('check-usage').disabled = true;
+      document.getElementById('check-connected').disabled = true;
+      document.getElementById('disconnect').disabled = true;
+      document.getElementById('connect').disabled = false;
+    }
+
     document.getElementById('connect').addEventListener('click', async () => {
       try {
+        window._testState.error = null;
+        window._testState.lastError = null;
+        window._testState.disconnectedByWallet = false;
         document.getElementById('status').textContent = 'Connecting...';
         session = await byoky.connect({
           providers: [{ id: 'anthropic', required: false }],
@@ -56,26 +79,23 @@
           window._testState.disconnectedByWallet = true;
           session = null;
           document.getElementById('status').textContent = 'Disconnected by wallet';
-          document.getElementById('send-request').disabled = true;
-          document.getElementById('check-usage').disabled = true;
-          document.getElementById('disconnect').disabled = true;
-          document.getElementById('connect').disabled = false;
+          disableButtons();
         });
 
         document.getElementById('status').textContent = 'Connected';
         document.getElementById('session-key').textContent = session.sessionKey.slice(0, 16) + '...';
-        document.getElementById('send-request').disabled = false;
-        document.getElementById('check-usage').disabled = false;
-        document.getElementById('disconnect').disabled = false;
-        document.getElementById('connect').disabled = true;
+        enableButtons();
       } catch (e) {
         window._testState.error = e.message;
+        window._testState.lastError = { code: e.code, message: e.message };
         document.getElementById('status').textContent = 'Error: ' + e.message;
       }
     });
 
     document.getElementById('send-request').addEventListener('click', async () => {
       if (!session) return;
+      window._testState.response = null;
+      window._testState.proxyError = null;
       try {
         const proxyFetch = session.createFetch('anthropic');
         const response = await proxyFetch('https://api.anthropic.com/v1/messages', {
@@ -91,11 +111,22 @@
           }),
         });
 
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          window._testState.proxyError = {
+            status: response.status,
+            code: errData.error?.code ?? errData.code,
+            message: errData.error?.message ?? errData.message,
+          };
+          document.getElementById('response').textContent = 'Error ' + response.status + ': ' + (errData.message || errData.code);
+          return;
+        }
+
         const data = await response.json();
         window._testState.response = data;
         document.getElementById('response').textContent = JSON.stringify(data.content?.[0]?.text ?? data);
       } catch (e) {
-        window._testState.error = e.message;
+        window._testState.proxyError = { message: e.message };
         document.getElementById('response').textContent = 'Error: ' + e.message;
       }
     });
@@ -112,16 +143,23 @@
       }
     });
 
+    document.getElementById('check-connected').addEventListener('click', async () => {
+      if (!session) return;
+      try {
+        const result = await session.isConnected();
+        window._testState.isConnectedResult = result;
+      } catch (e) {
+        window._testState.isConnectedResult = false;
+      }
+    });
+
     document.getElementById('disconnect').addEventListener('click', () => {
       if (!session) return;
       session.disconnect();
       window._testState.connected = false;
       session = null;
       document.getElementById('status').textContent = 'Disconnected';
-      document.getElementById('send-request').disabled = true;
-      document.getElementById('check-usage').disabled = true;
-      document.getElementById('disconnect').disabled = true;
-      document.getElementById('connect').disabled = false;
+      disableButtons();
     });
   </script>
 </body>
