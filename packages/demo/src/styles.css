@@ -14,9 +14,9 @@
   --text: #e2e2ec;
   --text-secondary: #7a7a9c;
   --text-muted: #464866;
-  --teal: #f59e0b;
-  --teal-light: #fcd34d;
-  --teal-dark: #b45309;
+  --teal: #0ea5e9;
+  --teal-light: #7dd3fc;
+  --teal-dark: #0369a1;
   --green: #22c55e;
   --red: #ef4444;
   --font-sans: 'Sora', system-ui, -apple-system, sans-serif;
@@ -563,7 +563,7 @@ body {
 .demo-sample-btn.active {
   border-color: var(--teal);
   color: var(--teal-light);
-  background: rgba(245, 158, 11, 0.08);
+  background: rgba(14, 165, 233, 0.08);
 }
 
 .demo-textarea {
@@ -634,7 +634,7 @@ body {
 }
 
 .tool-step-user .tool-step-label { color: var(--teal-light); }
-.tool-step-tool_call .tool-step-label { color: #f59e0b; }
+.tool-step-tool_call .tool-step-label { color: #0ea5e9; }
 .tool-step-tool_result .tool-step-label { color: var(--green); }
 .tool-step-assistant .tool-step-label { color: var(--text-secondary); }
 

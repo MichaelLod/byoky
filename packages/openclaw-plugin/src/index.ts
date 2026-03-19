@@ -321,7 +321,7 @@ function buildAuthPage(requestProviders: string): string {
     }
     h1 {
       font-size: 24px; font-weight: 700;
-      background: linear-gradient(135deg, #fef3c7, #f59e0b);
+      background: linear-gradient(135deg, #e0f2fe, #0ea5e9);
       -webkit-background-clip: text; -webkit-text-fill-color: transparent;
       margin-bottom: 8px;
     }
@@ -330,7 +330,7 @@ function buildAuthPage(requestProviders: string): string {
       padding: 16px; border-radius: 8px;
       margin-bottom: 16px; font-size: 14px; line-height: 1.6;
     }
-    .waiting { background: rgba(245,158,11,0.1); color: #fcd34d; }
+    .waiting { background: rgba(14,165,233,0.1); color: #7dd3fc; }
     .success { background: rgba(52,211,153,0.1); color: #34d399; }
     .error { background: rgba(244,63,94,0.1); color: #f43f5e; }
     .info { color: #55555f; font-size: 12px; line-height: 1.6; }

@@ -15,14 +15,14 @@
   --text-secondary: #7a7a9c;
   --text-muted: #464866;
 
-  --teal: #f59e0b;
-  --teal-light: #fcd34d;
-  --teal-dark: #b45309;
-  --teal-glow: rgba(245, 158, 11, 0.2);
+  --teal: #0ea5e9;
+  --teal-light: #7dd3fc;
+  --teal-dark: #0369a1;
+  --teal-glow: rgba(14, 165, 233, 0.2);
 
   --green: #86efac;
   --cyan: #67e8f9;
-  --amber: #fbbf24;
+  --amber: #38bdf8;
 
   --font-sans: var(--font-sora), system-ui, -apple-system, sans-serif;
   --font-code: var(--font-mono), 'Fira Code', 'Consolas', monospace;
@@ -192,8 +192,8 @@ section {
   height: 600px;
   background: radial-gradient(
     ellipse at center,
-    rgba(245, 158, 11, 0.14) 0%,
-    rgba(245, 158, 11, 0.04) 45%,
+    rgba(14, 165, 233, 0.14) 0%,
+    rgba(14, 165, 233, 0.04) 45%,
     transparent 70%
   );
   filter: blur(40px);
@@ -210,7 +210,7 @@ section {
   height: 400px;
   background: radial-gradient(
     ellipse at center,
-    rgba(251, 191, 36, 0.08) 0%,
+    rgba(56, 189, 248, 0.08) 0%,
     transparent 60%
   );
   filter: blur(60px);
@@ -441,7 +441,7 @@ section {
   background: #07070f;
   overflow: hidden;
   box-shadow:
-    0 0 60px rgba(245, 158, 11, 0.06),
+    0 0 60px rgba(14, 165, 233, 0.06),
     0 20px 40px rgba(0, 0, 0, 0.4);
 }
 
@@ -490,12 +490,12 @@ section {
 }
 
 /* Syntax tokens */
-.tk { color: #fcd34d; }       /* keyword */
+.tk { color: #7dd3fc; }       /* keyword */
 .ts { color: #86efac; }       /* string */
 .tt { color: #67e8f9; }       /* type */
 .tp { color: var(--text); }   /* property */
 .tc { color: var(--text-muted); } /* comment */
-.tv { color: #fbbf24; }       /* value */
+.tv { color: #38bdf8; }       /* value */
 .tn { color: var(--text-secondary); } /* punctuation */
 
 /* =============================================
@@ -536,7 +536,7 @@ section {
 
 .security-card:hover {
   border-color: var(--teal-dark);
-  box-shadow: 0 0 40px rgba(245, 158, 11, 0.08);
+  box-shadow: 0 0 40px rgba(14, 165, 233, 0.08);
 }
 
 .security-icon {
@@ -679,7 +679,7 @@ section {
 }
 
 .provider-logo-more {
-  background: rgba(245, 158, 11, 0.1);
+  background: rgba(14, 165, 233, 0.1);
   color: var(--teal-light);
 }
 

@@ -1,17 +1,17 @@
 <svg width="480" height="140" viewBox="0 0 480 140" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <linearGradient id="glow" x1="0" y1="0" x2="480" y2="140" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.15"/>
-      <stop offset="50%" stop-color="#fbbf24" stop-opacity="0.08"/>
-      <stop offset="100%" stop-color="#f59e0b" stop-opacity="0.15"/>
+      <stop offset="0%" stop-color="#0ea5e9" stop-opacity="0.15"/>
+      <stop offset="50%" stop-color="#38bdf8" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#0ea5e9" stop-opacity="0.15"/>
     </linearGradient>
     <linearGradient id="textGrad" x1="120" y1="40" x2="360" y2="100" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#e4e4ec"/>
-      <stop offset="100%" stop-color="#fcd34d"/>
+      <stop offset="100%" stop-color="#7dd3fc"/>
     </linearGradient>
     <linearGradient id="accent" x1="0" y1="0" x2="100%" y2="0">
       <stop offset="0%" stop-color="transparent"/>
-      <stop offset="50%" stop-color="#f59e0b"/>
+      <stop offset="50%" stop-color="#0ea5e9"/>
       <stop offset="100%" stop-color="transparent"/>
     </linearGradient>
   </defs>
