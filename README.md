@@ -37,6 +37,12 @@
 - **For users** — One wallet for all your AI credentials. Add keys, approve apps, revoke access. Full visibility into every request.
 - **For developers** — Two lines of code. Use your favorite provider SDK. Keys never touch your app.
 
+<p align="center">
+  <img src="https://github.com/MichaelLod/byoky/raw/main/.github/screenshots/screenshot-1.png" alt="Byoky Wallet" width="600" />
+  <br />
+  <img src="https://github.com/MichaelLod/byoky/raw/main/.github/screenshots/screenshot-2.png" alt="Byoky Add Credential" width="600" />
+</p>
+
 ### How it works
 
 ```
@@ -168,7 +174,6 @@ pnpm --filter @byoky/extension build:all     # Chrome + Firefox + Safari
 - [ ] Spending caps and rate limits per app
 - [ ] Export/import encrypted vault backup
 - [ ] Browser extension store listings
-- [x] Landing page at [byoky.com](https://byoky.com)
 
 ## Star History
 
