@@ -1,6 +1,6 @@
 {
   "name": "byoky",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "description": "Bring Your Own Key — Secure wallet for your AI credentials",
   "scripts": {
@@ -28,7 +28,10 @@
       "esbuild",
       "sharp",
       "spawn-sync"
-    ]
+    ],
+    "overrides": {
+      "tar": ">=7.5.11"
+    }
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",

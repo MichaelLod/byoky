@@ -48,8 +48,8 @@ jobs:
         run: |
           echo "Scanning for potential secrets..."
           FAIL=0
-          # Check for hardcoded API keys
-          if grep -rn --include='*.ts' --include='*.tsx' -E '(sk-ant-|sk-proj-|AIzaSy|ghp_|gho_)' packages/ --exclude-dir=node_modules; then
+          # Check for hardcoded API keys (exclude placeholders in UI and test files)
+          if grep -rn --include='*.ts' --include='*.tsx' -E '(sk-ant-api|sk-proj-|AIzaSy[A-Za-z0-9]{30}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36})' packages/ --exclude-dir=node_modules --exclude-dir=tests; then
             echo "::error::Potential hardcoded API key found"
             FAIL=1
           fi

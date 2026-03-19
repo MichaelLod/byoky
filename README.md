@@ -206,8 +206,7 @@ byoky/
 │   ├── extension/     # Browser extension (Chrome, Firefox, Safari) — WXT
 │   ├── bridge/        # @byoky/bridge — HTTP proxy + native messaging for CLI/desktop apps
 │   ├── openclaw-plugin/ # OpenClaw provider plugin
-│   ├── demo/          # Demo app — demo.byoky.com
-│   └── web/           # Landing page — byoky.com
+│   └── web/           # Landing page (byoky.com) + demo app (demo.byoky.com)
 ```
 
 ## Development
