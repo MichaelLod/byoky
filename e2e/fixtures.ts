@@ -98,6 +98,30 @@ export const test = base.extend<TestFixtures>({
         });
       });
 
+      // Mock OpenAI API
+      await sharedContext.route('https://api.openai.com/**', async (route) => {
+        const request = route.request();
+        let body: Record<string, unknown> = {};
+        try { body = request.postDataJSON(); } catch {}
+        const messages = body.messages as Array<{ content: string }> | undefined;
+
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            id: 'chatcmpl-mock-e2e',
+            object: 'chat.completion',
+            choices: [{
+              index: 0,
+              message: { role: 'assistant', content: `OpenAI mock: ${messages?.[0]?.content ?? 'unknown'}` },
+              finish_reason: 'stop',
+            }],
+            model: body.model ?? 'gpt-4o',
+            usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
+          }),
+        });
+      });
+
       // Get extension ID from service worker
       let extensionId = '';
       const workers = sharedContext.serviceWorkers();

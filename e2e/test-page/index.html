@@ -20,6 +20,8 @@
 
   <button id="connect">Connect Wallet</button>
   <button id="send-request" disabled>Send Request</button>
+  <button id="send-openai" disabled>Send OpenAI</button>
+  <button id="send-missing" disabled>Send Missing Provider</button>
   <button id="check-usage" disabled>Check Usage</button>
   <button id="check-connected" disabled>Check Connected</button>
   <button id="disconnect" disabled>Disconnect</button>
@@ -44,6 +46,8 @@
 
     function enableButtons() {
       document.getElementById('send-request').disabled = false;
+      document.getElementById('send-openai').disabled = false;
+      document.getElementById('send-missing').disabled = false;
       document.getElementById('check-usage').disabled = false;
       document.getElementById('check-connected').disabled = false;
       document.getElementById('disconnect').disabled = false;
@@ -52,6 +56,8 @@
 
     function disableButtons() {
       document.getElementById('send-request').disabled = true;
+      document.getElementById('send-openai').disabled = true;
+      document.getElementById('send-missing').disabled = true;
       document.getElementById('check-usage').disabled = true;
       document.getElementById('check-connected').disabled = true;
       document.getElementById('disconnect').disabled = true;
@@ -128,6 +134,66 @@
       } catch (e) {
         window._testState.proxyError = { message: e.message };
         document.getElementById('response').textContent = 'Error: ' + e.message;
+      }
+    });
+
+    document.getElementById('send-openai').addEventListener('click', async () => {
+      if (!session) return;
+      window._testState.response = null;
+      window._testState.proxyError = null;
+      try {
+        const proxyFetch = session.createFetch('openai');
+        const response = await proxyFetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            model: 'gpt-4o',
+            max_tokens: 1024,
+            messages: [{ role: 'user', content: 'Hello from OpenAI E2E test!' }],
+          }),
+        });
+
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          window._testState.proxyError = {
+            status: response.status,
+            code: errData.error?.code ?? errData.code,
+            message: errData.error?.message ?? errData.message,
+          };
+          return;
+        }
+        const data = await response.json();
+        window._testState.response = data;
+      } catch (e) {
+        window._testState.proxyError = { message: e.message };
+      }
+    });
+
+    document.getElementById('send-missing').addEventListener('click', async () => {
+      if (!session) return;
+      window._testState.response = null;
+      window._testState.proxyError = null;
+      try {
+        const proxyFetch = session.createFetch('gemini');
+        const response = await proxyFetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts: [{ text: 'Hello' }] }] }),
+        });
+
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          window._testState.proxyError = {
+            status: response.status,
+            code: errData.error?.code ?? errData.code,
+            message: errData.error?.message ?? errData.message,
+          };
+          return;
+        }
+        const data = await response.json();
+        window._testState.response = data;
+      } catch (e) {
+        window._testState.proxyError = { message: e.message };
       }
     });
 
