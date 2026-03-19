@@ -13,12 +13,12 @@
   <br />
   <strong>MetaMask for AI</strong>
   <br />
-  A secure browser wallet for your LLM API keys and auth tokens.
+  A secure browser wallet for your LLM API keys and setup tokens.
   <br />
   Your keys never leave the extension.
   <br />
   <br />
-  <a href="https://byoky.com">Website</a> · <a href="#quick-start">Quick Start</a> · <a href="#for-developers">SDK Docs</a> · <a href="https://github.com/MichaelLod/byoky/issues">Issues</a>
+  <a href="https://byoky.com">Website</a> · <a href="https://demo.byoky.com">Demo</a> · <a href="#quick-start">Quick Start</a> · <a href="#for-developers">SDK Docs</a> · <a href="https://github.com/MichaelLod/byoky/issues">Issues</a>
   <br />
   <br />
   <a href="https://github.com/MichaelLod/byoky/blob/main/LICENSE"><img src="https://img.shields.io/github/license/MichaelLod/byoky?style=flat&color=0ea5e9" alt="License" /></a>
@@ -32,7 +32,7 @@
 
 ## What is Byoky?
 
-**Byoky** (Bring Your Own Key) is an open-source browser extension that stores your AI API keys and OAuth tokens in an encrypted vault. Developers integrate via `@byoky/sdk` — their apps can use your credentials without ever seeing them.
+**Byoky** (Bring Your Own Key) is an open-source browser extension that stores your AI API keys and setup tokens in an encrypted vault. Developers integrate via `@byoky/sdk` — their apps can use your credentials without ever seeing them.
 
 - **For users** — One wallet for all your AI credentials. Add keys, approve apps, revoke access. Full visibility into every request.
 - **For developers** — Two lines of code. Use your favorite provider SDK. Keys never touch your app.
@@ -45,7 +45,7 @@
 
 ```
 1. Install the Byoky wallet → set a master password
-2. Add your API keys or sign in via OAuth → encrypted locally
+2. Add your API keys or a Claude setup token → encrypted locally
 3. Visit any Byoky-enabled app → approve access → keys stay in the vault
 ```
 
@@ -184,6 +184,7 @@ byoky/
 │   ├── sdk/           # @byoky/sdk (+ @byoky/sdk/server for backend relay)
 │   ├── extension/     # Browser extension (Chrome, Firefox, Safari) — WXT
 │   ├── bridge/        # @byoky/bridge — native messaging for setup tokens
+│   ├── openclaw-plugin/ # OpenClaw provider plugin
 │   ├── demo/          # Demo app — demo.byoky.com
 │   └── web/           # Landing page — byoky.com
 ```
@@ -224,7 +225,9 @@ pnpm --filter @byoky/extension build:all     # Chrome + Firefox + Safari
 - [x] Backend relay (`@byoky/sdk/server`)
 - [x] Token allowances per app (total + per-provider limits)
 - [x] Encrypted vault export/import (`.byoky` files)
-- [ ] Browser extension store listings
+- [ ] Browser extension store listings (Chrome, Firefox, Safari)
+- [ ] OpenClaw provider plugin
+- [ ] Password change (re-encrypt vault with new master password)
 
 ## Star History
 
