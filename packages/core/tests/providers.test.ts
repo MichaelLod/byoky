@@ -30,14 +30,8 @@ describe('PROVIDERS', () => {
     }
   });
 
-  it('anthropic has oauth config', () => {
-    expect(PROVIDERS.anthropic.oauthConfig).toBeDefined();
-    expect(PROVIDERS.anthropic.oauthConfig!.authorizationUrl).toContain(
-      'anthropic.com',
-    );
-    expect(PROVIDERS.anthropic.oauthConfig!.tokenUrl).toContain(
-      'anthropic.com',
-    );
+  it('anthropic supports setup token via oauth auth method', () => {
+    expect(PROVIDERS.anthropic.authMethods).toContain('oauth');
   });
 
   it('provider base URLs are valid HTTPS', () => {
