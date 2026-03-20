@@ -23,7 +23,6 @@ import {
 interface BridgeRequest {
   type: 'proxy';
   requestId: string;
-  setupToken: string;
   url: string;
   method: string;
   headers: Record<string, string>;
@@ -175,8 +174,6 @@ async function handleMessage(msg: unknown): Promise<void> {
 
 async function handleSetupTokenProxy(req: BridgeRequest): Promise<void> {
   try {
-    const fs = await import('node:fs');
-    fs.appendFileSync('/tmp/byoky-bridge.log', `[${new Date().toISOString()}] proxy fetch: ${req.method} ${req.url} headers: ${JSON.stringify(Object.keys(req.headers))}\n`);
     const res = await fetch(req.url, {
       method: req.method,
       headers: req.headers,
@@ -195,9 +192,6 @@ async function handleSetupTokenProxy(req: BridgeRequest): Promise<void> {
       body,
     } satisfies BridgeResponse);
   } catch (e) {
-    const fs2 = await import('node:fs');
-    const err = e as Error & { cause?: Error };
-    fs2.appendFileSync('/tmp/byoky-bridge.log', `[${new Date().toISOString()}] proxy error: ${err.message}\ncause: ${err.cause?.message ?? 'none'} ${err.cause?.stack ?? ''}\nstack: ${err.stack}\n`);
     writeMessage({
       type: 'proxy_error',
       requestId: req.requestId,

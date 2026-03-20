@@ -255,24 +255,9 @@ export default defineBackground(() => {
 
         const realHeaders = buildHeaders(msg.providerId, msg.headers, apiKey, credential.authMethod);
 
-        // Setup tokens for Anthropic route through the bridge (Node.js) to bypass TLS fingerprint detection
+        // OAuth tokens for Anthropic route through the bridge (Node.js) to bypass TLS fingerprint detection
         if (credential.authMethod === 'oauth' && msg.providerId === 'anthropic') {
-          // Prepend Claude Code system prompt required for OAuth token auth
-          let body = msg.body;
-          if (body) {
-            try {
-              const parsed = JSON.parse(body);
-              const prefix = "You are Claude Code, Anthropic's official CLI for Claude.";
-              if (!parsed.system) {
-                parsed.system = prefix;
-              } else if (typeof parsed.system === 'string') {
-                parsed.system = `${prefix}\n\n${parsed.system}`;
-              } else if (Array.isArray(parsed.system)) {
-                parsed.system = [{ type: 'text', text: prefix }, ...parsed.system];
-              }
-              body = JSON.stringify(parsed);
-            } catch {}
-          }
+          const body = injectClaudeCodeSystemPrompt(msg.body);
           await proxyViaBridge(port, { ...msg, body }, realHeaders);
           return;
         }
@@ -344,6 +329,24 @@ export default defineBackground(() => {
   });
 
   // --- Helpers ---
+
+  function injectClaudeCodeSystemPrompt(body: string | undefined): string | undefined {
+    if (!body) return body;
+    try {
+      const parsed = JSON.parse(body);
+      const prefix = "You are Claude Code, Anthropic's official CLI for Claude.";
+      if (!parsed.system) {
+        parsed.system = prefix;
+      } else if (typeof parsed.system === 'string') {
+        parsed.system = `${prefix}\n\n${parsed.system}`;
+      } else if (Array.isArray(parsed.system)) {
+        parsed.system = [{ type: 'text', text: prefix }, ...parsed.system];
+      }
+      return JSON.stringify(parsed);
+    } catch {
+      return body;
+    }
+  }
 
   function resolveOrigin(sender: Runtime.MessageSender): string {
     // sender.url is always available for content scripts (no tabs permission needed)
@@ -1333,31 +1336,13 @@ export default defineBackground(() => {
       if (credential.authMethod === 'oauth' && providerId === 'anthropic') {
         if (!bridgeProxyPort) return;
 
-        let adjustedBody = body;
-        if (adjustedBody) {
-          try {
-            const parsed = JSON.parse(adjustedBody);
-            const prefix = "You are Claude Code, Anthropic's official CLI for Claude.";
-            if (!parsed.system) {
-              parsed.system = prefix;
-            } else if (typeof parsed.system === 'string') {
-              parsed.system = `${prefix}\n\n${parsed.system}`;
-            } else if (Array.isArray(parsed.system)) {
-              parsed.system = [{ type: 'text', text: prefix }, ...parsed.system];
-            }
-            adjustedBody = JSON.stringify(parsed);
-          } catch { /* keep original body */ }
-        }
-
-        // Send setup token proxy request through the existing bridge connection
         bridgeProxyPort.postMessage({
           type: 'proxy',
           requestId,
-          setupToken: apiKey,
           url,
           method,
           headers: realHeaders,
-          body: adjustedBody,
+          body: injectClaudeCodeSystemPrompt(body),
         });
 
         // The bridge will respond with proxy_response/proxy_error which gets
