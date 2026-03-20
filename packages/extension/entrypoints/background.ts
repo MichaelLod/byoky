@@ -8,6 +8,9 @@ import {
   type ConnectRequest,
   type ConnectResponse,
   type ProxyRequest,
+  type Gift,
+  type GiftedCredential,
+  type GiftLink,
   decrypt,
   encrypt,
   verifyPassword,
@@ -17,6 +20,9 @@ import {
   parseUsage,
   computeAllowanceCheck,
   validateProxyUrl,
+  createGiftLink,
+  decodeGiftLink,
+  validateGiftLink,
 } from '@byoky/core';
 import type { Runtime } from 'wxt/browser';
 
@@ -213,6 +219,13 @@ export default defineBackground(() => {
           status: 429,
           error: { code: 'QUOTA_EXCEEDED', message: allowanceCheck.reason ?? 'Token allowance exceeded' },
         });
+        return;
+      }
+
+      // Check if this is a gifted credential — route through relay
+      const sessionProvider = session.providers.find((sp) => sp.providerId === msg.providerId);
+      if (sessionProvider?.giftId && sessionProvider.giftRelayUrl && sessionProvider.giftAuthToken) {
+        await proxyViaGiftRelay(port, msg, sessionProvider);
         return;
       }
 
@@ -500,6 +513,8 @@ export default defineBackground(() => {
     }
 
     const credentials = await getStoredCredentials();
+    const gcData = await browser.storage.local.get('giftedCredentials');
+    const giftedCreds = (gcData.giftedCredentials ?? []) as GiftedCredential[];
     const request = message.payload;
     const sessionKey = `byk_${crypto.randomUUID().replace(/-/g, '')}`;
 
@@ -508,8 +523,9 @@ export default defineBackground(() => {
 
     for (const req of request.providers ?? []) {
       const cred = credentials.find((c) => c.providerId === req.id);
+      const gc = !cred ? giftedCreds.find((g) => g.providerId === req.id && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens) : undefined;
       providerMap[req.id] = {
-        available: !!cred,
+        available: !!(cred || gc),
         authMethod: cred?.authMethod ?? 'api_key',
       };
       if (cred) {
@@ -518,6 +534,16 @@ export default defineBackground(() => {
           credentialId: cred.id,
           available: true,
           authMethod: cred.authMethod,
+        });
+      } else if (gc) {
+        sessionProviders.push({
+          providerId: req.id,
+          credentialId: gc.id,
+          available: true,
+          authMethod: 'api_key',
+          giftId: gc.giftId,
+          giftRelayUrl: gc.relayUrl,
+          giftAuthToken: gc.authToken,
         });
       }
     }
@@ -534,6 +560,20 @@ export default defineBackground(() => {
           available: true,
           authMethod: cred.authMethod,
         });
+      }
+      for (const gc of giftedCreds) {
+        if (gc.expiresAt > Date.now() && gc.usedTokens < gc.maxTokens && !providerMap[gc.providerId]) {
+          providerMap[gc.providerId] = { available: true, authMethod: 'api_key' };
+          sessionProviders.push({
+            providerId: gc.providerId,
+            credentialId: gc.id,
+            available: true,
+            authMethod: 'api_key',
+            giftId: gc.giftId,
+            giftRelayUrl: gc.relayUrl,
+            giftAuthToken: gc.authToken,
+          });
+        }
       }
     }
 
@@ -840,6 +880,97 @@ export default defineBackground(() => {
         return { success: true };
       }
 
+      // --- Token gifts ---
+
+      case 'createGift': {
+        if (!masterPassword) return { error: 'Wallet is locked' };
+        const { credentialId, providerId, label, maxTokens, expiresInMs, relayUrl } = message.payload as {
+          credentialId: string; providerId: string; label: string; maxTokens: number; expiresInMs: number; relayUrl: string;
+        };
+        const gift: Gift = {
+          id: crypto.randomUUID(),
+          credentialId,
+          providerId,
+          label,
+          authToken: `gft_${crypto.randomUUID().replace(/-/g, '')}`,
+          maxTokens,
+          usedTokens: 0,
+          expiresAt: Date.now() + expiresInMs,
+          createdAt: Date.now(),
+          active: true,
+          relayUrl,
+        };
+        const data = await browser.storage.local.get('gifts');
+        const gifts = (data.gifts ?? []) as Gift[];
+        gifts.push(gift);
+        await browser.storage.local.set({ gifts });
+        const { encoded } = createGiftLink(gift);
+        connectGiftRelay(gift);
+        return { success: true, giftLink: encoded };
+      }
+
+      case 'getGifts': {
+        const data = await browser.storage.local.get('gifts');
+        return { gifts: (data.gifts ?? []) as Gift[] };
+      }
+
+      case 'revokeGift': {
+        const { giftId } = message.payload as { giftId: string };
+        const data = await browser.storage.local.get('gifts');
+        const gifts = (data.gifts ?? []) as Gift[];
+        const idx = gifts.findIndex((g) => g.id === giftId);
+        if (idx !== -1) {
+          gifts[idx].active = false;
+          await browser.storage.local.set({ gifts });
+          disconnectGiftRelay(giftId);
+        }
+        return { success: true };
+      }
+
+      case 'redeemGift': {
+        const { giftLinkEncoded } = message.payload as { giftLinkEncoded: string };
+        const link = decodeGiftLink(giftLinkEncoded);
+        if (!link) return { error: 'Invalid gift link' };
+        const validation = validateGiftLink(link);
+        if (!validation.valid) return { error: validation.reason };
+        const giftedCred: GiftedCredential = {
+          id: crypto.randomUUID(),
+          giftId: link.id,
+          providerId: link.p,
+          providerName: link.n,
+          senderLabel: link.s,
+          authToken: link.t,
+          maxTokens: link.m,
+          usedTokens: 0,
+          expiresAt: link.e,
+          relayUrl: link.r,
+          createdAt: Date.now(),
+        };
+        const gcData = await browser.storage.local.get('giftedCredentials');
+        const giftedCreds = (gcData.giftedCredentials ?? []) as GiftedCredential[];
+        if (giftedCreds.some((gc) => gc.giftId === link.id)) {
+          return { error: 'Gift already redeemed' };
+        }
+        giftedCreds.push(giftedCred);
+        await browser.storage.local.set({ giftedCredentials: giftedCreds });
+        return { success: true };
+      }
+
+      case 'getGiftedCredentials': {
+        const data = await browser.storage.local.get('giftedCredentials');
+        return { giftedCredentials: (data.giftedCredentials ?? []) as GiftedCredential[] };
+      }
+
+      case 'removeGiftedCredential': {
+        const { id } = message.payload as { id: string };
+        const data = await browser.storage.local.get('giftedCredentials');
+        const giftedCreds = (data.giftedCredentials ?? []) as GiftedCredential[];
+        await browser.storage.local.set({
+          giftedCredentials: giftedCreds.filter((gc) => gc.id !== id),
+        });
+        return { success: true };
+      }
+
       default:
         return { error: 'Unknown action' };
     }
@@ -1046,6 +1177,168 @@ export default defineBackground(() => {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  // --- Gift relay proxy (recipient side) ---
+
+  async function proxyViaGiftRelay(
+    responsePort: Runtime.Port,
+    msg: ProxyRequest,
+    sp: { giftId?: string; giftRelayUrl?: string; giftAuthToken?: string },
+  ): Promise<void> {
+    if (!sp.giftRelayUrl || !sp.giftAuthToken || !sp.giftId) {
+      responsePort.postMessage({
+        type: 'BYOKY_PROXY_RESPONSE_ERROR',
+        requestId: msg.requestId,
+        status: 500,
+        error: { code: 'GIFT_ERROR', message: 'Missing gift relay configuration' },
+      });
+      return;
+    }
+
+    try {
+      const ws = new WebSocket(sp.giftRelayUrl);
+      let authenticated = false;
+      const timeout = setTimeout(() => {
+        if (!authenticated) {
+          ws.close();
+          responsePort.postMessage({
+            type: 'BYOKY_PROXY_RESPONSE_ERROR',
+            requestId: msg.requestId,
+            status: 504,
+            error: { code: 'GIFT_TIMEOUT', message: 'Gift relay connection timed out' },
+          });
+        }
+      }, 30_000);
+
+      ws.onopen = () => {
+        ws.send(JSON.stringify({
+          type: 'gift:auth',
+          giftId: sp.giftId,
+          authToken: sp.giftAuthToken,
+          role: 'recipient',
+        }));
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(typeof event.data === 'string' ? event.data : '');
+
+          if (data.type === 'gift:auth:result') {
+            if (!data.success) {
+              clearTimeout(timeout);
+              ws.close();
+              responsePort.postMessage({
+                type: 'BYOKY_PROXY_RESPONSE_ERROR',
+                requestId: msg.requestId,
+                status: 403,
+                error: { code: 'GIFT_AUTH_FAILED', message: data.error || 'Gift authentication failed' },
+              });
+              return;
+            }
+            authenticated = true;
+            if (!data.peerOnline) {
+              clearTimeout(timeout);
+              ws.close();
+              responsePort.postMessage({
+                type: 'BYOKY_PROXY_RESPONSE_ERROR',
+                requestId: msg.requestId,
+                status: 503,
+                error: { code: 'GIFT_SENDER_OFFLINE', message: 'Gift sender is not online' },
+              });
+              return;
+            }
+            // Send the relay request
+            ws.send(JSON.stringify({
+              type: 'relay:request',
+              requestId: msg.requestId,
+              providerId: msg.providerId,
+              url: msg.url,
+              method: msg.method,
+              headers: msg.headers,
+              body: msg.body,
+            }));
+          }
+
+          // Forward relay responses to the port
+          if (data.type === 'relay:response:meta' && data.requestId === msg.requestId) {
+            clearTimeout(timeout);
+            responsePort.postMessage({
+              type: 'BYOKY_PROXY_RESPONSE_META',
+              requestId: msg.requestId,
+              status: data.status,
+              statusText: data.statusText,
+              headers: data.headers ?? {},
+            });
+          }
+
+          if (data.type === 'relay:response:chunk' && data.requestId === msg.requestId) {
+            responsePort.postMessage({
+              type: 'BYOKY_PROXY_RESPONSE_CHUNK',
+              requestId: msg.requestId,
+              chunk: data.chunk,
+            });
+          }
+
+          if (data.type === 'relay:response:done' && data.requestId === msg.requestId) {
+            responsePort.postMessage({
+              type: 'BYOKY_PROXY_RESPONSE_DONE',
+              requestId: msg.requestId,
+            });
+            ws.close();
+          }
+
+          if (data.type === 'relay:response:error' && data.requestId === msg.requestId) {
+            clearTimeout(timeout);
+            responsePort.postMessage({
+              type: 'BYOKY_PROXY_RESPONSE_ERROR',
+              requestId: msg.requestId,
+              status: data.error?.code === 'GIFT_BUDGET_EXHAUSTED' ? 429 : 502,
+              error: data.error ?? { code: 'GIFT_ERROR', message: 'Gift relay error' },
+            });
+            ws.close();
+          }
+
+          // Update local gifted credential usage
+          if (data.type === 'gift:usage' && data.giftId === sp.giftId) {
+            updateGiftedCredentialUsage(sp.giftId!, data.usedTokens);
+          }
+        } catch {
+          // Ignore parse errors
+        }
+      };
+
+      ws.onerror = () => {
+        clearTimeout(timeout);
+        responsePort.postMessage({
+          type: 'BYOKY_PROXY_RESPONSE_ERROR',
+          requestId: msg.requestId,
+          status: 502,
+          error: { code: 'GIFT_RELAY_ERROR', message: 'Failed to connect to gift relay' },
+        });
+      };
+
+      ws.onclose = () => {
+        clearTimeout(timeout);
+      };
+    } catch (e) {
+      responsePort.postMessage({
+        type: 'BYOKY_PROXY_RESPONSE_ERROR',
+        requestId: msg.requestId,
+        status: 502,
+        error: { code: 'GIFT_RELAY_ERROR', message: (e as Error).message },
+      });
+    }
+  }
+
+  async function updateGiftedCredentialUsage(giftId: string, usedTokens: number) {
+    const data = await browser.storage.local.get('giftedCredentials');
+    const giftedCreds = (data.giftedCredentials ?? []) as GiftedCredential[];
+    const idx = giftedCreds.findIndex((gc) => gc.giftId === giftId);
+    if (idx !== -1) {
+      giftedCreds[idx].usedTokens = usedTokens;
+      await browser.storage.local.set({ giftedCredentials: giftedCreds });
     }
   }
 
@@ -1591,4 +1884,212 @@ export default defineBackground(() => {
 
     return computeAllowanceCheck(allowance, entries, providerId);
   }
+
+  // --- Gift relay (sender side) ---
+
+  const giftRelayConnections = new Map<string, WebSocket>();
+
+  function connectGiftRelay(gift: Gift) {
+    if (giftRelayConnections.has(gift.id)) return;
+    if (!gift.active || gift.expiresAt <= Date.now()) return;
+
+    try {
+      const ws = new WebSocket(gift.relayUrl);
+
+      ws.onopen = () => {
+        ws.send(JSON.stringify({
+          type: 'gift:auth',
+          giftId: gift.id,
+          authToken: gift.authToken,
+          role: 'sender',
+        }));
+      };
+
+      ws.onmessage = async (event) => {
+        try {
+          const msg = JSON.parse(typeof event.data === 'string' ? event.data : '');
+
+          if (msg.type === 'gift:auth:result' && !msg.success) {
+            ws.close();
+            giftRelayConnections.delete(gift.id);
+            return;
+          }
+
+          // Proxy request from recipient
+          if (msg.type === 'relay:request') {
+            await handleGiftProxyRequest(gift, ws, msg);
+          }
+        } catch {
+          // ignore parse errors
+        }
+      };
+
+      ws.onclose = () => {
+        giftRelayConnections.delete(gift.id);
+        // Reconnect if gift is still active
+        setTimeout(async () => {
+          const data = await browser.storage.local.get('gifts');
+          const gifts = (data.gifts ?? []) as Gift[];
+          const current = gifts.find((g) => g.id === gift.id);
+          if (current?.active && current.expiresAt > Date.now()) {
+            connectGiftRelay(current);
+          }
+        }, 5000);
+      };
+
+      ws.onerror = () => {
+        // onclose will fire after onerror
+      };
+
+      giftRelayConnections.set(gift.id, ws);
+    } catch {
+      // WebSocket construction failed
+    }
+  }
+
+  function disconnectGiftRelay(giftId: string) {
+    const ws = giftRelayConnections.get(giftId);
+    if (ws) {
+      ws.close();
+      giftRelayConnections.delete(giftId);
+    }
+  }
+
+  async function handleGiftProxyRequest(
+    gift: Gift,
+    ws: WebSocket,
+    msg: { requestId: string; providerId: string; url: string; method: string; headers: Record<string, string>; body?: string },
+  ) {
+    if (!masterPassword) {
+      ws.send(JSON.stringify({
+        type: 'relay:response:error',
+        requestId: msg.requestId,
+        error: { code: 'WALLET_LOCKED', message: 'Sender wallet is locked' },
+      }));
+      return;
+    }
+
+    // Check budget
+    const data = await browser.storage.local.get('gifts');
+    const gifts = (data.gifts ?? []) as Gift[];
+    const current = gifts.find((g) => g.id === gift.id);
+    if (!current || !current.active || current.expiresAt <= Date.now()) {
+      ws.send(JSON.stringify({
+        type: 'relay:response:error',
+        requestId: msg.requestId,
+        error: { code: 'GIFT_EXPIRED', message: 'Gift has expired or been revoked' },
+      }));
+      return;
+    }
+    if (current.usedTokens >= current.maxTokens) {
+      ws.send(JSON.stringify({
+        type: 'relay:response:error',
+        requestId: msg.requestId,
+        error: { code: 'GIFT_BUDGET_EXHAUSTED', message: 'Gift token budget exhausted' },
+      }));
+      return;
+    }
+
+    // Resolve credential
+    const credentials = await getStoredCredentials();
+    const credential = credentials.find((c) => c.id === gift.credentialId);
+    if (!credential) {
+      ws.send(JSON.stringify({
+        type: 'relay:response:error',
+        requestId: msg.requestId,
+        error: { code: 'PROVIDER_UNAVAILABLE', message: 'Credential no longer available' },
+      }));
+      return;
+    }
+
+    if (!validateProxyUrl(gift.providerId, msg.url)) {
+      ws.send(JSON.stringify({
+        type: 'relay:response:error',
+        requestId: msg.requestId,
+        error: { code: 'INVALID_URL', message: 'Request URL does not match provider' },
+      }));
+      return;
+    }
+
+    try {
+      const apiKey = await decryptCredentialKey(credential);
+      const realHeaders = buildHeaders(gift.providerId, msg.headers, apiKey, credential.authMethod);
+
+      const response = await fetch(msg.url, {
+        method: msg.method,
+        headers: realHeaders,
+        body: msg.body,
+      });
+
+      const respHeaders: Record<string, string> = {};
+      response.headers.forEach((v, k) => { respHeaders[k] = v; });
+
+      ws.send(JSON.stringify({
+        type: 'relay:response:meta',
+        requestId: msg.requestId,
+        status: response.status,
+        statusText: response.statusText,
+        headers: respHeaders,
+      }));
+
+      const chunks: string[] = [];
+      if (response.body) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const text = decoder.decode(value, { stream: true });
+          chunks.push(text);
+          ws.send(JSON.stringify({
+            type: 'relay:response:chunk',
+            requestId: msg.requestId,
+            chunk: text,
+          }));
+        }
+      }
+
+      ws.send(JSON.stringify({
+        type: 'relay:response:done',
+        requestId: msg.requestId,
+      }));
+
+      // Update gift usage
+      const fullBody = chunks.join('');
+      const usage = parseUsage(gift.providerId, fullBody);
+      if (usage) {
+        const totalTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
+        const refreshData = await browser.storage.local.get('gifts');
+        const refreshGifts = (refreshData.gifts ?? []) as Gift[];
+        const gIdx = refreshGifts.findIndex((g) => g.id === gift.id);
+        if (gIdx !== -1) {
+          refreshGifts[gIdx].usedTokens += totalTokens;
+          await browser.storage.local.set({ gifts: refreshGifts });
+        }
+        // Notify recipient of usage
+        ws.send(JSON.stringify({
+          type: 'gift:usage',
+          giftId: gift.id,
+          usedTokens: refreshGifts[gIdx]?.usedTokens ?? current.usedTokens + totalTokens,
+        }));
+      }
+    } catch (error) {
+      ws.send(JSON.stringify({
+        type: 'relay:response:error',
+        requestId: msg.requestId,
+        error: { code: 'PROXY_ERROR', message: (error as Error).message },
+      }));
+    }
+  }
+
+  // Reconnect active gifts on startup
+  (async () => {
+    const data = await browser.storage.local.get('gifts');
+    const gifts = (data.gifts ?? []) as Gift[];
+    for (const gift of gifts) {
+      if (gift.active && gift.expiresAt > Date.now()) {
+        connectGiftRelay(gift);
+      }
+    }
+  })();
 });

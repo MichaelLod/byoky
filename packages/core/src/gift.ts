@@ -1,0 +1,177 @@
+import { PROVIDERS } from './providers.js';
+
+// --- Gift (sender side) ---
+
+export interface Gift {
+  id: string;
+  credentialId: string;
+  providerId: string;
+  label: string;
+  authToken: string;
+  maxTokens: number;
+  usedTokens: number;
+  expiresAt: number;
+  createdAt: number;
+  active: boolean;
+  relayUrl: string;
+}
+
+// --- Gift link (shareable payload) ---
+
+export interface GiftLink {
+  v: 1;
+  id: string;
+  p: string;    // providerId
+  n: string;    // provider display name
+  s: string;    // sender label
+  t: string;    // auth token
+  m: number;    // max tokens
+  e: number;    // expires at (unix ms)
+  r: string;    // relay URL
+}
+
+// --- Gifted credential (recipient side) ---
+
+export interface GiftedCredential {
+  id: string;
+  giftId: string;
+  providerId: string;
+  providerName: string;
+  senderLabel: string;
+  authToken: string;
+  maxTokens: number;
+  usedTokens: number;
+  expiresAt: number;
+  relayUrl: string;
+  createdAt: number;
+}
+
+// --- Gift relay protocol ---
+
+export interface GiftRelayAuth {
+  type: 'gift:auth';
+  giftId: string;
+  authToken: string;
+  role: 'sender' | 'recipient';
+}
+
+export interface GiftRelayAuthResult {
+  type: 'gift:auth:result';
+  success: boolean;
+  error?: string;
+  peerOnline?: boolean;
+}
+
+export interface GiftRelayPeerStatus {
+  type: 'gift:peer:status';
+  online: boolean;
+}
+
+export interface GiftRelayUsageUpdate {
+  type: 'gift:usage';
+  giftId: string;
+  usedTokens: number;
+}
+
+export type GiftRelayMessage =
+  | GiftRelayAuth
+  | GiftRelayAuthResult
+  | GiftRelayPeerStatus
+  | GiftRelayUsageUpdate;
+
+// --- Encoding / decoding ---
+
+export function encodeGiftLink(link: GiftLink): string {
+  const json = JSON.stringify(link);
+  const bytes = new TextEncoder().encode(json);
+  return base64UrlEncode(bytes);
+}
+
+export function decodeGiftLink(encoded: string): GiftLink | null {
+  try {
+    const clean = encoded.replace(/^byoky:\/\/gift\//, '');
+    const bytes = base64UrlDecode(clean);
+    const json = new TextDecoder().decode(bytes);
+    const parsed = JSON.parse(json);
+    if (parsed.v !== 1) return null;
+    return parsed as GiftLink;
+  } catch {
+    return null;
+  }
+}
+
+export function giftLinkToUrl(encoded: string): string {
+  return `byoky://gift/${encoded}`;
+}
+
+// --- Validation ---
+
+export function validateGiftLink(link: GiftLink): { valid: boolean; reason?: string } {
+  if (link.v !== 1) return { valid: false, reason: 'Unsupported gift version' };
+  if (!link.id || typeof link.id !== 'string') return { valid: false, reason: 'Missing gift ID' };
+  if (!link.p || typeof link.p !== 'string') return { valid: false, reason: 'Missing provider' };
+  if (!link.t || typeof link.t !== 'string') return { valid: false, reason: 'Missing auth token' };
+  if (!link.r || typeof link.r !== 'string') return { valid: false, reason: 'Missing relay URL' };
+  if (typeof link.m !== 'number' || link.m <= 0) return { valid: false, reason: 'Invalid token budget' };
+  if (typeof link.e !== 'number' || link.e <= Date.now()) return { valid: false, reason: 'Gift has expired' };
+
+  try {
+    const url = new URL(link.r);
+    if (url.protocol !== 'ws:' && url.protocol !== 'wss:') {
+      return { valid: false, reason: 'Relay URL must use ws:// or wss://' };
+    }
+  } catch {
+    return { valid: false, reason: 'Invalid relay URL' };
+  }
+
+  return { valid: true };
+}
+
+export function isGiftExpired(gift: { expiresAt: number }): boolean {
+  return gift.expiresAt <= Date.now();
+}
+
+export function isGiftBudgetExhausted(gift: { usedTokens: number; maxTokens: number }): boolean {
+  return gift.usedTokens >= gift.maxTokens;
+}
+
+export function giftBudgetRemaining(gift: { usedTokens: number; maxTokens: number }): number {
+  return Math.max(0, gift.maxTokens - gift.usedTokens);
+}
+
+export function giftBudgetPercent(gift: { usedTokens: number; maxTokens: number }): number {
+  if (gift.maxTokens === 0) return 100;
+  return Math.min(100, Math.round((gift.usedTokens / gift.maxTokens) * 100));
+}
+
+export function createGiftLink(gift: Gift): { encoded: string; link: GiftLink } {
+  const provider = PROVIDERS[gift.providerId];
+  const link: GiftLink = {
+    v: 1,
+    id: gift.id,
+    p: gift.providerId,
+    n: provider?.name ?? gift.providerId,
+    s: gift.label,
+    t: gift.authToken,
+    m: gift.maxTokens,
+    e: gift.expiresAt,
+    r: gift.relayUrl,
+  };
+  return { encoded: encodeGiftLink(link), link };
+}
+
+// --- Base64url helpers ---
+
+function base64UrlEncode(bytes: Uint8Array): string {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function base64UrlDecode(str: string): Uint8Array {
+  const padded = str.replace(/-/g, '+').replace(/_/g, '/');
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}

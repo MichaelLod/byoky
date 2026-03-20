@@ -1313,6 +1313,175 @@ body {
   animation: fade-in 0.2s ease-out both;
 }
 
+/* ─── Token Gifts ─── */
+
+.gift-section-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 16px 0 8px;
+}
+
+.gift-card {
+  border-left: 3px solid var(--accent);
+}
+
+.gift-card-sent {
+  border-left: 3px solid var(--success);
+}
+
+.badge-gift {
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+}
+
+.badge-gift-sent {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.gift-budget {
+  margin-top: 8px;
+}
+
+.gift-budget-text {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.gift-budget-total {
+  color: var(--text-muted);
+}
+
+.gift-budget-presets {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.gift-preset-btn {
+  background: var(--bg-input);
+  border: 1.5px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.gift-preset-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.gift-preset-btn.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-hover);
+}
+
+.gift-security-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: var(--success-soft);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.gift-security-note svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--success);
+}
+
+.gift-success {
+  text-align: center;
+  padding: 20px 0;
+}
+
+.gift-success-icon {
+  margin-bottom: 12px;
+}
+
+.gift-success-label {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.gift-link-box {
+  background: var(--bg-input);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  margin-bottom: 12px;
+  word-break: break-all;
+}
+
+.gift-link-text {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.gift-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 12px;
+  line-height: 1.5;
+}
+
+.gift-preview {
+  background: var(--bg-raised);
+  border: 1.5px solid var(--accent-soft);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 8px;
+}
+
+.gift-preview-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+
+.gift-preview-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gift-preview-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+}
+
+.gift-preview-label {
+  color: var(--text-muted);
+}
+
+.gift-preview-relay {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 /* Respect reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

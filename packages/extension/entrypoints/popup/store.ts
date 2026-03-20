@@ -7,6 +7,8 @@ import {
   type PendingApproval,
   type TrustedSite,
   type TokenAllowance,
+  type Gift,
+  type GiftedCredential,
   hashPassword,
 } from '@byoky/core';
 
@@ -19,7 +21,9 @@ type Page =
   | 'usage'
   | 'request-history'
   | 'approval'
-  | 'settings';
+  | 'settings'
+  | 'create-gift'
+  | 'redeem-gift';
 
 interface WalletState {
   isInitialized: boolean;
@@ -30,6 +34,8 @@ interface WalletState {
   pendingApprovals: PendingApproval[];
   trustedSites: TrustedSite[];
   tokenAllowances: TokenAllowance[];
+  gifts: Gift[];
+  giftedCredentials: GiftedCredential[];
   currentPage: Page;
   loading: boolean;
   error: string | null;
@@ -49,6 +55,10 @@ interface WalletState {
   removeTrustedSite: (origin: string) => Promise<void>;
   setAllowance: (allowance: TokenAllowance) => Promise<void>;
   removeAllowance: (origin: string) => Promise<void>;
+  createGift: (credentialId: string, providerId: string, label: string, maxTokens: number, expiresInMs: number, relayUrl: string) => Promise<string | null>;
+  revokeGift: (giftId: string) => Promise<void>;
+  redeemGift: (giftLinkEncoded: string) => Promise<void>;
+  removeGiftedCredential: (id: string) => Promise<void>;
   refreshData: () => Promise<void>;
   clearError: () => void;
 }
@@ -70,6 +80,8 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   pendingApprovals: [],
   trustedSites: [],
   tokenAllowances: [],
+  gifts: [],
+  giftedCredentials: [],
   currentPage: 'unlock',
   loading: true,
   error: null,
@@ -127,6 +139,8 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       credentials: [],
       requestLog: [],
       pendingApprovals: [],
+      gifts: [],
+      giftedCredentials: [],
       currentPage: 'unlock',
     });
   },
@@ -222,14 +236,54 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     await get().refreshData();
   },
 
+  createGift: async (credentialId, providerId, label, maxTokens, expiresInMs, relayUrl) => {
+    set({ loading: true, error: null });
+    try {
+      const result = await sendInternal('createGift', {
+        credentialId, providerId, label, maxTokens, expiresInMs, relayUrl,
+      });
+      if (result.error) throw new Error(result.error as string);
+      await get().refreshData();
+      set({ loading: false });
+      return result.giftLink as string;
+    } catch (e) {
+      set({ error: (e as Error).message, loading: false });
+      return null;
+    }
+  },
+
+  revokeGift: async (giftId: string) => {
+    await sendInternal('revokeGift', { giftId });
+    await get().refreshData();
+  },
+
+  redeemGift: async (giftLinkEncoded: string) => {
+    set({ loading: true, error: null });
+    try {
+      const result = await sendInternal('redeemGift', { giftLinkEncoded });
+      if (result.error) throw new Error(result.error as string);
+      await get().refreshData();
+      set({ currentPage: 'dashboard', loading: false });
+    } catch (e) {
+      set({ error: (e as Error).message, loading: false });
+    }
+  },
+
+  removeGiftedCredential: async (id: string) => {
+    await sendInternal('removeGiftedCredential', { id });
+    await get().refreshData();
+  },
+
   refreshData: async () => {
-    const [credResult, sessionResult, logResult, approvalResult, trustedResult, allowanceResult] = await Promise.all([
+    const [credResult, sessionResult, logResult, approvalResult, trustedResult, allowanceResult, giftResult, giftedResult] = await Promise.all([
       sendInternal('getCredentials'),
       sendInternal('getSessions'),
       sendInternal('getRequestLog'),
       sendInternal('getPendingApprovals'),
       sendInternal('getTrustedSites'),
       sendInternal('getAllowances'),
+      sendInternal('getGifts'),
+      sendInternal('getGiftedCredentials'),
     ]);
 
     const metas: CredentialMeta[] = ((credResult.credentials ?? []) as Array<Record<string, unknown>>).map(
@@ -251,9 +305,10 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       pendingApprovals: (approvalResult.approvals ?? []) as PendingApproval[],
       trustedSites: (trustedResult.sites ?? []) as TrustedSite[],
       tokenAllowances: (allowanceResult.allowances ?? []) as TokenAllowance[],
+      gifts: (giftResult.gifts ?? []) as Gift[],
+      giftedCredentials: (giftedResult.giftedCredentials ?? []) as GiftedCredential[],
     });
   },
 
   clearError: () => set({ error: null }),
 }));
-

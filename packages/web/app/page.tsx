@@ -220,6 +220,18 @@ function HowItWorks() {
               </p>
             </div>
           </FadeIn>
+          <FadeIn delay={0.4}>
+            <div className="step">
+              <div className="step-number">
+                <GiftIcon />
+              </div>
+              <h3>Gift tokens</h3>
+              <p>
+                Share token access without sharing your API key. Set a budget,
+                generate a gift link, and revoke anytime. Relay-backed — zero key exposure.
+              </p>
+            </div>
+          </FadeIn>
         </div>
       </div>
     </section>
@@ -291,6 +303,18 @@ function ForDevelopers() {
                     <p>
                       The Byoky Bridge lets CLI tools and desktop apps route
                       through the wallet via a local HTTP proxy. Keys stay in the extension.
+                    </p>
+                  </div>
+                </div>
+                <div className="dev-feature">
+                  <div className="dev-feature-icon">
+                    <CheckIcon />
+                  </div>
+                  <div>
+                    <h4>Token gifts</h4>
+                    <p>
+                      Let users share token access without sharing API keys.
+                      Relay-backed with budget caps, expiry, and instant revocation.
                     </p>
                   </div>
                 </div>
@@ -396,6 +420,18 @@ function Security() {
               <p>
                 Set token allowances per app — total or per provider.
                 The proxy enforces limits so no app can overspend.
+              </p>
+            </div>
+          </FadeIn>
+          <FadeIn delay={0.19}>
+            <div className="security-card">
+              <div className="security-icon">
+                <GiftIcon />
+              </div>
+              <h3>Relay-backed gifting</h3>
+              <p>
+                Share token access with anyone — your API key stays in your wallet.
+                Requests relay through you. Budget-capped with instant revocation.
               </p>
             </div>
           </FadeIn>
@@ -796,6 +832,18 @@ function TerminalIcon() {
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="4 17 10 11 4 5" />
       <line x1="12" y1="19" x2="20" y2="19" />
+    </svg>
+  );
+}
+
+function GiftIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 12v10H4V12" />
+      <path d="M2 7h20v5H2z" />
+      <path d="M12 22V7" />
+      <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z" />
+      <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" />
     </svg>
   );
 }

@@ -70,6 +70,9 @@ export interface SessionProvider {
   credentialId: string;
   available: boolean;
   authMethod: AuthMethod;
+  giftId?: string;
+  giftRelayUrl?: string;
+  giftAuthToken?: string;
 }
 
 // --- Connect ---

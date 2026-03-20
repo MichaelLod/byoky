@@ -9,6 +9,8 @@ import { ApprovalRequest } from './pages/ApprovalRequest';
 import { Usage } from './pages/Usage';
 import { RequestHistory } from './pages/RequestHistory';
 import { Settings } from './pages/Settings';
+import { CreateGift } from './pages/CreateGift';
+import { RedeemGift } from './pages/RedeemGift';
 
 export default function App() {
   const { currentPage, sessions, pendingApprovals, loading, init } = useWalletStore();
@@ -127,6 +129,8 @@ export default function App() {
           {currentPage === 'usage' && <Usage />}
           {currentPage === 'request-history' && <RequestHistory />}
           {currentPage === 'settings' && <Settings />}
+          {currentPage === 'create-gift' && <CreateGift />}
+          {currentPage === 'redeem-gift' && <RedeemGift />}
         </div>
       </main>
       {(currentPage === 'setup' || currentPage === 'unlock') && (

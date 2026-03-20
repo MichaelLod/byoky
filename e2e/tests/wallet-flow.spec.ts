@@ -769,6 +769,66 @@ test.describe.serial('Byoky wallet E2E flow', () => {
     expect(countAfter).toBe(countBefore - 1);
   });
 
+  // ── Token Gifts ───────────────────────────────────────
+
+  test('gift creation page opens from dashboard', async ({ extensionPage }) => {
+    await extensionPage.bringToFront();
+    await extensionPage.click('button[title="Wallet"]');
+    await extensionPage.waitForSelector('text=E2E Test Key', { timeout: 5_000 });
+    // Click the Gift button on the first credential
+    await extensionPage.click('button:has-text("Gift")');
+    await expect(extensionPage.locator('text=Gift Tokens')).toBeVisible({ timeout: 5_000 });
+    await expect(extensionPage.locator('text=Token budget')).toBeVisible();
+    await expect(extensionPage.locator('text=Relay server')).toBeVisible();
+  });
+
+  test('gift creation form has correct defaults', async ({ extensionPage }) => {
+    // Should still be on the create-gift page from previous test
+    const budgetInput = extensionPage.locator('input[type="number"]');
+    await expect(budgetInput).toHaveValue('100000');
+    const relayInput = extensionPage.locator('input[placeholder="wss://relay.byoky.com"]');
+    await expect(relayInput).toHaveValue('wss://relay.byoky.com');
+  });
+
+  test('gift creation returns gift link', async ({ extensionPage }) => {
+    // Submit the gift creation form
+    await extensionPage.click('button:has-text("Create Gift")');
+    await expect(extensionPage.locator('text=Gift Created')).toBeVisible({ timeout: 10_000 });
+    await expect(extensionPage.locator('text=byoky://gift/')).toBeVisible();
+    await expect(extensionPage.locator('text=Copy Gift Link')).toBeVisible();
+    // Navigate back
+    await extensionPage.click('button:has-text("Done")');
+    await expect(extensionPage.locator('text=Sent Gifts')).toBeVisible({ timeout: 5_000 });
+  });
+
+  test('sent gift appears on dashboard with budget bar', async ({ extensionPage }) => {
+    await expect(extensionPage.locator('.badge-gift-sent:has-text("Sent")')).toBeVisible();
+    await expect(extensionPage.locator('text=0 used')).toBeVisible();
+    await expect(extensionPage.locator('.allowance-bar')).toBeVisible();
+  });
+
+  test('gift can be revoked', async ({ extensionPage }) => {
+    await extensionPage.click('button:has-text("Revoke")');
+    // After revoke, "Sent Gifts" section should disappear
+    await expect(extensionPage.locator('.badge-gift-sent')).not.toBeVisible({ timeout: 5_000 });
+  });
+
+  test('redeem gift page opens', async ({ extensionPage }) => {
+    await extensionPage.click('button:has-text("Redeem gift")');
+    await expect(extensionPage.locator('text=Redeem Gift')).toBeVisible({ timeout: 5_000 });
+    await expect(extensionPage.locator('#gift-link')).toBeVisible();
+  });
+
+  test('invalid gift link shows error', async ({ extensionPage }) => {
+    await extensionPage.fill('#gift-link', 'not-a-valid-gift-link');
+    await expect(extensionPage.locator('text=Invalid gift link format')).toBeVisible({ timeout: 3_000 });
+  });
+
+  test('back to dashboard from redeem', async ({ extensionPage }) => {
+    await extensionPage.click('button:has-text("Cancel")');
+    await expect(extensionPage.locator('text=E2E Test Key')).toBeVisible({ timeout: 5_000 });
+  });
+
   // ── Final cleanup disconnect ───────────────────────────
 
   test('final disconnect and verify clean state', async ({ testPage, extensionPage }) => {

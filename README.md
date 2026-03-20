@@ -36,6 +36,7 @@
 
 - **For users** — One wallet for all your AI credentials. Add keys, approve apps, revoke access, export encrypted backups. Full visibility into every request.
 - **For developers** — Two lines of code. Use your favorite provider SDK. Keys never touch your app.
+- **Token gifts** — Share token access with friends or teammates without sharing your API key. Set budgets and expiration. All requests relay through your wallet.
 
 <p align="center">
   <img src="https://github.com/MichaelLod/byoky/raw/main/.github/screenshots/screenshot-1.png" alt="Byoky Wallet" width="400" />&nbsp;&nbsp;<img src="https://github.com/MichaelLod/byoky/raw/main/.github/screenshots/screenshot-2.png" alt="Byoky Unlock" width="400" />
@@ -139,6 +140,31 @@ npm install -g @byoky/bridge
 byoky-bridge install   # register native messaging host
 ```
 
+### Token Gifts (Relay)
+
+Share token access without sharing your API key. The sender's extension proxies all requests — the key never leaves the wallet.
+
+```
+Sender's Extension ←WebSocket→ Relay Server ←WebSocket→ Recipient's Extension
+```
+
+**Create a gift:**
+1. Open the wallet → select a credential → click "Gift"
+2. Set a token budget and expiry
+3. Share the generated gift link
+
+**Redeem a gift:**
+1. Open the wallet → click "Redeem Gift"
+2. Paste the gift link → accept
+
+**Self-host the relay:**
+```bash
+npm install -g @byoky/gift-relay
+byoky-gift-relay  # default port 8787
+```
+
+> **Privacy guarantee:** The recipient never receives your API key. Every request is relayed through the sender's running extension, which enforces the token budget and can revoke access at any time.
+
 ### OpenClaw Integration
 
 Use your Byoky wallet as the key provider for [OpenClaw](https://openclaw.dev). The plugin connects through the bridge — your keys never leave the extension, even from the CLI.
@@ -159,6 +185,7 @@ All 15 providers are available through the plugin. Install the bridge, connect y
 | **Vault backup** | Encrypted export/import (`.byoky` files) with separate export password |
 | **Audit log** | Every request logged — app origin, provider, status, timestamp |
 | **Spending caps** | Token allowances per app — total and per-provider limits, enforced at the proxy |
+| **Token gifts** | Share access without sharing keys — relay-backed with budget enforcement, sender-side proxy |
 | **Local only** | No cloud. No telemetry. No tracking. Your device, your keys |
 
 ## Supported Providers
@@ -192,6 +219,7 @@ Byoky uses a **proxy model** (like MetaMask's transaction signing). Keys never l
 Browser apps  → SDK (createFetch) → Content Script → Extension → LLM API
 Backend apps  → SDK/server (WebSocket) → User's Browser → Extension → LLM API
 CLI/desktop   → HTTP → Bridge (localhost) → Native Messaging → Extension → LLM API
+Token gifts   → WebSocket → Relay Server → WebSocket → Sender's Extension → LLM API
 ```
 
 The SDK provides `createFetch()` — a drop-in `fetch` replacement that routes through the extension. Works with **any provider's native SDK**.
@@ -205,6 +233,7 @@ byoky/
 │   ├── sdk/           # @byoky/sdk (+ @byoky/sdk/server for backend relay)
 │   ├── extension/     # Browser extension (Chrome, Firefox, Safari) — WXT
 │   ├── bridge/        # @byoky/bridge — HTTP proxy + native messaging for CLI/desktop apps
+│   ├── gift-relay/   # @byoky/gift-relay — WebSocket relay for token gifts
 │   ├── openclaw-plugin/ # OpenClaw provider plugin
 │   └── web/           # Landing page (byoky.com) + demo app (demo.byoky.com)
 ```
@@ -247,6 +276,7 @@ pnpm --filter @byoky/extension build:all     # Chrome + Firefox + Safari
 - [x] Encrypted vault export/import (`.byoky` files)
 - [ ] Browser extension store listings (Chrome, Firefox, Safari)
 - [x] OpenClaw provider plugin (bridge proxy — keys stay in extension)
+- [x] Token gifts (relay-backed, zero key exposure)
 - [ ] Password change (re-encrypt vault with new master password)
 
 ## Star History
