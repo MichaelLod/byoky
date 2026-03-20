@@ -255,15 +255,20 @@ export default defineBackground(() => {
 
         const realHeaders = buildHeaders(msg.providerId, msg.headers, apiKey, credential.authMethod);
 
-        // Setup tokens for Anthropic route through the bridge (Node.js) to avoid browser CORS
+        // Setup tokens for Anthropic route through the bridge (Node.js) to bypass TLS fingerprint detection
         if (credential.authMethod === 'oauth' && msg.providerId === 'anthropic') {
-          // Inject Claude Code system prompt required for OAuth token auth
+          // Prepend Claude Code system prompt required for OAuth token auth
           let body = msg.body;
           if (body) {
             try {
               const parsed = JSON.parse(body);
+              const prefix = "You are Claude Code, Anthropic's official CLI for Claude.";
               if (!parsed.system) {
-                parsed.system = "You are Claude Code, Anthropic's official CLI for Claude.";
+                parsed.system = prefix;
+              } else if (typeof parsed.system === 'string') {
+                parsed.system = `${prefix}\n\n${parsed.system}`;
+              } else if (Array.isArray(parsed.system)) {
+                parsed.system = [{ type: 'text', text: prefix }, ...parsed.system];
               }
               body = JSON.stringify(parsed);
             } catch {}
@@ -1222,6 +1227,21 @@ export default defineBackground(() => {
         const msg = raw as Record<string, unknown>;
         if (msg.type === 'proxy_http') {
           await handleBridgeProxyRequest(msg);
+        } else if (msg.type === 'proxy_response') {
+          // Setup token proxy response from bridge — forward to HTTP proxy client
+          bridgeProxyPort?.postMessage({
+            type: 'proxy_http_response',
+            requestId: msg.requestId,
+            status: msg.status,
+            headers: msg.headers,
+            body: msg.body,
+          });
+        } else if (msg.type === 'proxy_error') {
+          bridgeProxyPort?.postMessage({
+            type: 'proxy_http_error',
+            requestId: msg.requestId,
+            error: msg.error,
+          });
         }
       });
 
@@ -1307,6 +1327,43 @@ export default defineBackground(() => {
     try {
       const apiKey = await decryptCredentialKey(credential);
       const realHeaders = buildHeaders(providerId, headers, apiKey, credential.authMethod);
+
+      // OAuth tokens for Anthropic must route through the native bridge (Node.js)
+      // to bypass TLS fingerprint detection on api.anthropic.com.
+      if (credential.authMethod === 'oauth' && providerId === 'anthropic') {
+        if (!bridgeProxyPort) return;
+
+        let adjustedBody = body;
+        if (adjustedBody) {
+          try {
+            const parsed = JSON.parse(adjustedBody);
+            const prefix = "You are Claude Code, Anthropic's official CLI for Claude.";
+            if (!parsed.system) {
+              parsed.system = prefix;
+            } else if (typeof parsed.system === 'string') {
+              parsed.system = `${prefix}\n\n${parsed.system}`;
+            } else if (Array.isArray(parsed.system)) {
+              parsed.system = [{ type: 'text', text: prefix }, ...parsed.system];
+            }
+            adjustedBody = JSON.stringify(parsed);
+          } catch { /* keep original body */ }
+        }
+
+        // Send setup token proxy request through the existing bridge connection
+        bridgeProxyPort.postMessage({
+          type: 'proxy',
+          requestId,
+          setupToken: apiKey,
+          url,
+          method,
+          headers: realHeaders,
+          body: adjustedBody,
+        });
+
+        // The bridge will respond with proxy_response/proxy_error which gets
+        // routed back to the HTTP proxy server via handleProxyResponse
+        return;
+      }
 
       const response = await fetch(url, {
         method,

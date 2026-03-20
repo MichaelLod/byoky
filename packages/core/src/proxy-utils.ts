@@ -39,12 +39,17 @@ export function buildHeaders(
   delete headers['x-api-key'];
   delete headers['api-key'];
 
+  // Strip browser headers that trigger CORS rejection from provider APIs
+  delete headers['origin'];
+  delete headers['referer'];
+
   if (providerId === 'anthropic') {
     if (authMethod === 'oauth') {
       headers['authorization'] = `Bearer ${apiKey}`;
-      headers['user-agent'] = 'claude-cli/2.1.75';
+      headers['user-agent'] = 'claude-cli/2.1.76';
       headers['x-app'] = 'cli';
-      headers['anthropic-beta'] = 'claude-code-20250219,oauth-2025-04-20';
+      headers['anthropic-beta'] = 'claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14';
+      headers['anthropic-dangerous-direct-browser-access'] = 'true';
     } else {
       headers['x-api-key'] = apiKey;
     }

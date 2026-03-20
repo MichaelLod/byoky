@@ -5,7 +5,8 @@
  * messaging protocol (stdin/stdout with length-prefixed JSON).
  *
  * Two modes:
- * 1. Setup token proxy: Routes Anthropic requests through Claude Code CLI
+ * 1. OAuth token proxy: Fetches Anthropic API from Node.js to bypass TLS
+ *    fingerprint detection that blocks browser-originated requests.
  * 2. HTTP proxy: Local gateway for any CLI/desktop/server app to make LLM
  *    calls through the user's wallet. The bridge is a dumb relay — the
  *    extension makes the actual API call. Keys never touch the bridge.
@@ -151,7 +152,7 @@ async function handleMessage(msg: unknown): Promise<void> {
     return;
   }
 
-  // Setup token proxy (Anthropic → Claude Code CLI)
+  // OAuth token proxy (Anthropic — fetch from Node.js to bypass TLS fingerprinting)
   if (message.type === 'proxy') {
     const req = msg as BridgeRequest;
     await handleSetupTokenProxy(req);
@@ -174,6 +175,8 @@ async function handleMessage(msg: unknown): Promise<void> {
 
 async function handleSetupTokenProxy(req: BridgeRequest): Promise<void> {
   try {
+    const fs = await import('node:fs');
+    fs.appendFileSync('/tmp/byoky-bridge.log', `[${new Date().toISOString()}] proxy fetch: ${req.method} ${req.url} headers: ${JSON.stringify(Object.keys(req.headers))}\n`);
     const res = await fetch(req.url, {
       method: req.method,
       headers: req.headers,
@@ -192,6 +195,9 @@ async function handleSetupTokenProxy(req: BridgeRequest): Promise<void> {
       body,
     } satisfies BridgeResponse);
   } catch (e) {
+    const fs2 = await import('node:fs');
+    const err = e as Error & { cause?: Error };
+    fs2.appendFileSync('/tmp/byoky-bridge.log', `[${new Date().toISOString()}] proxy error: ${err.message}\ncause: ${err.cause?.message ?? 'none'} ${err.cause?.stack ?? ''}\nstack: ${err.stack}\n`);
     writeMessage({
       type: 'proxy_error',
       requestId: req.requestId,
