@@ -22,30 +22,202 @@ import { createServer, type Server } from 'node:http';
 
 type ProviderApi = 'anthropic-messages' | 'openai-completions';
 
+interface ModelDef {
+  id: string;
+  name: string;
+  reasoning: boolean;
+  input: Array<'text' | 'image'>;
+  cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  contextWindow: number;
+  maxTokens: number;
+}
+
 interface ByokyProvider {
   id: string;
   name: string;
   api: ProviderApi;
+  models: ModelDef[];
 }
 
 const DEFAULT_BRIDGE_PORT = 19280;
 
+// --- Model catalogs per provider ---
+
+const ANTHROPIC_MODELS: ModelDef[] = [
+  {
+    id: 'claude-opus-4-20250514',
+    name: 'Claude Opus 4',
+    reasoning: true,
+    input: ['text', 'image'],
+    cost: { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 },
+    contextWindow: 200_000,
+    maxTokens: 32_000,
+  },
+  {
+    id: 'claude-sonnet-4-20250514',
+    name: 'Claude Sonnet 4',
+    reasoning: true,
+    input: ['text', 'image'],
+    cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+    contextWindow: 200_000,
+    maxTokens: 16_000,
+  },
+  {
+    id: 'claude-haiku-4-5-20251001',
+    name: 'Claude Haiku 4.5',
+    reasoning: false,
+    input: ['text', 'image'],
+    cost: { input: 0.8, output: 4, cacheRead: 0.08, cacheWrite: 1 },
+    contextWindow: 200_000,
+    maxTokens: 8_192,
+  },
+];
+
+const OPENAI_MODELS: ModelDef[] = [
+  {
+    id: 'gpt-4.1',
+    name: 'GPT-4.1',
+    reasoning: false,
+    input: ['text', 'image'],
+    cost: { input: 2, output: 8, cacheRead: 0.5, cacheWrite: 0 },
+    contextWindow: 1_047_576,
+    maxTokens: 32_768,
+  },
+  {
+    id: 'o3',
+    name: 'o3',
+    reasoning: true,
+    input: ['text', 'image'],
+    cost: { input: 10, output: 40, cacheRead: 2.5, cacheWrite: 0 },
+    contextWindow: 200_000,
+    maxTokens: 100_000,
+  },
+  {
+    id: 'o4-mini',
+    name: 'o4-mini',
+    reasoning: true,
+    input: ['text', 'image'],
+    cost: { input: 1.1, output: 4.4, cacheRead: 0.275, cacheWrite: 0 },
+    contextWindow: 200_000,
+    maxTokens: 100_000,
+  },
+  {
+    id: 'gpt-4.1-mini',
+    name: 'GPT-4.1 Mini',
+    reasoning: false,
+    input: ['text', 'image'],
+    cost: { input: 0.4, output: 1.6, cacheRead: 0.1, cacheWrite: 0 },
+    contextWindow: 1_047_576,
+    maxTokens: 32_768,
+  },
+];
+
+const GEMINI_MODELS: ModelDef[] = [
+  {
+    id: 'gemini-2.5-pro',
+    name: 'Gemini 2.5 Pro',
+    reasoning: true,
+    input: ['text', 'image'],
+    cost: { input: 1.25, output: 10, cacheRead: 0.315, cacheWrite: 0 },
+    contextWindow: 1_048_576,
+    maxTokens: 65_536,
+  },
+  {
+    id: 'gemini-2.5-flash',
+    name: 'Gemini 2.5 Flash',
+    reasoning: true,
+    input: ['text', 'image'],
+    cost: { input: 0.15, output: 0.6, cacheRead: 0.0375, cacheWrite: 0 },
+    contextWindow: 1_048_576,
+    maxTokens: 65_536,
+  },
+];
+
+const DEEPSEEK_MODELS: ModelDef[] = [
+  {
+    id: 'deepseek-chat',
+    name: 'DeepSeek V3',
+    reasoning: false,
+    input: ['text'],
+    cost: { input: 0.27, output: 1.1, cacheRead: 0.07, cacheWrite: 0 },
+    contextWindow: 65_536,
+    maxTokens: 8_192,
+  },
+  {
+    id: 'deepseek-reasoner',
+    name: 'DeepSeek R1',
+    reasoning: true,
+    input: ['text'],
+    cost: { input: 0.55, output: 2.19, cacheRead: 0.14, cacheWrite: 0 },
+    contextWindow: 65_536,
+    maxTokens: 8_192,
+  },
+];
+
+const XAI_MODELS: ModelDef[] = [
+  {
+    id: 'grok-3',
+    name: 'Grok 3',
+    reasoning: false,
+    input: ['text'],
+    cost: { input: 3, output: 15, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 131_072,
+    maxTokens: 16_384,
+  },
+  {
+    id: 'grok-3-mini',
+    name: 'Grok 3 Mini',
+    reasoning: true,
+    input: ['text'],
+    cost: { input: 0.3, output: 0.5, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 131_072,
+    maxTokens: 16_384,
+  },
+];
+
+const MISTRAL_MODELS: ModelDef[] = [
+  {
+    id: 'mistral-large-latest',
+    name: 'Mistral Large',
+    reasoning: false,
+    input: ['text', 'image'],
+    cost: { input: 2, output: 6, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128_000,
+    maxTokens: 8_192,
+  },
+];
+
+const GROQ_MODELS: ModelDef[] = [
+  {
+    id: 'llama-3.3-70b-versatile',
+    name: 'Llama 3.3 70B',
+    reasoning: false,
+    input: ['text'],
+    cost: { input: 0.59, output: 0.79, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128_000,
+    maxTokens: 32_768,
+  },
+];
+
+// Providers with no pre-defined model catalog (models vary widely or require discovery)
+const EMPTY_MODELS: ModelDef[] = [];
+
 const PROVIDERS: ByokyProvider[] = [
-  { id: 'anthropic', name: 'Anthropic', api: 'anthropic-messages' },
-  { id: 'openai', name: 'OpenAI', api: 'openai-completions' },
-  { id: 'gemini', name: 'Google Gemini', api: 'openai-completions' },
-  { id: 'mistral', name: 'Mistral', api: 'openai-completions' },
-  { id: 'cohere', name: 'Cohere', api: 'openai-completions' },
-  { id: 'xai', name: 'xAI (Grok)', api: 'openai-completions' },
-  { id: 'deepseek', name: 'DeepSeek', api: 'openai-completions' },
-  { id: 'perplexity', name: 'Perplexity', api: 'openai-completions' },
-  { id: 'groq', name: 'Groq', api: 'openai-completions' },
-  { id: 'together', name: 'Together AI', api: 'openai-completions' },
-  { id: 'fireworks', name: 'Fireworks AI', api: 'openai-completions' },
-  { id: 'openrouter', name: 'OpenRouter', api: 'openai-completions' },
-  { id: 'replicate', name: 'Replicate', api: 'openai-completions' },
-  { id: 'huggingface', name: 'Hugging Face', api: 'openai-completions' },
-  { id: 'azure_openai', name: 'Azure OpenAI', api: 'openai-completions' },
+  { id: 'anthropic', name: 'Anthropic', api: 'anthropic-messages', models: ANTHROPIC_MODELS },
+  { id: 'openai', name: 'OpenAI', api: 'openai-completions', models: OPENAI_MODELS },
+  { id: 'gemini', name: 'Google Gemini', api: 'openai-completions', models: GEMINI_MODELS },
+  { id: 'mistral', name: 'Mistral', api: 'openai-completions', models: MISTRAL_MODELS },
+  { id: 'cohere', name: 'Cohere', api: 'openai-completions', models: EMPTY_MODELS },
+  { id: 'xai', name: 'xAI (Grok)', api: 'openai-completions', models: XAI_MODELS },
+  { id: 'deepseek', name: 'DeepSeek', api: 'openai-completions', models: DEEPSEEK_MODELS },
+  { id: 'perplexity', name: 'Perplexity', api: 'openai-completions', models: EMPTY_MODELS },
+  { id: 'groq', name: 'Groq', api: 'openai-completions', models: GROQ_MODELS },
+  { id: 'together', name: 'Together AI', api: 'openai-completions', models: EMPTY_MODELS },
+  { id: 'fireworks', name: 'Fireworks AI', api: 'openai-completions', models: EMPTY_MODELS },
+  { id: 'openrouter', name: 'OpenRouter', api: 'openai-completions', models: EMPTY_MODELS },
+  { id: 'replicate', name: 'Replicate', api: 'openai-completions', models: EMPTY_MODELS },
+  { id: 'huggingface', name: 'Hugging Face', api: 'openai-completions', models: EMPTY_MODELS },
+  { id: 'azure_openai', name: 'Azure OpenAI', api: 'openai-completions', models: EMPTY_MODELS },
 ];
 
 const byokyPlugin = {
@@ -56,7 +228,6 @@ const byokyPlugin = {
   configSchema: emptyPluginConfigSchema(),
 
   register(api: OpenClawPluginApi) {
-    // Register one provider per Byoky provider that routes through the bridge
     for (const provider of PROVIDERS) {
       const openclawId = `byoky-${provider.id}`;
 
@@ -87,10 +258,50 @@ const byokyPlugin = {
         },
       });
     }
+
+    // /byoky command — check bridge status
+    api.registerCommand({
+      name: 'byoky',
+      description: 'Show Byoky bridge status and connected providers',
+      acceptsArgs: false,
+      handler: async () => {
+        const health = await checkBridgeHealth();
+        if (!health) {
+          return {
+            text: 'Byoky Bridge: **offline**\n\nStart the bridge with `openclaw models auth login --provider byoky-anthropic` or ensure it is running on port ' + DEFAULT_BRIDGE_PORT + '.',
+          };
+        }
+        const providerList = health.providers.length > 0
+          ? health.providers.join(', ')
+          : 'none';
+        return {
+          text: `Byoky Bridge: **online** (port ${DEFAULT_BRIDGE_PORT})\nProviders: ${providerList}`,
+        };
+      },
+    });
   },
 };
 
 export default byokyPlugin;
+
+// --- Bridge health check ---
+
+async function checkBridgeHealth(): Promise<{ providers: string[] } | null> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch(`http://127.0.0.1:${DEFAULT_BRIDGE_PORT}/health`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!res.ok) return null;
+    const data = await res.json() as { status?: string; providers?: string[] };
+    if (data.status !== 'ok') return null;
+    return { providers: data.providers ?? [] };
+  } catch {
+    return null;
+  }
+}
 
 // --- Auth flow ---
 
@@ -111,6 +322,15 @@ async function runProviderAuth(
       throw new Error(`${provider.name} not available in your Byoky wallet`);
     }
 
+    // Verify bridge is actually reachable before configuring
+    const health = await checkBridgeHealth();
+    if (!health) {
+      throw new Error(
+        `Byoky Bridge is not reachable on port ${result.port}. ` +
+        'Ensure the bridge is installed and the wallet connection completed successfully.',
+      );
+    }
+
     const openclawId = `byoky-${provider.id}`;
 
     return {
@@ -118,9 +338,9 @@ async function runProviderAuth(
         {
           profileId: `${openclawId}:byoky`,
           credential: {
-            type: 'token',
+            type: 'api_key',
             provider: openclawId,
-            token: 'byoky-proxy', // Dummy — bridge injects the real key
+            key: 'byoky-proxy',
           },
         },
       ],
@@ -131,16 +351,21 @@ async function runProviderAuth(
               baseUrl: `http://127.0.0.1:${result.port}/${provider.id}`,
               api: provider.api,
               apiKey: 'byoky-proxy',
-              models: [],
+              models: provider.models,
             },
           },
         },
       },
-      defaultModel: undefined,
+      defaultModel: provider.models.length > 0
+        ? `${openclawId}/${provider.models[0].id}`
+        : undefined,
       notes: [
         `Connected ${provider.name} via Byoky Bridge on port ${result.port}.`,
         'Key stays in your browser extension — the bridge relays requests.',
         'The bridge must be running for API calls to work.',
+        ...(provider.models.length > 0
+          ? [`Available models: ${provider.models.map((m) => m.id).join(', ')}`]
+          : ['No pre-defined models — set agents.defaults.model manually.']),
       ],
     };
   } finally {
