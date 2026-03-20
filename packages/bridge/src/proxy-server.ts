@@ -26,12 +26,23 @@ export interface ProxyRequestOut {
   body?: string;
 }
 
-export interface ProxyResponseIn {
-  type: 'proxy_http_response';
+// Streaming response messages from extension (or direct fetch)
+export interface ProxyResponseMetaIn {
+  type: 'proxy_http_response_meta';
   requestId: string;
   status: number;
   headers: Record<string, string>;
-  body: string;
+}
+
+export interface ProxyResponseChunkIn {
+  type: 'proxy_http_response_chunk';
+  requestId: string;
+  chunk: string;
+}
+
+export interface ProxyResponseDoneIn {
+  type: 'proxy_http_response_done';
+  requestId: string;
 }
 
 export interface ProxyErrorIn {
@@ -39,6 +50,12 @@ export interface ProxyErrorIn {
   requestId: string;
   error: string;
 }
+
+export type ProxyResponseMessage =
+  | ProxyResponseMetaIn
+  | ProxyResponseChunkIn
+  | ProxyResponseDoneIn
+  | ProxyErrorIn;
 
 interface ProxyConfig {
   port: number;
@@ -48,26 +65,34 @@ interface ProxyConfig {
 }
 
 type PendingResponse = {
-  resolve: (response: ProxyResponseIn) => void;
-  reject: (error: Error) => void;
+  res: ServerResponse;
+  timeout: ReturnType<typeof setTimeout>;
 };
 
 const MAX_PENDING_REQUESTS = 100;
 const pendingRequests = new Map<string, PendingResponse>();
 
-export function handleProxyResponse(msg: ProxyResponseIn | ProxyErrorIn): void {
-  if (msg.type === 'proxy_http_response') {
-    const pending = pendingRequests.get(msg.requestId);
-    if (pending) {
-      pending.resolve(msg);
-      pendingRequests.delete(msg.requestId);
-    }
+export function handleProxyResponse(msg: ProxyResponseMessage): void {
+  const pending = pendingRequests.get(msg.requestId);
+  if (!pending) return;
+
+  if (msg.type === 'proxy_http_response_meta') {
+    const headers = { ...msg.headers };
+    delete headers['transfer-encoding'];
+    pending.res.writeHead(msg.status, headers);
+  } else if (msg.type === 'proxy_http_response_chunk') {
+    pending.res.write(msg.chunk);
+  } else if (msg.type === 'proxy_http_response_done') {
+    pending.res.end();
+    clearTimeout(pending.timeout);
+    pendingRequests.delete(msg.requestId);
   } else if (msg.type === 'proxy_http_error') {
-    const pending = pendingRequests.get(msg.requestId);
-    if (pending) {
-      pending.reject(new Error(msg.error));
-      pendingRequests.delete(msg.requestId);
+    if (!pending.res.headersSent) {
+      pending.res.writeHead(502, { 'Content-Type': 'application/json' });
     }
+    pending.res.end(JSON.stringify({ error: msg.error }));
+    clearTimeout(pending.timeout);
+    pendingRequests.delete(msg.requestId);
   }
 }
 
@@ -171,31 +196,18 @@ export function startProxyServer(config: ProxyConfig): Server {
       return;
     }
 
-    try {
-      const response = await new Promise<ProxyResponseIn>((resolve, reject) => {
-        pendingRequests.set(requestId, { resolve, reject });
+    const timeout = setTimeout(() => {
+      if (pendingRequests.has(requestId)) {
+        pendingRequests.delete(requestId);
+        if (!res.headersSent) {
+          res.writeHead(504, { 'Content-Type': 'application/json' });
+        }
+        res.end(JSON.stringify({ error: 'Request timed out' }));
+      }
+    }, 120_000);
 
-        // Timeout after 120s
-        setTimeout(() => {
-          if (pendingRequests.has(requestId)) {
-            pendingRequests.delete(requestId);
-            reject(new Error('Request timed out'));
-          }
-        }, 120_000);
-
-        sendToExtension(proxyMsg);
-      });
-
-      // Return the response from the extension
-      const responseHeaders: Record<string, string> = { ...response.headers };
-      delete responseHeaders['transfer-encoding']; // Node handles this
-
-      res.writeHead(response.status, responseHeaders);
-      res.end(response.body);
-    } catch (err) {
-      res.writeHead(502, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: (err as Error).message }));
-    }
+    pendingRequests.set(requestId, { res, timeout });
+    sendToExtension(proxyMsg);
   });
 
   server.listen(port, '127.0.0.1', () => {

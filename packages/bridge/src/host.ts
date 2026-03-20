@@ -16,8 +16,7 @@ import {
   startProxyServer,
   handleProxyResponse,
   type ProxyRequestOut,
-  type ProxyResponseIn,
-  type ProxyErrorIn,
+  type ProxyResponseMessage,
 } from './proxy-server.js';
 
 interface BridgeRequest {
@@ -29,22 +28,37 @@ interface BridgeRequest {
   body: string;
 }
 
-interface BridgeResponse {
-  type: 'proxy_response';
+interface DirectFetchRequest {
+  type: 'proxy_direct_fetch';
+  requestId: string;
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  body?: string;
+}
+
+interface BridgeResponseMeta {
+  type: 'proxy_response_meta';
   requestId: string;
   status: number;
   headers: Record<string, string>;
-  body: string;
+}
+
+interface BridgeResponseChunk {
+  type: 'proxy_response_chunk';
+  requestId: string;
+  chunk: string;
+}
+
+interface BridgeResponseDone {
+  type: 'proxy_response_done';
+  requestId: string;
 }
 
 interface BridgeError {
   type: 'proxy_error';
   requestId: string;
   error: string;
-}
-
-interface BridgePing {
-  type: 'ping';
 }
 
 interface BridgePong {
@@ -147,14 +161,21 @@ async function handleMessage(msg: unknown): Promise<void> {
   const message = msg as { type: string };
 
   if (message.type === 'ping') {
-    writeMessage({ type: 'pong', version: '0.2.0' } satisfies BridgePong);
+    writeMessage({ type: 'pong', version: '0.3.0' } satisfies BridgePong);
     return;
   }
 
-  // OAuth token proxy (Anthropic — fetch from Node.js to bypass TLS fingerprinting)
+  // OAuth token proxy (Web SDK path — extension delegates fetch to Node.js)
   if (message.type === 'proxy') {
     const req = msg as BridgeRequest;
-    await handleSetupTokenProxy(req);
+    await handleStreamingFetch(req.requestId, req.url, req.method, req.headers, req.body, 'bridge');
+    return;
+  }
+
+  // Direct fetch (CLI path — extension resolves creds, bridge does the fetch directly)
+  if (message.type === 'proxy_direct_fetch') {
+    const req = msg as DirectFetchRequest;
+    await handleStreamingFetch(req.requestId, req.url, req.method, req.headers, req.body, 'proxy_http');
     return;
   }
 
@@ -165,38 +186,73 @@ async function handleMessage(msg: unknown): Promise<void> {
     return;
   }
 
-  // Response from extension for an HTTP proxy request
-  if (message.type === 'proxy_http_response' || message.type === 'proxy_http_error') {
-    handleProxyResponse(msg as ProxyResponseIn | ProxyErrorIn);
+  // Streaming response from extension for an HTTP proxy request
+  if (
+    msg && typeof msg === 'object' && 'type' in msg &&
+    (
+      (msg as { type: string }).type === 'proxy_http_response_meta' ||
+      (msg as { type: string }).type === 'proxy_http_response_chunk' ||
+      (msg as { type: string }).type === 'proxy_http_response_done' ||
+      (msg as { type: string }).type === 'proxy_http_error'
+    )
+  ) {
+    handleProxyResponse(msg as ProxyResponseMessage);
     return;
   }
 }
 
-async function handleSetupTokenProxy(req: BridgeRequest): Promise<void> {
+/**
+ * Streaming fetch handler used by both bridge paths.
+ *
+ * - mode 'bridge': sends proxy_response_meta/chunk/done messages back to
+ *   extension via native messaging (Web SDK path)
+ * - mode 'proxy_http': sends proxy_http_response_meta/chunk/done directly
+ *   to proxy-server (CLI path, eliminates double hop)
+ */
+async function handleStreamingFetch(
+  requestId: string,
+  url: string,
+  method: string,
+  headers: Record<string, string>,
+  body: string | undefined,
+  mode: 'bridge' | 'proxy_http',
+): Promise<void> {
+  const send = (msg: unknown) => {
+    if (mode === 'bridge') {
+      writeMessage(msg);
+    } else {
+      handleProxyResponse(msg as ProxyResponseMessage);
+    }
+  };
+
+  const prefix = mode === 'bridge' ? 'proxy_response' : 'proxy_http_response';
+  const errorType = mode === 'bridge' ? 'proxy_error' : 'proxy_http_error';
+
   try {
-    const res = await fetch(req.url, {
-      method: req.method,
-      headers: req.headers,
-      body: req.body || undefined,
+    const res = await fetch(url, {
+      method,
+      headers,
+      body: body || undefined,
     });
 
-    const body = await res.text();
-    const headers: Record<string, string> = {};
-    res.headers.forEach((v, k) => { headers[k] = v; });
+    const resHeaders: Record<string, string> = {};
+    res.headers.forEach((v, k) => { resHeaders[k] = v; });
 
-    writeMessage({
-      type: 'proxy_response',
-      requestId: req.requestId,
-      status: res.status,
-      headers,
-      body,
-    } satisfies BridgeResponse);
+    send({ type: `${prefix}_meta`, requestId, status: res.status, headers: resHeaders });
+
+    if (res.body) {
+      const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+      const decoder = new TextDecoder();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        send({ type: `${prefix}_chunk`, requestId, chunk: decoder.decode(value, { stream: true }) });
+      }
+    }
+
+    send({ type: `${prefix}_done`, requestId });
   } catch (e) {
-    writeMessage({
-      type: 'proxy_error',
-      requestId: req.requestId,
-      error: (e as Error).message,
-    } satisfies BridgeError);
+    send({ type: errorType, requestId, error: (e as Error).message });
   }
 }
 

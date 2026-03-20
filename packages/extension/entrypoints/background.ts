@@ -1121,10 +1121,10 @@ export default defineBackground(() => {
 
       nativePort.onMessage.addListener(
         (raw: unknown) => {
-          const response = raw as { type: string; requestId: string; status?: number; headers?: Record<string, string>; body?: string; error?: string };
+          const response = raw as { type: string; requestId: string; status?: number; headers?: Record<string, string>; chunk?: string; error?: string };
           if (response.requestId !== msg.requestId) return;
 
-          if (response.type === 'proxy_response') {
+          if (response.type === 'proxy_response_meta') {
             bridgeResponded = true;
             responsePort.postMessage({
               type: 'BYOKY_PROXY_RESPONSE_META',
@@ -1133,20 +1133,17 @@ export default defineBackground(() => {
               statusText: response.status === 200 ? 'OK' : 'Error',
               headers: response.headers ?? {},
             });
-
-            if (response.body) {
-              responsePort.postMessage({
-                type: 'BYOKY_PROXY_RESPONSE_CHUNK',
-                requestId: msg.requestId,
-                chunk: response.body,
-              });
-            }
-
+          } else if (response.type === 'proxy_response_chunk') {
+            responsePort.postMessage({
+              type: 'BYOKY_PROXY_RESPONSE_CHUNK',
+              requestId: msg.requestId,
+              chunk: response.chunk,
+            });
+          } else if (response.type === 'proxy_response_done') {
             responsePort.postMessage({
               type: 'BYOKY_PROXY_RESPONSE_DONE',
               requestId: msg.requestId,
             });
-
             nativePort.disconnect();
           } else if (response.type === 'proxy_error') {
             bridgeResponded = true;
@@ -1225,26 +1222,11 @@ export default defineBackground(() => {
         providers: providerIds,
       });
 
-      // Listen for messages from the bridge
+      // Listen for HTTP proxy requests from the bridge
       bridgeProxyPort.onMessage.addListener(async (raw: unknown) => {
         const msg = raw as Record<string, unknown>;
         if (msg.type === 'proxy_http') {
           await handleBridgeProxyRequest(msg);
-        } else if (msg.type === 'proxy_response') {
-          // Setup token proxy response from bridge — forward to HTTP proxy client
-          bridgeProxyPort?.postMessage({
-            type: 'proxy_http_response',
-            requestId: msg.requestId,
-            status: msg.status,
-            headers: msg.headers,
-            body: msg.body,
-          });
-        } else if (msg.type === 'proxy_error') {
-          bridgeProxyPort?.postMessage({
-            type: 'proxy_http_error',
-            requestId: msg.requestId,
-            error: msg.error,
-          });
         }
       });
 
@@ -1333,20 +1315,18 @@ export default defineBackground(() => {
 
       // OAuth tokens for Anthropic must route through the native bridge (Node.js)
       // to bypass TLS fingerprint detection on api.anthropic.com.
+      // Bridge does the fetch directly and streams response to proxy-server (no double hop).
       if (credential.authMethod === 'oauth' && providerId === 'anthropic') {
         if (!bridgeProxyPort) return;
 
         bridgeProxyPort.postMessage({
-          type: 'proxy',
+          type: 'proxy_direct_fetch',
           requestId,
           url,
           method,
           headers: realHeaders,
           body: injectClaudeCodeSystemPrompt(body),
         });
-
-        // The bridge will respond with proxy_response/proxy_error which gets
-        // routed back to the HTTP proxy server via handleProxyResponse
         return;
       }
 
@@ -1356,19 +1336,35 @@ export default defineBackground(() => {
         body: body || undefined,
       });
 
-      // Read the full response body
-      const responseBody = await response.text();
       const responseHeaders: Record<string, string> = {};
       response.headers.forEach((value, key) => {
         responseHeaders[key] = value;
       });
 
       bridgeProxyPort?.postMessage({
-        type: 'proxy_http_response',
+        type: 'proxy_http_response_meta',
         requestId,
         status: response.status,
         headers: responseHeaders,
-        body: responseBody,
+      });
+
+      if (response.body) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          bridgeProxyPort?.postMessage({
+            type: 'proxy_http_response_chunk',
+            requestId,
+            chunk: decoder.decode(value, { stream: true }),
+          });
+        }
+      }
+
+      bridgeProxyPort?.postMessage({
+        type: 'proxy_http_response_done',
+        requestId,
       });
 
       await logRequest(session, { providerId, url, method } as ProxyRequest, response.status);
