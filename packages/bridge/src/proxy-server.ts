@@ -79,6 +79,10 @@ export function handleProxyResponse(msg: ProxyResponseMessage): void {
   if (msg.type === 'proxy_http_response_meta') {
     const headers = { ...msg.headers };
     delete headers['transfer-encoding'];
+    // Node.js fetch auto-decompresses gzip, so the body is already plain text.
+    // Strip content-encoding to prevent the client from trying to decompress again.
+    delete headers['content-encoding'];
+    delete headers['content-length']; // Length no longer matches after decompression
     pending.res.writeHead(msg.status, headers);
   } else if (msg.type === 'proxy_http_response_chunk') {
     pending.res.write(msg.chunk);

@@ -322,15 +322,6 @@ async function runProviderAuth(
       throw new Error(`${provider.name} not available in your Byoky wallet`);
     }
 
-    // Verify bridge is actually reachable before configuring
-    const health = await checkBridgeHealth();
-    if (!health) {
-      throw new Error(
-        `Byoky Bridge is not reachable on port ${result.port}. ` +
-        'Ensure the bridge is installed and the wallet connection completed successfully.',
-      );
-    }
-
     const openclawId = `byoky-${provider.id}`;
 
     return {

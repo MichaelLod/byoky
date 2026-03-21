@@ -39,15 +39,26 @@ export function buildHeaders(
   delete headers['x-api-key'];
   delete headers['api-key'];
 
-  // Strip browser headers that trigger CORS rejection from provider APIs
+  // Strip browser/SDK headers that can trigger rejection from provider APIs
   delete headers['origin'];
   delete headers['referer'];
+  // Remove SDK telemetry headers that leak the real client environment
+  for (const key of Object.keys(headers)) {
+    if (key.startsWith('x-stainless-')) delete headers[key];
+  }
+  delete headers['sec-fetch-mode'];
+  delete headers['accept-language'];
+  delete headers['accept-encoding'];
+  // Always strip content-length — fetch() recalculates it from the actual body,
+  // and the body may have been modified (e.g. system prompt injection)
+  delete headers['content-length'];
 
   if (providerId === 'anthropic') {
     if (authMethod === 'oauth') {
       headers['authorization'] = `Bearer ${apiKey}`;
       headers['user-agent'] = 'claude-cli/2.1.76';
       headers['x-app'] = 'cli';
+      headers['accept'] = 'application/json';
       headers['anthropic-beta'] = 'claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14';
       headers['anthropic-dangerous-direct-browser-access'] = 'true';
     } else {
