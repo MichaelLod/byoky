@@ -1,7 +1,8 @@
-import type { ConnectRequest, ConnectResponse, SessionUsage } from '@byoky/core';
-import { ByokyError, ByokyErrorCode, isByokyMessage } from '@byoky/core';
+import type { AuthMethod, ConnectRequest, ConnectResponse, SessionUsage } from '@byoky/core';
+import { ByokyError, ByokyErrorCode, isByokyMessage, encodePairPayload } from '@byoky/core';
 import { isExtensionInstalled, getStoreUrl } from './detect.js';
 import { createProxyFetch } from './proxy-fetch.js';
+import { createRelayFetch } from './relay-fetch.js';
 import { createRelayClient, type RelayConnection } from './relay-client.js';
 
 export interface ByokySession extends ConnectResponse {
@@ -21,16 +22,28 @@ export interface ByokySession extends ConnectResponse {
 
 export interface ByokyOptions {
   timeout?: number;
+  /** Relay server URL for mobile wallet pairing. Default: wss://relay.byoky.com */
+  relayUrl?: string;
 }
 
 export class Byoky {
   private timeout: number;
+  private relayUrl: string;
 
   constructor(options: ByokyOptions = {}) {
     this.timeout = options.timeout ?? 60_000;
+    this.relayUrl = options.relayUrl ?? 'wss://relay.byoky.com';
   }
 
-  async connect(request: ConnectRequest = {}): Promise<ByokySession> {
+  /**
+   * Connect to a Byoky wallet. Tries the browser extension first.
+   * If no extension is found and `onPairingReady` is provided,
+   * falls back to relay mode — pairing with a mobile wallet app.
+   */
+  async connect(request: ConnectRequest & {
+    /** Called with a pairing code when no extension is detected. Show as QR or text. */
+    onPairingReady?: (pairingCode: string) => void;
+  } = {}): Promise<ByokySession> {
     if (typeof window === 'undefined') {
       throw new ByokyError(
         ByokyErrorCode.UNKNOWN,
@@ -38,16 +51,23 @@ export class Byoky {
       );
     }
 
-    if (!isExtensionInstalled()) {
-      const storeUrl = getStoreUrl();
-      if (storeUrl) {
-        window.open(storeUrl, '_blank');
-      }
-      throw ByokyError.walletNotInstalled();
+    // Try extension first
+    if (isExtensionInstalled()) {
+      const response = await this.sendConnectRequest(request);
+      return this.buildSession(response);
     }
 
-    const response = await this.sendConnectRequest(request);
-    return this.buildSession(response);
+    // Fall back to relay pairing if callback provided
+    if (request.onPairingReady) {
+      return this.connectViaRelay(request, request.onPairingReady);
+    }
+
+    // No extension, no relay callback — throw
+    const storeUrl = getStoreUrl();
+    if (storeUrl) {
+      window.open(storeUrl, '_blank');
+    }
+    throw ByokyError.walletNotInstalled();
   }
 
   /**
@@ -63,6 +83,133 @@ export class Byoky {
 
     return this.buildSession(savedResponse);
   }
+
+  // --- Relay pairing ---
+
+  private connectViaRelay(
+    request: ConnectRequest,
+    onPairingReady: (code: string) => void,
+  ): Promise<ByokySession> {
+    return new Promise<ByokySession>((resolve, reject) => {
+      const roomId = crypto.randomUUID();
+      const authToken = Array.from(crypto.getRandomValues(new Uint8Array(32)))
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+
+      const pairingCode = encodePairPayload({
+        v: 1,
+        r: this.relayUrl,
+        id: roomId,
+        t: authToken,
+        o: window.location.origin,
+      });
+
+      const ws = new WebSocket(this.relayUrl);
+
+      const timeout = setTimeout(() => {
+        ws.close();
+        reject(new ByokyError(ByokyErrorCode.UNKNOWN, 'Pairing timed out. No wallet connected.'));
+      }, this.timeout);
+
+      ws.onopen = () => {
+        // Authenticate as recipient (the web app receives proxied responses)
+        ws.send(JSON.stringify({
+          type: 'gift:auth',
+          giftId: roomId,
+          authToken,
+          role: 'recipient',
+        }));
+      };
+
+      ws.onmessage = (event) => {
+        let msg: { type: string; [k: string]: unknown };
+        try {
+          msg = JSON.parse(event.data);
+        } catch {
+          return;
+        }
+
+        switch (msg.type) {
+          case 'gift:auth:result':
+            if (msg.success) {
+              // Authenticated — show the pairing code
+              onPairingReady(pairingCode);
+            } else {
+              clearTimeout(timeout);
+              ws.close();
+              reject(new ByokyError(ByokyErrorCode.UNKNOWN, `Relay auth failed: ${msg.error}`));
+            }
+            break;
+
+          case 'relay:pair:hello': {
+            // Phone wallet connected and sent its providers
+            clearTimeout(timeout);
+            const providers = msg.providers as Record<string, { available: boolean; authMethod: AuthMethod }>;
+
+            // Acknowledge the pairing
+            ws.send(JSON.stringify({ type: 'relay:pair:ack' }));
+
+            resolve(this.buildRelaySession(ws, roomId, providers));
+            break;
+          }
+
+          case 'gift:peer:status':
+            // Phone came online but hasn't sent pair:hello yet — wait
+            break;
+        }
+      };
+
+      ws.onerror = () => {
+        clearTimeout(timeout);
+        reject(new ByokyError(ByokyErrorCode.UNKNOWN, 'Failed to connect to relay server'));
+      };
+
+      ws.onclose = () => {
+        clearTimeout(timeout);
+      };
+    });
+  }
+
+  private buildRelaySession(
+    ws: WebSocket,
+    roomId: string,
+    providers: Record<string, { available: boolean; authMethod: AuthMethod }>,
+  ): ByokySession {
+    const sessionKey = `relay_${roomId}`;
+    const disconnectCallbacks = new Set<() => void>();
+
+    // Keepalive
+    const pingInterval = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'relay:ping', ts: Date.now() }));
+      }
+    }, 30_000);
+
+    ws.addEventListener('close', () => {
+      clearInterval(pingInterval);
+      for (const cb of disconnectCallbacks) cb();
+      disconnectCallbacks.clear();
+    });
+
+    return {
+      sessionKey,
+      proxyUrl: '',
+      providers,
+      createFetch: (providerId: string) => createRelayFetch(ws, providerId),
+      createRelay: () => { throw new Error('Relay-in-relay not supported'); },
+      disconnect: () => {
+        clearInterval(pingInterval);
+        ws.close(1000, 'Client disconnected');
+      },
+      isConnected: async () => ws.readyState === WebSocket.OPEN,
+      getUsage: async () => ({ requests: 0, inputTokens: 0, outputTokens: 0, byProvider: {} }),
+      onDisconnect: (callback: () => void) => {
+        disconnectCallbacks.add(callback);
+        return () => { disconnectCallbacks.delete(callback); };
+      },
+    };
+  }
+
+  // --- Extension-based session ---
 
   private buildSession(response: ConnectResponse): ByokySession {
     const sessionKey = response.sessionKey;

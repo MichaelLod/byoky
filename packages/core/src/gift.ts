@@ -87,8 +87,11 @@ export function encodeGiftLink(link: GiftLink): string {
   return base64UrlEncode(bytes);
 }
 
+const MAX_GIFT_LINK_SIZE = 8_192; // 8 KB
+
 export function decodeGiftLink(encoded: string): GiftLink | null {
   try {
+    if (encoded.length > MAX_GIFT_LINK_SIZE) return null;
     const clean = encoded.replace(/^byoky:\/\/gift\//, '');
     const bytes = base64UrlDecode(clean);
     const json = new TextDecoder().decode(bytes);
@@ -158,6 +161,35 @@ export function createGiftLink(gift: Gift): { encoded: string; link: GiftLink } 
     r: gift.relayUrl,
   };
   return { encoded: encodeGiftLink(link), link };
+}
+
+// --- Pairing payload (mobile wallet relay connect) ---
+
+export interface PairPayload {
+  v: 1;
+  r: string;    // relay URL (wss://...)
+  id: string;   // room ID
+  t: string;    // auth token
+  o: string;    // app origin
+}
+
+export function encodePairPayload(payload: PairPayload): string {
+  const json = JSON.stringify(payload);
+  const bytes = new TextEncoder().encode(json);
+  return base64UrlEncode(bytes);
+}
+
+export function decodePairPayload(encoded: string): PairPayload | null {
+  try {
+    if (encoded.length > 2048) return null;
+    const bytes = base64UrlDecode(encoded);
+    const json = new TextDecoder().decode(bytes);
+    const parsed = JSON.parse(json);
+    if (parsed.v !== 1) return null;
+    return parsed as PairPayload;
+  } catch {
+    return null;
+  }
 }
 
 // --- Base64url helpers ---

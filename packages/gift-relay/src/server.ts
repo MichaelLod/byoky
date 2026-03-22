@@ -131,7 +131,7 @@ wss.on("connection", (ws) => {
 
     touchRoom(room);
 
-    if (authedRole === "recipient" && msg.type === "relay:request") {
+    if (authedRole === "recipient" && (msg.type === "relay:request" || msg.type === "relay:pair:ack")) {
       if (room.sender && room.sender.readyState === WebSocket.OPEN) {
         room.sender.send(String(raw));
       }
@@ -144,7 +144,8 @@ wss.on("connection", (ws) => {
         msg.type === "relay:response:chunk" ||
         msg.type === "relay:response:done" ||
         msg.type === "relay:response:error" ||
-        msg.type === "gift:usage"
+        msg.type === "gift:usage" ||
+        msg.type === "relay:pair:hello"
       ) {
         if (room.recipient && room.recipient.readyState === WebSocket.OPEN) {
           room.recipient.send(String(raw));
