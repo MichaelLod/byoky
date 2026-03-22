@@ -284,6 +284,7 @@
   gap: 12px;
   width: 100%;
   max-width: 320px;
+  margin: 0 auto;
 }
 
 .demo-app .connect-options .btn {
