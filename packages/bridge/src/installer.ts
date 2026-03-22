@@ -10,16 +10,14 @@
 import { writeFileSync, mkdirSync, unlinkSync, existsSync, chmodSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { homedir, platform } from 'node:os';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 
 const HOST_NAME = 'com.byoky.bridge';
 
 function getHostPath(): string {
-  // Find the actual host binary
   try {
-    return execSync('which byoky-bridge', { encoding: 'utf-8' }).trim();
+    return execFileSync('/usr/bin/which', ['byoky-bridge'], { encoding: 'utf-8', timeout: 5000 }).trim();
   } catch {
-    // Fallback: assume it's in the same directory as this file
     return resolve(dirname(new URL(import.meta.url).pathname), '../bin/byoky-bridge.js');
   }
 }
@@ -28,19 +26,29 @@ function getHostPath(): string {
  * Create a native messaging wrapper script that uses the absolute node path.
  * Chrome/Brave launch native hosts with a minimal PATH that doesn't include
  * nvm/fnm/volta/etc, so `#!/usr/bin/env node` often fails.
+ *
+ * Instead of inheriting the user's PATH (which risks injection), we construct
+ * a minimal PATH from the known node binary directory.
  */
 function createNativeWrapper(hostPath: string, manifestDir: string): string {
   const nodePath = process.execPath;
   const wrapperPath = resolve(manifestDir, 'byoky-bridge-host');
-  const userPath = process.env.PATH || '';
-  const script = `#!/bin/bash\nexport PATH="${userPath}"\nexec "${nodePath}" "${hostPath}" host "$@"\n`;
+  const nodeDir = dirname(nodePath);
+  const safePath = `${nodeDir}:/usr/local/bin:/usr/bin:/bin`;
+  const script = [
+    '#!/bin/bash',
+    `export PATH='${safePath}'`,
+    `exec '${nodePath.replace(/'/g, "'\\''")}' '${hostPath.replace(/'/g, "'\\''")}' host "$@"`,
+    '',
+  ].join('\n');
   writeFileSync(wrapperPath, script);
   chmodSync(wrapperPath, 0o755);
   return wrapperPath;
 }
 
-// TODO: Replace with the real Chrome Web Store extension ID once published
-const DEFAULT_EXTENSION_ID = 'ahhecmfcclkjdgjnmackoacldnmgmipl';
+// Development-only extension ID (unpacked). Set BYOKY_EXTENSION_ID or pass
+// --extension-id to override with the published Chrome Web Store ID.
+const DEFAULT_EXTENSION_ID = process.env.BYOKY_EXTENSION_ID || 'ahhecmfcclkjdgjnmackoacldnmgmipl';
 
 function buildManifest(hostPath: string, browserType: 'chrome' | 'firefox', extensionId?: string): object {
   const base = {

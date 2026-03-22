@@ -121,6 +121,16 @@ export function parseUsage(
   }
 }
 
+function sanitizeTokenCounts(
+  input: number,
+  output: number,
+): { inputTokens: number; outputTokens: number } | undefined {
+  const i = Math.max(0, Math.floor(input));
+  const o = Math.max(0, Math.floor(output));
+  if (!Number.isFinite(i) || !Number.isFinite(o)) return undefined;
+  return { inputTokens: i, outputTokens: o };
+}
+
 /**
  * Extract token usage from a parsed provider response object.
  */
@@ -132,7 +142,7 @@ export function extractUsageFromParsed(
   if (providerId === 'anthropic') {
     const usage = parsed.usage as Record<string, number> | undefined;
     if (usage?.input_tokens != null && usage?.output_tokens != null) {
-      return { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens };
+      return sanitizeTokenCounts(usage.input_tokens, usage.output_tokens);
     }
   }
 
@@ -140,10 +150,7 @@ export function extractUsageFromParsed(
   if (providerId === 'gemini') {
     const meta = parsed.usageMetadata as Record<string, number> | undefined;
     if (meta?.promptTokenCount != null) {
-      return {
-        inputTokens: meta.promptTokenCount,
-        outputTokens: meta.candidatesTokenCount ?? 0,
-      };
+      return sanitizeTokenCounts(meta.promptTokenCount, meta.candidatesTokenCount ?? 0);
     }
   }
 
@@ -151,7 +158,7 @@ export function extractUsageFromParsed(
   // { usage: { prompt_tokens, completion_tokens } }
   const usage = parsed.usage as Record<string, number> | undefined;
   if (usage?.prompt_tokens != null && usage?.completion_tokens != null) {
-    return { inputTokens: usage.prompt_tokens, outputTokens: usage.completion_tokens };
+    return sanitizeTokenCounts(usage.prompt_tokens, usage.completion_tokens);
   }
 
   return undefined;

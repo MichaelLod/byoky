@@ -14,9 +14,15 @@ describe('checkPasswordStrength', () => {
     expect(result.label).toBe('Too weak');
   });
 
-  it('gives low score to short single-type passwords', () => {
+  it('rejects passwords shorter than MIN_PASSWORD_LENGTH', () => {
     const result = checkPasswordStrength('abcdefghij');
-    expect(result.score).toBeLessThanOrEqual(1);
+    expect(result.score).toBe(0);
+    expect(result.label).toBe('Too weak');
+  });
+
+  it('rejects 11-character passwords', () => {
+    const result = checkPasswordStrength('MyP@ss12345');
+    expect(result.score).toBe(0);
   });
 
   it('gives higher score to longer mixed passwords', () => {

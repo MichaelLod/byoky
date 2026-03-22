@@ -6,6 +6,9 @@ export default defineConfig({
     name: 'Byoky',
     description: 'Bring Your Own Key — Secure wallet for your AI credentials',
     permissions: ['storage', 'sidePanel', 'identity', 'nativeMessaging'],
+    content_security_policy: {
+      extension_pages: "script-src 'self'; object-src 'self'",
+    },
     host_permissions: [
       // Provider API hosts
       'https://api.anthropic.com/*',

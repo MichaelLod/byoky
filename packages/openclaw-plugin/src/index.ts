@@ -380,16 +380,7 @@ async function startCallbackServer(
     let resolved = false;
 
     const server = createServer((req, res) => {
-      const reqOrigin = req.headers.origin || '';
-      let isLocalhost = false;
-      try {
-        const parsed = new URL(reqOrigin);
-        isLocalhost = parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost';
-      } catch { /* ignore */ }
-      res.setHeader(
-        'Access-Control-Allow-Origin',
-        isLocalhost ? reqOrigin : 'http://127.0.0.1',
-      );
+      res.setHeader('Access-Control-Allow-Origin', 'http://127.0.0.1');
       res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
@@ -400,11 +391,22 @@ async function startCallbackServer(
       }
 
       if (req.method === 'POST' && req.url === '/callback') {
+        const MAX_BODY_SIZE = 1_048_576; // 1MB
         let body = '';
+        let oversized = false;
         req.on('data', (chunk: Buffer) => {
           body += chunk.toString();
+          if (body.length > MAX_BODY_SIZE) {
+            oversized = true;
+            req.destroy();
+          }
         });
         req.on('end', () => {
+          if (oversized) {
+            res.writeHead(413);
+            res.end('Request body too large');
+            return;
+          }
           try {
             const data = JSON.parse(body);
             res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -412,8 +414,8 @@ async function startCallbackServer(
             if (!resolved) {
               resolved = true;
               resolve({
-                providers: data.providers || [],
-                port: data.bridgePort || DEFAULT_BRIDGE_PORT,
+                providers: Array.isArray(data.providers) ? data.providers : [],
+                port: typeof data.bridgePort === 'number' ? data.bridgePort : DEFAULT_BRIDGE_PORT,
                 server,
               });
             }
@@ -526,7 +528,7 @@ function buildAuthPage(requestProviderId: string): string {
           id: requestId,
           requestId,
           payload: { providers: ${providerFilter} },
-        }, '*');
+        }, window.location.origin);
 
         const response = await new Promise((resolve, reject) => {
           function handler(event) {
@@ -558,7 +560,7 @@ function buildAuthPage(requestProviderId: string): string {
           requestId: bridgeRequestId,
           action: 'startBridgeProxy',
           payload: { sessionKey: response.sessionKey, port: ${DEFAULT_BRIDGE_PORT} },
-        }, '*');
+        }, window.location.origin);
 
         const bridgeResult = await new Promise((resolve, reject) => {
           function handler(event) {

@@ -11,11 +11,11 @@ jobs:
     name: Dependency audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@02f6c237bd2518259fed6c71566509edfb3f2b74 # v4
         with:
           version: 9
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
@@ -26,23 +26,23 @@ jobs:
     name: Security tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@02f6c237bd2518259fed6c71566509edfb3f2b74 # v4
         with:
           version: 9
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @byoky/core build && pnpm --filter @byoky/sdk build
-      - run: npx vitest run packages/core/tests/security.test.ts packages/core/tests/crypto.test.ts packages/core/tests/proxy-utils.test.ts packages/core/tests/relay.test.ts
+      - run: npx vitest run packages/core/tests/security.test.ts packages/core/tests/crypto.test.ts packages/core/tests/proxy-utils.test.ts packages/core/tests/relay.test.ts packages/core/tests/gift.test.ts packages/core/tests/protocol.test.ts packages/core/tests/password-strength.test.ts
 
   static-analysis:
     name: Static security checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Check for secrets in code
         run: |
@@ -122,6 +122,25 @@ jobs:
           # 8. portOrigin must be deny-by-default
           if grep -q 'portOrigin &&' packages/extension/entrypoints/background.ts; then
             echo "::error::portOrigin check allows null — must be deny-by-default (!portOrigin ||)"
+            FAIL=1
+          fi
+
+          # 9. SDK must not use wildcard postMessage targetOrigin
+          if grep -q "postMessage.*'\*'" packages/sdk/src/byoky.ts; then
+            echo "::error::SDK uses wildcard '*' for postMessage targetOrigin"
+            FAIL=1
+          fi
+
+          # 10. Gift relay must validate URL protocol
+          if ! grep -q "parsed.protocol === 'wss:'" packages/extension/entrypoints/background.ts; then
+            echo "::error::Gift relay missing wss:// protocol validation"
+            FAIL=1
+          fi
+
+          # 11. Sessions must be cleared on lock
+          LOCK_SECTION=$(sed -n "/case 'lock'/,/case 'isUnlocked'/p" packages/extension/entrypoints/background.ts)
+          if ! echo "$LOCK_SECTION" | grep -q 'sessions.clear()'; then
+            echo "::error::Sessions not cleared on wallet lock"
             FAIL=1
           fi
 

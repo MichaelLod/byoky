@@ -104,8 +104,11 @@ export function parseRelayMessage(data: unknown): RelayMessage | null {
         if (typeof raw.requestId !== 'string' || typeof raw.chunk !== 'string') return null;
         break;
       case 'relay:response:done':
+        if (typeof raw.requestId !== 'string') return null;
+        break;
       case 'relay:response:error':
         if (typeof raw.requestId !== 'string') return null;
+        if (raw.error && (typeof raw.error !== 'object' || typeof raw.error.code !== 'string' || typeof raw.error.message !== 'string')) return null;
         break;
       case 'relay:ping':
       case 'relay:pong':

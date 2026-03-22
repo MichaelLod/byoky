@@ -32,7 +32,7 @@ export function createRelayClient(
     const parsed = new URL(wsUrl);
     const isSecure = parsed.protocol === 'wss:';
     const isLocalWs = parsed.protocol === 'ws:' &&
-      (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1');
+      (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.hostname === '[::1]');
     if (!isSecure && !isLocalWs) {
       status = 'disconnected';
       return {

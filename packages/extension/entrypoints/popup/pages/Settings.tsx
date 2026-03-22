@@ -183,6 +183,11 @@ function ImportModal({ onClose }: { onClose: () => void }) {
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    const MAX_IMPORT_SIZE = 10 * 1024 * 1024; // 10MB
+    if (file.size > MAX_IMPORT_SIZE) {
+      setError('File too large (max 10MB)');
+      return;
+    }
     setFileName(file.name);
 
     const reader = new FileReader();

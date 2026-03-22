@@ -98,7 +98,7 @@ export function createProxyFetch(
           headers,
           body,
         },
-        '*',
+        window.location.origin,
       );
     });
   };
