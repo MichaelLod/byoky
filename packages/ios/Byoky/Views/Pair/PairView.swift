@@ -6,6 +6,7 @@ struct PairView: View {
     @StateObject private var pairService = RelayPairService()
     @State private var manualCode = ""
     @State private var showScanner = false
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationStack {
@@ -26,6 +27,11 @@ struct PairView: View {
                 QRScannerView { code in
                     showScanner = false
                     connectWithCode(code)
+                }
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .active {
+                    pairService.reconnectIfNeeded()
                 }
             }
         }

@@ -43,9 +43,11 @@ final class RelayPairService: ObservableObject {
     private var pingTimer: Timer?
     private var wallet: WalletStore?
     private var pairedOrigin: String?
+    private var lastPayload: PairPayload?
 
     func connect(payload: PairPayload, wallet: WalletStore) {
         self.wallet = wallet
+        self.lastPayload = payload
         status = .connecting
 
         guard let url = URL(string: payload.relayUrl),
@@ -92,8 +94,23 @@ final class RelayPairService: ObservableObject {
         wsTask?.cancel(with: .normalClosure, reason: nil)
         wsTask = nil
         pairedOrigin = nil
+        lastPayload = nil
         status = .idle
         requestCount = 0
+    }
+
+    /// Reconnect after iOS app returns from background.
+    func reconnectIfNeeded() {
+        guard let payload = lastPayload, let wallet else { return }
+        // Only reconnect if the WebSocket is gone but we had an active session
+        guard case .paired = status, wsTask?.state != .running else {
+            // Also reconnect if status shows error (connection lost)
+            if case .error = status, lastPayload != nil {
+                connect(payload: payload, wallet: wallet)
+            }
+            return
+        }
+        connect(payload: payload, wallet: wallet)
     }
 
     private func listenForMessages(ws: URLSessionWebSocketTask, payload: PairPayload) {
