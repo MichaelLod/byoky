@@ -217,12 +217,7 @@ final class RelayPairService: ObservableObject {
                     request.setValue(value, forHTTPHeaderField: key)
                 }
 
-                switch providerId {
-                case "anthropic":
-                    request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
-                default:
-                    request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-                }
+                Credential.applyAuth(to: &request, providerId: providerId, authMethod: credential.authMethod, apiKey: apiKey)
 
                 let (bytes, response) = try await URLSession.shared.bytes(for: request)
                 guard let httpResponse = response as? HTTPURLResponse else {
