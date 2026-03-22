@@ -6,11 +6,13 @@ struct WalletView: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            Group {
                 if wallet.credentials.isEmpty {
                     emptyState
                 } else {
-                    credentialsList
+                    List {
+                        credentialsList
+                    }
                 }
             }
             .navigationTitle("Wallet")
@@ -30,31 +32,29 @@ struct WalletView: View {
     }
 
     private var emptyState: some View {
-        Section {
-            VStack(spacing: 16) {
-                Image(systemName: "key.fill")
-                    .font(.system(size: 40))
-                    .foregroundStyle(Color(.systemGray3))
+        VStack(spacing: 16) {
+            Image(systemName: "key.fill")
+                .font(.system(size: 40))
+                .foregroundStyle(Color(.systemGray3))
 
-                Text("No API Keys")
-                    .font(.headline)
+            Text("No API Keys")
+                .font(.headline)
 
-                Text("Add your first API key to get started. Keys are encrypted with your master password and stored in the iOS Keychain.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+            Text("Add your first API key to get started. Keys are encrypted with your master password and stored in the iOS Keychain.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
 
-                Button {
-                    showAddCredential = true
-                } label: {
-                    Label("Add API Key", systemImage: "plus")
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.accent)
+            Button {
+                showAddCredential = true
+            } label: {
+                Label("Add API Key", systemImage: "plus")
             }
-            .padding(.vertical, 32)
-            .frame(maxWidth: .infinity)
+            .buttonStyle(.borderedProminent)
+            .tint(Theme.accent)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var credentialsList: some View {
