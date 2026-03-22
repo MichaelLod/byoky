@@ -4,7 +4,7 @@ import { Byoky } from '../src/byoky.js';
 import { ByokyErrorCode } from '@byoky/core';
 
 describe('Byoky', () => {
-  let postedMessages: Array<Record<string, unknown>>;
+  let postedMessages: Array<{ data: Record<string, unknown>; port?: MessagePort }>;
 
   beforeEach(() => {
     postedMessages = [];
@@ -13,9 +13,14 @@ describe('Byoky', () => {
       version: '0.1.0',
       isByoky: true,
     };
-    vi.spyOn(window, 'postMessage').mockImplementation((data: unknown) => {
-      postedMessages.push(data as Record<string, unknown>);
-    });
+    vi.spyOn(window, 'postMessage').mockImplementation(
+      (...args: unknown[]) => {
+        const data = args[0] as Record<string, unknown>;
+        const transfer = args[2] as Transferable[] | undefined;
+        const port = transfer?.[0] as MessagePort | undefined;
+        postedMessages.push({ data, port });
+      },
+    );
   });
 
   afterEach(() => {
@@ -54,13 +59,13 @@ describe('Byoky', () => {
     await new Promise((r) => setTimeout(r, 10));
 
     expect(postedMessages.length).toBe(1);
-    const msg = postedMessages[0];
+    const msg = postedMessages[0].data;
     expect(msg.type).toBe('BYOKY_CONNECT_REQUEST');
     expect((msg.payload as Record<string, unknown>).providers).toEqual([
       { id: 'anthropic', required: true },
     ]);
 
-    // Simulate successful response
+    // Simulate successful response via MessagePort
     simulateResponse({
       type: 'BYOKY_CONNECT_RESPONSE',
       requestId: msg.requestId,
@@ -90,7 +95,7 @@ describe('Byoky', () => {
 
     await new Promise((r) => setTimeout(r, 10));
 
-    const msg = postedMessages[0];
+    const msg = postedMessages[0].data;
     simulateResponse({
       type: 'BYOKY_ERROR',
       requestId: msg.requestId,
@@ -120,7 +125,7 @@ describe('Byoky', () => {
 
     await new Promise((r) => setTimeout(r, 10));
 
-    const msg = postedMessages[0];
+    const msg = postedMessages[0].data;
     simulateResponse({
       type: 'BYOKY_CONNECT_RESPONSE',
       requestId: msg.requestId,
@@ -134,11 +139,12 @@ describe('Byoky', () => {
     const session = await connectPromise;
     session.disconnect();
 
-    expect(postedMessages.length).toBe(2);
-    const disconnectMsg = postedMessages[1];
-    expect(disconnectMsg.type).toBe('BYOKY_DISCONNECT');
+    const disconnectMsg = postedMessages.find(
+      (m) => m.data.type === 'BYOKY_DISCONNECT',
+    );
+    expect(disconnectMsg).toBeDefined();
     expect(
-      (disconnectMsg.payload as Record<string, string>).sessionKey,
+      (disconnectMsg!.data.payload as Record<string, string>).sessionKey,
     ).toBe('byk_disconnect_test');
   });
 
@@ -148,7 +154,7 @@ describe('Byoky', () => {
 
     await new Promise((r) => setTimeout(r, 10));
 
-    const msg = postedMessages[0];
+    const msg = postedMessages[0].data;
     simulateResponse({
       type: 'BYOKY_CONNECT_RESPONSE',
       requestId: msg.requestId,
@@ -163,12 +169,13 @@ describe('Byoky', () => {
     const callback = vi.fn();
     session.onDisconnect(callback);
 
-    // Simulate wallet revoking the session
-    simulateResponse({
+    // Simulate wallet revoking the session via the notification port
+    simulateNotification({
       type: 'BYOKY_SESSION_REVOKED',
       payload: { sessionKey: 'byk_revoke_test' },
     });
 
+    await new Promise((r) => setTimeout(r, 10));
     expect(callback).toHaveBeenCalledTimes(1);
   });
 
@@ -178,7 +185,7 @@ describe('Byoky', () => {
 
     await new Promise((r) => setTimeout(r, 10));
 
-    const msg = postedMessages[0];
+    const msg = postedMessages[0].data;
     simulateResponse({
       type: 'BYOKY_CONNECT_RESPONSE',
       requestId: msg.requestId,
@@ -194,11 +201,12 @@ describe('Byoky', () => {
     const unsub = session.onDisconnect(callback);
     unsub();
 
-    simulateResponse({
+    simulateNotification({
       type: 'BYOKY_SESSION_REVOKED',
       payload: { sessionKey: 'byk_unsub_test' },
     });
 
+    await new Promise((r) => setTimeout(r, 10));
     expect(callback).not.toHaveBeenCalled();
   });
 
@@ -208,7 +216,7 @@ describe('Byoky', () => {
 
     await new Promise((r) => setTimeout(r, 10));
 
-    const msg = postedMessages[0];
+    const msg = postedMessages[0].data;
     simulateResponse({
       type: 'BYOKY_CONNECT_RESPONSE',
       requestId: msg.requestId,
@@ -225,14 +233,14 @@ describe('Byoky', () => {
     await new Promise((r) => setTimeout(r, 10));
 
     // Find the status request
-    const statusMsg = postedMessages.find(
-      (m) => m.type === 'BYOKY_SESSION_STATUS',
+    const statusEntry = postedMessages.find(
+      (m) => m.data.type === 'BYOKY_SESSION_STATUS',
     );
-    expect(statusMsg).toBeDefined();
+    expect(statusEntry).toBeDefined();
 
     simulateResponse({
       type: 'BYOKY_SESSION_STATUS_RESPONSE',
-      requestId: statusMsg!.requestId,
+      requestId: statusEntry!.data.requestId,
       payload: { connected: true },
     });
 
@@ -245,7 +253,7 @@ describe('Byoky', () => {
 
     await new Promise((r) => setTimeout(r, 10));
 
-    const msg = postedMessages[0];
+    const msg = postedMessages[0].data;
     simulateResponse({
       type: 'BYOKY_CONNECT_RESPONSE',
       requestId: msg.requestId,
@@ -260,15 +268,26 @@ describe('Byoky', () => {
     const callback = vi.fn();
     session.onDisconnect(callback);
 
-    simulateResponse({
+    simulateNotification({
       type: 'BYOKY_SESSION_REVOKED',
       payload: { sessionKey: 'byk_other' },
     });
 
+    await new Promise((r) => setTimeout(r, 10));
     expect(callback).not.toHaveBeenCalled();
   });
 
   function simulateResponse(data: Record<string, unknown>) {
-    document.dispatchEvent(new CustomEvent('byoky-message', { detail: data }));
+    const entry = postedMessages.find(
+      (m) => m.data.requestId === data.requestId,
+    );
+    entry?.port?.postMessage(data);
+  }
+
+  function simulateNotification(data: Record<string, unknown>) {
+    const notifyEntry = postedMessages.find(
+      (m) => m.data.type === 'BYOKY_REGISTER_NOTIFY',
+    );
+    notifyEntry?.port?.postMessage(data);
   }
 });

@@ -42,13 +42,15 @@ final class RelayPairService: ObservableObject {
     private var wsTask: URLSessionWebSocketTask?
     private var pingTimer: Timer?
     private var wallet: WalletStore?
+    private var pairedOrigin: String?
 
     func connect(payload: PairPayload, wallet: WalletStore) {
         self.wallet = wallet
         status = .connecting
 
-        guard let url = URL(string: payload.relayUrl) else {
-            status = .error("Invalid relay URL")
+        guard let url = URL(string: payload.relayUrl),
+              url.scheme == "wss" else {
+            status = .error("Relay must use a secure connection (wss://)")
             return
         }
 
@@ -56,7 +58,6 @@ final class RelayPairService: ObservableObject {
         wsTask = ws
         ws.resume()
 
-        // Authenticate as sender (phone holds the keys)
         let auth: [String: Any] = [
             "type": "gift:auth",
             "giftId": payload.roomId,
@@ -78,10 +79,8 @@ final class RelayPairService: ObservableObject {
             }
         }
 
-        // Start listening
         listenForMessages(ws: ws, payload: payload)
 
-        // Keepalive
         pingTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             self?.sendPing()
         }
@@ -92,6 +91,7 @@ final class RelayPairService: ObservableObject {
         pingTimer = nil
         wsTask?.cancel(with: .normalClosure, reason: nil)
         wsTask = nil
+        pairedOrigin = nil
         status = .idle
         requestCount = 0
     }
@@ -110,7 +110,6 @@ final class RelayPairService: ObservableObject {
                         self.handleMessage(type: type, json: json, payload: payload)
                     }
                 }
-                // Keep listening
                 self.listenForMessages(ws: ws, payload: payload)
 
             case .failure:
@@ -127,7 +126,6 @@ final class RelayPairService: ObservableObject {
         switch type {
         case "gift:auth:result":
             if json["success"] as? Bool == true {
-                // Authenticated — send our provider list
                 sendPairHello()
             } else {
                 let error = json["error"] as? String ?? "Auth failed"
@@ -135,15 +133,15 @@ final class RelayPairService: ObservableObject {
             }
 
         case "relay:pair:ack":
-            // Web app acknowledged pairing
+            pairedOrigin = payload.appOrigin
             status = .paired(appOrigin: payload.appOrigin)
 
         case "relay:request":
-            // Proxy this request
             handleRelayRequest(json)
 
         case "gift:peer:status":
             if json["online"] as? Bool == false, case .paired = status {
+                pairedOrigin = nil
                 status = .idle
                 requestCount = 0
             }
@@ -173,11 +171,18 @@ final class RelayPairService: ObservableObject {
     }
 
     private func handleRelayRequest(_ json: [String: Any]) {
+        guard case .paired = status else { return }
+
         guard let wallet,
               let requestId = json["requestId"] as? String,
               let providerId = json["providerId"] as? String,
               let urlString = json["url"] as? String,
               let method = json["method"] as? String else { return }
+
+        guard let url = Provider.validateUrl(urlString, for: providerId) else {
+            sendRelayError(requestId: requestId, code: "INVALID_URL", message: "URL doesn't match provider")
+            return
+        }
 
         let headers = json["headers"] as? [String: String] ?? [:]
         let bodyString = json["body"] as? String
@@ -186,7 +191,6 @@ final class RelayPairService: ObservableObject {
             await MainActor.run { requestCount += 1 }
 
             do {
-                // Find credential and decrypt key
                 let credential = await MainActor.run {
                     wallet.credentials.first { $0.providerId == providerId }
                 }
@@ -197,12 +201,6 @@ final class RelayPairService: ObservableObject {
 
                 let apiKey = try await MainActor.run {
                     try wallet.decryptKey(for: credential)
-                }
-
-                // Build the real request
-                guard let url = URL(string: urlString) else {
-                    sendRelayError(requestId: requestId, code: "INVALID_URL", message: "Invalid URL")
-                    return
                 }
 
                 var request = URLRequest(url: url)
@@ -219,7 +217,6 @@ final class RelayPairService: ObservableObject {
                     request.setValue(value, forHTTPHeaderField: key)
                 }
 
-                // Inject auth
                 switch providerId {
                 case "anthropic":
                     request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
@@ -227,14 +224,12 @@ final class RelayPairService: ObservableObject {
                     request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
                 }
 
-                // Stream the response back
                 let (bytes, response) = try await URLSession.shared.bytes(for: request)
                 guard let httpResponse = response as? HTTPURLResponse else {
                     sendRelayError(requestId: requestId, code: "INVALID_RESPONSE", message: "Invalid response")
                     return
                 }
 
-                // Send meta
                 var responseHeaders: [String: String] = [:]
                 for (key, value) in httpResponse.allHeaderFields {
                     responseHeaders[String(describing: key).lowercased()] = String(describing: value)
@@ -248,11 +243,9 @@ final class RelayPairService: ObservableObject {
                     "headers": responseHeaders,
                 ])
 
-                // Stream chunks
                 var buffer = Data()
                 for try await byte in bytes {
                     buffer.append(byte)
-                    // Flush every 4KB or on newlines (for SSE)
                     if buffer.count >= 4096 || byte == 0x0A {
                         if let chunk = String(data: buffer, encoding: .utf8) {
                             sendJSON([
@@ -265,7 +258,6 @@ final class RelayPairService: ObservableObject {
                     }
                 }
 
-                // Flush remaining
                 if !buffer.isEmpty, let chunk = String(data: buffer, encoding: .utf8) {
                     sendJSON([
                         "type": "relay:response:chunk",

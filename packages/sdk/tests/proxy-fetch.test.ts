@@ -3,15 +3,19 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createProxyFetch } from '../src/proxy-fetch.js';
 
 describe('createProxyFetch', () => {
-  let postedMessages: Array<Record<string, unknown>>;
+  let postedMessages: Array<{ data: Record<string, unknown>; port?: MessagePort }>;
 
   beforeEach(() => {
     postedMessages = [];
-    // Intercept postMessage to capture outgoing messages
-    vi.spyOn(window, 'postMessage').mockImplementation((data: unknown) => {
-      const msg = data as Record<string, unknown>;
-      postedMessages.push(msg);
-    });
+    // Intercept postMessage to capture outgoing messages and transferred ports
+    vi.spyOn(window, 'postMessage').mockImplementation(
+      (...args: unknown[]) => {
+        const data = args[0] as Record<string, unknown>;
+        const transfer = args[2] as Transferable[] | undefined;
+        const port = transfer?.[0] as MessagePort | undefined;
+        postedMessages.push({ data, port });
+      },
+    );
   });
 
   afterEach(() => {
@@ -36,7 +40,7 @@ describe('createProxyFetch', () => {
     await new Promise((r) => setTimeout(r, 10));
 
     expect(postedMessages.length).toBe(1);
-    const msg = postedMessages[0];
+    const msg = postedMessages[0].data;
     expect(msg.type).toBe('BYOKY_PROXY_REQUEST');
     expect(msg.providerId).toBe('anthropic');
     expect(msg.sessionKey).toBe('byk_session');
@@ -45,7 +49,7 @@ describe('createProxyFetch', () => {
 
     const requestId = msg.requestId as string;
 
-    // Simulate response from extension
+    // Simulate response from extension via MessagePort
     simulateResponse({
       type: 'BYOKY_PROXY_RESPONSE_META',
       requestId,
@@ -77,7 +81,7 @@ describe('createProxyFetch', () => {
 
     await new Promise((r) => setTimeout(r, 10));
 
-    const requestId = postedMessages[0].requestId as string;
+    const requestId = postedMessages[0].data.requestId as string;
     simulateResponse({
       type: 'BYOKY_PROXY_RESPONSE_ERROR',
       requestId,
@@ -102,7 +106,7 @@ describe('createProxyFetch', () => {
 
     await new Promise((r) => setTimeout(r, 10));
 
-    const requestId = postedMessages[0].requestId as string;
+    const requestId = postedMessages[0].data.requestId as string;
 
     simulateResponse({
       type: 'BYOKY_PROXY_RESPONSE_META',
@@ -141,8 +145,10 @@ describe('createProxyFetch', () => {
 
     await new Promise((r) => setTimeout(r, 10));
 
+    const port = postedMessages[0].port!;
+
     // Message for a different request — should be ignored
-    simulateResponse({
+    port.postMessage({
       type: 'BYOKY_PROXY_RESPONSE_META',
       requestId: 'other-id',
       status: 500,
@@ -150,7 +156,7 @@ describe('createProxyFetch', () => {
       headers: {},
     });
 
-    const requestId = postedMessages[0].requestId as string;
+    const requestId = postedMessages[0].data.requestId as string;
     simulateResponse({
       type: 'BYOKY_PROXY_RESPONSE_META',
       requestId,
@@ -168,6 +174,9 @@ describe('createProxyFetch', () => {
   });
 
   function simulateResponse(data: Record<string, unknown>) {
-    document.dispatchEvent(new CustomEvent('byoky-message', { detail: data }));
+    const entry = postedMessages.find(
+      (m) => m.data.requestId === data.requestId,
+    );
+    entry?.port?.postMessage(data);
   }
 });

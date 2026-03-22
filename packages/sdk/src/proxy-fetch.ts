@@ -32,8 +32,12 @@ export function createProxyFetch(
         reject(new Error('Proxy request timed out'));
       }, 120_000);
 
-      function handleEvent(event: Event) {
-        const data = (event as CustomEvent).detail ?? (event as MessageEvent).data;
+      // Use MessageChannel for secure response delivery — page scripts
+      // cannot intercept or spoof messages on a transferred port.
+      const channel = new MessageChannel();
+
+      channel.port1.onmessage = (event: MessageEvent) => {
+        const data = event.data;
         if (data?.requestId !== requestId) return;
 
         switch (data.type) {
@@ -78,14 +82,12 @@ export function createProxyFetch(
             break;
           }
         }
-      }
+      };
 
       function cleanup() {
         clearTimeout(timeout);
-        document.removeEventListener('byoky-message', handleEvent);
+        channel.port1.close();
       }
-
-      document.addEventListener('byoky-message', handleEvent);
 
       window.postMessage(
         {
@@ -99,6 +101,7 @@ export function createProxyFetch(
           body,
         },
         window.location.origin,
+        [channel.port2],
       );
     });
   };

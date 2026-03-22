@@ -67,6 +67,30 @@ export default defineBackground(() => {
   let unlockFailures = 0;
   let unlockLockedUntil = 0;
 
+  // Auto-lock after 20 minutes of inactivity
+  const IDLE_TIMEOUT_MS = 20 * 60 * 1000;
+  let lastActivityAt = 0;
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function resetIdleTimer() {
+    lastActivityAt = Date.now();
+    if (idleTimer) clearTimeout(idleTimer);
+    if (masterPassword) {
+      idleTimer = setTimeout(autoLock, IDLE_TIMEOUT_MS);
+    }
+  }
+
+  function autoLock() {
+    if (!masterPassword) return;
+    masterPassword = null;
+    sessions.clear();
+    authorizedBridgeSessionKey = null;
+    browser.runtime.sendMessage({
+      type: 'BYOKY_INTERNAL',
+      action: 'sessionChanged',
+    }).catch(() => {});
+  }
+
   // Rate limiting for connect requests per origin
   const connectRateLimit = new Map<string, number[]>();
   const CONNECT_RATE_LIMIT = 10; // max requests per window
@@ -217,6 +241,8 @@ export default defineBackground(() => {
     port.onMessage.addListener(async (raw: unknown) => {
       const msg = raw as ProxyRequest;
       if (msg.sessionKey == null) return;
+
+      resetIdleTimer();
 
       const session = sessions.get(msg.sessionKey);
       if (!session) {
@@ -734,6 +760,7 @@ export default defineBackground(() => {
           masterPassword = password;
           unlockFailures = 0;
           unlockLockedUntil = 0;
+          resetIdleTimer();
           processPendingAfterUnlock();
         } else {
           unlockFailures++;
@@ -750,6 +777,7 @@ export default defineBackground(() => {
         masterPassword = null;
         sessions.clear();
         authorizedBridgeSessionKey = null;
+        if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
         return { success: true };
 
       case 'isUnlocked':
@@ -1731,11 +1759,17 @@ export default defineBackground(() => {
   }
 
   async function handleBridgeProxyRequest(msg: Record<string, unknown>): Promise<void> {
-    const requestId = msg.requestId as string;
-    const sessionKey = msg.sessionKey as string;
-    const providerId = msg.providerId as string;
-    const url = msg.url as string;
-    const method = msg.method as string;
+    if (typeof msg.requestId !== 'string' || typeof msg.sessionKey !== 'string' ||
+        typeof msg.providerId !== 'string' || typeof msg.url !== 'string' ||
+        typeof msg.method !== 'string' || typeof msg.headers !== 'object' || !msg.headers ||
+        (msg.body !== undefined && typeof msg.body !== 'string')) {
+      return;
+    }
+    const requestId = msg.requestId;
+    const sessionKey = msg.sessionKey;
+    const providerId = msg.providerId;
+    const url = msg.url;
+    const method = msg.method;
     const headers = msg.headers as Record<string, string>;
     const body = msg.body as string | undefined;
 
@@ -1867,11 +1901,11 @@ export default defineBackground(() => {
       });
 
       await logRequest(session, { providerId, url, method } as ProxyRequest, response.status);
-    } catch (e) {
+    } catch {
       bridgeProxyPort?.postMessage({
         type: 'proxy_http_error',
         requestId,
-        error: (e as Error).message,
+        error: 'Proxy request failed',
       });
     }
   }

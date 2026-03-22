@@ -25,7 +25,7 @@ final class CryptoService {
 
     private init() {}
 
-    // MARK: - Key Derivation (PBKDF2-SHA256, matches Web Crypto implementation)
+    // MARK: - Key Derivation (PBKDF2-SHA256)
 
     func deriveKey(password: String, salt: Data) -> SymmetricKey? {
         guard let passwordData = password.data(using: .utf8) else { return nil }
@@ -53,6 +53,10 @@ final class CryptoService {
         return SymmetricKey(data: derivedKey)
     }
 
+    func generateSalt() -> Data {
+        randomBytes(count: saltLength)
+    }
+
     // MARK: - Password Hash (for verifying unlock)
 
     func hashPassword(_ password: String) -> String? {
@@ -75,27 +79,20 @@ final class CryptoService {
         guard let derivedKey = deriveKey(password: password, salt: salt) else { return false }
         let derivedData = derivedKey.withUnsafeBytes { Data($0) }
 
-        return derivedData == storedKey
+        return constantTimeEqual(derivedData, storedKey)
     }
 
-    // MARK: - AES-256-GCM Encrypt/Decrypt (compatible with Web Crypto format)
+    // MARK: - AES-256-GCM with pre-derived SymmetricKey
 
-    func encrypt(plaintext: String, password: String) throws -> String {
+    func encrypt(plaintext: String, key: SymmetricKey) throws -> String {
         guard let plaintextData = plaintext.data(using: .utf8) else {
             throw CryptoError.invalidData
-        }
-
-        let salt = randomBytes(count: saltLength)
-        guard let key = deriveKey(password: password, salt: salt) else {
-            throw CryptoError.keyDerivationFailed
         }
 
         let nonce = try AES.GCM.Nonce(data: randomBytes(count: nonceLength))
         let sealed = try AES.GCM.seal(plaintextData, using: key, nonce: nonce)
 
-        // Format: salt || nonce || ciphertext+tag (matches web crypto format)
         var combined = Data()
-        combined.append(salt)
         combined.append(Data(nonce))
         combined.append(sealed.ciphertext)
         combined.append(sealed.tag)
@@ -103,12 +100,41 @@ final class CryptoService {
         return combined.base64EncodedString()
     }
 
-    func decrypt(encoded: String, password: String) throws -> String {
+    func decrypt(encoded: String, key: SymmetricKey) throws -> String {
         guard let combined = Data(base64Encoded: encoded) else {
             throw CryptoError.invalidData
         }
 
-        let minLength = saltLength + nonceLength + 16 // 16 = GCM tag
+        let minLength = nonceLength + 16
+        guard combined.count >= minLength else {
+            throw CryptoError.invalidData
+        }
+
+        let nonceData = combined.prefix(nonceLength)
+        let ciphertextAndTag = combined[nonceLength...]
+        let tagStart = ciphertextAndTag.count - 16
+        let ciphertext = ciphertextAndTag.prefix(tagStart)
+        let tag = ciphertextAndTag.suffix(16)
+
+        let nonce = try AES.GCM.Nonce(data: nonceData)
+        let sealedBox = try AES.GCM.SealedBox(nonce: nonce, ciphertext: ciphertext, tag: tag)
+        let decrypted = try AES.GCM.open(sealedBox, using: key)
+
+        guard let result = String(data: decrypted, encoding: .utf8) else {
+            throw CryptoError.decryptionFailed
+        }
+
+        return result
+    }
+
+    // MARK: - Legacy password-based decrypt (v1 migration)
+
+    func decryptLegacy(encoded: String, password: String) throws -> String {
+        guard let combined = Data(base64Encoded: encoded) else {
+            throw CryptoError.invalidData
+        }
+
+        let minLength = saltLength + nonceLength + 16
         guard combined.count >= minLength else {
             throw CryptoError.invalidData
         }
@@ -137,6 +163,15 @@ final class CryptoService {
     }
 
     // MARK: - Helpers
+
+    private func constantTimeEqual(_ a: Data, _ b: Data) -> Bool {
+        guard a.count == b.count else { return false }
+        var result: UInt8 = 0
+        for i in 0..<a.count {
+            result |= a[a.startIndex + i] ^ b[b.startIndex + i]
+        }
+        return result == 0
+    }
 
     private func randomBytes(count: Int) -> Data {
         var bytes = Data(count: count)
