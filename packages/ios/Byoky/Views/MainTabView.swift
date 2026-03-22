@@ -8,6 +8,11 @@ struct MainTabView: View {
                     Label("Wallet", systemImage: "wallet.bifold")
                 }
 
+            PairView()
+                .tabItem {
+                    Label("Pair", systemImage: "qrcode.viewfinder")
+                }
+
             BridgeView()
                 .tabItem {
                     Label("Bridge", systemImage: "antenna.radiowaves.left.and.right")
