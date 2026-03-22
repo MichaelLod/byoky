@@ -46,38 +46,38 @@ export interface GiftedCredential {
   createdAt: number;
 }
 
-// --- Gift relay protocol ---
+// --- Relay protocol ---
 
-export interface GiftRelayAuth {
-  type: 'gift:auth';
-  giftId: string;
+export interface RelayAuth {
+  type: 'relay:auth';
+  roomId: string;
   authToken: string;
   role: 'sender' | 'recipient';
 }
 
-export interface GiftRelayAuthResult {
-  type: 'gift:auth:result';
+export interface RelayAuthResult {
+  type: 'relay:auth:result';
   success: boolean;
   error?: string;
   peerOnline?: boolean;
 }
 
-export interface GiftRelayPeerStatus {
-  type: 'gift:peer:status';
+export interface RelayPeerStatus {
+  type: 'relay:peer:status';
   online: boolean;
 }
 
-export interface GiftRelayUsageUpdate {
-  type: 'gift:usage';
-  giftId: string;
+export interface RelayUsageUpdate {
+  type: 'relay:usage';
+  roomId: string;
   usedTokens: number;
 }
 
-export type GiftRelayMessage =
-  | GiftRelayAuth
-  | GiftRelayAuthResult
-  | GiftRelayPeerStatus
-  | GiftRelayUsageUpdate;
+export type RelayProtocolMessage =
+  | RelayAuth
+  | RelayAuthResult
+  | RelayPeerStatus
+  | RelayUsageUpdate;
 
 // --- Encoding / decoding ---
 

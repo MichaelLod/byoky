@@ -1431,8 +1431,8 @@ export default defineBackground(() => {
 
       ws.onopen = () => {
         ws.send(JSON.stringify({
-          type: 'gift:auth',
-          giftId: sp.giftId,
+          type: 'relay:auth',
+          roomId: sp.giftId,
           authToken: sp.giftAuthToken,
           role: 'recipient',
         }));
@@ -1442,7 +1442,7 @@ export default defineBackground(() => {
         try {
           const data = JSON.parse(typeof event.data === 'string' ? event.data : '');
 
-          if (data.type === 'gift:auth:result') {
+          if (data.type === 'relay:auth:result') {
             if (!data.success) {
               clearActiveTimeout();
               ws.close();
@@ -1525,7 +1525,7 @@ export default defineBackground(() => {
           }
 
           // Update local gifted credential usage
-          if (data.type === 'gift:usage' && data.giftId === sp.giftId) {
+          if (data.type === 'relay:usage' && data.giftId === sp.giftId) {
             updateGiftedCredentialUsage(sp.giftId!, data.usedTokens);
           }
         } catch {
@@ -2164,8 +2164,8 @@ export default defineBackground(() => {
 
       ws.onopen = () => {
         ws.send(JSON.stringify({
-          type: 'gift:auth',
-          giftId: gift.id,
+          type: 'relay:auth',
+          roomId: gift.id,
           authToken: gift.authToken,
           role: 'sender',
         }));
@@ -2175,7 +2175,7 @@ export default defineBackground(() => {
         try {
           const msg = JSON.parse(typeof event.data === 'string' ? event.data : '');
 
-          if (msg.type === 'gift:auth:result' && !msg.success) {
+          if (msg.type === 'relay:auth:result' && !msg.success) {
             ws.close();
             giftRelayConnections.delete(gift.id);
             return;
@@ -2361,7 +2361,7 @@ export default defineBackground(() => {
             refreshGifts[gIdx].usedTokens += totalTokens;
             await browser.storage.local.set({ gifts: refreshGifts });
             ws.send(JSON.stringify({
-              type: 'gift:usage',
+              type: 'relay:usage',
               giftId: gift.id,
               usedTokens: refreshGifts[gIdx].usedTokens,
             }));
