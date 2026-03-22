@@ -200,6 +200,9 @@
 }
 
 .demo-app .connect-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   text-align: center;
   max-width: 460px;
   width: 100%;
@@ -586,7 +589,11 @@
 
 .demo-app .playground-content .chat {
   height: calc(100vh - 140px);
-  padding: 0 18px;
+  padding: 0 24px;
+}
+
+.demo-app .playground-content .chat .chat-input {
+  padding: 16px 0 28px;
 }
 
 /* ── Demo Panels ── */

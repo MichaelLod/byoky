@@ -79,29 +79,45 @@ export function ConnectWallet({ onConnect, onMobileConnect, pairingCode, isPairi
           API keys. Your keys never leave your device.
         </p>
 
-        {hasExtension ? (
-          <button className="btn btn-primary btn-lg" onClick={onConnect}>
-            Connect Wallet
-          </button>
-        ) : (
-          <div className="connect-options">
-            <button className="btn btn-primary btn-lg" onClick={onMobileConnect}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
-                <line x1="12" y1="18" x2="12.01" y2="18" />
-              </svg>
-              Connect with Phone App
-            </button>
-            <button className="btn btn-secondary btn-lg" onClick={onConnect}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-                <line x1="8" y1="21" x2="16" y2="21" />
-                <line x1="12" y1="17" x2="12" y2="21" />
-              </svg>
-              Connect with Browser Extension
-            </button>
-          </div>
-        )}
+        <div className="connect-options">
+          {hasExtension ? (
+            <>
+              <button className="btn btn-primary btn-lg" onClick={onConnect}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                  <line x1="8" y1="21" x2="16" y2="21" />
+                  <line x1="12" y1="17" x2="12" y2="21" />
+                </svg>
+                Connect with Extension
+              </button>
+              <button className="btn btn-secondary btn-lg" onClick={onMobileConnect}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
+                  <line x1="12" y1="18" x2="12.01" y2="18" />
+                </svg>
+                Connect with Phone App
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="btn btn-primary btn-lg" onClick={onMobileConnect}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
+                  <line x1="12" y1="18" x2="12.01" y2="18" />
+                </svg>
+                Connect with Phone App
+              </button>
+              <button className="btn btn-secondary btn-lg" onClick={onConnect}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                  <line x1="8" y1="21" x2="16" y2="21" />
+                  <line x1="12" y1="17" x2="12" y2="21" />
+                </svg>
+                Connect with Browser Extension
+              </button>
+            </>
+          )}
+        </div>
 
         <div className="connect-features">
           <div className="connect-feature">
