@@ -15,7 +15,7 @@
   <br />
   A secure browser wallet for your LLM API keys and setup tokens.
   <br />
-  Your keys never leave the extension.
+  Your keys never leave your device.
   <br />
   <br />
   <a href="https://byoky.com">Website</a> · <a href="https://demo.byoky.com">Demo</a> · <a href="#quick-start">Quick Start</a> · <a href="#for-developers">SDK Docs</a> · <a href="https://discord.gg/gRs8S9fxcT">Discord</a> · <a href="https://github.com/MichaelLod/byoky/issues">Issues</a>
@@ -98,7 +98,7 @@ const message = await client.messages.create({
 
 ### Mobile Wallet (No Extension Needed)
 
-No browser extension? Users can connect with the Byoky mobile app instead. The SDK automatically falls back to relay mode — showing a pairing code that the user scans with their phone.
+No browser extension? Users can connect with the Byoky iOS app instead. The SDK connects via relay — showing a pairing code that the user scans with their phone.
 
 ```
 Web App ←WebSocket→ Relay Server ←WebSocket→ Phone Wallet → LLM API
@@ -107,6 +107,7 @@ Web App ←WebSocket→ Relay Server ←WebSocket→ Phone Wallet → LLM API
 ```typescript
 const session = await byoky.connect({
   providers: [{ id: 'anthropic', required: true }],
+  useRelay: true,
   onPairingReady: (code) => {
     // Show this code as a QR or text for the user to scan
     showQRCode(code);
@@ -269,7 +270,8 @@ byoky/
 │   ├── sdk/           # @byoky/sdk (+ @byoky/sdk/server for backend relay)
 │   ├── extension/     # Browser extension (Chrome, Firefox, Safari) — WXT
 │   ├── bridge/        # @byoky/bridge — HTTP proxy + native messaging for CLI/desktop apps
-│   ├── relay/        # @byoky/relay — WebSocket relay server
+│   ├── relay/         # @byoky/relay — WebSocket relay server
+│   ├── ios/           # iOS app (wallet + Safari extension)
 │   ├── openclaw-plugin/ # OpenClaw provider plugin
 │   └── web/           # Landing page (byoky.com) + demo app (demo.byoky.com)
 ```
@@ -314,8 +316,8 @@ pnpm --filter @byoky/extension build:all     # Chrome + Firefox + Safari
 - [x] OpenClaw provider plugin (bridge proxy — keys stay in extension)
 - [x] Token gifts (relay-backed, zero key exposure)
 - [x] Mobile wallet relay connect (no extension needed, pair via QR code)
+- [x] iOS app (wallet + Safari extension + relay pairing)
 - [ ] Remote OpenClaw via relay (cloud deployment, zero key exposure)
-- [ ] iOS app (Safari extension + companion app)
 - [ ] Password change (re-encrypt vault with new master password)
 
 ## Star History
