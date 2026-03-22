@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Byoky, type ByokySession, type ConnectResponse } from '@byoky/sdk';
+import { Byoky, type ByokySession, type ConnectResponse, isExtensionInstalled } from '@byoky/sdk';
 import { ConnectWallet } from './components/ConnectWallet';
 import { Playground } from './components/Playground';
 import { CodeExample } from './components/CodeExample';
@@ -10,16 +10,16 @@ const byoky = new Byoky({ timeout: 120_000 });
 const SESSION_KEY = 'byoky-demo-session';
 
 function saveSession(response: ConnectResponse) {
-  try { localStorage.setItem(SESSION_KEY, JSON.stringify(response)); } catch {}
+  try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(response)); } catch {}
 }
 
 function clearSavedSession() {
-  try { localStorage.removeItem(SESSION_KEY); } catch {}
+  try { sessionStorage.removeItem(SESSION_KEY); } catch {}
 }
 
 function loadSavedSession(): ConnectResponse | null {
   try {
-    const raw = localStorage.getItem(SESSION_KEY);
+    const raw = sessionStorage.getItem(SESSION_KEY);
     return raw ? JSON.parse(raw) : null;
   } catch { return null; }
 }
@@ -28,6 +28,8 @@ export function DemoApp() {
   const [session, setSession] = useState<ByokySession | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(true);
+  const [pairingCode, setPairingCode] = useState<string | null>(null);
+  const [isPairing, setIsPairing] = useState(false);
 
   useEffect(() => {
     const saved = loadSavedSession();
@@ -43,6 +45,14 @@ export function DemoApp() {
     });
   }, []);
 
+  function onConnected(s: ByokySession) {
+    s.onDisconnect(() => { clearSavedSession(); setSession(null); setPairingCode(null); });
+    saveSession({ sessionKey: s.sessionKey, proxyUrl: s.proxyUrl, providers: s.providers });
+    setSession(s);
+    setPairingCode(null);
+    setIsPairing(false);
+  }
+
   async function handleConnect() {
     setError(null);
     try {
@@ -53,14 +63,11 @@ export function DemoApp() {
           { id: 'gemini', required: false },
         ],
       });
-
-      s.onDisconnect(() => { clearSavedSession(); setSession(null); });
-      saveSession({ sessionKey: s.sessionKey, proxyUrl: s.proxyUrl, providers: s.providers });
-      setSession(s);
+      onConnected(s);
     } catch (e) {
       const err = e as Error;
       if (err.message.includes('not installed')) {
-        setError('Byoky wallet not found. Install the extension first.');
+        setError('Byoky wallet not found. Install the extension or connect with the mobile app.');
       } else if (err.message.includes('rejected')) {
         setError('Connection rejected by user.');
       } else {
@@ -69,11 +76,42 @@ export function DemoApp() {
     }
   }
 
+  async function handleMobileConnect() {
+    setError(null);
+    setIsPairing(true);
+    setPairingCode(null);
+    try {
+      const s = await byoky.connect({
+        providers: [
+          { id: 'anthropic', required: false },
+          { id: 'openai', required: false },
+          { id: 'gemini', required: false },
+        ],
+        onPairingReady: (code) => {
+          setPairingCode(code);
+        },
+      });
+      onConnected(s);
+    } catch (e) {
+      const err = e as Error;
+      setError(err.message);
+      setIsPairing(false);
+      setPairingCode(null);
+    }
+  }
+
+  function handleCancelPairing() {
+    setIsPairing(false);
+    setPairingCode(null);
+  }
+
   function handleDisconnect() {
     session?.disconnect();
     clearSavedSession();
     setSession(null);
   }
+
+  const hasExtension = typeof window !== 'undefined' && isExtensionInstalled();
 
   return (
     <div className="demo-app">
@@ -92,7 +130,7 @@ export function DemoApp() {
               </button>
             </div>
           ) : (
-            <button className="btn btn-primary" onClick={handleConnect}>
+            <button className="btn btn-primary" onClick={hasExtension ? handleConnect : handleMobileConnect}>
               <WalletIcon />
               Connect Byoky
             </button>
@@ -109,7 +147,14 @@ export function DemoApp() {
 
       <main className="main">
         {restoring ? null : !session ? (
-          <ConnectWallet onConnect={handleConnect} />
+          <ConnectWallet
+            onConnect={handleConnect}
+            onMobileConnect={handleMobileConnect}
+            pairingCode={pairingCode}
+            isPairing={isPairing}
+            onCancelPairing={handleCancelPairing}
+            hasExtension={hasExtension}
+          />
         ) : (
           <Playground session={session} />
         )}
