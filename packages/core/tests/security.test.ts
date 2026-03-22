@@ -216,7 +216,7 @@ describe('security invariants', () => {
 
     it('validates provider ID in buildAuthPage', () => {
       expect(plugin).toContain('VALID_PROVIDER_IDS');
-      expect(plugin).toContain('JSON.stringify(requestProviders)');
+      expect(plugin).toContain('JSON.stringify(requestProviderId)');
     });
   });
 

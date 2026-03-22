@@ -7,5 +7,6 @@ dist/
 .DS_Store
 .env
 .env.local
+.env.test.local
 .vercel
 test-results/

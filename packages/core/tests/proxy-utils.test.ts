@@ -120,6 +120,42 @@ describe('buildHeaders', () => {
     buildHeaders('openai', input, 'real-key');
     expect(input).toEqual(frozen);
   });
+
+  // ── Anthropic OAuth / Setup Token headers ───────────
+
+  it('sets Bearer + Claude Code headers for Anthropic OAuth', () => {
+    const headers = buildHeaders('anthropic', { 'content-type': 'application/json' }, 'sk-ant-oat01-abc', 'oauth');
+    expect(headers['authorization']).toBe('Bearer sk-ant-oat01-abc');
+    expect(headers['x-api-key']).toBeUndefined();
+    expect(headers['user-agent']).toBe('claude-cli/2.1.76');
+    expect(headers['x-app']).toBe('cli');
+    expect(headers['anthropic-beta']).toContain('claude-code-20250219');
+    expect(headers['anthropic-beta']).toContain('oauth-2025-04-20');
+    expect(headers['anthropic-version']).toBe('2023-06-01');
+  });
+
+  it('preserves custom anthropic-version for OAuth', () => {
+    const headers = buildHeaders('anthropic', { 'anthropic-version': '2024-01-01' }, 'sk-ant-oat01-abc', 'oauth');
+    expect(headers['anthropic-version']).toBe('2024-01-01');
+    expect(headers['authorization']).toBe('Bearer sk-ant-oat01-abc');
+  });
+
+  it('strips fake auth headers before setting OAuth Bearer', () => {
+    const headers = buildHeaders('anthropic', {
+      'authorization': 'Bearer byk_fake',
+      'x-api-key': 'byk_fake',
+    }, 'sk-ant-oat01-real', 'oauth');
+    expect(headers['authorization']).toBe('Bearer sk-ant-oat01-real');
+    expect(headers['x-api-key']).toBeUndefined();
+  });
+
+  it('defaults to api_key authMethod when not specified', () => {
+    const headers = buildHeaders('anthropic', {}, 'sk-ant-api-key123');
+    expect(headers['x-api-key']).toBe('sk-ant-api-key123');
+    expect(headers['authorization']).toBeUndefined();
+    expect(headers['user-agent']).toBeUndefined();
+    expect(headers['x-app']).toBeUndefined();
+  });
 });
 
 // ── parseModel ─────────────────────────────────────────

@@ -1,8 +1,10 @@
 import { defineConfig } from 'vitest/config';
+import { loadEnv } from 'vite';
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   test: {
     globals: true,
+    env: loadEnv(mode ?? 'test', process.cwd(), ''),
     include: ['packages/*/tests/**/*.test.ts'],
     coverage: {
       provider: 'v8',
@@ -13,4 +15,4 @@ export default defineConfig({
       ['packages/sdk/tests/**', 'jsdom'],
     ],
   },
-});
+}));
