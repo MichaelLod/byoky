@@ -72,10 +72,10 @@ final class WalletStore: ObservableObject {
 
     // MARK: - Credentials
 
-    func addCredential(providerId: String, label: String, apiKey: String) throws {
+    func addCredential(providerId: String, label: String, apiKey: String, authMethod: AuthMethod = .apiKey) throws {
         guard let password = masterPassword else { throw WalletError.locked }
 
-        let credential = Credential.create(providerId: providerId, label: label)
+        let credential = Credential.create(providerId: providerId, label: label, authMethod: authMethod)
         let encryptedKey = try crypto.encrypt(plaintext: apiKey, password: password)
 
         try keychain.saveString(key: "key_\(credential.id)", value: encryptedKey)
