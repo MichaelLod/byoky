@@ -18,6 +18,8 @@ export interface ByokySession extends ConnectResponse {
   getUsage(): Promise<SessionUsage>;
   /** Register a callback for when the wallet revokes this session. */
   onDisconnect(callback: () => void): () => void;
+  /** Register a callback for when provider availability changes (e.g. credential added/removed). */
+  onProvidersUpdated(callback: (providers: ConnectResponse['providers']) => void): () => void;
 }
 
 export interface ByokyOptions {
@@ -228,6 +230,7 @@ export class Byoky {
         disconnectCallbacks.add(callback);
         return () => { disconnectCallbacks.delete(callback); };
       },
+      onProvidersUpdated: () => () => {},
     };
   }
 
@@ -236,30 +239,14 @@ export class Byoky {
   private buildSession(response: ConnectResponse): ByokySession {
     const sessionKey = response.sessionKey;
     const disconnectCallbacks = new Set<() => void>();
+    const providersUpdatedCallbacks = new Set<(providers: ConnectResponse['providers']) => void>();
 
-    // Register a secure notification channel via MessageChannel so
-    // revocation events cannot be spoofed by page scripts.
-    const notifyChannel = new MessageChannel();
-    notifyChannel.port1.onmessage = (event: MessageEvent) => {
-      const msg = event.data;
-      if (msg?.type === 'BYOKY_SESSION_REVOKED' && msg.payload?.sessionKey === sessionKey) {
-        for (const cb of disconnectCallbacks) cb();
-        disconnectCallbacks.clear();
-        notifyChannel.port1.close();
-      }
-    };
-    window.postMessage(
-      { type: 'BYOKY_REGISTER_NOTIFY' },
-      window.location.origin,
-      [notifyChannel.port2],
-    );
-
-    return {
+    const session: ByokySession = {
       ...response,
       createFetch: (providerId: string) =>
         createProxyFetch(providerId, sessionKey),
       createRelay: (wsUrl: string) =>
-        createRelayClient(wsUrl, sessionKey, response.providers),
+        createRelayClient(wsUrl, sessionKey, session.providers),
       disconnect: () => {
         notifyChannel.port1.close();
         this.sendDisconnect(sessionKey);
@@ -270,7 +257,34 @@ export class Byoky {
         disconnectCallbacks.add(callback);
         return () => { disconnectCallbacks.delete(callback); };
       },
+      onProvidersUpdated: (callback: (providers: ConnectResponse['providers']) => void) => {
+        providersUpdatedCallbacks.add(callback);
+        return () => { providersUpdatedCallbacks.delete(callback); };
+      },
     };
+
+    // Register a secure notification channel via MessageChannel so
+    // revocation events cannot be spoofed by page scripts.
+    const notifyChannel = new MessageChannel();
+    notifyChannel.port1.onmessage = (event: MessageEvent) => {
+      const msg = event.data;
+      if (msg?.type === 'BYOKY_SESSION_REVOKED' && msg.payload?.sessionKey === sessionKey) {
+        for (const cb of disconnectCallbacks) cb();
+        disconnectCallbacks.clear();
+        notifyChannel.port1.close();
+      } else if (msg?.type === 'BYOKY_PROVIDERS_UPDATED' && msg.payload?.sessionKey === sessionKey) {
+        const newProviders = msg.payload.providers as ConnectResponse['providers'];
+        session.providers = newProviders;
+        for (const cb of providersUpdatedCallbacks) cb(newProviders);
+      }
+    };
+    window.postMessage(
+      { type: 'BYOKY_REGISTER_NOTIFY' },
+      window.location.origin,
+      [notifyChannel.port2],
+    );
+
+    return session;
   }
 
   private sendConnectRequest(

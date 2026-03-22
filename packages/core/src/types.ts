@@ -61,6 +61,7 @@ export interface Session {
   appOrigin: string;
   appName?: string;
   providers: SessionProvider[];
+  requestedProviders: string[];
   createdAt: number;
   expiresAt: number;
 }
@@ -145,6 +146,7 @@ export type MessageType =
   | 'BYOKY_SESSION_USAGE'
   | 'BYOKY_SESSION_USAGE_RESPONSE'
   | 'BYOKY_SESSION_REVOKED'
+  | 'BYOKY_PROVIDERS_UPDATED'
   | 'BYOKY_ERROR';
 
 export interface ByokyMessage {

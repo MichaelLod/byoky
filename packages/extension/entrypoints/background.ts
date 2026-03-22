@@ -725,6 +725,7 @@ export default defineBackground(() => {
       sessionKey,
       appOrigin: origin,
       providers: sessionProviders,
+      requestedProviders: request.providers?.map(p => p.id) ?? [],
       createdAt: Date.now(),
       expiresAt: Date.now() + 24 * 60 * 60 * 1000,
     };
@@ -814,6 +815,7 @@ export default defineBackground(() => {
         }
         creds.push(newCred);
         await browser.storage.local.set({ credentials: creds });
+        refreshSessionProviders();
         return { success: true };
       }
 
@@ -824,6 +826,7 @@ export default defineBackground(() => {
         await browser.storage.local.set({
           credentials: rmCreds.filter((c) => c.id !== rmId),
         });
+        refreshSessionProviders();
         return { success: true };
       }
 
@@ -1118,6 +1121,7 @@ export default defineBackground(() => {
         }
         giftedCreds.push(giftedCred);
         await browser.storage.local.set({ giftedCredentials: giftedCreds });
+        refreshSessionProviders();
         return { success: true };
       }
 
@@ -1133,6 +1137,7 @@ export default defineBackground(() => {
         await browser.storage.local.set({
           giftedCredentials: giftedCreds.filter((gc) => gc.id !== id),
         });
+        refreshSessionProviders();
         return { success: true };
       }
 
@@ -2075,6 +2080,41 @@ export default defineBackground(() => {
     const msg = { type: 'BYOKY_SESSION_REVOKED', payload: { sessionKey } };
     for (const port of notifyPorts) {
       try { port.postMessage(msg); } catch { /* port may have disconnected */ }
+    }
+  }
+
+  async function refreshSessionProviders() {
+    if (sessions.size === 0) return;
+    const credentials = await getStoredCredentials();
+    const gcData = await browser.storage.local.get('giftedCredentials');
+    const giftedCreds = (gcData.giftedCredentials ?? []) as GiftedCredential[];
+
+    for (const [sessionKey, session] of sessions) {
+      const requested = session.requestedProviders;
+      const providerIds = requested.length > 0 ? requested : [
+        ...new Set([...credentials.map(c => c.providerId), ...giftedCreds.filter(g => g.expiresAt > Date.now() && g.usedTokens < g.maxTokens).map(g => g.providerId)]),
+      ];
+
+      const providerMap: ConnectResponse['providers'] = {};
+      const newSessionProviders: Session['providers'] = [];
+
+      for (const providerId of providerIds) {
+        const cred = credentials.find(c => c.providerId === providerId);
+        const gc = !cred ? giftedCreds.find(g => g.providerId === providerId && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens) : undefined;
+        providerMap[providerId] = { available: !!(cred || gc), authMethod: cred?.authMethod ?? 'api_key' };
+        if (cred) {
+          newSessionProviders.push({ providerId, credentialId: cred.id, available: true, authMethod: cred.authMethod });
+        } else if (gc) {
+          newSessionProviders.push({ providerId, credentialId: gc.id, available: true, authMethod: 'api_key', giftId: gc.giftId, giftRelayUrl: gc.relayUrl, giftAuthToken: gc.authToken });
+        }
+      }
+
+      session.providers = newSessionProviders;
+
+      const msg = { type: 'BYOKY_PROVIDERS_UPDATED', payload: { sessionKey, providers: providerMap } };
+      for (const port of notifyPorts) {
+        try { port.postMessage(msg); } catch { /* port may have disconnected */ }
+      }
     }
   }
 
