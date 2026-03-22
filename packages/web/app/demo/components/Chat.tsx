@@ -76,7 +76,11 @@ export function Chat({ session }: Props) {
         const text = await response.text();
         if (!response.ok) {
           let errMsg = `API error: ${response.status}`;
-          try { errMsg = JSON.parse(text).error?.message || errMsg; } catch {}
+          try {
+            const parsed = JSON.parse(text);
+            const err = parsed.error;
+            errMsg = (typeof err === 'string' ? err : err?.message) || errMsg;
+          } catch {}
           throw new Error(errMsg);
         }
         const data = JSON.parse(text);
@@ -95,7 +99,10 @@ export function Chat({ session }: Props) {
             }),
           },
         );
-        if (!response.ok) throw new Error((await response.json()).error?.message || `API error: ${response.status}`);
+        if (!response.ok) {
+          const err = (await response.json()).error;
+          throw new Error((typeof err === 'string' ? err : err?.message) || `API error: ${response.status}`);
+        }
         const data = await response.json();
         assistantContent = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response.';
       } else if (selectedProvider in openaiCompatible) {
@@ -105,7 +112,10 @@ export function Chat({ session }: Props) {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ model: config.model, messages: allMessages, max_tokens: 1024 }),
         });
-        if (!response.ok) throw new Error((await response.json()).error?.message || `API error: ${response.status}`);
+        if (!response.ok) {
+          const err = (await response.json()).error;
+          throw new Error((typeof err === 'string' ? err : err?.message) || `API error: ${response.status}`);
+        }
         const data = await response.json();
         assistantContent = data.choices?.[0]?.message?.content || 'No response.';
       } else {
