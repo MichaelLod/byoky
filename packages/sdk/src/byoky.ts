@@ -215,15 +215,22 @@ export class Byoky {
     const sessionKey = response.sessionKey;
     const disconnectCallbacks = new Set<() => void>();
 
-    function handleRevocation(event: Event) {
-      const msg = (event as CustomEvent).detail;
+    // Register a secure notification channel via MessageChannel so
+    // revocation events cannot be spoofed by page scripts.
+    const notifyChannel = new MessageChannel();
+    notifyChannel.port1.onmessage = (event: MessageEvent) => {
+      const msg = event.data;
       if (msg?.type === 'BYOKY_SESSION_REVOKED' && msg.payload?.sessionKey === sessionKey) {
         for (const cb of disconnectCallbacks) cb();
         disconnectCallbacks.clear();
-        document.removeEventListener('byoky-message', handleRevocation);
+        notifyChannel.port1.close();
       }
-    }
-    document.addEventListener('byoky-message', handleRevocation);
+    };
+    window.postMessage(
+      { type: 'BYOKY_REGISTER_NOTIFY' },
+      window.location.origin,
+      [notifyChannel.port2],
+    );
 
     return {
       ...response,
@@ -232,7 +239,7 @@ export class Byoky {
       createRelay: (wsUrl: string) =>
         createRelayClient(wsUrl, sessionKey, response.providers),
       disconnect: () => {
-        document.removeEventListener('byoky-message', handleRevocation);
+        notifyChannel.port1.close();
         this.sendDisconnect(sessionKey);
       },
       isConnected: () => this.querySessionStatus(sessionKey),
@@ -257,8 +264,10 @@ export class Byoky {
         );
       }, this.timeout);
 
-      function handleEvent(event: Event) {
-        const msg = (event as CustomEvent).detail;
+      const channel = new MessageChannel();
+
+      channel.port1.onmessage = (event: MessageEvent) => {
+        const msg = event.data;
         if (typeof msg?.type !== 'string' || !msg.type.startsWith('BYOKY_')) return;
         if (msg.requestId !== requestId) return;
 
@@ -273,14 +282,12 @@ export class Byoky {
           };
           reject(new ByokyError(code as ByokyErrorCode, message));
         }
-      }
+      };
 
       function cleanup() {
         clearTimeout(timeoutId);
-        document.removeEventListener('byoky-message', handleEvent);
+        channel.port1.close();
       }
-
-      document.addEventListener('byoky-message', handleEvent);
 
       window.postMessage(
         {
@@ -290,6 +297,7 @@ export class Byoky {
           payload: request,
         },
         window.location.origin,
+        [channel.port2],
       );
     });
   }
@@ -306,26 +314,27 @@ export class Byoky {
       const requestId = crypto.randomUUID();
       const timeout = setTimeout(() => { cleanup(); resolve(false); }, 5000);
 
-      function handleEvent(event: Event) {
-        const msg = (event as CustomEvent).detail;
+      const channel = new MessageChannel();
+
+      channel.port1.onmessage = (event: MessageEvent) => {
+        const msg = event.data;
         if (msg?.requestId !== requestId) return;
         if (msg.type === 'BYOKY_SESSION_STATUS_RESPONSE') {
           cleanup();
           resolve(!!msg.payload?.connected);
         }
-      }
+      };
 
       function cleanup() {
         clearTimeout(timeout);
-        document.removeEventListener('byoky-message', handleEvent);
+        channel.port1.close();
       }
 
-      document.addEventListener('byoky-message', handleEvent);
       window.postMessage({
         type: 'BYOKY_SESSION_STATUS',
         requestId,
         payload: { sessionKey },
-      }, window.location.origin);
+      }, window.location.origin, [channel.port2]);
     });
   }
 
@@ -337,8 +346,10 @@ export class Byoky {
         reject(new Error('Usage query timed out'));
       }, 5000);
 
-      function handleEvent(event: Event) {
-        const msg = (event as CustomEvent).detail;
+      const channel = new MessageChannel();
+
+      channel.port1.onmessage = (event: MessageEvent) => {
+        const msg = event.data;
         if (msg?.requestId !== requestId) return;
         if (msg.type === 'BYOKY_SESSION_USAGE_RESPONSE') {
           cleanup();
@@ -348,19 +359,18 @@ export class Byoky {
             reject(new Error('Session not found'));
           }
         }
-      }
+      };
 
       function cleanup() {
         clearTimeout(timeout);
-        document.removeEventListener('byoky-message', handleEvent);
+        channel.port1.close();
       }
 
-      document.addEventListener('byoky-message', handleEvent);
       window.postMessage({
         type: 'BYOKY_SESSION_USAGE',
         requestId,
         payload: { sessionKey },
-      }, window.location.origin);
+      }, window.location.origin, [channel.port2]);
     });
   }
 }

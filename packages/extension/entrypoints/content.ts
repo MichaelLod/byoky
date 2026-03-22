@@ -3,12 +3,30 @@ export default defineContentScript({
   runAt: 'document_start',
 
   main() {
+    // Ports registered by SDK instances for push notifications (revocations).
+    // MessagePort cannot be spoofed by page scripts, unlike CustomEvent.
+    const notifyPorts = new Set<MessagePort>();
+
     // Relay messages from page to background
     window.addEventListener('message', (event) => {
       if (event.source !== window) return;
       const data = event.data;
 
       if (typeof data?.type !== 'string' || !data.type.startsWith('BYOKY_')) return;
+
+      // Prefer MessagePort for response delivery (secure, unspoofable by page scripts).
+      // Falls back to CustomEvent for older SDK versions that don't transfer a port.
+      const replyPort: MessagePort | undefined = event.ports[0];
+
+      function reply(msg: unknown) {
+        if (replyPort) {
+          replyPort.postMessage(msg);
+        } else {
+          document.dispatchEvent(
+            new CustomEvent('byoky-message', { detail: msg }),
+          );
+        }
+      }
 
       if (data.type === 'BYOKY_PROXY_REQUEST') {
         // Validate message structure before forwarding to background
@@ -26,25 +44,19 @@ export default defineContentScript({
         port.postMessage(data);
 
         port.onMessage.addListener((msg) => {
-          document.dispatchEvent(
-            new CustomEvent('byoky-message', { detail: msg }),
-          );
+          reply(msg);
         });
 
         port.onDisconnect.addListener(() => {
-          document.dispatchEvent(
-            new CustomEvent('byoky-message', {
-              detail: {
-                type: 'BYOKY_PROXY_RESPONSE_ERROR',
-                requestId: data.requestId,
-                status: 500,
-                error: {
-                  code: 'PROXY_ERROR',
-                  message: 'Extension disconnected',
-                },
-              },
-            }),
-          );
+          reply({
+            type: 'BYOKY_PROXY_RESPONSE_ERROR',
+            requestId: data.requestId,
+            status: 500,
+            error: {
+              code: 'PROXY_ERROR',
+              message: 'Extension disconnected',
+            },
+          });
         });
       } else if (
         data.type === 'BYOKY_CONNECT_REQUEST' ||
@@ -52,14 +64,13 @@ export default defineContentScript({
         data.type === 'BYOKY_SESSION_STATUS' ||
         data.type === 'BYOKY_SESSION_USAGE'
       ) {
-        // Validate message structure
-        if (typeof data.id !== 'string') return;
+        // When a MessagePort is available, skip the id check (port IS the reply channel).
+        // Old SDK without MessagePort still needs id for CustomEvent correlation.
+        if (!replyPort && typeof data.id !== 'string') return;
 
         browser.runtime.sendMessage(data).then((response) => {
           if (response) {
-            document.dispatchEvent(
-              new CustomEvent('byoky-message', { detail: response }),
-            );
+            reply(response);
           }
         }).catch(() => {});
       } else if (data.type === 'BYOKY_INTERNAL_FROM_PAGE') {
@@ -78,18 +89,28 @@ export default defineContentScript({
           action: data.action,
           payload: data.payload,
         }).then((response) => {
-          document.dispatchEvent(
-            new CustomEvent('byoky-message', {
-              detail: { requestId: data.requestId, payload: response },
-            }),
-          );
+          reply({ requestId: data.requestId, payload: response });
         }).catch(() => {});
+      } else if (data.type === 'BYOKY_REGISTER_NOTIFY') {
+        // SDK registers a MessagePort for secure push notifications
+        if (replyPort) {
+          notifyPorts.add(replyPort);
+        }
       }
     });
 
     // Persistent port for receiving notifications (revocations) from background
     const notifyPort = browser.runtime.connect({ name: 'byoky-notify' });
     notifyPort.onMessage.addListener((msg) => {
+      // Push to registered SDK notification ports (secure channel)
+      for (const port of notifyPorts) {
+        try {
+          port.postMessage(msg);
+        } catch {
+          notifyPorts.delete(port);
+        }
+      }
+      // Also dispatch CustomEvent for backwards compat with old SDK versions
       document.dispatchEvent(
         new CustomEvent('byoky-message', { detail: msg }),
       );

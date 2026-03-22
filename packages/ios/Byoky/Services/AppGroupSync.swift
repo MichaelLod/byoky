@@ -1,7 +1,5 @@
 import Foundation
 
-/// Syncs wallet state to the App Group shared container
-/// so the Safari extension can read it.
 final class AppGroupSync {
     static let shared = AppGroupSync()
 
@@ -11,6 +9,7 @@ final class AppGroupSync {
     }
 
     private var pollTimer: Timer?
+    private var pollCount = 0
 
     private init() {}
 
@@ -24,13 +23,11 @@ final class AppGroupSync {
 
     // MARK: - Proxy Request Polling
 
-    /// Start polling for proxy requests from the Safari extension.
-    /// The extension writes requests to the shared container,
-    /// and we process them here and write back responses.
     func startPolling(handler: @escaping ([String: Any]) -> Void) {
         stopPolling()
+        pollCount = 0
         pollTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            self?.checkForPendingRequest(handler: handler)
+            self?.checkForPendingRequests(handler: handler)
         }
     }
 
@@ -39,19 +36,28 @@ final class AppGroupSync {
         pollTimer = nil
     }
 
-    private func checkForPendingRequest(handler: @escaping ([String: Any]) -> Void) {
-        guard let request = defaults?.dictionary(forKey: "pendingProxyRequest") else { return }
+    private func checkForPendingRequests(handler: @escaping ([String: Any]) -> Void) {
+        guard let defaults else { return }
+        pollCount += 1
 
-        // Clear the pending request immediately
-        defaults?.removeObject(forKey: "pendingProxyRequest")
+        for (key, _) in defaults.dictionaryRepresentation() where key.hasPrefix("pendingRequest_") {
+            if let request = defaults.dictionary(forKey: key) {
+                defaults.removeObject(forKey: key)
+                handler(request)
+            }
+        }
 
-        handler(request)
+        if pollCount % 100 == 0 {
+            cleanupStaleResponses()
+        }
     }
 
     // MARK: - Write Proxy Response (Main App → Extension)
 
     func writeProxyResponse(requestId: String, data: Data?, statusCode: Int?, error: String?) {
-        var response: [String: Any] = [:]
+        var response: [String: Any] = [
+            "timestamp": Date().timeIntervalSince1970,
+        ]
 
         if let error {
             response["error"] = error
@@ -61,5 +67,19 @@ final class AppGroupSync {
         }
 
         defaults?.set(response, forKey: "proxyResponse_\(requestId)")
+    }
+
+    // MARK: - Cleanup
+
+    private func cleanupStaleResponses() {
+        guard let defaults else { return }
+        let staleThreshold = Date().timeIntervalSince1970 - 60
+        for (key, _) in defaults.dictionaryRepresentation() where key.hasPrefix("proxyResponse_") {
+            if let dict = defaults.dictionary(forKey: key),
+               let ts = dict["timestamp"] as? TimeInterval,
+               ts < staleThreshold {
+                defaults.removeObject(forKey: key)
+            }
+        }
     }
 }

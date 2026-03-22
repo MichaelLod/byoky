@@ -6,7 +6,6 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
 
         let message = request?.userInfo?[SFExtensionMessageKey]
 
-        // Handle messages from the Safari extension's JavaScript
         let response = NSExtensionItem()
 
         guard let messageDict = message as? [String: Any],
@@ -18,21 +17,24 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
 
         switch action {
         case "getStatus":
-            // Check if wallet is unlocked and return status
             let status = checkWalletStatus()
             response.userInfo = [SFExtensionMessageKey: status]
 
         case "getCredentials":
-            // Return available provider IDs (not the actual keys)
             let providers = getAvailableProviders()
             response.userInfo = [SFExtensionMessageKey: ["providers": providers]]
 
         case "proxy":
-            // Handle proxy request — read from App Groups shared container
             guard let providerId = messageDict["providerId"] as? String,
                   let url = messageDict["url"] as? String,
                   let method = messageDict["method"] as? String else {
                 response.userInfo = [SFExtensionMessageKey: ["error": "missing proxy params"]]
+                context.completeRequest(returningItems: [response])
+                return
+            }
+
+            guard url.hasPrefix("https://") else {
+                response.userInfo = [SFExtensionMessageKey: ["error": "URL must use HTTPS"]]
                 context.completeRequest(returningItems: [response])
                 return
             }
@@ -96,8 +98,6 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
         body: Data?,
         completion: @escaping (Result<(Data, Int), Error>) -> Void
     ) {
-        // Write the proxy request to the shared container for the main app to process
-        // The main app's bridge service reads from here and writes the response back
         let defaults = UserDefaults(suiteName: appGroupId)
 
         let requestId = UUID().uuidString
@@ -111,10 +111,8 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
             "timestamp": Date().timeIntervalSince1970,
         ]
 
-        defaults?.set(request, forKey: "pendingProxyRequest")
+        defaults?.set(request, forKey: "pendingRequest_\(requestId)")
 
-        // Poll for response (with timeout)
-        // In production, use Darwin notifications or a more efficient IPC mechanism
         let startTime = Date()
         let timeout: TimeInterval = 30
 

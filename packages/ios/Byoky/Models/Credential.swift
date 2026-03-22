@@ -23,7 +23,7 @@ struct Credential: Identifiable, Codable {
     }
 }
 
-struct Provider: Identifiable {
+struct Provider: Identifiable, Hashable {
     let id: String
     let name: String
     let baseUrl: String
@@ -49,5 +49,30 @@ struct Provider: Identifiable {
 
     static func find(_ id: String) -> Provider? {
         all.first { $0.id == id }
+    }
+
+    static func buildUrl(provider: Provider, path: String) -> URL? {
+        let normalizedPath = path.hasPrefix("/") ? path : "/\(path)"
+        guard !normalizedPath.hasPrefix("//") else { return nil }
+        guard let url = URL(string: provider.baseUrl + normalizedPath),
+              let baseUrl = URL(string: provider.baseUrl),
+              url.host == baseUrl.host,
+              url.scheme == "https" else {
+            return nil
+        }
+        return url
+    }
+
+    static func validateUrl(_ urlString: String, for providerId: String) -> URL? {
+        guard let provider = find(providerId),
+              let url = URL(string: urlString),
+              let providerUrl = URL(string: provider.baseUrl),
+              let urlHost = url.host,
+              let providerHost = providerUrl.host,
+              urlHost == providerHost,
+              url.scheme == "https" else {
+            return nil
+        }
+        return url
     }
 }

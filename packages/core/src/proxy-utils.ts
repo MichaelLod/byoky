@@ -77,8 +77,10 @@ export function buildHeaders(
 /**
  * Parse the model name from a request body (JSON).
  */
+const MAX_BODY_PARSE_SIZE = 10_485_760; // 10 MB
+
 export function parseModel(body?: string): string | undefined {
-  if (!body) return undefined;
+  if (!body || body.length > MAX_BODY_PARSE_SIZE) return undefined;
   try {
     const parsed = JSON.parse(body);
     return parsed.model ?? undefined;

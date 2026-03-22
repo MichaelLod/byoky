@@ -5,6 +5,13 @@ struct UnlockView: View {
     @State private var password = ""
     @State private var error: String?
     @State private var isShaking = false
+    @State private var lockoutRemaining: Int = 0
+
+    private let lockoutTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    private var isLockedOut: Bool {
+        lockoutRemaining > 0
+    }
 
     var body: some View {
         ZStack {
@@ -35,8 +42,16 @@ struct UnlockView: View {
                         )
                         .offset(x: isShaking ? -8 : 0)
                         .onSubmit { unlock() }
+                        .disabled(isLockedOut)
 
-                    if let error {
+                    if isLockedOut {
+                        HStack(spacing: 6) {
+                            Image(systemName: "lock.fill")
+                            Text("Too many attempts. Try again in \(lockoutRemaining)s")
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                    } else if let error {
                         Text(error)
                             .font(.caption)
                             .foregroundStyle(Theme.danger)
@@ -50,10 +65,10 @@ struct UnlockView: View {
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 14)
-                            .background(password.isEmpty ? Theme.accent.opacity(0.3) : Theme.accent)
+                            .background(password.isEmpty || isLockedOut ? Theme.accent.opacity(0.3) : Theme.accent)
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                     }
-                    .disabled(password.isEmpty)
+                    .disabled(password.isEmpty || isLockedOut)
                 }
                 .padding(.horizontal, 24)
 
@@ -63,11 +78,34 @@ struct UnlockView: View {
             .padding(24)
         }
         .preferredColorScheme(.dark)
+        .onReceive(lockoutTimer) { _ in
+            updateLockoutState()
+        }
+        .onAppear {
+            updateLockoutState()
+        }
+    }
+
+    private func updateLockoutState() {
+        if let endTime = wallet.lockoutEndTime {
+            let remaining = max(0, Int(endTime.timeIntervalSinceNow))
+            lockoutRemaining = remaining
+            if remaining == 0 {
+                wallet.lockoutEndTime = nil
+            }
+        } else {
+            lockoutRemaining = 0
+        }
     }
 
     private func unlock() {
+        guard !isLockedOut else { return }
         do {
             try wallet.unlock(password: password)
+        } catch WalletError.lockedOut(let seconds) {
+            lockoutRemaining = seconds
+            error = nil
+            password = ""
         } catch {
             self.error = "Wrong password"
             password = ""

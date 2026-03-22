@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject var wallet: WalletStore
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
@@ -15,5 +16,15 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.3), value: wallet.status == .unlocked)
+        .onChange(of: scenePhase) { _, newPhase in
+            switch newPhase {
+            case .background:
+                wallet.recordBackgroundTime()
+            case .active:
+                wallet.checkAutoLock()
+            default:
+                break
+            }
+        }
     }
 }

@@ -109,13 +109,14 @@ struct OnboardingView: View {
                             .stroke(Color.white.opacity(0.06), lineWidth: 1)
                     )
 
-                if password.count > 0 && password.count < 12 {
+                if !password.isEmpty {
+                    let quality = PasswordQuality.evaluate(password)
                     HStack(spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle")
-                        Text("Minimum 12 characters")
+                        Image(systemName: quality.icon)
+                        Text(quality.message)
                     }
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(quality.color)
                 }
 
                 if let error {
@@ -148,7 +149,7 @@ struct OnboardingView: View {
     }
 
     private var isValid: Bool {
-        password.count >= 12 && password == confirmPassword
+        password == confirmPassword && PasswordQuality.evaluate(password).isAcceptable
     }
 
     private func createWallet() {
@@ -169,5 +170,61 @@ struct OnboardingView: View {
                 .font(.callout)
                 .foregroundStyle(Theme.textSecondary)
         }
+    }
+}
+
+private enum PasswordQuality {
+    case tooShort
+    case weak(String)
+    case fair
+    case strong
+
+    var icon: String {
+        switch self {
+        case .tooShort, .weak: return "exclamationmark.triangle"
+        case .fair: return "checkmark.circle"
+        case .strong: return "checkmark.shield"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .tooShort: return "Minimum 12 characters"
+        case .weak(let reason): return reason
+        case .fair: return "Fair — consider adding more variety"
+        case .strong: return "Strong password"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .tooShort, .weak: return .orange
+        case .fair: return .yellow
+        case .strong: return .green
+        }
+    }
+
+    var isAcceptable: Bool {
+        switch self {
+        case .tooShort, .weak: return false
+        case .fair, .strong: return true
+        }
+    }
+
+    static func evaluate(_ password: String) -> PasswordQuality {
+        if password.count < 12 { return .tooShort }
+
+        let uniqueChars = Set(password)
+        if uniqueChars.count < 4 { return .weak("Too many repeated characters") }
+
+        let hasLower = password.rangeOfCharacter(from: .lowercaseLetters) != nil
+        let hasUpper = password.rangeOfCharacter(from: .uppercaseLetters) != nil
+        let hasDigit = password.rangeOfCharacter(from: .decimalDigits) != nil
+        let hasSymbol = password.rangeOfCharacter(from: CharacterSet.alphanumerics.inverted) != nil
+        let classCount = [hasLower, hasUpper, hasDigit, hasSymbol].filter { $0 }.count
+
+        if classCount < 2 { return .weak("Use a mix of letters, numbers, or symbols") }
+        if classCount >= 3 && password.count >= 16 { return .strong }
+        return .fair
     }
 }

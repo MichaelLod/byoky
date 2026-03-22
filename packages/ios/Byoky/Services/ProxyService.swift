@@ -22,8 +22,6 @@ actor ProxyService {
     }
 }
 
-/// Minimal HTTP proxy server that listens on localhost.
-/// Routes /<providerId>/path to the real API with the user's key injected.
 actor ProxyServer {
     private let wallet: WalletStore
     private var listener: (any AnyObject)?
@@ -35,12 +33,10 @@ actor ProxyServer {
 
     func start() throws -> Int {
         let port = findAvailablePort()
+        guard port > 0 else {
+            throw ProxyError.serverStartFailed
+        }
         self.port = port
-
-        // NWListener-based HTTP server
-        // For now, use a URLSession-based approach via GCDAsyncSocket or NWListener
-        // This is the lightweight local proxy that the Safari extension talks to
-
         return port
     }
 
@@ -48,7 +44,6 @@ actor ProxyServer {
         listener = nil
     }
 
-    /// Proxy a request: inject the API key and forward to the real provider.
     func proxyRequest(
         providerId: String,
         path: String,
@@ -60,7 +55,10 @@ actor ProxyServer {
             throw ProxyError.unknownProvider(providerId)
         }
 
-        // Find credential for this provider
+        guard let url = Provider.buildUrl(provider: provider, path: path) else {
+            throw ProxyError.invalidUrl(path)
+        }
+
         let credential = await MainActor.run {
             wallet.credentials.first { $0.providerId == providerId }
         }
@@ -73,22 +71,17 @@ actor ProxyServer {
             try wallet.decryptKey(for: credential)
         }
 
-        // Build the real URL
-        let url = URL(string: "\(provider.baseUrl)\(path)")!
-
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.httpBody = body
         request.timeoutInterval = 120
 
-        // Forward headers, inject auth
         for (key, value) in headers {
-            if key.lowercased() == "host" { continue }
-            if key.lowercased() == "authorization" { continue }
+            let lower = key.lowercased()
+            if lower == "host" || lower == "authorization" || lower == "x-api-key" { continue }
             request.setValue(value, forHTTPHeaderField: key)
         }
 
-        // Provider-specific auth header
         switch providerId {
         case "anthropic":
             request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
@@ -105,7 +98,6 @@ actor ProxyServer {
         return (data, httpResponse)
     }
 
-    /// Proxy a streaming request, yielding chunks as they arrive.
     func proxyStreamingRequest(
         providerId: String,
         path: String,
@@ -120,6 +112,10 @@ actor ProxyServer {
                         throw ProxyError.unknownProvider(providerId)
                     }
 
+                    guard let url = Provider.buildUrl(provider: provider, path: path) else {
+                        throw ProxyError.invalidUrl(path)
+                    }
+
                     let credential = await MainActor.run {
                         wallet.credentials.first { $0.providerId == providerId }
                     }
@@ -132,14 +128,14 @@ actor ProxyServer {
                         try wallet.decryptKey(for: credential)
                     }
 
-                    let url = URL(string: "\(provider.baseUrl)\(path)")!
                     var request = URLRequest(url: url)
                     request.httpMethod = method
                     request.httpBody = body
                     request.timeoutInterval = 120
 
                     for (key, value) in headers {
-                        if key.lowercased() == "host" || key.lowercased() == "authorization" { continue }
+                        let lower = key.lowercased()
+                        if lower == "host" || lower == "authorization" || lower == "x-api-key" { continue }
                         request.setValue(value, forHTTPHeaderField: key)
                     }
 
@@ -165,8 +161,31 @@ actor ProxyServer {
     }
 
     private func findAvailablePort() -> Int {
-        // Find an available port in the ephemeral range
-        Int.random(in: 49152...65535)
+        let fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
+        guard fd >= 0 else { return 0 }
+        defer { close(fd) }
+
+        var addr = sockaddr_in()
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = 0
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+
+        let bindResult = withUnsafeMutablePointer(to: &addr) { addrPtr in
+            addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
+                Darwin.bind(fd, sockPtr, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard bindResult == 0 else { return 0 }
+
+        var boundAddr = sockaddr_in()
+        var addrLen = socklen_t(MemoryLayout<sockaddr_in>.size)
+        _ = withUnsafeMutablePointer(to: &boundAddr) { addrPtr in
+            addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockPtr in
+                getsockname(fd, sockPtr, &addrLen)
+            }
+        }
+
+        return Int(UInt16(bigEndian: boundAddr.sin_port))
     }
 }
 
@@ -175,6 +194,7 @@ enum ProxyError: LocalizedError {
     case noCredential(String)
     case invalidResponse
     case serverStartFailed
+    case invalidUrl(String)
 
     var errorDescription: String? {
         switch self {
@@ -182,6 +202,7 @@ enum ProxyError: LocalizedError {
         case .noCredential(let id): return "No credential for provider: \(id)"
         case .invalidResponse: return "Invalid response from API"
         case .serverStartFailed: return "Failed to start proxy server"
+        case .invalidUrl(let url): return "Invalid or disallowed URL: \(url)"
         }
     }
 }
