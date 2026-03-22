@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import type { ByokySession } from '@byoky/sdk';
 
 interface Message {
@@ -34,7 +34,6 @@ export function Chat({ session }: Props) {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<string>('');
-  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const availableProviders = Object.entries(session.providers)
     .filter(([, v]) => v.available)
@@ -46,9 +45,6 @@ export function Chat({ session }: Props) {
     }
   }, [availableProviders, selectedProvider]);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
 
   async function handleSend() {
     if (!input.trim() || loading || !selectedProvider) return;
@@ -172,7 +168,6 @@ export function Chat({ session }: Props) {
             </div>
           </div>
         )}
-        <div ref={messagesEndRef} />
       </div>
 
       <form className="chat-input" onSubmit={(e) => { e.preventDefault(); handleSend(); }}>
