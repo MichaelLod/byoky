@@ -240,7 +240,7 @@
 
 .demo-app .connect-features {
   margin-top: 40px;
-  display: flex;
+  display: inline-flex;
   flex-direction: column;
   gap: 14px;
   text-align: left;
