@@ -122,8 +122,8 @@ export class Byoky {
       ws.onopen = () => {
         // Authenticate as recipient (the web app receives proxied responses)
         ws.send(JSON.stringify({
-          type: 'gift:auth',
-          giftId: roomId,
+          type: 'relay:auth',
+          roomId,
           authToken,
           role: 'recipient',
         }));
@@ -138,7 +138,7 @@ export class Byoky {
         }
 
         switch (msg.type) {
-          case 'gift:auth:result':
+          case 'relay:auth:result':
             if (msg.success) {
               // Authenticated — show the pairing code
               onPairingReady(pairingCode);
@@ -161,7 +161,7 @@ export class Byoky {
             break;
           }
 
-          case 'gift:peer:status':
+          case 'relay:peer:status':
             // Phone came online but hasn't sent pair:hello yet — wait
             break;
         }
@@ -203,7 +203,7 @@ export class Byoky {
     ws.addEventListener('message', (event) => {
       try {
         const msg = JSON.parse(event.data);
-        if (msg.type === 'gift:peer:status' && msg.online === false) {
+        if (msg.type === 'relay:peer:status' && msg.online === false) {
           for (const cb of disconnectCallbacks) cb();
           disconnectCallbacks.clear();
           clearInterval(pingInterval);
