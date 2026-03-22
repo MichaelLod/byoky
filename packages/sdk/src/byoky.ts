@@ -178,13 +178,22 @@ export class Byoky {
             break;
 
           case 'relay:pair:hello': {
-            // Phone wallet connected and sent its providers
             clearTimeout(timeout);
-            const providers = msg.providers as Record<string, { available: boolean; authMethod: AuthMethod }>;
+            const raw = msg.providers;
+            if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+              ws.close();
+              reject(new ByokyError(ByokyErrorCode.UNKNOWN, 'Invalid provider data from relay'));
+              break;
+            }
+            const providers: Record<string, { available: boolean; authMethod: AuthMethod }> = {};
+            for (const [key, val] of Object.entries(raw as Record<string, unknown>)) {
+              if (!val || typeof val !== 'object') continue;
+              const v = val as Record<string, unknown>;
+              if (typeof v.available !== 'boolean' || typeof v.authMethod !== 'string') continue;
+              providers[key] = { available: v.available, authMethod: v.authMethod as AuthMethod };
+            }
 
-            // Acknowledge the pairing
             ws.send(JSON.stringify({ type: 'relay:pair:ack' }));
-
             resolve(this.buildRelaySession(ws, roomId, providers));
             break;
           }
