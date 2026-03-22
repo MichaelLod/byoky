@@ -34,7 +34,17 @@ export class Byoky {
 
   constructor(options: ByokyOptions = {}) {
     this.timeout = options.timeout ?? 60_000;
-    this.relayUrl = options.relayUrl ?? 'wss://relay.byoky.com';
+    const relayUrl = options.relayUrl ?? 'wss://relay.byoky.com';
+    try {
+      const parsed = new URL(relayUrl);
+      if (parsed.protocol !== 'wss:') {
+        throw new Error('Relay URL must use wss:// protocol');
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message.includes('wss://')) throw e;
+      throw new Error(`Invalid relay URL: ${relayUrl}`);
+    }
+    this.relayUrl = relayUrl;
   }
 
   /**
@@ -79,6 +89,22 @@ export class Byoky {
       window.open(storeUrl, '_blank');
     }
     throw ByokyError.walletNotInstalled();
+  }
+
+  /**
+   * Silently reconnect to an existing session for the current origin.
+   * Returns null if no active session exists in the wallet.
+   */
+  async tryReconnect(): Promise<ByokySession | null> {
+    if (typeof window === 'undefined') return null;
+    if (!isExtensionInstalled()) return null;
+
+    try {
+      const response = await this.sendConnectRequest({ reconnectOnly: true });
+      return this.buildSession(response);
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -147,7 +173,7 @@ export class Byoky {
             } else {
               clearTimeout(timeout);
               ws.close();
-              reject(new ByokyError(ByokyErrorCode.UNKNOWN, `Relay auth failed: ${msg.error}`));
+              reject(new ByokyError(ByokyErrorCode.UNKNOWN, 'Relay authentication failed'));
             }
             break;
 
