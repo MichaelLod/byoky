@@ -37,6 +37,10 @@ export function DemoApp() {
     byoky.reconnect(saved).then((s) => {
       if (s) {
         s.onDisconnect(() => { clearSavedSession(); setSession(null); });
+        s.onProvidersUpdated((providers) => {
+          saveSession({ sessionKey: s.sessionKey, proxyUrl: s.proxyUrl, providers });
+          setSession(prev => prev ? { ...prev, providers } : null);
+        });
         setSession(s);
       } else {
         clearSavedSession();
@@ -47,6 +51,10 @@ export function DemoApp() {
 
   function onConnected(s: ByokySession) {
     s.onDisconnect(() => { clearSavedSession(); setSession(null); setPairingCode(null); });
+    s.onProvidersUpdated((providers) => {
+      saveSession({ sessionKey: s.sessionKey, proxyUrl: s.proxyUrl, providers });
+      setSession(prev => prev ? { ...prev, providers } : null);
+    });
     saveSession({ sessionKey: s.sessionKey, proxyUrl: s.proxyUrl, providers: s.providers });
     setSession(s);
     setPairingCode(null);
