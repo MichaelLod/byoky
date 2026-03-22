@@ -43,6 +43,8 @@ export class Byoky {
   async connect(request: ConnectRequest & {
     /** Called with a pairing code when no extension is detected. Show as QR or text. */
     onPairingReady?: (pairingCode: string) => void;
+    /** Skip extension detection and go directly to relay pairing. */
+    useRelay?: boolean;
   } = {}): Promise<ByokySession> {
     if (typeof window === 'undefined') {
       throw new ByokyError(
@@ -51,15 +53,22 @@ export class Byoky {
       );
     }
 
+    const { onPairingReady, useRelay, ...connectRequest } = request;
+
+    // Go directly to relay if explicitly requested
+    if (useRelay && onPairingReady) {
+      return this.connectViaRelay(connectRequest, onPairingReady);
+    }
+
     // Try extension first
     if (isExtensionInstalled()) {
-      const response = await this.sendConnectRequest(request);
+      const response = await this.sendConnectRequest(connectRequest);
       return this.buildSession(response);
     }
 
     // Fall back to relay pairing if callback provided
-    if (request.onPairingReady) {
-      return this.connectViaRelay(request, request.onPairingReady);
+    if (onPairingReady) {
+      return this.connectViaRelay(connectRequest, onPairingReady);
     }
 
     // No extension, no relay callback — throw
