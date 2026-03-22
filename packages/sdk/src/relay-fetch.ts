@@ -70,9 +70,10 @@ export function createRelayFetch(
             break;
 
           case 'relay:response:error': {
-            const err = data.error as { code: string; message: string } | undefined;
+            const err = data.error as { code: string; message: string } | string | undefined;
+            const message = typeof err === 'string' ? err : err?.message ?? 'Relay proxy error';
             const errResponse = new Response(
-              JSON.stringify({ error: err?.message ?? 'Relay proxy error' }),
+              JSON.stringify({ error: { message, code: typeof err === 'object' ? err?.code : 'RELAY_ERROR' } }),
               { status: 500, headers: { 'content-type': 'application/json' } },
             );
             if (!resolved) {
