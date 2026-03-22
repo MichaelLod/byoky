@@ -656,6 +656,50 @@ function OpenClawIntegration() {
             </div>
           </div>
         </FadeIn>
+        <FadeIn delay={0.15}>
+          <div className="openclaw-card openclaw-card-remote">
+            <div className="openclaw-badge">Cloud</div>
+            <div className="openclaw-content">
+              <div className="openclaw-header">
+                <div className="openclaw-logo openclaw-logo-cloud">
+                  <CloudIcon />
+                </div>
+                <div>
+                  <h3>Remote OpenClaw</h3>
+                  <p className="openclaw-tagline">
+                    Run OpenClaw in the cloud. Keys stay on your device.
+                  </p>
+                </div>
+              </div>
+              <p className="openclaw-desc">
+                Deploy OpenClaw on Railway, Fly.io, or any cloud provider and
+                connect it to your Byoky wallet via the relay. Your server never
+                sees your API keys — no environment variables, no secrets
+                management, no leaked <code>.env</code> files.
+              </p>
+              <div className="openclaw-flow">
+                <div className="openclaw-flow-step">
+                  <span className="openclaw-flow-label">OpenClaw</span>
+                  <span className="openclaw-flow-sub">Railway</span>
+                </div>
+                <span className="openclaw-flow-arrow">&harr;</span>
+                <div className="openclaw-flow-step">
+                  <span className="openclaw-flow-label">Relay</span>
+                  <span className="openclaw-flow-sub">WebSocket</span>
+                </div>
+                <span className="openclaw-flow-arrow">&harr;</span>
+                <div className="openclaw-flow-step openclaw-flow-highlight">
+                  <span className="openclaw-flow-label">Your Wallet</span>
+                  <span className="openclaw-flow-sub">Keys stay here</span>
+                </div>
+                <span className="openclaw-flow-arrow">&rarr;</span>
+                <div className="openclaw-flow-step">
+                  <span className="openclaw-flow-label">LLM API</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </FadeIn>
       </div>
     </section>
   );
@@ -806,6 +850,14 @@ function ArchiveIcon() {
       <polyline points="21 8 21 21 3 21 3 8" />
       <rect x="1" y="3" width="22" height="5" />
       <line x1="10" y1="12" x2="14" y2="12" />
+    </svg>
+  );
+}
+
+function CloudIcon() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />
     </svg>
   );
 }
