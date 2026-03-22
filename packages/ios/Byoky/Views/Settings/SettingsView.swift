@@ -57,9 +57,13 @@ struct SettingsView: View {
             Button {
                 wallet.lock()
             } label: {
-                Label("Lock Wallet", systemImage: "lock")
-                    .foregroundStyle(.primary)
+                HStack {
+                    Label("Lock Wallet", systemImage: "lock")
+                    Spacer()
+                }
+                .contentShape(Rectangle())
             }
+            .foregroundStyle(.primary)
 
             LabeledContent("Encryption", value: "AES-256-GCM")
             LabeledContent("Key Derivation", value: "PBKDF2 (600K)")
