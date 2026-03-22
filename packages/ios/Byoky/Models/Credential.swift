@@ -21,6 +21,37 @@ struct Credential: Identifiable, Codable {
             createdAt: Date()
         )
     }
+
+    /// Apply auth headers and body modifications for this credential's auth method.
+    static func applyAuth(to request: inout URLRequest, providerId: String, authMethod: AuthMethod, apiKey: String) {
+        if providerId == "anthropic" && authMethod == .oauth {
+            // Setup tokens require CLI-like headers and Bearer auth
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            request.setValue("claude-cli/2.1.76", forHTTPHeaderField: "User-Agent")
+            request.setValue("cli", forHTTPHeaderField: "x-app")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.setValue(
+                "claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14",
+                forHTTPHeaderField: "anthropic-beta"
+            )
+            request.setValue("true", forHTTPHeaderField: "anthropic-dangerous-direct-browser-access")
+            // Inject Claude Code system prompt
+            if let body = request.httpBody,
+               var parsed = try? JSONSerialization.jsonObject(with: body) as? [String: Any] {
+                let prefix = "You are Claude Code, Anthropic's official CLI for Claude."
+                if parsed["system"] == nil {
+                    parsed["system"] = prefix
+                } else if let existing = parsed["system"] as? String {
+                    parsed["system"] = "\(prefix)\n\n\(existing)"
+                }
+                request.httpBody = try? JSONSerialization.data(withJSONObject: parsed)
+            }
+        } else if providerId == "anthropic" {
+            request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        } else {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+    }
 }
 
 struct Provider: Identifiable, Hashable {

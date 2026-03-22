@@ -82,12 +82,7 @@ actor ProxyServer {
             request.setValue(value, forHTTPHeaderField: key)
         }
 
-        switch providerId {
-        case "anthropic":
-            request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
-        default:
-            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        }
+        Credential.applyAuth(to: &request, providerId: providerId, authMethod: credential.authMethod, apiKey: apiKey)
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
@@ -139,12 +134,7 @@ actor ProxyServer {
                         request.setValue(value, forHTTPHeaderField: key)
                     }
 
-                    switch providerId {
-                    case "anthropic":
-                        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
-                    default:
-                        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-                    }
+                    Credential.applyAuth(to: &request, providerId: providerId, authMethod: credential.authMethod, apiKey: apiKey)
 
                     let (bytes, _) = try await URLSession.shared.bytes(for: request)
 
