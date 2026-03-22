@@ -48,7 +48,7 @@ struct PairView: View {
                     Text("Pair with Web App")
                         .font(.headline)
 
-                    Text("Scan the QR code shown on the web app, or paste the pairing code below. Your phone becomes the wallet — keys never leave this device.")
+                    Text("Scan the QR code shown on the web app, or paste the pairing code below. Your phone becomes the wallet — keys never leave this device. Keep the app open while using the web app.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -119,6 +119,22 @@ struct PairView: View {
             }
 
             Section {
+                HStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.title3)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Keep this app open")
+                            .font(.subheadline.weight(.semibold))
+                        Text("API calls are proxied through your phone. Locking your phone or switching apps will pause the connection.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 8)
+            }
+
+            Section {
                 LabeledContent("Requests proxied", value: "\(pairService.requestCount)")
                 LabeledContent("Credentials available", value: "\(wallet.credentials.count)")
             }
@@ -132,8 +148,6 @@ struct PairView: View {
                         Spacer()
                     }
                 }
-            } footer: {
-                Text("Keep this app open while using the web app. If you switch away, the connection will pause.")
             }
         }
     }
