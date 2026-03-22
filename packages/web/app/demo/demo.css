@@ -202,6 +202,8 @@
 .demo-app .connect-card {
   text-align: center;
   max-width: 460px;
+  width: 100%;
+  margin: 0 auto;
   position: relative;
 }
 
