@@ -2,6 +2,12 @@ import { defineConfig } from 'wxt';
 
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
+  transformManifest(manifest) {
+    // Safari iOS requires persistent: false for MV2 background scripts
+    if (manifest.background && 'scripts' in manifest.background) {
+      (manifest.background as Record<string, unknown>).persistent = false;
+    }
+  },
   manifest: {
     name: 'Byoky',
     description: 'Bring Your Own Key — Secure wallet for your AI credentials',
