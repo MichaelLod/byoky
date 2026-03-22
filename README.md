@@ -18,7 +18,7 @@
   Your keys never leave the extension.
   <br />
   <br />
-  <a href="https://byoky.com">Website</a> · <a href="https://demo.byoky.com">Demo</a> · <a href="#quick-start">Quick Start</a> · <a href="#for-developers">SDK Docs</a> · <a href="https://github.com/MichaelLod/byoky/issues">Issues</a>
+  <a href="https://byoky.com">Website</a> · <a href="https://demo.byoky.com">Demo</a> · <a href="#quick-start">Quick Start</a> · <a href="#for-developers">SDK Docs</a> · <a href="https://discord.gg/gRs8S9fxcT">Discord</a> · <a href="https://github.com/MichaelLod/byoky/issues">Issues</a>
   <br />
   <br />
   <a href="https://github.com/MichaelLod/byoky/blob/main/LICENSE"><img src="https://img.shields.io/github/license/MichaelLod/byoky?style=flat&color=0ea5e9" alt="License" /></a>
@@ -26,6 +26,7 @@
   <a href="https://github.com/MichaelLod/byoky/issues"><img src="https://img.shields.io/github/issues/MichaelLod/byoky?style=flat&color=0ea5e9" alt="Issues" /></a>
   <a href="https://github.com/MichaelLod/byoky/pulls"><img src="https://img.shields.io/badge/PRs-welcome-0ea5e9?style=flat" alt="PRs Welcome" /></a>
   <a href="https://www.npmjs.com/package/@byoky/sdk"><img src="https://img.shields.io/npm/v/@byoky/sdk?style=flat&color=0ea5e9&label=npm" alt="npm" /></a>
+  <a href="https://discord.gg/gRs8S9fxcT"><img src="https://img.shields.io/discord/1485230270192943184?style=flat&color=5865F2&label=discord" alt="Discord" /></a>
 </p>
 
 ---
