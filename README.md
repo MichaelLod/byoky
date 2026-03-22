@@ -55,9 +55,11 @@
 
 ### For Users
 
+**Firefox:** [Install from Mozilla Add-ons](https://addons.mozilla.org/en-US/firefox/addon/byoky/)
+
+**Chrome:** Coming soon — for now, build from source:
+
 ```bash
-# Coming soon to browser extension stores
-# For now, build from source:
 git clone https://github.com/MichaelLod/byoky.git
 cd byoky && pnpm install && pnpm dev
 # Load unpacked extension from packages/extension/.output/chrome-mv3
