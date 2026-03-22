@@ -376,7 +376,7 @@ describe('security invariants', () => {
   });
 
   describe('gift relay server', () => {
-    const relay = readFile('packages/gift-relay/src/server.ts');
+    const relay = readFile('packages/relay/src/server.ts');
 
     it('uses constant-time comparison without timing leak on length', () => {
       expect(relay).toContain('Buffer.alloc(maxLen)');

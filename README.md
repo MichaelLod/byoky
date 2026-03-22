@@ -183,8 +183,8 @@ Sender's Extension ←WebSocket→ Relay Server ←WebSocket→ Recipient's Exte
 
 **Self-host the relay:**
 ```bash
-npm install -g @byoky/gift-relay
-byoky-gift-relay  # default port 8787
+npm install -g @byoky/relay
+byoky-relay  # default port 8787
 ```
 
 > **Privacy guarantee:** The recipient never receives your API key. Every request is relayed through the sender's running extension, which enforces the token budget and can revoke access at any time.
@@ -269,7 +269,7 @@ byoky/
 │   ├── sdk/           # @byoky/sdk (+ @byoky/sdk/server for backend relay)
 │   ├── extension/     # Browser extension (Chrome, Firefox, Safari) — WXT
 │   ├── bridge/        # @byoky/bridge — HTTP proxy + native messaging for CLI/desktop apps
-│   ├── gift-relay/   # @byoky/gift-relay — WebSocket relay for token gifts
+│   ├── relay/        # @byoky/relay — WebSocket relay server
 │   ├── openclaw-plugin/ # OpenClaw provider plugin
 │   └── web/           # Landing page (byoky.com) + demo app (demo.byoky.com)
 ```

@@ -76,22 +76,6 @@ importers:
         specifier: ^0.19.0
         version: 0.19.29(@types/node@25.5.0)(rollup@4.59.0)(tsx@4.21.0)(yaml@2.8.2)
 
-  packages/gift-relay:
-    dependencies:
-      ws:
-        specifier: ^8.16.0
-        version: 8.19.0
-    devDependencies:
-      '@types/ws':
-        specifier: ^8.5.10
-        version: 8.18.1
-      tsx:
-        specifier: ^4.7.0
-        version: 4.21.0
-      typescript:
-        specifier: ^5.4.0
-        version: 5.9.3
-
   packages/openclaw-plugin:
     devDependencies:
       '@types/node':
@@ -105,6 +89,22 @@ importers:
         version: 8.5.1(jiti@2.6.1)(postcss@8.5.8)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.2)
       typescript:
         specifier: ^5.5.0
+        version: 5.9.3
+
+  packages/relay:
+    dependencies:
+      ws:
+        specifier: ^8.16.0
+        version: 8.19.0
+    devDependencies:
+      '@types/ws':
+        specifier: ^8.5.10
+        version: 8.18.1
+      tsx:
+        specifier: ^4.7.0
+        version: 4.21.0
+      typescript:
+        specifier: ^5.4.0
         version: 5.9.3
 
   packages/sdk:
