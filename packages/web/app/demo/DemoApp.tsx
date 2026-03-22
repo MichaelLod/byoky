@@ -10,16 +10,16 @@ const byoky = new Byoky({ timeout: 120_000 });
 const SESSION_KEY = 'byoky-demo-session';
 
 function saveSession(response: ConnectResponse) {
-  try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(response)); } catch {}
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify(response)); } catch {}
 }
 
 function clearSavedSession() {
-  try { sessionStorage.removeItem(SESSION_KEY); } catch {}
+  try { localStorage.removeItem(SESSION_KEY); } catch {}
 }
 
 function loadSavedSession(): ConnectResponse | null {
   try {
-    const raw = sessionStorage.getItem(SESSION_KEY);
+    const raw = localStorage.getItem(SESSION_KEY);
     return raw ? JSON.parse(raw) : null;
   } catch { return null; }
 }
