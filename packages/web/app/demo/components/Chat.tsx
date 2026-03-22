@@ -75,12 +75,16 @@ export function Chat({ session }: Props) {
         });
         const text = await response.text();
         if (!response.ok) {
-          let errMsg = `API error: ${response.status}`;
+          let errMsg = `API error ${response.status}`;
           try {
             const parsed = JSON.parse(text);
             const err = parsed.error;
-            errMsg = (typeof err === 'string' ? err : err?.message) || errMsg;
-          } catch {}
+            const msg = typeof err === 'string' ? err : err?.message;
+            const errType = typeof err === 'object' ? err?.type : undefined;
+            errMsg = [msg, errType ? `(${errType})` : '', `[${response.status}]`].filter(Boolean).join(' ');
+          } catch {
+            if (text) errMsg += `: ${text.slice(0, 200)}`;
+          }
           throw new Error(errMsg);
         }
         const data = JSON.parse(text);
@@ -124,7 +128,8 @@ export function Chat({ session }: Props) {
 
       setMessages((prev) => [...prev, { role: 'assistant', content: assistantContent }]);
     } catch (e) {
-      setMessages((prev) => [...prev, { role: 'assistant', content: `Error: ${(e as Error).message}` }]);
+      const msg = e instanceof Error ? e.message : String(e);
+      setMessages((prev) => [...prev, { role: 'assistant', content: `Error: ${msg || 'Unknown error'}` }]);
     } finally {
       setLoading(false);
     }
