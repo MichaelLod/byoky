@@ -11,6 +11,15 @@ export default defineContentScript({
       if (typeof data?.type !== 'string' || !data.type.startsWith('BYOKY_')) return;
 
       if (data.type === 'BYOKY_PROXY_REQUEST') {
+        // Validate message structure before forwarding to background
+        if (
+          typeof data.requestId !== 'string' ||
+          typeof data.sessionKey !== 'string' ||
+          typeof data.providerId !== 'string' ||
+          typeof data.url !== 'string' ||
+          typeof data.method !== 'string'
+        ) return;
+
         // Use a port for streaming proxy requests
         const port = browser.runtime.connect({ name: 'byoky-proxy' });
 
@@ -43,6 +52,9 @@ export default defineContentScript({
         data.type === 'BYOKY_SESSION_STATUS' ||
         data.type === 'BYOKY_SESSION_USAGE'
       ) {
+        // Validate message structure
+        if (typeof data.id !== 'string') return;
+
         browser.runtime.sendMessage(data).then((response) => {
           if (response) {
             document.dispatchEvent(
@@ -53,7 +65,7 @@ export default defineContentScript({
       } else if (data.type === 'BYOKY_INTERNAL_FROM_PAGE') {
         // Only allow from localhost/127.0.0.1, checked by exact hostname match
         const hostname = window.location.hostname;
-        if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+        if (hostname !== 'localhost' && hostname !== '127.0.0.1' && hostname !== '[::1]') {
           return;
         }
         // Only allow safe actions — never expose admin/crypto actions to web pages

@@ -190,6 +190,15 @@ export function ConnectedApps() {
                   Remove
                 </button>
               </div>
+              {site.allowedProviders && site.allowedProviders.length > 0 && (
+                <div className="connected-providers" style={{ marginTop: '8px' }}>
+                  {site.allowedProviders.map((id: string) => (
+                    <span key={id} className="badge badge-provider">
+                      {PROVIDERS[id]?.name ?? id}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </div>

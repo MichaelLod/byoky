@@ -228,11 +228,15 @@ async function handleStreamingFetch(
   const prefix = mode === 'bridge' ? 'proxy_response' : 'proxy_http_response';
   const errorType = mode === 'bridge' ? 'proxy_error' : 'proxy_http_error';
 
+  const controller = new AbortController();
+  const fetchTimeout = setTimeout(() => controller.abort(), 120_000);
+
   try {
     const res = await fetch(url, {
       method,
       headers,
       body: body || undefined,
+      signal: controller.signal,
     });
 
     const resHeaders: Record<string, string> = {};
@@ -252,7 +256,9 @@ async function handleStreamingFetch(
 
     send({ type: `${prefix}_done`, requestId });
   } catch (e) {
-    send({ type: errorType, requestId, error: (e as Error).message });
+    send({ type: errorType, requestId, error: 'Fetch request failed' });
+  } finally {
+    clearTimeout(fetchTimeout);
   }
 }
 
@@ -273,7 +279,7 @@ function handleStartProxy(req: StartProxyRequest): void {
     writeMessage({
       type: 'proxy_error',
       requestId: 'start-proxy',
-      error: (e as Error).message,
+      error: 'Failed to start proxy server',
     });
   }
 }

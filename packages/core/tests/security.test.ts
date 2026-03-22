@@ -24,6 +24,20 @@ describe('security invariants', () => {
       expect(content).toContain("hostname !== 'localhost'");
     });
 
+    it('blocks IPv6 loopback bypass', () => {
+      expect(content).toContain("[::1]");
+    });
+
+    it('validates proxy request message structure before forwarding', () => {
+      expect(content).toContain("typeof data.requestId !== 'string'");
+      expect(content).toContain("typeof data.sessionKey !== 'string'");
+      expect(content).toContain("typeof data.url !== 'string'");
+    });
+
+    it('validates connect message structure before forwarding', () => {
+      expect(content).toContain("typeof data.id !== 'string'");
+    });
+
     it('has an action allowlist for BYOKY_INTERNAL_FROM_PAGE', () => {
       expect(content).toContain('ALLOWED_PAGE_ACTIONS');
     });
@@ -92,6 +106,69 @@ describe('security invariants', () => {
     it('has brute-force protection on unlock', () => {
       expect(bg).toContain('unlockFailures');
       expect(bg).toContain('unlockLockedUntil');
+      // Verify actual lockout behavior: 5 failures triggers lock
+      expect(bg).toContain('unlockFailures >= 5');
+      // Verify lockout uses exponential backoff
+      expect(bg).toContain('Math.pow(2, exponent)');
+    });
+
+    it('scopes trusted site auto-approval to allowedProviders', () => {
+      expect(bg).toContain('scopeProvidersForTrust');
+      expect(bg).toContain('trustedSite.allowedProviders');
+      // Must NOT auto-approve without allowedProviders
+      expect(bg).not.toContain("trustedSites.some((s) => s.origin === origin)");
+    });
+
+    it('stores allowedProviders when trusting a site', () => {
+      expect(bg).toContain('addTrustedSite(pending.approval.appOrigin, approvedProviderIds)');
+    });
+
+    it('clears sessions on wallet lock', () => {
+      const lockSection = bg.slice(bg.indexOf("case 'lock'"), bg.indexOf("case 'isUnlocked'"));
+      expect(lockSection).toContain('sessions.clear()');
+      expect(lockSection).toContain('authorizedBridgeSessionKey = null');
+    });
+
+    it('has rate limiting on connect requests with cleanup', () => {
+      expect(bg).toContain('isConnectRateLimited');
+      expect(bg).toContain('CONNECT_RATE_LIMIT');
+      // Must clean up stale entries to prevent memory leak
+      expect(bg).toContain('connectRateLimit.delete(key)');
+    });
+
+    it('has rate limiting on OAuth flow', () => {
+      expect(bg).toContain('isOAuthRateLimited');
+      expect(bg).toContain('OAUTH_RATE_LIMIT');
+    });
+
+    it('wraps credential decryption in try-catch', () => {
+      const fn = bg.slice(bg.indexOf('async function decryptCredentialKey'));
+      expect(fn).toContain('try {');
+      expect(fn).toContain('Failed to decrypt credential');
+    });
+
+    it('strips sensitive headers from relay responses on recipient side', () => {
+      const relayHandler = bg.slice(bg.indexOf('function proxyViaGiftRelay'));
+      expect(relayHandler).toContain("delete relayHeaders[");
+      expect(relayHandler).toContain("'server'");
+    });
+
+    it('strips sensitive headers from relay responses on sender side', () => {
+      const handler = bg.slice(bg.indexOf('function handleGiftProxyRequest'));
+      expect(handler).toContain("delete respHeaders[");
+    });
+
+    it('clears authorizedBridgeSessionKey on session revocation', () => {
+      const revokeSection = bg.slice(bg.indexOf("case 'revokeSession'"), bg.indexOf("case 'checkBridge'"));
+      expect(revokeSection).toContain('authorizedBridgeSessionKey');
+    });
+
+    it('clears authorizedBridgeSessionKey on disconnect', () => {
+      const disconnectSection = bg.slice(
+        bg.indexOf('BYOKY_DISCONNECT'),
+        bg.indexOf('BYOKY_SESSION_STATUS'),
+      );
+      expect(disconnectSection).toContain('authorizedBridgeSessionKey');
     });
 
     it('pins bridge proxy session key', () => {
@@ -109,9 +186,52 @@ describe('security invariants', () => {
       expect(bridgeHandler).toContain('checkAllowance');
     });
 
+    it('validates bridge proxy providerId against session providers', () => {
+      const bridgeHandler = bg.slice(bg.indexOf('handleBridgeProxyRequest'));
+      expect(bridgeHandler).toContain('Provider not available in this session');
+      expect(bridgeHandler).toContain('p.providerId === providerId');
+    });
+
     it('strips query params from request log URLs', () => {
       expect(bg).toContain('parsed.search');
       expect(bg).toContain('sanitizedUrl');
+      // Verify the sanitized URL replaces the original
+      const logSection = bg.slice(bg.indexOf('async function logRequest'));
+      expect(logSection).toContain("parsed.search = ''");
+      expect(logSection).toContain('url: sanitizedUrl');
+    });
+
+    it('validates session expiry before proxying', () => {
+      // Main proxy path checks session.expiresAt
+      expect(bg).toContain('session.expiresAt < Date.now()');
+      // And deletes expired sessions
+      expect(bg).toContain('sessions.delete(msg.sessionKey)');
+    });
+
+    it('uses deny-by-default for session status origin', () => {
+      const statusSection = bg.slice(bg.indexOf('BYOKY_SESSION_STATUS'), bg.indexOf('BYOKY_SESSION_USAGE'));
+      expect(statusSection).toContain("statusOrigin === 'unknown'");
+      // Must deny when origin is unknown, not allow
+      expect(statusSection).not.toContain("statusOrigin !== 'unknown' && statusOrigin !== session.appOrigin");
+    });
+
+    it('uses deny-by-default for session usage origin', () => {
+      // Find the usage handler (starts with the type check)
+      const usageStart = bg.indexOf("message.type === 'BYOKY_SESSION_USAGE'");
+      const usageSection = bg.slice(usageStart, usageStart + 500);
+      expect(usageSection).toContain("usageOrigin === 'unknown'");
+      // Must deny when origin is unknown
+      expect(usageSection).not.toContain("usageOrigin !== 'unknown' && usageOrigin !== session.appOrigin");
+    });
+
+    it('validates OAuth token response before encrypting', () => {
+      expect(bg).toContain('OAuth provider returned no access token');
+      expect(bg).toContain("typeof tokens.access_token !== 'string'");
+    });
+
+    it('does not leak raw OAuth error responses', () => {
+      // Should not include raw error body from provider
+      expect(bg).not.toContain('Token exchange failed: ${err}');
     });
   });
 
@@ -124,6 +244,12 @@ describe('security invariants', () => {
 
     it('buildHeaders normalizes keys to lowercase', () => {
       expect(proxyUtils).toContain('key.toLowerCase()');
+    });
+
+    it('sanitizes token counts to non-negative integers', () => {
+      expect(proxyUtils).toContain('sanitizeTokenCounts');
+      expect(proxyUtils).toContain('Math.max(0');
+      expect(proxyUtils).toContain('Number.isFinite');
     });
 
     it('buildHeaders strips all auth header variants', () => {
@@ -158,6 +284,15 @@ describe('security invariants', () => {
     });
   });
 
+  describe('sdk', () => {
+    const sdk = readFile('packages/sdk/src/byoky.ts');
+
+    it('uses window.location.origin instead of wildcard for postMessage', () => {
+      expect(sdk).not.toContain("'*'");
+      expect(sdk).toContain('window.location.origin');
+    });
+  });
+
   describe('relay', () => {
     const relayClient = readFile('packages/sdk/src/relay-client.ts');
 
@@ -170,6 +305,10 @@ describe('security invariants', () => {
     it('sends a separate relayId instead of real sessionKey', () => {
       expect(relayClient).toContain('relayId');
       expect(relayClient).toContain('sessionId: relayId');
+    });
+
+    it('validates IPv6 loopback for WebSocket URLs', () => {
+      expect(relayClient).toContain("[::1]");
     });
   });
 
@@ -189,12 +328,32 @@ describe('security invariants', () => {
       expect(proxy).toContain('MAX_BODY_SIZE');
     });
 
+    it('limits URI length', () => {
+      expect(proxy).toContain('MAX_URI_LENGTH');
+      expect(proxy).toContain('URI too long');
+    });
+
     it('limits concurrent pending requests', () => {
       expect(proxy).toContain('MAX_PENDING_REQUESTS');
     });
 
     it('uses crypto.randomUUID for request IDs', () => {
       expect(proxy).toContain('crypto.randomUUID()');
+    });
+
+    it('pre-validates Content-Length header before reading body', () => {
+      expect(proxy).toContain("content-length");
+      expect(proxy).toContain('Payload too large');
+    });
+
+    it('strips set-cookie headers from proxy responses', () => {
+      expect(proxy).toContain("delete headers['set-cookie']");
+    });
+
+    it('strips auth and cookie headers from forwarded requests', () => {
+      expect(proxy).toContain("'authorization'");
+      expect(proxy).toContain("'cookie'");
+      expect(proxy).toContain("'proxy-authorization'");
     });
   });
 
@@ -206,12 +365,118 @@ describe('security invariants', () => {
     });
   });
 
+  describe('extension manifest', () => {
+    const manifest = readFile('packages/extension/wxt.config.ts');
+
+    it('has explicit Content Security Policy', () => {
+      expect(manifest).toContain('content_security_policy');
+      expect(manifest).toContain("script-src 'self'");
+      expect(manifest).toContain("object-src 'self'");
+    });
+  });
+
+  describe('gift relay server', () => {
+    const relay = readFile('packages/gift-relay/src/server.ts');
+
+    it('uses constant-time comparison without timing leak on length', () => {
+      expect(relay).toContain('Buffer.alloc(maxLen)');
+      expect(relay).toContain('timingSafeEqual(a, b)');
+    });
+  });
+
+  describe('gift relay security', () => {
+    const bg = readFile('packages/extension/entrypoints/background.ts');
+
+    it('validates relay URL protocol before connecting', () => {
+      // connectGiftRelay must validate wss:// or localhost ws://
+      const relaySection = bg.slice(bg.indexOf('function connectGiftRelay'));
+      expect(relaySection).toContain("parsed.protocol === 'wss:'");
+      expect(relaySection).toContain("parsed.hostname === 'localhost'");
+    });
+
+    it('validates gift creation inputs', () => {
+      const createSection = bg.slice(bg.indexOf("case 'createGift'"), bg.indexOf("case 'getGifts'"));
+      expect(createSection).toContain('Invalid provider');
+      expect(createSection).toContain('Invalid maxTokens');
+      expect(createSection).toContain('Invalid expiry');
+      expect(createSection).toContain('Invalid relay URL');
+    });
+
+    it('checks gift budget before proxying', () => {
+      const handler = bg.slice(bg.indexOf('handleGiftProxyRequest'));
+      expect(handler).toContain('usedTokens >= c.maxTokens');
+      expect(handler).toContain('GIFT_BUDGET_EXHAUSTED');
+    });
+
+    it('checks gift expiry before proxying', () => {
+      const handler = bg.slice(bg.indexOf('handleGiftProxyRequest'));
+      expect(handler).toContain('current.expiresAt');
+      expect(handler).toContain('GIFT_EXPIRED');
+    });
+
+    it('validates URL in gift proxy requests', () => {
+      const handler = bg.slice(bg.indexOf('handleGiftProxyRequest'));
+      expect(handler).toContain('validateProxyUrl');
+    });
+
+    it('uses atomic gift budget updates with re-check under lock', () => {
+      expect(bg).toContain('giftBudgetLocks');
+      // Must re-validate budget inside the locked section to prevent overspend
+      const lockSection = bg.slice(bg.indexOf('giftBudgetLocks.get(gift.id)'));
+      expect(lockSection).toContain('usedTokens + totalTokens > refreshGifts');
+    });
+
+    it('checks gift budget under lock before proxying', () => {
+      const handler = bg.slice(bg.indexOf('handleGiftProxyRequest'));
+      // Budget check must acquire the lock to prevent race conditions
+      expect(handler).toContain('budgetPrev = giftBudgetLocks.get(gift.id)');
+      expect(handler).toContain('budgetCheck');
+    });
+
+    it('has request timeout on gift proxy fetch', () => {
+      const handler = bg.slice(bg.indexOf('handleGiftProxyRequest'));
+      expect(handler).toContain('AbortController');
+      expect(handler).toContain('controller.abort()');
+    });
+
+    it('does not leak error details in gift proxy responses', () => {
+      const handler = bg.slice(bg.indexOf('handleGiftProxyRequest'));
+      const catchBlock = handler.slice(handler.lastIndexOf('catch ('));
+      expect(catchBlock).not.toContain('(error as Error).message');
+    });
+
+    it('does not leak raw error messages in any proxy responses', () => {
+      // No proxy/bridge error path should expose raw Error.message to clients
+      expect(bg).not.toContain("code: 'PROXY_ERROR', message: (error as Error).message");
+      expect(bg).not.toContain("message: response.error ||");
+    });
+
+    it('validates relay URL on recipient side too', () => {
+      const recipientHandler = bg.slice(bg.indexOf('proxyViaGiftRelay'));
+      expect(recipientHandler).toContain("relayParsed.protocol === 'wss:'");
+      expect(recipientHandler).toContain('Insecure relay URL rejected');
+    });
+
+    it('has request-level timeout on recipient gift relay', () => {
+      const recipientHandler = bg.slice(bg.indexOf('proxyViaGiftRelay'));
+      // Must have both auth phase timeout AND request phase timeout
+      expect(recipientHandler).toContain('Gift relay connection timed out');
+      expect(recipientHandler).toContain('Gift relay request timed out');
+      expect(recipientHandler).toContain('120_000');
+    });
+  });
+
   describe('openclaw plugin', () => {
     const plugin = readFile('packages/openclaw-plugin/src/index.ts');
 
-    it('uses exact hostname match for CORS (not startsWith)', () => {
-      expect(plugin).not.toContain("startsWith('http://127.0.0.1')");
-      expect(plugin).toContain("parsed.hostname === '127.0.0.1'");
+    it('uses fixed CORS origin (not echoed)', () => {
+      expect(plugin).toContain("'Access-Control-Allow-Origin', 'http://127.0.0.1'");
+      // Must not echo back the request origin
+      expect(plugin).not.toContain('isLocalhost ? reqOrigin');
+    });
+
+    it('limits request body size', () => {
+      expect(plugin).toContain('MAX_BODY_SIZE');
     });
 
     it('validates provider ID in buildAuthPage', () => {

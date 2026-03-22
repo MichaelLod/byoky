@@ -142,7 +142,7 @@ export class Byoky {
           requestId,
           payload: request,
         },
-        '*',
+        window.location.origin,
       );
     });
   }
@@ -150,7 +150,7 @@ export class Byoky {
   private sendDisconnect(sessionKey: string): void {
     window.postMessage(
       { type: 'BYOKY_DISCONNECT', payload: { sessionKey } },
-      '*',
+      window.location.origin,
     );
   }
 
@@ -178,7 +178,7 @@ export class Byoky {
         type: 'BYOKY_SESSION_STATUS',
         requestId,
         payload: { sessionKey },
-      }, '*');
+      }, window.location.origin);
     });
   }
 
@@ -213,7 +213,7 @@ export class Byoky {
         type: 'BYOKY_SESSION_USAGE',
         requestId,
         payload: { sessionKey },
-      }, '*');
+      }, window.location.origin);
     });
   }
 }

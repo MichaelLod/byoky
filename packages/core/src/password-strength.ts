@@ -9,17 +9,24 @@ const COMMON_PASSWORDS = new Set([
   'monkey12', 'dragon12', 'master12', 'abc12345', 'password1',
   'password12', 'iloveyou1', 'sunshine1', 'trustno1', 'princess1',
   'football1', 'shadow123', 'michael1', 'jordan123', 'superman1',
+  'password123', 'admin12345', 'letmein123', 'p@ssw0rd', 'p@ssw0rd1',
+  'qwerty1234', 'changeme12', 'welcome123', '1234567890', 'baseball1',
+  'starwars12', 'whatever1', 'passw0rd1', 'mustang12', 'access1234',
+  'charlie123', 'donald1234', 'maggie1234', 'master1234', 'michael123',
+  'jennifer1', 'hunter1234', 'thomas1234', 'corvette12', 'robert1234',
+  'summer1234', 'george1234', 'harley1234', 'cheese1234', 'computer1',
+  'internet1', 'secret1234', 'diamond1', 'chicken123', 'pepper1234',
+  'jessica123', 'hannah1234', 'ginger1234', 'joshua1234', 'abcdefgh1',
+  'qwertyuiop', 'asdfghjkl1', 'zxcvbnm123', '1q2w3e4r5t', 'passpass1',
 ]);
 
 export function checkPasswordStrength(password: string): PasswordStrength {
   const feedback: string[] = [];
   let score = 0;
 
-  if (password.length < 12) {
+  if (password.length < MIN_PASSWORD_LENGTH) {
     feedback.push('Use at least 12 characters');
-    if (password.length < 8) {
-      return { score: 0, label: 'Too weak', feedback };
-    }
+    return { score: 0, label: 'Too weak', feedback };
   } else {
     score++;
     if (password.length >= 16) score++;

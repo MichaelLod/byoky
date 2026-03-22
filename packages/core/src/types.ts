@@ -216,6 +216,7 @@ export interface PendingApproval {
 export interface TrustedSite {
   origin: string;
   trustedAt: number;
+  allowedProviders?: string[];
 }
 
 // --- Token allowances ---

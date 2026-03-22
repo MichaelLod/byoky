@@ -175,6 +175,16 @@ OpenClaw → HTTP → Bridge (localhost) → Native Messaging → Extension → 
 
 All 15 providers are available through the plugin. Install the bridge, connect your wallet, and OpenClaw uses your Byoky credentials transparently. See the [OpenClaw plugin](packages/openclaw-plugin) for setup instructions.
 
+#### Remote OpenClaw (Cloud Deployment)
+
+Run OpenClaw on a remote server (Railway, Fly.io, etc.) and keep your API keys on your device. The relay bridges the gap — your cloud instance never sees your credentials.
+
+```
+OpenClaw (Railway) ←WebSocket→ Relay Server ←WebSocket→ Your Wallet → LLM API
+```
+
+No environment variables. No secrets management. No leaked `.env` files. Your keys stay in the wallet, and OpenClaw runs wherever you need it.
+
 ## Security
 
 | | |
@@ -219,6 +229,7 @@ Byoky uses a **proxy model** (like MetaMask's transaction signing). Keys never l
 Browser apps  → SDK (createFetch) → Content Script → Extension → LLM API
 Backend apps  → SDK/server (WebSocket) → User's Browser → Extension → LLM API
 CLI/desktop   → HTTP → Bridge (localhost) → Native Messaging → Extension → LLM API
+Remote apps   → WebSocket → Relay Server → WebSocket → Your Wallet → LLM API
 Token gifts   → WebSocket → Relay Server → WebSocket → Sender's Extension → LLM API
 ```
 
@@ -277,6 +288,8 @@ pnpm --filter @byoky/extension build:all     # Chrome + Firefox + Safari
 - [ ] Browser extension store listings (Chrome, Firefox, Safari)
 - [x] OpenClaw provider plugin (bridge proxy — keys stay in extension)
 - [x] Token gifts (relay-backed, zero key exposure)
+- [ ] Remote OpenClaw via relay (cloud deployment, zero key exposure)
+- [ ] iOS app (Safari extension + companion app)
 - [ ] Password change (re-encrypt vault with new master password)
 
 ## Star History

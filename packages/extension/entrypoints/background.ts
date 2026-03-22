@@ -1,4 +1,5 @@
 import {
+  type AuthMethod,
   type Credential,
   type Session,
   type RequestLogEntry,
@@ -7,6 +8,7 @@ import {
   type TokenAllowance,
   type ConnectRequest,
   type ConnectResponse,
+  type ProviderRequirement,
   type ProxyRequest,
   type Gift,
   type GiftedCredential,
@@ -65,6 +67,53 @@ export default defineBackground(() => {
   let unlockFailures = 0;
   let unlockLockedUntil = 0;
 
+  // Rate limiting for connect requests per origin
+  const connectRateLimit = new Map<string, number[]>();
+  const CONNECT_RATE_LIMIT = 10; // max requests per window
+  const CONNECT_RATE_WINDOW = 60_000; // 1 minute
+
+  function isConnectRateLimited(origin: string): boolean {
+    const now = Date.now();
+    const timestamps = connectRateLimit.get(origin) ?? [];
+    const recent = timestamps.filter((t) => now - t < CONNECT_RATE_WINDOW);
+    if (recent.length >= CONNECT_RATE_LIMIT) {
+      connectRateLimit.set(origin, recent);
+      return true;
+    }
+    recent.push(now);
+    connectRateLimit.set(origin, recent);
+    // Periodically prune stale origins (every 100 calls)
+    if (connectRateLimit.size > 50) {
+      for (const [key, ts] of connectRateLimit) {
+        if (ts.every((t) => now - t >= CONNECT_RATE_WINDOW)) {
+          connectRateLimit.delete(key);
+        }
+      }
+    }
+    return false;
+  }
+
+  // Rate limiting for OAuth flow requests
+  const oauthRateLimit = new Map<string, number[]>();
+  const OAUTH_RATE_LIMIT = 3;
+  const OAUTH_RATE_WINDOW = 60_000;
+
+  function isOAuthRateLimited(providerId: string): boolean {
+    const now = Date.now();
+    const timestamps = oauthRateLimit.get(providerId) ?? [];
+    const recent = timestamps.filter((t) => now - t < OAUTH_RATE_WINDOW);
+    if (recent.length >= OAUTH_RATE_LIMIT) {
+      oauthRateLimit.set(providerId, recent);
+      return true;
+    }
+    recent.push(now);
+    oauthRateLimit.set(providerId, recent);
+    return false;
+  }
+
+  // Mutex for gift budget updates to prevent concurrent overwrites
+  const giftBudgetLocks = new Map<string, Promise<void>>();
+
   // --- Open side panel on icon click (Chrome) ---
 
   if (typeof chrome !== 'undefined' && chrome.sidePanel) {
@@ -88,6 +137,9 @@ export default defineBackground(() => {
         const disconnectOrigin = resolveOrigin(senderInfo);
         if (disconnectOrigin === session.appOrigin) {
           sessions.delete(sessionKey);
+          if (authorizedBridgeSessionKey === sessionKey) {
+            authorizedBridgeSessionKey = null;
+          }
           browser.runtime.sendMessage({
             type: 'BYOKY_INTERNAL',
             action: 'sessionChanged',
@@ -102,7 +154,7 @@ export default defineBackground(() => {
       const session = sessions.get(sessionKey);
       // Verify the requesting origin owns this session
       const statusOrigin = resolveOrigin(senderInfo);
-      if (session && statusOrigin !== 'unknown' && statusOrigin !== session.appOrigin) {
+      if (!session || !statusOrigin || statusOrigin === 'unknown' || statusOrigin !== session.appOrigin) {
         return Promise.resolve({
           type: 'BYOKY_SESSION_STATUS_RESPONSE',
           requestId: message.requestId,
@@ -124,7 +176,7 @@ export default defineBackground(() => {
       const session = sessions.get(sessionKey);
       // Verify the requesting origin owns this session
       const usageOrigin = resolveOrigin(senderInfo);
-      if (!session || (usageOrigin !== 'unknown' && usageOrigin !== session.appOrigin)) {
+      if (!session || !usageOrigin || usageOrigin === 'unknown' || usageOrigin !== session.appOrigin) {
         return Promise.resolve({
           type: 'BYOKY_SESSION_USAGE_RESPONSE',
           requestId: message.requestId,
@@ -335,7 +387,7 @@ export default defineBackground(() => {
           type: 'BYOKY_PROXY_RESPONSE_ERROR',
           requestId: msg.requestId,
           status: 502,
-          error: { code: 'PROXY_ERROR', message: (error as Error).message },
+          error: { code: 'PROXY_ERROR', message: 'Proxy request failed' },
         });
       }
     });
@@ -399,6 +451,14 @@ export default defineBackground(() => {
   ): Promise<unknown> {
     const origin = resolveOrigin(sender);
 
+    if (isConnectRateLimited(origin)) {
+      return {
+        type: 'BYOKY_ERROR',
+        requestId: message.id,
+        payload: { code: 'RATE_LIMITED', message: 'Too many connection requests. Try again later.' },
+      };
+    }
+
     // If there's already an active session for this origin, reuse it
     const existing = findActiveSession(origin);
     if (existing) {
@@ -437,11 +497,22 @@ export default defineBackground(() => {
         getTrustedSites().then((trustedSites) => {
           const entry = pendingApprovals.get(approval.id);
           if (!entry) return;
-          if (trustedSites.some((s) => s.origin === origin)) {
-            // Auto-approve trusted origin
-            pendingApprovals.delete(approval.id);
-            createSession(message, origin).then((response) => entry.resolve(response));
-            return;
+          const trustedSite = trustedSites.find((s) => s.origin === origin);
+          if (trustedSite && trustedSite.allowedProviders?.length) {
+            // Scope to the providers the user originally approved for this trusted site
+            const scopedProviders = scopeProvidersForTrust(
+              message.payload.providers,
+              trustedSite.allowedProviders,
+            );
+            if (scopedProviders) {
+              pendingApprovals.delete(approval.id);
+              createSession(
+                { ...message, payload: { ...message.payload, providers: scopedProviders } },
+                origin,
+              ).then((response) => entry.resolve(response));
+              return;
+            }
+            // Requested providers outside trust scope — fall through to manual approval
           }
           // Notify popup to show approval UI
           browser.runtime.sendMessage({
@@ -502,6 +573,70 @@ export default defineBackground(() => {
     });
   }
 
+  /**
+   * Scope a connect request's providers against a trusted site's allowedProviders.
+   * Returns scoped ProviderRequirement[] if all requested providers are within scope,
+   * or null if any fall outside (requiring manual re-approval).
+   */
+  function scopeProvidersForTrust(
+    requested: ProviderRequirement[] | undefined,
+    allowedProviders: string[],
+  ): ProviderRequirement[] | null {
+    const allowed = new Set(allowedProviders);
+    if (!requested || requested.length === 0) {
+      // Empty request: scope to exactly the trusted providers
+      return allowedProviders.map((id) => ({ id, required: false }) as ProviderRequirement);
+    }
+    // Check every requested provider is within the trust scope
+    if (requested.every((r) => allowed.has(r.id))) {
+      return requested;
+    }
+    return null; // Some requested providers are outside trust scope
+  }
+
+  async function resolveAllProviders(): Promise<Array<{
+    id: string;
+    authMethod: AuthMethod;
+    sessionProvider: Session['providers'][number];
+  }>> {
+    const credentials = await getStoredCredentials();
+    const gcData = await browser.storage.local.get('giftedCredentials');
+    const giftedCreds = (gcData.giftedCredentials ?? []) as GiftedCredential[];
+    const result: Array<{ id: string; authMethod: AuthMethod; sessionProvider: Session['providers'][number] }> = [];
+    const seen = new Set<string>();
+    for (const cred of credentials) {
+      seen.add(cred.providerId);
+      result.push({
+        id: cred.providerId,
+        authMethod: cred.authMethod,
+        sessionProvider: {
+          providerId: cred.providerId,
+          credentialId: cred.id,
+          available: true,
+          authMethod: cred.authMethod,
+        },
+      });
+    }
+    for (const gc of giftedCreds) {
+      if (gc.expiresAt > Date.now() && gc.usedTokens < gc.maxTokens && !seen.has(gc.providerId)) {
+        result.push({
+          id: gc.providerId,
+          authMethod: 'api_key',
+          sessionProvider: {
+            providerId: gc.providerId,
+            credentialId: gc.id,
+            available: true,
+            authMethod: 'api_key',
+            giftId: gc.giftId,
+            giftRelayUrl: gc.relayUrl,
+            giftAuthToken: gc.authToken,
+          },
+        });
+      }
+    }
+    return result;
+  }
+
   async function createSession(
     message: { id: string; payload: ConnectRequest },
     origin: string,
@@ -549,31 +684,13 @@ export default defineBackground(() => {
     }
 
     if (request.providers?.length === 0 || !request.providers) {
-      for (const cred of credentials) {
-        providerMap[cred.providerId] = {
-          available: true,
-          authMethod: cred.authMethod,
-        };
-        sessionProviders.push({
-          providerId: cred.providerId,
-          credentialId: cred.id,
-          available: true,
-          authMethod: cred.authMethod,
-        });
-      }
-      for (const gc of giftedCreds) {
-        if (gc.expiresAt > Date.now() && gc.usedTokens < gc.maxTokens && !providerMap[gc.providerId]) {
-          providerMap[gc.providerId] = { available: true, authMethod: 'api_key' };
-          sessionProviders.push({
-            providerId: gc.providerId,
-            credentialId: gc.id,
-            available: true,
-            authMethod: 'api_key',
-            giftId: gc.giftId,
-            giftRelayUrl: gc.relayUrl,
-            giftAuthToken: gc.authToken,
-          });
-        }
+      // Empty provider list: resolve to all available credentials.
+      // This path is only reached via explicit user approval — trusted
+      // auto-approvals always scope providers before calling createSession.
+      const resolved = await resolveAllProviders();
+      for (const rp of resolved) {
+        providerMap[rp.id] = { available: true, authMethod: rp.authMethod };
+        sessionProviders.push(rp.sessionProvider);
       }
     }
 
@@ -621,7 +738,9 @@ export default defineBackground(() => {
         } else {
           unlockFailures++;
           if (unlockFailures >= 5) {
-            unlockLockedUntil = Date.now() + 60_000 * Math.min(unlockFailures - 4, 5);
+            // Exponential backoff: 1m, 2m, 4m, 8m, ... capped at 60m
+            const exponent = Math.min(unlockFailures - 5, 5);
+            unlockLockedUntil = Date.now() + 60_000 * Math.pow(2, exponent);
           }
         }
         return { success: valid };
@@ -629,6 +748,8 @@ export default defineBackground(() => {
 
       case 'lock':
         masterPassword = null;
+        sessions.clear();
+        authorizedBridgeSessionKey = null;
         return { success: true };
 
       case 'isUnlocked':
@@ -706,6 +827,9 @@ export default defineBackground(() => {
         for (const [key, s] of sessions) {
           if (s.id === sessionId) {
             sessions.delete(key);
+            if (authorizedBridgeSessionKey === key) {
+              authorizedBridgeSessionKey = null;
+            }
             broadcastRevocation(key);
             break;
           }
@@ -749,8 +873,13 @@ export default defineBackground(() => {
 
         pendingApprovals.delete(approvalId);
 
+        // Resolve which providers are being approved
+        const approvedProviderIds = pending.approval.providers.length > 0
+          ? pending.approval.providers.map((p) => p.id)
+          : (await getStoredCredentials()).map((c) => c.providerId);
+
         if (trust) {
-          await addTrustedSite(pending.approval.appOrigin);
+          await addTrustedSite(pending.approval.appOrigin, approvedProviderIds);
         }
 
         const response = await createSession(
@@ -887,6 +1016,14 @@ export default defineBackground(() => {
         const { credentialId, providerId, label, maxTokens, expiresInMs, relayUrl } = message.payload as {
           credentialId: string; providerId: string; label: string; maxTokens: number; expiresInMs: number; relayUrl: string;
         };
+        if (!PROVIDERS[providerId]) return { error: 'Invalid provider' };
+        if (!label || label.length > 200) return { error: 'Label must be 1-200 characters' };
+        if (!Number.isFinite(maxTokens) || maxTokens <= 0 || maxTokens > 100_000_000) return { error: 'Invalid maxTokens' };
+        if (!Number.isFinite(expiresInMs) || expiresInMs <= 0 || expiresInMs > 90 * 24 * 60 * 60_000) return { error: 'Invalid expiry (max 90 days)' };
+        try {
+          const parsed = new URL(relayUrl);
+          if (parsed.protocol !== 'wss:' && parsed.protocol !== 'ws:') return { error: 'Relay URL must use ws:// or wss://' };
+        } catch { return { error: 'Invalid relay URL' }; }
         const gift: Gift = {
           id: crypto.randomUUID(),
           credentialId,
@@ -984,6 +1121,10 @@ export default defineBackground(() => {
       return { success: false, error: 'Wallet is locked' };
     }
 
+    if (isOAuthRateLimited(providerId)) {
+      return { success: false, error: 'Too many OAuth requests. Try again later.' };
+    }
+
     const provider = PROVIDERS[providerId];
     if (!provider?.oauthConfig) {
       return { success: false, error: 'Provider does not support OAuth' };
@@ -1051,23 +1192,30 @@ export default defineBackground(() => {
       });
 
       if (!tokenResponse.ok) {
-        const err = await tokenResponse.text();
-        return { success: false, error: `Token exchange failed: ${err}` };
+        return { success: false, error: `Token exchange failed (HTTP ${tokenResponse.status})` };
       }
 
       const tokens = (await tokenResponse.json()) as {
-        access_token: string;
+        access_token?: string;
         refresh_token?: string;
         expires_in?: number;
       };
+
+      if (!tokens.access_token || typeof tokens.access_token !== 'string') {
+        return { success: false, error: 'OAuth provider returned no access token' };
+      }
 
       // Encrypt and store
       const encryptedAccessToken = await encrypt(
         tokens.access_token,
         masterPassword,
       );
-      const encryptedRefreshToken = tokens.refresh_token
+      const encryptedRefreshToken = tokens.refresh_token && typeof tokens.refresh_token === 'string'
         ? await encrypt(tokens.refresh_token, masterPassword)
+        : undefined;
+
+      const expiresIn = typeof tokens.expires_in === 'number' && tokens.expires_in > 0
+        ? tokens.expires_in
         : undefined;
 
       const newCred: Credential = {
@@ -1077,8 +1225,8 @@ export default defineBackground(() => {
         authMethod: 'oauth',
         encryptedAccessToken,
         encryptedRefreshToken,
-        expiresAt: tokens.expires_in
-          ? Date.now() + tokens.expires_in * 1000
+        expiresAt: expiresIn
+          ? Date.now() + expiresIn * 1000
           : undefined,
         createdAt: Date.now(),
       };
@@ -1152,15 +1300,21 @@ export default defineBackground(() => {
       if (!response.ok) return false;
 
       const tokens = (await response.json()) as {
-        access_token: string;
+        access_token?: string;
         expires_in?: number;
         refresh_token?: string;
       };
 
+      if (!tokens.access_token || typeof tokens.access_token !== 'string') return false;
+
       const encryptedAccessToken = await encrypt(tokens.access_token, masterPassword);
-      const encryptedRefreshToken = tokens.refresh_token
+      const encryptedRefreshToken = tokens.refresh_token && typeof tokens.refresh_token === 'string'
         ? await encrypt(tokens.refresh_token, masterPassword)
         : oauthCred.encryptedRefreshToken;
+
+      const refreshExpiresIn = typeof tokens.expires_in === 'number' && tokens.expires_in > 0
+        ? tokens.expires_in
+        : undefined;
 
       const credentials = await getStoredCredentials();
       const idx = credentials.findIndex((c) => c.id === credential.id);
@@ -1170,7 +1324,7 @@ export default defineBackground(() => {
         ...credentials[idx],
         encryptedAccessToken,
         encryptedRefreshToken,
-        expiresAt: tokens.expires_in ? Date.now() + tokens.expires_in * 1000 : undefined,
+        expiresAt: refreshExpiresIn ? Date.now() + refreshExpiresIn * 1000 : undefined,
       } as Credential;
 
       await browser.storage.local.set({ credentials });
@@ -1197,20 +1351,55 @@ export default defineBackground(() => {
       return;
     }
 
+    // Validate relay URL uses TLS (wss://) or is localhost
+    try {
+      const relayParsed = new URL(sp.giftRelayUrl);
+      const isSecure = relayParsed.protocol === 'wss:';
+      const isLocalWs = relayParsed.protocol === 'ws:' &&
+        (relayParsed.hostname === 'localhost' || relayParsed.hostname === '127.0.0.1' || relayParsed.hostname === '[::1]');
+      if (!isSecure && !isLocalWs) {
+        responsePort.postMessage({
+          type: 'BYOKY_PROXY_RESPONSE_ERROR',
+          requestId: msg.requestId,
+          status: 400,
+          error: { code: 'GIFT_ERROR', message: 'Insecure relay URL rejected' },
+        });
+        return;
+      }
+    } catch {
+      responsePort.postMessage({
+        type: 'BYOKY_PROXY_RESPONSE_ERROR',
+        requestId: msg.requestId,
+        status: 400,
+        error: { code: 'GIFT_ERROR', message: 'Invalid relay URL' },
+      });
+      return;
+    }
+
     try {
       const ws = new WebSocket(sp.giftRelayUrl);
       let authenticated = false;
-      const timeout = setTimeout(() => {
-        if (!authenticated) {
+      let activeTimeout: ReturnType<typeof setTimeout> | null = null;
+
+      function setPhaseTimeout(ms: number, code: string, message: string, status: number) {
+        if (activeTimeout) clearTimeout(activeTimeout);
+        activeTimeout = setTimeout(() => {
           ws.close();
           responsePort.postMessage({
             type: 'BYOKY_PROXY_RESPONSE_ERROR',
             requestId: msg.requestId,
-            status: 504,
-            error: { code: 'GIFT_TIMEOUT', message: 'Gift relay connection timed out' },
+            status,
+            error: { code, message },
           });
-        }
-      }, 30_000);
+        }, ms);
+      }
+
+      function clearActiveTimeout() {
+        if (activeTimeout) { clearTimeout(activeTimeout); activeTimeout = null; }
+      }
+
+      // Auth phase timeout: 30 seconds
+      setPhaseTimeout(30_000, 'GIFT_TIMEOUT', 'Gift relay connection timed out', 504);
 
       ws.onopen = () => {
         ws.send(JSON.stringify({
@@ -1227,19 +1416,19 @@ export default defineBackground(() => {
 
           if (data.type === 'gift:auth:result') {
             if (!data.success) {
-              clearTimeout(timeout);
+              clearActiveTimeout();
               ws.close();
               responsePort.postMessage({
                 type: 'BYOKY_PROXY_RESPONSE_ERROR',
                 requestId: msg.requestId,
                 status: 403,
-                error: { code: 'GIFT_AUTH_FAILED', message: data.error || 'Gift authentication failed' },
+                error: { code: 'GIFT_AUTH_FAILED', message: 'Gift authentication failed' },
               });
               return;
             }
             authenticated = true;
             if (!data.peerOnline) {
-              clearTimeout(timeout);
+              clearActiveTimeout();
               ws.close();
               responsePort.postMessage({
                 type: 'BYOKY_PROXY_RESPONSE_ERROR',
@@ -1259,17 +1448,24 @@ export default defineBackground(() => {
               headers: msg.headers,
               body: msg.body,
             }));
+            // Request phase timeout: 2 minutes
+            setPhaseTimeout(120_000, 'GIFT_TIMEOUT', 'Gift relay request timed out', 504);
           }
 
           // Forward relay responses to the port
           if (data.type === 'relay:response:meta' && data.requestId === msg.requestId) {
-            clearTimeout(timeout);
+            clearActiveTimeout();
+            // Strip potentially sensitive upstream headers from relay responses
+            const relayHeaders = { ...(data.headers ?? {}) };
+            for (const h of ['server', 'x-request-id', 'x-cloud-trace-context', 'set-cookie', 'set-cookie2', 'alt-svc', 'via']) {
+              delete relayHeaders[h];
+            }
             responsePort.postMessage({
               type: 'BYOKY_PROXY_RESPONSE_META',
               requestId: msg.requestId,
               status: data.status,
               statusText: data.statusText,
-              headers: data.headers ?? {},
+              headers: relayHeaders,
             });
           }
 
@@ -1290,7 +1486,7 @@ export default defineBackground(() => {
           }
 
           if (data.type === 'relay:response:error' && data.requestId === msg.requestId) {
-            clearTimeout(timeout);
+            clearActiveTimeout();
             responsePort.postMessage({
               type: 'BYOKY_PROXY_RESPONSE_ERROR',
               requestId: msg.requestId,
@@ -1310,7 +1506,7 @@ export default defineBackground(() => {
       };
 
       ws.onerror = () => {
-        clearTimeout(timeout);
+        clearActiveTimeout();
         responsePort.postMessage({
           type: 'BYOKY_PROXY_RESPONSE_ERROR',
           requestId: msg.requestId,
@@ -1320,14 +1516,14 @@ export default defineBackground(() => {
       };
 
       ws.onclose = () => {
-        clearTimeout(timeout);
+        clearActiveTimeout();
       };
-    } catch (e) {
+    } catch {
       responsePort.postMessage({
         type: 'BYOKY_PROXY_RESPONSE_ERROR',
         requestId: msg.requestId,
         status: 502,
-        error: { code: 'GIFT_RELAY_ERROR', message: (e as Error).message },
+        error: { code: 'GIFT_RELAY_ERROR', message: 'Failed to connect to gift relay' },
       });
     }
   }
@@ -1446,7 +1642,7 @@ export default defineBackground(() => {
               status: 502,
               error: {
                 code: 'BRIDGE_ERROR',
-                message: response.error || 'Bridge request failed',
+                message: 'Bridge request failed',
               },
             });
             nativePort.disconnect();
@@ -1559,6 +1755,16 @@ export default defineBackground(() => {
         type: 'proxy_http_error',
         requestId,
         error: 'Session not found or wallet locked',
+      });
+      return;
+    }
+
+    // Validate providerId is one the session actually granted access to
+    if (!session.providers.some((p) => p.providerId === providerId && p.available)) {
+      bridgeProxyPort?.postMessage({
+        type: 'proxy_http_error',
+        requestId,
+        error: 'Provider not available in this session',
       });
       return;
     }
@@ -1708,10 +1914,14 @@ export default defineBackground(() => {
   ): Promise<string> {
     if (!masterPassword) throw new Error('Wallet is locked');
 
-    if (credential.authMethod === 'api_key') {
-      return decrypt(credential.encryptedKey, masterPassword);
+    try {
+      if (credential.authMethod === 'api_key') {
+        return await decrypt(credential.encryptedKey, masterPassword);
+      }
+      return await decrypt(credential.encryptedAccessToken, masterPassword);
+    } catch {
+      throw new Error('Failed to decrypt credential');
     }
-    return decrypt(credential.encryptedAccessToken, masterPassword);
   }
 
   // buildHeaders, parseModel, parseUsage, computeAllowanceCheck imported from @byoky/core
@@ -1801,14 +2011,20 @@ export default defineBackground(() => {
     const trustedSites = await getTrustedSites();
 
     for (const [id, entry] of pendingApprovals) {
-      if (trustedSites.some((s) => s.origin === entry.approval.appOrigin)) {
-        // Auto-approve trusted origins
-        pendingApprovals.delete(id);
-        const response = await createSession(
-          { id: entry.originalMessageId, payload: { providers: entry.approval.providers } as ConnectRequest },
-          entry.approval.appOrigin,
+      const trustedSite = trustedSites.find((s) => s.origin === entry.approval.appOrigin);
+      if (trustedSite && trustedSite.allowedProviders?.length) {
+        const scopedProviders = scopeProvidersForTrust(
+          entry.approval.providers,
+          trustedSite.allowedProviders,
         );
-        entry.resolve(response);
+        if (scopedProviders) {
+          pendingApprovals.delete(id);
+          const response = await createSession(
+            { id: entry.originalMessageId, payload: { providers: scopedProviders } as ConnectRequest },
+            entry.approval.appOrigin,
+          );
+          entry.resolve(response);
+        }
       }
     }
 
@@ -1833,12 +2049,17 @@ export default defineBackground(() => {
     return (data.trustedSites as TrustedSite[]) ?? [];
   }
 
-  async function addTrustedSite(origin: string) {
+  async function addTrustedSite(origin: string, allowedProviders: string[]) {
     const sites = await getTrustedSites();
-    if (!sites.some((s) => s.origin === origin)) {
-      sites.push({ origin, trustedAt: Date.now() });
-      await browser.storage.local.set({ trustedSites: sites });
+    const existing = sites.find((s) => s.origin === origin);
+    if (existing) {
+      // Merge new providers into existing trust entry
+      const merged = new Set([...(existing.allowedProviders ?? []), ...allowedProviders]);
+      existing.allowedProviders = [...merged];
+    } else {
+      sites.push({ origin, trustedAt: Date.now(), allowedProviders });
     }
+    await browser.storage.local.set({ trustedSites: sites });
   }
 
   async function removeTrustedSite(origin: string) {
@@ -1892,6 +2113,17 @@ export default defineBackground(() => {
   function connectGiftRelay(gift: Gift) {
     if (giftRelayConnections.has(gift.id)) return;
     if (!gift.active || gift.expiresAt <= Date.now()) return;
+
+    // Validate relay URL uses TLS (wss://) or is localhost
+    try {
+      const parsed = new URL(gift.relayUrl);
+      const isSecure = parsed.protocol === 'wss:';
+      const isLocalWs = parsed.protocol === 'ws:' &&
+        (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.hostname === '[::1]');
+      if (!isSecure && !isLocalWs) return;
+    } catch {
+      return;
+    }
 
     try {
       const ws = new WebSocket(gift.relayUrl);
@@ -1969,11 +2201,24 @@ export default defineBackground(() => {
       return;
     }
 
-    // Check budget
-    const data = await browser.storage.local.get('gifts');
-    const gifts = (data.gifts ?? []) as Gift[];
-    const current = gifts.find((g) => g.id === gift.id);
-    if (!current || !current.active || current.expiresAt <= Date.now()) {
+    // Check budget under the per-gift lock to prevent race conditions where
+    // concurrent requests both pass the check before either updates usage.
+    const budgetPrev = giftBudgetLocks.get(gift.id) ?? Promise.resolve();
+    let budgetError: 'expired' | 'exhausted' | null = null;
+    const budgetCheck = budgetPrev.then(async () => {
+      const d = await browser.storage.local.get('gifts');
+      const g = (d.gifts ?? []) as Gift[];
+      const c = g.find((x) => x.id === gift.id);
+      if (!c || !c.active || c.expiresAt <= Date.now()) {
+        budgetError = 'expired';
+      } else if (c.usedTokens >= c.maxTokens) {
+        budgetError = 'exhausted';
+      }
+    });
+    giftBudgetLocks.set(gift.id, budgetCheck.catch(() => {}));
+    await budgetCheck;
+
+    if (budgetError === 'expired') {
       ws.send(JSON.stringify({
         type: 'relay:response:error',
         requestId: msg.requestId,
@@ -1981,7 +2226,7 @@ export default defineBackground(() => {
       }));
       return;
     }
-    if (current.usedTokens >= current.maxTokens) {
+    if (budgetError === 'exhausted') {
       ws.send(JSON.stringify({
         type: 'relay:response:error',
         requestId: msg.requestId,
@@ -2015,14 +2260,22 @@ export default defineBackground(() => {
       const apiKey = await decryptCredentialKey(credential);
       const realHeaders = buildHeaders(gift.providerId, msg.headers, apiKey, credential.authMethod);
 
+      const controller = new AbortController();
+      const requestTimeout = setTimeout(() => controller.abort(), 120_000);
+
       const response = await fetch(msg.url, {
         method: msg.method,
         headers: realHeaders,
         body: msg.body,
+        signal: controller.signal,
       });
 
       const respHeaders: Record<string, string> = {};
       response.headers.forEach((v, k) => { respHeaders[k] = v; });
+      // Strip headers that could leak upstream server details through the relay
+      for (const h of ['server', 'x-request-id', 'x-cloud-trace-context', 'set-cookie', 'set-cookie2', 'alt-svc', 'via']) {
+        delete respHeaders[h];
+      }
 
       ws.send(JSON.stringify({
         type: 'relay:response:meta',
@@ -2049,35 +2302,44 @@ export default defineBackground(() => {
         }
       }
 
+      clearTimeout(requestTimeout);
+
       ws.send(JSON.stringify({
         type: 'relay:response:done',
         requestId: msg.requestId,
       }));
 
-      // Update gift usage
+      // Update gift usage atomically using a per-gift lock
       const fullBody = chunks.join('');
       const usage = parseUsage(gift.providerId, fullBody);
       if (usage) {
         const totalTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
-        const refreshData = await browser.storage.local.get('gifts');
-        const refreshGifts = (refreshData.gifts ?? []) as Gift[];
-        const gIdx = refreshGifts.findIndex((g) => g.id === gift.id);
-        if (gIdx !== -1) {
-          refreshGifts[gIdx].usedTokens += totalTokens;
-          await browser.storage.local.set({ gifts: refreshGifts });
-        }
-        // Notify recipient of usage
-        ws.send(JSON.stringify({
-          type: 'gift:usage',
-          giftId: gift.id,
-          usedTokens: refreshGifts[gIdx]?.usedTokens ?? current.usedTokens + totalTokens,
-        }));
+        const prev = giftBudgetLocks.get(gift.id) ?? Promise.resolve();
+        const lock = prev.then(async () => {
+          const refreshData = await browser.storage.local.get('gifts');
+          const refreshGifts = (refreshData.gifts ?? []) as Gift[];
+          const gIdx = refreshGifts.findIndex((g) => g.id === gift.id);
+          if (gIdx !== -1) {
+            // Re-check budget under lock to prevent overspend from concurrent requests
+            if (refreshGifts[gIdx].usedTokens + totalTokens > refreshGifts[gIdx].maxTokens) {
+              return;
+            }
+            refreshGifts[gIdx].usedTokens += totalTokens;
+            await browser.storage.local.set({ gifts: refreshGifts });
+            ws.send(JSON.stringify({
+              type: 'gift:usage',
+              giftId: gift.id,
+              usedTokens: refreshGifts[gIdx].usedTokens,
+            }));
+          }
+        });
+        giftBudgetLocks.set(gift.id, lock.catch(() => {}));
       }
     } catch (error) {
       ws.send(JSON.stringify({
         type: 'relay:response:error',
         requestId: msg.requestId,
-        error: { code: 'PROXY_ERROR', message: (error as Error).message },
+        error: { code: 'PROXY_ERROR', message: 'Request failed' },
       }));
     }
   }

@@ -83,6 +83,9 @@ export function handleProxyResponse(msg: ProxyResponseMessage): void {
     // Strip content-encoding to prevent the client from trying to decompress again.
     delete headers['content-encoding'];
     delete headers['content-length']; // Length no longer matches after decompression
+    // Strip headers that could leak information or set state
+    delete headers['set-cookie'];
+    delete headers['set-cookie2'];
     pending.res.writeHead(msg.status, headers);
   } else if (msg.type === 'proxy_http_response_chunk') {
     pending.res.write(msg.chunk);
@@ -126,6 +129,13 @@ export function startProxyServer(config: ProxyConfig): Server {
       return;
     }
 
+    // Reject excessively long URIs to prevent resource exhaustion
+    if ((req.url?.length ?? 0) > MAX_URI_LENGTH) {
+      res.writeHead(414, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'URI too long' }));
+      return;
+    }
+
     // Parse: /<providerId>/rest/of/path
     const match = req.url?.match(/^\/([^/]+)(\/.*)?$/);
     if (!match) {
@@ -140,6 +150,14 @@ export function startProxyServer(config: ProxyConfig): Server {
     if (!providers.includes(providerId)) {
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: `Provider "${providerId}" not available in this session` }));
+      return;
+    }
+
+    // Reject oversized requests early based on Content-Length header
+    const declaredLength = parseInt(req.headers['content-length'] || '0', 10);
+    if (declaredLength > MAX_BODY_SIZE) {
+      res.writeHead(413, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Payload too large' }));
       return;
     }
 
@@ -175,10 +193,15 @@ export function startProxyServer(config: ProxyConfig): Server {
     const realUrl = `${baseUrl}${path}`;
     const requestId = `proxy-${crypto.randomUUID()}`;
 
-    // Forward headers (strip host)
+    // Forward headers, stripping hop-by-hop and auth headers (defense-in-depth;
+    // the extension's buildHeaders() does the authoritative sanitization).
+    const STRIP_HEADERS = new Set([
+      'host', 'connection', 'cookie', 'authorization',
+      'proxy-authorization', 'proxy-connection',
+    ]);
     const headers: Record<string, string> = {};
     for (const [key, value] of Object.entries(req.headers)) {
-      if (key === 'host' || key === 'connection') continue;
+      if (STRIP_HEADERS.has(key)) continue;
       if (typeof value === 'string') headers[key] = value;
     }
 
@@ -222,6 +245,7 @@ export function startProxyServer(config: ProxyConfig): Server {
 }
 
 const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10 MB
+const MAX_URI_LENGTH = 8192;
 
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
