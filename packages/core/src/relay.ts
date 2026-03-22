@@ -71,6 +71,15 @@ export interface RelayPong {
   ts: number;
 }
 
+export interface RelayPairHello {
+  type: 'relay:pair:hello';
+  providers: Record<string, { available: boolean; authMethod: AuthMethod }>;
+}
+
+export interface RelayPairAck {
+  type: 'relay:pair:ack';
+}
+
 export type RelayMessage =
   | RelayHello
   | RelayRequest
@@ -79,10 +88,15 @@ export type RelayMessage =
   | RelayResponseDone
   | RelayResponseError
   | RelayPing
-  | RelayPong;
+  | RelayPong
+  | RelayPairHello
+  | RelayPairAck;
+
+const MAX_RELAY_MESSAGE_SIZE = 1_048_576; // 1 MB
 
 export function parseRelayMessage(data: unknown): RelayMessage | null {
   try {
+    if (typeof data === 'string' && data.length > MAX_RELAY_MESSAGE_SIZE) return null;
     const raw = typeof data === 'string' ? JSON.parse(data) : data;
     if (!raw || typeof raw !== 'object' || typeof raw.type !== 'string' || !raw.type.startsWith('relay:')) {
       return null;
@@ -113,6 +127,11 @@ export function parseRelayMessage(data: unknown): RelayMessage | null {
       case 'relay:ping':
       case 'relay:pong':
         if (typeof raw.ts !== 'number') return null;
+        break;
+      case 'relay:pair:hello':
+        if (!raw.providers || typeof raw.providers !== 'object') return null;
+        break;
+      case 'relay:pair:ack':
         break;
       default:
         return null;

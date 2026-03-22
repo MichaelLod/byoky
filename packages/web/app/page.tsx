@@ -13,6 +13,8 @@ export default function Home() {
       <div className="divider" />
       <Providers />
       <div className="divider" />
+      <MobileWallet />
+      <div className="divider" />
       <OpenClawIntegration />
       <div className="divider" />
       <OpenSource />
@@ -591,6 +593,76 @@ function Providers() {
   );
 }
 
+/* ─── Mobile Wallet ────────────────────────────── */
+
+function MobileWallet() {
+  return (
+    <section className="openclaw-section">
+      <div className="container">
+        <FadeIn>
+          <div className="openclaw-card">
+            <div className="openclaw-badge">Mobile</div>
+            <div className="openclaw-content">
+              <div className="openclaw-header">
+                <div className="openclaw-logo openclaw-logo-cloud">
+                  <PhoneIcon />
+                </div>
+                <div>
+                  <h3>No Extension? Use Your Phone</h3>
+                  <p className="openclaw-tagline">
+                    Connect any browser to your Byoky mobile wallet via QR code.
+                  </p>
+                </div>
+              </div>
+              <p className="openclaw-desc">
+                No browser extension needed. The SDK automatically falls back to
+                relay mode — the web app shows a pairing code, you scan it with
+                the Byoky app on your phone, and your keys proxy through your
+                device. Works on any browser, any computer.
+              </p>
+              <div className="openclaw-flow">
+                <div className="openclaw-flow-step">
+                  <span className="openclaw-flow-label">Web App</span>
+                  <span className="openclaw-flow-sub">Any browser</span>
+                </div>
+                <span className="openclaw-flow-arrow">&harr;</span>
+                <div className="openclaw-flow-step">
+                  <span className="openclaw-flow-label">Relay</span>
+                  <span className="openclaw-flow-sub">WebSocket</span>
+                </div>
+                <span className="openclaw-flow-arrow">&harr;</span>
+                <div className="openclaw-flow-step openclaw-flow-highlight">
+                  <span className="openclaw-flow-label">Phone Wallet</span>
+                  <span className="openclaw-flow-sub">Keys stay here</span>
+                </div>
+                <span className="openclaw-flow-arrow">&rarr;</span>
+                <div className="openclaw-flow-step">
+                  <span className="openclaw-flow-label">LLM API</span>
+                </div>
+              </div>
+              <div className="code-block">
+                <div className="code-header">
+                  <div className="code-dots">
+                    <span className="code-dot code-dot-red" />
+                    <span className="code-dot code-dot-yellow" />
+                    <span className="code-dot code-dot-green" />
+                  </div>
+                  <span className="code-filename">app.ts</span>
+                </div>
+                <pre className="code-body"><code>{`const session = await byoky.connect({
+  providers: [{ id: 'anthropic' }],
+  onPairingReady: (code) => showQRCode(code),
+});
+// Works exactly the same as extension mode`}</code></pre>
+              </div>
+            </div>
+          </div>
+        </FadeIn>
+      </div>
+    </section>
+  );
+}
+
 /* ─── OpenClaw Integration ─────────────────────── */
 
 function OpenClawIntegration() {
@@ -850,6 +922,15 @@ function ArchiveIcon() {
       <polyline points="21 8 21 21 3 21 3 8" />
       <rect x="1" y="3" width="22" height="5" />
       <line x1="10" y1="12" x2="14" y2="12" />
+    </svg>
+  );
+}
+
+function PhoneIcon() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
+      <line x1="12" y1="18" x2="12.01" y2="18" />
     </svg>
   );
 }

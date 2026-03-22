@@ -93,6 +93,27 @@ const message = await client.messages.create({
 
 > **Two lines changed.** Full API compatibility. Streaming works. Keys never exposed.
 
+### Mobile Wallet (No Extension Needed)
+
+No browser extension? Users can connect with the Byoky mobile app instead. The SDK automatically falls back to relay mode — showing a pairing code that the user scans with their phone.
+
+```
+Web App ←WebSocket→ Relay Server ←WebSocket→ Phone Wallet → LLM API
+```
+
+```typescript
+const session = await byoky.connect({
+  providers: [{ id: 'anthropic', required: true }],
+  onPairingReady: (code) => {
+    // Show this code as a QR or text for the user to scan
+    showQRCode(code);
+  },
+});
+// Works exactly the same as extension mode
+```
+
+> **Works on any browser, any device.** No extension install required. Keys stay on the phone.
+
 ### Backend Relay
 
 Need LLM calls from your server? The user's browser relays requests through the extension — your backend never sees the API key.
@@ -227,6 +248,7 @@ Byoky uses a **proxy model** (like MetaMask's transaction signing). Keys never l
 
 ```
 Browser apps  → SDK (createFetch) → Content Script → Extension → LLM API
+Mobile wallet → SDK (createFetch) → WebSocket → Relay → Phone App → LLM API
 Backend apps  → SDK/server (WebSocket) → User's Browser → Extension → LLM API
 CLI/desktop   → HTTP → Bridge (localhost) → Native Messaging → Extension → LLM API
 Remote apps   → WebSocket → Relay Server → WebSocket → Your Wallet → LLM API
@@ -288,6 +310,7 @@ pnpm --filter @byoky/extension build:all     # Chrome + Firefox + Safari
 - [ ] Browser extension store listings (Chrome, Firefox, Safari)
 - [x] OpenClaw provider plugin (bridge proxy — keys stay in extension)
 - [x] Token gifts (relay-backed, zero key exposure)
+- [x] Mobile wallet relay connect (no extension needed, pair via QR code)
 - [ ] Remote OpenClaw via relay (cloud deployment, zero key exposure)
 - [ ] iOS app (Safari extension + companion app)
 - [ ] Password change (re-encrypt vault with new master password)
