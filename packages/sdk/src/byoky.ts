@@ -199,6 +199,19 @@ export class Byoky {
       disconnectCallbacks.clear();
     });
 
+    // Listen for phone going offline (app backgrounded/closed)
+    ws.addEventListener('message', (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'gift:peer:status' && msg.online === false) {
+          for (const cb of disconnectCallbacks) cb();
+          disconnectCallbacks.clear();
+          clearInterval(pingInterval);
+          ws.close(1000, 'Phone disconnected');
+        }
+      } catch {}
+    });
+
     return {
       sessionKey,
       proxyUrl: '',
