@@ -34,7 +34,7 @@ function Hero() {
         <FadeIn>
           <div className="hero-badge">
             <span className="hero-badge-dot" />
-            Open-source browser extension
+            Open-source wallet for AI keys
           </div>
         </FadeIn>
         <FadeIn delay={0.1}>
@@ -142,7 +142,7 @@ function Hero() {
         <FadeIn delay={0.2}>
           <p>
             A secure browser wallet for your LLM API keys and setup tokens.
-            Connect to any app — your keys never leave the extension.
+            Connect to any app — your keys never leave your device.
           </p>
         </FadeIn>
         <FadeIn delay={0.3}>
@@ -615,10 +615,10 @@ function MobileWallet() {
                 </div>
               </div>
               <p className="openclaw-desc">
-                No browser extension needed. The SDK automatically falls back to
-                relay mode — the web app shows a pairing code, you scan it with
-                the Byoky app on your phone, and your keys proxy through your
-                device. Works on any browser, any computer.
+                No browser extension needed. The web app shows a pairing code,
+                you scan it with the Byoky iOS app, and your keys proxy through
+                your phone. Works on any browser, any computer. Keep the app
+                open while using the web app.
               </p>
               <div className="openclaw-flow">
                 <div className="openclaw-flow-step">
@@ -651,6 +651,7 @@ function MobileWallet() {
                 </div>
                 <pre className="code-body"><code>{`const session = await byoky.connect({
   providers: [{ id: 'anthropic' }],
+  useRelay: true,
   onPairingReady: (code) => showQRCode(code),
 });
 // Works exactly the same as extension mode`}</code></pre>
