@@ -81,6 +81,7 @@ export interface SessionProvider {
 export interface ConnectRequest {
   providers?: ProviderRequirement[];
   capabilities?: string[];
+  reconnectOnly?: boolean;
 }
 
 export interface ProviderRequirement {

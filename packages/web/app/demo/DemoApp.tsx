@@ -1,28 +1,12 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Byoky, type ByokySession, type ConnectResponse, isExtensionInstalled } from '@byoky/sdk';
+import { Byoky, type ByokySession, isExtensionInstalled } from '@byoky/sdk';
 import { ConnectWallet } from './components/ConnectWallet';
 import { Playground } from './components/Playground';
 import { CodeExample } from './components/CodeExample';
 
 const byoky = new Byoky({ timeout: 120_000 });
-const SESSION_KEY = 'byoky-demo-session';
-
-function saveSession(response: ConnectResponse) {
-  try { localStorage.setItem(SESSION_KEY, JSON.stringify(response)); } catch {}
-}
-
-function clearSavedSession() {
-  try { localStorage.removeItem(SESSION_KEY); } catch {}
-}
-
-function loadSavedSession(): ConnectResponse | null {
-  try {
-    const raw = localStorage.getItem(SESSION_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
-}
 
 export function DemoApp() {
   const [session, setSession] = useState<ByokySession | null>(null);
@@ -32,30 +16,17 @@ export function DemoApp() {
   const [isPairing, setIsPairing] = useState(false);
 
   useEffect(() => {
-    const saved = loadSavedSession();
-    if (!saved) { setRestoring(false); return; }
-    byoky.reconnect(saved).then((s) => {
-      if (s) {
-        s.onDisconnect(() => { clearSavedSession(); setSession(null); });
-        s.onProvidersUpdated((providers) => {
-          saveSession({ sessionKey: s.sessionKey, proxyUrl: s.proxyUrl, providers });
-          setSession(prev => prev ? { ...prev, providers } : null);
-        });
-        setSession(s);
-      } else {
-        clearSavedSession();
-      }
+    byoky.tryReconnect().then((s) => {
+      if (s) onConnected(s);
       setRestoring(false);
     });
   }, []);
 
   function onConnected(s: ByokySession) {
-    s.onDisconnect(() => { clearSavedSession(); setSession(null); setPairingCode(null); });
+    s.onDisconnect(() => { setSession(null); setPairingCode(null); });
     s.onProvidersUpdated((providers) => {
-      saveSession({ sessionKey: s.sessionKey, proxyUrl: s.proxyUrl, providers });
       setSession(prev => prev ? { ...prev, providers } : null);
     });
-    saveSession({ sessionKey: s.sessionKey, proxyUrl: s.proxyUrl, providers: s.providers });
     setSession(s);
     setPairingCode(null);
     setIsPairing(false);
@@ -116,7 +87,6 @@ export function DemoApp() {
 
   function handleDisconnect() {
     session?.disconnect();
-    clearSavedSession();
     setSession(null);
   }
 
