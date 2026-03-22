@@ -215,6 +215,8 @@ export default defineBackground(() => {
     }
 
     if (message.type === 'BYOKY_INTERNAL') {
+      // Only accept internal messages from the extension itself (popup/side panel)
+      if (senderInfo.id !== browser.runtime.id) return;
       return handleInternal(message as { action: string; payload?: unknown });
     }
   });
@@ -489,6 +491,15 @@ export default defineBackground(() => {
     const existing = findActiveSession(origin);
     if (existing) {
       return buildSessionResponse(existing, message.id);
+    }
+
+    // Silent reconnect: only return existing session, don't prompt
+    if (message.payload.reconnectOnly) {
+      return {
+        type: 'BYOKY_ERROR',
+        requestId: message.id,
+        payload: { code: 'NO_SESSION', message: 'No active session for this origin' },
+      };
     }
 
     // If there's already a pending approval for this origin, wait for its result
@@ -2275,129 +2286,113 @@ export default defineBackground(() => {
       return;
     }
 
-    // Check budget under the per-gift lock to prevent race conditions where
-    // concurrent requests both pass the check before either updates usage.
-    const budgetPrev = giftBudgetLocks.get(gift.id) ?? Promise.resolve();
-    let budgetError: 'expired' | 'exhausted' | null = null;
-    const budgetCheck = budgetPrev.then(async () => {
+    // Serialize the entire request lifecycle per gift under one lock so budget
+    // check → API call → usage update are atomic (prevents concurrent overspend).
+    const prev = giftBudgetLocks.get(gift.id) ?? Promise.resolve();
+    const lock = prev.then(async () => {
+      // Budget check
       const d = await browser.storage.local.get('gifts');
       const g = (d.gifts ?? []) as Gift[];
       const c = g.find((x) => x.id === gift.id);
       if (!c || !c.active || c.expiresAt <= Date.now()) {
-        budgetError = 'expired';
-      } else if (c.usedTokens >= c.maxTokens) {
-        budgetError = 'exhausted';
+        ws.send(JSON.stringify({
+          type: 'relay:response:error',
+          requestId: msg.requestId,
+          error: { code: 'GIFT_EXPIRED', message: 'Gift has expired or been revoked' },
+        }));
+        return;
       }
-    });
-    giftBudgetLocks.set(gift.id, budgetCheck.catch(() => {}));
-    await budgetCheck;
-
-    if (budgetError === 'expired') {
-      ws.send(JSON.stringify({
-        type: 'relay:response:error',
-        requestId: msg.requestId,
-        error: { code: 'GIFT_EXPIRED', message: 'Gift has expired or been revoked' },
-      }));
-      return;
-    }
-    if (budgetError === 'exhausted') {
-      ws.send(JSON.stringify({
-        type: 'relay:response:error',
-        requestId: msg.requestId,
-        error: { code: 'GIFT_BUDGET_EXHAUSTED', message: 'Gift token budget exhausted' },
-      }));
-      return;
-    }
-
-    // Resolve credential
-    const credentials = await getStoredCredentials();
-    const credential = credentials.find((c) => c.id === gift.credentialId);
-    if (!credential) {
-      ws.send(JSON.stringify({
-        type: 'relay:response:error',
-        requestId: msg.requestId,
-        error: { code: 'PROVIDER_UNAVAILABLE', message: 'Credential no longer available' },
-      }));
-      return;
-    }
-
-    if (!validateProxyUrl(gift.providerId, msg.url)) {
-      ws.send(JSON.stringify({
-        type: 'relay:response:error',
-        requestId: msg.requestId,
-        error: { code: 'INVALID_URL', message: 'Request URL does not match provider' },
-      }));
-      return;
-    }
-
-    try {
-      const apiKey = await decryptCredentialKey(credential);
-      const realHeaders = buildHeaders(gift.providerId, msg.headers, apiKey, credential.authMethod);
-
-      const controller = new AbortController();
-      const requestTimeout = setTimeout(() => controller.abort(), 120_000);
-
-      const response = await fetch(msg.url, {
-        method: msg.method,
-        headers: realHeaders,
-        body: msg.body,
-        signal: controller.signal,
-      });
-
-      const respHeaders: Record<string, string> = {};
-      response.headers.forEach((v, k) => { respHeaders[k] = v; });
-      // Strip headers that could leak upstream server details through the relay
-      for (const h of ['server', 'x-request-id', 'x-cloud-trace-context', 'set-cookie', 'set-cookie2', 'alt-svc', 'via']) {
-        delete respHeaders[h];
+      if (c.usedTokens >= c.maxTokens) {
+        ws.send(JSON.stringify({
+          type: 'relay:response:error',
+          requestId: msg.requestId,
+          error: { code: 'GIFT_BUDGET_EXHAUSTED', message: 'Gift token budget exhausted' },
+        }));
+        return;
       }
 
-      ws.send(JSON.stringify({
-        type: 'relay:response:meta',
-        requestId: msg.requestId,
-        status: response.status,
-        statusText: response.statusText,
-        headers: respHeaders,
-      }));
+      // Resolve credential
+      const credentials = await getStoredCredentials();
+      const credential = credentials.find((cr) => cr.id === gift.credentialId);
+      if (!credential) {
+        ws.send(JSON.stringify({
+          type: 'relay:response:error',
+          requestId: msg.requestId,
+          error: { code: 'PROVIDER_UNAVAILABLE', message: 'Credential no longer available' },
+        }));
+        return;
+      }
 
-      const chunks: string[] = [];
-      if (response.body) {
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const text = decoder.decode(value, { stream: true });
-          chunks.push(text);
-          ws.send(JSON.stringify({
-            type: 'relay:response:chunk',
-            requestId: msg.requestId,
-            chunk: text,
-          }));
+      if (!validateProxyUrl(gift.providerId, msg.url)) {
+        ws.send(JSON.stringify({
+          type: 'relay:response:error',
+          requestId: msg.requestId,
+          error: { code: 'INVALID_URL', message: 'Request URL does not match provider' },
+        }));
+        return;
+      }
+
+      try {
+        const apiKey = await decryptCredentialKey(credential);
+        const realHeaders = buildHeaders(gift.providerId, msg.headers, apiKey, credential.authMethod);
+
+        const controller = new AbortController();
+        const requestTimeout = setTimeout(() => controller.abort(), 120_000);
+
+        const response = await fetch(msg.url, {
+          method: msg.method,
+          headers: realHeaders,
+          body: msg.body,
+          signal: controller.signal,
+        });
+
+        const respHeaders: Record<string, string> = {};
+        response.headers.forEach((v, k) => { respHeaders[k] = v; });
+        for (const h of ['server', 'x-request-id', 'x-cloud-trace-context', 'set-cookie', 'set-cookie2', 'alt-svc', 'via']) {
+          delete respHeaders[h];
         }
-      }
 
-      clearTimeout(requestTimeout);
+        ws.send(JSON.stringify({
+          type: 'relay:response:meta',
+          requestId: msg.requestId,
+          status: response.status,
+          statusText: response.statusText,
+          headers: respHeaders,
+        }));
 
-      ws.send(JSON.stringify({
-        type: 'relay:response:done',
-        requestId: msg.requestId,
-      }));
+        const chunks: string[] = [];
+        if (response.body) {
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const text = decoder.decode(value, { stream: true });
+            chunks.push(text);
+            ws.send(JSON.stringify({
+              type: 'relay:response:chunk',
+              requestId: msg.requestId,
+              chunk: text,
+            }));
+          }
+        }
 
-      // Update gift usage atomically using a per-gift lock
-      const fullBody = chunks.join('');
-      const usage = parseUsage(gift.providerId, fullBody);
-      if (usage) {
-        const totalTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
-        const prev = giftBudgetLocks.get(gift.id) ?? Promise.resolve();
-        const lock = prev.then(async () => {
+        clearTimeout(requestTimeout);
+
+        ws.send(JSON.stringify({
+          type: 'relay:response:done',
+          requestId: msg.requestId,
+        }));
+
+        // Update usage within the same lock scope
+        const fullBody = chunks.join('');
+        const usage = parseUsage(gift.providerId, fullBody);
+        if (usage) {
+          const totalTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
           const refreshData = await browser.storage.local.get('gifts');
           const refreshGifts = (refreshData.gifts ?? []) as Gift[];
-          const gIdx = refreshGifts.findIndex((g) => g.id === gift.id);
-          if (gIdx !== -1) {
-            // Re-check budget under lock to prevent overspend from concurrent requests
-            if (refreshGifts[gIdx].usedTokens + totalTokens > refreshGifts[gIdx].maxTokens) {
-              return;
-            }
+          const gIdx = refreshGifts.findIndex((rg) => rg.id === gift.id);
+          if (gIdx !== -1 && refreshGifts[gIdx].usedTokens + totalTokens <= refreshGifts[gIdx].maxTokens) {
             refreshGifts[gIdx].usedTokens += totalTokens;
             await browser.storage.local.set({ gifts: refreshGifts });
             ws.send(JSON.stringify({
@@ -2406,16 +2401,17 @@ export default defineBackground(() => {
               usedTokens: refreshGifts[gIdx].usedTokens,
             }));
           }
-        });
-        giftBudgetLocks.set(gift.id, lock.catch(() => {}));
+        }
+      } catch {
+        ws.send(JSON.stringify({
+          type: 'relay:response:error',
+          requestId: msg.requestId,
+          error: { code: 'PROXY_ERROR', message: 'Request failed' },
+        }));
       }
-    } catch (error) {
-      ws.send(JSON.stringify({
-        type: 'relay:response:error',
-        requestId: msg.requestId,
-        error: { code: 'PROXY_ERROR', message: 'Request failed' },
-      }));
-    }
+    });
+    giftBudgetLocks.set(gift.id, lock.catch(() => {}));
+    await lock;
   }
 
   // Reconnect active gifts on startup
