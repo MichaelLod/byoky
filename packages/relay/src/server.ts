@@ -30,12 +30,12 @@ function touchRoom(room: Room): void {
 
 function cleanupIdleRooms(): void {
   const now = Date.now();
-  for (const [giftId, room] of rooms) {
+  for (const [roomId, room] of rooms) {
     if (now - room.lastActivity > IDLE_TIMEOUT_MS) {
       if (room.sender?.readyState === WebSocket.OPEN) room.sender.close();
       if (room.recipient?.readyState === WebSocket.OPEN) room.recipient.close();
-      rooms.delete(giftId);
-      console.log(`[cleanup] removed idle room ${giftId.slice(0, 8)}...`);
+      rooms.delete(roomId);
+      console.log(`[cleanup] removed idle room ${roomId.slice(0, 8)}...`);
     }
   }
 }
@@ -47,43 +47,43 @@ const wss = new WebSocketServer({ port: PORT, maxPayload: 1 * 1024 * 1024 }, () 
 });
 
 wss.on("connection", (ws) => {
-  let authedGiftId: string | null = null;
+  let authedRoomId: string | null = null;
   let authedRole: "sender" | "recipient" | null = null;
 
   console.log("[connect] new connection");
 
   ws.on("message", (raw) => {
-    let msg: { type: string; giftId?: string; authToken?: string; role?: string; [k: string]: unknown };
+    let msg: { type: string; roomId?: string; authToken?: string; role?: string; [k: string]: unknown };
     try {
       msg = JSON.parse(String(raw));
     } catch {
       return;
     }
 
-    if (!authedGiftId) {
-      if (msg.type !== "gift:auth") return;
+    if (!authedRoomId) {
+      if (msg.type !== "relay:auth") return;
 
-      const { giftId, authToken, role } = msg;
+      const { roomId, authToken, role } = msg;
       if (
-        typeof giftId !== "string" ||
+        typeof roomId !== "string" ||
         typeof authToken !== "string" ||
         (role !== "sender" && role !== "recipient")
       ) {
-        send(ws, { type: "gift:auth:result", success: false, error: "invalid auth payload" });
+        send(ws, { type: "relay:auth:result", success: false, error: "invalid auth payload" });
         return;
       }
 
-      // Rate limit auth attempts per gift
+      // Rate limit auth attempts per room
       const now = Date.now();
-      const attempts = (authAttempts.get(giftId) ?? []).filter((t) => now - t < AUTH_RATE_WINDOW);
+      const attempts = (authAttempts.get(roomId) ?? []).filter((t) => now - t < AUTH_RATE_WINDOW);
       if (attempts.length >= AUTH_RATE_LIMIT) {
-        send(ws, { type: "gift:auth:result", success: false, error: "too many auth attempts" });
+        send(ws, { type: "relay:auth:result", success: false, error: "too many auth attempts" });
         return;
       }
       attempts.push(now);
-      authAttempts.set(giftId, attempts);
+      authAttempts.set(roomId, attempts);
 
-      let room = rooms.get(giftId);
+      let room = rooms.get(roomId);
 
       if (room) {
         // Constant-time comparison — pad to equal length so the length
@@ -96,37 +96,37 @@ wss.on("connection", (ws) => {
         expected.copy(a);
         provided.copy(b);
         if (!timingSafeEqual(a, b) || expected.length !== provided.length) {
-          send(ws, { type: "gift:auth:result", success: false, error: "auth token mismatch" });
+          send(ws, { type: "relay:auth:result", success: false, error: "auth token mismatch" });
           return;
         }
         if (room[role] && room[role]!.readyState === WebSocket.OPEN) {
-          send(ws, { type: "gift:auth:result", success: false, error: `${role} already connected` });
+          send(ws, { type: "relay:auth:result", success: false, error: `${role} already connected` });
           return;
         }
       } else {
         room = { authToken, lastActivity: Date.now() };
-        rooms.set(giftId, room);
+        rooms.set(roomId, room);
       }
 
       room[role] = ws;
       touchRoom(room);
-      authedGiftId = giftId;
+      authedRoomId = roomId;
       authedRole = role;
 
       const peer = role === "sender" ? room.recipient : room.sender;
       const peerOnline = !!peer && peer.readyState === WebSocket.OPEN;
 
-      send(ws, { type: "gift:auth:result", success: true, peerOnline });
-      console.log(`[auth] ${role} joined room ${giftId.slice(0, 8)}... (peer ${peerOnline ? "online" : "offline"})`);
+      send(ws, { type: "relay:auth:result", success: true, peerOnline });
+      console.log(`[auth] ${role} joined room ${roomId.slice(0, 8)}... (peer ${peerOnline ? "online" : "offline"})`);
 
       if (peerOnline) {
-        send(peer!, { type: "gift:peer:status", online: true });
+        send(peer!, { type: "relay:peer:status", online: true });
       }
 
       return;
     }
 
-    const room = rooms.get(authedGiftId);
+    const room = rooms.get(authedRoomId);
     if (!room) return;
 
     touchRoom(room);
@@ -144,7 +144,7 @@ wss.on("connection", (ws) => {
         msg.type === "relay:response:chunk" ||
         msg.type === "relay:response:done" ||
         msg.type === "relay:response:error" ||
-        msg.type === "gift:usage" ||
+        msg.type === "relay:usage" ||
         msg.type === "relay:pair:hello"
       ) {
         if (room.recipient && room.recipient.readyState === WebSocket.OPEN) {
@@ -156,25 +156,25 @@ wss.on("connection", (ws) => {
   });
 
   ws.on("close", () => {
-    if (!authedGiftId || !authedRole) {
+    if (!authedRoomId || !authedRole) {
       console.log("[disconnect] unauthenticated connection closed");
       return;
     }
 
-    console.log(`[disconnect] ${authedRole} left room ${authedGiftId.slice(0, 8)}...`);
-    const room = rooms.get(authedGiftId);
+    console.log(`[disconnect] ${authedRole} left room ${authedRoomId.slice(0, 8)}...`);
+    const room = rooms.get(authedRoomId);
     if (!room) return;
 
     room[authedRole] = undefined;
 
     const peer = authedRole === "sender" ? room.recipient : room.sender;
     if (peer && peer.readyState === WebSocket.OPEN) {
-      send(peer, { type: "gift:peer:status", online: false });
+      send(peer, { type: "relay:peer:status", online: false });
     }
 
     if (!room.sender && !room.recipient) {
-      rooms.delete(authedGiftId);
-      console.log(`[cleanup] removed empty room ${authedGiftId.slice(0, 8)}...`);
+      rooms.delete(authedRoomId);
+      console.log(`[cleanup] removed empty room ${authedRoomId.slice(0, 8)}...`);
     }
   });
 

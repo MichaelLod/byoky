@@ -61,8 +61,8 @@ final class RelayPairService: ObservableObject {
         ws.resume()
 
         let auth: [String: Any] = [
-            "type": "gift:auth",
-            "giftId": payload.roomId,
+            "type": "relay:auth",
+            "roomId": payload.roomId,
             "authToken": payload.authToken,
             "role": "sender",
         ]
@@ -141,7 +141,7 @@ final class RelayPairService: ObservableObject {
 
     private func handleMessage(type: String, json: [String: Any], payload: PairPayload) {
         switch type {
-        case "gift:auth:result":
+        case "relay:auth:result":
             if json["success"] as? Bool == true {
                 sendPairHello()
             } else {
@@ -156,7 +156,7 @@ final class RelayPairService: ObservableObject {
         case "relay:request":
             handleRelayRequest(json)
 
-        case "gift:peer:status":
+        case "relay:peer:status":
             if json["online"] as? Bool == false, case .paired = status {
                 pairedOrigin = nil
                 status = .idle
