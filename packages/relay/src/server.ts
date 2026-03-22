@@ -43,7 +43,7 @@ function cleanupIdleRooms(): void {
 const cleanupInterval = setInterval(cleanupIdleRooms, 60_000);
 
 const wss = new WebSocketServer({ port: PORT, maxPayload: 1 * 1024 * 1024 }, () => {
-  console.log(`gift-relay listening on port ${PORT}`);
+  console.log(`relay listening on port ${PORT}`);
 });
 
 wss.on("connection", (ws) => {

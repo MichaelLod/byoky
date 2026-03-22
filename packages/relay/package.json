@@ -1,10 +1,10 @@
 {
-  "name": "@byoky/gift-relay",
+  "name": "@byoky/relay",
   "version": "0.4.0",
-  "description": "WebSocket relay server for Byoky token gifts",
+  "description": "WebSocket relay server for Byoky",
   "type": "module",
   "main": "dist/server.js",
-  "bin": { "byoky-gift-relay": "dist/server.js" },
+  "bin": { "byoky-relay": "dist/server.js" },
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
