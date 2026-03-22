@@ -87,6 +87,7 @@ export function DemoApp() {
           { id: 'openai', required: false },
           { id: 'gemini', required: false },
         ],
+        useRelay: true,
         onPairingReady: (code) => {
           setPairingCode(code);
         },
