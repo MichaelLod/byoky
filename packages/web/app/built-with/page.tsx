@@ -5,13 +5,8 @@ export const metadata: Metadata = {
   title: 'Built with Byoky',
   description:
     'Apps and sites powered by Byoky — the open-source wallet for AI API keys.',
-  openGraph: {
-    title: 'Built with Byoky',
-    description:
-      'Apps and sites powered by Byoky — the open-source wallet for AI API keys.',
-    url: 'https://byoky.com/built-with',
-    siteName: 'Byoky',
-    type: 'website',
+  alternates: {
+    canonical: '/built-with',
   },
 };
 

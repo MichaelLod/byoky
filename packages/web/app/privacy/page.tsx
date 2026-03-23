@@ -1,7 +1,12 @@
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Privacy Policy — Byoky',
+  title: 'Privacy Policy',
+  description:
+    'Byoky stores everything locally on your device. No data collection, no analytics, no tracking.',
+  alternates: {
+    canonical: '/privacy',
+  },
 };
 
 export default function Privacy() {

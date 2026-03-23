@@ -111,7 +111,7 @@ export function createRelayClient(
     inFlight.set(requestId, controller);
 
     try {
-      const proxyFetch = createProxyFetch(providerId, sessionKey);
+      const proxyFetch = createProxyFetch(providerId, { current: sessionKey });
       const response = await proxyFetch(url, {
         method,
         headers,
