@@ -114,7 +114,7 @@ const STYLES = /* css */ `
   }
 
   .success-check {
-    width: 48px; height: 48px; color: #22c55e; margin-bottom: 12px;
+    width: 48px; height: 48px; color: #22c55e; margin: 0 auto 12px;
   }
 
   .link { color: var(--accent, #0ea5e9); text-decoration: none; }
