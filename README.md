@@ -95,7 +95,7 @@ const message = await client.messages.create({
 });
 ```
 
-> **Two lines changed.** Full API compatibility. Streaming works. Keys never exposed. Sessions auto-reconnect if the extension restarts.
+> **Two lines changed.** Full API compatibility. Streaming, file uploads, and vision all work. Keys never exposed. Sessions auto-reconnect if the extension restarts.
 
 ### Mobile Wallet (No Extension Needed)
 

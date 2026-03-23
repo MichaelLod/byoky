@@ -1,3 +1,10 @@
+import type { SerializedFormDataEntry } from '@byoky/core';
+
+interface ReadBodyResult {
+  body: string;
+  bodyEncoding?: 'base64' | 'formdata';
+}
+
 export function createProxyFetch(
   providerId: string,
   sessionKeyRef: { current: string },
@@ -17,7 +24,7 @@ export function createProxyFetch(
     const headers = init?.headers
       ? Object.fromEntries(new Headers(init.headers).entries())
       : {};
-    const body = init?.body ? await readBody(init.body) : undefined;
+    const bodyResult = init?.body ? await readBody(init.body, headers['content-type']) : undefined;
 
     const requestId = crypto.randomUUID();
 
@@ -98,7 +105,8 @@ export function createProxyFetch(
           url,
           method,
           headers,
-          body,
+          body: bodyResult?.body,
+          bodyEncoding: bodyResult?.bodyEncoding,
         },
         window.location.origin,
         [channel.port2],
@@ -107,11 +115,67 @@ export function createProxyFetch(
   };
 }
 
-async function readBody(body: BodyInit): Promise<string | undefined> {
-  if (typeof body === 'string') return body;
-  if (body instanceof ArrayBuffer) return new TextDecoder().decode(body);
-  if (body instanceof Blob) return body.text();
-  if (body instanceof URLSearchParams) return body.toString();
+function isTextContentType(contentType?: string): boolean {
+  if (!contentType) return true;
+  const lower = contentType.toLowerCase();
+  return lower.startsWith('text/') ||
+    lower.includes('json') ||
+    lower.includes('xml') ||
+    lower.includes('urlencoded') ||
+    lower.includes('javascript');
+}
+
+function uint8ToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+async function serializeFormData(formData: FormData): Promise<string> {
+  const entries: SerializedFormDataEntry[] = [];
+  for (const [name, value] of formData.entries()) {
+    if (typeof value === 'string') {
+      entries.push({ name, value, type: 'text' });
+    } else {
+      const buffer = await value.arrayBuffer();
+      const base64 = uint8ToBase64(new Uint8Array(buffer));
+      entries.push({
+        name,
+        value: base64,
+        type: 'file',
+        filename: value instanceof File ? value.name : undefined,
+        contentType: value.type || 'application/octet-stream',
+      });
+    }
+  }
+  return JSON.stringify(entries);
+}
+
+async function readBody(body: BodyInit, contentType?: string): Promise<ReadBodyResult | undefined> {
+  if (typeof body === 'string') return { body };
+  if (body instanceof URLSearchParams) return { body: body.toString() };
+
+  if (body instanceof FormData) {
+    return { body: await serializeFormData(body), bodyEncoding: 'formdata' };
+  }
+
+  if (body instanceof ArrayBuffer) {
+    if (isTextContentType(contentType)) {
+      return { body: new TextDecoder().decode(body) };
+    }
+    return { body: uint8ToBase64(new Uint8Array(body)), bodyEncoding: 'base64' };
+  }
+
+  if (body instanceof Blob) {
+    if (isTextContentType(contentType)) {
+      return { body: await body.text() };
+    }
+    const buffer = await body.arrayBuffer();
+    return { body: uint8ToBase64(new Uint8Array(buffer)), bodyEncoding: 'base64' };
+  }
+
   if (body instanceof ReadableStream) {
     const reader = body.getReader();
     const chunks: Uint8Array[] = [];
@@ -127,7 +191,11 @@ async function readBody(body: BodyInit): Promise<string | undefined> {
       combined.set(chunk, offset);
       offset += chunk.length;
     }
-    return new TextDecoder().decode(combined);
+    if (isTextContentType(contentType)) {
+      return { body: new TextDecoder().decode(combined) };
+    }
+    return { body: uint8ToBase64(combined), bodyEncoding: 'base64' };
   }
+
   return undefined;
 }
