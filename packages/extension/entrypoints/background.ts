@@ -23,6 +23,7 @@ import {
   parseUsage,
   computeAllowanceCheck,
   validateProxyUrl,
+  injectClaudeCodeSystemPrompt,
   createGiftLink,
   decodeGiftLink,
   validateGiftLink,
@@ -493,24 +494,6 @@ export default defineBackground(() => {
   });
 
   // --- Helpers ---
-
-  function injectClaudeCodeSystemPrompt(body: string | undefined): string | undefined {
-    if (!body) return body;
-    try {
-      const parsed = JSON.parse(body);
-      const prefix = "You are Claude Code, Anthropic's official CLI for Claude.";
-      if (!parsed.system) {
-        parsed.system = prefix;
-      } else if (typeof parsed.system === 'string') {
-        parsed.system = `${prefix}\n\n${parsed.system}`;
-      } else if (Array.isArray(parsed.system)) {
-        parsed.system = [{ type: 'text', text: prefix }, ...parsed.system];
-      }
-      return JSON.stringify(parsed);
-    } catch {
-      return body;
-    }
-  }
 
   function resolveOrigin(sender: Runtime.MessageSender): string {
     // sender.url is always available for content scripts (no tabs permission needed)
