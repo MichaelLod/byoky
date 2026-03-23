@@ -995,6 +995,9 @@ export default defineBackground(() => {
         } catch {
           return { error: 'Wrong password or corrupted file' };
         }
+        if (vaultJson.length > 10_485_760) {
+          return { error: 'Vault file too large' };
+        }
         const vault = JSON.parse(vaultJson) as { version?: number; credentials?: unknown[] };
         if (!vault.version || !vault.credentials) {
           return { error: 'Invalid vault file format' };
@@ -1456,7 +1459,9 @@ export default defineBackground(() => {
 
       ws.onmessage = (event) => {
         try {
-          const data = JSON.parse(typeof event.data === 'string' ? event.data : '');
+          const raw = typeof event.data === 'string' ? event.data : '';
+          if (raw.length > 10_485_760) return;
+          const data = JSON.parse(raw);
 
           if (data.type === 'relay:auth:result') {
             if (!data.success) {
@@ -2224,7 +2229,9 @@ export default defineBackground(() => {
 
       ws.onmessage = async (event) => {
         try {
-          const msg = JSON.parse(typeof event.data === 'string' ? event.data : '');
+          const raw = typeof event.data === 'string' ? event.data : '';
+          if (raw.length > 10_485_760) return;
+          const msg = JSON.parse(raw);
 
           if (msg.type === 'relay:auth:result' && !msg.success) {
             ws.close();

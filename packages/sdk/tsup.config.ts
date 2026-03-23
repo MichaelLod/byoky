@@ -5,6 +5,6 @@ export default defineConfig({
   format: ['esm', 'cjs'],
   dts: true,
   clean: true,
-  sourcemap: true,
+  sourcemap: false,
   external: ['@byoky/core'],
 });

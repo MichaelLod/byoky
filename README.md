@@ -40,7 +40,7 @@
 - **Token gifts** — Share token access with friends or teammates without sharing your API key. Set budgets and expiration. All requests relay through your wallet.
 
 <p align="center">
-  <img src="https://github.com/MichaelLod/byoky/raw/main/.github/screenshots/screenshot-1.png" alt="Byoky Wallet" width="400" />&nbsp;&nbsp;<img src="https://github.com/MichaelLod/byoky/raw/main/.github/screenshots/screenshot-2.png" alt="Byoky Unlock" width="400" />
+  <img src="https://github.com/MichaelLod/byoky/raw/main/.github/screenshots/screenshot-1.png?v=2" alt="Byoky Wallet" width="400" height="1051" />&nbsp;&nbsp;<img src="https://github.com/MichaelLod/byoky/raw/main/.github/screenshots/screenshot-2.png?v=2" alt="Byoky Unlock" width="400" height="1051" />
 </p>
 
 ### How it works
