@@ -1,3 +1,5 @@
+import { validateProxyUrl } from '@byoky/core';
+
 /**
  * Creates a fetch-like function that routes requests through a WebSocket relay
  * to a mobile wallet app, instead of through a browser extension.
@@ -16,6 +18,10 @@ export function createRelayFetch(
         : input instanceof URL
           ? input.toString()
           : input.url;
+
+    if (!validateProxyUrl(providerId, url)) {
+      throw new Error(`Request URL does not match provider ${providerId} — request blocked`);
+    }
 
     const method = init?.method ?? 'GET';
     const headers = init?.headers
@@ -88,12 +94,24 @@ export function createRelayFetch(
         }
       }
 
+      function handleClose() {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timeout);
+          reject(new Error('Relay WebSocket closed before response completed'));
+        }
+        writer.close().catch(() => {});
+        cleanup();
+      }
+
       function cleanup() {
         clearTimeout(timeout);
         ws.removeEventListener('message', handleMessage);
+        ws.removeEventListener('close', handleClose);
       }
 
       ws.addEventListener('message', handleMessage);
+      ws.addEventListener('close', handleClose);
 
       ws.send(JSON.stringify({
         type: 'relay:request',

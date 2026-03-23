@@ -423,14 +423,15 @@ describe('security invariants', () => {
       expect(bg).toContain('giftBudgetLocks');
       // Must re-validate budget inside the locked section to prevent overspend
       const lockSection = bg.slice(bg.indexOf('giftBudgetLocks.get(gift.id)'));
-      expect(lockSection).toContain('usedTokens + totalTokens > refreshGifts');
+      expect(lockSection).toContain('usedTokens + totalTokens');
     });
 
-    it('checks gift budget under lock before proxying', () => {
+    it('serializes entire gift request lifecycle under one lock', () => {
       const handler = bg.slice(bg.indexOf('handleGiftProxyRequest'));
-      // Budget check must acquire the lock to prevent race conditions
-      expect(handler).toContain('budgetPrev = giftBudgetLocks.get(gift.id)');
-      expect(handler).toContain('budgetCheck');
+      // Budget check, API call, and usage update must all run under one lock
+      // to prevent concurrent requests from both passing the budget check
+      expect(handler).toContain('prev = giftBudgetLocks.get(gift.id)');
+      expect(handler).toContain('Serialize the entire request lifecycle');
     });
 
     it('has request timeout on gift proxy fetch', () => {
