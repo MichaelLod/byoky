@@ -358,7 +358,7 @@ function calcPenalty(matrix: boolean[][]): number {
   for (let r = 0; r < size; r++) {
     for (let c = 0; c < size - 10; c++) {
       if (matchFinderPattern(matrix, r, c, true)) penalty += 40;
-      if (matchFinderPattern(matrix, c, r, false)) penalty += 40;
+      if (matchFinderPattern(matrix, r, c, false)) penalty += 40;
     }
   }
 
