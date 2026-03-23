@@ -433,6 +433,10 @@ export default defineBackground(() => {
             outputTokens: usage?.outputTokens,
             model,
           });
+          browser.runtime.sendMessage({
+            type: 'BYOKY_INTERNAL',
+            action: 'usageUpdated',
+          }).catch(() => {});
         }
       } catch (error) {
         port.postMessage({

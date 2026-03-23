@@ -30,7 +30,7 @@ export default function App() {
             useWalletStore.getState().navigate('approval');
           }
         });
-      } else if (msg.action === 'sessionChanged') {
+      } else if (msg.action === 'sessionChanged' || msg.action === 'usageUpdated') {
         useWalletStore.getState().refreshData();
       }
     }
