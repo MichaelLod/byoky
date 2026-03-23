@@ -30,8 +30,8 @@ const projects: Project[] = [
     name: 'LamboChart',
     url: 'https://lambochart.com',
     description:
-      'AI-powered crypto charting and analysis. Users bring their own LLM keys via Byoky to power on-chain insights.',
-    category: 'Crypto',
+      'Track your vibe coding progress with AI-powered analytics. Users bring their own LLM keys via Byoky.',
+    category: 'Vibe Coding',
     color: '#f59e0b',
   },
 ];
