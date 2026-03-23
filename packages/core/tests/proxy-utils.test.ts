@@ -67,6 +67,33 @@ describe('buildHeaders', () => {
     expect(headers['anthropic-version']).toBe('2024-01-01');
   });
 
+  it('merges app beta flags with OAuth-required flags for Anthropic', () => {
+    const headers = buildHeaders(
+      'anthropic',
+      { 'anthropic-beta': 'prompt-caching-2024-07-31' },
+      'sk-ant-oat01-token',
+      'oauth',
+    );
+    expect(headers['anthropic-beta']).toContain('prompt-caching-2024-07-31');
+    expect(headers['anthropic-beta']).toContain('oauth-2025-04-20');
+    expect(headers['authorization']).toBe('Bearer sk-ant-oat01-token');
+  });
+
+  it('preserves app accept header for OAuth Anthropic', () => {
+    const headers = buildHeaders(
+      'anthropic',
+      { 'accept': 'text/event-stream' },
+      'sk-ant-oat01-token',
+      'oauth',
+    );
+    expect(headers['accept']).toBe('text/event-stream');
+  });
+
+  it('defaults accept to application/json for OAuth Anthropic', () => {
+    const headers = buildHeaders('anthropic', {}, 'sk-ant-oat01-token', 'oauth');
+    expect(headers['accept']).toBe('application/json');
+  });
+
   it('sets api-key for Azure OpenAI', () => {
     const headers = buildHeaders('azure_openai', {}, 'azure-key');
     expect(headers['api-key']).toBe('azure-key');

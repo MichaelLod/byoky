@@ -58,8 +58,11 @@ export function buildHeaders(
       headers['authorization'] = `Bearer ${apiKey}`;
       headers['user-agent'] = 'claude-cli/2.1.76';
       headers['x-app'] = 'cli';
-      headers['accept'] = 'application/json';
-      headers['anthropic-beta'] = 'claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14';
+      headers['accept'] = headers['accept'] ?? 'application/json';
+      // Merge app's beta flags with OAuth-required flags
+      const oauthBeta = ['claude-code-20250219', 'oauth-2025-04-20', 'fine-grained-tool-streaming-2025-05-14', 'interleaved-thinking-2025-05-14'];
+      const existing = headers['anthropic-beta'] ? headers['anthropic-beta'].split(',').map(s => s.trim()) : [];
+      headers['anthropic-beta'] = [...new Set([...existing, ...oauthBeta])].join(',');
       headers['anthropic-dangerous-direct-browser-access'] = 'true';
     } else {
       headers['x-api-key'] = apiKey;
