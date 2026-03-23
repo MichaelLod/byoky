@@ -1,6 +1,6 @@
 export function createProxyFetch(
   providerId: string,
-  sessionKey: string,
+  sessionKeyRef: { current: string },
 ): typeof fetch {
   return async (
     input: RequestInfo | URL,
@@ -93,7 +93,7 @@ export function createProxyFetch(
         {
           type: 'BYOKY_PROXY_REQUEST',
           requestId,
-          sessionKey,
+          sessionKey: sessionKeyRef.current,
           providerId,
           url,
           method,

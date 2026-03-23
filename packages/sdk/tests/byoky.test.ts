@@ -277,6 +277,150 @@ describe('Byoky', () => {
     expect(callback).not.toHaveBeenCalled();
   });
 
+  it('auto-reconnects on SESSION_EXPIRED and retries the request', async () => {
+    const byoky = new Byoky();
+    const connectPromise = byoky.connect();
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    const connectMsg = postedMessages[0].data;
+    simulateResponse({
+      type: 'BYOKY_CONNECT_RESPONSE',
+      requestId: connectMsg.requestId,
+      payload: {
+        sessionKey: 'byk_old',
+        proxyUrl: 'extension-proxy',
+        providers: { anthropic: { available: true, authMethod: 'api_key' as const } },
+      },
+    });
+
+    const session = await connectPromise;
+    const anthropicFetch = session.createFetch('anthropic');
+
+    // Make a request that will get SESSION_EXPIRED
+    const fetchPromise = anthropicFetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      body: '{"model":"claude-sonnet-4-20250514"}',
+    });
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Find the proxy request
+    const proxyMsg = postedMessages.find((m) => m.data.type === 'BYOKY_PROXY_REQUEST');
+    expect(proxyMsg).toBeDefined();
+    expect(proxyMsg!.data.sessionKey).toBe('byk_old');
+
+    // Respond with SESSION_EXPIRED
+    proxyMsg!.port!.postMessage({
+      type: 'BYOKY_PROXY_RESPONSE_ERROR',
+      requestId: proxyMsg!.data.requestId,
+      status: 401,
+      error: { code: 'SESSION_EXPIRED', message: 'Invalid or expired session' },
+    });
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    // SDK should have sent a reconnectOnly connect request
+    const reconnectMsg = postedMessages.find(
+      (m) => m.data.type === 'BYOKY_CONNECT_REQUEST' && m.data !== connectMsg,
+    );
+    expect(reconnectMsg).toBeDefined();
+    expect((reconnectMsg!.data.payload as Record<string, unknown>).reconnectOnly).toBe(true);
+
+    // Respond with a new session
+    reconnectMsg!.port!.postMessage({
+      type: 'BYOKY_CONNECT_RESPONSE',
+      requestId: reconnectMsg!.data.requestId,
+      payload: {
+        sessionKey: 'byk_new',
+        proxyUrl: 'extension-proxy',
+        providers: { anthropic: { available: true, authMethod: 'api_key' as const } },
+      },
+    });
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    // SDK should have retried the proxy request with the new session key
+    const retryMsg = postedMessages.find(
+      (m) => m.data.type === 'BYOKY_PROXY_REQUEST' && m.data.sessionKey === 'byk_new',
+    );
+    expect(retryMsg).toBeDefined();
+
+    // Respond with success
+    retryMsg!.port!.postMessage({
+      type: 'BYOKY_PROXY_RESPONSE_META',
+      requestId: retryMsg!.data.requestId,
+      status: 200,
+      statusText: 'OK',
+      headers: { 'content-type': 'application/json' },
+    });
+    retryMsg!.port!.postMessage({
+      type: 'BYOKY_PROXY_RESPONSE_CHUNK',
+      requestId: retryMsg!.data.requestId,
+      chunk: '{"ok":true}',
+    });
+    retryMsg!.port!.postMessage({
+      type: 'BYOKY_PROXY_RESPONSE_DONE',
+      requestId: retryMsg!.data.requestId,
+    });
+
+    const response = await fetchPromise;
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(session.sessionKey).toBe('byk_new');
+  });
+
+  it('fires onDisconnect when auto-reconnect fails', async () => {
+    const byoky = new Byoky();
+    const connectPromise = byoky.connect();
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    const connectMsg = postedMessages[0].data;
+    simulateResponse({
+      type: 'BYOKY_CONNECT_RESPONSE',
+      requestId: connectMsg.requestId,
+      payload: {
+        sessionKey: 'byk_dead',
+        proxyUrl: 'extension-proxy',
+        providers: { anthropic: { available: true, authMethod: 'api_key' as const } },
+      },
+    });
+
+    const session = await connectPromise;
+    const disconnectCb = vi.fn();
+    session.onDisconnect(disconnectCb);
+
+    const anthropicFetch = session.createFetch('anthropic');
+    const fetchPromise = anthropicFetch('https://api.anthropic.com/v1/messages');
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    const proxyMsg = postedMessages.find((m) => m.data.type === 'BYOKY_PROXY_REQUEST');
+    proxyMsg!.port!.postMessage({
+      type: 'BYOKY_PROXY_RESPONSE_ERROR',
+      requestId: proxyMsg!.data.requestId,
+      status: 401,
+      error: { code: 'SESSION_EXPIRED', message: 'Invalid or expired session' },
+    });
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Fail the reconnect attempt
+    const reconnectMsg = postedMessages.find(
+      (m) => m.data.type === 'BYOKY_CONNECT_REQUEST' && m.data !== connectMsg,
+    );
+    reconnectMsg!.port!.postMessage({
+      type: 'BYOKY_ERROR',
+      requestId: reconnectMsg!.data.requestId,
+      payload: { code: 'NO_SESSION', message: 'No active session' },
+    });
+
+    const response = await fetchPromise;
+    expect(response.status).toBe(401);
+    expect(disconnectCb).toHaveBeenCalledTimes(1);
+  });
+
   function simulateResponse(data: Record<string, unknown>) {
     const entry = postedMessages.find(
       (m) => m.data.requestId === data.requestId,

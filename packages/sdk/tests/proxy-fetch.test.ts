@@ -23,12 +23,12 @@ describe('createProxyFetch', () => {
   });
 
   it('returns a function', () => {
-    const proxyFetch = createProxyFetch('anthropic', 'byk_test');
+    const proxyFetch = createProxyFetch('anthropic', { current: 'byk_test' });
     expect(typeof proxyFetch).toBe('function');
   });
 
   it('posts a BYOKY_PROXY_REQUEST message', async () => {
-    const proxyFetch = createProxyFetch('anthropic', 'byk_session');
+    const proxyFetch = createProxyFetch('anthropic', { current: 'byk_session' });
 
     const fetchPromise = proxyFetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -75,7 +75,7 @@ describe('createProxyFetch', () => {
   });
 
   it('handles error responses', async () => {
-    const proxyFetch = createProxyFetch('openai', 'byk_session');
+    const proxyFetch = createProxyFetch('openai', { current: 'byk_session' });
 
     const fetchPromise = proxyFetch('https://api.openai.com/v1/chat/completions');
 
@@ -97,7 +97,7 @@ describe('createProxyFetch', () => {
   });
 
   it('handles streaming chunks', async () => {
-    const proxyFetch = createProxyFetch('anthropic', 'byk_session');
+    const proxyFetch = createProxyFetch('anthropic', { current: 'byk_session' });
 
     const fetchPromise = proxyFetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -139,7 +139,7 @@ describe('createProxyFetch', () => {
   });
 
   it('ignores messages for other request ids', async () => {
-    const proxyFetch = createProxyFetch('anthropic', 'byk_session');
+    const proxyFetch = createProxyFetch('anthropic', { current: 'byk_session' });
 
     const fetchPromise = proxyFetch('https://api.anthropic.com/v1/messages');
 
