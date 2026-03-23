@@ -29,6 +29,14 @@ const projects: Project[] = [
     category: 'Vibe Coding',
     color: '#f59e0b',
   },
+  {
+    name: 'RNRH',
+    url: 'https://rnrh.app',
+    description:
+      'Free AI-powered PDF generator. Create professional documents with your own API keys through Byoky.',
+    category: 'Productivity',
+    color: '#3b82f6',
+  },
 ];
 
 /* ─── Page ────────────────────────────────────── */
