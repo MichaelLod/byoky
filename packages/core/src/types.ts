@@ -111,6 +111,15 @@ export interface ProxyRequest {
   method: string;
   headers: Record<string, string>;
   body?: string;
+  bodyEncoding?: 'base64' | 'formdata';
+}
+
+export interface SerializedFormDataEntry {
+  name: string;
+  value: string;
+  type: 'text' | 'file';
+  filename?: string;
+  contentType?: string;
 }
 
 export interface ProxyResponseMeta {

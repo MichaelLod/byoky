@@ -148,6 +148,50 @@ const response = await client.messages.create({
 // Handle the tool_use block, run your function, send results back`,
   },
   {
+    id: 'vision',
+    label: 'Vision',
+    filename: 'vision.ts',
+    description:
+      'Analyze images with Claude or GPT-4o. File uploads go through the proxy — the API never sees your key.',
+    code: `import Anthropic from '@anthropic-ai/sdk';
+import { Byoky } from '@byoky/sdk';
+
+const session = await new Byoky().connect({
+  providers: [{ id: 'anthropic', required: true }],
+  modal: true,
+});
+
+const client = new Anthropic({
+  apiKey: session.sessionKey,
+  fetch: session.createFetch('anthropic'),
+});
+
+// Read a file from an <input> or drag-and-drop
+const file: File = document.querySelector('input')!.files![0];
+const base64 = btoa(
+  String.fromCharCode(...new Uint8Array(await file.arrayBuffer())),
+);
+
+const response = await client.messages.create({
+  model: 'claude-sonnet-4-20250514',
+  max_tokens: 1024,
+  messages: [{
+    role: 'user',
+    content: [
+      {
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: file.type as 'image/jpeg',
+          data: base64,
+        },
+      },
+      { type: 'text', text: 'What is in this image?' },
+    ],
+  }],
+});`,
+  },
+  {
     id: 'backend-relay',
     label: 'Backend Relay',
     filename: 'relay.ts',
