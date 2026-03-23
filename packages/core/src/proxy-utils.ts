@@ -199,3 +199,25 @@ export function computeAllowanceCheck(
 
   return { allowed: true };
 }
+
+/**
+ * Inject the Claude Code system prompt prefix into a JSON request body.
+ * Only used for bridge/CLI sessions that go through the Claude Code OAuth path.
+ */
+export function injectClaudeCodeSystemPrompt(body: string | undefined): string | undefined {
+  if (!body) return body;
+  try {
+    const parsed = JSON.parse(body);
+    const prefix = "You are Claude Code, Anthropic's official CLI for Claude.";
+    if (!parsed.system) {
+      parsed.system = prefix;
+    } else if (typeof parsed.system === 'string') {
+      parsed.system = `${prefix}\n\n${parsed.system}`;
+    } else if (Array.isArray(parsed.system)) {
+      parsed.system = [{ type: 'text', text: prefix }, ...parsed.system];
+    }
+    return JSON.stringify(parsed);
+  } catch {
+    return body;
+  }
+}
