@@ -256,8 +256,10 @@ final class RelayPairService: ObservableObject {
                 ])
 
                 var buffer = Data()
+                var fullResponseData = Data()
                 for try await byte in bytes {
                     buffer.append(byte)
+                    fullResponseData.append(byte)
                     if buffer.count >= 4096 || byte == 0x0A {
                         if let chunk = String(data: buffer, encoding: .utf8) {
                             sendJSON([
@@ -282,6 +284,21 @@ final class RelayPairService: ObservableObject {
                     "type": "relay:response:done",
                     "requestId": requestId,
                 ])
+
+                let responseBody = String(data: fullResponseData, encoding: .utf8)
+                let requestBody = bodyString?.data(using: .utf8)
+                let origin = await MainActor.run { self.pairedOrigin ?? "relay" }
+                await MainActor.run {
+                    wallet.logRequest(
+                        appOrigin: origin,
+                        providerId: providerId,
+                        method: method,
+                        url: urlString,
+                        statusCode: httpResponse.statusCode,
+                        requestBody: requestBody,
+                        responseBody: responseBody
+                    )
+                }
 
             } catch {
                 sendRelayError(requestId: requestId, code: "PROXY_ERROR", message: error.localizedDescription)
