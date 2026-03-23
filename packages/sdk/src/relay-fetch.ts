@@ -1,5 +1,7 @@
 import { validateProxyUrl } from '@byoky/core';
 
+const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10 MB
+
 /**
  * Creates a fetch-like function that routes requests through a WebSocket relay
  * to a mobile wallet app, instead of through a browser extension.
@@ -52,22 +54,30 @@ export function createRelayFetch(
         if (data.requestId !== requestId) return;
 
         switch (data.type) {
-          case 'relay:response:meta':
-            if (!resolved) {
-              resolved = true;
-              clearTimeout(timeout);
-              resolve(
-                new Response(readable, {
-                  status: data.status as number,
-                  statusText: (data.statusText as string) ?? '',
-                  headers: new Headers(data.headers as Record<string, string>),
-                }),
-              );
+          case 'relay:response:meta': {
+            if (resolved) break;
+            if (typeof data.status !== 'number' || data.status < 100 || data.status > 599) break;
+            const statusText = typeof data.statusText === 'string' ? data.statusText : '';
+            if (!data.headers || typeof data.headers !== 'object' || Array.isArray(data.headers)) break;
+            const safeHeaders: Record<string, string> = {};
+            for (const [k, v] of Object.entries(data.headers as Record<string, unknown>)) {
+              if (typeof k === 'string' && typeof v === 'string') safeHeaders[k] = v;
             }
+            resolved = true;
+            clearTimeout(timeout);
+            resolve(
+              new Response(readable, {
+                status: data.status,
+                statusText,
+                headers: new Headers(safeHeaders),
+              }),
+            );
             break;
+          }
 
           case 'relay:response:chunk':
-            writer.write(encoder.encode(data.chunk as string)).catch(() => {});
+            if (typeof data.chunk !== 'string') break;
+            writer.write(encoder.encode(data.chunk)).catch(() => {});
             break;
 
           case 'relay:response:done':
@@ -76,10 +86,8 @@ export function createRelayFetch(
             break;
 
           case 'relay:response:error': {
-            const err = data.error as { code: string; message: string } | string | undefined;
-            const message = typeof err === 'string' ? err : err?.message ?? 'Relay proxy error';
             const errResponse = new Response(
-              JSON.stringify({ error: { message, code: typeof err === 'object' ? err?.code : 'RELAY_ERROR' } }),
+              JSON.stringify({ error: { message: 'Relay proxy error', code: 'RELAY_ERROR' } }),
               { status: 500, headers: { 'content-type': 'application/json' } },
             );
             if (!resolved) {
@@ -127,20 +135,31 @@ export function createRelayFetch(
 }
 
 async function readBody(body: BodyInit): Promise<string | undefined> {
-  if (typeof body === 'string') return body;
-  if (body instanceof ArrayBuffer) return new TextDecoder().decode(body);
-  if (body instanceof Blob) return body.text();
+  if (typeof body === 'string') {
+    if (body.length > MAX_BODY_SIZE) throw new Error('Request body exceeds maximum size');
+    return body;
+  }
+  if (body instanceof ArrayBuffer) {
+    if (body.byteLength > MAX_BODY_SIZE) throw new Error('Request body exceeds maximum size');
+    return new TextDecoder().decode(body);
+  }
+  if (body instanceof Blob) {
+    if (body.size > MAX_BODY_SIZE) throw new Error('Request body exceeds maximum size');
+    return body.text();
+  }
   if (body instanceof URLSearchParams) return body.toString();
   if (body instanceof ReadableStream) {
     const reader = body.getReader();
     const chunks: Uint8Array[] = [];
+    let totalSize = 0;
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
+      totalSize += value.length;
+      if (totalSize > MAX_BODY_SIZE) throw new Error('Request body exceeds maximum size');
       chunks.push(value);
     }
-    const total = chunks.reduce((acc, c) => acc + c.length, 0);
-    const combined = new Uint8Array(total);
+    const combined = new Uint8Array(totalSize);
     let offset = 0;
     for (const chunk of chunks) {
       combined.set(chunk, offset);

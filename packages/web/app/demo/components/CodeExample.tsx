@@ -13,6 +13,7 @@ import { Byoky } from '@byoky/sdk';
 const byoky = new Byoky();
 const session = await byoky.connect({
   providers: [{ id: 'anthropic', required: true }],
+  modal: true, // built-in connect UI with QR code
 });
 
 const client = new Anthropic({
@@ -37,6 +38,7 @@ import { Byoky } from '@byoky/sdk';
 
 const session = await new Byoky().connect({
   providers: [{ id: 'openai', required: true }],
+  modal: true,
 });
 
 const client = new OpenAI({
@@ -81,6 +83,7 @@ import { Byoky } from '@byoky/sdk';
 
 const session = await new Byoky().connect({
   providers: [{ id: 'anthropic', required: true }],
+  modal: true,
 });
 
 const client = new Anthropic({
@@ -112,6 +115,7 @@ import { Byoky } from '@byoky/sdk';
 
 const session = await new Byoky().connect({
   providers: [{ id: 'anthropic', required: true }],
+  modal: true,
 });
 
 const client = new Anthropic({
@@ -154,6 +158,7 @@ import { Byoky } from '@byoky/sdk';
 
 const session = await new Byoky().connect({
   providers: [{ id: 'anthropic', required: true }],
+  modal: true, // built-in connect UI
 });
 
 // Open relay — backend can now make LLM calls through this session
@@ -201,6 +206,7 @@ const session = await new Byoky().connect({
     { id: 'openai', required: false },
     { id: 'gemini', required: false },
   ],
+  modal: true,
 });
 
 // Check which providers the user approved

@@ -349,7 +349,8 @@ function CodeBlock() {
             {'\n'}
             <span className="tk">const</span> <span className="tp">byoky</span> <span className="tn">=</span> <span className="tk">new</span> <span className="tt">Byoky</span><span className="tn">();</span>{'\n'}
             <span className="tk">const</span> <span className="tp">session</span> <span className="tn">=</span> <span className="tk">await</span> <span className="tp">byoky</span><span className="tn">.</span><span className="tp">connect</span><span className="tn">(</span><span className="tn">{'{'}</span>{'\n'}
-            {'  '}<span className="tp">providers</span><span className="tn">:</span> <span className="tn">[{'{'}</span> <span className="tp">id</span><span className="tn">:</span> <span className="ts">&apos;anthropic&apos;</span><span className="tn">,</span> <span className="tp">required</span><span className="tn">:</span> <span className="tv">true</span> <span className="tn">{'}]'}</span>{'\n'}
+            {'  '}<span className="tp">providers</span><span className="tn">:</span> <span className="tn">[{'{'}</span> <span className="tp">id</span><span className="tn">:</span> <span className="ts">&apos;anthropic&apos;</span><span className="tn">,</span> <span className="tp">required</span><span className="tn">:</span> <span className="tv">true</span> <span className="tn">{'}]'}</span><span className="tn">,</span>{'\n'}
+            {'  '}<span className="tp">modal</span><span className="tn">:</span> <span className="tv">true</span><span className="tn">,</span> <span className="tc">{'// built-in connect UI with QR code'}</span>{'\n'}
             <span className="tn">{'}'});</span>{'\n'}
             {'\n'}
             <span className="tc">{'// Use the native Anthropic SDK — keys never exposed'}</span>{'\n'}
@@ -652,7 +653,7 @@ function MobileWallet() {
                 <pre className="code-body"><code>{`const session = await byoky.connect({
   providers: [{ id: 'anthropic' }],
   useRelay: true,
-  onPairingReady: (code) => showQRCode(code),
+  modal: true, // built-in connect UI with QR code
 });
 // Works exactly the same as extension mode`}</code></pre>
               </div>
@@ -824,6 +825,9 @@ function Footer() {
             </a>
             <a href="/demo">
               Demo
+            </a>
+            <a href="/built-with">
+              Built with Byoky
             </a>
             <a
               href="https://github.com/MichaelLod/byoky/blob/main/LICENSE"

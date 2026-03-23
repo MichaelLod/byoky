@@ -78,6 +78,7 @@ import { Byoky } from '@byoky/sdk';
 const byoky = new Byoky();
 const session = await byoky.connect({
   providers: [{ id: 'anthropic', required: true }],
+  modal: true,
 });
 
 // Use the native Anthropic SDK — just swap in Byoky's fetch
@@ -104,16 +105,11 @@ No browser extension? Users can connect with the Byoky iOS app instead. The SDK 
 Web App ←WebSocket→ Relay Server ←WebSocket→ Phone Wallet → LLM API
 ```
 
+With `modal: true`, the connect modal automatically detects whether the extension is installed. If not, it falls back to relay mode and shows a built-in QR code for mobile pairing — no custom UI needed.
+
 ```typescript
-const session = await byoky.connect({
-  providers: [{ id: 'anthropic', required: true }],
-  useRelay: true,
-  onPairingReady: (code) => {
-    // Show this code as a QR or text for the user to scan
-    showQRCode(code);
-  },
-});
-// Works exactly the same as extension mode
+// Works with both extension and mobile — modal handles detection and QR code
+const session = await byoky.connect({ modal: true });
 ```
 
 > **Works on any browser, any device.** No extension install required. Keys stay on the phone.
@@ -128,7 +124,7 @@ Backend ←WebSocket→ User's Frontend ←Extension→ LLM API
 
 ```typescript
 // Frontend — open a relay so the backend can make LLM calls
-const session = await new Byoky().connect({ providers: [{ id: 'anthropic' }] });
+const session = await new Byoky().connect({ providers: [{ id: 'anthropic' }], modal: true });
 const relay = session.createRelay('wss://your-app.com/ws/relay');
 ```
 
@@ -303,7 +299,7 @@ pnpm --filter @byoky/extension build:all     # Chrome + Firefox + Safari
 | | |
 |---|---|
 | **Extension** | [WXT](https://wxt.dev) · React · Zustand · Web Crypto API |
-| **SDK** | TypeScript · zero dependencies (except @byoky/core) |
+| **SDK** | TypeScript · built-in connect modal with QR code for mobile pairing · zero dependencies (except @byoky/core) |
 | **Monorepo** | pnpm workspaces · TypeScript strict mode |
 | **Browsers** | Chrome (MV3) · Firefox · Safari |
 
