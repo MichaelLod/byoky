@@ -56,33 +56,56 @@ interface VersionParams {
 }
 
 const VERSIONS: VersionParams[] = [
-  { ecPerBlock: 10, groups: [[1, 16]] },       // v1
-  { ecPerBlock: 16, groups: [[1, 28]] },       // v2
-  { ecPerBlock: 26, groups: [[1, 44]] },       // v3
-  { ecPerBlock: 18, groups: [[2, 32]] },       // v4
-  { ecPerBlock: 24, groups: [[2, 43]] },       // v5
-  { ecPerBlock: 16, groups: [[4, 27]] },       // v6
-  { ecPerBlock: 18, groups: [[4, 31]] },       // v7
-  { ecPerBlock: 22, groups: [[2, 38], [2, 39]] },   // v8
-  { ecPerBlock: 22, groups: [[3, 36], [2, 37]] },   // v9
-  { ecPerBlock: 26, groups: [[4, 43], [1, 44]] },   // v10
+  { ecPerBlock: 10, groups: [[1, 16]] },                 // v1
+  { ecPerBlock: 16, groups: [[1, 28]] },                 // v2
+  { ecPerBlock: 26, groups: [[1, 44]] },                 // v3
+  { ecPerBlock: 18, groups: [[2, 32]] },                 // v4
+  { ecPerBlock: 24, groups: [[2, 43]] },                 // v5
+  { ecPerBlock: 16, groups: [[4, 27]] },                 // v6
+  { ecPerBlock: 18, groups: [[4, 31]] },                 // v7
+  { ecPerBlock: 22, groups: [[2, 38], [2, 39]] },       // v8
+  { ecPerBlock: 22, groups: [[3, 36], [2, 37]] },       // v9
+  { ecPerBlock: 26, groups: [[4, 43], [1, 44]] },       // v10
+  { ecPerBlock: 30, groups: [[1, 50], [4, 51]] },       // v11
+  { ecPerBlock: 22, groups: [[6, 36], [2, 37]] },       // v12
+  { ecPerBlock: 22, groups: [[8, 37], [1, 38]] },       // v13
+  { ecPerBlock: 24, groups: [[4, 40], [5, 41]] },       // v14
+  { ecPerBlock: 24, groups: [[5, 41], [5, 42]] },       // v15
+  { ecPerBlock: 28, groups: [[7, 45], [3, 46]] },       // v16
+  { ecPerBlock: 28, groups: [[10, 46], [1, 47]] },      // v17
+  { ecPerBlock: 26, groups: [[9, 43], [4, 44]] },       // v18
+  { ecPerBlock: 26, groups: [[3, 44], [11, 45]] },      // v19
+  { ecPerBlock: 26, groups: [[3, 41], [13, 42]] },      // v20
 ];
 
 const ALIGNMENT: number[][] = [
-  [],           // v1
-  [6, 18],      // v2
-  [6, 22],      // v3
-  [6, 26],      // v4
-  [6, 30],      // v5
-  [6, 34],      // v6
-  [6, 22, 38],  // v7
-  [6, 24, 42],  // v8
-  [6, 26, 46],  // v9
-  [6, 28, 50],  // v10
+  [],              // v1
+  [6, 18],         // v2
+  [6, 22],         // v3
+  [6, 26],         // v4
+  [6, 30],         // v5
+  [6, 34],         // v6
+  [6, 22, 38],     // v7
+  [6, 24, 42],     // v8
+  [6, 26, 46],     // v9
+  [6, 28, 50],     // v10
+  [6, 30, 54],     // v11
+  [6, 32, 58],     // v12
+  [6, 34, 62],     // v13
+  [6, 26, 46, 66], // v14
+  [6, 26, 48, 70], // v15
+  [6, 26, 50, 74], // v16
+  [6, 30, 54, 78], // v17
+  [6, 30, 56, 82], // v18
+  [6, 30, 58, 86], // v19
+  [6, 34, 62, 90], // v20
 ];
 
 // Byte capacity per version at ECC-M (after mode + count overhead)
-const CAPACITY = [14, 26, 42, 62, 84, 106, 122, 152, 180, 213];
+const CAPACITY = [
+  14, 26, 42, 62, 84, 106, 122, 152, 180, 213,   // v1-10
+  251, 287, 331, 362, 412, 450, 504, 560, 614, 666, // v11-20
+];
 
 // --- Data encoding ---
 

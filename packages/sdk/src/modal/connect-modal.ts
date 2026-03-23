@@ -274,8 +274,12 @@ export class ConnectModal {
     if (this.pairingCode) {
       const qrDiv = document.createElement('div');
       qrDiv.className = 'qr';
-      const matrix = encode(this.pairingCode);
-      qrDiv.innerHTML = toSvg(matrix, { size: 200, margin: 2, darkColor: '#f5f5f7', lightColor: '#1c1c22' });
+      try {
+        const matrix = encode(this.pairingCode);
+        qrDiv.innerHTML = toSvg(matrix, { size: 200, margin: 2, darkColor: '#f5f5f7', lightColor: '#1c1c22' });
+      } catch {
+        // Fallback if pairing code is too large for QR
+      }
       this.card.appendChild(qrDiv);
 
       const codeBox = document.createElement('div');
