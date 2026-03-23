@@ -13,6 +13,7 @@ import {
   type Gift,
   type GiftedCredential,
   type GiftLink,
+  type SerializedFormDataEntry,
   decrypt,
   encrypt,
   verifyPassword,
@@ -34,6 +35,44 @@ declare const chrome: {
     open(opts: { tabId: number }): Promise<void>;
   };
 };
+
+function base64ToUint8(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function reconstructBody(
+  body: string | undefined,
+  bodyEncoding: string | undefined,
+): { body: BodyInit | undefined; stripContentType: boolean } {
+  if (body === undefined) return { body: undefined, stripContentType: false };
+
+  if (bodyEncoding === 'formdata') {
+    const entries = JSON.parse(body) as SerializedFormDataEntry[];
+    const formData = new FormData();
+    for (const entry of entries) {
+      if (entry.type === 'text') {
+        formData.append(entry.name, entry.value);
+      } else {
+        const binary = base64ToUint8(entry.value);
+        const blob = new Blob([binary], { type: entry.contentType || 'application/octet-stream' });
+        formData.append(entry.name, blob, entry.filename);
+      }
+    }
+    return { body: formData, stripContentType: true };
+  }
+
+  if (bodyEncoding === 'base64') {
+    const binary = base64ToUint8(body);
+    return { body: binary.buffer as ArrayBuffer, stripContentType: false };
+  }
+
+  return { body, stripContentType: false };
+}
 
 export default defineBackground(() => {
   const sessions = new Map<string, Session>();
@@ -379,10 +418,14 @@ export default defineBackground(() => {
           return;
         }
 
+        const reconstructed = reconstructBody(msg.body, msg.bodyEncoding);
+        const fetchHeaders = { ...realHeaders };
+        if (reconstructed.stripContentType) delete fetchHeaders['content-type'];
+
         const response = await fetch(msg.url, {
           method: msg.method,
-          headers: realHeaders,
-          body: msg.body,
+          headers: fetchHeaders,
+          body: reconstructed.body,
         });
 
         const respHeaders: Record<string, string> = {};
@@ -425,7 +468,7 @@ export default defineBackground(() => {
 
         // Parse token usage from the buffered response
         const fullBody = chunks.join('');
-        const model = parseModel(msg.body);
+        const model = msg.bodyEncoding ? undefined : parseModel(msg.body);
         const usage = parseUsage(msg.providerId, fullBody);
         if (usage || model) {
           await updateLogEntry(logEntryId, {
@@ -2466,10 +2509,14 @@ export default defineBackground(() => {
         const controller = new AbortController();
         const requestTimeout = setTimeout(() => controller.abort(), 120_000);
 
+        const giftReconstructed = reconstructBody(msg.body, msg.bodyEncoding);
+        const giftFetchHeaders = { ...realHeaders };
+        if (giftReconstructed.stripContentType) delete giftFetchHeaders['content-type'];
+
         const response = await fetch(msg.url, {
           method: msg.method,
-          headers: realHeaders,
-          body: msg.body,
+          headers: giftFetchHeaders,
+          body: giftReconstructed.body,
           signal: controller.signal,
         });
 

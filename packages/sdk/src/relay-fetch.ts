@@ -1,6 +1,11 @@
-import { validateProxyUrl } from '@byoky/core';
+import { validateProxyUrl, type SerializedFormDataEntry } from '@byoky/core';
 
 const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10 MB
+
+interface ReadBodyResult {
+  body: string;
+  bodyEncoding?: 'base64' | 'formdata';
+}
 
 /**
  * Creates a fetch-like function that routes requests through a WebSocket relay
@@ -29,7 +34,7 @@ export function createRelayFetch(
     const headers = init?.headers
       ? Object.fromEntries(new Headers(init.headers).entries())
       : {};
-    const body = init?.body ? await readBody(init.body) : undefined;
+    const bodyResult = init?.body ? await readBody(init.body, headers['content-type']) : undefined;
 
     const requestId = crypto.randomUUID();
 
@@ -128,26 +133,83 @@ export function createRelayFetch(
         url,
         method,
         headers,
-        body,
+        body: bodyResult?.body,
+        bodyEncoding: bodyResult?.bodyEncoding,
       }));
     });
   };
 }
 
-async function readBody(body: BodyInit): Promise<string | undefined> {
+function isTextContentType(contentType?: string): boolean {
+  if (!contentType) return true;
+  const lower = contentType.toLowerCase();
+  return lower.startsWith('text/') ||
+    lower.includes('json') ||
+    lower.includes('xml') ||
+    lower.includes('urlencoded') ||
+    lower.includes('javascript');
+}
+
+function uint8ToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+async function serializeFormData(formData: FormData): Promise<ReadBodyResult> {
+  const entries: SerializedFormDataEntry[] = [];
+  let totalSize = 0;
+  for (const [name, value] of formData.entries()) {
+    if (typeof value === 'string') {
+      totalSize += value.length;
+      if (totalSize > MAX_BODY_SIZE) throw new Error('Request body exceeds maximum size');
+      entries.push({ name, value, type: 'text' });
+    } else {
+      totalSize += value.size;
+      if (totalSize > MAX_BODY_SIZE) throw new Error('Request body exceeds maximum size');
+      const buffer = await value.arrayBuffer();
+      entries.push({
+        name,
+        value: uint8ToBase64(new Uint8Array(buffer)),
+        type: 'file',
+        filename: value instanceof File ? value.name : undefined,
+        contentType: value.type || 'application/octet-stream',
+      });
+    }
+  }
+  return { body: JSON.stringify(entries), bodyEncoding: 'formdata' };
+}
+
+async function readBody(body: BodyInit, contentType?: string): Promise<ReadBodyResult | undefined> {
   if (typeof body === 'string') {
     if (body.length > MAX_BODY_SIZE) throw new Error('Request body exceeds maximum size');
-    return body;
+    return { body };
   }
+  if (body instanceof URLSearchParams) return { body: body.toString() };
+
+  if (body instanceof FormData) {
+    return serializeFormData(body);
+  }
+
   if (body instanceof ArrayBuffer) {
     if (body.byteLength > MAX_BODY_SIZE) throw new Error('Request body exceeds maximum size');
-    return new TextDecoder().decode(body);
+    if (isTextContentType(contentType)) {
+      return { body: new TextDecoder().decode(body) };
+    }
+    return { body: uint8ToBase64(new Uint8Array(body)), bodyEncoding: 'base64' };
   }
+
   if (body instanceof Blob) {
     if (body.size > MAX_BODY_SIZE) throw new Error('Request body exceeds maximum size');
-    return body.text();
+    if (isTextContentType(contentType)) {
+      return { body: await body.text() };
+    }
+    const buffer = await body.arrayBuffer();
+    return { body: uint8ToBase64(new Uint8Array(buffer)), bodyEncoding: 'base64' };
   }
-  if (body instanceof URLSearchParams) return body.toString();
+
   if (body instanceof ReadableStream) {
     const reader = body.getReader();
     const chunks: Uint8Array[] = [];
@@ -165,7 +227,11 @@ async function readBody(body: BodyInit): Promise<string | undefined> {
       combined.set(chunk, offset);
       offset += chunk.length;
     }
-    return new TextDecoder().decode(combined);
+    if (isTextContentType(contentType)) {
+      return { body: new TextDecoder().decode(combined) };
+    }
+    return { body: uint8ToBase64(combined), bodyEncoding: 'base64' };
   }
+
   return undefined;
 }
