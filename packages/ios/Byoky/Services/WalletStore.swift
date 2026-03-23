@@ -133,6 +133,44 @@ final class WalletStore: ObservableObject {
         AppGroupSync.shared.syncWalletState(isUnlocked: false, providers: [])
     }
 
+    func resetWallet() {
+        masterKey = nil
+        backgroundTime = nil
+
+        // Load credential IDs from keychain even when locked,
+        // so we can delete individual encrypted key entries
+        var credentialIds: [String] = credentials.map(\.id)
+        if credentialIds.isEmpty {
+            if let stored = try? keychain.loadCodable(key: credentialsKey, as: [Credential].self) {
+                credentialIds = stored.map(\.id)
+            }
+        }
+
+        // Delete all keychain items
+        for id in credentialIds {
+            try? keychain.delete(key: "key_\(id)")
+        }
+        try? keychain.delete(key: passwordHashKey)
+        try? keychain.delete(key: masterSaltKey)
+        try? keychain.delete(key: credentialsKey)
+        try? keychain.delete(key: sessionsKey)
+        try? keychain.delete(key: requestLogKey)
+
+        // Clear in-memory state
+        credentials = []
+        sessions = []
+        requestLogs = []
+        bridgeStatus = .inactive
+
+        // Reset brute-force state
+        failedAttempts = 0
+        lockoutEndTime = nil
+        UserDefaults.standard.set(0.0, forKey: "byoky_lockoutEndTime")
+
+        AppGroupSync.shared.syncWalletState(isUnlocked: false, providers: [])
+        status = .uninitialized
+    }
+
     // MARK: - Brute-Force Protection
 
     private func handleFailedAttempt() {

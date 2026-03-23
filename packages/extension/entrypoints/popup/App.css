@@ -208,6 +208,18 @@ body {
   transform: translateY(-1px);
 }
 
+.btn-link {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 0;
+}
+
+.btn-link:hover {
+  text-decoration: underline;
+}
+
 .btn-secondary {
   background: var(--bg-card);
   color: var(--text);
