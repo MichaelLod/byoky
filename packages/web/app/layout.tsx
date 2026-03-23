@@ -21,9 +21,27 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'Byoky — MetaMask for AI',
+  metadataBase: new URL('https://byoky.com'),
+  title: {
+    default: 'Byoky — MetaMask for AI',
+    template: '%s — Byoky',
+  },
   description:
     'A secure browser wallet for your LLM API keys and setup tokens. Connect to any app — your keys never leave the extension.',
+  keywords: [
+    'AI API key wallet',
+    'LLM API key manager',
+    'bring your own key',
+    'BYOK',
+    'browser extension',
+    'API key security',
+    'OpenAI key wallet',
+    'Anthropic key wallet',
+    'AI developer tools',
+  ],
+  alternates: {
+    canonical: '/',
+  },
   icons: {
     icon: [
       { url: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
@@ -41,7 +59,7 @@ export const metadata: Metadata = {
     type: 'website',
     images: [
       {
-        url: 'https://byoky.com/og-image.png',
+        url: '/og-image.png',
         width: 1200,
         height: 630,
         alt: 'Byoky — MetaMask for AI',
@@ -53,7 +71,7 @@ export const metadata: Metadata = {
     title: 'Byoky — MetaMask for AI',
     description:
       'A secure browser wallet for your LLM API keys. Your keys never leave the extension.',
-    images: ['https://byoky.com/og-image.png'],
+    images: ['/og-image.png'],
   },
 };
 
@@ -64,7 +82,31 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={`${sora.variable} ${jetbrainsMono.variable} ${outfit.variable}`}>
-      <body>{children}</body>
+      <body>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              '@context': 'https://schema.org',
+              '@type': 'SoftwareApplication',
+              name: 'Byoky',
+              applicationCategory: 'BrowserApplication',
+              operatingSystem: 'Chrome, Firefox, Safari',
+              description:
+                'A secure browser wallet for your LLM API keys and setup tokens. Connect to any app — your keys never leave the extension.',
+              url: 'https://byoky.com',
+              offers: {
+                '@type': 'Offer',
+                price: '0',
+                priceCurrency: 'USD',
+              },
+              isAccessibleForFree: true,
+              license: 'https://opensource.org/licenses/MIT',
+            }),
+          }}
+        />
+        {children}
+      </body>
     </html>
   );
 }
