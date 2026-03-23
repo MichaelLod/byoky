@@ -327,7 +327,7 @@ export default defineBackground(() => {
       // Check if this is a gifted credential — route through relay
       const sessionProvider = session.providers.find((sp) => sp.providerId === msg.providerId);
       if (sessionProvider?.giftId && sessionProvider.giftRelayUrl && sessionProvider.giftAuthToken) {
-        await proxyViaGiftRelay(port, msg, sessionProvider);
+        await proxyViaGiftRelay(port, msg, sessionProvider, session);
         return;
       }
 
@@ -375,7 +375,7 @@ export default defineBackground(() => {
           const body = authorizedBridgeSessionKey === msg.sessionKey
             ? injectClaudeCodeSystemPrompt(msg.body)
             : msg.body;
-          await proxyViaBridge(port, { ...msg, body }, realHeaders);
+          await proxyViaBridge(port, { ...msg, body }, realHeaders, session);
           return;
         }
 
@@ -1421,6 +1421,7 @@ export default defineBackground(() => {
     responsePort: Runtime.Port,
     msg: ProxyRequest,
     sp: { giftId?: string; giftRelayUrl?: string; giftAuthToken?: string },
+    session: Session,
   ): Promise<void> {
     if (!sp.giftRelayUrl || !sp.giftAuthToken || !sp.giftId) {
       responsePort.postMessage({
@@ -1461,6 +1462,8 @@ export default defineBackground(() => {
       const ws = new WebSocket(sp.giftRelayUrl);
       let authenticated = false;
       let activeTimeout: ReturnType<typeof setTimeout> | null = null;
+      let logEntryId: string | undefined;
+      const chunks: string[] = [];
 
       function setPhaseTimeout(ms: number, code: string, message: string, status: number) {
         if (activeTimeout) clearTimeout(activeTimeout);
@@ -1550,9 +1553,11 @@ export default defineBackground(() => {
               statusText: data.statusText,
               headers: relayHeaders,
             });
+            logRequest(session, msg, data.status ?? 0).then((id) => { logEntryId = id; });
           }
 
           if (data.type === 'relay:response:chunk' && data.requestId === msg.requestId) {
+            chunks.push(data.chunk ?? '');
             responsePort.postMessage({
               type: 'BYOKY_PROXY_RESPONSE_CHUNK',
               requestId: msg.requestId,
@@ -1566,6 +1571,20 @@ export default defineBackground(() => {
               requestId: msg.requestId,
             });
             ws.close();
+            const fullBody = chunks.join('');
+            const model = parseModel(msg.body);
+            const usage = parseUsage(msg.providerId, fullBody);
+            if (logEntryId && (usage || model)) {
+              updateLogEntry(logEntryId, {
+                inputTokens: usage?.inputTokens,
+                outputTokens: usage?.outputTokens,
+                model,
+              });
+              browser.runtime.sendMessage({
+                type: 'BYOKY_INTERNAL',
+                action: 'usageUpdated',
+              }).catch(() => {});
+            }
           }
 
           if (data.type === 'relay:response:error' && data.requestId === msg.requestId) {
@@ -1662,6 +1681,7 @@ export default defineBackground(() => {
     responsePort: Runtime.Port,
     msg: ProxyRequest,
     headers: Record<string, string>,
+    session: Session,
   ): Promise<void> {
     const available = await checkBridgeAvailable();
     if (!available) {
@@ -1690,6 +1710,8 @@ export default defineBackground(() => {
       });
 
       let bridgeResponded = false;
+      let logEntryId: string | undefined;
+      const chunks: string[] = [];
 
       nativePort.onMessage.addListener(
         (raw: unknown) => {
@@ -1705,7 +1727,9 @@ export default defineBackground(() => {
               statusText: response.status === 200 ? 'OK' : 'Error',
               headers: response.headers ?? {},
             });
+            logRequest(session, msg, response.status ?? 0).then((id) => { logEntryId = id; });
           } else if (response.type === 'proxy_response_chunk') {
+            chunks.push(response.chunk ?? '');
             responsePort.postMessage({
               type: 'BYOKY_PROXY_RESPONSE_CHUNK',
               requestId: msg.requestId,
@@ -1717,6 +1741,20 @@ export default defineBackground(() => {
               requestId: msg.requestId,
             });
             nativePort.disconnect();
+            const fullBody = chunks.join('');
+            const model = parseModel(msg.body);
+            const usage = parseUsage(msg.providerId, fullBody);
+            if (logEntryId && (usage || model)) {
+              updateLogEntry(logEntryId, {
+                inputTokens: usage?.inputTokens,
+                outputTokens: usage?.outputTokens,
+                model,
+              });
+              browser.runtime.sendMessage({
+                type: 'BYOKY_INTERNAL',
+                action: 'usageUpdated',
+              }).catch(() => {});
+            }
           } else if (response.type === 'proxy_error') {
             bridgeResponded = true;
             responsePort.postMessage({
@@ -1915,6 +1953,10 @@ export default defineBackground(() => {
           headers: realHeaders,
           body: injectClaudeCodeSystemPrompt(body),
         });
+        const model = parseModel(body);
+        logRequest(session, { providerId, url, method } as ProxyRequest, 200).then((logId) => {
+          if (model) updateLogEntry(logId, { model });
+        });
         return;
       }
 
@@ -1936,16 +1978,21 @@ export default defineBackground(() => {
         headers: responseHeaders,
       });
 
+      const logEntryId = await logRequest(session, { providerId, url, method } as ProxyRequest, response.status);
+
+      const chunks: string[] = [];
       if (response.body) {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
+          const text = decoder.decode(value, { stream: true });
+          chunks.push(text);
           bridgeProxyPort?.postMessage({
             type: 'proxy_http_response_chunk',
             requestId,
-            chunk: decoder.decode(value, { stream: true }),
+            chunk: text,
           });
         }
       }
@@ -1955,7 +2002,20 @@ export default defineBackground(() => {
         requestId,
       });
 
-      await logRequest(session, { providerId, url, method } as ProxyRequest, response.status);
+      const fullBody = chunks.join('');
+      const model = parseModel(body);
+      const usage = parseUsage(providerId, fullBody);
+      if (usage || model) {
+        await updateLogEntry(logEntryId, {
+          inputTokens: usage?.inputTokens,
+          outputTokens: usage?.outputTokens,
+          model,
+        });
+        browser.runtime.sendMessage({
+          type: 'BYOKY_INTERNAL',
+          action: 'usageUpdated',
+        }).catch(() => {});
+      }
     } catch {
       bridgeProxyPort?.postMessage({
         type: 'proxy_http_error',
