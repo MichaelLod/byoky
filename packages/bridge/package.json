@@ -1,6 +1,6 @@
 {
   "name": "@byoky/bridge",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "Native messaging bridge for Byoky — routes setup token requests through Claude Code CLI",
   "type": "module",
   "main": "dist/host.js",
