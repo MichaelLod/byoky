@@ -288,22 +288,67 @@ export class Byoky {
   // --- Extension-based session ---
 
   private buildSession(response: ConnectResponse): ByokySession {
-    const sessionKey = response.sessionKey;
+    const sessionKeyRef = { current: response.sessionKey };
     const disconnectCallbacks = new Set<() => void>();
     const providersUpdatedCallbacks = new Set<(providers: ConnectResponse['providers']) => void>();
 
+    let reconnectPromise: Promise<boolean> | null = null;
+
+    const attemptReconnect = (): Promise<boolean> => {
+      if (reconnectPromise) return reconnectPromise;
+      reconnectPromise = this.sendConnectRequest({ reconnectOnly: true }).then(
+        (newResponse) => {
+          sessionKeyRef.current = newResponse.sessionKey;
+          session.sessionKey = newResponse.sessionKey;
+          session.providers = newResponse.providers;
+          for (const cb of providersUpdatedCallbacks) cb(newResponse.providers);
+          reconnectPromise = null;
+          return true;
+        },
+        () => {
+          for (const cb of disconnectCallbacks) cb();
+          disconnectCallbacks.clear();
+          reconnectPromise = null;
+          return false;
+        },
+      );
+      return reconnectPromise;
+    };
+
     const session: ByokySession = {
       ...response,
-      createFetch: (providerId: string) =>
-        createProxyFetch(providerId, sessionKey),
+      createFetch: (providerId: string) => {
+        const proxyFetch = createProxyFetch(providerId, sessionKeyRef);
+        return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+          // Pre-serialize ReadableStream body so retry is possible
+          const safeInit = init?.body instanceof ReadableStream
+            ? { ...init, body: await new Response(init.body).text() }
+            : init;
+
+          const resp = await proxyFetch(input, safeInit);
+
+          if (resp.status === 401) {
+            try {
+              const body = await resp.clone().json();
+              if (body?.error?.code === 'SESSION_EXPIRED') {
+                if (await attemptReconnect()) {
+                  return proxyFetch(input, safeInit);
+                }
+              }
+            } catch { /* not JSON or parse error — return original response */ }
+          }
+
+          return resp;
+        };
+      },
       createRelay: (wsUrl: string) =>
-        createRelayClient(wsUrl, sessionKey, session.providers),
+        createRelayClient(wsUrl, sessionKeyRef.current, session.providers),
       disconnect: () => {
         notifyChannel.port1.close();
-        this.sendDisconnect(sessionKey);
+        this.sendDisconnect(sessionKeyRef.current);
       },
-      isConnected: () => this.querySessionStatus(sessionKey),
-      getUsage: () => this.querySessionUsage(sessionKey),
+      isConnected: () => this.querySessionStatus(sessionKeyRef.current),
+      getUsage: () => this.querySessionUsage(sessionKeyRef.current),
       onDisconnect: (callback: () => void) => {
         disconnectCallbacks.add(callback);
         return () => { disconnectCallbacks.delete(callback); };
@@ -319,11 +364,11 @@ export class Byoky {
     const notifyChannel = new MessageChannel();
     notifyChannel.port1.onmessage = (event: MessageEvent) => {
       const msg = event.data;
-      if (msg?.type === 'BYOKY_SESSION_REVOKED' && msg.payload?.sessionKey === sessionKey) {
+      if (msg?.type === 'BYOKY_SESSION_REVOKED' && msg.payload?.sessionKey === sessionKeyRef.current) {
         for (const cb of disconnectCallbacks) cb();
         disconnectCallbacks.clear();
         notifyChannel.port1.close();
-      } else if (msg?.type === 'BYOKY_PROVIDERS_UPDATED' && msg.payload?.sessionKey === sessionKey) {
+      } else if (msg?.type === 'BYOKY_PROVIDERS_UPDATED' && msg.payload?.sessionKey === sessionKeyRef.current) {
         const newProviders = msg.payload.providers as ConnectResponse['providers'];
         session.providers = newProviders;
         for (const cb of providersUpdatedCallbacks) cb(newProviders);
