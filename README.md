@@ -316,6 +316,14 @@ pnpm --filter @byoky/extension build:all     # Chrome + Firefox + Safari
 - [ ] Remote OpenClaw via relay (cloud deployment, zero key exposure)
 - [ ] Password change (re-encrypt vault with new master password)
 
+## Built with Byoky
+
+| Project | Description |
+|---------|-------------|
+| [LamboChart](https://lambochart.com) | AI-powered analytics for vibe coders — users bring their own LLM keys via Byoky |
+
+[Add your project →](https://byoky.com/built-with)
+
 ## Star History
 
 <a href="https://star-history.com/#MichaelLod/byoky&Date">
