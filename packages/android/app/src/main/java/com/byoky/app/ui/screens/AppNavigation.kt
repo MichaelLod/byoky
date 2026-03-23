@@ -2,10 +2,7 @@ package com.byoky.app.ui.screens
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CellTower
-import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Wallet
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -14,6 +11,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.byoky.app.data.WalletStatus
 import com.byoky.app.data.WalletStore
+import com.byoky.app.relay.RelayPairService
 import com.byoky.app.ui.theme.Accent
 
 @Composable
@@ -31,10 +29,13 @@ fun AppNavigation(wallet: WalletStore) {
 private fun MainScreen(wallet: WalletStore) {
     val navController = rememberNavController()
     var selectedTab by remember { mutableIntStateOf(0) }
+    val pairService = remember { RelayPairService() }
 
     val tabs = listOf(
         Triple("Wallet", Icons.Default.Wallet, "wallet"),
+        Triple("Pair", Icons.Default.QrCodeScanner, "pair"),
         Triple("Bridge", Icons.Default.CellTower, "bridge"),
+        Triple("Usage", Icons.Default.BarChart, "usage"),
         Triple("Sessions", Icons.Default.Link, "sessions"),
         Triple("Settings", Icons.Default.Settings, "settings"),
     )
@@ -47,7 +48,7 @@ private fun MainScreen(wallet: WalletStore) {
                 tabs.forEachIndexed { index, (label, icon, _) ->
                     NavigationBarItem(
                         icon = { Icon(icon, contentDescription = label) },
-                        label = { Text(label) },
+                        label = { Text(label, fontSize = androidx.compose.ui.unit.TextUnit(10f, androidx.compose.ui.unit.TextUnitType.Sp)) },
                         selected = selectedTab == index,
                         onClick = {
                             selectedTab = index
@@ -72,7 +73,9 @@ private fun MainScreen(wallet: WalletStore) {
             modifier = Modifier.padding(padding),
         ) {
             composable("wallet") { WalletScreen(wallet) }
+            composable("pair") { PairScreen(wallet, pairService) }
             composable("bridge") { BridgeScreen(wallet) }
+            composable("usage") { UsageScreen(wallet) }
             composable("sessions") { SessionsScreen(wallet) }
             composable("settings") { SettingsScreen(wallet) }
         }

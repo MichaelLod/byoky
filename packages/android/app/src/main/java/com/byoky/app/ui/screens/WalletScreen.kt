@@ -183,7 +183,10 @@ private fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
     var selectedProvider by remember { mutableStateOf<Provider?>(null) }
     var label by remember { mutableStateOf("") }
     var apiKey by remember { mutableStateOf("") }
+    var authMethod by remember { mutableStateOf(AuthMethod.API_KEY) }
     var error by remember { mutableStateOf<String?>(null) }
+
+    val supportsSetupToken = selectedProvider?.id == "anthropic"
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -216,6 +219,7 @@ private fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
                         onClick = {
                             selectedProvider = provider
                             if (label.isEmpty()) label = provider.name
+                            if (provider.id != "anthropic") authMethod = AuthMethod.API_KEY
                         },
                         color = if (selectedProvider?.id == provider.id) AccentSoft else BgCard,
                         shape = RoundedCornerShape(8.dp),
@@ -236,6 +240,37 @@ private fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
             }
 
             if (selectedProvider != null) {
+                if (supportsSetupToken) {
+                    Spacer(Modifier.height(16.dp))
+                    Text("Credential Type", color = TextSecondary, fontSize = 12.sp)
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        FilterChip(
+                            selected = authMethod == AuthMethod.API_KEY,
+                            onClick = { authMethod = AuthMethod.API_KEY },
+                            label = { Text("API Key") },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = AccentSoft,
+                                selectedLabelColor = Accent,
+                            ),
+                            modifier = Modifier.weight(1f),
+                        )
+                        FilterChip(
+                            selected = authMethod == AuthMethod.OAUTH,
+                            onClick = { authMethod = AuthMethod.OAUTH },
+                            label = { Text("Setup Token") },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = AccentSoft,
+                                selectedLabelColor = Accent,
+                            ),
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+
                 Spacer(Modifier.height(16.dp))
 
                 OutlinedTextField(
@@ -258,7 +293,7 @@ private fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
                 OutlinedTextField(
                     value = apiKey,
                     onValueChange = { apiKey = it },
-                    label = { Text("API Key") },
+                    label = { Text(if (authMethod == AuthMethod.OAUTH) "Setup Token" else "API Key") },
                     visualTransformation = PasswordVisualTransformation(),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -270,6 +305,22 @@ private fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
                     ),
                     shape = RoundedCornerShape(12.dp),
                 )
+
+                if (authMethod == AuthMethod.OAUTH) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Run `claude setup-token` in your terminal to get a token. Setup tokens use your Claude Pro/Max subscription.",
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                    )
+                } else {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Your key will be encrypted with AES-256-GCM and stored securely. It never leaves this device.",
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                    )
+                }
             }
 
             error?.let {
@@ -284,7 +335,7 @@ private fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
             Button(
                 onClick = {
                     try {
-                        wallet.addCredential(selectedProvider!!.id, label, apiKey)
+                        wallet.addCredential(selectedProvider!!.id, label, apiKey, authMethod)
                         onDismiss()
                     } catch (e: Exception) {
                         error = e.message

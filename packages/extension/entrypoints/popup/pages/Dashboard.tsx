@@ -41,18 +41,8 @@ export function Dashboard() {
             return (
               <div key={cred.id} className="card">
                 <div className="card-header">
-                  <div>
-                    <span className="card-title">{cred.label}</span>
-                    <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
-                      <span className="badge badge-provider">
-                        {provider?.name ?? cred.providerId}
-                      </span>
-                      <span className="badge badge-method">
-                        {cred.authMethod === 'oauth' ? 'Setup Token' : 'API Key'}
-                      </span>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: '6px' }}>
+                  <span className="card-title">{cred.label}</span>
+                  <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
                     <button
                       className="btn btn-sm"
                       style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}
@@ -75,6 +65,14 @@ export function Dashboard() {
                       Remove
                     </button>
                   </div>
+                </div>
+                <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                  <span className="badge badge-provider">
+                    {provider?.name ?? cred.providerId}
+                  </span>
+                  <span className="badge badge-method">
+                    {cred.authMethod === 'oauth' ? 'Setup Token' : 'API Key'}
+                  </span>
                 </div>
                 <div className="card-subtitle" style={{ marginTop: '8px' }}>
                   Added {new Date(cred.createdAt).toLocaleDateString()}

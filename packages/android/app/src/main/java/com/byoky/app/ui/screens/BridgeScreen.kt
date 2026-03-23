@@ -122,7 +122,7 @@ fun BridgeScreen(wallet: WalletStore) {
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Help, null, tint = Accent, modifier = Modifier.size(20.dp))
+                        Icon(Icons.Default.Info, null, tint = Accent, modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(8.dp))
                         Text("What is the Bridge?", fontWeight = FontWeight.SemiBold, color = TextPrimary)
                     }
@@ -145,7 +145,7 @@ fun BridgeScreen(wallet: WalletStore) {
                         description = "Tools like OpenClaw on remote servers connect through the relay while the bridge is active.",
                     )
 
-                    Divider(color = Border)
+                    HorizontalDivider(color = Border)
 
                     Text(
                         "The bridge must remain active while using these features. If the app goes to the background, the bridge will pause.",
