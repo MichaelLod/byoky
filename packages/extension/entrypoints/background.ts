@@ -372,7 +372,9 @@ export default defineBackground(() => {
 
         // OAuth tokens for Anthropic route through the bridge (Node.js) to bypass TLS fingerprint detection
         if (credential.authMethod === 'oauth' && msg.providerId === 'anthropic') {
-          const body = injectClaudeCodeSystemPrompt(msg.body);
+          const body = authorizedBridgeSessionKey === msg.sessionKey
+            ? injectClaudeCodeSystemPrompt(msg.body)
+            : msg.body;
           await proxyViaBridge(port, { ...msg, body }, realHeaders);
           return;
         }
