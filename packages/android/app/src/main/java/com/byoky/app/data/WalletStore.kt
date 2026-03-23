@@ -13,6 +13,12 @@ import org.json.JSONObject
 
 enum class WalletStatus { UNINITIALIZED, LOCKED, UNLOCKED }
 
+sealed class UnlockResult {
+    data object Success : UnlockResult()
+    data object WrongPassword : UnlockResult()
+    data class LockedOut(val secondsRemaining: Int) : UnlockResult()
+}
+
 class WalletStore(context: Context) {
     private val masterKey = MasterKey.Builder(context)
         .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
@@ -26,6 +32,9 @@ class WalletStore(context: Context) {
         EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
     )
 
+    private val plainPrefs: SharedPreferences =
+        context.getSharedPreferences("byoky_state", Context.MODE_PRIVATE)
+
     private val _status = MutableStateFlow(WalletStatus.UNINITIALIZED)
     val status: StateFlow<WalletStatus> = _status.asStateFlow()
 
@@ -35,13 +44,23 @@ class WalletStore(context: Context) {
     private val _sessions = MutableStateFlow<List<Session>>(emptyList())
     val sessions: StateFlow<List<Session>> = _sessions.asStateFlow()
 
+    private val _requestLogs = MutableStateFlow<List<RequestLog>>(emptyList())
+    val requestLogs: StateFlow<List<RequestLog>> = _requestLogs.asStateFlow()
+
     private val _bridgeStatus = MutableStateFlow(BridgeStatus.INACTIVE)
     val bridgeStatus: StateFlow<BridgeStatus> = _bridgeStatus.asStateFlow()
 
+    private val _lockoutEndTime = MutableStateFlow<Long?>(null)
+    val lockoutEndTime: StateFlow<Long?> = _lockoutEndTime.asStateFlow()
+
     private var masterPassword: String? = null
+    private var backgroundTime: Long? = null
+
+    private val autoLockTimeout = 300_000L // 5 minutes
 
     init {
         _status.value = if (prefs.contains("password_hash")) WalletStatus.LOCKED else WalletStatus.UNINITIALIZED
+        restoreLockoutState()
     }
 
     val isUnlocked: Boolean get() = _status.value == WalletStatus.UNLOCKED
@@ -55,28 +74,98 @@ class WalletStore(context: Context) {
         _status.value = WalletStatus.UNLOCKED
     }
 
-    fun unlock(password: String): Boolean {
-        val hash = prefs.getString("password_hash", null) ?: return false
-        if (!CryptoService.verifyPassword(password, hash)) return false
+    fun unlock(password: String): UnlockResult {
+        val now = System.currentTimeMillis()
+        val endTime = _lockoutEndTime.value
+        if (endTime != null && now < endTime) {
+            return UnlockResult.LockedOut(maxOf(1, ((endTime - now) / 1000).toInt()))
+        }
+
+        val hash = prefs.getString("password_hash", null) ?: return UnlockResult.WrongPassword
+        if (!CryptoService.verifyPassword(password, hash)) {
+            handleFailedAttempt()
+            return UnlockResult.WrongPassword
+        }
+
+        resetFailedAttempts()
         masterPassword = password
         _status.value = WalletStatus.UNLOCKED
         loadCredentials()
         loadSessions()
-        return true
+        loadRequestLogs()
+        return UnlockResult.Success
     }
 
     fun lock() {
         masterPassword = null
         _credentials.value = emptyList()
         _sessions.value = emptyList()
+        _requestLogs.value = emptyList()
         _status.value = WalletStatus.LOCKED
+        backgroundTime = null
+    }
+
+    // MARK: - Brute-Force Protection
+
+    private var failedAttempts: Int
+        get() = plainPrefs.getInt("failedUnlockAttempts", 0)
+        set(value) = plainPrefs.edit().putInt("failedUnlockAttempts", value).apply()
+
+    private fun handleFailedAttempt() {
+        failedAttempts++
+        val duration = lockoutDuration(failedAttempts)
+        if (duration != null) {
+            val endTime = System.currentTimeMillis() + duration
+            _lockoutEndTime.value = endTime
+            plainPrefs.edit().putLong("lockoutEndTime", endTime).apply()
+        }
+    }
+
+    private fun resetFailedAttempts() {
+        failedAttempts = 0
+        _lockoutEndTime.value = null
+        plainPrefs.edit().putLong("lockoutEndTime", 0L).apply()
+    }
+
+    private fun restoreLockoutState() {
+        val endTime = plainPrefs.getLong("lockoutEndTime", 0L)
+        if (endTime > 0 && System.currentTimeMillis() < endTime) {
+            _lockoutEndTime.value = endTime
+        } else {
+            plainPrefs.edit().putLong("lockoutEndTime", 0L).apply()
+        }
+    }
+
+    private fun lockoutDuration(attempts: Int): Long? {
+        if (attempts < 5) return null
+        if (attempts < 10) return 30_000L
+        if (attempts < 15) return 300_000L
+        return 1_800_000L
+    }
+
+    // MARK: - Auto-Lock
+
+    fun recordBackgroundTime() {
+        if (_status.value == WalletStatus.UNLOCKED) {
+            backgroundTime = System.currentTimeMillis()
+        }
+    }
+
+    fun checkAutoLock() {
+        val bg = backgroundTime
+        backgroundTime = null
+        if (_status.value == WalletStatus.UNLOCKED && bg != null &&
+            System.currentTimeMillis() - bg > autoLockTimeout
+        ) {
+            lock()
+        }
     }
 
     // MARK: - Credentials
 
-    fun addCredential(providerId: String, label: String, apiKey: String) {
+    fun addCredential(providerId: String, label: String, apiKey: String, authMethod: AuthMethod = AuthMethod.API_KEY) {
         val password = masterPassword ?: throw IllegalStateException("Wallet locked")
-        val credential = Credential(providerId = providerId, label = label)
+        val credential = Credential(providerId = providerId, label = label, authMethod = authMethod)
         val encrypted = CryptoService.encrypt(apiKey, password)
         prefs.edit().putString("key_${credential.id}", encrypted).apply()
         _credentials.value = _credentials.value + credential
@@ -107,6 +196,47 @@ class WalletStore(context: Context) {
 
     fun setBridgeStatus(status: BridgeStatus) {
         _bridgeStatus.value = status
+    }
+
+    // MARK: - Request Logging
+
+    fun logRequest(
+        appOrigin: String,
+        providerId: String,
+        method: String,
+        url: String,
+        statusCode: Int,
+        requestBody: ByteArray?,
+        responseBody: String?,
+    ) {
+        var sanitizedUrl = url
+        val queryIndex = url.indexOf('?')
+        if (queryIndex >= 0) sanitizedUrl = url.substring(0, queryIndex)
+
+        val model = UsageParser.parseModel(requestBody)
+        var inputTokens: Int? = null
+        var outputTokens: Int? = null
+
+        if (responseBody != null) {
+            val usage = UsageParser.parseUsage(providerId, responseBody)
+            inputTokens = usage?.inputTokens
+            outputTokens = usage?.outputTokens
+        }
+
+        val entry = RequestLog(
+            appOrigin = appOrigin,
+            providerId = providerId,
+            method = method,
+            url = sanitizedUrl,
+            statusCode = statusCode,
+            model = model,
+            inputTokens = inputTokens,
+            outputTokens = outputTokens,
+        )
+
+        val logs = listOf(entry) + _requestLogs.value
+        _requestLogs.value = if (logs.size > 500) logs.take(500) else logs
+        saveRequestLogs()
     }
 
     // MARK: - Persistence
@@ -179,5 +309,52 @@ class WalletStore(context: Context) {
             })
         }
         prefs.edit().putString("sessions", arr.toString()).apply()
+    }
+
+    private fun loadRequestLogs() {
+        val json = prefs.getString("requestLogs", null) ?: return
+        try {
+            val arr = JSONArray(json)
+            val list = mutableListOf<RequestLog>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                list.add(
+                    RequestLog(
+                        id = obj.getString("id"),
+                        appOrigin = obj.getString("appOrigin"),
+                        providerId = obj.getString("providerId"),
+                        method = obj.getString("method"),
+                        url = obj.getString("url"),
+                        statusCode = obj.getInt("statusCode"),
+                        timestamp = obj.getLong("timestamp"),
+                        inputTokens = if (obj.has("inputTokens")) obj.optInt("inputTokens") else null,
+                        outputTokens = if (obj.has("outputTokens")) obj.optInt("outputTokens") else null,
+                        model = obj.optString("model", "").takeIf { it.isNotEmpty() },
+                    )
+                )
+            }
+            _requestLogs.value = list
+        } catch (_: Exception) {
+            _requestLogs.value = emptyList()
+        }
+    }
+
+    private fun saveRequestLogs() {
+        val arr = JSONArray()
+        _requestLogs.value.forEach { r ->
+            arr.put(JSONObject().apply {
+                put("id", r.id)
+                put("appOrigin", r.appOrigin)
+                put("providerId", r.providerId)
+                put("method", r.method)
+                put("url", r.url)
+                put("statusCode", r.statusCode)
+                put("timestamp", r.timestamp)
+                r.inputTokens?.let { put("inputTokens", it) }
+                r.outputTokens?.let { put("outputTokens", it) }
+                r.model?.let { put("model", it) }
+            })
+        }
+        prefs.edit().putString("requestLogs", arr.toString()).apply()
     }
 }

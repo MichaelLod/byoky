@@ -52,6 +52,19 @@ data class Provider(
     }
 }
 
+data class RequestLog(
+    val id: String = UUID.randomUUID().toString(),
+    val appOrigin: String,
+    val providerId: String,
+    val method: String,
+    val url: String,
+    val statusCode: Int,
+    val timestamp: Long = System.currentTimeMillis(),
+    val inputTokens: Int? = null,
+    val outputTokens: Int? = null,
+    val model: String? = null,
+)
+
 enum class BridgeStatus {
     INACTIVE, STARTING, ACTIVE, ERROR;
 
