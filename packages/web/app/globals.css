@@ -363,6 +363,80 @@ section {
 }
 
 /* =============================================
+   Zero Cost Section
+   ============================================= */
+
+.zero-cost-section {
+  position: relative;
+  overflow: hidden;
+  text-align: center;
+}
+
+.zero-cost-glow {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 600px;
+  height: 600px;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(circle, var(--teal-glow) 0%, transparent 70%);
+  pointer-events: none;
+  opacity: 0.4;
+}
+
+.zero-cost-heading {
+  font-family: var(--font-sans);
+  font-size: 52px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  margin-bottom: 20px;
+}
+
+.zero-cost-body {
+  font-size: 18px;
+  color: var(--text-secondary);
+  max-width: 540px;
+  margin: 0 auto 56px;
+  line-height: 1.7;
+}
+
+.zero-cost-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.zero-cost-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 36px 24px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+
+.zero-cost-stat {
+  font-family: var(--font-sans);
+  font-size: 48px;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  background: linear-gradient(135deg, var(--teal-light), var(--teal));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.zero-cost-label {
+  font-size: 15px;
+  color: var(--text-secondary);
+  letter-spacing: -0.01em;
+}
+
+/* =============================================
    Developers Section
    ============================================= */
 
@@ -1200,6 +1274,18 @@ section {
     grid-template-columns: repeat(3, 1fr);
   }
 
+  .zero-cost-heading {
+    font-size: 36px;
+  }
+
+  .zero-cost-body {
+    font-size: 16px;
+  }
+
+  .zero-cost-stat {
+    font-size: 36px;
+  }
+
   .steps-section h2,
   .dev-section h2,
   .security-section h2,
@@ -1250,6 +1336,15 @@ section {
   .btn {
     width: 100%;
     max-width: 280px;
+  }
+
+  .zero-cost-grid {
+    grid-template-columns: 1fr;
+    max-width: 320px;
+  }
+
+  .zero-cost-heading {
+    font-size: 30px;
   }
 
   .providers-grid {
