@@ -63,8 +63,8 @@ jobs:
             echo "::error::eval() or new Function() found"
             FAIL=1
           fi
-          # Check for dangerouslySetInnerHTML
-          if grep -rn 'dangerouslySetInnerHTML' packages/ --exclude-dir=node_modules; then
+          # Check for dangerouslySetInnerHTML (allow in web package for JSON-LD structured data)
+          if grep -rn 'dangerouslySetInnerHTML' packages/ --exclude-dir=node_modules --exclude-dir=web; then
             echo "::error::dangerouslySetInnerHTML found"
             FAIL=1
           fi
