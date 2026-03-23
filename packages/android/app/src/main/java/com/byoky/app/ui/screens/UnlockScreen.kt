@@ -25,6 +25,7 @@ fun UnlockScreen(wallet: WalletStore) {
     var shakeOffset by remember { mutableFloatStateOf(0f) }
     val lockoutEndTime by wallet.lockoutEndTime.collectAsState()
     var lockoutRemaining by remember { mutableIntStateOf(0) }
+    var showResetDialog by remember { mutableStateOf(false) }
 
     val shakeAnim = remember { Animatable(0f) }
 
@@ -151,6 +152,39 @@ fun UnlockScreen(wallet: WalletStore) {
             Text("Unlock", fontWeight = FontWeight.SemiBold)
         }
 
-        Spacer(Modifier.weight(2f))
+        Spacer(Modifier.weight(1f))
+
+        TextButton(onClick = { showResetDialog = true }) {
+            Text("Forgot password?", color = TextMuted)
+        }
+
+        Spacer(Modifier.weight(1f))
+    }
+
+    if (showResetDialog) {
+        AlertDialog(
+            onDismissRequest = { showResetDialog = false },
+            title = { Text("Reset Wallet?", color = TextPrimary) },
+            text = {
+                Text(
+                    "This will permanently delete all API keys, sessions, and settings. This cannot be undone.",
+                    color = TextSecondary,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showResetDialog = false
+                    wallet.resetWallet()
+                }) {
+                    Text("Reset", color = Danger)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetDialog = false }) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            },
+            containerColor = BgCard,
+        )
     }
 }
