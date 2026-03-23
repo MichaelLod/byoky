@@ -85,6 +85,7 @@ export default defineBackground(() => {
     masterPassword = null;
     sessions.clear();
     authorizedBridgeSessionKey = null;
+    disconnectAllGiftRelays();
     browser.runtime.sendMessage({
       type: 'BYOKY_INTERNAL',
       action: 'sessionChanged',
@@ -215,8 +216,17 @@ export default defineBackground(() => {
     }
 
     if (message.type === 'BYOKY_INTERNAL') {
-      // Only accept internal messages from the extension itself (popup/side panel)
+      // Only accept internal messages from the extension itself
       if (senderInfo.id !== browser.runtime.id) return;
+      // Content scripts have the same extension ID but must be restricted
+      // to safe actions — only popup/sidepanel pages get full access
+      const senderUrl = senderInfo.url ?? '';
+      const extensionOrigin = new URL(browser.runtime.getURL('/popup.html')).origin;
+      const isExtensionPage = senderUrl.startsWith(extensionOrigin + '/');
+      if (!isExtensionPage) {
+        const ALLOWED_CONTENT_ACTIONS = ['startBridgeProxy', 'checkBridge', 'startOAuth'];
+        if (!ALLOWED_CONTENT_ACTIONS.includes((message as { action: string }).action)) return;
+      }
       return handleInternal(message as { action: string; payload?: unknown });
     }
   });
@@ -774,6 +784,7 @@ export default defineBackground(() => {
           unlockLockedUntil = 0;
           resetIdleTimer();
           processPendingAfterUnlock();
+          reconnectGiftRelays();
         } else {
           unlockFailures++;
           if (unlockFailures >= 5) {
@@ -789,6 +800,7 @@ export default defineBackground(() => {
         masterPassword = null;
         sessions.clear();
         authorizedBridgeSessionKey = null;
+        disconnectAllGiftRelays();
         if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
         return { success: true };
 
@@ -1069,12 +1081,13 @@ export default defineBackground(() => {
           const parsed = new URL(relayUrl);
           if (parsed.protocol !== 'wss:' && parsed.protocol !== 'ws:') return { error: 'Relay URL must use ws:// or wss://' };
         } catch { return { error: 'Invalid relay URL' }; }
+        const authToken = `gft_${crypto.randomUUID().replace(/-/g, '')}`;
         const gift: Gift = {
           id: crypto.randomUUID(),
           credentialId,
           providerId,
           label,
-          authToken: `gft_${crypto.randomUUID().replace(/-/g, '')}`,
+          authToken,
           maxTokens,
           usedTokens: 0,
           expiresAt: Date.now() + expiresInMs,
@@ -1082,9 +1095,12 @@ export default defineBackground(() => {
           active: true,
           relayUrl,
         };
+        // Encrypt authToken before persisting to storage
+        const encryptedAuthToken = await encrypt(authToken, masterPassword!);
+        const storageGift = { ...gift, authToken: encryptedAuthToken };
         const data = await browser.storage.local.get('gifts');
         const gifts = (data.gifts ?? []) as Gift[];
-        gifts.push(gift);
+        gifts.push(storageGift);
         await browser.storage.local.set({ gifts });
         const { encoded } = createGiftLink(gift);
         connectGiftRelay(gift);
@@ -2250,10 +2266,10 @@ export default defineBackground(() => {
 
       ws.onclose = () => {
         giftRelayConnections.delete(gift.id);
-        // Reconnect if gift is still active
+        // Reconnect if gift is still active and wallet is unlocked
         setTimeout(async () => {
-          const data = await browser.storage.local.get('gifts');
-          const gifts = (data.gifts ?? []) as Gift[];
+          if (!masterPassword) return;
+          const gifts = await decryptGiftsFromStorage(masterPassword);
           const current = gifts.find((g) => g.id === gift.id);
           if (current?.active && current.expiresAt > Date.now()) {
             connectGiftRelay(current);
@@ -2277,6 +2293,32 @@ export default defineBackground(() => {
       ws.close();
       giftRelayConnections.delete(giftId);
     }
+  }
+
+  function disconnectAllGiftRelays() {
+    for (const [id, ws] of giftRelayConnections) {
+      ws.close();
+      giftRelayConnections.delete(id);
+    }
+  }
+
+  async function decryptGiftsFromStorage(password: string): Promise<Gift[]> {
+    const data = await browser.storage.local.get('gifts');
+    const stored = (data.gifts ?? []) as Gift[];
+    const result: Gift[] = [];
+    for (const gift of stored) {
+      if (!gift.active || gift.expiresAt <= Date.now()) {
+        result.push(gift);
+        continue;
+      }
+      try {
+        const decryptedToken = await decrypt(gift.authToken, password);
+        result.push({ ...gift, authToken: decryptedToken });
+      } catch {
+        result.push(gift);
+      }
+    }
+    return result;
   }
 
   async function handleGiftProxyRequest(
@@ -2421,14 +2463,13 @@ export default defineBackground(() => {
     await lock;
   }
 
-  // Reconnect active gifts on startup
-  (async () => {
-    const data = await browser.storage.local.get('gifts');
-    const gifts = (data.gifts ?? []) as Gift[];
+  async function reconnectGiftRelays() {
+    if (!masterPassword) return;
+    const gifts = await decryptGiftsFromStorage(masterPassword);
     for (const gift of gifts) {
       if (gift.active && gift.expiresAt > Date.now()) {
         connectGiftRelay(gift);
       }
     }
-  })();
+  }
 });
