@@ -1,11 +1,13 @@
 package com.byoky.app.ui.screens
 
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -44,6 +46,7 @@ private fun MainScreen(wallet: WalletStore) {
         bottomBar = {
             NavigationBar(
                 containerColor = MaterialTheme.colorScheme.surface,
+                windowInsets = WindowInsets(left = 8.dp, right = 8.dp),
             ) {
                 tabs.forEachIndexed { index, (label, icon, _) ->
                     NavigationBarItem(
