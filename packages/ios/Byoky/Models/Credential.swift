@@ -29,11 +29,15 @@ struct Credential: Identifiable, Codable {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
             request.setValue("claude-cli/2.1.76", forHTTPHeaderField: "User-Agent")
             request.setValue("cli", forHTTPHeaderField: "x-app")
-            request.setValue("application/json", forHTTPHeaderField: "Accept")
-            request.setValue(
-                "claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14",
-                forHTTPHeaderField: "anthropic-beta"
-            )
+            if request.value(forHTTPHeaderField: "Accept") == nil {
+                request.setValue("application/json", forHTTPHeaderField: "Accept")
+            }
+            // Merge app's beta flags with OAuth-required flags
+            let oauthBeta = ["claude-code-20250219", "oauth-2025-04-20", "fine-grained-tool-streaming-2025-05-14", "interleaved-thinking-2025-05-14"]
+            let existing = request.value(forHTTPHeaderField: "anthropic-beta")?
+                .components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) } ?? []
+            let merged = Array(Set(existing + oauthBeta)).sorted()
+            request.setValue(merged.joined(separator: ","), forHTTPHeaderField: "anthropic-beta")
             request.setValue("true", forHTTPHeaderField: "anthropic-dangerous-direct-browser-access")
             // Inject Claude Code system prompt
             if let body = request.httpBody,
