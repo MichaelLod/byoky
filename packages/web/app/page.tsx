@@ -7,6 +7,8 @@ export default function Home() {
       <div className="divider" />
       <HowItWorks />
       <div className="divider" />
+      <ZeroCost />
+      <div className="divider" />
       <ForDevelopers />
       <div className="divider" />
       <Security />
@@ -232,6 +234,48 @@ function HowItWorks() {
                 Share token access without sharing your API key. Set a budget,
                 generate a gift link, and revoke anytime. Relay-backed — zero key exposure.
               </p>
+            </div>
+          </FadeIn>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ─── Zero Cost ───────────────────────────────── */
+
+function ZeroCost() {
+  return (
+    <section className="zero-cost-section">
+      <div className="zero-cost-glow" aria-hidden />
+      <div className="container">
+        <FadeIn>
+          <h2 className="zero-cost-heading">
+            Zero infrastructure.<br />
+            <span className="hero-gradient">Zero cost.</span>
+          </h2>
+          <p className="zero-cost-body">
+            Your users bring their own AI keys. You build the product — they power it.
+            No API bills. No rate limits. No backend required.
+          </p>
+        </FadeIn>
+        <div className="zero-cost-grid">
+          <FadeIn delay={0.1}>
+            <div className="zero-cost-card">
+              <span className="zero-cost-stat">$0</span>
+              <span className="zero-cost-label">AI infrastructure cost</span>
+            </div>
+          </FadeIn>
+          <FadeIn delay={0.2}>
+            <div className="zero-cost-card">
+              <span className="zero-cost-stat">0</span>
+              <span className="zero-cost-label">API keys to manage</span>
+            </div>
+          </FadeIn>
+          <FadeIn delay={0.3}>
+            <div className="zero-cost-card">
+              <span className="zero-cost-stat">2</span>
+              <span className="zero-cost-label">lines to integrate</span>
             </div>
           </FadeIn>
         </div>
