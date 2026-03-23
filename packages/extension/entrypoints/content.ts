@@ -68,11 +68,26 @@ export default defineContentScript({
         // Old SDK without MessagePort still needs id for CustomEvent correlation.
         if (!replyPort && typeof data.id !== 'string') return;
 
-        browser.runtime.sendMessage(data).then((response) => {
-          if (response) {
-            reply(response);
-          }
-        }).catch(() => {});
+        // Use a port for these requests so the message goes directly to the
+        // background and isn't also dispatched to the side-panel/popup, which
+        // can swallow the response in Chrome MV3 when multiple onMessage
+        // listeners exist.
+        const port = browser.runtime.connect({ name: 'byoky-message' });
+        let replied = false;
+        port.postMessage(data);
+        port.onMessage.addListener((msg) => {
+          replied = true;
+          reply(msg);
+          port.disconnect();
+        });
+        port.onDisconnect.addListener(() => {
+          if (replied) return;
+          reply({
+            type: 'BYOKY_ERROR',
+            requestId: data.id || data.requestId,
+            payload: { code: 'EXTENSION_ERROR', message: 'Extension disconnected' },
+          });
+        });
       } else if (data.type === 'BYOKY_INTERNAL_FROM_PAGE') {
         // Only allow from localhost/127.0.0.1, checked by exact hostname match
         const hostname = window.location.hostname;
