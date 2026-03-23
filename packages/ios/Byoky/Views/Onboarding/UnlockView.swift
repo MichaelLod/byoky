@@ -6,6 +6,7 @@ struct UnlockView: View {
     @State private var error: String?
     @State private var isShaking = false
     @State private var lockoutRemaining: Int = 0
+    @State private var showResetConfirmation = false
 
     private let lockoutTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -73,11 +74,28 @@ struct UnlockView: View {
                 .padding(.horizontal, 24)
 
                 Spacer()
+
+                Button {
+                    showResetConfirmation = true
+                } label: {
+                    Text("Forgot password?")
+                        .font(.callout)
+                        .foregroundStyle(Theme.textMuted)
+                }
+
                 Spacer()
             }
             .padding(24)
         }
         .preferredColorScheme(.dark)
+        .alert("Reset Wallet?", isPresented: $showResetConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reset", role: .destructive) {
+                wallet.resetWallet()
+            }
+        } message: {
+            Text("This will permanently delete all API keys, sessions, and settings. This cannot be undone.")
+        }
         .onReceive(lockoutTimer) { _ in
             updateLockoutState()
         }

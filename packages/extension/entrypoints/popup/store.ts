@@ -59,6 +59,7 @@ interface WalletState {
   revokeGift: (giftId: string) => Promise<void>;
   redeemGift: (giftLinkEncoded: string) => Promise<void>;
   removeGiftedCredential: (id: string) => Promise<void>;
+  resetWallet: () => Promise<void>;
   refreshData: () => Promise<void>;
   clearError: () => void;
 }
@@ -272,6 +273,24 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   removeGiftedCredential: async (id: string) => {
     await sendInternal('removeGiftedCredential', { id });
     await get().refreshData();
+  },
+
+  resetWallet: async () => {
+    await sendInternal('resetWallet');
+    set({
+      isInitialized: false,
+      isUnlocked: false,
+      credentials: [],
+      sessions: [],
+      requestLog: [],
+      pendingApprovals: [],
+      trustedSites: [],
+      tokenAllowances: [],
+      gifts: [],
+      giftedCredentials: [],
+      currentPage: 'setup',
+      error: null,
+    });
   },
 
   refreshData: async () => {

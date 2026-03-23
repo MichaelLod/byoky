@@ -192,6 +192,51 @@ class WalletStore(context: Context) {
         saveSessions()
     }
 
+    // MARK: - Reset
+
+    fun resetWallet() {
+        masterPassword = null
+        backgroundTime = null
+
+        // Load credential IDs from prefs even when locked,
+        // so we can delete individual encrypted key entries
+        var credentialIds = _credentials.value.map { it.id }
+        if (credentialIds.isEmpty()) {
+            val json = prefs.getString("credentials", null)
+            if (json != null) {
+                try {
+                    val arr = JSONArray(json)
+                    credentialIds = (0 until arr.length()).map { arr.getJSONObject(it).getString("id") }
+                } catch (_: Exception) {}
+            }
+        }
+
+        // Delete all encrypted keys
+        val editor = prefs.edit()
+        credentialIds.forEach { editor.remove("key_$it") }
+        editor.remove("password_hash")
+        editor.remove("credentials")
+        editor.remove("sessions")
+        editor.remove("requestLogs")
+        editor.apply()
+
+        // Clear in-memory state
+        _credentials.value = emptyList()
+        _sessions.value = emptyList()
+        _requestLogs.value = emptyList()
+        _bridgeStatus.value = BridgeStatus.INACTIVE
+
+        // Reset brute-force state
+        failedAttempts = 0
+        _lockoutEndTime.value = null
+        plainPrefs.edit()
+            .putLong("lockoutEndTime", 0L)
+            .putInt("failedUnlockAttempts", 0)
+            .apply()
+
+        _status.value = WalletStatus.UNINITIALIZED
+    }
+
     // MARK: - Bridge
 
     fun setBridgeStatus(status: BridgeStatus) {
