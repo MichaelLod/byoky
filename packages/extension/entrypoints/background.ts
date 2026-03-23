@@ -907,6 +907,18 @@ export default defineBackground(() => {
         return { success: true };
       }
 
+      case 'resetWallet': {
+        masterPassword = null;
+        sessions.clear();
+        authorizedBridgeSessionKey = null;
+        disconnectAllGiftRelays();
+        if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+        unlockFailures = 0;
+        unlockLockedUntil = 0;
+        await browser.storage.local.clear();
+        return { success: true };
+      }
+
       case 'getSessions':
         return {
           sessions: Array.from(sessions.values()).map(

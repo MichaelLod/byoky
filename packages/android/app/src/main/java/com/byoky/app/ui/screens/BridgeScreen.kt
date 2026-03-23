@@ -93,7 +93,14 @@ fun BridgeScreen(wallet: WalletStore) {
                             if (bridgeStatus == BridgeStatus.ACTIVE) {
                                 wallet.setBridgeStatus(BridgeStatus.INACTIVE)
                             } else {
-                                wallet.setBridgeStatus(BridgeStatus.ACTIVE)
+                                wallet.setBridgeStatus(BridgeStatus.STARTING)
+                                val proxyService = com.byoky.app.proxy.ProxyService(wallet)
+                                val port = proxyService.findAvailablePort()
+                                if (port > 0) {
+                                    wallet.setBridgeStatus(BridgeStatus.ACTIVE.also { it.port = port })
+                                } else {
+                                    wallet.setBridgeStatus(BridgeStatus.ERROR.also { it.errorMessage = "Failed to find available port" })
+                                }
                             }
                         },
                         modifier = Modifier
@@ -155,6 +162,13 @@ fun BridgeScreen(wallet: WalletStore) {
                 }
             }
 
+            // Error message
+            if (bridgeStatus == BridgeStatus.ERROR) {
+                bridgeStatus.errorMessage?.let { msg ->
+                    Text(msg, color = Danger, fontSize = 12.sp)
+                }
+            }
+
             // Active info
             if (bridgeStatus == BridgeStatus.ACTIVE) {
                 Card(
@@ -165,6 +179,9 @@ fun BridgeScreen(wallet: WalletStore) {
                         Text("Connection Info", fontWeight = FontWeight.SemiBold, color = TextPrimary)
                         Spacer(Modifier.height(12.dp))
                         InfoRow("Status", "Active")
+                        if (bridgeStatus.port > 0) {
+                            InfoRow("Port", "${bridgeStatus.port}")
+                        }
                         InfoRow("Credentials", "${credentials.size} available")
                     }
                 }

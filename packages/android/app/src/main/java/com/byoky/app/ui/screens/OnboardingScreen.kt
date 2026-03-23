@@ -20,6 +20,28 @@ import com.byoky.app.data.WalletStore
 import com.byoky.app.ui.components.MascotView
 import com.byoky.app.ui.theme.*
 
+private data class PasswordQualityResult(
+    val icon: androidx.compose.ui.graphics.vector.ImageVector,
+    val message: String,
+    val color: androidx.compose.ui.graphics.Color,
+    val isAcceptable: Boolean,
+) {
+    companion object {
+        fun evaluate(password: String): PasswordQualityResult {
+            if (password.length < 12) return PasswordQualityResult(Icons.Default.Warning, "Minimum 12 characters", androidx.compose.ui.graphics.Color(0xFFFB923C), false)
+            if (password.toSet().size < 4) return PasswordQualityResult(Icons.Default.Warning, "Too many repeated characters", androidx.compose.ui.graphics.Color(0xFFFB923C), false)
+            val hasLower = password.any { it.isLowerCase() }
+            val hasUpper = password.any { it.isUpperCase() }
+            val hasDigit = password.any { it.isDigit() }
+            val hasSymbol = password.any { !it.isLetterOrDigit() }
+            val classCount = listOf(hasLower, hasUpper, hasDigit, hasSymbol).count { it }
+            if (classCount < 2) return PasswordQualityResult(Icons.Default.Warning, "Use a mix of letters, numbers, or symbols", androidx.compose.ui.graphics.Color(0xFFFB923C), false)
+            if (classCount >= 3 && password.length >= 16) return PasswordQualityResult(Icons.Default.Shield, "Strong password", Success, true)
+            return PasswordQualityResult(Icons.Default.CheckCircle, "Fair — consider adding more variety", androidx.compose.ui.graphics.Color(0xFFFACC15), true)
+        }
+    }
+}
+
 @Composable
 fun OnboardingScreen(wallet: WalletStore) {
     var step by remember { mutableIntStateOf(0) }
@@ -141,9 +163,16 @@ fun OnboardingScreen(wallet: WalletStore) {
                 shape = RoundedCornerShape(12.dp),
             )
 
-            if (password.isNotEmpty() && password.length < 12) {
+            if (password.isNotEmpty()) {
+                val quality = PasswordQualityResult.evaluate(password)
                 Spacer(Modifier.height(8.dp))
-                Text("Minimum 12 characters", color = Danger, fontSize = 12.sp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Icon(quality.icon, null, tint = quality.color, modifier = Modifier.size(14.dp))
+                    Text(quality.message, color = quality.color, fontSize = 12.sp)
+                }
             }
 
             error?.let {
@@ -153,7 +182,8 @@ fun OnboardingScreen(wallet: WalletStore) {
 
             Spacer(Modifier.height(24.dp))
 
-            val isValid = password.length >= 12 && password == confirmPassword
+            val quality = if (password.isNotEmpty()) PasswordQualityResult.evaluate(password) else null
+            val isValid = quality?.isAcceptable == true && password == confirmPassword
 
             Button(
                 onClick = {

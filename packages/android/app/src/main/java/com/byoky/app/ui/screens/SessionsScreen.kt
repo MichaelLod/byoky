@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.byoky.app.data.WalletStore
 import com.byoky.app.ui.theme.*
+import android.text.format.DateUtils
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -91,11 +92,22 @@ fun SessionsScreen(wallet: WalletStore) {
                                     color = TextPrimary,
                                 )
                                 Spacer(Modifier.height(4.dp))
-                                Text(
-                                    "${session.providers.size} provider${if (session.providers.size == 1) "" else "s"}",
-                                    fontSize = 12.sp,
-                                    color = TextSecondary,
-                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Text(
+                                        "${session.providers.size} provider${if (session.providers.size == 1) "" else "s"}",
+                                        fontSize = 12.sp,
+                                        color = TextSecondary,
+                                    )
+                                    Text(
+                                        DateUtils.getRelativeTimeSpanString(
+                                            session.expiresAt,
+                                            System.currentTimeMillis(),
+                                            DateUtils.MINUTE_IN_MILLIS,
+                                        ).toString(),
+                                        fontSize = 12.sp,
+                                        color = TextMuted,
+                                    )
+                                }
                             }
 
                             IconButton(onClick = { wallet.revokeSession(session) }) {
