@@ -21,6 +21,7 @@ final class WalletStore: ObservableObject {
     private let masterSaltKey = "master_salt"
     private let credentialsKey = "credentials"
     private let sessionsKey = "sessions"
+    private let requestLogKey = "requestLog"
 
     private let autoLockTimeout: TimeInterval = 300
     private var backgroundTime: Date?
@@ -113,6 +114,7 @@ final class WalletStore: ObservableObject {
         status = .unlocked
         try loadCredentials()
         try loadSessions()
+        loadRequestLogs()
         try migrateCredentials(password: password)
 
         AppGroupSync.shared.syncWalletState(
@@ -270,6 +272,61 @@ final class WalletStore: ObservableObject {
 
     private func saveSessions() throws {
         try keychain.saveCodable(key: sessionsKey, value: sessions)
+    }
+
+    // MARK: - Request Logging
+
+    func logRequest(
+        appOrigin: String,
+        providerId: String,
+        method: String,
+        url: String,
+        statusCode: Int,
+        requestBody: Data?,
+        responseBody: String?
+    ) {
+        var sanitizedUrl = url
+        if let comps = URLComponents(string: url) {
+            var clean = comps
+            clean.query = nil
+            sanitizedUrl = clean.string ?? url
+        }
+
+        var entry = RequestLog(
+            id: UUID().uuidString,
+            appOrigin: appOrigin,
+            providerId: providerId,
+            method: method,
+            url: sanitizedUrl,
+            statusCode: statusCode,
+            timestamp: Date()
+        )
+
+        entry.model = UsageParser.parseModel(from: requestBody)
+
+        if let responseBody {
+            let usage = UsageParser.parseUsage(providerId: providerId, body: responseBody)
+            entry.inputTokens = usage?.inputTokens
+            entry.outputTokens = usage?.outputTokens
+        }
+
+        requestLogs.insert(entry, at: 0)
+        if requestLogs.count > 500 {
+            requestLogs = Array(requestLogs.prefix(500))
+        }
+        saveRequestLogs()
+    }
+
+    private func loadRequestLogs() {
+        do {
+            requestLogs = try keychain.loadCodable(key: requestLogKey, as: [RequestLog].self)
+        } catch {
+            requestLogs = []
+        }
+    }
+
+    private func saveRequestLogs() {
+        try? keychain.saveCodable(key: requestLogKey, value: requestLogs)
     }
 }
 

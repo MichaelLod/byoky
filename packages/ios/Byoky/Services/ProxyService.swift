@@ -90,6 +90,19 @@ actor ProxyServer {
             throw ProxyError.invalidResponse
         }
 
+        let responseBody = String(data: data, encoding: .utf8)
+        await MainActor.run {
+            wallet.logRequest(
+                appOrigin: "bridge",
+                providerId: providerId,
+                method: method,
+                url: url.absoluteString,
+                statusCode: httpResponse.statusCode,
+                requestBody: body,
+                responseBody: responseBody
+            )
+        }
+
         return (data, httpResponse)
     }
 
@@ -136,10 +149,28 @@ actor ProxyServer {
 
                     Credential.applyAuth(to: &request, providerId: providerId, authMethod: credential.authMethod, apiKey: apiKey)
 
-                    let (bytes, _) = try await URLSession.shared.bytes(for: request)
+                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                    let httpResponse = response as? HTTPURLResponse
+                    var accumulated = Data()
 
                     for try await byte in bytes {
-                        continuation.yield(Data([byte]))
+                        let chunk = Data([byte])
+                        accumulated.append(byte)
+                        continuation.yield(chunk)
+                    }
+
+                    let responseBody = String(data: accumulated, encoding: .utf8)
+                    let statusCode = httpResponse?.statusCode ?? 0
+                    await MainActor.run {
+                        self.wallet.logRequest(
+                            appOrigin: "bridge",
+                            providerId: providerId,
+                            method: method,
+                            url: url.absoluteString,
+                            statusCode: statusCode,
+                            requestBody: body,
+                            responseBody: responseBody
+                        )
                     }
 
                     continuation.finish()
