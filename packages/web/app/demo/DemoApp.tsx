@@ -1,8 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Byoky, type ByokySession, isExtensionInstalled } from '@byoky/sdk';
-import { ConnectWallet } from './components/ConnectWallet';
+import { Byoky, type ByokySession } from '@byoky/sdk';
 import { Playground } from './components/Playground';
 import { CodeExample } from './components/CodeExample';
 
@@ -12,8 +11,6 @@ export function DemoApp() {
   const [session, setSession] = useState<ByokySession | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(true);
-  const [pairingCode, setPairingCode] = useState<string | null>(null);
-  const [isPairing, setIsPairing] = useState(false);
 
   useEffect(() => {
     byoky.tryReconnect().then((s) => {
@@ -23,13 +20,11 @@ export function DemoApp() {
   }, []);
 
   function onConnected(s: ByokySession) {
-    s.onDisconnect(() => { setSession(null); setPairingCode(null); });
+    s.onDisconnect(() => { setSession(null); });
     s.onProvidersUpdated((providers) => {
       setSession(prev => prev ? { ...prev, providers } : null);
     });
     setSession(s);
-    setPairingCode(null);
-    setIsPairing(false);
   }
 
   async function handleConnect() {
@@ -41,56 +36,20 @@ export function DemoApp() {
           { id: 'openai', required: false },
           { id: 'gemini', required: false },
         ],
+        modal: true,
       });
       onConnected(s);
     } catch (e) {
       const err = e as Error;
-      if (err.message.includes('not installed')) {
-        setError('Byoky wallet not found. Install the extension or connect with the mobile app.');
-      } else if (err.message.includes('rejected')) {
-        setError('Connection rejected by user.');
-      } else {
-        setError(err.message);
-      }
-    }
-  }
-
-  async function handleMobileConnect() {
-    setError(null);
-    setIsPairing(true);
-    setPairingCode(null);
-    try {
-      const s = await byoky.connect({
-        providers: [
-          { id: 'anthropic', required: false },
-          { id: 'openai', required: false },
-          { id: 'gemini', required: false },
-        ],
-        useRelay: true,
-        onPairingReady: (code) => {
-          setPairingCode(code);
-        },
-      });
-      onConnected(s);
-    } catch (e) {
-      const err = e as Error;
+      if (err.message === 'User cancelled') return;
       setError(err.message);
-      setIsPairing(false);
-      setPairingCode(null);
     }
-  }
-
-  function handleCancelPairing() {
-    setIsPairing(false);
-    setPairingCode(null);
   }
 
   function handleDisconnect() {
     session?.disconnect();
     setSession(null);
   }
-
-  const hasExtension = typeof window !== 'undefined' && isExtensionInstalled();
 
   return (
     <div className="demo-app">
@@ -109,7 +68,7 @@ export function DemoApp() {
               </button>
             </div>
           ) : (
-            <button className="btn btn-primary" onClick={hasExtension ? handleConnect : handleMobileConnect}>
+            <button className="btn btn-primary" onClick={handleConnect}>
               <WalletIcon />
               Connect Byoky
             </button>
@@ -126,14 +85,46 @@ export function DemoApp() {
 
       <main className="main">
         {restoring ? null : !session ? (
-          <ConnectWallet
-            onConnect={handleConnect}
-            onMobileConnect={handleMobileConnect}
-            pairingCode={pairingCode}
-            isPairing={isPairing}
-            onCancelPairing={handleCancelPairing}
-            hasExtension={hasExtension}
-          />
+          <div className="connect-page">
+            <div className="connect-card">
+              <div className="connect-icon">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                  <path d="M9 12l2 2 4-4" />
+                </svg>
+              </div>
+              <h2>Connect your Byoky wallet</h2>
+              <p>
+                This demo app uses the Byoky SDK to chat with AI models using your own
+                API keys. Your keys never leave your device.
+              </p>
+              <button className="btn btn-primary btn-lg" onClick={handleConnect}>
+                Connect Wallet
+              </button>
+              <div className="connect-features">
+                <div className="connect-feature">
+                  <span className="feature-check">&#10003;</span>
+                  Keys stay encrypted in your wallet
+                </div>
+                <div className="connect-feature">
+                  <span className="feature-check">&#10003;</span>
+                  This app never sees your API keys
+                </div>
+                <div className="connect-feature">
+                  <span className="feature-check">&#10003;</span>
+                  Revoke access anytime from the wallet
+                </div>
+              </div>
+            </div>
+            <div className="connect-install">
+              <p>
+                Don&apos;t have Byoky?{' '}
+                <a href="https://byoky.com" target="_blank" rel="noopener noreferrer">
+                  Get the app or extension
+                </a>
+              </p>
+            </div>
+          </div>
         ) : (
           <Playground session={session} />
         )}

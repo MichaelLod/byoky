@@ -997,6 +997,144 @@ section {
 }
 
 /* =============================================
+   Built With
+   ============================================= */
+
+.built-with-hero {
+  text-align: center;
+  padding: 160px 0 var(--section-padding);
+  position: relative;
+  overflow: hidden;
+}
+
+.built-with-glow {
+  position: absolute;
+  top: -20%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 700px;
+  height: 400px;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(14, 165, 233, 0.1) 0%,
+    transparent 70%
+  );
+  filter: blur(40px);
+  pointer-events: none;
+}
+
+.built-with-hero h1 {
+  font-size: 56px;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  margin-bottom: 20px;
+}
+
+.built-with-subtitle {
+  font-size: 18px;
+  color: var(--text-secondary);
+  max-width: 480px;
+  margin: 0 auto;
+  line-height: 1.7;
+}
+
+.built-with-grid-section {
+  padding: var(--section-padding) 0;
+}
+
+.built-with-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+
+.built-with-card {
+  display: block;
+  padding: 28px;
+  border-radius: 14px;
+  background: linear-gradient(
+    145deg,
+    rgba(13, 13, 26, 0.8),
+    rgba(9, 9, 20, 0.6)
+  );
+  border: 1px solid var(--border);
+  transition: border-color 0.3s, box-shadow 0.3s, transform 0.3s;
+  text-decoration: none;
+  color: inherit;
+}
+
+.built-with-card:hover {
+  border-color: var(--teal-dark);
+  box-shadow: 0 0 40px rgba(14, 165, 233, 0.08);
+  transform: translateY(-2px);
+}
+
+.built-with-card-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.built-with-card-logo {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.built-with-card-header h3 {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.built-with-card-category {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.built-with-card-arrow {
+  margin-left: auto;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: color 0.2s;
+}
+
+.built-with-card:hover .built-with-card-arrow {
+  color: var(--teal-light);
+}
+
+.built-with-card p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.65;
+}
+
+.built-with-cta-section {
+  text-align: center;
+  padding: var(--section-padding) 0;
+}
+
+.built-with-cta-section h2 {
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-bottom: 12px;
+}
+
+.built-with-cta-text {
+  font-size: 16px;
+  color: var(--text-secondary);
+  margin-bottom: 32px;
+}
+
+/* =============================================
    Animations
    ============================================= */
 
@@ -1067,8 +1205,13 @@ section {
   .security-section h2,
   .providers-section h2,
   .openclaw-section h2,
-  .oss-section h2 {
+  .oss-section h2,
+  .built-with-cta-section h2 {
     font-size: 32px;
+  }
+
+  .built-with-hero h1 {
+    font-size: 40px;
   }
 }
 
@@ -1085,6 +1228,18 @@ section {
 
   .hero h1 {
     font-size: 38px;
+  }
+
+  .built-with-hero {
+    padding: 120px 0 72px;
+  }
+
+  .built-with-hero h1 {
+    font-size: 32px;
+  }
+
+  .built-with-grid {
+    grid-template-columns: 1fr;
   }
 
   .hero-actions {

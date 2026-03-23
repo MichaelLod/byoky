@@ -4,6 +4,7 @@ import { isExtensionInstalled, getStoreUrl } from './detect.js';
 import { createProxyFetch } from './proxy-fetch.js';
 import { createRelayFetch } from './relay-fetch.js';
 import { createRelayClient, type RelayConnection } from './relay-client.js';
+import { ConnectModal, type ModalOptions } from './modal/connect-modal.js';
 
 export interface ByokySession extends ConnectResponse {
   /** Create a fetch function that proxies requests through the wallet for the given provider. */
@@ -57,6 +58,8 @@ export class Byoky {
     onPairingReady?: (pairingCode: string) => void;
     /** Skip extension detection and go directly to relay pairing. */
     useRelay?: boolean;
+    /** Show a built-in connect modal with QR code for pairing. Pass true or ModalOptions. */
+    modal?: boolean | ModalOptions;
   } = {}): Promise<ByokySession> {
     if (typeof window === 'undefined') {
       throw new ByokyError(
@@ -65,7 +68,18 @@ export class Byoky {
       );
     }
 
-    const { onPairingReady, useRelay, ...connectRequest } = request;
+    const { onPairingReady, useRelay, modal, ...connectRequest } = request;
+
+    if (modal) {
+      const modalOpts = typeof modal === 'object' ? modal : {};
+      const connectModal = new ConnectModal(modalOpts);
+      return connectModal.show({
+        hasExtension: isExtensionInstalled(),
+        connectExtension: () => this.sendConnectRequest(connectRequest).then((r) => this.buildSession(r)),
+        connectRelay: (onReady) => this.connectViaRelay(connectRequest, onReady),
+        getStoreUrl: () => getStoreUrl(),
+      });
+    }
 
     // Go directly to relay if explicitly requested
     if (useRelay && onPairingReady) {
@@ -185,11 +199,13 @@ export class Byoky {
               reject(new ByokyError(ByokyErrorCode.UNKNOWN, 'Invalid provider data from relay'));
               break;
             }
+            const VALID_AUTH_METHODS: Set<string> = new Set(['api_key', 'oauth']);
             const providers: Record<string, { available: boolean; authMethod: AuthMethod }> = {};
             for (const [key, val] of Object.entries(raw as Record<string, unknown>)) {
               if (!val || typeof val !== 'object') continue;
               const v = val as Record<string, unknown>;
               if (typeof v.available !== 'boolean' || typeof v.authMethod !== 'string') continue;
+              if (!VALID_AUTH_METHODS.has(v.authMethod)) continue;
               providers[key] = { available: v.available, authMethod: v.authMethod as AuthMethod };
             }
 
