@@ -147,73 +147,11 @@ export default defineBackground(() => {
 
   // --- Message handling ---
 
+  // Connect/disconnect/status/usage are handled via ports (byoky-message) in onConnect.
+  // Only BYOKY_INTERNAL messages (popup ↔ background) use sendMessage.
   browser.runtime.onMessage.addListener((raw: unknown, sender: unknown) => {
     const message = raw as Record<string, unknown>;
     const senderInfo = sender as Runtime.MessageSender;
-
-    if (message.type === 'BYOKY_CONNECT_REQUEST') {
-      return handleConnect(message as { id: string; payload: ConnectRequest }, senderInfo);
-    }
-
-    if (message.type === 'BYOKY_DISCONNECT') {
-      const { sessionKey } = message.payload as { sessionKey: string };
-      const session = sessions.get(sessionKey);
-      if (session) {
-        const disconnectOrigin = resolveOrigin(senderInfo);
-        if (disconnectOrigin === session.appOrigin) {
-          sessions.delete(sessionKey);
-          if (authorizedBridgeSessionKey === sessionKey) {
-            authorizedBridgeSessionKey = null;
-          }
-          browser.runtime.sendMessage({
-            type: 'BYOKY_INTERNAL',
-            action: 'sessionChanged',
-          }).catch(() => {});
-        }
-      }
-      return;
-    }
-
-    if (message.type === 'BYOKY_SESSION_STATUS') {
-      const { sessionKey } = message.payload as { sessionKey: string };
-      const session = sessions.get(sessionKey);
-      // Verify the requesting origin owns this session
-      const statusOrigin = resolveOrigin(senderInfo);
-      if (!session || !statusOrigin || statusOrigin === 'unknown' || statusOrigin !== session.appOrigin) {
-        return Promise.resolve({
-          type: 'BYOKY_SESSION_STATUS_RESPONSE',
-          requestId: message.requestId,
-          payload: { connected: false },
-        });
-      }
-      return Promise.resolve({
-        type: 'BYOKY_SESSION_STATUS_RESPONSE',
-        requestId: message.requestId,
-        payload: {
-          connected: !!session && session.expiresAt > Date.now(),
-          expiresAt: session?.expiresAt,
-        },
-      });
-    }
-
-    if (message.type === 'BYOKY_SESSION_USAGE') {
-      const { sessionKey } = message.payload as { sessionKey: string };
-      const session = sessions.get(sessionKey);
-      // Verify the requesting origin owns this session
-      const usageOrigin = resolveOrigin(senderInfo);
-      if (!session || !usageOrigin || usageOrigin === 'unknown' || usageOrigin !== session.appOrigin) {
-        return Promise.resolve({
-          type: 'BYOKY_SESSION_USAGE_RESPONSE',
-          requestId: message.requestId,
-          payload: null,
-        });
-      }
-      return getSessionUsage(session.id).then((usage) => ({
-        type: 'BYOKY_SESSION_USAGE_RESPONSE',
-        requestId: message.requestId,
-        payload: usage,
-      }));
-    }
 
     if (message.type === 'BYOKY_INTERNAL') {
       // Only accept internal messages from the extension itself
@@ -241,6 +179,80 @@ export default defineBackground(() => {
     if (port.name === 'byoky-notify') {
       notifyPorts.add(port);
       port.onDisconnect.addListener(() => notifyPorts.delete(port));
+      return;
+    }
+
+    if (port.name === 'byoky-message') {
+      // Handle connect/disconnect/status/usage via port so the message doesn't
+      // broadcast to the side-panel's onMessage listener (which can interfere
+      // in Chrome MV3 when multiple listeners exist).
+      port.onMessage.addListener(async (raw: unknown) => {
+        const message = raw as Record<string, unknown>;
+        const sender = port.sender as Runtime.MessageSender;
+        let response: unknown;
+
+        if (message.type === 'BYOKY_CONNECT_REQUEST') {
+          response = await handleConnect(message as { id: string; payload: ConnectRequest }, sender);
+        } else if (message.type === 'BYOKY_DISCONNECT') {
+          const { sessionKey } = message.payload as { sessionKey: string };
+          const session = sessions.get(sessionKey);
+          if (session) {
+            const disconnectOrigin = resolveOrigin(sender);
+            if (disconnectOrigin === session.appOrigin) {
+              sessions.delete(sessionKey);
+              if (authorizedBridgeSessionKey === sessionKey) {
+                authorizedBridgeSessionKey = null;
+              }
+              browser.runtime.sendMessage({
+                type: 'BYOKY_INTERNAL',
+                action: 'sessionChanged',
+              }).catch(() => {});
+            }
+          }
+        } else if (message.type === 'BYOKY_SESSION_STATUS') {
+          const { sessionKey } = message.payload as { sessionKey: string };
+          const session = sessions.get(sessionKey);
+          const statusOrigin = resolveOrigin(sender);
+          if (!session || !statusOrigin || statusOrigin === 'unknown' || statusOrigin !== session.appOrigin) {
+            response = {
+              type: 'BYOKY_SESSION_STATUS_RESPONSE',
+              requestId: message.requestId,
+              payload: { connected: false },
+            };
+          } else {
+            response = {
+              type: 'BYOKY_SESSION_STATUS_RESPONSE',
+              requestId: message.requestId,
+              payload: {
+                connected: !!session && session.expiresAt > Date.now(),
+                expiresAt: session?.expiresAt,
+              },
+            };
+          }
+        } else if (message.type === 'BYOKY_SESSION_USAGE') {
+          const { sessionKey } = message.payload as { sessionKey: string };
+          const session = sessions.get(sessionKey);
+          const usageOrigin = resolveOrigin(sender);
+          if (!session || !usageOrigin || usageOrigin === 'unknown' || usageOrigin !== session.appOrigin) {
+            response = {
+              type: 'BYOKY_SESSION_USAGE_RESPONSE',
+              requestId: message.requestId,
+              payload: null,
+            };
+          } else {
+            const usage = await getSessionUsage(session.id);
+            response = {
+              type: 'BYOKY_SESSION_USAGE_RESPONSE',
+              requestId: message.requestId,
+              payload: usage,
+            };
+          }
+        }
+
+        if (response) {
+          try { port.postMessage(response); } catch { /* port closed */ }
+        }
+      });
       return;
     }
 
