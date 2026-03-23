@@ -18,6 +18,11 @@ struct MainTabView: View {
                     Label("Bridge", systemImage: "antenna.radiowaves.left.and.right")
                 }
 
+            UsageView()
+                .tabItem {
+                    Label("Usage", systemImage: "chart.bar")
+                }
+
             SessionsView()
                 .tabItem {
                     Label("Sessions", systemImage: "link")
