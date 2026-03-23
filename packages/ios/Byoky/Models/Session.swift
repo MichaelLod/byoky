@@ -15,11 +15,13 @@ struct Session: Identifiable, Codable {
 
 struct RequestLog: Identifiable, Codable {
     let id: String
-    let sessionId: String
+    let appOrigin: String
     let providerId: String
     let method: String
     let url: String
     let statusCode: Int
     let timestamp: Date
-    let tokensUsed: Int?
+    var inputTokens: Int?
+    var outputTokens: Int?
+    var model: String?
 }
