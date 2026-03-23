@@ -18,6 +18,7 @@ val TextSecondary = Color(0xFF8E8E9A)
 val TextMuted = Color(0xFF55555F)
 val Danger = Color(0xFFF43F5E)
 val Success = Color(0xFF34D399)
+val Warning = Color(0xFFFB923C)
 val Border = Color(0x0FFFFFFF)
 val EyeCyan = Color(0xFF7DD3FC)
 
