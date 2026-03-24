@@ -58,10 +58,16 @@ class ProxyService(private val wallet: WalletStore) {
 
         applyAuth(filteredHeaders, providerId, credential.authMethod, apiKey)
 
+        val finalBody = if (providerId == "anthropic" && credential.authMethod == AuthMethod.OAUTH && body != null) {
+            injectClaudeCodeSystemPrompt(body)
+        } else {
+            body
+        }
+
         val requestBody = when {
-            body != null && method.uppercase() in setOf("POST", "PUT", "PATCH") -> {
+            finalBody != null && method.uppercase() in setOf("POST", "PUT", "PATCH") -> {
                 val contentType = filteredHeaders["content-type"] ?: "application/json"
-                body.toRequestBody(contentType.toMediaTypeOrNull())
+                finalBody.toRequestBody(contentType.toMediaTypeOrNull())
             }
             else -> null
         }
@@ -98,10 +104,16 @@ class ProxyService(private val wallet: WalletStore) {
 
         applyAuth(filteredHeaders, providerId, credential.authMethod, apiKey)
 
+        val finalBody = if (providerId == "anthropic" && credential.authMethod == AuthMethod.OAUTH && body != null) {
+            injectClaudeCodeSystemPrompt(body)
+        } else {
+            body
+        }
+
         val requestBody = when {
-            body != null && method.uppercase() in setOf("POST", "PUT", "PATCH") -> {
+            finalBody != null && method.uppercase() in setOf("POST", "PUT", "PATCH") -> {
                 val contentType = filteredHeaders["content-type"] ?: "application/json"
-                body.toRequestBody(contentType.toMediaTypeOrNull())
+                finalBody.toRequestBody(contentType.toMediaTypeOrNull())
             }
             else -> null
         }
@@ -134,6 +146,22 @@ class ProxyService(private val wallet: WalletStore) {
         }
 
         awaitClose()
+    }
+
+    private fun injectClaudeCodeSystemPrompt(body: ByteArray): ByteArray {
+        return try {
+            val parsed = org.json.JSONObject(String(body, Charsets.UTF_8))
+            val prefix = "You are Claude Code, Anthropic's official CLI for Claude."
+            val existing = parsed.optString("system", "").takeIf { it.isNotEmpty() }
+            if (existing == null) {
+                parsed.put("system", prefix)
+            } else {
+                parsed.put("system", "$prefix\n\n$existing")
+            }
+            parsed.toString().toByteArray(Charsets.UTF_8)
+        } catch (_: Exception) {
+            body
+        }
     }
 
     private fun applyAuth(

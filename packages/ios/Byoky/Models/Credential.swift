@@ -39,6 +39,17 @@ struct Credential: Identifiable, Codable {
             let merged = Array(Set(existing + oauthBeta)).sorted()
             request.setValue(merged.joined(separator: ","), forHTTPHeaderField: "anthropic-beta")
             request.setValue("true", forHTTPHeaderField: "anthropic-dangerous-direct-browser-access")
+            // Setup tokens require the Claude Code system prompt
+            if let body = request.httpBody,
+               var parsed = try? JSONSerialization.jsonObject(with: body) as? [String: Any] {
+                let prefix = "You are Claude Code, Anthropic's official CLI for Claude."
+                if parsed["system"] == nil {
+                    parsed["system"] = prefix
+                } else if let existing = parsed["system"] as? String {
+                    parsed["system"] = "\(prefix)\n\n\(existing)"
+                }
+                request.httpBody = try? JSONSerialization.data(withJSONObject: parsed)
+            }
         } else if providerId == "anthropic" {
             request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         } else {
