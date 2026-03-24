@@ -138,13 +138,15 @@ function Hero() {
             </svg>
           </div>
           <h1>
-            <span className="hero-gradient">MetaMask for AI.</span>
+            <span className="hero-eyebrow">Bring Your Own Key.</span>
+            <span className="hero-gradient">The AI key wallet.</span>
           </h1>
         </FadeIn>
         <FadeIn delay={0.2}>
           <p>
-            A secure browser wallet for your LLM API keys and setup tokens.
-            Connect to any app — your keys never leave your device.
+            Your keys. Your wallet. Your control.
+            A secure browser extension that stores your AI API keys locally
+            and connects them to any app — without ever exposing them.
           </p>
         </FadeIn>
         <FadeIn delay={0.3}>

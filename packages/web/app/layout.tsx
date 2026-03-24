@@ -23,7 +23,7 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   metadataBase: new URL('https://byoky.com'),
   title: {
-    default: 'Byoky — MetaMask for AI',
+    default: 'Byoky — Bring Your Own Key',
     template: '%s — Byoky',
   },
   description:
@@ -51,7 +51,7 @@ export const metadata: Metadata = {
     apple: '/apple-touch-icon.png',
   },
   openGraph: {
-    title: 'Byoky — MetaMask for AI',
+    title: 'Byoky — Bring Your Own Key',
     description:
       'A secure browser wallet for your LLM API keys. Install once, connect everywhere. Your keys never leave the extension.',
     url: 'https://byoky.com',
@@ -62,13 +62,13 @@ export const metadata: Metadata = {
         url: '/og-image.png',
         width: 1200,
         height: 630,
-        alt: 'Byoky — MetaMask for AI',
+        alt: 'Byoky — Bring Your Own Key',
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Byoky — MetaMask for AI',
+    title: 'Byoky — Bring Your Own Key',
     description:
       'A secure browser wallet for your LLM API keys. Your keys never leave the extension.',
     images: ['/og-image.png'],

@@ -2,7 +2,7 @@ import type { MetadataRoute } from 'next';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'Byoky — MetaMask for AI',
+    name: 'Byoky — Bring Your Own Key',
     short_name: 'Byoky',
     description:
       'A secure browser wallet for your LLM API keys and setup tokens. Connect to any app — your keys never leave the extension.',
