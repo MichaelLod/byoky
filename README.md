@@ -18,7 +18,7 @@
   Your keys never leave your device.
   <br />
   <br />
-  <a href="https://byoky.com">Website</a> · <a href="https://demo.byoky.com">Demo</a> · <a href="#quick-start">Quick Start</a> · <a href="#for-developers">SDK Docs</a> · <a href="https://discord.gg/gRs8S9fxcT">Discord</a> · <a href="https://github.com/MichaelLod/byoky/issues">Issues</a>
+  <a href="https://byoky.com">Website</a> · <a href="https://byoky.com/dev">Developer Hub</a> · <a href="https://demo.byoky.com">Demo</a> · <a href="#quick-start">Quick Start</a> · <a href="https://discord.gg/gRs8S9fxcT">Discord</a> · <a href="https://github.com/MichaelLod/byoky/issues">Issues</a>
   <br />
   <br />
   <a href="https://github.com/MichaelLod/byoky/blob/main/LICENSE"><img src="https://img.shields.io/github/license/MichaelLod/byoky?style=flat&color=0ea5e9" alt="License" /></a>
@@ -66,6 +66,14 @@ cd byoky && pnpm install && pnpm dev
 ```
 
 ### For Developers
+
+**Scaffold a new app instantly:**
+
+```bash
+npx create-byoky-app
+```
+
+**Or add to an existing project:**
 
 ```bash
 npm install @byoky/sdk
@@ -269,6 +277,7 @@ byoky/
 │   ├── relay/         # @byoky/relay — WebSocket relay server
 │   ├── ios/           # iOS app (wallet + Safari extension)
 │   ├── openclaw-plugin/ # OpenClaw provider plugin
+│   ├── create-byoky-app/ # CLI scaffolder — npx create-byoky-app
 │   └── web/           # Landing page (byoky.com) + demo app (demo.byoky.com)
 ```
 
@@ -313,6 +322,7 @@ pnpm --filter @byoky/extension build:all     # Chrome + Firefox + Safari
 - [x] Token gifts (relay-backed, zero key exposure)
 - [x] Mobile wallet relay connect (no extension needed, pair via QR code)
 - [x] iOS app (wallet + Safari extension + relay pairing)
+- [x] Developer Hub + create-byoky-app CLI scaffolder
 - [ ] Remote OpenClaw via relay (cloud deployment, zero key exposure)
 - [ ] Password change (re-encrypt vault with new master password)
 
