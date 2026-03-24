@@ -19,8 +19,9 @@ export interface RepoInfo {
 
 export async function startDeviceFlow(): Promise<DeviceFlowResponse> {
   const res = await fetch('/api/github/device-code', { method: 'POST' });
-  if (!res.ok) throw new Error('Failed to start device flow');
-  return res.json();
+  const data = await res.json();
+  if (!res.ok || data.error) throw new Error(data.error || `Device flow failed (${res.status})`);
+  return data;
 }
 
 export async function pollForToken(
@@ -52,9 +53,16 @@ export async function pollForToken(
 
 export async function getUser(token: string): Promise<GitHubUser> {
   const res = await fetch('https://api.github.com/user', {
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'Byoky-DevHub',
+    },
   });
-  if (!res.ok) throw new Error('Failed to get user');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`GitHub user fetch failed (${res.status}): ${(err as Record<string, string>).message || 'unknown'}`);
+  }
   return res.json();
 }
 
