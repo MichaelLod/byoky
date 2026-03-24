@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="miniapp" content='{"name":"Email Writer","description":"Describe the tone and topic, get a polished email draft","author":"byoky","providers":["anthropic"]}'>
+<title>Email Writer</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #0a0a0a;
+    color: #ededed;
+    min-height: 100vh;
+    padding: 24px;
+    line-height: 1.6;
+  }
+
+  .container {
+    max-width: 640px;
+    margin: 0 auto;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+
+  .subtitle {
+    color: #888;
+    font-size: 0.875rem;
+    margin-bottom: 24px;
+  }
+
+  .card {
+    background: #141414;
+    border: 1px solid #2a2a2a;
+    border-radius: 12px;
+    padding: 24px;
+  }
+
+  .field {
+    margin-bottom: 16px;
+  }
+
+  .field:last-child {
+    margin-bottom: 0;
+  }
+
+  label {
+    display: block;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: #aaa;
+    margin-bottom: 6px;
+  }
+
+  input, select, textarea {
+    width: 100%;
+    background: #0a0a0a;
+    border: 1px solid #2a2a2a;
+    border-radius: 8px;
+    color: #ededed;
+    font-family: inherit;
+    font-size: 0.9375rem;
+    padding: 10px 12px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  input:focus, select:focus, textarea:focus {
+    border-color: #8b5cf6;
+  }
+
+  select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23888' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 32px;
+    cursor: pointer;
+  }
+
+  select option {
+    background: #141414;
+    color: #ededed;
+  }
+
+  textarea {
+    resize: vertical;
+    min-height: 100px;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: #8b5cf6;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 0.9375rem;
+    font-weight: 500;
+    padding: 10px 20px;
+    cursor: pointer;
+    transition: background 0.15s;
+    width: 100%;
+    margin-top: 20px;
+  }
+
+  .btn:hover:not(:disabled) {
+    background: #7c3aed;
+  }
+
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .btn-secondary {
+    background: transparent;
+    border: 1px solid #2a2a2a;
+    color: #ededed;
+    width: auto;
+    margin-top: 0;
+    padding: 8px 16px;
+    font-size: 0.8125rem;
+  }
+
+  .btn-secondary:hover:not(:disabled) {
+    background: #1a1a1a;
+    border-color: #3a3a3a;
+  }
+
+  .result {
+    margin-top: 20px;
+    display: none;
+  }
+
+  .result.visible {
+    display: block;
+  }
+
+  .result-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
+  .result-label {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: #aaa;
+  }
+
+  .result-body {
+    background: #0a0a0a;
+    border: 1px solid #2a2a2a;
+    border-radius: 8px;
+    padding: 16px;
+    white-space: pre-wrap;
+    font-size: 0.9375rem;
+    line-height: 1.7;
+    min-height: 80px;
+  }
+
+  .error {
+    color: #f87171;
+    font-size: 0.875rem;
+    margin-top: 12px;
+    display: none;
+  }
+
+  .error.visible {
+    display: block;
+  }
+
+  .spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .copied {
+    color: #8b5cf6;
+    transition: color 0.2s;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Email Writer</h1>
+  <p class="subtitle">Describe the tone and topic, get a polished email draft</p>
+
+  <div class="card">
+    <div class="field">
+      <label for="to">To</label>
+      <input type="text" id="to" placeholder="e.g. hiring manager, client, teammate">
+    </div>
+
+    <div class="field">
+      <label for="tone">Tone</label>
+      <select id="tone">
+        <option value="professional">Professional</option>
+        <option value="casual">Casual</option>
+        <option value="friendly">Friendly</option>
+        <option value="formal">Formal</option>
+        <option value="apologetic">Apologetic</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="subject">Subject / Topic</label>
+      <input type="text" id="subject" placeholder="e.g. follow-up after interview">
+    </div>
+
+    <div class="field">
+      <label for="context">Context / Details</label>
+      <textarea id="context" placeholder="Any extra details, key points to include, or specific requests..."></textarea>
+    </div>
+
+    <button class="btn" id="draftBtn" disabled>Draft Email</button>
+    <div class="error" id="error"></div>
+
+    <div class="result" id="result">
+      <div class="result-header">
+        <span class="result-label">Draft</span>
+        <button class="btn btn-secondary" id="copyBtn">Copy</button>
+      </div>
+      <div class="result-body" id="output"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  let sessionResolve;
+  const sessionReady = new Promise(r => { sessionResolve = r; });
+  let providers = {};
+  window.addEventListener('message', (e) => {
+    if (e.data && e.data.type === 'BYOKY_SESSION') { providers = e.data.providers || {}; sessionResolve(e.data); }
+    if (e.data && e.data.type === 'BYOKY_API_RESPONSE') { const p = pending.get(e.data.requestId); if (p) { pending.delete(e.data.requestId); p.resolve(e.data); } }
+    if (e.data && e.data.type === 'BYOKY_API_RESPONSE_START') { const p = pending.get(e.data.requestId); if (p && p.onStart) p.onStart(e.data); }
+    if (e.data && e.data.type === 'BYOKY_API_RESPONSE_CHUNK') { const p = pending.get(e.data.requestId); if (p && p.onChunk) p.onChunk(e.data.chunk); }
+    if (e.data && e.data.type === 'BYOKY_API_RESPONSE_END') { const p = pending.get(e.data.requestId); if (p) { pending.delete(e.data.requestId); if (p.onEnd) p.onEnd(); } }
+    if (e.data && e.data.type === 'BYOKY_API_RESPONSE_ERROR') { const p = pending.get(e.data.requestId); if (p) { pending.delete(e.data.requestId); p.reject(new Error(e.data.error)); } }
+  });
+  window.parent.postMessage({ type: 'MINIAPP_READY' }, '*');
+  let reqId = 0;
+  const pending = new Map();
+  window.byoky = {
+    sessionReady,
+    get providers() { return providers; },
+    async fetch(provider, url, options) { await sessionReady; options = options || {}; const id = String(++reqId); return new Promise((resolve, reject) => { pending.set(id, { resolve: (d) => resolve(new Response(d.body, { status: d.status, statusText: d.statusText, headers: d.headers || {} })), reject }); window.parent.postMessage({ type: 'BYOKY_API_REQUEST', requestId: id, provider, url, method: options.method || 'POST', headers: options.headers || {}, body: options.body || null }, '*'); }); },
+    async fetchStream(provider, url, options) { await sessionReady; options = options || {}; const id = String(++reqId); return new Promise((resolve, reject) => { const { readable, writable } = new TransformStream(); const writer = writable.getWriter(); const encoder = new TextEncoder(); pending.set(id, { onStart: (d) => resolve(new Response(readable, { status: d.status, statusText: d.statusText, headers: d.headers || {} })), onChunk: (chunk) => { writer.write(encoder.encode(chunk)).catch(() => {}); }, onEnd: () => { writer.close().catch(() => {}); }, reject: (err) => { writer.abort(err).catch(() => {}); reject(err); } }); window.parent.postMessage({ type: 'BYOKY_API_REQUEST', requestId: id, provider, url, method: options.method || 'POST', headers: options.headers || {}, body: options.body || null, stream: true }, '*'); }); }
+  };
+})();
+</script>
+
+<script>
+(function() {
+  const toInput = document.getElementById('to');
+  const toneSelect = document.getElementById('tone');
+  const subjectInput = document.getElementById('subject');
+  const contextInput = document.getElementById('context');
+  const draftBtn = document.getElementById('draftBtn');
+  const copyBtn = document.getElementById('copyBtn');
+  const output = document.getElementById('output');
+  const resultEl = document.getElementById('result');
+  const errorEl = document.getElementById('error');
+
+  let generating = false;
+
+  window.byoky.sessionReady.then(() => {
+    draftBtn.disabled = false;
+  });
+
+  draftBtn.addEventListener('click', async () => {
+    if (generating) return;
+
+    const to = toInput.value.trim();
+    const tone = toneSelect.value;
+    const subject = subjectInput.value.trim();
+    const context = contextInput.value.trim();
+
+    if (!subject) {
+      showError('Please enter a subject or topic.');
+      return;
+    }
+
+    hideError();
+    generating = true;
+    draftBtn.disabled = true;
+    draftBtn.innerHTML = '<span class="spinner"></span> Drafting...';
+    output.textContent = '';
+    resultEl.classList.add('visible');
+
+    let userMessage = `Write an email with a ${tone} tone about: ${subject}`;
+    if (to) userMessage += `\nThe email is addressed to: ${to}`;
+    if (context) userMessage += `\nAdditional context: ${context}`;
+
+    try {
+      const response = await window.byoky.fetchStream('anthropic', 'https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1024,
+          stream: true,
+          system: 'You are an email writing assistant. Draft professional emails based on the given parameters. Output only the email text.',
+          messages: [{ role: 'user', content: userMessage }]
+        })
+      });
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const data = line.slice(6).trim();
+          if (data === '[DONE]') continue;
+
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.type === 'content_block_delta' && parsed.delta && parsed.delta.type === 'text_delta') {
+              output.textContent += parsed.delta.text;
+            }
+          } catch (e) {
+            // skip unparseable lines
+          }
+        }
+      }
+    } catch (err) {
+      showError(err.message || 'Failed to generate email draft.');
+    } finally {
+      generating = false;
+      draftBtn.disabled = false;
+      draftBtn.textContent = 'Draft Email';
+    }
+  });
+
+  copyBtn.addEventListener('click', async () => {
+    const text = output.textContent;
+    if (!text) return;
+
+    try {
+      await navigator.clipboard.writeText(text);
+      copyBtn.textContent = 'Copied!';
+      copyBtn.classList.add('copied');
+      setTimeout(() => {
+        copyBtn.textContent = 'Copy';
+        copyBtn.classList.remove('copied');
+      }, 1500);
+    } catch (e) {
+      showError('Failed to copy to clipboard.');
+    }
+  });
+
+  function showError(msg) {
+    errorEl.textContent = msg;
+    errorEl.classList.add('visible');
+  }
+
+  function hideError() {
+    errorEl.textContent = '';
+    errorEl.classList.remove('visible');
+  }
+})();
+</script>
+</body>
+</html>

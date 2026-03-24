@@ -165,8 +165,14 @@ function Hero() {
               Try the Demo
             </a>
             <a
-              href="/dev"
+              href="/apps"
               className="btn btn-primary"
+            >
+              MiniApps
+            </a>
+            <a
+              href="/dev"
+              className="btn btn-secondary"
             >
               App Generator
             </a>
@@ -893,6 +899,9 @@ function Footer() {
               rel="noopener noreferrer"
             >
               GitHub
+            </a>
+            <a href="/apps">
+              MiniApps
             </a>
             <a href="/dev">
               Developers

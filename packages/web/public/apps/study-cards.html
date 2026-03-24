@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="miniapp" content='{"name":"Study Cards","description":"Enter any topic and generate interactive flashcards","author":"byoky","providers":["anthropic"]}'>
+<title>Study Cards</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #0a0a0a;
+    color: #ededed;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2rem 1rem;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin-bottom: 1.5rem;
+    letter-spacing: -0.02em;
+  }
+
+  .setup {
+    width: 100%;
+    max-width: 480px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .setup input, .setup select {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    background: #141414;
+    border: 1px solid #2a2a2a;
+    border-radius: 8px;
+    color: #ededed;
+    font-size: 0.95rem;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  .setup input:focus, .setup select:focus {
+    border-color: #6366f1;
+  }
+
+  .setup input::placeholder { color: #555; }
+
+  .setup select option { background: #141414; color: #ededed; }
+
+  .row {
+    display: flex;
+    gap: 0.75rem;
+  }
+
+  .row input { flex: 1; }
+  .row select { width: 120px; flex-shrink: 0; }
+
+  button {
+    padding: 0.75rem 1.5rem;
+    background: #6366f1;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: opacity 0.2s;
+  }
+
+  button:hover { opacity: 0.9; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .error {
+    color: #f87171;
+    font-size: 0.85rem;
+    text-align: center;
+  }
+
+  .loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 2rem;
+  }
+
+  .spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid #2a2a2a;
+    border-top-color: #6366f1;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .loading span { color: #888; font-size: 0.9rem; }
+
+  .cards-view {
+    width: 100%;
+    max-width: 520px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.25rem;
+  }
+
+  .counter {
+    font-size: 0.85rem;
+    color: #888;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .card-container {
+    width: 100%;
+    aspect-ratio: 3 / 2;
+    perspective: 800px;
+    cursor: pointer;
+  }
+
+  .card {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    transform-style: preserve-3d;
+    transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .card.flipped { transform: rotateY(180deg); }
+
+  .card-face {
+    position: absolute;
+    inset: 0;
+    backface-visibility: hidden;
+    background: #141414;
+    border: 1px solid #2a2a2a;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    text-align: center;
+    overflow-y: auto;
+  }
+
+  .card-face .label {
+    position: absolute;
+    top: 1rem;
+    left: 1.25rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #6366f1;
+  }
+
+  .card-face p {
+    font-size: 1.1rem;
+    line-height: 1.6;
+  }
+
+  .card-back {
+    transform: rotateY(180deg);
+  }
+
+  .card-back p { color: #c4c4c4; }
+
+  .hint {
+    font-size: 0.75rem;
+    color: #555;
+  }
+
+  .nav {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .nav button {
+    padding: 0.5rem 1.25rem;
+    font-size: 0.85rem;
+    background: #1e1e1e;
+    border: 1px solid #2a2a2a;
+  }
+
+  .nav button:hover { border-color: #6366f1; }
+
+  .restart {
+    margin-top: 0.5rem;
+    padding: 0.5rem 1.25rem;
+    font-size: 0.85rem;
+    background: transparent;
+    border: 1px solid #2a2a2a;
+    color: #888;
+  }
+
+  .restart:hover { border-color: #6366f1; color: #ededed; }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<h1>Study Cards</h1>
+
+<div id="setup" class="setup">
+  <input type="text" id="topic" placeholder="Enter a topic (e.g. Organic Chemistry)" autofocus>
+  <div class="row">
+    <input type="text" id="details" placeholder="Optional: specific focus or subtopic">
+    <select id="count">
+      <option value="5">5 cards</option>
+      <option value="8">8 cards</option>
+      <option value="10" selected>10 cards</option>
+      <option value="15">15 cards</option>
+      <option value="20">20 cards</option>
+    </select>
+  </div>
+  <button id="generateBtn" onclick="generate()">Generate Flashcards</button>
+  <div id="error" class="error hidden"></div>
+</div>
+
+<div id="loadingView" class="loading hidden">
+  <div class="spinner"></div>
+  <span>Generating flashcards...</span>
+</div>
+
+<div id="cardsView" class="cards-view hidden">
+  <div class="counter"><span id="current">1</span> / <span id="total">10</span></div>
+  <div class="card-container" onclick="flip()">
+    <div class="card" id="card">
+      <div class="card-face card-front">
+        <div class="label">Question</div>
+        <p id="question"></p>
+      </div>
+      <div class="card-face card-back">
+        <div class="label">Answer</div>
+        <p id="answer"></p>
+      </div>
+    </div>
+  </div>
+  <div class="hint">Click card to flip</div>
+  <div class="nav">
+    <button onclick="prev()">Prev</button>
+    <button onclick="next()">Next</button>
+  </div>
+  <button class="restart" onclick="restart()">New Topic</button>
+</div>
+
+<script>
+(function() {
+  let sessionResolve;
+  const sessionReady = new Promise(r => { sessionResolve = r; });
+  let providers = {};
+  window.addEventListener('message', (e) => {
+    if (e.data && e.data.type === 'BYOKY_SESSION') { providers = e.data.providers || {}; sessionResolve(e.data); }
+    if (e.data && e.data.type === 'BYOKY_API_RESPONSE') { const p = pending.get(e.data.requestId); if (p) { pending.delete(e.data.requestId); p.resolve(e.data); } }
+    if (e.data && e.data.type === 'BYOKY_API_RESPONSE_START') { const p = pending.get(e.data.requestId); if (p && p.onStart) p.onStart(e.data); }
+    if (e.data && e.data.type === 'BYOKY_API_RESPONSE_CHUNK') { const p = pending.get(e.data.requestId); if (p && p.onChunk) p.onChunk(e.data.chunk); }
+    if (e.data && e.data.type === 'BYOKY_API_RESPONSE_END') { const p = pending.get(e.data.requestId); if (p) { pending.delete(e.data.requestId); if (p.onEnd) p.onEnd(); } }
+    if (e.data && e.data.type === 'BYOKY_API_RESPONSE_ERROR') { const p = pending.get(e.data.requestId); if (p) { pending.delete(e.data.requestId); p.reject(new Error(e.data.error)); } }
+  });
+  window.parent.postMessage({ type: 'MINIAPP_READY' }, '*');
+  let reqId = 0;
+  const pending = new Map();
+  window.byoky = {
+    sessionReady,
+    get providers() { return providers; },
+    async fetch(provider, url, options) { await sessionReady; options = options || {}; const id = String(++reqId); return new Promise((resolve, reject) => { pending.set(id, { resolve: (d) => resolve(new Response(d.body, { status: d.status, statusText: d.statusText, headers: d.headers || {} })), reject }); window.parent.postMessage({ type: 'BYOKY_API_REQUEST', requestId: id, provider, url, method: options.method || 'POST', headers: options.headers || {}, body: options.body || null }, '*'); }); },
+    async fetchStream(provider, url, options) { await sessionReady; options = options || {}; const id = String(++reqId); return new Promise((resolve, reject) => { const { readable, writable } = new TransformStream(); const writer = writable.getWriter(); const encoder = new TextEncoder(); pending.set(id, { onStart: (d) => resolve(new Response(readable, { status: d.status, statusText: d.statusText, headers: d.headers || {} })), onChunk: (chunk) => { writer.write(encoder.encode(chunk)).catch(() => {}); }, onEnd: () => { writer.close().catch(() => {}); }, reject: (err) => { writer.abort(err).catch(() => {}); reject(err); } }); window.parent.postMessage({ type: 'BYOKY_API_REQUEST', requestId: id, provider, url, method: options.method || 'POST', headers: options.headers || {}, body: options.body || null, stream: true }, '*'); }); }
+  };
+})();
+</script>
+
+<script>
+  let cards = [];
+  let index = 0;
+
+  function showError(msg) {
+    const el = document.getElementById('error');
+    el.textContent = msg;
+    el.classList.remove('hidden');
+  }
+
+  function clearError() {
+    document.getElementById('error').classList.add('hidden');
+  }
+
+  function showView(name) {
+    document.getElementById('setup').classList.toggle('hidden', name !== 'setup');
+    document.getElementById('loadingView').classList.toggle('hidden', name !== 'loading');
+    document.getElementById('cardsView').classList.toggle('hidden', name !== 'cards');
+  }
+
+  function renderCard() {
+    const c = cards[index];
+    document.getElementById('question').textContent = c.question;
+    document.getElementById('answer').textContent = c.answer;
+    document.getElementById('current').textContent = index + 1;
+    document.getElementById('total').textContent = cards.length;
+    document.getElementById('card').classList.remove('flipped');
+  }
+
+  function flip() {
+    document.getElementById('card').classList.toggle('flipped');
+  }
+
+  function prev() {
+    if (index > 0) { index--; renderCard(); }
+  }
+
+  function next() {
+    if (index < cards.length - 1) { index++; renderCard(); }
+  }
+
+  function restart() {
+    cards = [];
+    index = 0;
+    document.getElementById('topic').value = '';
+    document.getElementById('details').value = '';
+    showView('setup');
+    document.getElementById('topic').focus();
+  }
+
+  async function generate() {
+    clearError();
+    const topic = document.getElementById('topic').value.trim();
+    if (!topic) { showError('Please enter a topic.'); return; }
+
+    const count = parseInt(document.getElementById('count').value, 10);
+    const details = document.getElementById('details').value.trim();
+    const userMsg = `Topic: ${topic}${details ? `\nFocus: ${details}` : ''}\nGenerate exactly ${count} flashcards.`;
+
+    document.getElementById('generateBtn').disabled = true;
+    showView('loading');
+
+    try {
+      const res = await window.byoky.fetch('anthropic', 'https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 4096,
+          system: 'Generate flashcards for studying. Return a JSON array of objects with "question" and "answer" fields. Output only valid JSON, no other text.',
+          messages: [{ role: 'user', content: userMsg }]
+        })
+      });
+
+      if (!res.ok) {
+        const errBody = await res.text();
+        throw new Error(`API error ${res.status}: ${errBody}`);
+      }
+
+      const data = await res.json();
+      const text = data.content[0].text.trim();
+      const parsed = JSON.parse(text);
+
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        throw new Error('Invalid response format');
+      }
+
+      cards = parsed;
+      index = 0;
+      renderCard();
+      showView('cards');
+    } catch (err) {
+      showView('setup');
+      showError(err.message || 'Failed to generate flashcards.');
+    } finally {
+      document.getElementById('generateBtn').disabled = false;
+    }
+  }
+
+  document.getElementById('topic').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') generate();
+  });
+</script>
+
+</body>
+</html>

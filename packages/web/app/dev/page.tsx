@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef, useEffect, forwardRef } from 'react';
 import { Byoky } from '@byoky/sdk';
 import type { ByokySession } from '@byoky/sdk';
-import { startDeviceFlow, pollForToken, getUser, createRepo, pushFiles } from './github';
+import { startDeviceFlow, pollForToken, getUser, createRepo, pushFiles, createGist } from './github';
 import type { GitHubUser, RepoInfo } from './github';
 import { generateApp } from './generator';
 import type { GenerateResult, Message } from './generator';
@@ -95,6 +95,7 @@ export default function DevHub() {
   const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
   const [generating, setGenerating] = useState(false);
   const [generatedFiles, setGeneratedFiles] = useState<Record<string, string> | null>(null);
+  const [miniappHtml, setMiniappHtml] = useState<string | null>(null);
   const [activeFile, setActiveFile] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
 
@@ -104,6 +105,10 @@ export default function DevHub() {
   const [pushing, setPushing] = useState(false);
   const [pushProgress, setPushProgress] = useState<{ done: number; total: number } | null>(null);
   const [result, setResult] = useState<RepoInfo | null>(null);
+
+  /* ── Publish state ── */
+  const [publishing, setPublishing] = useState(false);
+  const [publishedGistUrl, setPublishedGistUrl] = useState<string | null>(null);
 
   /* ── UI state ── */
   const [error, setError] = useState<string | null>(null);
@@ -259,6 +264,7 @@ export default function DevHub() {
       } else {
         setGeneratedFiles((prev) => ({ ...prev, ...res.files }));
       }
+      if (res.miniappHtml) setMiniappHtml(res.miniappHtml);
 
       const changedFiles = Object.keys(res.files).sort();
       if (changedFiles.length > 0) {
@@ -351,6 +357,45 @@ export default function DevHub() {
     }
   }, [githubToken, githubUser, generatedFiles, repoName, isPrivate]);
 
+  /* ─── Publish as MiniApp ────────────────────── */
+
+  const handlePublish = useCallback(async () => {
+    if (!githubToken || !githubUser || !miniappHtml) return;
+
+    setPublishing(true);
+    setError(null);
+
+    try {
+      const appName = repoName || 'my-miniapp';
+      const gist = await createGist(
+        githubToken,
+        `${appName}.html`,
+        miniappHtml,
+        `Byoky MiniApp: ${appName}`,
+      );
+
+      setPublishedGistUrl(gist.html_url);
+
+      const registryEntry = JSON.stringify({
+        id: appName,
+        name: appName.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+        description: messages.find((m) => m.role === 'assistant')?.content || 'A Byoky MiniApp',
+        author: githubUser.login,
+        gistId: gist.id,
+        providers: ['anthropic'],
+        category: 'other',
+        publishedAt: new Date().toISOString(),
+      }, null, 2);
+
+      await navigator.clipboard.writeText(registryEntry);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to publish miniapp');
+    } finally {
+      setPublishing(false);
+    }
+  }, [githubToken, githubUser, miniappHtml, repoName, messages]);
+
   /* ─── Keyboard shortcuts ────────────────────── */
 
   const handleKeyDown = useCallback(
@@ -386,9 +431,11 @@ export default function DevHub() {
               onClick={() => {
                 setMessages([]);
                 setGeneratedFiles(null);
+                setMiniappHtml(null);
                 setActiveFile(null);
                 setRepoName('');
                 setResult(null);
+                setPublishedGistUrl(null);
                 setShowRepoInput(false);
                 setMode('chat');
                 localStorage.removeItem(STORAGE_KEY);
@@ -432,6 +479,28 @@ export default function DevHub() {
             <button className="dh-pill" onClick={connectGitHub}>
               <GitHubIcon /> Connect GitHub
             </button>
+          )}
+
+          {/* Publish MiniApp */}
+          {miniappHtml && githubUser && (
+            publishedGistUrl ? (
+              <a
+                href={publishedGistUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="dh-pill dh-pill-connected"
+              >
+                Published &#8599;
+              </a>
+            ) : (
+              <button
+                className="dh-pill"
+                onClick={handlePublish}
+                disabled={publishing}
+              >
+                {publishing ? <><span className="dh-spinner-sm" /> Publishing...</> : <><MiniAppIcon /> Publish MiniApp</>}
+              </button>
+            )
           )}
 
           {/* Export actions */}
@@ -820,6 +889,17 @@ function CodeIcon() {
     <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" opacity="0.3">
       <polyline points="16 18 22 12 16 6" />
       <polyline points="8 6 2 12 8 18" />
+    </svg>
+  );
+}
+
+function MiniAppIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="7" height="7" />
+      <rect x="14" y="3" width="7" height="7" />
+      <rect x="3" y="14" width="7" height="7" />
+      <rect x="14" y="14" width="7" height="7" />
     </svg>
   );
 }

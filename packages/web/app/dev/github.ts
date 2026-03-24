@@ -87,6 +87,38 @@ export async function createRepo(
   return res.json();
 }
 
+export interface GistInfo {
+  id: string;
+  html_url: string;
+  files: Record<string, { raw_url: string }>;
+}
+
+export async function createGist(
+  token: string,
+  filename: string,
+  content: string,
+  description: string,
+): Promise<GistInfo> {
+  const res = await fetch('https://api.github.com/gists', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github+json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      description,
+      public: true,
+      files: { [filename]: { content } },
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || `Failed to create gist (${res.status})`);
+  }
+  return res.json();
+}
+
 export async function pushFiles(
   token: string,
   owner: string,
