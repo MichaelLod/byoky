@@ -38,6 +38,9 @@ export const metadata: Metadata = {
     'OpenAI key wallet',
     'Anthropic key wallet',
     'AI developer tools',
+    'AI app generator',
+    'BYOK app builder',
+    'create AI app',
   ],
   alternates: {
     canonical: '/',
