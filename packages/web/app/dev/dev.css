@@ -395,15 +395,15 @@
 .dh-typing {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 8px 0;
+  gap: 5px;
+  padding: 8px 4px;
 }
 
 .dh-typing-dot {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: var(--teal);
+  background: var(--teal-light);
   animation: dh-typing-pulse 1.4s ease-in-out infinite;
 }
 
@@ -416,8 +416,8 @@
 }
 
 @keyframes dh-typing-pulse {
-  0%, 60%, 100% { opacity: 0.3; transform: scale(0.8); }
-  30% { opacity: 1; transform: scale(1); }
+  0%, 100% { opacity: 0.25; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-3px); }
 }
 
 /* ─── Chat input ─────────────────────────────── */
