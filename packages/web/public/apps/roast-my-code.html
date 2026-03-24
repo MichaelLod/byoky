@@ -368,9 +368,8 @@
           model: 'claude-sonnet-4-20250514',
           max_tokens: 1500,
           stream: true,
-          system: systemPrompts[currentHeat],
           messages: [
-            { role: 'user', content: 'Roast this code:\n\n```\n' + code + '\n```' }
+            { role: 'user', content: systemPrompts[currentHeat] + '\n\nRoast this code:\n\n```\n' + code + '\n```' }
           ]
         })
       });
