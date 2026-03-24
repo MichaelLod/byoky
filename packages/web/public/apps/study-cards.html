@@ -352,8 +352,7 @@
         body: JSON.stringify({
           model: 'claude-sonnet-4-20250514',
           max_tokens: 4096,
-          system: 'Generate flashcards for studying. Return a JSON array of objects with "question" and "answer" fields. Output only valid JSON, no other text.',
-          messages: [{ role: 'user', content: userMsg }]
+          messages: [{ role: 'user', content: 'Generate flashcards for studying. Return a JSON array of objects with "question" and "answer" fields. Output only valid JSON, no other text.\n\n' + userMsg }]
         })
       });
 

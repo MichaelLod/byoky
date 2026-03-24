@@ -336,8 +336,7 @@
           model: 'claude-sonnet-4-20250514',
           max_tokens: 4096,
           stream: true,
-          system: 'You are a translator. Translate the given text to the target language. Output only the translation, nothing else.',
-          messages: [{ role: 'user', content: userMsg }]
+          messages: [{ role: 'user', content: 'You are a translator. Translate the given text to the target language. Output only the translation, nothing else.\n\n' + userMsg }]
         })
       });
 

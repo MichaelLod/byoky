@@ -323,8 +323,7 @@
           model: 'claude-sonnet-4-20250514',
           max_tokens: 1024,
           stream: true,
-          system: 'You are an email writing assistant. Draft professional emails based on the given parameters. Output only the email text.',
-          messages: [{ role: 'user', content: userMessage }]
+          messages: [{ role: 'user', content: 'You are an email writing assistant. Draft professional emails based on the given parameters. Output only the email text.\n\n' + userMessage }]
         })
       });
 
