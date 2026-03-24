@@ -85,6 +85,7 @@ export default function DevHub() {
   const [error, setError] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState('');
   const [codeView, setCodeView] = useState<'code' | 'preview'>('code');
+  const [copied, setCopied] = useState(false);
   const previewIframeRef = useRef<HTMLIFrameElement>(null);
 
   /* ── Hydrate from localStorage on mount ── */
@@ -512,7 +513,19 @@ export default function DevHub() {
                   />
                 </div>
               ) : (
-                <div className="dh-code-area">
+                <div
+                  className="dh-code-area"
+                  onClick={() => {
+                    if (!miniappHtml) return;
+                    navigator.clipboard.writeText(miniappHtml).then(() => {
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 2000);
+                    }).catch(() => {});
+                  }}
+                  style={{ cursor: 'pointer' }}
+                  title="Click to copy HTML"
+                >
+                  {copied && <div className="dh-copied-toast">Copied to clipboard</div>}
                   <pre className="dh-code-block">
                     <code>{renderCodeLines(miniappHtml)}</code>
                   </pre>
