@@ -25,7 +25,7 @@ import com.byoky.app.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun WalletScreen(wallet: WalletStore) {
+fun WalletScreen(wallet: WalletStore, onNavigateToSettings: () -> Unit = {}) {
     val credentials by wallet.credentials.collectAsState()
     var showAddSheet by remember { mutableStateOf(false) }
 
@@ -36,6 +36,9 @@ fun WalletScreen(wallet: WalletStore) {
                 actions = {
                     IconButton(onClick = { showAddSheet = true }) {
                         Icon(Icons.Default.AddCircle, "Add credential", tint = Accent)
+                    }
+                    IconButton(onClick = onNavigateToSettings) {
+                        Icon(Icons.Default.Settings, "Settings", tint = TextSecondary)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(

@@ -51,6 +51,20 @@ export function CreateGift() {
     setTimeout(() => setCopied(false), 2000);
   }
 
+  async function shareLink() {
+    if (!giftLink) return;
+    const text = `I'm sharing ${formatTokens(maxTokens)} tokens of ${provider?.name ?? selectedCred?.providerId} with you via Byoky!`;
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'Byoky Gift', text, url: giftLink });
+        return;
+      } catch {
+        // Fall through to copy
+      }
+    }
+    await copyLink();
+  }
+
   function formatTokens(n: number): string {
     if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
     if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
@@ -77,9 +91,21 @@ export function CreateGift() {
           <div className="gift-link-box">
             <code className="gift-link-text">{giftLink}</code>
           </div>
-          <button className="btn btn-primary" onClick={copyLink}>
-            {copied ? 'Copied!' : 'Copy Gift Link'}
-          </button>
+          <div className="gift-share-actions">
+            <button className="btn btn-primary" onClick={shareLink}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="18" cy="5" r="3" />
+                <circle cx="6" cy="12" r="3" />
+                <circle cx="18" cy="19" r="3" />
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+              </svg>
+              Share Gift
+            </button>
+            <button className="btn btn-secondary" onClick={copyLink}>
+              {copied ? 'Copied!' : 'Copy Link'}
+            </button>
+          </div>
           <p className="gift-hint">
             Share this link with the recipient. They can redeem it in their Byoky wallet.
             Your API key never leaves your extension.
@@ -88,7 +114,7 @@ export function CreateGift() {
         <button
           className="btn btn-secondary"
           style={{ marginTop: '12px' }}
-          onClick={() => navigate('dashboard')}
+          onClick={() => navigate('gifts')}
         >
           Done
         </button>
@@ -208,7 +234,7 @@ export function CreateGift() {
             <button
               type="button"
               className="btn btn-secondary"
-              onClick={() => navigate('dashboard')}
+              onClick={() => navigate('gifts')}
             >
               Cancel
             </button>

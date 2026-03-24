@@ -3,6 +3,7 @@ import SwiftUI
 struct WalletView: View {
     @EnvironmentObject var wallet: WalletStore
     @State private var showAddCredential = false
+    @State private var showSettings = false
 
     var body: some View {
         NavigationStack {
@@ -17,6 +18,13 @@ struct WalletView: View {
             }
             .navigationTitle("Wallet")
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button {
+                        showSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         showAddCredential = true
@@ -27,6 +35,11 @@ struct WalletView: View {
             }
             .sheet(isPresented: $showAddCredential) {
                 AddCredentialView()
+            }
+            .sheet(isPresented: $showSettings) {
+                NavigationStack {
+                    SettingsView()
+                }
             }
         }
     }
