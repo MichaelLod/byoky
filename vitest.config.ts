@@ -11,6 +11,7 @@ export default defineConfig({
     },
     environmentMatchGlobs: [
       ['packages/sdk/tests/**', 'jsdom'],
+      ['packages/web/tests/**', 'jsdom'],
     ],
   },
 });
