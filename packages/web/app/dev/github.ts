@@ -202,3 +202,93 @@ export async function pushFiles(
   if (!updateRes.ok) throw new Error('Failed to update branch ref');
   onProgress?.(++done, total);
 }
+
+const BYOKY_REPO = 'MichaelLod/byoky';
+const REGISTRY_PATH = 'packages/web/public/apps/registry.json';
+
+export interface PrInfo {
+  html_url: string;
+  number: number;
+}
+
+export async function submitRegistryPR(
+  token: string,
+  author: string,
+  entry: Record<string, unknown>,
+): Promise<PrInfo> {
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: 'application/vnd.github+json',
+    'Content-Type': 'application/json',
+  };
+  const base = `https://api.github.com/repos/${BYOKY_REPO}`;
+
+  // 1. Ensure fork exists
+  await fetch(`https://api.github.com/repos/${BYOKY_REPO}/forks`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ default_branch_only: true }),
+  });
+  // Wait a moment for fork to be ready
+  await new Promise(r => setTimeout(r, 2000));
+
+  const forkBase = `https://api.github.com/repos/${author}/byoky`;
+
+  // 2. Get main branch SHA from the fork
+  const refRes = await fetch(`${forkBase}/git/ref/heads/main`, { headers });
+  if (!refRes.ok) throw new Error('Failed to get fork ref — fork may still be creating');
+  const refData = await refRes.json();
+  const baseSha = refData.object.sha;
+
+  // 3. Create a new branch on the fork
+  const branchName = `miniapp-${(entry.id as string).slice(0, 30)}-${Date.now()}`;
+  const branchRes = await fetch(`${forkBase}/git/refs`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ ref: `refs/heads/${branchName}`, sha: baseSha }),
+  });
+  if (!branchRes.ok) throw new Error('Failed to create branch');
+
+  // 4. Get current registry.json from upstream
+  const fileRes = await fetch(`${base}/contents/${REGISTRY_PATH}?ref=main`, { headers });
+  if (!fileRes.ok) throw new Error('Failed to fetch registry.json');
+  const fileData = await fileRes.json();
+  const currentContent = JSON.parse(atob(fileData.content.replace(/\n/g, '')));
+
+  // 5. Add the new entry
+  currentContent.push(entry);
+  const updatedContent = JSON.stringify(currentContent, null, 2) + '\n';
+
+  // 6. Update the file on the fork branch
+  const updateRes = await fetch(`${forkBase}/contents/${REGISTRY_PATH}`, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify({
+      message: `Add miniapp: ${entry.name}`,
+      content: btoa(unescape(encodeURIComponent(updatedContent))),
+      sha: fileData.sha,
+      branch: branchName,
+    }),
+  });
+  if (!updateRes.ok) {
+    const err = await updateRes.json().catch(() => ({}));
+    throw new Error((err as Record<string, string>).message || 'Failed to update registry');
+  }
+
+  // 7. Create PR from fork branch to upstream main
+  const prRes = await fetch(`${base}/pulls`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      title: `Add miniapp: ${entry.name}`,
+      head: `${author}:${branchName}`,
+      base: 'main',
+      body: `Adds **${entry.name}** to the MiniApps registry.\n\n- Author: @${author}\n- Category: ${entry.category}\n- Providers: ${(entry.providers as string[]).join(', ')}\n- Gist: https://gist.github.com/${entry.gistId}`,
+    }),
+  });
+  if (!prRes.ok) {
+    const err = await prRes.json().catch(() => ({}));
+    throw new Error((err as Record<string, string>).message || 'Failed to create PR');
+  }
+  return prRes.json();
+}
