@@ -4,7 +4,9 @@
     "name": "AI Chat",
     "description": "Simple multi-turn chat with Claude. Supports streaming responses and markdown-style formatting.",
     "author": "byoky",
-    "providers": ["anthropic"],
+    "providers": [
+      "anthropic"
+    ],
     "category": "chat",
     "htmlUrl": "/apps/ai-chat.html",
     "publishedAt": "2026-03-24T00:00:00Z"
@@ -14,7 +16,9 @@
     "name": "Code Explainer",
     "description": "Paste any code snippet and get a clear, detailed explanation of what it does.",
     "author": "byoky",
-    "providers": ["anthropic"],
+    "providers": [
+      "anthropic"
+    ],
     "category": "code",
     "htmlUrl": "/apps/code-explainer.html",
     "publishedAt": "2026-03-24T00:00:00Z"
@@ -24,7 +28,9 @@
     "name": "Email Writer",
     "description": "Describe the tone and topic, get a polished email draft instantly.",
     "author": "byoky",
-    "providers": ["anthropic"],
+    "providers": [
+      "anthropic"
+    ],
     "category": "writing",
     "htmlUrl": "/apps/email-writer.html",
     "publishedAt": "2026-03-24T00:00:00Z"
@@ -34,7 +40,9 @@
     "name": "Translator",
     "description": "Translate text between any languages with natural, context-aware results.",
     "author": "byoky",
-    "providers": ["anthropic"],
+    "providers": [
+      "anthropic"
+    ],
     "category": "productivity",
     "htmlUrl": "/apps/translator.html",
     "publishedAt": "2026-03-24T00:00:00Z"
@@ -44,7 +52,9 @@
     "name": "Study Cards",
     "description": "Enter any topic and generate interactive flashcards for studying.",
     "author": "byoky",
-    "providers": ["anthropic"],
+    "providers": [
+      "anthropic"
+    ],
     "category": "productivity",
     "htmlUrl": "/apps/study-cards.html",
     "publishedAt": "2026-03-24T00:00:00Z"
@@ -54,9 +64,23 @@
     "name": "Roast My Code",
     "description": "Paste your code and get a brutally honest (but funny) code review.",
     "author": "byoky",
-    "providers": ["anthropic"],
+    "providers": [
+      "anthropic"
+    ],
     "category": "fun",
     "htmlUrl": "/apps/roast-my-code.html",
     "publishedAt": "2026-03-24T00:00:00Z"
+  },
+  {
+    "id": "MichaelLod-bad-dad-jokes",
+    "name": "Bad Dad Jokes",
+    "description": "A bad dad joke generator that creates groan-worthy puns and jokes using Claude AI.",
+    "author": "MichaelLod",
+    "gistId": "4e9f08cc522732776f8277462650b5e7",
+    "providers": [
+      "anthropic"
+    ],
+    "category": "other",
+    "publishedAt": "2026-03-24T18:32:38.999Z"
   }
 ]
