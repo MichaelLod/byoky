@@ -4,6 +4,14 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+import java.io.FileInputStream
+import java.util.Properties
+
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) load(FileInputStream(keystorePropsFile))
+}
+
 android {
     namespace = "com.byoky.app"
     compileSdk = 35
@@ -16,10 +24,24 @@ android {
         versionName = "1.0.0"
     }
 
+    if (keystorePropsFile.exists()) {
+        signingConfigs {
+            create("release") {
+                storeFile = rootProject.file(keystoreProps["STORE_FILE"] as String)
+                storePassword = keystoreProps["STORE_PASSWORD"] as String
+                keyAlias = keystoreProps["KEY_ALIAS"] as String
+                keyPassword = keystoreProps["KEY_PASSWORD"] as String
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (keystorePropsFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
