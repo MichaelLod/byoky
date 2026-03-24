@@ -133,7 +133,7 @@ export function RedeemGift() {
           <button
             type="button"
             className="btn btn-secondary"
-            onClick={() => navigate('dashboard')}
+            onClick={() => navigate('gifts')}
           >
             Cancel
           </button>

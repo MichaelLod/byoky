@@ -1332,6 +1332,41 @@ body {
 
 /* ─── Token Gifts ─── */
 
+.gift-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.gift-actions .btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  justify-content: center;
+}
+
+.gift-share-btns {
+  display: flex;
+  gap: 4px;
+}
+
+.gift-share-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.gift-share-actions .btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gift-card-expired {
+  opacity: 0.6;
+}
+
 .gift-section-label {
   font-size: 12px;
   font-weight: 600;

@@ -9,30 +9,27 @@ struct PairView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        NavigationStack {
-            List {
-                switch pairService.status {
-                case .idle:
-                    idleSection
-                case .connecting:
-                    connectingSection
-                case .paired(let origin):
-                    pairedSection(origin: origin)
-                case .error(let msg):
-                    errorSection(message: msg)
-                }
+        List {
+            switch pairService.status {
+            case .idle:
+                idleSection
+            case .connecting:
+                connectingSection
+            case .paired(let origin):
+                pairedSection(origin: origin)
+            case .error(let msg):
+                errorSection(message: msg)
             }
-            .navigationTitle("Pair")
-            .sheet(isPresented: $showScanner) {
-                QRScannerView { code in
-                    showScanner = false
-                    connectWithCode(code)
-                }
+        }
+        .sheet(isPresented: $showScanner) {
+            QRScannerView { code in
+                showScanner = false
+                connectWithCode(code)
             }
-            .onChange(of: scenePhase) { _, newPhase in
-                if newPhase == .active {
-                    pairService.reconnectIfNeeded()
-                }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                pairService.reconnectIfNeeded()
             }
         }
     }

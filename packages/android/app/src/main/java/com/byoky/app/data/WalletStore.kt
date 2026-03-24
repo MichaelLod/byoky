@@ -47,6 +47,12 @@ class WalletStore(context: Context) {
     private val _requestLogs = MutableStateFlow<List<RequestLog>>(emptyList())
     val requestLogs: StateFlow<List<RequestLog>> = _requestLogs.asStateFlow()
 
+    private val _gifts = MutableStateFlow<List<Gift>>(emptyList())
+    val gifts: StateFlow<List<Gift>> = _gifts.asStateFlow()
+
+    private val _giftedCredentials = MutableStateFlow<List<GiftedCredential>>(emptyList())
+    val giftedCredentials: StateFlow<List<GiftedCredential>> = _giftedCredentials.asStateFlow()
+
     private val _bridgeStatus = MutableStateFlow(BridgeStatus.INACTIVE)
     val bridgeStatus: StateFlow<BridgeStatus> = _bridgeStatus.asStateFlow()
 
@@ -93,6 +99,8 @@ class WalletStore(context: Context) {
         loadCredentials()
         loadSessions()
         loadRequestLogs()
+        loadGifts()
+        loadGiftedCredentials()
         return UnlockResult.Success
     }
 
@@ -101,6 +109,8 @@ class WalletStore(context: Context) {
         _credentials.value = emptyList()
         _sessions.value = emptyList()
         _requestLogs.value = emptyList()
+        _gifts.value = emptyList()
+        _giftedCredentials.value = emptyList()
         _status.value = WalletStatus.LOCKED
         backgroundTime = null
     }
@@ -192,6 +202,65 @@ class WalletStore(context: Context) {
         saveSessions()
     }
 
+    // MARK: - Gifts
+
+    fun createGift(
+        credentialId: String,
+        providerId: String,
+        label: String,
+        maxTokens: Int,
+        expiresInMs: Long,
+        relayUrl: String,
+    ): Gift {
+        val gift = Gift(
+            credentialId = credentialId,
+            providerId = providerId,
+            label = label,
+            authToken = generateAuthToken(),
+            maxTokens = maxTokens,
+            expiresAt = System.currentTimeMillis() + expiresInMs,
+            relayUrl = relayUrl,
+        )
+        _gifts.value = _gifts.value + gift
+        saveGifts()
+        return gift
+    }
+
+    fun revokeGift(id: String) {
+        _gifts.value = _gifts.value.map {
+            if (it.id == id) it.copy(active = false) else it
+        }
+        saveGifts()
+    }
+
+    fun redeemGift(encoded: String): Pair<Boolean, String?> {
+        val link = decodeGiftLink(encoded) ?: return Pair(false, "Invalid gift link")
+        val (valid, error) = validateGiftLink(link)
+        if (!valid) return Pair(false, error)
+
+        val existing = _giftedCredentials.value.any { it.giftId == link.id }
+        if (existing) return Pair(false, "Gift already redeemed")
+
+        val credential = GiftedCredential(
+            giftId = link.id,
+            providerId = link.p,
+            providerName = link.n,
+            senderLabel = link.s,
+            authToken = link.t,
+            maxTokens = link.m,
+            expiresAt = link.e,
+            relayUrl = link.r,
+        )
+        _giftedCredentials.value = _giftedCredentials.value + credential
+        saveGiftedCredentials()
+        return Pair(true, null)
+    }
+
+    fun removeGiftedCredential(id: String) {
+        _giftedCredentials.value = _giftedCredentials.value.filter { it.id != id }
+        saveGiftedCredentials()
+    }
+
     // MARK: - Reset
 
     fun resetWallet() {
@@ -218,12 +287,16 @@ class WalletStore(context: Context) {
         editor.remove("credentials")
         editor.remove("sessions")
         editor.remove("requestLogs")
+        editor.remove("gifts")
+        editor.remove("giftedCredentials")
         editor.apply()
 
         // Clear in-memory state
         _credentials.value = emptyList()
         _sessions.value = emptyList()
         _requestLogs.value = emptyList()
+        _gifts.value = emptyList()
+        _giftedCredentials.value = emptyList()
         _bridgeStatus.value = BridgeStatus.INACTIVE
 
         // Reset brute-force state
@@ -401,5 +474,103 @@ class WalletStore(context: Context) {
             })
         }
         prefs.edit().putString("requestLogs", arr.toString()).apply()
+    }
+
+    private fun loadGifts() {
+        val json = prefs.getString("gifts", null) ?: return
+        try {
+            val arr = JSONArray(json)
+            val list = mutableListOf<Gift>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                list.add(
+                    Gift(
+                        id = obj.getString("id"),
+                        credentialId = obj.getString("credentialId"),
+                        providerId = obj.getString("providerId"),
+                        label = obj.getString("label"),
+                        authToken = obj.getString("authToken"),
+                        maxTokens = obj.getInt("maxTokens"),
+                        usedTokens = obj.optInt("usedTokens", 0),
+                        expiresAt = obj.getLong("expiresAt"),
+                        createdAt = obj.getLong("createdAt"),
+                        active = obj.optBoolean("active", true),
+                        relayUrl = obj.getString("relayUrl"),
+                    )
+                )
+            }
+            _gifts.value = list
+        } catch (_: Exception) {
+            _gifts.value = emptyList()
+        }
+    }
+
+    private fun saveGifts() {
+        val arr = JSONArray()
+        _gifts.value.forEach { g ->
+            arr.put(JSONObject().apply {
+                put("id", g.id)
+                put("credentialId", g.credentialId)
+                put("providerId", g.providerId)
+                put("label", g.label)
+                put("authToken", g.authToken)
+                put("maxTokens", g.maxTokens)
+                put("usedTokens", g.usedTokens)
+                put("expiresAt", g.expiresAt)
+                put("createdAt", g.createdAt)
+                put("active", g.active)
+                put("relayUrl", g.relayUrl)
+            })
+        }
+        prefs.edit().putString("gifts", arr.toString()).apply()
+    }
+
+    private fun loadGiftedCredentials() {
+        val json = prefs.getString("giftedCredentials", null) ?: return
+        try {
+            val arr = JSONArray(json)
+            val list = mutableListOf<GiftedCredential>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                list.add(
+                    GiftedCredential(
+                        id = obj.getString("id"),
+                        giftId = obj.getString("giftId"),
+                        providerId = obj.getString("providerId"),
+                        providerName = obj.getString("providerName"),
+                        senderLabel = obj.getString("senderLabel"),
+                        authToken = obj.getString("authToken"),
+                        maxTokens = obj.getInt("maxTokens"),
+                        usedTokens = obj.optInt("usedTokens", 0),
+                        expiresAt = obj.getLong("expiresAt"),
+                        relayUrl = obj.getString("relayUrl"),
+                        createdAt = obj.getLong("createdAt"),
+                    )
+                )
+            }
+            _giftedCredentials.value = list
+        } catch (_: Exception) {
+            _giftedCredentials.value = emptyList()
+        }
+    }
+
+    private fun saveGiftedCredentials() {
+        val arr = JSONArray()
+        _giftedCredentials.value.forEach { gc ->
+            arr.put(JSONObject().apply {
+                put("id", gc.id)
+                put("giftId", gc.giftId)
+                put("providerId", gc.providerId)
+                put("providerName", gc.providerName)
+                put("senderLabel", gc.senderLabel)
+                put("authToken", gc.authToken)
+                put("maxTokens", gc.maxTokens)
+                put("usedTokens", gc.usedTokens)
+                put("expiresAt", gc.expiresAt)
+                put("relayUrl", gc.relayUrl)
+                put("createdAt", gc.createdAt)
+            })
+        }
+        prefs.edit().putString("giftedCredentials", arr.toString()).apply()
     }
 }
