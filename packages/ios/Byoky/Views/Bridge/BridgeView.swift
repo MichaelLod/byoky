@@ -5,15 +5,12 @@ struct BridgeView: View {
     @State private var isStarting = false
 
     var body: some View {
-        NavigationStack {
-            List {
-                statusSection
-                explainerSection
-                if wallet.bridgeStatus.isActive {
-                    activeInfoSection
-                }
+        List {
+            statusSection
+            explainerSection
+            if wallet.bridgeStatus.isActive {
+                activeInfoSection
             }
-            .navigationTitle("Bridge")
         }
     }
 

@@ -22,6 +22,7 @@ type Page =
   | 'request-history'
   | 'approval'
   | 'settings'
+  | 'gifts'
   | 'create-gift'
   | 'redeem-gift';
 
@@ -264,7 +265,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       const result = await sendInternal('redeemGift', { giftLinkEncoded });
       if (result.error) throw new Error(result.error as string);
       await get().refreshData();
-      set({ currentPage: 'dashboard', loading: false });
+      set({ currentPage: 'gifts', loading: false });
     } catch (e) {
       set({ error: (e as Error).message, loading: false });
     }

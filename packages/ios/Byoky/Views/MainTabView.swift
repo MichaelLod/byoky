@@ -8,14 +8,14 @@ struct MainTabView: View {
                     Label("Wallet", systemImage: "wallet.bifold")
                 }
 
-            PairView()
+            GiftsView()
                 .tabItem {
-                    Label("Pair", systemImage: "qrcode.viewfinder")
+                    Label("Gifts", systemImage: "gift")
                 }
 
-            BridgeView()
+            ConnectView()
                 .tabItem {
-                    Label("Bridge", systemImage: "antenna.radiowaves.left.and.right")
+                    Label("Connect", systemImage: "antenna.radiowaves.left.and.right")
                 }
 
             UsageView()
@@ -26,11 +26,6 @@ struct MainTabView: View {
             SessionsView()
                 .tabItem {
                     Label("Sessions", systemImage: "link")
-                }
-
-            SettingsView()
-                .tabItem {
-                    Label("Settings", systemImage: "gearshape")
                 }
         }
         .tint(Theme.accent)

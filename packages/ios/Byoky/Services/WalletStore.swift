@@ -10,6 +10,8 @@ final class WalletStore: ObservableObject {
     @Published var credentials: [Credential] = []
     @Published var sessions: [Session] = []
     @Published var requestLogs: [RequestLog] = []
+    @Published var gifts: [Gift] = []
+    @Published var giftedCredentials: [GiftedCredential] = []
     @Published var bridgeStatus: BridgeStatus = .inactive
     @Published var lockoutEndTime: Date?
 
@@ -22,6 +24,8 @@ final class WalletStore: ObservableObject {
     private let credentialsKey = "credentials"
     private let sessionsKey = "sessions"
     private let requestLogKey = "requestLog"
+    private let giftsKey = "gifts"
+    private let giftedCredentialsKey = "giftedCredentials"
 
     private let autoLockTimeout: TimeInterval = 300
     private var backgroundTime: Date?
@@ -115,6 +119,8 @@ final class WalletStore: ObservableObject {
         try loadCredentials()
         try loadSessions()
         loadRequestLogs()
+        loadGifts()
+        loadGiftedCredentials()
         try migrateCredentials(password: password)
 
         AppGroupSync.shared.syncWalletState(
@@ -128,6 +134,8 @@ final class WalletStore: ObservableObject {
         credentials = []
         sessions = []
         requestLogs = []
+        gifts = []
+        giftedCredentials = []
         status = .locked
         backgroundTime = nil
         AppGroupSync.shared.syncWalletState(isUnlocked: false, providers: [])
@@ -155,11 +163,15 @@ final class WalletStore: ObservableObject {
         try? keychain.delete(key: credentialsKey)
         try? keychain.delete(key: sessionsKey)
         try? keychain.delete(key: requestLogKey)
+        try? keychain.delete(key: giftsKey)
+        try? keychain.delete(key: giftedCredentialsKey)
 
         // Clear in-memory state
         credentials = []
         sessions = []
         requestLogs = []
+        gifts = []
+        giftedCredentials = []
         bridgeStatus = .inactive
 
         // Reset brute-force state
@@ -365,6 +377,94 @@ final class WalletStore: ObservableObject {
 
     private func saveRequestLogs() {
         try? keychain.saveCodable(key: requestLogKey, value: requestLogs)
+    }
+
+    // MARK: - Gifts (Sender)
+
+    func createGift(
+        credentialId: String,
+        providerId: String,
+        label: String,
+        maxTokens: Int,
+        expiresInMs: TimeInterval,
+        relayUrl: String
+    ) -> Gift {
+        let gift = Gift(
+            id: UUID().uuidString,
+            credentialId: credentialId,
+            providerId: providerId,
+            label: label,
+            authToken: generateSecureToken(),
+            maxTokens: maxTokens,
+            usedTokens: 0,
+            expiresAt: Date(timeIntervalSinceNow: expiresInMs / 1000),
+            createdAt: Date(),
+            active: true,
+            relayUrl: relayUrl
+        )
+        gifts.append(gift)
+        saveGifts()
+        return gift
+    }
+
+    func revokeGift(id: String) {
+        guard let index = gifts.firstIndex(where: { $0.id == id }) else { return }
+        gifts[index].active = false
+        saveGifts()
+    }
+
+    func redeemGift(encoded: String) throws {
+        let link = try decodeGiftLink(encoded)
+        try validateGiftLink(link)
+
+        if giftedCredentials.contains(where: { $0.giftId == link.id }) {
+            throw GiftError.alreadyRedeemed
+        }
+
+        let credential = GiftedCredential(
+            id: UUID().uuidString,
+            giftId: link.id,
+            providerId: link.p,
+            providerName: link.n,
+            senderLabel: link.s,
+            authToken: link.t,
+            maxTokens: link.m,
+            usedTokens: 0,
+            expiresAt: Date(timeIntervalSince1970: link.e / 1000),
+            relayUrl: link.r,
+            createdAt: Date()
+        )
+        giftedCredentials.append(credential)
+        saveGiftedCredentials()
+    }
+
+    func removeGiftedCredential(id: String) {
+        giftedCredentials.removeAll { $0.id == id }
+        saveGiftedCredentials()
+    }
+
+    private func loadGifts() {
+        do {
+            gifts = try keychain.loadCodable(key: giftsKey, as: [Gift].self)
+        } catch {
+            gifts = []
+        }
+    }
+
+    private func saveGifts() {
+        try? keychain.saveCodable(key: giftsKey, value: gifts)
+    }
+
+    private func loadGiftedCredentials() {
+        do {
+            giftedCredentials = try keychain.loadCodable(key: giftedCredentialsKey, as: [GiftedCredential].self)
+        } catch {
+            giftedCredentials = []
+        }
+    }
+
+    private func saveGiftedCredentials() {
+        try? keychain.saveCodable(key: giftedCredentialsKey, value: giftedCredentials)
     }
 }
 
