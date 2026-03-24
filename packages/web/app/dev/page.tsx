@@ -404,57 +404,6 @@ export default function DevHub() {
             </button>
           )}
 
-          {/* GitHub pill */}
-          {githubUser ? (
-            <button className="dh-pill dh-pill-connected" onClick={disconnectGitHub}>
-              <span className="dh-dot dh-dot-green" />
-              {githubUser.login}
-            </button>
-          ) : deviceFlow ? (
-            <div className="dh-device-inline">
-              <code className="dh-device-code-sm">{deviceFlow.user_code}</code>
-              <span className="dh-spinner-sm" />
-              <button className="dh-link-btn" onClick={cancelDeviceFlow}>Cancel</button>
-            </div>
-          ) : (
-            <button className="dh-pill" onClick={connectGitHub}>
-              <GitHubIcon /> Connect GitHub
-            </button>
-          )}
-
-          {/* Export actions */}
-          {miniappHtml && (
-            <div className="dh-export-actions">
-              <button
-                className="dh-export-btn"
-                onClick={() => downloadHtml(miniappHtml, appName || 'miniapp')}
-                title="Download HTML file"
-              >
-                <DownloadIcon /> Download
-              </button>
-              {githubUser && (
-                publishedGistUrl ? (
-                  <a
-                    href={publishedGistUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="dh-export-btn dh-export-btn-success"
-                  >
-                    Published &#8599;
-                  </a>
-                ) : (
-                  <button
-                    className="dh-export-btn dh-export-btn-primary"
-                    onClick={handlePublish}
-                    disabled={publishing}
-                  >
-                    {publishing ? <><span className="dh-spinner-sm" /> Publishing...</> : <><MiniAppIcon /> Publish</>}
-                  </button>
-                )
-              )}
-            </div>
-          )}
-
           {/* Browse apps link */}
           <a href="/apps" className="dh-pill" style={{ textDecoration: 'none' }}>
             Browse MiniApps
@@ -584,9 +533,17 @@ export default function DevHub() {
                 </div>
                 <div className="dh-next-steps-right">
                   {!githubUser ? (
-                    <button className="dh-next-btn dh-next-btn-primary" onClick={connectGitHub}>
-                      <GitHubIcon /> Connect GitHub to Publish
-                    </button>
+                    deviceFlow ? (
+                      <div className="dh-device-inline">
+                        <code className="dh-device-code-sm">{deviceFlow.user_code}</code>
+                        <span className="dh-spinner-sm" />
+                        <button className="dh-link-btn" onClick={cancelDeviceFlow}>Cancel</button>
+                      </div>
+                    ) : (
+                      <button className="dh-next-btn dh-next-btn-primary" onClick={connectGitHub}>
+                        <GitHubIcon /> Connect GitHub to Publish
+                      </button>
+                    )
                   ) : publishedGistUrl ? (
                     <a href={publishedGistUrl} target="_blank" rel="noopener noreferrer" className="dh-next-btn dh-next-btn-success">
                       Published &#8599;
