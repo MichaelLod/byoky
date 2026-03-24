@@ -18,7 +18,7 @@
   Your keys never leave your device.
   <br />
   <br />
-  <a href="https://byoky.com">Website</a> · <a href="https://byoky.com/dev">Developer Hub</a> · <a href="https://demo.byoky.com">Demo</a> · <a href="#quick-start">Quick Start</a> · <a href="https://discord.gg/gRs8S9fxcT">Discord</a> · <a href="https://github.com/MichaelLod/byoky/issues">Issues</a>
+  <a href="https://byoky.com">Website</a> · <a href="https://byoky.com/apps">MiniApps</a> · <a href="https://byoky.com/dev">Developer Hub</a> · <a href="https://demo.byoky.com">Demo</a> · <a href="#quick-start">Quick Start</a> · <a href="https://discord.gg/gRs8S9fxcT">Discord</a> · <a href="https://github.com/MichaelLod/byoky/issues">Issues</a>
   <br />
   <br />
   <a href="https://github.com/MichaelLod/byoky/blob/main/LICENSE"><img src="https://img.shields.io/github/license/MichaelLod/byoky?style=flat&color=0ea5e9" alt="License" /></a>
@@ -282,7 +282,8 @@ byoky/
 │   ├── ios/           # iOS app (wallet + Safari extension)
 │   ├── openclaw-plugin/ # OpenClaw provider plugin
 │   ├── create-byoky-app/ # CLI scaffolder — npx create-byoky-app
-│   └── web/           # Landing page (byoky.com) + demo app (demo.byoky.com)
+│   ├── vault/         # Encrypted cloud vault backup server
+│   └── web/           # Landing page (byoky.com) + MiniApps marketplace + Developer Hub
 ```
 
 ## Development
@@ -327,8 +328,23 @@ pnpm --filter @byoky/extension build:all     # Chrome + Firefox + Safari
 - [x] Mobile wallet relay connect (no extension needed, pair via QR code)
 - [x] iOS app (wallet + Safari extension + relay pairing)
 - [x] Developer Hub + create-byoky-app CLI scaffolder
+- [x] MiniApps marketplace (byoky.com/apps)
 - [ ] Remote OpenClaw via relay (cloud deployment, zero key exposure)
 - [ ] Password change (re-encrypt vault with new master password)
+
+## MiniApps
+
+**[byoky.com/apps](https://byoky.com/apps)** — A marketplace of single-HTML AI tools that run on your own API keys. Connect your wallet, pick an app, and it works instantly. No accounts, no costs.
+
+**Included apps:** AI Chat, Code Explainer, Email Writer, Translator, Study Cards, Roast My Code.
+
+**Build your own:** The [App Generator](https://byoky.com/dev) creates miniapp HTML alongside full projects. Publish to GitHub Gist and submit to the registry.
+
+**How miniapps work:**
+- Each miniapp is a self-contained HTML file (inline CSS + JS)
+- Runs in a sandboxed iframe on byoky.com
+- API calls are proxied through the parent page via postMessage → the Byoky extension handles key injection
+- Supports streaming responses (SSE) for real-time output
 
 ## Built with Byoky
 
