@@ -212,6 +212,7 @@ export default function DevHub() {
       const res: GenerateResult = await generateApp(proxyFetch, userText, previousMessages.length > 0 ? previousMessages : undefined);
 
       setMiniappHtml(res.html);
+      setCodeView('preview');
       if (isFirst) {
         setAppName(sanitizeName(userText.split(/\s+/).slice(0, 4).join('-')));
       }
