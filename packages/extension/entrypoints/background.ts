@@ -410,9 +410,11 @@ export default defineBackground(() => {
 
         const realHeaders = buildHeaders(msg.providerId, msg.headers, apiKey, credential.authMethod);
 
-        // OAuth tokens for Anthropic route through the bridge (Node.js) to bypass TLS fingerprint detection
+        // OAuth tokens for Anthropic route through the bridge (Node.js) to bypass TLS fingerprint detection.
+        // Setup tokens require the Claude Code system prompt — inject it for OAuth requests.
         if (credential.authMethod === 'oauth' && msg.providerId === 'anthropic') {
-          await proxyViaBridge(port, msg, realHeaders, session);
+          const body = injectClaudeCodeSystemPrompt(msg.body);
+          await proxyViaBridge(port, { ...msg, body }, realHeaders, session);
           return;
         }
 

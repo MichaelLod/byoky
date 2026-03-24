@@ -122,10 +122,13 @@ describe('generateApp', () => {
 
     const body = JSON.parse(opts.body);
     expect(body.model).toBe('claude-sonnet-4-20250514');
-    expect(body.max_tokens).toBe(16000);
+    expect(body.max_tokens).toBe(12000);
     expect(body.stream).toBe(true);
+    expect(body.system).toBeUndefined();
     expect(body.messages).toHaveLength(1);
-    expect(body.messages[0]).toEqual({ role: 'user', content: 'Build a chat app' });
+    expect(body.messages[0].role).toBe('user');
+    expect(body.messages[0].content).toContain('Build a chat app');
+    expect(body.messages[0].content).toContain('User request:');
   });
 
   it('returns parsed files and description', async () => {
@@ -160,6 +163,7 @@ describe('generateApp', () => {
     expect(body.messages).toHaveLength(3);
     expect(body.messages[0].content).toBe('Build a chat app');
     expect(body.messages[1].content).toBe('Here is your chat app...');
+    // Follow-up messages don't include the system prompt prefix
     expect(body.messages[2].content).toBe('Make it blue');
   });
 
