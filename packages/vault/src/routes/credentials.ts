@@ -16,14 +16,14 @@ credentials.use('/*', authMiddleware);
 
 credentials.get('/', async (c) => {
   const userId = c.get('userId');
-  const rows = getCredentialsByUser(userId);
+  const rows = await getCredentialsByUser(userId);
   const cryptoKey = getCachedKey(userId);
 
   const result = await Promise.all(rows.map(async (row) => {
     let maskedKey: string | undefined;
     if (cryptoKey) {
       try {
-        const plainKey = await decryptWithKey(row.encrypted_key, cryptoKey);
+        const plainKey = await decryptWithKey(row.encryptedKey, cryptoKey);
         maskedKey = maskKey(plainKey);
       } catch {
         maskedKey = '****';
@@ -32,12 +32,12 @@ credentials.get('/', async (c) => {
 
     return {
       id: row.id,
-      providerId: row.provider_id,
+      providerId: row.providerId,
       label: row.label,
-      authMethod: row.auth_method,
+      authMethod: row.authMethod,
       maskedKey,
-      createdAt: row.created_at,
-      lastUsedAt: row.last_used_at,
+      createdAt: row.createdAt,
+      lastUsedAt: row.lastUsedAt,
     };
   }));
 
@@ -77,16 +77,16 @@ credentials.post('/', async (c) => {
   const encryptedKey = await encryptWithKey(apiKey, cryptoKey);
   const credLabel = label ?? `${provider.name} key`;
 
-  const row = createCredential(userId, providerId, credLabel, method, encryptedKey);
+  const row = await createCredential(userId, providerId, credLabel, method, encryptedKey);
 
   return c.json({
     credential: {
       id: row.id,
-      providerId: row.provider_id,
+      providerId: row.providerId,
       label: row.label,
-      authMethod: row.auth_method,
+      authMethod: row.authMethod,
       maskedKey: maskKey(apiKey),
-      createdAt: row.created_at,
+      createdAt: row.createdAt,
     },
   }, 201);
 });
@@ -95,12 +95,12 @@ credentials.delete('/:id', async (c) => {
   const userId = c.get('userId');
   const credentialId = c.req.param('id');
 
-  const credential = getCredentialById(userId, credentialId);
+  const credential = await getCredentialById(userId, credentialId);
   if (!credential) {
     return c.json({ error: { code: 'NOT_FOUND', message: 'Credential not found' } }, 404);
   }
 
-  deleteCredential(userId, credentialId);
+  await deleteCredential(userId, credentialId);
   return c.json({ ok: true });
 });
 

@@ -29,13 +29,14 @@ auth.post('/signup', async (c) => {
     return c.json({ error: { code: 'WEAK_PASSWORD', message: 'Password too weak', feedback: strength.feedback } }, 400);
   }
 
-  if (getUserByEmail(emailLower)) {
+  const existing = await getUserByEmail(emailLower);
+  if (existing) {
     return c.json({ error: { code: 'EMAIL_EXISTS', message: 'An account with this email already exists' } }, 409);
   }
 
   const passwordHash = await hashPassword(password);
   const encryptionSalt = Buffer.from(crypto.getRandomValues(new Uint8Array(SALT_LENGTH))).toString('base64');
-  const user = createUser(emailLower, passwordHash, encryptionSalt);
+  const user = await createUser(emailLower, passwordHash, encryptionSalt);
 
   // Derive encryption key and cache it
   const saltBytes = Buffer.from(encryptionSalt, 'base64');
@@ -43,12 +44,12 @@ auth.post('/signup', async (c) => {
 
   // Create session with proper session ID in token
   const tempToken = signJwt(user.id, 'pending', SESSION_DURATION_MS);
-  const session = createSession(user.id, hashToken(tempToken), Date.now() + SESSION_DURATION_MS);
+  const session = await createSession(user.id, hashToken(tempToken), Date.now() + SESSION_DURATION_MS);
 
   // Re-sign with actual session ID
-  deleteSession(session.id);
+  await deleteSession(session.id);
   const finalToken = signJwt(user.id, session.id, SESSION_DURATION_MS);
-  const finalSession = createSession(user.id, hashToken(finalToken), Date.now() + SESSION_DURATION_MS);
+  const finalSession = await createSession(user.id, hashToken(finalToken), Date.now() + SESSION_DURATION_MS);
 
   cacheKey(user.id, encryptionKey);
 
@@ -68,27 +69,27 @@ auth.post('/login', async (c) => {
   }
 
   const emailLower = email.toLowerCase().trim();
-  const user = getUserByEmail(emailLower);
+  const user = await getUserByEmail(emailLower);
   if (!user) {
     return c.json({ error: { code: 'INVALID_CREDENTIALS', message: 'Invalid email or password' } }, 401);
   }
 
-  const valid = await verifyPassword(password, user.password_hash);
+  const valid = await verifyPassword(password, user.passwordHash);
   if (!valid) {
     return c.json({ error: { code: 'INVALID_CREDENTIALS', message: 'Invalid email or password' } }, 401);
   }
 
   // Derive encryption key and cache it
-  const saltBytes = Buffer.from(user.encryption_salt, 'base64');
+  const saltBytes = Buffer.from(user.encryptionSalt, 'base64');
   const encryptionKey = await deriveKey(password, new Uint8Array(saltBytes));
 
   // Create session with proper session ID in token
   const tempToken = signJwt(user.id, 'pending', SESSION_DURATION_MS);
-  const session = createSession(user.id, hashToken(tempToken), Date.now() + SESSION_DURATION_MS);
+  const session = await createSession(user.id, hashToken(tempToken), Date.now() + SESSION_DURATION_MS);
 
-  deleteSession(session.id);
+  await deleteSession(session.id);
   const finalToken = signJwt(user.id, session.id, SESSION_DURATION_MS);
-  const finalSession = createSession(user.id, hashToken(finalToken), Date.now() + SESSION_DURATION_MS);
+  const finalSession = await createSession(user.id, hashToken(finalToken), Date.now() + SESSION_DURATION_MS);
 
   cacheKey(user.id, encryptionKey);
 
@@ -102,7 +103,7 @@ auth.post('/login', async (c) => {
 auth.post('/logout', authMiddleware, async (c) => {
   const userId = c.get('userId');
   const sessionId = c.get('sessionId');
-  deleteSession(sessionId);
+  await deleteSession(sessionId);
   evictKey(userId);
   return c.json({ ok: true });
 });

@@ -21,12 +21,12 @@ export async function authMiddleware(c: Context, next: Next): Promise<Response |
     return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired token' } }, 401);
   }
 
-  const session = getSessionByTokenHash(hashToken(token));
-  if (!session || session.expires_at < Date.now()) {
+  const session = await getSessionByTokenHash(hashToken(token));
+  if (!session || session.expiresAt < Date.now()) {
     return c.json({ error: { code: 'SESSION_EXPIRED', message: 'Session expired' } }, 401);
   }
 
-  updateSessionActivity(session.id);
+  await updateSessionActivity(session.id);
   c.set('userId', payload.sub);
   c.set('sessionId', payload.sid);
 

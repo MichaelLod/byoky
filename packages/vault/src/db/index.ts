@@ -1,137 +1,122 @@
-import Database from 'better-sqlite3';
-import { createTables } from './schema.js';
+import { drizzle } from 'drizzle-orm/postgres-js';
+import postgres from 'postgres';
+import { eq, and, lt, desc } from 'drizzle-orm';
 import crypto from 'node:crypto';
+import { users, credentials, sessions, requestLog } from './schema.js';
 
-let db: Database.Database;
+export type Db = ReturnType<typeof drizzle>;
 
-export function initDb(path: string = 'vault.db'): Database.Database {
-  db = new Database(path);
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
-  createTables(db);
+let db: Db;
+
+export function initDb(connectionString: string): Db {
+  const client = postgres(connectionString);
+  db = drizzle(client);
   return db;
 }
 
-export function getDb(): Database.Database {
+export function getDb(): Db {
   if (!db) throw new Error('Database not initialized');
   return db;
 }
 
 // --- Users ---
 
-interface UserRow {
-  id: string;
-  email: string;
-  password_hash: string;
-  encryption_salt: string;
-  created_at: number;
-}
-
-export function createUser(email: string, passwordHash: string, encryptionSalt: string): UserRow {
+export async function createUser(email: string, passwordHash: string, encryptionSalt: string) {
   const id = crypto.randomUUID();
   const now = Date.now();
-  getDb().prepare(
-    'INSERT INTO users (id, email, password_hash, encryption_salt, created_at) VALUES (?, ?, ?, ?, ?)',
-  ).run(id, email, passwordHash, encryptionSalt, now);
-  return { id, email, password_hash: passwordHash, encryption_salt: encryptionSalt, created_at: now };
+  const [row] = await getDb().insert(users).values({
+    id, email, passwordHash, encryptionSalt, createdAt: now,
+  }).returning();
+  return row;
 }
 
-export function getUserByEmail(email: string): UserRow | undefined {
-  return getDb().prepare('SELECT * FROM users WHERE email = ?').get(email) as UserRow | undefined;
+export async function getUserByEmail(email: string) {
+  const [row] = await getDb().select().from(users).where(eq(users.email, email)).limit(1);
+  return row;
 }
 
-export function getUserById(id: string): UserRow | undefined {
-  return getDb().prepare('SELECT * FROM users WHERE id = ?').get(id) as UserRow | undefined;
+export async function getUserById(id: string) {
+  const [row] = await getDb().select().from(users).where(eq(users.id, id)).limit(1);
+  return row;
 }
 
 // --- Sessions ---
 
-interface SessionRow {
-  id: string;
-  user_id: string;
-  token_hash: string;
-  created_at: number;
-  expires_at: number;
-  last_activity_at: number;
-}
-
-export function createSession(userId: string, tokenHash: string, expiresAt: number): SessionRow {
+export async function createSession(userId: string, tokenHash: string, expiresAt: number) {
   const id = crypto.randomUUID();
   const now = Date.now();
-  getDb().prepare(
-    'INSERT INTO sessions (id, user_id, token_hash, created_at, expires_at, last_activity_at) VALUES (?, ?, ?, ?, ?, ?)',
-  ).run(id, userId, tokenHash, now, expiresAt, now);
-  return { id, user_id: userId, token_hash: tokenHash, created_at: now, expires_at: expiresAt, last_activity_at: now };
+  const [row] = await getDb().insert(sessions).values({
+    id, userId, tokenHash, createdAt: now, expiresAt, lastActivityAt: now,
+  }).returning();
+  return row;
 }
 
-export function getSessionByTokenHash(tokenHash: string): SessionRow | undefined {
-  return getDb().prepare('SELECT * FROM sessions WHERE token_hash = ?').get(tokenHash) as SessionRow | undefined;
+export async function getSessionByTokenHash(tokenHash: string) {
+  const [row] = await getDb().select().from(sessions).where(eq(sessions.tokenHash, tokenHash)).limit(1);
+  return row;
 }
 
-export function updateSessionActivity(sessionId: string): void {
-  getDb().prepare('UPDATE sessions SET last_activity_at = ? WHERE id = ?').run(Date.now(), sessionId);
+export async function updateSessionActivity(sessionId: string) {
+  await getDb().update(sessions).set({ lastActivityAt: Date.now() }).where(eq(sessions.id, sessionId));
 }
 
-export function deleteSession(sessionId: string): void {
-  getDb().prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
+export async function deleteSession(sessionId: string) {
+  await getDb().delete(sessions).where(eq(sessions.id, sessionId));
 }
 
-export function deleteExpiredSessions(): void {
-  getDb().prepare('DELETE FROM sessions WHERE expires_at < ?').run(Date.now());
+export async function deleteExpiredSessions() {
+  await getDb().delete(sessions).where(lt(sessions.expiresAt, Date.now()));
 }
 
 // --- Credentials ---
 
-interface CredentialRow {
-  id: string;
-  user_id: string;
-  provider_id: string;
-  label: string;
-  auth_method: string;
-  encrypted_key: string;
-  created_at: number;
-  last_used_at: number | null;
-}
-
-export function createCredential(
+export async function createCredential(
   userId: string,
   providerId: string,
   label: string,
   authMethod: string,
   encryptedKey: string,
-): CredentialRow {
+) {
   const id = crypto.randomUUID();
   const now = Date.now();
-  getDb().prepare(
-    'INSERT INTO credentials (id, user_id, provider_id, label, auth_method, encrypted_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-  ).run(id, userId, providerId, label, authMethod, encryptedKey, now);
-  return { id, user_id: userId, provider_id: providerId, label, auth_method: authMethod, encrypted_key: encryptedKey, created_at: now, last_used_at: null };
+  const [row] = await getDb().insert(credentials).values({
+    id, userId, providerId, label, authMethod, encryptedKey, createdAt: now,
+  }).returning();
+  return row;
 }
 
-export function getCredentialsByUser(userId: string): CredentialRow[] {
-  return getDb().prepare('SELECT * FROM credentials WHERE user_id = ?').all(userId) as CredentialRow[];
+export async function getCredentialsByUser(userId: string) {
+  return getDb().select().from(credentials).where(eq(credentials.userId, userId));
 }
 
-export function getCredentialByUserAndProvider(userId: string, providerId: string): CredentialRow | undefined {
-  return getDb().prepare('SELECT * FROM credentials WHERE user_id = ? AND provider_id = ? ORDER BY last_used_at DESC LIMIT 1').get(userId, providerId) as CredentialRow | undefined;
+export async function getCredentialByUserAndProvider(userId: string, providerId: string) {
+  const [row] = await getDb().select().from(credentials)
+    .where(and(eq(credentials.userId, userId), eq(credentials.providerId, providerId)))
+    .orderBy(desc(credentials.lastUsedAt))
+    .limit(1);
+  return row;
 }
 
-export function getCredentialById(userId: string, credentialId: string): CredentialRow | undefined {
-  return getDb().prepare('SELECT * FROM credentials WHERE id = ? AND user_id = ?').get(credentialId, userId) as CredentialRow | undefined;
+export async function getCredentialById(userId: string, credentialId: string) {
+  const [row] = await getDb().select().from(credentials)
+    .where(and(eq(credentials.id, credentialId), eq(credentials.userId, userId)))
+    .limit(1);
+  return row;
 }
 
-export function deleteCredential(userId: string, credentialId: string): boolean {
-  const result = getDb().prepare('DELETE FROM credentials WHERE id = ? AND user_id = ?').run(credentialId, userId);
-  return result.changes > 0;
+export async function deleteCredential(userId: string, credentialId: string) {
+  const result = await getDb().delete(credentials)
+    .where(and(eq(credentials.id, credentialId), eq(credentials.userId, userId)));
+  return result.length > 0;
 }
 
-export function updateCredentialLastUsed(credentialId: string): void {
-  getDb().prepare('UPDATE credentials SET last_used_at = ? WHERE id = ?').run(Date.now(), credentialId);
+export async function updateCredentialLastUsed(credentialId: string) {
+  await getDb().update(credentials).set({ lastUsedAt: Date.now() }).where(eq(credentials.id, credentialId));
 }
 
 // --- Request log ---
 
-export function logRequest(
+export async function logRequest(
   userId: string,
   sessionId: string,
   providerId: string,
@@ -141,9 +126,13 @@ export function logRequest(
   inputTokens?: number,
   outputTokens?: number,
   model?: string,
-): void {
+) {
   const id = crypto.randomUUID();
-  getDb().prepare(
-    'INSERT INTO request_log (id, user_id, session_id, provider_id, url, method, status, timestamp, input_tokens, output_tokens, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-  ).run(id, userId, sessionId, providerId, url, method, status, Date.now(), inputTokens ?? null, outputTokens ?? null, model ?? null);
+  await getDb().insert(requestLog).values({
+    id, userId, sessionId, providerId, url, method, status,
+    timestamp: Date.now(),
+    inputTokens: inputTokens ?? null,
+    outputTokens: outputTokens ?? null,
+    model: model ?? null,
+  });
 }
