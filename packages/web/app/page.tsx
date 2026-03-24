@@ -174,7 +174,7 @@ function Hero() {
               href="/dev"
               className="btn btn-secondary"
             >
-              App Generator
+              MiniApp Creator
             </a>
             <a
               href="/built-with"
@@ -322,11 +322,11 @@ function ForDevelopers() {
         <FadeIn>
           <h2>Describe your app. We build it.</h2>
           <p className="subtitle">
-            The Byoky App Generator turns your idea into a working app — powered
+            The Byoky MiniApp Creator turns your idea into a working app — powered
             by your own AI keys. Push to GitHub in one click. Zero cost.
           </p>
           <a href="/dev" className="btn btn-primary" style={{ marginBottom: 16 }}>
-            Open App Generator
+            Open MiniApp Creator
           </a>
           <p className="subtitle" style={{ fontSize: 14, marginBottom: 0, marginTop: 0 }}>
             or <code style={{ fontFamily: 'var(--font-code)', color: 'var(--teal-light)', fontSize: 13 }}>npx create-byoky-app</code> to scaffold locally
@@ -904,7 +904,7 @@ function Footer() {
               MiniApps
             </a>
             <a href="/dev">
-              Developers
+              MiniApp Creator
             </a>
             <a href="/demo">
               Demo
