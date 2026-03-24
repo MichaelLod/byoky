@@ -290,9 +290,8 @@
           model: 'claude-sonnet-4-20250514',
           max_tokens: 4096,
           stream: true,
-          system: 'You are a code explainer. Explain the following code clearly and concisely. Break down what each part does. Use plain language.',
           messages: [
-            { role: 'user', content: 'Explain this code:\n\n```\n' + code + '\n```' }
+            { role: 'user', content: 'You are a code explainer. Explain the following code clearly and concisely. Break down what each part does. Use plain language.\n\nExplain this code:\n\n```\n' + code + '\n```' }
           ]
         })
       });
