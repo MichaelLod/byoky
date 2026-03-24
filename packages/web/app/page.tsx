@@ -166,9 +166,9 @@ function Hero() {
             </a>
             <a
               href="/dev"
-              className="btn btn-secondary"
+              className="btn btn-primary"
             >
-              Developer Hub
+              App Generator
             </a>
             <a
               href="/built-with"
@@ -314,17 +314,17 @@ function ForDevelopers() {
     <section className="dev-section">
       <div className="container">
         <FadeIn>
-          <h2>Ship today, not next quarter.</h2>
+          <h2>Describe your app. We build it.</h2>
           <p className="subtitle">
-            Two lines of code. Any provider SDK. Your users&apos; keys power
-            the AI — you just build the experience.
+            The Byoky App Generator turns your idea into a working app — powered
+            by your own AI keys. Push to GitHub in one click. Zero cost.
           </p>
-          <div className="install-cmd">
-            <code>npx create-byoky-app</code>
-          </div>
-          <p className="subtitle" style={{ fontSize: 14, marginBottom: 0, marginTop: 12 }}>
-            or <code style={{ fontFamily: 'var(--font-code)', color: 'var(--teal-light)', fontSize: 13 }}>npm install @byoky/sdk</code> to add to an existing project.
-            {' '}<a href="/dev" style={{ color: 'var(--teal)', textDecoration: 'underline', textUnderlineOffset: 3 }}>Developer Hub &rarr;</a>
+          <a href="/dev" className="btn btn-primary" style={{ marginBottom: 16 }}>
+            Open App Generator
+          </a>
+          <p className="subtitle" style={{ fontSize: 14, marginBottom: 0, marginTop: 0 }}>
+            or <code style={{ fontFamily: 'var(--font-code)', color: 'var(--teal-light)', fontSize: 13 }}>npx create-byoky-app</code> to scaffold locally
+            {' · '}<code style={{ fontFamily: 'var(--font-code)', color: 'var(--teal-light)', fontSize: 13 }}>npm install @byoky/sdk</code> to add to an existing project
           </p>
         </FadeIn>
         <div className="dev-layout">
