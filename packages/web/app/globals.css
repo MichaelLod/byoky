@@ -447,6 +447,15 @@ section {
   letter-spacing: -0.01em;
 }
 
+.zero-cost-pitch {
+  font-size: 16px;
+  color: var(--text-secondary);
+  max-width: 520px;
+  margin: 48px auto 0;
+  line-height: 1.7;
+  font-style: italic;
+}
+
 /* =============================================
    Developers Section
    ============================================= */
