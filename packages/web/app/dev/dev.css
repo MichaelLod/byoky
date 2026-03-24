@@ -749,6 +749,26 @@
   background: #07070f;
   padding: 20px;
   min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.dh-code-area::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.dh-code-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.dh-code-area::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+.dh-code-area::-webkit-scrollbar-thumb:hover {
+  background: var(--border-hover);
 }
 
 .dh-code-block {
