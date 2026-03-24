@@ -49,6 +49,35 @@ async function openInStackBlitz(files: Record<string, string>, name: string): Pr
   }, { openFile: 'src/app/page.tsx' });
 }
 
+/* ─── LocalStorage persistence ───────────────── */
+
+const STORAGE_KEY = 'byoky-dev-project';
+
+interface PersistedState {
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  generatedFiles: Record<string, string> | null;
+  activeFile: string | null;
+  repoName: string;
+}
+
+function loadPersistedState(): Partial<PersistedState> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) as PersistedState;
+  } catch {
+    return {};
+  }
+}
+
+function savePersistedState(state: PersistedState): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // localStorage full or unavailable — silently ignore
+  }
+}
+
 /* ─── Main Component ──────────────────────────── */
 
 export default function DevHub() {
@@ -67,6 +96,7 @@ export default function DevHub() {
   const [generating, setGenerating] = useState(false);
   const [generatedFiles, setGeneratedFiles] = useState<Record<string, string> | null>(null);
   const [activeFile, setActiveFile] = useState<string | null>(null);
+  const [hydrated, setHydrated] = useState(false);
 
   /* ── Deploy state ── */
   const [repoName, setRepoName] = useState('');
@@ -79,6 +109,22 @@ export default function DevHub() {
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<'chat' | 'template'>('chat');
   const [showRepoInput, setShowRepoInput] = useState(false);
+
+  /* ── Hydrate from localStorage on mount ── */
+  useEffect(() => {
+    const saved = loadPersistedState();
+    if (saved.messages?.length) setMessages(saved.messages);
+    if (saved.generatedFiles) setGeneratedFiles(saved.generatedFiles);
+    if (saved.activeFile) setActiveFile(saved.activeFile);
+    if (saved.repoName) setRepoName(saved.repoName);
+    setHydrated(true);
+  }, []);
+
+  /* ── Persist to localStorage on changes ── */
+  useEffect(() => {
+    if (!hydrated) return;
+    savePersistedState({ messages, generatedFiles, activeFile, repoName });
+  }, [hydrated, messages, generatedFiles, activeFile, repoName]);
 
   /* ── Refs ── */
   const abortRef = useRef<AbortController | null>(null);
@@ -334,6 +380,24 @@ export default function DevHub() {
         <div className="dh-topbar-left">
           <a href="/" className="dh-brand">Byoky</a>
           <span className="dh-topbar-title">App Generator</span>
+          {generatedFiles && (
+            <button
+              className="dh-new-project-btn"
+              onClick={() => {
+                setMessages([]);
+                setGeneratedFiles(null);
+                setActiveFile(null);
+                setRepoName('');
+                setResult(null);
+                setShowRepoInput(false);
+                setMode('chat');
+                localStorage.removeItem(STORAGE_KEY);
+              }}
+              title="Start a new project"
+            >
+              + New
+            </button>
+          )}
         </div>
         <div className="dh-topbar-right">
           {/* Wallet pill */}
