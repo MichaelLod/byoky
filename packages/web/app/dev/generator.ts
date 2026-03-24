@@ -1,7 +1,6 @@
 export interface GenerateResult {
-  files: Record<string, string>;
+  html: string;
   description: string;
-  miniappHtml: string | null;
 }
 
 export interface Message {
@@ -9,96 +8,31 @@ export interface Message {
   content: string;
 }
 
-const SYSTEM_PROMPT = `You are an expert web app generator for the Byoky platform. You generate complete, working applications that integrate @byoky/sdk for AI functionality.
+const SYSTEM_PROMPT = `You are an expert MiniApp generator for the Byoky platform. You generate self-contained, single-HTML-file AI tools that run inside an iframe on byoky.com.
 
 ## Output Format
 
 First output a brief summary:
 <description>One-sentence summary of what you built.</description>
 
-Then output each file:
-<file path="relative/path">
-file content here
-</file>
-
-For iteration requests, only output changed files — not the entire project.
-
-## Stack
-
-- Next.js 15 (App Router) with TypeScript
-- @byoky/sdk ^0.4.9 for AI integration (required — this is the whole point)
-- Appropriate provider SDKs (@anthropic-ai/sdk, openai, etc.)
-- Dark theme: background #0a0a0a, text #ededed
-- Responsive, mobile-friendly layout
-
-## Required Files (initial generation)
-
-- package.json (with all dependencies)
-- tsconfig.json
-- next.config.ts
-- src/app/layout.tsx (with metadata, Inter font, globals.css import)
-- src/app/globals.css (dark theme, reset styles)
-- src/app/page.tsx ('use client' — main app)
-- README.md (setup instructions)
-
-## @byoky/sdk API Reference
-
-\`\`\`ts
-import { Byoky, type ByokySession } from '@byoky/sdk';
-
-// Connect to wallet
-const byoky = new Byoky();
-const session = await byoky.connect({
-  providers: [{ id: 'anthropic', required: true }],
-  modal: true,
-});
-
-// Proxied fetch (API key injected by extension)
-const proxyFetch = session.createFetch('anthropic');
-
-// With Anthropic SDK
-import Anthropic from '@anthropic-ai/sdk';
-const client = new Anthropic({
-  apiKey: session.sessionKey,
-  fetch: session.createFetch('anthropic'),
-  dangerouslyAllowBrowser: true,
-});
-
-// With OpenAI SDK
-import OpenAI from 'openai';
-const openai = new OpenAI({
-  apiKey: session.sessionKey,
-  fetch: session.createFetch('openai'),
-  dangerouslyAllowBrowser: true,
-});
-
-// Other API
-session.disconnect();
-session.onDisconnect(cb);
-session.providers; // Record of available providers
-\`\`\`
-
-## Quality Standards
-
-- All code must be complete and working — no placeholders, no TODOs, no "implement this"
-- Handle loading states, errors, and empty states
-- Use proper TypeScript types (no \`any\`)
-- No default exports except where Next.js requires them (page, layout)
-- Include a "Connect Wallet" flow before the main UI
-- Use inline styles or CSS modules — no Tailwind unless requested
-
-## MiniApp Version
-
-After all <file> tags, also output a **self-contained single HTML file** miniapp version wrapped in:
+Then output the complete miniapp HTML:
 <miniapp>
-...full HTML here...
+...full HTML file here...
 </miniapp>
 
-The miniapp HTML must:
-- Be a complete standalone HTML file (inline CSS + inline JS, no external dependencies)
-- Dark theme: background #0a0a0a, text #ededed, accent matching the app's purpose
-- Include \`<meta name="miniapp" content='{"name":"APP_NAME","description":"SHORT_DESC","author":"byoky","providers":["PROVIDER_IDS"]}'>\`
-- Include the Byoky MiniApp Runtime (a postMessage-based protocol for API calls):
+For iteration requests, output the complete updated miniapp HTML (not a diff).
+
+## MiniApp Requirements
+
+Each miniapp is a **single self-contained HTML file** with:
+- Inline CSS and inline JS (no external dependencies, no CDN imports)
+- Dark theme: background #0a0a0a, text #ededed, accent color matching the app's purpose
+- Responsive, mobile-friendly layout
+- \`<meta name="miniapp" content='{"name":"APP_NAME","description":"SHORT_DESC","author":"byoky","providers":["anthropic"]}'>\`
+
+## Byoky MiniApp Runtime
+
+Every miniapp MUST include this runtime script as the FIRST <script> tag. It handles session management and API proxying via postMessage with the parent page:
 
 \`\`\`
 <script>
@@ -149,11 +83,43 @@ The miniapp HTML must:
 </script>
 \`\`\`
 
-- Use window.byoky.fetch(provider, url, options) for non-streaming API calls
-- Use window.byoky.fetchStream(provider, url, options) for streaming API calls
-- Parse SSE for Anthropic streaming: lines starting with "data: ", extract content_block_delta with text_delta
-- Be responsive and mobile-friendly
-- The miniapp runs inside an iframe on byoky.com — the parent page handles wallet connection and API proxying`;
+## Making API Calls
+
+Use window.byoky.fetch() or window.byoky.fetchStream() to call AI APIs:
+
+\`\`\`js
+// Non-streaming (returns full response)
+const res = await window.byoky.fetch('anthropic', 'https://api.anthropic.com/v1/messages', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' },
+  body: JSON.stringify({
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 1024,
+    messages: [{ role: 'user', content: 'Hello!' }]
+  })
+});
+const data = await res.json();
+
+// Streaming (returns Response with ReadableStream body)
+const res = await window.byoky.fetchStream('anthropic', 'https://api.anthropic.com/v1/messages', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' },
+  body: JSON.stringify({
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 1024,
+    stream: true,
+    messages: [{ role: 'user', content: 'Hello!' }]
+  })
+});
+// Parse SSE: lines starting with "data: ", extract content_block_delta with text_delta
+\`\`\`
+
+## CRITICAL RULES
+
+- Do NOT use the \`system\` field in API request bodies — it conflicts with the extension. Put instructions in the user message instead.
+- All code must be complete and working — no placeholders, no TODOs
+- Handle loading states, errors, and empty states
+- The miniapp runs in a sandboxed iframe — no access to parent DOM or localStorage`;
 
 export function parseGeneratedFiles(text: string): Record<string, string> {
   const files: Record<string, string> = {};
@@ -228,17 +194,16 @@ export async function generateApp(
 
   const fullText = await collectStream(res);
 
-  const files = parseGeneratedFiles(fullText);
-  if (Object.keys(files).length === 0) {
+  const html = parseMiniappHtml(fullText);
+  if (!html) {
     throw new Error(
-      `No files found in response. Raw output:\n\n${fullText.slice(0, 2000)}`,
+      `No miniapp HTML found in response. Raw output:\n\n${fullText.slice(0, 2000)}`,
     );
   }
 
   return {
-    files,
+    html,
     description: parseDescription(fullText),
-    miniappHtml: parseMiniappHtml(fullText),
   };
 }
 
