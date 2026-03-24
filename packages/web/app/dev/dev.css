@@ -138,6 +138,18 @@
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 2px 8px;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.dh-device-code-sm:hover {
+  background: var(--bg-card);
+  border-color: var(--border-hover);
+}
+
+.dh-device-code-copied {
+  background: rgba(14, 165, 233, 0.15);
+  border-color: var(--teal-dark);
+  color: var(--teal-light);
 }
 
 .dh-spinner-sm {
@@ -737,33 +749,6 @@
   background: #07070f;
   padding: 20px;
   min-height: 0;
-  position: relative;
-}
-
-.dh-code-area:hover {
-  background: #0a0a14;
-}
-
-.dh-copied-toast {
-  position: sticky;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 10;
-  text-align: center;
-  padding: 8px 16px;
-  margin: -20px -20px 16px;
-  background: var(--teal);
-  color: white;
-  font-family: var(--font-sans);
-  font-size: 13px;
-  font-weight: 600;
-  animation: dh-copied-fade 2s ease-out forwards;
-}
-
-@keyframes dh-copied-fade {
-  0%, 70% { opacity: 1; }
-  100% { opacity: 0; }
 }
 
 .dh-code-block {
