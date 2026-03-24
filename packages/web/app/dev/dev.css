@@ -737,6 +737,33 @@
   background: #07070f;
   padding: 20px;
   min-height: 0;
+  position: relative;
+}
+
+.dh-code-area:hover {
+  background: #0a0a14;
+}
+
+.dh-copied-toast {
+  position: sticky;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  text-align: center;
+  padding: 8px 16px;
+  margin: -20px -20px 16px;
+  background: var(--teal);
+  color: white;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  animation: dh-copied-fade 2s ease-out forwards;
+}
+
+@keyframes dh-copied-fade {
+  0%, 70% { opacity: 1; }
+  100% { opacity: 0; }
 }
 
 .dh-code-block {
