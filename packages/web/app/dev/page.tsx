@@ -84,6 +84,8 @@ export default function DevHub() {
   /* ── UI state ── */
   const [error, setError] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState('');
+  const [codeView, setCodeView] = useState<'code' | 'preview'>('code');
+  const previewIframeRef = useRef<HTMLIFrameElement>(null);
 
   /* ── Hydrate from localStorage on mount ── */
   useEffect(() => {
@@ -243,6 +245,69 @@ export default function DevHub() {
       setGenerating(false);
     }
   }, [walletSession, inputValue, generating, messages]);
+
+  /* ─── Preview postMessage proxy ──────────────── */
+
+  useEffect(() => {
+    if (codeView !== 'preview' || !miniappHtml || !walletSession) return;
+
+    const providerMap: Record<string, { available: boolean }> = {};
+    for (const [id, info] of Object.entries(walletSession.providers)) {
+      providerMap[id] = { available: (info as { available: boolean }).available };
+    }
+
+    const sendSession = () => {
+      previewIframeRef.current?.contentWindow?.postMessage(
+        { type: 'BYOKY_SESSION', providers: providerMap }, '*',
+      );
+    };
+
+    const iframe = previewIframeRef.current;
+    if (iframe) {
+      iframe.addEventListener('load', sendSession);
+      sendSession();
+    }
+
+    const handler = async (event: MessageEvent) => {
+      const iframeEl = previewIframeRef.current;
+      if (!iframeEl?.contentWindow || !event.data || typeof event.data.type !== 'string') return;
+
+      if (event.data.type === 'MINIAPP_READY') {
+        iframeEl.contentWindow.postMessage({ type: 'BYOKY_SESSION', providers: providerMap }, '*');
+      }
+
+      if (event.data.type === 'BYOKY_API_REQUEST') {
+        const { requestId, provider, url, method, headers, body, stream } = event.data;
+        try {
+          const proxyFetch = walletSession.createFetch(provider);
+          const response = await proxyFetch(url, { method, headers, body });
+
+          if (stream && response.body) {
+            iframeEl.contentWindow.postMessage({ type: 'BYOKY_API_RESPONSE_START', requestId, status: response.status, statusText: response.statusText, headers: Object.fromEntries(response.headers.entries()) }, '*');
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              iframeEl.contentWindow?.postMessage({ type: 'BYOKY_API_RESPONSE_CHUNK', requestId, chunk: decoder.decode(value, { stream: true }) }, '*');
+            }
+            iframeEl.contentWindow?.postMessage({ type: 'BYOKY_API_RESPONSE_END', requestId }, '*');
+          } else {
+            const responseBody = await response.text();
+            iframeEl.contentWindow.postMessage({ type: 'BYOKY_API_RESPONSE', requestId, status: response.status, statusText: response.statusText, headers: Object.fromEntries(response.headers.entries()), body: responseBody }, '*');
+          }
+        } catch (err) {
+          iframeEl.contentWindow?.postMessage({ type: 'BYOKY_API_RESPONSE_ERROR', requestId, error: err instanceof Error ? err.message : 'Request failed' }, '*');
+        }
+      }
+    };
+
+    window.addEventListener('message', handler);
+    return () => {
+      window.removeEventListener('message', handler);
+      iframe?.removeEventListener('load', sendSession);
+    };
+  }, [codeView, miniappHtml, walletSession]);
 
   /* ─── Publish as MiniApp ────────────────────── */
 
@@ -473,14 +538,64 @@ export default function DevHub() {
           ) : miniappHtml ? (
             <>
               <div className="dh-file-tabs">
-                <button className="dh-file-tab dh-file-tab-active">
+                <button
+                  className={`dh-file-tab${codeView === 'code' ? ' dh-file-tab-active' : ''}`}
+                  onClick={() => setCodeView('code')}
+                >
                   {appName || 'miniapp'}.html
                 </button>
+                <button
+                  className={`dh-file-tab${codeView === 'preview' ? ' dh-file-tab-active' : ''}`}
+                  onClick={() => setCodeView('preview')}
+                >
+                  Preview
+                </button>
               </div>
-              <div className="dh-code-area">
-                <pre className="dh-code-block">
-                  <code>{renderCodeLines(miniappHtml)}</code>
-                </pre>
+              {codeView === 'preview' ? (
+                <div className="dh-preview-area">
+                  <iframe
+                    ref={previewIframeRef}
+                    className="dh-preview-iframe"
+                    sandbox="allow-scripts"
+                    srcDoc={miniappHtml}
+                    title="MiniApp Preview"
+                  />
+                </div>
+              ) : (
+                <div className="dh-code-area">
+                  <pre className="dh-code-block">
+                    <code>{renderCodeLines(miniappHtml)}</code>
+                  </pre>
+                </div>
+              )}
+
+              {/* ── Next Steps Bar ── */}
+              <div className="dh-next-steps">
+                <div className="dh-next-steps-left">
+                  {codeView !== 'preview' && (
+                    <button className="dh-next-btn" onClick={() => setCodeView('preview')}>
+                      <PlayIcon /> Preview
+                    </button>
+                  )}
+                  <button className="dh-next-btn" onClick={() => downloadHtml(miniappHtml, appName || 'miniapp')}>
+                    <DownloadIcon /> Download HTML
+                  </button>
+                </div>
+                <div className="dh-next-steps-right">
+                  {!githubUser ? (
+                    <button className="dh-next-btn dh-next-btn-primary" onClick={connectGitHub}>
+                      <GitHubIcon /> Connect GitHub to Publish
+                    </button>
+                  ) : publishedGistUrl ? (
+                    <a href={publishedGistUrl} target="_blank" rel="noopener noreferrer" className="dh-next-btn dh-next-btn-success">
+                      Published &#8599;
+                    </a>
+                  ) : (
+                    <button className="dh-next-btn dh-next-btn-primary" onClick={handlePublish} disabled={publishing}>
+                      {publishing ? <><span className="dh-spinner-sm" /> Publishing...</> : <><MiniAppIcon /> Publish to MiniApps</>}
+                    </button>
+                  )}
+                </div>
               </div>
             </>
           ) : (
@@ -614,6 +729,14 @@ function MiniAppIcon() {
       <rect x="14" y="3" width="7" height="7" />
       <rect x="3" y="14" width="7" height="7" />
       <rect x="14" y="14" width="7" height="7" />
+    </svg>
+  );
+}
+
+function PlayIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+      <polygon points="5 3 19 12 5 21 5 3" />
     </svg>
   );
 }
