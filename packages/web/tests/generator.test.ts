@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   parseGeneratedFiles,
   parseDescription,
+  parseMiniappHtml,
   generateApp,
 } from '../app/dev/generator';
 
@@ -80,6 +81,20 @@ describe('parseDescription', () => {
   it('handles multiline description', () => {
     const input = '<description>Line one\nLine two</description>';
     expect(parseDescription(input)).toBe('Line one\nLine two');
+  });
+});
+
+/* ─── parseMiniappHtml ──────────────────────────── */
+
+describe('parseMiniappHtml', () => {
+  it('extracts miniapp HTML from tags', () => {
+    const input = '<miniapp>\n<!DOCTYPE html><html></html>\n</miniapp>';
+    expect(parseMiniappHtml(input)).toBe('<!DOCTYPE html><html></html>');
+  });
+
+  it('returns null when no miniapp tag', () => {
+    expect(parseMiniappHtml('no miniapp here')).toBeNull();
+    expect(parseMiniappHtml('')).toBeNull();
   });
 });
 
