@@ -221,7 +221,28 @@ export default function DevHub() {
 
       setMessages([...updatedMessages, { role: 'assistant', content: res.description }]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Generation failed');
+      const msg = e instanceof Error ? e.message : 'Generation failed';
+      if (msg.includes('SESSION_EXPIRED') || msg.includes('expired session')) {
+        setError('Session expired — reconnecting...');
+        setWalletSession(null);
+        try {
+          const byoky = new Byoky();
+          const session = await byoky.connect({
+            providers: [
+              { id: 'anthropic', required: false },
+              { id: 'openai', required: false },
+              { id: 'gemini', required: false },
+            ],
+            modal: true,
+          });
+          setWalletSession(session);
+          setError(null);
+        } catch {
+          setError('Session expired. Please reconnect your wallet.');
+        }
+      } else {
+        setError(msg);
+      }
       setMessages(updatedMessages);
     } finally {
       setGenerating(false);
