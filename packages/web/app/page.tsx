@@ -165,6 +165,12 @@ function Hero() {
               Try the Demo
             </a>
             <a
+              href="/dev"
+              className="btn btn-secondary"
+            >
+              Developer Hub
+            </a>
+            <a
               href="/built-with"
               className="btn btn-secondary"
             >
@@ -314,8 +320,12 @@ function ForDevelopers() {
             the AI — you just build the experience.
           </p>
           <div className="install-cmd">
-            <code>npm install @byoky/sdk</code>
+            <code>npx create-byoky-app</code>
           </div>
+          <p className="subtitle" style={{ fontSize: 14, marginBottom: 0, marginTop: 12 }}>
+            or <code style={{ fontFamily: 'var(--font-code)', color: 'var(--teal-light)', fontSize: 13 }}>npm install @byoky/sdk</code> to add to an existing project.
+            {' '}<a href="/dev" style={{ color: 'var(--teal)', textDecoration: 'underline', textUnderlineOffset: 3 }}>Developer Hub &rarr;</a>
+          </p>
         </FadeIn>
         <div className="dev-layout">
           <div>
@@ -883,6 +893,9 @@ function Footer() {
               rel="noopener noreferrer"
             >
               GitHub
+            </a>
+            <a href="/dev">
+              Developers
             </a>
             <a href="/demo">
               Demo
