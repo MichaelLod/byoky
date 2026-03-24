@@ -513,19 +513,7 @@ export default function DevHub() {
                   />
                 </div>
               ) : (
-                <div
-                  className="dh-code-area"
-                  onClick={() => {
-                    if (!miniappHtml) return;
-                    navigator.clipboard.writeText(miniappHtml).then(() => {
-                      setCopied(true);
-                      setTimeout(() => setCopied(false), 2000);
-                    }).catch(() => {});
-                  }}
-                  style={{ cursor: 'pointer' }}
-                  title="Click to copy HTML"
-                >
-                  {copied && <div className="dh-copied-toast">Copied to clipboard</div>}
+                <div className="dh-code-area">
                   <pre className="dh-code-block">
                     <code>{renderCodeLines(miniappHtml)}</code>
                   </pre>
@@ -548,7 +536,19 @@ export default function DevHub() {
                   {!githubUser ? (
                     deviceFlow ? (
                       <div className="dh-device-inline">
-                        <code className="dh-device-code-sm">{deviceFlow.user_code}</code>
+                        <code
+                          className={`dh-device-code-sm${copied ? ' dh-device-code-copied' : ''}`}
+                          onClick={() => {
+                            navigator.clipboard.writeText(deviceFlow.user_code).then(() => {
+                              setCopied(true);
+                              setTimeout(() => setCopied(false), 2000);
+                            }).catch(() => {});
+                          }}
+                          title="Click to copy"
+                          style={{ cursor: 'pointer' }}
+                        >
+                          {copied ? 'Copied!' : deviceFlow.user_code}
+                        </code>
                         <span className="dh-spinner-sm" />
                         <button className="dh-link-btn" onClick={cancelDeviceFlow}>Cancel</button>
                       </div>
