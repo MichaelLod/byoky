@@ -13,6 +13,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:security": "vitest run packages/core/tests/security.test.ts",
+    "test:vault": "vitest run packages/vault/tests/integration.test.ts",
+    "test:vault:e2e": "vitest run packages/vault/tests/e2e.test.ts",
     "typecheck": "pnpm -r typecheck",
     "clean": "pnpm -r clean",
     "test:e2e": "pnpm build:core && pnpm build:sdk && pnpm build:extension && npx playwright test --config e2e/playwright.config.ts",
