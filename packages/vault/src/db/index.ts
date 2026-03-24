@@ -42,8 +42,8 @@ export async function getUserById(id: string) {
 
 // --- Sessions ---
 
-export async function createSession(userId: string, tokenHash: string, expiresAt: number) {
-  const id = crypto.randomUUID();
+export async function createSession(userId: string, tokenHash: string, expiresAt: number, id?: string) {
+  id = id ?? crypto.randomUUID();
   const now = Date.now();
   const [row] = await getDb().insert(sessions).values({
     id, userId, tokenHash, createdAt: now, expiresAt, lastActivityAt: now,

@@ -42,21 +42,16 @@ auth.post('/signup', async (c) => {
   const saltBytes = Buffer.from(encryptionSalt, 'base64');
   const encryptionKey = await deriveKey(password, new Uint8Array(saltBytes));
 
-  // Create session with proper session ID in token
-  const tempToken = signJwt(user.id, 'pending', SESSION_DURATION_MS);
-  const session = await createSession(user.id, hashToken(tempToken), Date.now() + SESSION_DURATION_MS);
-
-  // Re-sign with actual session ID
-  await deleteSession(session.id);
-  const finalToken = signJwt(user.id, session.id, SESSION_DURATION_MS);
-  const finalSession = await createSession(user.id, hashToken(finalToken), Date.now() + SESSION_DURATION_MS);
+  const sessionId = crypto.randomUUID();
+  const token = signJwt(user.id, sessionId, SESSION_DURATION_MS);
+  await createSession(user.id, hashToken(token), Date.now() + SESSION_DURATION_MS, sessionId);
 
   cacheKey(user.id, encryptionKey);
 
   return c.json({
-    token: finalToken,
+    token,
     user: { id: user.id, email: user.email },
-    sessionId: finalSession.id,
+    sessionId,
   }, 201);
 });
 
@@ -83,20 +78,16 @@ auth.post('/login', async (c) => {
   const saltBytes = Buffer.from(user.encryptionSalt, 'base64');
   const encryptionKey = await deriveKey(password, new Uint8Array(saltBytes));
 
-  // Create session with proper session ID in token
-  const tempToken = signJwt(user.id, 'pending', SESSION_DURATION_MS);
-  const session = await createSession(user.id, hashToken(tempToken), Date.now() + SESSION_DURATION_MS);
-
-  await deleteSession(session.id);
-  const finalToken = signJwt(user.id, session.id, SESSION_DURATION_MS);
-  const finalSession = await createSession(user.id, hashToken(finalToken), Date.now() + SESSION_DURATION_MS);
+  const sessionId = crypto.randomUUID();
+  const token = signJwt(user.id, sessionId, SESSION_DURATION_MS);
+  await createSession(user.id, hashToken(token), Date.now() + SESSION_DURATION_MS, sessionId);
 
   cacheKey(user.id, encryptionKey);
 
   return c.json({
-    token: finalToken,
+    token,
     user: { id: user.id, email: user.email },
-    sessionId: finalSession.id,
+    sessionId,
   });
 });
 
