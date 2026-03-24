@@ -227,6 +227,42 @@
   margin-top: 10px;
 }
 
+.dh-connect-prompt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 48px 24px;
+}
+
+.dh-connect-prompt-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--teal-light);
+  margin-bottom: 20px;
+}
+
+.dh-connect-prompt-title {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin-bottom: 10px;
+}
+
+.dh-connect-prompt-text {
+  font-size: 14px;
+  color: var(--text-secondary);
+  max-width: 420px;
+  line-height: 1.65;
+  margin-bottom: 28px;
+}
+
 /* ─── Buttons ─────────────────────────────────── */
 
 .dh-btn {
