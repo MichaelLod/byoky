@@ -416,6 +416,8 @@ export default function DevHub() {
                 onKeyDown={handleKeyDown}
                 disabled={!walletSession || generating}
                 walletConnected={!!walletSession}
+                walletConnecting={walletConnecting}
+                onConnectWallet={connectWallet}
                 placeholder="Describe your app..."
                 onTemplatesClick={() => setMode('template')}
               />
@@ -452,6 +454,8 @@ export default function DevHub() {
                 onKeyDown={handleKeyDown}
                 disabled={!walletSession || generating}
                 walletConnected={!!walletSession}
+                walletConnecting={walletConnecting}
+                onConnectWallet={connectWallet}
                 placeholder="What would you like to change?"
                 onTemplatesClick={() => setMode('template')}
               />
@@ -527,20 +531,41 @@ interface ChatInputProps {
   onKeyDown: (e: React.KeyboardEvent) => void;
   disabled: boolean;
   walletConnected: boolean;
+  walletConnecting: boolean;
+  onConnectWallet: () => void;
   placeholder: string;
   onTemplatesClick: () => void;
 }
 
 const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
-  function ChatInput({ value, onChange, onSend, onKeyDown, disabled, walletConnected, placeholder, onTemplatesClick }, ref) {
+  function ChatInput({ value, onChange, onSend, onKeyDown, disabled, walletConnected, walletConnecting, onConnectWallet, placeholder, onTemplatesClick }, ref) {
+    if (!walletConnected) {
+      return (
+        <div className="dh-chat-input-area">
+          <button
+            className="dh-connect-btn"
+            onClick={onConnectWallet}
+            disabled={walletConnecting}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" />
+              <path d="M3 5v14a2 2 0 0 0 2 2h16v-5" />
+              <path d="M18 12a2 2 0 0 0 0 4h4v-4z" />
+            </svg>
+            {walletConnecting ? 'Connecting...' : 'Connect Wallet to Start'}
+          </button>
+          <div className="dh-chat-footer">
+            <button className="dh-templates-link" onClick={onTemplatesClick}>
+              or use a template
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="dh-chat-input-area">
         <div className="dh-chat-input-wrap">
-          {!walletConnected && (
-            <div className="dh-chat-disabled-overlay">
-              <span className="dh-chat-disabled-text">Connect wallet to start</span>
-            </div>
-          )}
           <textarea
             ref={ref}
             className="dh-chat-textarea"
