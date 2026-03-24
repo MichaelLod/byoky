@@ -253,6 +253,17 @@ section {
   line-height: 1.05;
 }
 
+.hero-eyebrow {
+  display: block;
+  font-size: 0.42em;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--teal);
+  -webkit-text-fill-color: var(--teal);
+  margin-bottom: 8px;
+}
+
 .hero-gradient {
   background: linear-gradient(135deg, var(--text), var(--teal-light));
   -webkit-background-clip: text;
