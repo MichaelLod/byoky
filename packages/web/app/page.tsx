@@ -165,13 +165,19 @@ function Hero() {
               Try the Demo
             </a>
             <a
+              href="/built-with"
+              className="btn btn-secondary"
+            >
+              Built with Byoky
+            </a>
+            <a
               href="https://github.com/MichaelLod/byoky"
               className="btn btn-secondary"
               target="_blank"
               rel="noopener noreferrer"
             >
               <GitHubIcon />
-              View on GitHub
+              GitHub
             </a>
           </div>
         </FadeIn>
