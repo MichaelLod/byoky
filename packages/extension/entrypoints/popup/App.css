@@ -1190,6 +1190,11 @@ body {
 .card:nth-child(5) { animation-delay: 0.16s; }
 .card:nth-child(6) { animation-delay: 0.2s; }
 
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Button press feedback */
 .btn:active:not(:disabled) {
   transform: scale(0.97);
