@@ -235,9 +235,23 @@ class RelayPairService {
                 // Apply auth
                 applyAuth(filteredHeaders, providerId, credential.authMethod, apiKey, bodyString)
 
-                val requestBody = if (bodyString != null && method.uppercase() in setOf("POST", "PUT", "PATCH")) {
+                // Setup tokens require the Claude Code system prompt
+                val finalBody = if (providerId == "anthropic" && credential.authMethod == com.byoky.app.data.AuthMethod.OAUTH && bodyString != null) {
+                    try {
+                        val parsed = JSONObject(bodyString)
+                        val prefix = "You are Claude Code, Anthropic's official CLI for Claude."
+                        val existing = parsed.optString("system", "").takeIf { it.isNotEmpty() }
+                        if (existing == null) parsed.put("system", prefix)
+                        else parsed.put("system", "$prefix\n\n$existing")
+                        parsed.toString()
+                    } catch (_: Exception) { bodyString }
+                } else {
+                    bodyString
+                }
+
+                val requestBody = if (finalBody != null && method.uppercase() in setOf("POST", "PUT", "PATCH")) {
                     val contentType = filteredHeaders["content-type"] ?: "application/json"
-                    bodyString.toByteArray(Charsets.UTF_8)
+                    finalBody.toByteArray(Charsets.UTF_8)
                         .toRequestBody(contentType.toMediaTypeOrNull())
                 } else null
 
