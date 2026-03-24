@@ -37,7 +37,7 @@ proxy.post('/', async (c) => {
     return c.json({ error: { code: 'INVALID_URL', message: 'URL does not match provider' } }, 403);
   }
 
-  const credential = getCredentialByUserAndProvider(userId, providerId);
+  const credential = await getCredentialByUserAndProvider(userId, providerId);
   if (!credential) {
     return c.json({ error: { code: 'NO_CREDENTIAL', message: `No credential found for provider: ${providerId}` } }, 404);
   }
@@ -49,7 +49,7 @@ proxy.post('/', async (c) => {
 
   let apiKey: string;
   try {
-    apiKey = await decryptWithKey(credential.encrypted_key, cryptoKey);
+    apiKey = await decryptWithKey(credential.encryptedKey, cryptoKey);
   } catch {
     return c.json({ error: { code: 'DECRYPT_FAILED', message: 'Failed to decrypt credential' } }, 500);
   }
@@ -58,7 +58,7 @@ proxy.post('/', async (c) => {
     providerId,
     reqHeaders ?? {},
     apiKey,
-    credential.auth_method,
+    credential.authMethod,
   );
 
   const model = parseModel(reqBody);
@@ -72,11 +72,11 @@ proxy.post('/', async (c) => {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Upstream request failed';
-    logRequest(userId, sessionId, providerId, url, method ?? 'POST', 502, undefined, undefined, model);
+    await logRequest(userId, sessionId, providerId, url, method ?? 'POST', 502, undefined, undefined, model);
     return c.json({ error: { code: 'UPSTREAM_ERROR', message } }, 502);
   }
 
-  updateCredentialLastUsed(credential.id);
+  await updateCredentialLastUsed(credential.id);
 
   const contentType = upstreamResponse.headers.get('content-type') ?? '';
   const isStreaming = contentType.includes('text/event-stream');
@@ -103,7 +103,7 @@ proxy.post('/', async (c) => {
       }
 
       const usage = parseUsage(providerId, collected);
-      logRequest(
+      await logRequest(
         userId, sessionId, providerId, url, method ?? 'POST',
         upstreamResponse.status,
         usage?.inputTokens, usage?.outputTokens, model,
@@ -114,7 +114,7 @@ proxy.post('/', async (c) => {
   // Non-streaming response
   const responseBody = await upstreamResponse.text();
   const usage = parseUsage(providerId, responseBody);
-  logRequest(
+  await logRequest(
     userId, sessionId, providerId, url, method ?? 'POST',
     upstreamResponse.status,
     usage?.inputTokens, usage?.outputTokens, model,
