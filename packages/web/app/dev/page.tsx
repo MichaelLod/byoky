@@ -305,7 +305,7 @@ export default function DevHub() {
         <div className="dh-topbar-left">
           <a href="/" className="dh-brand">Byoky</a>
           <span className="dh-topbar-title">MiniApp Creator</span>
-          {miniappHtml && (
+          {(miniappHtml || messages.length > 0) && (
             <button
               className="dh-new-project-btn"
               onClick={() => {
