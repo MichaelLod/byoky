@@ -11,7 +11,7 @@
     </picture>
   </a>
   <br />
-  <strong>MetaMask for AI</strong>
+  <strong>Bring Your Own Key</strong>
   <br />
   A secure browser wallet for your LLM API keys and setup tokens.
   <br />
@@ -244,7 +244,7 @@ No environment variables. No secrets management. No leaked `.env` files. Your ke
 
 ## Architecture
 
-Byoky uses a **proxy model** (like MetaMask's transaction signing). Keys never leave the extension. Three integration paths, same guarantee:
+Byoky uses a **proxy model**. Keys never leave the extension. Three integration paths, same guarantee:
 
 ```
 Browser apps  → SDK (createFetch) → Content Script → Extension → LLM API
