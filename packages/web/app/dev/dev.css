@@ -1,0 +1,513 @@
+/* =============================================
+   Developer Hub — Styles
+   ============================================= */
+
+/* ─── Hero ─────────────────────────────────────── */
+
+.dh-hero {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 120px 0 160px;
+  position: relative;
+  overflow: hidden;
+}
+
+.dh-hero-glow {
+  position: absolute;
+  top: -20%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 900px;
+  height: 600px;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(14, 165, 233, 0.14) 0%,
+    rgba(14, 165, 233, 0.04) 45%,
+    transparent 70%
+  );
+  filter: blur(40px);
+  animation: breathe 10s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.dh-hero h1 {
+  font-size: 68px;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  margin-bottom: 24px;
+  line-height: 1.08;
+}
+
+.dh-hero p {
+  font-size: 19px;
+  color: var(--text-secondary);
+  max-width: 540px;
+  margin: 0 auto 48px;
+  line-height: 1.7;
+}
+
+.dh-hero-actions {
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* ─── Quick Start ──────────────────────────────── */
+
+.dh-quickstart {
+  background: var(--bg-surface);
+}
+
+.dh-quickstart h2 {
+  font-size: 44px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  text-align: center;
+  margin-bottom: 14px;
+}
+
+.dh-quickstart .dh-subtitle {
+  font-size: 17px;
+  color: var(--text-secondary);
+  text-align: center;
+  max-width: 520px;
+  margin: 0 auto 64px;
+  line-height: 1.7;
+}
+
+.dh-steps-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 28px;
+  position: relative;
+}
+
+.dh-steps-grid::before {
+  content: '';
+  position: absolute;
+  top: 36px;
+  left: calc(16.66% + 16px);
+  right: calc(16.66% + 16px);
+  height: 1px;
+  background: linear-gradient(to right, var(--border), var(--teal-dark), var(--border));
+  opacity: 0.5;
+}
+
+.dh-step {
+  text-align: center;
+  position: relative;
+}
+
+.dh-step-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  margin-bottom: 20px;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--teal-light);
+  position: relative;
+  z-index: 2;
+}
+
+.dh-step h3 {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.dh-step .code-window {
+  text-align: left;
+}
+
+.dh-step .code-body {
+  padding: 16px;
+}
+
+.dh-step .code-body pre {
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre;
+}
+
+/* ─── Templates ────────────────────────────────── */
+
+.dh-templates h2 {
+  font-size: 44px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  text-align: center;
+  margin-bottom: 14px;
+}
+
+.dh-templates .dh-subtitle {
+  font-size: 17px;
+  color: var(--text-secondary);
+  text-align: center;
+  max-width: 520px;
+  margin: 0 auto 64px;
+  line-height: 1.7;
+}
+
+.dh-templates-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+
+.dh-template-card {
+  display: flex;
+  flex-direction: column;
+  padding: 28px;
+  border-radius: 14px;
+  background: linear-gradient(
+    145deg,
+    rgba(13, 13, 26, 0.8),
+    rgba(9, 9, 20, 0.6)
+  );
+  border: 1px solid var(--border);
+  transition: border-color 0.3s, box-shadow 0.3s, transform 0.3s;
+  text-decoration: none;
+  color: inherit;
+}
+
+.dh-template-card:hover {
+  border-color: var(--teal-dark);
+  box-shadow: 0 0 40px rgba(14, 165, 233, 0.08);
+  transform: translateY(-2px);
+}
+
+.dh-template-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.dh-template-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.dh-template-header h3 {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.dh-template-card p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.65;
+  margin-bottom: 16px;
+  flex: 1;
+}
+
+.dh-template-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dh-template-tags {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dh-template-tag {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+
+.dh-template-link {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--teal);
+  white-space: nowrap;
+  transition: color 0.2s;
+}
+
+.dh-template-card:hover .dh-template-link {
+  color: var(--teal-light);
+}
+
+/* ─── Recipes ──────────────────────────────────── */
+
+.dh-recipes h2 {
+  font-size: 44px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  text-align: center;
+  margin-bottom: 14px;
+}
+
+.dh-recipes .dh-subtitle {
+  font-size: 17px;
+  color: var(--text-secondary);
+  text-align: center;
+  max-width: 520px;
+  margin: 0 auto 64px;
+  line-height: 1.7;
+}
+
+.dh-recipes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.dh-recipe-card {
+  border-radius: 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  transition: border-color 0.3s;
+}
+
+.dh-recipe-card:hover {
+  border-color: var(--border-hover);
+}
+
+.dh-recipe-header {
+  padding: 24px 28px 16px;
+}
+
+.dh-recipe-header h3 {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.dh-recipe-header p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.dh-recipe-card .code-window {
+  border-radius: 0;
+  border: none;
+  border-top: 1px solid var(--border);
+  box-shadow: none;
+}
+
+.dh-recipe-card .code-body pre {
+  font-size: 12.5px;
+  line-height: 1.7;
+  white-space: pre;
+  color: var(--text-secondary);
+}
+
+/* ─── Checklist ────────────────────────────────── */
+
+.dh-checklist {
+  background: var(--bg-surface);
+}
+
+.dh-checklist h2 {
+  font-size: 44px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  text-align: center;
+  margin-bottom: 14px;
+}
+
+.dh-checklist .dh-subtitle {
+  font-size: 17px;
+  color: var(--text-secondary);
+  text-align: center;
+  max-width: 520px;
+  margin: 0 auto 56px;
+  line-height: 1.7;
+}
+
+.dh-checklist-card {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 36px 40px;
+  border-radius: 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  position: relative;
+  overflow: hidden;
+}
+
+.dh-checklist-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--teal), transparent);
+  opacity: 0.6;
+}
+
+.dh-checklist-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  list-style: none;
+}
+
+.dh-checklist-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.dh-checklist-icon {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: var(--teal-glow);
+  border: 1px solid var(--teal-dark);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--teal-light);
+  margin-top: 1px;
+}
+
+.dh-checklist-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.dh-checklist-item code {
+  font-family: var(--font-code);
+  font-size: 13px;
+  color: var(--teal-light);
+  background: var(--bg-elevated);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+/* ─── CTA ──────────────────────────────────────── */
+
+.dh-cta {
+  text-align: center;
+}
+
+.dh-cta h2 {
+  font-size: 44px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  margin-bottom: 20px;
+}
+
+.dh-cta p {
+  font-size: 17px;
+  color: var(--text-secondary);
+  max-width: 480px;
+  margin: 0 auto 40px;
+  line-height: 1.7;
+}
+
+.dh-cta-links {
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* =============================================
+   Responsive
+   ============================================= */
+
+@media (max-width: 900px) {
+  .dh-hero h1 {
+    font-size: 44px;
+  }
+
+  .dh-hero p {
+    font-size: 17px;
+  }
+
+  .dh-steps-grid {
+    grid-template-columns: 1fr;
+    gap: 40px;
+    max-width: 400px;
+    margin: 0 auto;
+  }
+
+  .dh-steps-grid::before {
+    display: none;
+  }
+
+  .dh-templates-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dh-quickstart h2,
+  .dh-templates h2,
+  .dh-recipes h2,
+  .dh-checklist h2,
+  .dh-cta h2 {
+    font-size: 32px;
+  }
+}
+
+@media (max-width: 600px) {
+  .dh-hero {
+    min-height: auto;
+    padding: 120px 0 80px;
+  }
+
+  .dh-hero h1 {
+    font-size: 36px;
+  }
+
+  .dh-hero-actions {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .dh-checklist-card {
+    padding: 24px 20px;
+  }
+
+  .dh-cta-links {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .dh-recipe-header {
+    padding: 20px 20px 12px;
+  }
+
+  .dh-recipe-card .code-body pre {
+    font-size: 11px;
+  }
+
+  .dh-step .code-body pre {
+    font-size: 11px;
+  }
+}
