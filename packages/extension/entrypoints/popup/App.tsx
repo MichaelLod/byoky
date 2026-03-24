@@ -9,6 +9,7 @@ import { ApprovalRequest } from './pages/ApprovalRequest';
 import { Usage } from './pages/Usage';
 import { RequestHistory } from './pages/RequestHistory';
 import { Settings } from './pages/Settings';
+import { Gifts } from './pages/Gifts';
 import { CreateGift } from './pages/CreateGift';
 import { RedeemGift } from './pages/RedeemGift';
 
@@ -67,6 +68,19 @@ export default function App() {
                 <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" />
                 <path d="M3 5v14a2 2 0 0 0 2 2h16v-5" />
                 <path d="M18 12a2 2 0 0 0 0 4h4v-4z" />
+              </svg>
+            </button>
+            <button
+              className={currentPage === 'gifts' || currentPage === 'create-gift' || currentPage === 'redeem-gift' ? 'active' : ''}
+              onClick={() => useWalletStore.getState().navigate('gifts')}
+              title="Gifts"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 12v10H4V12" />
+                <path d="M2 7h20v5H2z" />
+                <path d="M12 22V7" />
+                <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z" />
+                <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" />
               </svg>
             </button>
             <button
@@ -129,6 +143,7 @@ export default function App() {
           {currentPage === 'usage' && <Usage />}
           {currentPage === 'request-history' && <RequestHistory />}
           {currentPage === 'settings' && <Settings />}
+          {currentPage === 'gifts' && <Gifts />}
           {currentPage === 'create-gift' && <CreateGift />}
           {currentPage === 'redeem-gift' && <RedeemGift />}
         </div>

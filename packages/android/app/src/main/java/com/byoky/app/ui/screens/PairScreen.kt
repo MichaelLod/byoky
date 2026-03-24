@@ -39,30 +39,17 @@ import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.common.InputImage
 import java.util.concurrent.Executors
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PairScreen(wallet: WalletStore, pairService: RelayPairService) {
+fun PairContent(wallet: WalletStore, pairService: RelayPairService) {
     val status by pairService.status.collectAsState()
     val requestCount by pairService.requestCount.collectAsState()
     val credentials by wallet.credentials.collectAsState()
     var showScanner by remember { mutableStateOf(false) }
     var manualCode by remember { mutableStateOf("") }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Pair") },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = BgMain,
-                    titleContentColor = TextPrimary,
-                ),
-            )
-        },
-        containerColor = BgMain,
-    ) { padding ->
+    Box {
         Column(
             modifier = Modifier
-                .padding(padding)
                 .fillMaxSize()
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,

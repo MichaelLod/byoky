@@ -35,11 +35,10 @@ private fun MainScreen(wallet: WalletStore) {
 
     val tabs = listOf(
         Triple("Wallet", Icons.Default.Wallet, "wallet"),
-        Triple("Pair", Icons.Default.QrCodeScanner, "pair"),
-        Triple("Bridge", Icons.Default.CellTower, "bridge"),
+        Triple("Gifts", Icons.Default.CardGiftcard, "gifts"),
+        Triple("Connect", Icons.Default.CellTower, "connect"),
         Triple("Usage", Icons.Default.BarChart, "usage"),
         Triple("Sessions", Icons.Default.Link, "sessions"),
-        Triple("Settings", Icons.Default.Settings, "settings"),
     )
 
     Scaffold(
@@ -75,9 +74,32 @@ private fun MainScreen(wallet: WalletStore) {
             startDestination = "wallet",
             modifier = Modifier.padding(padding),
         ) {
-            composable("wallet") { WalletScreen(wallet) }
-            composable("pair") { PairScreen(wallet, pairService) }
-            composable("bridge") { BridgeScreen(wallet) }
+            composable("wallet") {
+                WalletScreen(
+                    wallet = wallet,
+                    onNavigateToSettings = {
+                        navController.navigate("settings") { launchSingleTop = true }
+                    },
+                )
+            }
+            composable("gifts") {
+                GiftsScreen(
+                    wallet = wallet,
+                    onNavigateToCreate = {
+                        navController.navigate("create-gift") { launchSingleTop = true }
+                    },
+                    onNavigateToRedeem = {
+                        navController.navigate("redeem-gift") { launchSingleTop = true }
+                    },
+                )
+            }
+            composable("create-gift") {
+                CreateGiftScreen(wallet = wallet, onBack = { navController.popBackStack() })
+            }
+            composable("redeem-gift") {
+                RedeemGiftScreen(wallet = wallet, onBack = { navController.popBackStack() })
+            }
+            composable("connect") { ConnectScreen(wallet, pairService) }
             composable("usage") { UsageScreen(wallet) }
             composable("sessions") { SessionsScreen(wallet) }
             composable("settings") { SettingsScreen(wallet) }
