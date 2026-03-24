@@ -5,11 +5,11 @@ export default function Home() {
     <>
       <Hero />
       <div className="divider" />
-      <HowItWorks />
-      <div className="divider" />
       <ZeroCost />
       <div className="divider" />
       <ForDevelopers />
+      <div className="divider" />
+      <HowItWorks />
       <div className="divider" />
       <Security />
       <div className="divider" />
@@ -144,9 +144,9 @@ function Hero() {
         </FadeIn>
         <FadeIn delay={0.2}>
           <p>
-            Your keys. Your wallet. Your control.
-            A secure browser extension that stores your AI API keys locally
-            and connects them to any app — without ever exposing them.
+            A secure browser wallet for AI API keys.
+            Users own their keys. Developers build for free.
+            No API costs, no key management — just ship.
           </p>
         </FadeIn>
         <FadeIn delay={0.3}>
@@ -253,25 +253,27 @@ function ZeroCost() {
       <div className="container">
         <FadeIn>
           <h2 className="zero-cost-heading">
-            Zero infrastructure.<br />
-            <span className="hero-gradient">Zero cost.</span>
+            Build AI apps.<br />
+            <span className="hero-gradient">Pay nothing for AI.</span>
           </h2>
           <p className="zero-cost-body">
-            Your users bring their own AI keys. You build the product — they power it.
-            No API bills. No rate limits. No backend required.
+            Stop worrying about API bills killing your project.
+            Your users connect their own AI keys through Byoky — you
+            get the full power of Claude, GPT-4, Gemini, and 12 more
+            providers without spending a cent on infrastructure.
           </p>
         </FadeIn>
         <div className="zero-cost-grid">
           <FadeIn delay={0.1}>
             <div className="zero-cost-card">
               <span className="zero-cost-stat">$0</span>
-              <span className="zero-cost-label">AI infrastructure cost</span>
+              <span className="zero-cost-label">your AI cost — forever</span>
             </div>
           </FadeIn>
           <FadeIn delay={0.2}>
             <div className="zero-cost-card">
-              <span className="zero-cost-stat">0</span>
-              <span className="zero-cost-label">API keys to manage</span>
+              <span className="zero-cost-stat">15</span>
+              <span className="zero-cost-label">AI providers supported</span>
             </div>
           </FadeIn>
           <FadeIn delay={0.3}>
@@ -281,6 +283,13 @@ function ZeroCost() {
             </div>
           </FadeIn>
         </div>
+        <FadeIn delay={0.4}>
+          <p className="zero-cost-pitch">
+            Indie dev? Startup? Side project? It doesn&apos;t matter.
+            If your users have API keys, you have a product. No billing
+            integration, no usage caps, no margin pressure.
+          </p>
+        </FadeIn>
       </div>
     </section>
   );
@@ -293,10 +302,10 @@ function ForDevelopers() {
     <section className="dev-section">
       <div className="container">
         <FadeIn>
-          <h2>Integrate in minutes.</h2>
+          <h2>Ship today, not next quarter.</h2>
           <p className="subtitle">
-            Use your favorite provider SDK with Byoky&apos;s fetch proxy. Two
-            extra lines. Full API compatibility. Keys never touch your app.
+            Two lines of code. Any provider SDK. Your users&apos; keys power
+            the AI — you just build the experience.
           </p>
           <div className="install-cmd">
             <code>npm install @byoky/sdk</code>
