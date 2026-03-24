@@ -373,46 +373,79 @@ export default function DevHub() {
           <div className={`dh-generate-box${generating ? ' dh-generating' : ''}`}>
             {mode === 'generate' ? (
               <>
-                <label className="dh-generate-label" htmlFor="dh-prompt">
-                  What do you want to build?
-                </label>
-                <textarea
-                  ref={textareaRef}
-                  id="dh-prompt"
-                  className="dh-textarea"
-                  rows={4}
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  onKeyDown={handleTextareaKeyDown}
-                  placeholder="A chat app that lets users compare responses from Claude and GPT side by side..."
-                  disabled={generating}
-                />
-                <div className="dh-generate-actions">
-                  <button
-                    className="dh-btn dh-btn-primary"
-                    onClick={handleGenerate}
-                    disabled={generating || !walletSession || !prompt.trim()}
-                    title={!walletSession ? 'Connect wallet first' : undefined}
-                  >
-                    {generating ? (
-                      <>
-                        <span className="dh-spinner-sm" />
-                        Generating your app...
-                      </>
-                    ) : (
-                      'Generate with AI'
-                    )}
-                  </button>
-                  <button
-                    className="dh-btn dh-btn-secondary"
-                    onClick={() => setMode('template')}
-                    disabled={generating}
-                  >
-                    Start from template
-                  </button>
-                </div>
-                {!walletSession && (
-                  <p className="dh-hint">Connect your wallet to generate with AI.</p>
+                {!walletSession ? (
+                  <div className="dh-connect-prompt">
+                    <div className="dh-connect-prompt-icon">
+                      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" />
+                        <path d="M3 5v14a2 2 0 0 0 2 2h16v-5" />
+                        <path d="M18 12a2 2 0 0 0 0 4h4v-4z" />
+                      </svg>
+                    </div>
+                    <h3 className="dh-connect-prompt-title">Connect your Byoky wallet to start</h3>
+                    <p className="dh-connect-prompt-text">
+                      Your AI keys power the code generation — no subscription, no API costs for us.
+                      Connect your wallet with at least one provider (Anthropic recommended).
+                    </p>
+                    <button
+                      className="dh-btn dh-btn-primary"
+                      onClick={connectWallet}
+                      disabled={walletConnecting}
+                    >
+                      {walletConnecting ? (
+                        <><span className="dh-spinner-sm" /> Connecting...</>
+                      ) : (
+                        'Connect Wallet'
+                      )}
+                    </button>
+                    <button
+                      className="dh-btn dh-btn-secondary"
+                      onClick={() => setMode('template')}
+                      style={{ marginTop: 12 }}
+                    >
+                      or start from a template
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <label className="dh-generate-label" htmlFor="dh-prompt">
+                      What do you want to build?
+                    </label>
+                    <textarea
+                      ref={textareaRef}
+                      id="dh-prompt"
+                      className="dh-textarea"
+                      rows={4}
+                      value={prompt}
+                      onChange={(e) => setPrompt(e.target.value)}
+                      onKeyDown={handleTextareaKeyDown}
+                      placeholder="A chat app that lets users compare responses from Claude and GPT side by side..."
+                      disabled={generating}
+                    />
+                    <div className="dh-generate-actions">
+                      <button
+                        className="dh-btn dh-btn-primary"
+                        onClick={handleGenerate}
+                        disabled={generating || !prompt.trim()}
+                      >
+                        {generating ? (
+                          <>
+                            <span className="dh-spinner-sm" />
+                            Generating your app...
+                          </>
+                        ) : (
+                          'Generate with AI'
+                        )}
+                      </button>
+                      <button
+                        className="dh-btn dh-btn-secondary"
+                        onClick={() => setMode('template')}
+                        disabled={generating}
+                      >
+                        Start from template
+                      </button>
+                    </div>
+                  </>
                 )}
               </>
             ) : (
