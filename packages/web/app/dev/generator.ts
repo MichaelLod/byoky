@@ -1,6 +1,7 @@
 export interface GenerateResult {
   files: Record<string, string>;
   description: string;
+  miniappHtml: string | null;
 }
 
 export interface Message {
@@ -84,7 +85,75 @@ session.providers; // Record of available providers
 - Use proper TypeScript types (no \`any\`)
 - No default exports except where Next.js requires them (page, layout)
 - Include a "Connect Wallet" flow before the main UI
-- Use inline styles or CSS modules — no Tailwind unless requested`;
+- Use inline styles or CSS modules — no Tailwind unless requested
+
+## MiniApp Version
+
+After all <file> tags, also output a **self-contained single HTML file** miniapp version wrapped in:
+<miniapp>
+...full HTML here...
+</miniapp>
+
+The miniapp HTML must:
+- Be a complete standalone HTML file (inline CSS + inline JS, no external dependencies)
+- Dark theme: background #0a0a0a, text #ededed, accent matching the app's purpose
+- Include \`<meta name="miniapp" content='{"name":"APP_NAME","description":"SHORT_DESC","author":"byoky","providers":["PROVIDER_IDS"]}'>\`
+- Include the Byoky MiniApp Runtime (a postMessage-based protocol for API calls):
+
+\`\`\`
+<script>
+(function() {
+  let sessionResolve;
+  const sessionReady = new Promise(r => { sessionResolve = r; });
+  let providers = {};
+  window.addEventListener('message', (e) => {
+    if (e.data && e.data.type === 'BYOKY_SESSION') { providers = e.data.providers || {}; sessionResolve(e.data); }
+    if (e.data && e.data.type === 'BYOKY_API_RESPONSE') { const p = pending.get(e.data.requestId); if (p) { pending.delete(e.data.requestId); p.resolve(e.data); } }
+    if (e.data && e.data.type === 'BYOKY_API_RESPONSE_START') { const p = pending.get(e.data.requestId); if (p && p.onStart) p.onStart(e.data); }
+    if (e.data && e.data.type === 'BYOKY_API_RESPONSE_CHUNK') { const p = pending.get(e.data.requestId); if (p && p.onChunk) p.onChunk(e.data.chunk); }
+    if (e.data && e.data.type === 'BYOKY_API_RESPONSE_END') { const p = pending.get(e.data.requestId); if (p) { pending.delete(e.data.requestId); if (p.onEnd) p.onEnd(); } }
+    if (e.data && e.data.type === 'BYOKY_API_RESPONSE_ERROR') { const p = pending.get(e.data.requestId); if (p) { pending.delete(e.data.requestId); p.reject(new Error(e.data.error)); } }
+  });
+  window.parent.postMessage({ type: 'MINIAPP_READY' }, '*');
+  let reqId = 0;
+  const pending = new Map();
+  window.byoky = {
+    sessionReady,
+    get providers() { return providers; },
+    async fetch(provider, url, options) {
+      await sessionReady; options = options || {};
+      const id = String(++reqId);
+      return new Promise((resolve, reject) => {
+        pending.set(id, { resolve: (d) => resolve(new Response(d.body, { status: d.status, headers: d.headers || {} })), reject });
+        window.parent.postMessage({ type: 'BYOKY_API_REQUEST', requestId: id, provider, url, method: options.method || 'POST', headers: options.headers || {}, body: options.body || null }, '*');
+      });
+    },
+    async fetchStream(provider, url, options) {
+      await sessionReady; options = options || {};
+      const id = String(++reqId);
+      return new Promise((resolve, reject) => {
+        const { readable, writable } = new TransformStream();
+        const writer = writable.getWriter();
+        const encoder = new TextEncoder();
+        pending.set(id, {
+          onStart: (d) => resolve(new Response(readable, { status: d.status, headers: d.headers || {} })),
+          onChunk: (chunk) => { writer.write(encoder.encode(chunk)).catch(() => {}); },
+          onEnd: () => { writer.close().catch(() => {}); },
+          reject: (err) => { writer.abort(err).catch(() => {}); reject(err); }
+        });
+        window.parent.postMessage({ type: 'BYOKY_API_REQUEST', requestId: id, provider, url, method: options.method || 'POST', headers: options.headers || {}, body: options.body || null, stream: true }, '*');
+      });
+    }
+  };
+})();
+</script>
+\`\`\`
+
+- Use window.byoky.fetch(provider, url, options) for non-streaming API calls
+- Use window.byoky.fetchStream(provider, url, options) for streaming API calls
+- Parse SSE for Anthropic streaming: lines starting with "data: ", extract content_block_delta with text_delta
+- Be responsive and mobile-friendly
+- The miniapp runs inside an iframe on byoky.com — the parent page handles wallet connection and API proxying`;
 
 export function parseGeneratedFiles(text: string): Record<string, string> {
   const files: Record<string, string> = {};
@@ -103,6 +172,11 @@ export function parseGeneratedFiles(text: string): Record<string, string> {
 export function parseDescription(text: string): string {
   const match = text.match(/<description>([\s\S]*?)<\/description>/);
   return match?.[1]?.trim() ?? 'Generated application';
+}
+
+export function parseMiniappHtml(text: string): string | null {
+  const match = text.match(/<miniapp>\n?([\s\S]*?)\n?<\/miniapp>/);
+  return match?.[1]?.trim() ?? null;
 }
 
 /**
@@ -164,6 +238,7 @@ export async function generateApp(
   return {
     files,
     description: parseDescription(fullText),
+    miniappHtml: parseMiniappHtml(fullText),
   };
 }
 
