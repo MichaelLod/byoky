@@ -105,7 +105,8 @@ export function Chat({ session }: Props) {
       let assistantContent = '';
 
       if (selectedProvider === 'anthropic') {
-        const content: unknown[] = [];
+        type ContentBlock = { type: string; text?: string; source?: { type: string; media_type: string; data: string } };
+        const content: ContentBlock[] = [];
         if (userMessage.image) {
           content.push({
             type: 'image',
@@ -114,7 +115,7 @@ export function Chat({ session }: Props) {
         }
         content.push({ type: 'text', text: userMessage.content });
 
-        const apiMessages = messages
+        const apiMessages: Array<{ role: string; content: string | ContentBlock[] }> = messages
           .filter((m) => m.role === 'user' || m.role === 'assistant')
           .map((m) => {
             if (m.image) {
@@ -123,7 +124,7 @@ export function Chat({ session }: Props) {
                 content: [
                   { type: 'image', source: { type: 'base64', media_type: m.image.mediaType, data: m.image.base64 } },
                   { type: 'text', text: m.content },
-                ],
+                ] as ContentBlock[],
               };
             }
             return { role: m.role, content: m.content };
@@ -152,13 +153,14 @@ export function Chat({ session }: Props) {
         const data = JSON.parse(text);
         assistantContent = data.content?.[0]?.text || 'No response.';
       } else if (selectedProvider === 'gemini') {
-        const parts: unknown[] = [];
+        type GeminiPart = { text?: string; inline_data?: { mime_type: string; data: string } };
+        const parts: GeminiPart[] = [];
         if (userMessage.image) {
           parts.push({ inline_data: { mime_type: userMessage.image.mediaType, data: userMessage.image.base64 } });
         }
         parts.push({ text: userMessage.content });
 
-        const apiContents = messages
+        const apiContents: Array<{ role: string; parts: GeminiPart[] }> = messages
           .filter((m) => m.role === 'user' || m.role === 'assistant')
           .map((m) => ({
             role: m.role === 'assistant' ? 'model' : 'user',
@@ -183,13 +185,14 @@ export function Chat({ session }: Props) {
         const data = await response.json();
         assistantContent = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response.';
       } else if (selectedProvider === 'openai') {
-        const content: unknown[] = [];
+        type OAIBlock = { type: string; text?: string; image_url?: { url: string } };
+        const content: OAIBlock[] = [];
         if (userMessage.image) {
           content.push({ type: 'image_url', image_url: { url: `data:${userMessage.image.mediaType};base64,${userMessage.image.base64}` } });
         }
         content.push({ type: 'text', text: userMessage.content });
 
-        const apiMessages = messages
+        const apiMessages: Array<{ role: string; content: string | OAIBlock[] }> = messages
           .filter((m) => m.role === 'user' || m.role === 'assistant')
           .map((m) => {
             if (m.image) {
@@ -198,7 +201,7 @@ export function Chat({ session }: Props) {
                 content: [
                   { type: 'image_url', image_url: { url: `data:${m.image.mediaType};base64,${m.image.base64}` } },
                   { type: 'text', text: m.content },
-                ],
+                ] as OAIBlock[],
               };
             }
             return { role: m.role, content: m.content };
