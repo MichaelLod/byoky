@@ -86,7 +86,7 @@ session.providers; // Record of available providers
 - Include a "Connect Wallet" flow before the main UI
 - Use inline styles or CSS modules — no Tailwind unless requested`;
 
-function parseGeneratedFiles(text: string): Record<string, string> {
+export function parseGeneratedFiles(text: string): Record<string, string> {
   const files: Record<string, string> = {};
   const regex = /<file\s+path="([^"]+)">\n?([\s\S]*?)\n?<\/file>/g;
   let match;
@@ -100,7 +100,7 @@ function parseGeneratedFiles(text: string): Record<string, string> {
   return files;
 }
 
-function parseDescription(text: string): string {
+export function parseDescription(text: string): string {
   const match = text.match(/<description>([\s\S]*?)<\/description>/);
   return match?.[1]?.trim() ?? 'Generated application';
 }
