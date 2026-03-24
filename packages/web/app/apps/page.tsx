@@ -66,11 +66,14 @@ export default function MiniApps() {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  /* ── Fetch registry on mount ── */
+  /* ── Fetch registry on mount + load user-published apps ── */
   useEffect(() => {
     fetch('/apps/registry.json')
       .then((r) => r.json())
-      .then((data) => setRegistry(data))
+      .then((data: RegistryEntry[]) => {
+        const userApps: RegistryEntry[] = JSON.parse(localStorage.getItem('byoky-user-apps') || '[]');
+        setRegistry([...userApps, ...data]);
+      })
       .catch(() => setError('Failed to load app registry'));
   }, []);
 
