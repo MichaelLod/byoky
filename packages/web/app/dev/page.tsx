@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef, useEffect, forwardRef } from 'react';
 import { Byoky } from '@byoky/sdk';
 import type { ByokySession } from '@byoky/sdk';
-import { startDeviceFlow, pollForToken, getUser, createGist } from './github';
+import { startDeviceFlow, pollForToken, getUser, createGist, submitRegistryPR } from './github';
 import type { GitHubUser } from './github';
 import { generateApp } from './generator';
 import type { GenerateResult, Message } from './generator';
@@ -79,7 +79,8 @@ export default function DevHub() {
 
   /* ── Publish state ── */
   const [publishing, setPublishing] = useState(false);
-  const [publishedGistUrl, setPublishedGistUrl] = useState<string | null>(null);
+  const [publishState, setPublishState] = useState<'idle' | 'review' | 'done'>('idle');
+  const [publishPrUrl, setPublishPrUrl] = useState<string | null>(null);
 
   /* ── UI state ── */
   const [error, setError] = useState<string | null>(null);
@@ -324,7 +325,7 @@ export default function DevHub() {
       const gist = await createGist(githubToken, `${name}.html`, miniappHtml, `Byoky MiniApp: ${name}`);
 
       const entry = {
-        id: `${githubUser.login}-${name}-${Date.now()}`,
+        id: `${githubUser.login}-${name}`,
         name: name.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
         description: messages.find((m) => m.role === 'assistant')?.content || 'A Byoky MiniApp',
         author: githubUser.login,
@@ -334,12 +335,15 @@ export default function DevHub() {
         publishedAt: new Date().toISOString(),
       };
 
-      // Save to localStorage so /apps page picks it up
+      // Save to localStorage so user can see it in /apps immediately
       const existing = JSON.parse(localStorage.getItem('byoky-user-apps') || '[]');
       existing.push(entry);
       localStorage.setItem('byoky-user-apps', JSON.stringify(existing));
 
-      setPublishedGistUrl('/apps');
+      // Submit PR to add to the public registry
+      const pr = await submitRegistryPR(githubToken, githubUser.login, entry);
+      setPublishPrUrl(pr.html_url);
+      setPublishState('review');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to publish miniapp');
     } finally {
@@ -383,7 +387,8 @@ export default function DevHub() {
                 setMessages([]);
                 setMiniappHtml(null);
                 setAppName('');
-                setPublishedGistUrl(null);
+                setPublishState('idle');
+                setPublishPrUrl(null);
                 localStorage.removeItem(STORAGE_KEY);
               }}
               title="Start a new miniapp"
@@ -561,10 +566,19 @@ export default function DevHub() {
                         <GitHubIcon /> Connect GitHub to Publish
                       </button>
                     )
-                  ) : publishedGistUrl ? (
-                    <a href="/apps" className="dh-next-btn dh-next-btn-success">
-                      View in MiniApps &#8599;
-                    </a>
+                  ) : publishState === 'review' ? (
+                    <div className="dh-publish-review">
+                      <span className="dh-review-badge">In Review</span>
+                      <span className="dh-review-text">Your miniapp is submitted and will be published shortly.</span>
+                      <a href="/apps" className="dh-next-btn dh-next-btn-success">
+                        View in MiniApps
+                      </a>
+                      {publishPrUrl && (
+                        <a href={publishPrUrl} target="_blank" rel="noopener noreferrer" className="dh-next-btn">
+                          View PR
+                        </a>
+                      )}
+                    </div>
                   ) : (
                     <button className="dh-next-btn dh-next-btn-primary" onClick={handlePublish} disabled={publishing}>
                       {publishing ? <><span className="dh-spinner-sm" /> Publishing...</> : <><MiniAppIcon /> Publish to MiniApps</>}
