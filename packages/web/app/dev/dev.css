@@ -50,6 +50,25 @@
   color: var(--text-secondary);
 }
 
+.dh-new-project-btn {
+  padding: 4px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.dh-new-project-btn:hover {
+  border-color: var(--border-hover);
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+
 .dh-topbar-right {
   display: flex;
   align-items: center;
