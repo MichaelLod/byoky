@@ -5,6 +5,14 @@ import { createProxyFetch } from './proxy-fetch.js';
 import { createRelayFetch } from './relay-fetch.js';
 import { createRelayClient, type RelayConnection } from './relay-client.js';
 import { ConnectModal, type ModalOptions } from './modal/connect-modal.js';
+import { createVaultFetch } from './vault-fetch.js';
+
+export interface VaultConnectOptions {
+  vaultUrl: string;
+  email?: string;
+  password?: string;
+  token?: string;
+}
 
 export interface ByokySession extends ConnectResponse {
   /** Create a fetch function that proxies requests through the wallet for the given provider. */
@@ -133,6 +141,59 @@ export class Byoky {
     if (!connected) return null;
 
     return this.buildSession(savedResponse);
+  }
+
+  /**
+   * Connect via a Byoky Vault server. Works in both browser and Node.js.
+   * The vault stores encrypted credentials and proxies API calls server-side.
+   */
+  async connectViaVault(options: VaultConnectOptions): Promise<ByokySession> {
+    const { vaultUrl } = options;
+    let token = options.token;
+
+    if (!token) {
+      if (!options.email || !options.password) {
+        throw new ByokyError(ByokyErrorCode.UNKNOWN, 'Either token or email+password required for vault connection');
+      }
+      const loginResp = await fetch(`${vaultUrl.replace(/\/$/, '')}/auth/login`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: options.email, password: options.password }),
+      });
+      if (!loginResp.ok) {
+        const err = await loginResp.json().catch(() => ({})) as Record<string, unknown>;
+        const errObj = err.error as Record<string, string> | undefined;
+        throw new ByokyError(ByokyErrorCode.UNKNOWN, errObj?.message ?? 'Vault login failed');
+      }
+      const loginData = await loginResp.json() as { token: string };
+      token = loginData.token;
+    }
+
+    const connectResp = await fetch(`${vaultUrl.replace(/\/$/, '')}/connect`, {
+      headers: { 'authorization': `Bearer ${token}` },
+    });
+    if (!connectResp.ok) {
+      throw new ByokyError(ByokyErrorCode.UNKNOWN, 'Failed to get vault providers');
+    }
+    const connectData = await connectResp.json() as {
+      providers: Record<string, { available: boolean; authMethod: AuthMethod }>;
+    };
+
+    const sessionKey = `vault_${token.slice(-8)}`;
+    const vaultToken = token;
+
+    return {
+      sessionKey,
+      proxyUrl: `${vaultUrl.replace(/\/$/, '')}/proxy`,
+      providers: connectData.providers,
+      createFetch: (providerId: string) => createVaultFetch(vaultUrl, vaultToken, providerId),
+      createRelay: () => { throw new Error('Relay not supported in vault mode'); },
+      disconnect: () => {},
+      isConnected: async () => true,
+      getUsage: async () => ({ requests: 0, inputTokens: 0, outputTokens: 0, byProvider: {} }),
+      onDisconnect: () => () => {},
+      onProvidersUpdated: () => () => {},
+    };
   }
 
   // --- Relay pairing ---
