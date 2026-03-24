@@ -163,6 +163,12 @@ importers:
       '@byoky/sdk':
         specifier: workspace:*
         version: link:../sdk
+      '@stackblitz/sdk':
+        specifier: ^1.11.0
+        version: 1.11.0
+      jszip:
+        specifier: ^3.10.1
+        version: 3.10.1
       next:
         specifier: ^15.5.14
         version: 15.5.14(@playwright/test@1.58.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -2132,6 +2138,9 @@ packages:
   '@snazzah/davey@0.1.10':
     resolution: {integrity: sha512-J5f7vV5/tnj0xGnqufFRd6qiWn3FcR3iXjpjpEmO2Ok+Io0AASkMaZ3I39TsL45as0Qo5bq9wWuamFQ77PjJ+g==}
     engines: {node: '>= 10'}
+
+  '@stackblitz/sdk@1.11.0':
+    resolution: {integrity: sha512-DFQGANNkEZRzFk1/rDP6TcFdM82ycHE+zfl9C/M/jXlH68jiqHWHFMQURLELoD8koxvu/eW5uhg94NSAZlYrUQ==}
 
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
@@ -7372,6 +7381,8 @@ snapshots:
       '@snazzah/davey-win32-arm64-msvc': 0.1.10
       '@snazzah/davey-win32-ia32-msvc': 0.1.10
       '@snazzah/davey-win32-x64-msvc': 0.1.10
+
+  '@stackblitz/sdk@1.11.0': {}
 
   '@standard-schema/spec@1.1.0': {}
 
