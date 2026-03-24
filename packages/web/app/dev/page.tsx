@@ -1,242 +1,582 @@
-import type { Metadata } from 'next';
-import { FadeIn } from '../components/FadeIn';
+'use client';
+
+import { useState, useCallback, useRef } from 'react';
+import { Byoky } from '@byoky/sdk';
+import type { ByokySession } from '@byoky/sdk';
+import {
+  startDeviceFlow,
+  pollForToken,
+  getUser,
+  createRepo,
+  pushFiles,
+} from './github';
+import type { GitHubUser, RepoInfo } from './github';
+import type { Template } from './templates';
+import { TEMPLATES } from './templates';
 import './dev.css';
 
-export const metadata: Metadata = {
-  title: 'Developer Hub',
-  description: 'Build AI apps on Byoky in 5 minutes. Templates, recipes, and guides to ship fast.',
-  alternates: { canonical: '/dev' },
-};
+/* ─── Main Component ──────────────────────────── */
 
 export default function DevHub() {
+  const [walletSession, setWalletSession] = useState<ByokySession | null>(null);
+  const [walletConnecting, setWalletConnecting] = useState(false);
+  const [githubToken, setGithubToken] = useState<string | null>(null);
+  const [githubUser, setGithubUser] = useState<GitHubUser | null>(null);
+  const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
+  const [repoName, setRepoName] = useState('');
+  const [isPrivate, setIsPrivate] = useState(false);
+  const [deviceFlow, setDeviceFlow] = useState<{
+    user_code: string;
+    verification_uri: string;
+  } | null>(null);
+  const [pushing, setPushing] = useState(false);
+  const [pushProgress, setPushProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
+  const [result, setResult] = useState<RepoInfo | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const abortRef = useRef<AbortController | null>(null);
+
+  const bothConnected = walletSession !== null && githubUser !== null;
+  const templateReady = bothConnected && selectedTemplate !== null;
+
+  /* ─── Wallet connect ────────────────────────── */
+
+  const connectWallet = useCallback(async () => {
+    setWalletConnecting(true);
+    setError(null);
+    try {
+      const byoky = new Byoky();
+      const session = await byoky.connect({
+        providers: [
+          { id: 'anthropic', required: false },
+          { id: 'openai', required: false },
+          { id: 'gemini', required: false },
+        ],
+        modal: true,
+      });
+      setWalletSession(session);
+    } catch (e) {
+      if (e instanceof Error && e.message.includes('cancelled')) return;
+      setError(e instanceof Error ? e.message : 'Failed to connect wallet');
+    } finally {
+      setWalletConnecting(false);
+    }
+  }, []);
+
+  const disconnectWallet = useCallback(() => {
+    walletSession?.disconnect();
+    setWalletSession(null);
+  }, [walletSession]);
+
+  /* ─── GitHub connect (device flow) ──────────── */
+
+  const connectGitHub = useCallback(async () => {
+    setError(null);
+    try {
+      const flow = await startDeviceFlow();
+      setDeviceFlow({
+        user_code: flow.user_code,
+        verification_uri: flow.verification_uri,
+      });
+      window.open(flow.verification_uri, '_blank');
+
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      const token = await pollForToken(
+        flow.device_code,
+        flow.interval,
+        controller.signal,
+      );
+      setGithubToken(token);
+
+      const user = await getUser(token);
+      setGithubUser(user);
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') return;
+      setError(e instanceof Error ? e.message : 'GitHub auth failed');
+    } finally {
+      setDeviceFlow(null);
+      abortRef.current = null;
+    }
+  }, []);
+
+  const cancelDeviceFlow = useCallback(() => {
+    abortRef.current?.abort();
+    setDeviceFlow(null);
+  }, []);
+
+  const disconnectGitHub = useCallback(() => {
+    setGithubToken(null);
+    setGithubUser(null);
+    setResult(null);
+  }, []);
+
+  /* ─── Template selection ────────────────────── */
+
+  const selectTemplate = useCallback((id: string) => {
+    setSelectedTemplate(id);
+    setRepoName(`my-${id}`);
+    setResult(null);
+    setError(null);
+  }, []);
+
+  /* ─── Push to GitHub ────────────────────────── */
+
+  const handlePush = useCallback(async () => {
+    if (!githubToken || !githubUser || !selectedTemplate || !repoName.trim()) return;
+
+    const template = TEMPLATES.find((t) => t.id === selectedTemplate);
+    if (!template) return;
+
+    setPushing(true);
+    setPushProgress(null);
+    setError(null);
+    setResult(null);
+
+    try {
+      const repo = await createRepo(githubToken, repoName.trim(), isPrivate);
+
+      const processedFiles: Record<string, string> = {};
+      for (const [path, content] of Object.entries(template.files)) {
+        processedFiles[path] = content.replaceAll(
+          '{{PROJECT_NAME}}',
+          repoName.trim(),
+        );
+      }
+
+      await pushFiles(
+        githubToken,
+        githubUser.login,
+        repoName.trim(),
+        processedFiles,
+        (done, total) => setPushProgress({ done, total }),
+      );
+
+      setResult(repo);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to push to GitHub');
+    } finally {
+      setPushing(false);
+      setPushProgress(null);
+    }
+  }, [githubToken, githubUser, selectedTemplate, repoName, isPrivate]);
+
+  /* ─── Providers list from session ───────────── */
+
+  const connectedProviders = walletSession
+    ? Object.entries(walletSession.providers)
+        .filter(([, v]) => v.available)
+        .map(([k]) => k)
+    : [];
+
+  /* ─── Render ────────────────────────────────── */
+
   return (
     <>
-      <Hero />
-      <div className="divider" />
-      <QuickStart />
-      <div className="divider" />
-      <Templates />
-      <div className="divider" />
-      <Recipes />
-      <div className="divider" />
-      <LaunchChecklist />
-      <div className="divider" />
-      <CallToAction />
+      <Header />
+
+      <main className="dh-main">
+        {/* Step 1: Connect */}
+        <StepSection label="Step 1 · Connect">
+          <div className="dh-connect-grid">
+            <WalletCard
+              session={walletSession}
+              connecting={walletConnecting}
+              providers={connectedProviders}
+              onConnect={connectWallet}
+              onDisconnect={disconnectWallet}
+            />
+            <GitHubCard
+              user={githubUser}
+              deviceFlow={deviceFlow}
+              onConnect={connectGitHub}
+              onCancel={cancelDeviceFlow}
+              onDisconnect={disconnectGitHub}
+            />
+          </div>
+        </StepSection>
+
+        {/* Step 2: Choose Template */}
+        <StepSection
+          label="Step 2 · Choose Template"
+          disabled={!bothConnected}
+        >
+          <div className="dh-templates-grid">
+            {TEMPLATES.map((t) => (
+              <TemplateCard
+                key={t.id}
+                template={t}
+                selected={selectedTemplate === t.id}
+                onSelect={selectTemplate}
+              />
+            ))}
+          </div>
+          {!bothConnected && (
+            <p className="dh-step-notice">
+              Connect both your wallet and GitHub to choose a template.
+            </p>
+          )}
+        </StepSection>
+
+        {/* Step 3: Create Repository */}
+        <StepSection
+          label="Step 3 · Create Repository"
+          disabled={!templateReady}
+        >
+          {result ? (
+            <div className="dh-result">
+              <div className="dh-result-title">Repository created</div>
+              <div className="dh-result-repo">
+                <a
+                  href={result.html_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {result.full_name}
+                </a>
+              </div>
+              <a
+                href={result.html_url}
+                className="dh-connect-btn dh-connect-btn-primary"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Open Repository
+              </a>
+            </div>
+          ) : (
+            <div className="dh-create-form">
+              <div className="dh-field">
+                <label htmlFor="repo-name">Repository name</label>
+                <input
+                  id="repo-name"
+                  className="dh-input"
+                  type="text"
+                  value={repoName}
+                  onChange={(e) => setRepoName(e.target.value)}
+                  placeholder="my-ai-chat"
+                  disabled={!templateReady || pushing}
+                />
+              </div>
+              <div className="dh-checkbox-row">
+                <input
+                  id="private-repo"
+                  type="checkbox"
+                  checked={isPrivate}
+                  onChange={(e) => setIsPrivate(e.target.checked)}
+                  disabled={!templateReady || pushing}
+                />
+                <label htmlFor="private-repo">Private repository</label>
+              </div>
+              <button
+                className="dh-connect-btn dh-connect-btn-primary"
+                onClick={handlePush}
+                disabled={!templateReady || pushing || !repoName.trim()}
+              >
+                {pushing ? 'Pushing...' : 'Push to GitHub'}
+              </button>
+              {pushing && pushProgress && (
+                <div className="dh-progress">
+                  <div className="dh-progress-bar">
+                    <div
+                      className="dh-progress-fill"
+                      style={{
+                        width: `${(pushProgress.done / pushProgress.total) * 100}%`,
+                      }}
+                    />
+                  </div>
+                  <div className="dh-progress-text">
+                    {pushProgress.done} of {pushProgress.total} files...
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {!templateReady && !result && (
+            <p className="dh-step-notice">Select a template first.</p>
+          )}
+        </StepSection>
+
+        {/* Error display */}
+        {error && (
+          <div className="dh-error">
+            <span>{error}</span>
+            <button className="dh-link-btn" onClick={() => setError(null)}>
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {/* CLI alternative */}
+        <div className="dh-divider">or use the CLI</div>
+        <div className="dh-cli">
+          <h3>Prefer the CLI?</h3>
+          <code className="dh-cli-code">npx create-byoky-app</code>
+          <p>Same templates, runs locally. No GitHub connection needed.</p>
+        </div>
+
+        {/* Quick Recipes */}
+        <div className="dh-divider">Quick Recipes</div>
+        <RecipesSection />
+      </main>
+
       <Footer />
     </>
   );
 }
 
-/* ─── Hero ─────────────────────────────────────── */
+/* ─── Header ──────────────────────────────────── */
 
-function Hero() {
+function Header() {
   return (
-    <section className="dh-hero">
-      <div className="dh-hero-glow" aria-hidden />
-      <div className="container">
-        <FadeIn>
-          <div className="hero-badge">
-            <span className="hero-badge-dot" />
-            Developer Hub
-          </div>
-        </FadeIn>
-        <FadeIn delay={0.1}>
-          <h1>
-            Build on Byoky.<br />
-            <span className="hero-gradient">Ship in minutes.</span>
-          </h1>
-        </FadeIn>
-        <FadeIn delay={0.2}>
-          <p>
-            Everything you need to build AI apps where users bring their own
-            keys. Zero API costs. Zero key management. Just code.
-          </p>
-        </FadeIn>
-        <FadeIn delay={0.3}>
-          <div className="dh-hero-actions">
-            <div className="install-cmd">
-              <code>npx create-byoky-app</code>
-            </div>
-            <a
-              href="https://github.com/MichaelLod/byoky"
-              className="btn btn-secondary"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <GitHubIcon />
-              View on GitHub
-            </a>
-          </div>
-        </FadeIn>
-      </div>
-    </section>
-  );
-}
-
-/* ─── Quick Start ──────────────────────────────── */
-
-function QuickStart() {
-  return (
-    <section className="dh-quickstart">
-      <div className="container">
-        <FadeIn>
-          <h2>Get started in 3 steps</h2>
-          <p className="dh-subtitle">
-            From zero to AI-powered app in under a minute.
-          </p>
-        </FadeIn>
-        <div className="dh-steps-grid">
-          <FadeIn delay={0.1}>
-            <div className="dh-step">
-              <div className="dh-step-number">1</div>
-              <h3>Install</h3>
-              <div className="code-window">
-                <div className="code-titlebar">
-                  <span className="code-dot code-dot-red" />
-                  <span className="code-dot code-dot-yellow" />
-                  <span className="code-dot code-dot-green" />
-                  <span className="code-filename">terminal</span>
-                </div>
-                <div className="code-body">
-                  <pre><code>npm install @byoky/sdk</code></pre>
-                </div>
-              </div>
-            </div>
-          </FadeIn>
-          <FadeIn delay={0.2}>
-            <div className="dh-step">
-              <div className="dh-step-number">2</div>
-              <h3>Connect</h3>
-              <div className="code-window">
-                <div className="code-titlebar">
-                  <span className="code-dot code-dot-red" />
-                  <span className="code-dot code-dot-yellow" />
-                  <span className="code-dot code-dot-green" />
-                  <span className="code-filename">app.ts</span>
-                </div>
-                <div className="code-body">
-                  <pre><code>{`import { Byoky } from '@byoky/sdk';
-
-const session = await new Byoky().connect({
-  providers: [{ id: 'anthropic' }],
-  modal: true,
-});`}</code></pre>
-                </div>
-              </div>
-            </div>
-          </FadeIn>
-          <FadeIn delay={0.3}>
-            <div className="dh-step">
-              <div className="dh-step-number">3</div>
-              <h3>Use</h3>
-              <div className="code-window">
-                <div className="code-titlebar">
-                  <span className="code-dot code-dot-red" />
-                  <span className="code-dot code-dot-yellow" />
-                  <span className="code-dot code-dot-green" />
-                  <span className="code-filename">app.ts</span>
-                </div>
-                <div className="code-body">
-                  <pre><code>{`const client = new Anthropic({
-  apiKey: session.sessionKey,
-  fetch: session.createFetch('anthropic'),
-});`}</code></pre>
-                </div>
-              </div>
-            </div>
-          </FadeIn>
+    <header className="dh-header">
+      <div className="dh-header-inner">
+        <div className="dh-header-left">
+          <a href="/" className="dh-header-back">
+            &larr; byoky.com
+          </a>
+          <span className="dh-header-title">Byoky Developer Hub</span>
         </div>
+        <nav className="dh-header-links">
+          <a
+            href="https://github.com/MichaelLod/byoky"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Docs
+          </a>
+          <a
+            href="https://github.com/MichaelLod/byoky"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            GitHub
+          </a>
+        </nav>
       </div>
-    </section>
+    </header>
   );
 }
 
-/* ─── Templates ────────────────────────────────── */
+/* ─── Step wrapper ────────────────────────────── */
 
-const templates = [
-  {
-    name: 'AI Chat',
-    letter: 'C',
-    color: '#0ea5e9',
-    description: 'Multi-provider chat with streaming. Works with Anthropic, OpenAI, Gemini.',
-    tech: ['Next.js', 'React'],
-  },
-  {
-    name: 'Code Assistant',
-    letter: 'A',
-    color: '#86efac',
-    description: 'Editor with AI completions. Monaco editor + streaming.',
-    tech: ['Vite', 'TypeScript'],
-  },
-  {
-    name: 'Agent Sandbox',
-    letter: 'S',
-    color: '#c084fc',
-    description: 'Tool-using AI agent with function calling. Multi-step reasoning.',
-    tech: ['Next.js', 'React'],
-  },
-  {
-    name: 'Backend Relay',
-    letter: 'R',
-    color: '#f59e0b',
-    description: 'Server-side LLM calls through user\u2019s wallet via WebSocket.',
-    tech: ['Express', 'Node.js'],
-  },
-];
-
-function Templates() {
+function StepSection({
+  label,
+  disabled,
+  children,
+}: {
+  label: string;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
   return (
-    <section className="dh-templates">
-      <div className="container">
-        <FadeIn>
-          <h2>Start from a template</h2>
-          <p className="dh-subtitle">
-            Production-ready starters. Clone, customize, ship.
-          </p>
-        </FadeIn>
-        <div className="dh-templates-grid">
-          {templates.map((t, i) => (
-            <FadeIn key={t.name} delay={0.05 + i * 0.08}>
-              <a href="#" className="dh-template-card">
-                <div className="dh-template-header">
-                  <div
-                    className="dh-template-icon"
-                    style={{
-                      background: `${t.color}15`,
-                      color: t.color,
-                    }}
-                  >
-                    {t.letter}
-                  </div>
-                  <h3>{t.name}</h3>
-                </div>
-                <p>{t.description}</p>
-                <div className="dh-template-footer">
-                  <div className="dh-template-tags">
-                    {t.tech.map((tag) => (
-                      <span key={tag} className="dh-template-tag">{tag}</span>
-                    ))}
-                  </div>
-                  <span className="dh-template-link">
-                    Use template &rarr;
-                  </span>
-                </div>
-              </a>
-            </FadeIn>
-          ))}
-        </div>
+    <section className="dh-step-section">
+      <div className="dh-step-label">{label}</div>
+      <div className={disabled ? 'dh-step-disabled' : undefined}>
+        {children}
       </div>
     </section>
   );
 }
 
-/* ─── Recipes ──────────────────────────────────── */
+/* ─── Wallet Card ─────────────────────────────── */
 
-const recipes = [
+function WalletCard({
+  session,
+  connecting,
+  providers,
+  onConnect,
+  onDisconnect,
+}: {
+  session: ByokySession | null;
+  connecting: boolean;
+  providers: string[];
+  onConnect: () => void;
+  onDisconnect: () => void;
+}) {
+  const connected = session !== null;
+
+  return (
+    <div className="dh-connect-card">
+      <div className="dh-connect-card-header">
+        <span className="dh-connect-card-title">Byoky Wallet</span>
+        <span className="dh-connect-status">
+          <span
+            className={`dh-connect-status-dot${connected ? ' dh-connected' : ''}`}
+          />
+          {connected ? 'Connected' : 'Not connected'}
+        </span>
+      </div>
+
+      {connected ? (
+        <>
+          {providers.length > 0 && (
+            <div className="dh-provider-pills">
+              {providers.map((p) => (
+                <span key={p} className="dh-provider-pill">
+                  {p}
+                </span>
+              ))}
+            </div>
+          )}
+          <button className="dh-link-btn" onClick={onDisconnect}>
+            Disconnect
+          </button>
+        </>
+      ) : (
+        <>
+          <p className="dh-connect-desc">
+            Connect your Byoky wallet to access AI providers.
+          </p>
+          <button
+            className="dh-connect-btn dh-connect-btn-primary"
+            onClick={onConnect}
+            disabled={connecting}
+          >
+            {connecting ? 'Connecting...' : 'Connect Wallet'}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ─── GitHub Card ─────────────────────────────── */
+
+function GitHubCard({
+  user,
+  deviceFlow,
+  onConnect,
+  onCancel,
+  onDisconnect,
+}: {
+  user: GitHubUser | null;
+  deviceFlow: { user_code: string; verification_uri: string } | null;
+  onConnect: () => void;
+  onCancel: () => void;
+  onDisconnect: () => void;
+}) {
+  const connected = user !== null;
+
+  return (
+    <div className="dh-connect-card">
+      <div className="dh-connect-card-header">
+        <span className="dh-connect-card-title">GitHub</span>
+        <span className="dh-connect-status">
+          <span
+            className={`dh-connect-status-dot${connected ? ' dh-connected' : ''}`}
+          />
+          {connected ? 'Connected' : 'Not connected'}
+        </span>
+      </div>
+
+      {connected ? (
+        <>
+          <div className="dh-connect-info">
+            <img
+              className="dh-connect-avatar"
+              src={user.avatar_url}
+              alt={user.login}
+              width={28}
+              height={28}
+            />
+            <span className="dh-connect-username">{user.login}</span>
+          </div>
+          <button className="dh-link-btn" onClick={onDisconnect}>
+            Disconnect
+          </button>
+        </>
+      ) : deviceFlow ? (
+        <div className="dh-device-flow">
+          <div className="dh-device-code">{deviceFlow.user_code}</div>
+          <a
+            className="dh-device-link"
+            href={deviceFlow.verification_uri}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {deviceFlow.verification_uri}
+          </a>
+          <div className="dh-device-waiting">
+            <span className="dh-spinner" />
+            Waiting for authorization...
+          </div>
+          <button className="dh-link-btn" onClick={onCancel}>
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <>
+          <p className="dh-connect-desc">
+            Connect GitHub to push templates to your repos.
+          </p>
+          <button className="dh-connect-btn" onClick={onConnect}>
+            <GitHubIcon />
+            Connect GitHub
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ─── Template Card ───────────────────────────── */
+
+function TemplateCard({
+  template,
+  selected,
+  onSelect,
+}: {
+  template: Template;
+  selected: boolean;
+  onSelect: (id: string) => void;
+}) {
+  const techTags = template.tech.split(' \u00b7 ');
+
+  return (
+    <div
+      className={`dh-template-card${selected ? ' dh-selected' : ''}`}
+      onClick={() => onSelect(template.id)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect(template.id);
+        }
+      }}
+    >
+      <div
+        className="dh-template-icon"
+        style={{
+          background: `${template.color}15`,
+          color: template.color,
+        }}
+      >
+        {template.name.charAt(0)}
+      </div>
+      <h3>{template.name}</h3>
+      <p>{template.description}</p>
+      <div className="dh-template-tags">
+        {techTags.map((tag) => (
+          <span key={tag} className="dh-template-tag">
+            {tag}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Recipes ─────────────────────────────────── */
+
+const RECIPES = [
   {
-    title: 'Streaming Chat with Anthropic',
-    description: 'Full streaming with the native Anthropic SDK. Keys never leave the wallet.',
-    filename: 'anthropic-stream.ts',
+    title: 'Streaming Chat',
     code: `import Anthropic from '@anthropic-ai/sdk';
 import { Byoky } from '@byoky/sdk';
 
@@ -261,34 +601,7 @@ for await (const event of stream) {
 }`,
   },
   {
-    title: 'OpenAI Chat Completions',
-    description: 'Use the official OpenAI SDK with zero config changes.',
-    filename: 'openai-chat.ts',
-    code: `import OpenAI from 'openai';
-import { Byoky } from '@byoky/sdk';
-
-const session = await new Byoky().connect({
-  providers: [{ id: 'openai', required: true }],
-  modal: true,
-});
-
-const openai = new OpenAI({
-  apiKey: session.sessionKey,
-  fetch: session.createFetch('openai'),
-  dangerouslyAllowBrowser: true,
-});
-
-const response = await openai.chat.completions.create({
-  model: 'gpt-4o',
-  messages: [{ role: 'user', content: 'Hello!' }],
-});
-
-console.log(response.choices[0].message.content);`,
-  },
-  {
-    title: 'Multi-Provider Fallback',
-    description: 'Let users connect whichever provider they have. Use whatever is available.',
-    filename: 'multi-provider.ts',
+    title: 'Multi-Provider',
     code: `import { Byoky } from '@byoky/sdk';
 
 const session = await new Byoky().connect({
@@ -300,245 +613,115 @@ const session = await new Byoky().connect({
   modal: true,
 });
 
-// Use whichever provider the user has
 const available = Object.keys(session.providers);
 const fetch = session.createFetch(available[0]);`,
   },
   {
     title: 'Backend Relay',
-    description: 'Server-side LLM calls through the user\u2019s wallet. Keys never touch your server.',
-    filename: 'relay.ts',
-    code: `// === Frontend ===
-import { Byoky } from '@byoky/sdk';
-
+    code: `// Frontend
 const session = await new Byoky().connect({
   providers: [{ id: 'anthropic', required: true }],
   modal: true,
 });
 session.createRelay('wss://your-app.com/ws/relay');
 
-// === Backend (Node.js) ===
+// Backend (Node.js)
 import { ByokyServer } from '@byoky/sdk/server';
 
 const byoky = new ByokyServer();
 wss.on('connection', async (ws) => {
   const client = await byoky.handleConnection(ws);
   const fetch = client.createFetch('anthropic');
-  // Make LLM calls with the user's keys
 });`,
-  },
-  {
-    title: 'Mobile QR Pairing',
-    description: 'No extension installed? Users scan a QR code with the Byoky mobile app.',
-    filename: 'mobile-qr.ts',
-    code: `import { Byoky } from '@byoky/sdk';
-
-const session = await new Byoky().connect({
-  providers: [{ id: 'anthropic' }],
-  useRelay: true,
-  modal: true, // Shows QR code automatically
-});
-
-// Works exactly the same as extension mode
-const fetch = session.createFetch('anthropic');`,
   },
   {
     title: 'Extension Detection',
-    description: 'Detect the extension, show install prompts, and fall back to QR pairing.',
-    filename: 'detect.ts',
-    code: `import { Byoky, isExtensionInstalled, getStoreUrl } from '@byoky/sdk';
+    code: `import { isExtensionInstalled, getStoreUrl } from '@byoky/sdk';
 
 if (!await isExtensionInstalled()) {
-  const storeUrl = getStoreUrl(); // Auto-detects browser
+  const storeUrl = getStoreUrl();
   // Show install prompt with storeUrl
-}
-
-const byoky = new Byoky();
-const session = await byoky.connect({
-  providers: [{ id: 'anthropic' }],
-  modal: true, // Handles detection + QR fallback
-});`,
+}`,
   },
 ];
 
-function Recipes() {
+function RecipesSection() {
+  const [openIndex, setOpenIndex] = useState<number | null>(null);
+
   return (
-    <section className="dh-recipes">
-      <div className="container">
-        <FadeIn>
-          <h2>Recipes</h2>
-          <p className="dh-subtitle">
-            Copy-paste patterns for common use cases. Each one works out of the box.
-          </p>
-        </FadeIn>
-        <div className="dh-recipes-list">
-          {recipes.map((r, i) => (
-            <FadeIn key={r.title} delay={0.05 + i * 0.06}>
-              <div className="dh-recipe-card">
-                <div className="dh-recipe-header">
-                  <h3>{r.title}</h3>
-                  <p>{r.description}</p>
-                </div>
-                <div className="code-window">
-                  <div className="code-titlebar">
-                    <span className="code-dot code-dot-red" />
-                    <span className="code-dot code-dot-yellow" />
-                    <span className="code-dot code-dot-green" />
-                    <span className="code-filename">{r.filename}</span>
-                  </div>
-                  <div className="code-body">
-                    <pre><code>{r.code}</code></pre>
-                  </div>
-                </div>
-              </div>
-            </FadeIn>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-/* ─── Launch Checklist ─────────────────────────── */
-
-const checklistItems = [
-  { text: 'Handle extension detection and show install prompt' },
-  {
-    text: (
-      <>Add mobile fallback with <code>useRelay: true</code> and <code>modal: true</code></>
-    ),
-  },
-  {
-    text: (
-      <>Handle <code>session.onDisconnect()</code> for wallet revocation</>
-    ),
-  },
-  {
-    text: (
-      <>Listen for <code>session.onProvidersUpdated()</code> for key changes</>
-    ),
-  },
-  { text: 'Set error boundaries for network/proxy failures' },
-  { text: 'Add "Built with Byoky" badge (optional, we love you)' },
-];
-
-function LaunchChecklist() {
-  return (
-    <section className="dh-checklist">
-      <div className="container">
-        <FadeIn>
-          <h2>Launch checklist</h2>
-          <p className="dh-subtitle">
-            Ship with confidence. Make sure you&apos;ve covered the essentials.
-          </p>
-        </FadeIn>
-        <FadeIn delay={0.1}>
-          <div className="dh-checklist-card">
-            <ul className="dh-checklist-list">
-              {checklistItems.map((item, i) => (
-                <li key={i} className="dh-checklist-item">
-                  <span className="dh-checklist-icon">
-                    <CheckIcon />
-                  </span>
-                  <span>{item.text}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </FadeIn>
-      </div>
-    </section>
-  );
-}
-
-/* ─── CTA + Footer ─────────────────────────────── */
-
-function CallToAction() {
-  return (
-    <section className="dh-cta">
-      <div className="container">
-        <FadeIn>
-          <h2>
-            Ready to build?
-          </h2>
-          <p>
-            Start with a template, explore the recipes, or dive straight into
-            the SDK. Your users&apos; keys, your app, zero API costs.
-          </p>
-          <div className="dh-cta-links">
-            <a href="/demo" className="btn btn-primary">
-              Try the Demo
-            </a>
-            <a
-              href="https://github.com/MichaelLod/byoky"
-              className="btn btn-secondary"
-              target="_blank"
-              rel="noopener noreferrer"
+    <section className="dh-recipes-section">
+      <h3>Collapsible code snippets for common patterns</h3>
+      <div className="dh-recipes-list">
+        {RECIPES.map((recipe, i) => (
+          <div key={recipe.title} className="dh-recipe-card">
+            <div
+              className="dh-recipe-header"
+              onClick={() => setOpenIndex(openIndex === i ? null : i)}
             >
-              <GitHubIcon />
-              GitHub
-            </a>
-            <a href="/built-with" className="btn btn-secondary">
-              Built with Byoky
-            </a>
+              <span className="dh-recipe-title">{recipe.title}</span>
+              <ChevronIcon open={openIndex === i} />
+            </div>
+            {openIndex === i && (
+              <div className="dh-recipe-body">
+                <code className="dh-recipe-code">{recipe.code}</code>
+              </div>
+            )}
           </div>
-        </FadeIn>
+        ))}
       </div>
     </section>
   );
 }
+
+/* ─── Footer ──────────────────────────────────── */
 
 function Footer() {
   return (
-    <footer className="footer">
-      <div className="container">
-        <div className="footer-inner">
-          <span className="footer-brand">Byoky</span>
-          <div className="footer-links">
-            <a
-              href="https://github.com/MichaelLod/byoky"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              GitHub
-            </a>
-            <a href="/demo">
-              Demo
-            </a>
-            <a href="/built-with">
-              Built with Byoky
-            </a>
-            <a
-              href="https://github.com/MichaelLod/byoky/blob/main/LICENSE"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              MIT License
-            </a>
-          </div>
-          <span className="footer-note">
-            Made for developers who care about key security.
-          </span>
-        </div>
+    <footer className="dh-footer">
+      <div className="dh-footer-inner">
+        <span className="dh-footer-brand">Byoky</span>
+        <nav className="dh-footer-links">
+          <a href="/">byoky.com</a>
+          <a
+            href="https://github.com/MichaelLod/byoky"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            GitHub
+          </a>
+          <a href="/demo">Demo</a>
+          <a href="/built-with">Built with Byoky</a>
+          <a href="/dev" aria-current="page">
+            Developers
+          </a>
+        </nav>
       </div>
     </footer>
   );
 }
 
-/* ─── Icons (inline SVG) ───────────────────────── */
+/* ─── Icons ───────────────────────────────────── */
 
 function GitHubIcon() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
       <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
     </svg>
   );
 }
 
-function CheckIcon() {
+function ChevronIcon({ open }: { open: boolean }) {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="20 6 9 17 4 12" />
+    <svg
+      className={`dh-recipe-chevron${open ? ' dh-open' : ''}`}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="6 9 12 15 18 9" />
     </svg>
   );
 }
