@@ -294,6 +294,9 @@ export default function MiniApps() {
           </div>
         </div>
         <div className="ma-topbar-right">
+          <a href="/dev" className="ma-create-btn">
+            <PlusIcon /> Create Your Own
+          </a>
           {walletSession ? (
             <button className="ma-pill ma-pill-connected" onClick={disconnectWallet}>
               <span className="ma-dot" />
@@ -439,6 +442,15 @@ function WalletIcon() {
       <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" />
       <path d="M3 5v14a2 2 0 0 0 2 2h16v-5" />
       <path d="M18 12a2 2 0 0 0 0 4h4v-4z" />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
     </svg>
   );
 }
