@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="miniapp" content='{"name":"Translator","description":"Translate text between any languages with natural results","author":"byoky","providers":["anthropic"]}'>
+<title>Translator</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #0a0a0a;
+    color: #ededed;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 16px;
+  }
+  h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin-bottom: 24px;
+    color: #06b6d4;
+  }
+  .container {
+    width: 100%;
+    max-width: 720px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .lang-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .lang-row select {
+    flex: 1;
+    padding: 10px 12px;
+    background: #141414;
+    color: #ededed;
+    border: 1px solid #2a2a2a;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    outline: none;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 32px;
+  }
+  .lang-row select:focus { border-color: #06b6d4; }
+  .swap-btn {
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #141414;
+    border: 1px solid #2a2a2a;
+    border-radius: 8px;
+    color: #06b6d4;
+    cursor: pointer;
+    font-size: 1.1rem;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .swap-btn:hover { background: #1e1e1e; border-color: #06b6d4; }
+  .card {
+    background: #141414;
+    border: 1px solid #2a2a2a;
+    border-radius: 12px;
+    padding: 16px;
+  }
+  .card label {
+    display: block;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #888;
+    margin-bottom: 8px;
+  }
+  textarea {
+    width: 100%;
+    min-height: 140px;
+    background: transparent;
+    border: none;
+    color: #ededed;
+    font-family: inherit;
+    font-size: 1rem;
+    line-height: 1.6;
+    resize: vertical;
+    outline: none;
+  }
+  textarea::placeholder { color: #555; }
+  .output-area {
+    min-height: 140px;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-size: 1rem;
+    line-height: 1.6;
+    color: #ededed;
+  }
+  .output-area.placeholder { color: #555; }
+  .actions {
+    display: flex;
+    gap: 10px;
+  }
+  .btn {
+    flex: 1;
+    padding: 12px 20px;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: opacity 0.15s, background 0.15s;
+  }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-primary {
+    background: #06b6d4;
+    color: #0a0a0a;
+  }
+  .btn-primary:hover:not(:disabled) { background: #08c9e8; }
+  .btn-secondary {
+    background: #1e1e1e;
+    color: #ededed;
+    border: 1px solid #2a2a2a;
+    flex: 0;
+    padding: 12px 16px;
+  }
+  .btn-secondary:hover:not(:disabled) { background: #2a2a2a; }
+  .status {
+    text-align: center;
+    font-size: 0.8rem;
+    color: #555;
+    min-height: 1.2em;
+  }
+  .status.error { color: #f87171; }
+</style>
+</head>
+<body>
+<h1>Translator</h1>
+<div class="container">
+  <div class="lang-row">
+    <select id="sourceLang">
+      <option value="auto">Auto-detect</option>
+      <option value="English">English</option>
+      <option value="Spanish">Spanish</option>
+      <option value="French">French</option>
+      <option value="German">German</option>
+      <option value="Italian">Italian</option>
+      <option value="Portuguese">Portuguese</option>
+      <option value="Dutch">Dutch</option>
+      <option value="Russian">Russian</option>
+      <option value="Chinese (Simplified)">Chinese (Simplified)</option>
+      <option value="Chinese (Traditional)">Chinese (Traditional)</option>
+      <option value="Japanese">Japanese</option>
+      <option value="Korean">Korean</option>
+      <option value="Arabic">Arabic</option>
+      <option value="Hindi">Hindi</option>
+      <option value="Turkish">Turkish</option>
+      <option value="Polish">Polish</option>
+      <option value="Swedish">Swedish</option>
+      <option value="Vietnamese">Vietnamese</option>
+      <option value="Thai">Thai</option>
+      <option value="Indonesian">Indonesian</option>
+      <option value="Ukrainian">Ukrainian</option>
+      <option value="Czech">Czech</option>
+      <option value="Greek">Greek</option>
+      <option value="Hebrew">Hebrew</option>
+      <option value="Romanian">Romanian</option>
+      <option value="Hungarian">Hungarian</option>
+      <option value="Danish">Danish</option>
+      <option value="Finnish">Finnish</option>
+      <option value="Norwegian">Norwegian</option>
+    </select>
+    <button class="swap-btn" id="swapBtn" title="Swap languages">&#8646;</button>
+    <select id="targetLang">
+      <option value="English">English</option>
+      <option value="Spanish" selected>Spanish</option>
+      <option value="French">French</option>
+      <option value="German">German</option>
+      <option value="Italian">Italian</option>
+      <option value="Portuguese">Portuguese</option>
+      <option value="Dutch">Dutch</option>
+      <option value="Russian">Russian</option>
+      <option value="Chinese (Simplified)">Chinese (Simplified)</option>
+      <option value="Chinese (Traditional)">Chinese (Traditional)</option>
+      <option value="Japanese">Japanese</option>
+      <option value="Korean">Korean</option>
+      <option value="Arabic">Arabic</option>
+      <option value="Hindi">Hindi</option>
+      <option value="Turkish">Turkish</option>
+      <option value="Polish">Polish</option>
+      <option value="Swedish">Swedish</option>
+      <option value="Vietnamese">Vietnamese</option>
+      <option value="Thai">Thai</option>
+      <option value="Indonesian">Indonesian</option>
+      <option value="Ukrainian">Ukrainian</option>
+      <option value="Czech">Czech</option>
+      <option value="Greek">Greek</option>
+      <option value="Hebrew">Hebrew</option>
+      <option value="Romanian">Romanian</option>
+      <option value="Hungarian">Hungarian</option>
+      <option value="Danish">Danish</option>
+      <option value="Finnish">Finnish</option>
+      <option value="Norwegian">Norwegian</option>
+    </select>
+  </div>
+
+  <div class="card">
+    <label>Source text</label>
+    <textarea id="sourceText" placeholder="Enter text to translate..."></textarea>
+  </div>
+
+  <div class="actions">
+    <button class="btn btn-primary" id="translateBtn">Translate</button>
+    <button class="btn btn-secondary" id="copyBtn" disabled title="Copy translation">Copy</button>
+  </div>
+
+  <div class="card">
+    <label>Translation</label>
+    <div class="output-area placeholder" id="outputArea">Translation will appear here...</div>
+  </div>
+
+  <div class="status" id="status"></div>
+</div>
+
+<script>
+(function() {
+  let sessionResolve;
+  const sessionReady = new Promise(r => { sessionResolve = r; });
+  let providers = {};
+  window.addEventListener('message', (e) => {
+    if (e.data && e.data.type === 'BYOKY_SESSION') { providers = e.data.providers || {}; sessionResolve(e.data); }
+    if (e.data && e.data.type === 'BYOKY_API_RESPONSE') { const p = pending.get(e.data.requestId); if (p) { pending.delete(e.data.requestId); p.resolve(e.data); } }
+    if (e.data && e.data.type === 'BYOKY_API_RESPONSE_START') { const p = pending.get(e.data.requestId); if (p && p.onStart) p.onStart(e.data); }
+    if (e.data && e.data.type === 'BYOKY_API_RESPONSE_CHUNK') { const p = pending.get(e.data.requestId); if (p && p.onChunk) p.onChunk(e.data.chunk); }
+    if (e.data && e.data.type === 'BYOKY_API_RESPONSE_END') { const p = pending.get(e.data.requestId); if (p) { pending.delete(e.data.requestId); if (p.onEnd) p.onEnd(); } }
+    if (e.data && e.data.type === 'BYOKY_API_RESPONSE_ERROR') { const p = pending.get(e.data.requestId); if (p) { pending.delete(e.data.requestId); p.reject(new Error(e.data.error)); } }
+  });
+  window.parent.postMessage({ type: 'MINIAPP_READY' }, '*');
+  let reqId = 0;
+  const pending = new Map();
+  window.byoky = {
+    sessionReady,
+    get providers() { return providers; },
+    async fetch(provider, url, options) { await sessionReady; options = options || {}; const id = String(++reqId); return new Promise((resolve, reject) => { pending.set(id, { resolve: (d) => resolve(new Response(d.body, { status: d.status, statusText: d.statusText, headers: d.headers || {} })), reject }); window.parent.postMessage({ type: 'BYOKY_API_REQUEST', requestId: id, provider, url, method: options.method || 'POST', headers: options.headers || {}, body: options.body || null }, '*'); }); },
+    async fetchStream(provider, url, options) { await sessionReady; options = options || {}; const id = String(++reqId); return new Promise((resolve, reject) => { const { readable, writable } = new TransformStream(); const writer = writable.getWriter(); const encoder = new TextEncoder(); pending.set(id, { onStart: (d) => resolve(new Response(readable, { status: d.status, statusText: d.statusText, headers: d.headers || {} })), onChunk: (chunk) => { writer.write(encoder.encode(chunk)).catch(() => {}); }, onEnd: () => { writer.close().catch(() => {}); }, reject: (err) => { writer.abort(err).catch(() => {}); reject(err); } }); window.parent.postMessage({ type: 'BYOKY_API_REQUEST', requestId: id, provider, url, method: options.method || 'POST', headers: options.headers || {}, body: options.body || null, stream: true }, '*'); }); }
+  };
+})();
+</script>
+
+<script>
+(function() {
+  const sourceLang = document.getElementById('sourceLang');
+  const targetLang = document.getElementById('targetLang');
+  const sourceText = document.getElementById('sourceText');
+  const translateBtn = document.getElementById('translateBtn');
+  const copyBtn = document.getElementById('copyBtn');
+  const swapBtn = document.getElementById('swapBtn');
+  const outputArea = document.getElementById('outputArea');
+  const status = document.getElementById('status');
+
+  let translating = false;
+  let resultText = '';
+
+  swapBtn.addEventListener('click', () => {
+    if (sourceLang.value === 'auto') return;
+    const tmp = sourceLang.value;
+    sourceLang.value = targetLang.value;
+    targetLang.value = tmp;
+    if (resultText) {
+      sourceText.value = resultText;
+      resultText = '';
+      outputArea.textContent = 'Translation will appear here...';
+      outputArea.classList.add('placeholder');
+      copyBtn.disabled = true;
+    }
+  });
+
+  copyBtn.addEventListener('click', async () => {
+    if (!resultText) return;
+    try {
+      await navigator.clipboard.writeText(resultText);
+      copyBtn.textContent = 'Copied!';
+      setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
+    } catch {
+      status.textContent = 'Failed to copy';
+      status.className = 'status error';
+    }
+  });
+
+  translateBtn.addEventListener('click', translate);
+
+  sourceText.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      translate();
+    }
+  });
+
+  async function translate() {
+    const text = sourceText.value.trim();
+    if (!text || translating) return;
+
+    translating = true;
+    resultText = '';
+    translateBtn.disabled = true;
+    translateBtn.textContent = 'Translating...';
+    copyBtn.disabled = true;
+    outputArea.textContent = '';
+    outputArea.classList.remove('placeholder');
+    status.textContent = '';
+    status.className = 'status';
+
+    const src = sourceLang.value === 'auto' ? '' : sourceLang.value;
+    const tgt = targetLang.value;
+
+    const userMsg = src
+      ? `Translate the following text from ${src} to ${tgt}:\n\n${text}`
+      : `Translate the following text to ${tgt}:\n\n${text}`;
+
+    try {
+      const response = await window.byoky.fetchStream('anthropic', 'https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 4096,
+          stream: true,
+          system: 'You are a translator. Translate the given text to the target language. Output only the translation, nothing else.',
+          messages: [{ role: 'user', content: userMsg }]
+        })
+      });
+
+      if (!response.ok) {
+        const errBody = await response.text();
+        throw new Error(`API error ${response.status}: ${errBody}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const data = line.slice(6);
+          if (data === '[DONE]') continue;
+          try {
+            const event = JSON.parse(data);
+            if (event.type === 'content_block_delta' && event.delta && event.delta.type === 'text_delta') {
+              resultText += event.delta.text;
+              outputArea.textContent = resultText;
+            }
+          } catch {}
+        }
+      }
+
+      if (!resultText) {
+        outputArea.textContent = 'No translation returned.';
+        outputArea.classList.add('placeholder');
+      } else {
+        copyBtn.disabled = false;
+      }
+    } catch (err) {
+      status.textContent = err.message;
+      status.className = 'status error';
+      if (!resultText) {
+        outputArea.textContent = 'Translation will appear here...';
+        outputArea.classList.add('placeholder');
+      }
+    } finally {
+      translating = false;
+      translateBtn.disabled = false;
+      translateBtn.textContent = 'Translate';
+    }
+  }
+})();
+</script>
+</body>
+</html>
