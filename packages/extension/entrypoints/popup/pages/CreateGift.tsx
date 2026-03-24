@@ -20,6 +20,11 @@ export function CreateGift() {
   const [giftLink, setGiftLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  // Sync credentialId when credentials load after mount
+  if (!credentialId && credentials.length > 0) {
+    setCredentialId(credentials[0].id);
+  }
+
   const selectedCred = credentials.find((c) => c.id === credentialId);
   const provider = selectedCred ? PROVIDERS[selectedCred.providerId] : null;
 
