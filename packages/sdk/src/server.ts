@@ -238,4 +238,6 @@ async function readBody(body: BodyInit): Promise<string | undefined> {
   return undefined;
 }
 
+export { createVaultFetch } from './vault-fetch.js';
+export type { VaultConnectOptions } from './byoky.js';
 export type { WebSocketLike, RelayMessage, AuthMethod } from '@byoky/core';
