@@ -322,10 +322,9 @@ export default function DevHub() {
     try {
       const name = appName || 'my-miniapp';
       const gist = await createGist(githubToken, `${name}.html`, miniappHtml, `Byoky MiniApp: ${name}`);
-      setPublishedGistUrl(gist.html_url);
 
-      const registryEntry = JSON.stringify({
-        id: name,
+      const entry = {
+        id: `${githubUser.login}-${name}-${Date.now()}`,
         name: name.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
         description: messages.find((m) => m.role === 'assistant')?.content || 'A Byoky MiniApp',
         author: githubUser.login,
@@ -333,9 +332,14 @@ export default function DevHub() {
         providers: ['anthropic'],
         category: 'other',
         publishedAt: new Date().toISOString(),
-      }, null, 2);
+      };
 
-      await navigator.clipboard.writeText(registryEntry);
+      // Save to localStorage so /apps page picks it up
+      const existing = JSON.parse(localStorage.getItem('byoky-user-apps') || '[]');
+      existing.push(entry);
+      localStorage.setItem('byoky-user-apps', JSON.stringify(existing));
+
+      setPublishedGistUrl('/apps');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to publish miniapp');
     } finally {
@@ -558,8 +562,8 @@ export default function DevHub() {
                       </button>
                     )
                   ) : publishedGistUrl ? (
-                    <a href={publishedGistUrl} target="_blank" rel="noopener noreferrer" className="dh-next-btn dh-next-btn-success">
-                      Published &#8599;
+                    <a href="/apps" className="dh-next-btn dh-next-btn-success">
+                      View in MiniApps &#8599;
                     </a>
                   ) : (
                     <button className="dh-next-btn dh-next-btn-primary" onClick={handlePublish} disabled={publishing}>
