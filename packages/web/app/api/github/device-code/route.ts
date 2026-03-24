@@ -9,7 +9,7 @@ export async function POST() {
         'Content-Type': 'application/json',
         'User-Agent': 'Byoky-DevHub',
       },
-      body: JSON.stringify({ client_id: CLIENT_ID, scope: 'repo' }),
+      body: JSON.stringify({ client_id: CLIENT_ID, scope: 'repo gist' }),
     });
     if (!res.ok) {
       const text = await res.text();
