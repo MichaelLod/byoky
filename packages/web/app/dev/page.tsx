@@ -1,15 +1,9 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, forwardRef } from 'react';
 import { Byoky } from '@byoky/sdk';
 import type { ByokySession } from '@byoky/sdk';
-import {
-  startDeviceFlow,
-  pollForToken,
-  getUser,
-  createRepo,
-  pushFiles,
-} from './github';
+import { startDeviceFlow, pollForToken, getUser, createRepo, pushFiles } from './github';
 import type { GitHubUser, RepoInfo } from './github';
 import { generateApp } from './generator';
 import type { GenerateResult, Message } from './generator';
@@ -26,11 +20,6 @@ function sanitizeRepoName(s: string): string {
     .slice(0, 60) || 'my-app';
 }
 
-function fileExtension(path: string): string {
-  const dot = path.lastIndexOf('.');
-  return dot === -1 ? '' : path.slice(dot + 1);
-}
-
 /* ─── Main Component ──────────────────────────── */
 
 export default function DevHub() {
@@ -44,39 +33,49 @@ export default function DevHub() {
     verification_uri: string;
   } | null>(null);
 
-  /* ── Generator state ── */
-  const [prompt, setPrompt] = useState('');
+  /* ── Chat & Generation state ── */
+  const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
   const [generating, setGenerating] = useState(false);
   const [generatedFiles, setGeneratedFiles] = useState<Record<string, string> | null>(null);
   const [activeFile, setActiveFile] = useState<string | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [generationDescription, setGenerationDescription] = useState<string | null>(null);
-
-  /* ── Refine state ── */
-  const [refineInput, setRefineInput] = useState('');
 
   /* ── Deploy state ── */
   const [repoName, setRepoName] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
   const [pushing, setPushing] = useState(false);
-  const [pushProgress, setPushProgress] = useState<{
-    done: number;
-    total: number;
-  } | null>(null);
+  const [pushProgress, setPushProgress] = useState<{ done: number; total: number } | null>(null);
   const [result, setResult] = useState<RepoInfo | null>(null);
 
-  /* ── General ── */
+  /* ── UI state ── */
   const [error, setError] = useState<string | null>(null);
-  const [mode, setMode] = useState<'generate' | 'template'>('generate');
+  const [mode, setMode] = useState<'chat' | 'template'>('chat');
+  const [showRepoInput, setShowRepoInput] = useState(false);
 
+  /* ── Refs ── */
   const abortRef = useRef<AbortController | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const refineRef = useRef<HTMLInputElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const errorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /* ── Auto-focus textarea on mount ── */
   useEffect(() => {
     textareaRef.current?.focus();
   }, []);
+
+  /* ── Auto-scroll chat to bottom ── */
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, generating]);
+
+  /* ── Auto-dismiss error after 5s ── */
+  useEffect(() => {
+    if (!error) return;
+    if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    errorTimerRef.current = setTimeout(() => setError(null), 5000);
+    return () => {
+      if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    };
+  }, [error]);
 
   /* ── Derived ── */
   const connectedProviders = walletSession
@@ -86,6 +85,7 @@ export default function DevHub() {
     : [];
 
   const filePaths = generatedFiles ? Object.keys(generatedFiles).sort() : [];
+  const hasMessages = messages.length > 0;
 
   /* ─── Wallet connect ────────────────────────── */
 
@@ -131,11 +131,7 @@ export default function DevHub() {
       const controller = new AbortController();
       abortRef.current = controller;
 
-      const token = await pollForToken(
-        flow.device_code,
-        flow.interval,
-        controller.signal,
-      );
+      const token = await pollForToken(flow.device_code, flow.interval, controller.signal);
       setGithubToken(token);
 
       const user = await getUser(token);
@@ -160,34 +156,48 @@ export default function DevHub() {
     setResult(null);
   }, []);
 
-  /* ─── Generate with AI ──────────────────────── */
+  /* ─── Send chat message (generate/refine) ──── */
 
-  const handleGenerate = useCallback(async () => {
-    if (!walletSession || !prompt.trim() || generating) return;
+  const [inputValue, setInputValue] = useState('');
+
+  const handleSend = useCallback(async () => {
+    if (!walletSession || !inputValue.trim() || generating) return;
+
+    const userText = inputValue.trim();
+    setInputValue('');
     setGenerating(true);
     setError(null);
     setResult(null);
 
+    const isFirst = messages.length === 0;
+    const updatedMessages: Message[] = [...messages, { role: 'user', content: userText }];
+    setMessages(updatedMessages);
+
     try {
       const proxyFetch = walletSession.createFetch('anthropic');
-      const res: GenerateResult = await generateApp(proxyFetch, prompt.trim());
+      const previousMessages: Message[] = isFirst ? [] : messages;
+      const res: GenerateResult = await generateApp(proxyFetch, userText, previousMessages.length > 0 ? previousMessages : undefined);
 
-      setGeneratedFiles(res.files);
-      setGenerationDescription(res.description);
-      setMessages([
-        { role: 'user', content: prompt.trim() },
-        { role: 'assistant', content: res.description },
-      ]);
+      if (isFirst) {
+        setGeneratedFiles(res.files);
+        setRepoName(sanitizeRepoName(userText.split(/\s+/).slice(0, 4).join('-')));
+      } else {
+        setGeneratedFiles((prev) => ({ ...prev, ...res.files }));
+      }
 
-      const firstFile = Object.keys(res.files).sort()[0] ?? null;
-      setActiveFile(firstFile);
-      setRepoName(sanitizeRepoName(prompt.trim().split(/\s+/).slice(0, 4).join('-')));
+      const changedFiles = Object.keys(res.files).sort();
+      if (changedFiles.length > 0) {
+        setActiveFile(changedFiles[0]);
+      }
+
+      setMessages([...updatedMessages, { role: 'assistant', content: res.description }]);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Generation failed');
+      setMessages(updatedMessages);
     } finally {
       setGenerating(false);
     }
-  }, [walletSession, prompt, generating]);
+  }, [walletSession, inputValue, generating, messages]);
 
   /* ─── Template selection ────────────────────── */
 
@@ -196,54 +206,18 @@ export default function DevHub() {
     if (!template) return;
 
     setGeneratedFiles(template.files);
-    setGenerationDescription(template.description);
-    setMessages([]);
-
     const firstFile = Object.keys(template.files).sort()[0] ?? null;
     setActiveFile(firstFile);
     setRepoName(`my-${id}`);
     setResult(null);
     setError(null);
-    setMode('generate');
+    setMode('chat');
+
+    setMessages([
+      { role: 'user', content: `I want to use the ${template.name} template` },
+      { role: 'assistant', content: `Here's your ${template.name} app. The files are ready \u2014 check the code panel.` },
+    ]);
   }, []);
-
-  /* ─── Refine ────────────────────────────────── */
-
-  const handleRefine = useCallback(async () => {
-    if (!walletSession || !refineInput.trim() || generating) return;
-    setGenerating(true);
-    setError(null);
-
-    try {
-      const proxyFetch = walletSession.createFetch('anthropic');
-      const res: GenerateResult = await generateApp(
-        proxyFetch,
-        refineInput.trim(),
-        messages,
-      );
-
-      setGeneratedFiles((prev) => ({
-        ...prev,
-        ...res.files,
-      }));
-      setGenerationDescription(res.description);
-      setMessages((prev) => [
-        ...prev,
-        { role: 'user', content: refineInput.trim() },
-        { role: 'assistant', content: res.description },
-      ]);
-
-      const changedFiles = Object.keys(res.files);
-      if (changedFiles.length > 0) {
-        setActiveFile(changedFiles.sort()[0]);
-      }
-      setRefineInput('');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Refinement failed');
-    } finally {
-      setGenerating(false);
-    }
-  }, [walletSession, refineInput, generating, messages]);
 
   /* ─── Push to GitHub ────────────────────────── */
 
@@ -260,10 +234,7 @@ export default function DevHub() {
 
       const processedFiles: Record<string, string> = {};
       for (const [path, content] of Object.entries(generatedFiles)) {
-        processedFiles[path] = content.replaceAll(
-          '{{PROJECT_NAME}}',
-          repoName.trim(),
-        );
+        processedFiles[path] = content.replaceAll('{{PROJECT_NAME}}', repoName.trim());
       }
 
       await pushFiles(
@@ -275,6 +246,7 @@ export default function DevHub() {
       );
 
       setResult(repo);
+      setShowRepoInput(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to push to GitHub');
     } finally {
@@ -285,372 +257,320 @@ export default function DevHub() {
 
   /* ─── Keyboard shortcuts ────────────────────── */
 
-  const handleTextareaKeyDown = useCallback(
+  const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
         e.preventDefault();
-        handleGenerate();
+        handleSend();
       }
     },
-    [handleGenerate],
+    [handleSend],
   );
 
-  const handleRefineKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-        e.preventDefault();
-        handleRefine();
-      }
-    },
-    [handleRefine],
-  );
+  /* ─── Render helpers ────────────────────────── */
+
+  const renderCodeLines = (content: string) => {
+    return content.split('\n').map((line, i) => (
+      <span key={i} className="dh-code-line">{line}</span>
+    ));
+  };
 
   /* ─── Render ────────────────────────────────── */
 
   return (
-    <>
-      {/* ── Header ── */}
-      <header className="dh-header">
-        <div className="dh-header-inner">
-          <div className="dh-header-left">
-            <a href="/" className="dh-header-back">
-              &larr; byoky.com
-            </a>
-            <span className="dh-header-title">Byoky App Generator</span>
-          </div>
-          <div className="dh-header-right">
-            {/* Wallet status */}
-            {walletSession ? (
-              <button className="dh-status-pill dh-status-connected" onClick={disconnectWallet}>
-                <span className="dh-status-dot dh-dot-green" />
-                {connectedProviders.length} provider{connectedProviders.length !== 1 ? 's' : ''}
-              </button>
-            ) : (
-              <button
-                className="dh-status-pill"
-                onClick={connectWallet}
-                disabled={walletConnecting}
-              >
-                {walletConnecting ? (
-                  <>
-                    <span className="dh-spinner-sm" />
-                    Connecting...
-                  </>
-                ) : (
-                  'Connect Wallet'
-                )}
-              </button>
-            )}
-
-            {/* GitHub status */}
-            {githubUser ? (
-              <button className="dh-status-pill dh-status-connected" onClick={disconnectGitHub}>
-                <span className="dh-status-dot dh-dot-green" />
-                {githubUser.login}
-              </button>
-            ) : deviceFlow ? (
-              <div className="dh-device-inline">
-                <code className="dh-device-code-sm">{deviceFlow.user_code}</code>
-                <span className="dh-spinner-sm" />
-                <button className="dh-link-btn" onClick={cancelDeviceFlow}>
-                  Cancel
-                </button>
-              </div>
-            ) : (
-              <button className="dh-status-pill" onClick={connectGitHub}>
-                <GitHubIcon />
-                Connect GitHub
-              </button>
-            )}
-          </div>
+    <div className="dh-container">
+      {/* ── Top Bar ── */}
+      <div className="dh-topbar">
+        <div className="dh-topbar-left">
+          <a href="/" className="dh-brand">Byoky</a>
+          <span className="dh-topbar-title">App Generator</span>
         </div>
-      </header>
+        <div className="dh-topbar-right">
+          {/* Wallet pill */}
+          {walletSession ? (
+            <button className="dh-pill dh-pill-connected" onClick={disconnectWallet}>
+              <span className="dh-dot dh-dot-green" />
+              {connectedProviders.length} provider{connectedProviders.length !== 1 ? 's' : ''}
+            </button>
+          ) : (
+            <button className="dh-pill" onClick={connectWallet} disabled={walletConnecting}>
+              {walletConnecting ? (
+                <><span className="dh-spinner-sm" /> Connecting...</>
+              ) : (
+                'Connect Wallet'
+              )}
+            </button>
+          )}
 
-      <main className="dh-main">
-        {/* ── Generate Section ── */}
-        <section className="dh-section">
-          <div className="dh-section-label">Generate</div>
-          <div className={`dh-generate-box${generating ? ' dh-generating' : ''}`}>
-            {mode === 'generate' ? (
-              <>
-                {!walletSession ? (
-                  <div className="dh-connect-prompt">
-                    <div className="dh-connect-prompt-icon">
-                      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" />
-                        <path d="M3 5v14a2 2 0 0 0 2 2h16v-5" />
-                        <path d="M18 12a2 2 0 0 0 0 4h4v-4z" />
-                      </svg>
-                    </div>
-                    <h3 className="dh-connect-prompt-title">Connect your Byoky wallet to start</h3>
-                    <p className="dh-connect-prompt-text">
-                      Your AI keys power the code generation — no subscription, no API costs for us.
-                      Connect your wallet with at least one provider (Anthropic recommended).
-                    </p>
-                    <button
-                      className="dh-btn dh-btn-primary"
-                      onClick={connectWallet}
-                      disabled={walletConnecting}
-                    >
-                      {walletConnecting ? (
-                        <><span className="dh-spinner-sm" /> Connecting...</>
-                      ) : (
-                        'Connect Wallet'
-                      )}
-                    </button>
-                    <button
-                      className="dh-btn dh-btn-secondary"
-                      onClick={() => setMode('template')}
-                      style={{ marginTop: 12 }}
-                    >
-                      or start from a template
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <label className="dh-generate-label" htmlFor="dh-prompt">
-                      What do you want to build?
-                    </label>
-                    <textarea
-                      ref={textareaRef}
-                      id="dh-prompt"
-                      className="dh-textarea"
-                      rows={4}
-                      value={prompt}
-                      onChange={(e) => setPrompt(e.target.value)}
-                      onKeyDown={handleTextareaKeyDown}
-                      placeholder="A chat app that lets users compare responses from Claude and GPT side by side..."
-                      disabled={generating}
-                    />
-                    <div className="dh-generate-actions">
-                      <button
-                        className="dh-btn dh-btn-primary"
-                        onClick={handleGenerate}
-                        disabled={generating || !prompt.trim()}
-                      >
-                        {generating ? (
-                          <>
-                            <span className="dh-spinner-sm" />
-                            Generating your app...
-                          </>
-                        ) : (
-                          'Generate with AI'
-                        )}
-                      </button>
-                      <button
-                        className="dh-btn dh-btn-secondary"
-                        onClick={() => setMode('template')}
-                        disabled={generating}
-                      >
-                        Start from template
-                      </button>
-                    </div>
-                  </>
-                )}
-              </>
-            ) : (
-              <>
-                <div className="dh-template-header">
-                  <button
-                    className="dh-link-btn dh-back-btn"
-                    onClick={() => setMode('generate')}
-                  >
-                    &larr; Back to generate
-                  </button>
-                  <span className="dh-generate-label">Pick a template</span>
-                </div>
-                <div className="dh-templates-grid">
-                  {TEMPLATES.map((t) => (
-                    <TemplateCard
-                      key={t.id}
-                      template={t}
-                      onSelect={selectTemplate}
-                    />
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        </section>
-
-        {/* ── Files Section ── */}
-        {generatedFiles && (
-          <section className="dh-section">
-            <div className="dh-section-label">Files</div>
-            {generationDescription && (
-              <p className="dh-file-description">{generationDescription}</p>
-            )}
-            <div className="dh-files-panel">
-              <div className="dh-code-preview">
-                {activeFile && generatedFiles[activeFile] !== undefined ? (
-                  <pre className="dh-code-block">
-                    <code>{generatedFiles[activeFile]}</code>
-                  </pre>
-                ) : (
-                  <div className="dh-code-empty">Select a file to preview</div>
-                )}
-              </div>
-              <div className="dh-file-tree">
-                {filePaths.map((fp) => (
-                  <button
-                    key={fp}
-                    className={`dh-file-entry${activeFile === fp ? ' dh-file-active' : ''}`}
-                    onClick={() => setActiveFile(fp)}
-                  >
-                    <FileIcon ext={fileExtension(fp)} />
-                    <span className="dh-file-name">{fp}</span>
-                  </button>
-                ))}
-              </div>
+          {/* GitHub pill */}
+          {githubUser ? (
+            <button className="dh-pill dh-pill-connected" onClick={disconnectGitHub}>
+              <span className="dh-dot dh-dot-green" />
+              {githubUser.login}
+            </button>
+          ) : deviceFlow ? (
+            <div className="dh-device-inline">
+              <code className="dh-device-code-sm">{deviceFlow.user_code}</code>
+              <span className="dh-spinner-sm" />
+              <button className="dh-link-btn" onClick={cancelDeviceFlow}>Cancel</button>
             </div>
-          </section>
-        )}
+          ) : (
+            <button className="dh-pill" onClick={connectGitHub}>
+              <GitHubIcon /> Connect GitHub
+            </button>
+          )}
 
-        {/* ── Refine Section ── */}
-        {generatedFiles && walletSession && (
-          <section className="dh-section">
-            <div className="dh-section-label">Refine</div>
-            <div className="dh-refine-row">
-              <input
-                ref={refineRef}
-                className="dh-refine-input"
-                type="text"
-                value={refineInput}
-                onChange={(e) => setRefineInput(e.target.value)}
-                onKeyDown={handleRefineKeyDown}
-                placeholder="Make the sidebar collapsible and add settings..."
-                disabled={generating}
-              />
-              <button
-                className="dh-refine-submit"
-                onClick={handleRefine}
-                disabled={generating || !refineInput.trim()}
-                aria-label="Submit refinement"
-              >
-                {generating ? <span className="dh-spinner-sm" /> : <ArrowIcon />}
-              </button>
-            </div>
-          </section>
-        )}
-
-        {/* ── Deploy Section ── */}
-        {generatedFiles && githubUser && (
-          <section className="dh-section">
-            <div className="dh-section-label">Deploy</div>
-            {result ? (
-              <div className="dh-result">
-                <div className="dh-result-title">Repository created</div>
-                <div className="dh-result-repo">
-                  <a
-                    href={result.html_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    {result.full_name}
-                  </a>
-                </div>
+          {/* Push / Repo input / View Repo */}
+          {generatedFiles && githubUser && (
+            <>
+              {result ? (
                 <a
                   href={result.html_url}
-                  className="dh-btn dh-btn-primary"
                   target="_blank"
                   rel="noopener noreferrer"
+                  className="dh-push-link"
                 >
-                  Open Repository
+                  View Repo &#8599;
                 </a>
-              </div>
-            ) : (
-              <div className="dh-deploy-form">
-                <div className="dh-deploy-row">
-                  <div className="dh-field">
-                    <label htmlFor="repo-name">Repository</label>
+              ) : showRepoInput ? (
+                <div className="dh-repo-inline">
+                  <input
+                    className="dh-repo-input"
+                    type="text"
+                    value={repoName}
+                    onChange={(e) => setRepoName(e.target.value)}
+                    placeholder="repo-name"
+                    disabled={pushing}
+                  />
+                  <label className="dh-repo-private">
                     <input
-                      id="repo-name"
-                      className="dh-input"
-                      type="text"
-                      value={repoName}
-                      onChange={(e) => setRepoName(e.target.value)}
-                      placeholder="my-ai-chat"
-                      disabled={pushing}
-                    />
-                  </div>
-                  <div className="dh-checkbox-row">
-                    <input
-                      id="private-repo"
                       type="checkbox"
                       checked={isPrivate}
                       onChange={(e) => setIsPrivate(e.target.checked)}
                       disabled={pushing}
                     />
-                    <label htmlFor="private-repo">Private</label>
-                  </div>
+                    Private
+                  </label>
                   <button
-                    className="dh-btn dh-btn-primary"
+                    className="dh-push-btn"
                     onClick={handlePush}
                     disabled={pushing || !repoName.trim()}
                   >
-                    {pushing ? 'Pushing...' : 'Push to GitHub'}
+                    {pushing ? <><span className="dh-spinner-sm" /> Pushing...</> : 'Push'}
                   </button>
                 </div>
-                {pushing && pushProgress && (
-                  <div className="dh-progress">
-                    <div className="dh-progress-bar">
-                      <div
-                        className="dh-progress-fill"
-                        style={{
-                          width: `${(pushProgress.done / pushProgress.total) * 100}%`,
-                        }}
-                      />
-                    </div>
-                    <div className="dh-progress-text">
-                      {pushProgress.done} of {pushProgress.total} files...
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </section>
-        )}
-      </main>
+              ) : (
+                <button
+                  className="dh-push-btn"
+                  onClick={() => setShowRepoInput(true)}
+                >
+                  Push to GitHub
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      </div>
 
-      {/* ── Error banner ── */}
-      {error && (
-        <div className="dh-error">
-          <span>{error}</span>
-          <button className="dh-link-btn" onClick={() => setError(null)}>
-            Dismiss
-          </button>
+      {/* ── Push progress bar ── */}
+      {pushing && pushProgress && (
+        <div className="dh-push-progress">
+          <div
+            className="dh-push-progress-fill"
+            style={{ width: `${(pushProgress.done / pushProgress.total) * 100}%` }}
+          />
         </div>
       )}
 
-      {/* ── Footer ── */}
-      <footer className="dh-footer">
-        <div className="dh-footer-inner">
-          <span className="dh-footer-brand">Byoky</span>
-          <nav className="dh-footer-links">
-            <a href="/">byoky.com</a>
-            <a
-              href="https://github.com/MichaelLod/byoky"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              GitHub
-            </a>
-            <a
-              href="https://github.com/MichaelLod/byoky"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Docs
-            </a>
-            <a href="/built-with">Built with Byoky</a>
-          </nav>
+      {/* ── Split Layout ── */}
+      <div className="dh-split">
+        {/* ── Chat Panel (left) ── */}
+        <div className="dh-chat-panel">
+          {mode === 'template' ? (
+            /* Template picker */
+            <div className="dh-template-view">
+              <button className="dh-template-back" onClick={() => setMode('chat')}>
+                &larr; Back to chat
+              </button>
+              <div className="dh-template-grid">
+                {TEMPLATES.map((t) => (
+                  <TemplateCard key={t.id} template={t} onSelect={selectTemplate} />
+                ))}
+              </div>
+            </div>
+          ) : !hasMessages && !generating ? (
+            /* Empty state */
+            <>
+              <div className="dh-chat-empty">
+                <div className="dh-chat-empty-icon">
+                  <WalletIcon />
+                </div>
+                <h3>What do you want to build?</h3>
+                <p>Describe your app and we will generate the code using your AI keys.</p>
+              </div>
+              <ChatInput
+                ref={textareaRef}
+                value={inputValue}
+                onChange={setInputValue}
+                onSend={handleSend}
+                onKeyDown={handleKeyDown}
+                disabled={!walletSession || generating}
+                walletConnected={!!walletSession}
+                placeholder="Describe your app..."
+                onTemplatesClick={() => setMode('template')}
+              />
+            </>
+          ) : (
+            /* Messages view */
+            <>
+              <div className="dh-chat-messages">
+                {messages.map((msg, i) => (
+                  <div key={i} className={`dh-msg dh-msg-${msg.role}`}>
+                    <span className="dh-msg-label">
+                      {msg.role === 'user' ? 'you' : 'Byoky'}
+                    </span>
+                    <div className="dh-msg-bubble">{msg.content}</div>
+                  </div>
+                ))}
+                {generating && (
+                  <div className="dh-msg dh-msg-assistant">
+                    <span className="dh-msg-label">Byoky</span>
+                    <div className="dh-typing">
+                      <span className="dh-typing-dot" />
+                      <span className="dh-typing-dot" />
+                      <span className="dh-typing-dot" />
+                    </div>
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+              <ChatInput
+                ref={textareaRef}
+                value={inputValue}
+                onChange={setInputValue}
+                onSend={handleSend}
+                onKeyDown={handleKeyDown}
+                disabled={!walletSession || generating}
+                walletConnected={!!walletSession}
+                placeholder="What would you like to change?"
+                onTemplatesClick={() => setMode('template')}
+              />
+            </>
+          )}
         </div>
-      </footer>
-    </>
+
+        {/* ── Code Panel (right) ── */}
+        <div className="dh-code-panel">
+          {generating && !generatedFiles ? (
+            /* Generating state (first generation) */
+            <div className="dh-code-generating">
+              <div className="dh-gen-pulse" />
+              <p>Building your idea...</p>
+            </div>
+          ) : generatedFiles && filePaths.length > 0 ? (
+            /* Files view */
+            <>
+              <div className="dh-file-tabs">
+                {filePaths.map((fp) => (
+                  <button
+                    key={fp}
+                    className={`dh-file-tab${activeFile === fp ? ' dh-file-tab-active' : ''}`}
+                    onClick={() => setActiveFile(fp)}
+                  >
+                    {fp}
+                  </button>
+                ))}
+              </div>
+              <div className="dh-code-area">
+                {activeFile && generatedFiles[activeFile] !== undefined ? (
+                  <pre className="dh-code-block">
+                    <code>{renderCodeLines(generatedFiles[activeFile])}</code>
+                  </pre>
+                ) : (
+                  <div className="dh-code-empty">
+                    <p>Select a file to preview</p>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            /* Empty state */
+            <div className="dh-code-empty">
+              <div className="dh-code-empty-icon">
+                <CodeIcon />
+              </div>
+              <p>Your app will appear here</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Error Toast ── */}
+      {error && (
+        <div className="dh-toast">
+          <span>{error}</span>
+          <button className="dh-toast-dismiss" onClick={() => setError(null)}>
+            &times;
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
-/* ─── Template Card ───────────────────────────── */
+/* ─── Chat Input Component ─────────────────────── */
+
+interface ChatInputProps {
+  value: string;
+  onChange: (v: string) => void;
+  onSend: () => void;
+  onKeyDown: (e: React.KeyboardEvent) => void;
+  disabled: boolean;
+  walletConnected: boolean;
+  placeholder: string;
+  onTemplatesClick: () => void;
+}
+
+const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
+  function ChatInput({ value, onChange, onSend, onKeyDown, disabled, walletConnected, placeholder, onTemplatesClick }, ref) {
+    return (
+      <div className="dh-chat-input-area">
+        <div className="dh-chat-input-wrap">
+          {!walletConnected && (
+            <div className="dh-chat-disabled-overlay">
+              <span className="dh-chat-disabled-text">Connect wallet to start</span>
+            </div>
+          )}
+          <textarea
+            ref={ref}
+            className="dh-chat-textarea"
+            rows={2}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder={placeholder}
+            disabled={disabled}
+          />
+          <button
+            className="dh-chat-send"
+            onClick={onSend}
+            disabled={disabled || !value.trim()}
+            aria-label="Send message"
+          >
+            <ArrowIcon />
+          </button>
+        </div>
+        <div className="dh-chat-footer">
+          <button className="dh-templates-link" onClick={onTemplatesClick}>
+            Templates
+          </button>
+        </div>
+      </div>
+    );
+  },
+);
+
+/* ─── Template Card ────────────────────────────── */
 
 function TemplateCard({
   template,
@@ -676,10 +596,7 @@ function TemplateCard({
     >
       <div
         className="dh-template-icon"
-        style={{
-          background: `${template.color}15`,
-          color: template.color,
-        }}
+        style={{ background: `${template.color}15`, color: template.color }}
       >
         {template.name.charAt(0)}
       </div>
@@ -687,16 +604,24 @@ function TemplateCard({
       <p>{template.description}</p>
       <div className="dh-template-tags">
         {techTags.map((tag) => (
-          <span key={tag} className="dh-template-tag">
-            {tag}
-          </span>
+          <span key={tag} className="dh-template-tag">{tag}</span>
         ))}
       </div>
     </div>
   );
 }
 
-/* ─── Icons ───────────────────────────────────── */
+/* ─── Icons ────────────────────────────────────── */
+
+function WalletIcon() {
+  return (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" />
+      <path d="M3 5v14a2 2 0 0 0 2 2h16v-5" />
+      <path d="M18 12a2 2 0 0 0 0 4h4v-4z" />
+    </svg>
+  );
+}
 
 function GitHubIcon() {
   return (
@@ -708,31 +633,18 @@ function GitHubIcon() {
 
 function ArrowIcon() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <line x1="5" y1="12" x2="19" y2="12" />
       <polyline points="12 5 19 12 12 19" />
     </svg>
   );
 }
 
-function FileIcon({ ext }: { ext: string }) {
-  const color =
-    ext === 'tsx' || ext === 'ts'
-      ? '#3178c6'
-      : ext === 'json'
-        ? '#f59e0b'
-        : ext === 'css'
-          ? '#a855f7'
-          : ext === 'md'
-            ? '#6b7280'
-            : ext === 'html'
-              ? '#e34c26'
-              : 'var(--text-muted)';
-
+function CodeIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <polyline points="14 2 14 8 20 8" />
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" opacity="0.3">
+      <polyline points="16 18 22 12 16 6" />
+      <polyline points="8 6 2 12 8 18" />
     </svg>
   );
 }
