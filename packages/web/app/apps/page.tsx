@@ -164,6 +164,37 @@ export default function MiniApps() {
     setAppHtml(null);
   }, []);
 
+  /* ── Build provider map for session sharing ── */
+  const buildProviderMap = useCallback(() => {
+    if (!walletSession) return {};
+    const providerMap: Record<string, { available: boolean }> = {};
+    for (const [id, info] of Object.entries(walletSession.providers)) {
+      providerMap[id] = { available: (info as { available: boolean }).available };
+    }
+    return providerMap;
+  }, [walletSession]);
+
+  /* ── Send session to iframe proactively (handles race with MINIAPP_READY) ── */
+  useEffect(() => {
+    if (!activeApp || !appHtml || !walletSession) return;
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+
+    const sendSession = () => {
+      iframe.contentWindow?.postMessage(
+        { type: 'BYOKY_SESSION', providers: buildProviderMap() },
+        '*',
+      );
+    };
+
+    // Send session once iframe loads (catches the race where MINIAPP_READY fires before our listener)
+    iframe.addEventListener('load', sendSession);
+    // Also send immediately in case iframe already loaded
+    sendSession();
+
+    return () => iframe.removeEventListener('load', sendSession);
+  }, [activeApp, appHtml, walletSession, buildProviderMap]);
+
   /* ── Handle postMessage from iframe ── */
   useEffect(() => {
     if (!activeApp || !appHtml || !walletSession) return;
@@ -171,17 +202,16 @@ export default function MiniApps() {
     const handler = async (event: MessageEvent) => {
       const iframe = iframeRef.current;
       if (!iframe?.contentWindow) return;
-      if (event.source !== iframe.contentWindow) return;
 
+      // Only handle messages from our iframe or with our protocol types
+      if (!event.data || typeof event.data.type !== 'string') return;
       const { type } = event.data;
+      const isOurProtocol = type === 'MINIAPP_READY' || type === 'BYOKY_API_REQUEST';
+      if (!isOurProtocol) return;
 
       if (type === 'MINIAPP_READY') {
-        const providerMap: Record<string, { available: boolean }> = {};
-        for (const [id, info] of Object.entries(walletSession.providers)) {
-          providerMap[id] = { available: (info as { available: boolean }).available };
-        }
         iframe.contentWindow.postMessage(
-          { type: 'BYOKY_SESSION', providers: providerMap },
+          { type: 'BYOKY_SESSION', providers: buildProviderMap() },
           '*',
         );
       }
@@ -253,7 +283,7 @@ export default function MiniApps() {
 
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
-  }, [activeApp, appHtml, walletSession]);
+  }, [activeApp, appHtml, walletSession, buildProviderMap]);
 
   /* ── Escape to close ── */
   useEffect(() => {
