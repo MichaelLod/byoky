@@ -78,7 +78,7 @@ export async function createRepo(
       Accept: 'application/vnd.github+json',
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ name, private: isPrivate, auto_init: false }),
+    body: JSON.stringify({ name, private: isPrivate, auto_init: true }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -101,8 +101,23 @@ export async function pushFiles(
   };
   const base = `https://api.github.com/repos/${owner}/${repo}`;
   const entries = Object.entries(files);
-  const total = entries.length + 3; // blobs + tree + commit + ref
+  const total = entries.length + 4; // get ref + blobs + tree + commit + update ref
   let done = 0;
+
+  // Get current HEAD commit (repo was created with auto_init: true)
+  // Retry a few times since GitHub may not have the initial commit ready yet
+  let parentSha = '';
+  for (let attempt = 0; attempt < 5; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 1000));
+    const refRes = await fetch(`${base}/git/ref/heads/main`, { headers });
+    if (refRes.ok) {
+      const refData = await refRes.json();
+      parentSha = refData.object.sha;
+      break;
+    }
+    if (attempt === 4) throw new Error('Failed to get repo HEAD ref — repo may still be initializing');
+  }
+  onProgress?.(++done, total);
 
   // Create blobs
   const tree = await Promise.all(
@@ -112,7 +127,10 @@ export async function pushFiles(
         headers,
         body: JSON.stringify({ content, encoding: 'utf-8' }),
       });
-      if (!res.ok) throw new Error(`Failed to create blob for ${path}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(`Failed to create blob for ${path} (${res.status}): ${(err as Record<string, string>).message || ''}`);
+      }
       const { sha } = await res.json();
       onProgress?.(++done, total);
       return { path, sha, mode: '100644' as const, type: 'blob' as const };
@@ -129,22 +147,26 @@ export async function pushFiles(
   const { sha: treeSha } = await treeRes.json();
   onProgress?.(++done, total);
 
-  // Create commit
+  // Create commit with parent
   const commitRes = await fetch(`${base}/git/commits`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ message: 'Initial commit from Byoky Developer Hub', tree: treeSha }),
+    body: JSON.stringify({
+      message: 'Initial commit from Byoky Developer Hub',
+      tree: treeSha,
+      parents: [parentSha],
+    }),
   });
   if (!commitRes.ok) throw new Error('Failed to create commit');
   const { sha: commitSha } = await commitRes.json();
   onProgress?.(++done, total);
 
-  // Create main branch ref
-  const refRes = await fetch(`${base}/git/refs`, {
-    method: 'POST',
+  // Update main branch ref
+  const updateRes = await fetch(`${base}/git/refs/heads/main`, {
+    method: 'PATCH',
     headers,
-    body: JSON.stringify({ ref: 'refs/heads/main', sha: commitSha }),
+    body: JSON.stringify({ sha: commitSha }),
   });
-  if (!refRes.ok) throw new Error('Failed to create branch ref');
+  if (!updateRes.ok) throw new Error('Failed to update branch ref');
   onProgress?.(++done, total);
 }
