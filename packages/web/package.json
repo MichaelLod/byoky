@@ -9,6 +9,8 @@
   },
   "dependencies": {
     "@byoky/sdk": "workspace:*",
+    "@stackblitz/sdk": "^1.11.0",
+    "jszip": "^3.10.1",
     "next": "^15.5.14",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
