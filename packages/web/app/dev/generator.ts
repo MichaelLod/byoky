@@ -122,13 +122,19 @@ export async function generateApp(
     }
   }
 
-  messages.push({ role: 'user', content: prompt });
+  // Put generator instructions in the user message instead of the system field.
+  // Setup tokens (OAuth) require the Claude Code system prompt in the system field —
+  // the extension injects it automatically. Putting our own system prompt would conflict.
+  const isFirstMessage = messages.length === 0;
+  const userContent = isFirstMessage
+    ? `${SYSTEM_PROMPT}\n\n---\n\nUser request: ${prompt}`
+    : prompt;
+  messages.push({ role: 'user', content: userContent });
 
   const requestBody = {
     model: 'claude-sonnet-4-20250514',
     max_tokens: 12000,
     stream: true,
-    system: SYSTEM_PROMPT,
     messages,
   };
 
