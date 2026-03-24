@@ -124,19 +124,21 @@ export async function generateApp(
 
   messages.push({ role: 'user', content: prompt });
 
+  const requestBody = {
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 12000,
+    stream: true,
+    system: SYSTEM_PROMPT,
+    messages,
+  };
+
   const res = await proxyFetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
       'anthropic-version': '2023-06-01',
     },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 16000,
-      stream: true,
-      system: SYSTEM_PROMPT,
-      messages,
-    }),
+    body: JSON.stringify(requestBody),
   });
 
   if (!res.ok) {
