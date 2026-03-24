@@ -67,7 +67,11 @@ cd byoky && pnpm install && pnpm dev
 
 ### For Developers
 
-**Scaffold a new app instantly:**
+**Generate a full app from a description — powered by your own keys:**
+
+> **[byoky.com/dev](https://byoky.com/dev)** — Connect your wallet, describe your app, and we generate it with AI. Push to GitHub in one click. Zero cost — your keys power everything.
+
+**Or scaffold locally:**
 
 ```bash
 npx create-byoky-app
