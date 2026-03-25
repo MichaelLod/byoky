@@ -77,6 +77,14 @@ export default function MiniApps() {
       .catch(() => setError('Failed to load app registry'));
   }, []);
 
+  /* ── Auto-reconnect to existing wallet session on mount ── */
+  useEffect(() => {
+    const byoky = new Byoky();
+    byoky.tryReconnect().then((session) => {
+      if (session) setWalletSession(session);
+    });
+  }, []);
+
   /* ── Auto-dismiss error ── */
   useEffect(() => {
     if (!error) return;
