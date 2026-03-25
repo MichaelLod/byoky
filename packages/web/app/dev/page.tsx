@@ -98,6 +98,14 @@ export default function DevHub() {
     setHydrated(true);
   }, []);
 
+  /* ── Auto-reconnect to existing wallet session on mount ── */
+  useEffect(() => {
+    const byoky = new Byoky();
+    byoky.tryReconnect().then((session) => {
+      if (session) setWalletSession(session);
+    });
+  }, []);
+
   /* ── Persist to localStorage on changes ── */
   useEffect(() => {
     if (!hydrated) return;
