@@ -144,6 +144,7 @@ export default function MiniApps() {
       setLoadingApp(true);
       setActiveApp(app);
       setAppHtml(null);
+      window.history.pushState({ miniapp: true }, '');
 
       try {
         let url: string;
@@ -173,7 +174,21 @@ export default function MiniApps() {
   const closeApp = useCallback(() => {
     setActiveApp(null);
     setAppHtml(null);
+    if (window.history.state?.miniapp) {
+      window.history.back();
+    }
   }, []);
+
+  /* ── Browser back button closes overlay ── */
+  useEffect(() => {
+    if (!activeApp) return;
+    const handler = () => {
+      setActiveApp(null);
+      setAppHtml(null);
+    };
+    window.addEventListener('popstate', handler);
+    return () => window.removeEventListener('popstate', handler);
+  }, [activeApp]);
 
   /* ── Build provider map for session sharing ── */
   const buildProviderMap = useCallback(() => {
