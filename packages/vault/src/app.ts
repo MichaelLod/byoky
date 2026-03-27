@@ -9,7 +9,14 @@ import { rateLimitMiddleware } from './middleware/rate-limit.js';
 const app = new Hono();
 
 app.use('/*', cors({
-  origin: (origin) => origin,
+  origin: (origin) => {
+    if (!origin) return origin;
+    if (origin === 'https://byoky.com') return origin;
+    if (origin.endsWith('.byoky.com') && origin.startsWith('https://')) return origin;
+    if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return origin;
+    if (/^(chrome|moz|safari-web)-extension:\/\//.test(origin)) return origin;
+    return undefined;
+  },
   allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization'],
   maxAge: 86400,
