@@ -139,14 +139,13 @@ function Hero() {
           </div>
           <h1>
             <span className="hero-eyebrow">Bring Your Own Key.</span>
-            <span className="hero-gradient">The AI key wallet.</span>
+            <span className="hero-gradient">Use any AI app without sharing your keys.</span>
           </h1>
         </FadeIn>
         <FadeIn delay={0.2}>
           <p>
-            A secure browser wallet for AI API keys.
-            Users own their keys. Developers build for free.
-            No API costs, no key management — just ship.
+            A browser wallet that keeps your AI API keys encrypted and local.
+            Apps get proxied access — never the keys themselves.
           </p>
         </FadeIn>
         <FadeIn delay={0.3}>
@@ -174,24 +173,6 @@ function Hero() {
               className="btn btn-secondary"
             >
               Try the Demo
-            </a>
-            <a
-              href="/apps"
-              className="btn btn-secondary"
-            >
-              MiniApps (Preview)
-            </a>
-            <a
-              href="/dev"
-              className="btn btn-secondary"
-            >
-              App Creator (Preview)
-            </a>
-            <a
-              href="/built-with"
-              className="btn btn-secondary"
-            >
-              Built with Byoky
             </a>
             <a
               href="https://github.com/MichaelLod/byoky"
@@ -908,17 +889,8 @@ function Footer() {
             >
               GitHub
             </a>
-            <a href="/apps">
-              MiniApps (Preview)
-            </a>
-            <a href="/dev">
-              App Creator (Preview)
-            </a>
             <a href="/demo">
               Demo
-            </a>
-            <a href="/built-with">
-              Built with Byoky
             </a>
             <a
               href="https://github.com/MichaelLod/byoky/blob/main/LICENSE"
