@@ -55,15 +55,9 @@
 
 ### For Users
 
+**Chrome:** [Install from Chrome Web Store](https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon)
+
 **Firefox:** [Install from Mozilla Add-ons](https://addons.mozilla.org/en-US/firefox/addon/byoky/)
-
-**Chrome:** Coming soon — for now, build from source:
-
-```bash
-git clone https://github.com/MichaelLod/byoky.git
-cd byoky && pnpm install && pnpm dev
-# Load unpacked extension from packages/extension/.output/chrome-mv3
-```
 
 ### For Developers
 
@@ -322,7 +316,7 @@ pnpm --filter @byoky/extension build:all     # Chrome + Firefox + Safari
 - [x] Backend relay (`@byoky/sdk/server`)
 - [x] Token allowances per app (total + per-provider limits)
 - [x] Encrypted vault export/import (`.byoky` files)
-- [ ] Browser extension store listings (Chrome, Firefox, Safari)
+- [x] Browser extension store listings (Chrome, Firefox)
 - [x] OpenClaw provider plugin (bridge proxy — keys stay in extension)
 - [x] Token gifts (relay-backed, zero key exposure)
 - [x] Mobile wallet relay connect (no extension needed, pair via QR code)
