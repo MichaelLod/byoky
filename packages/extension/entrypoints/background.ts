@@ -107,6 +107,37 @@ export default defineBackground(() => {
   let unlockFailures = 0;
   let unlockLockedUntil = 0;
 
+  // Persist masterPassword across MV3 service worker restarts using session storage.
+  // session storage is memory-only (not written to disk) and cleared when the browser closes.
+  // Firefox (MV2) doesn't support storage.session, so we guard all access.
+  const hasSessionStorage = !!browser.storage.session;
+
+  async function persistSession() {
+    if (!hasSessionStorage) return;
+    try {
+      await browser.storage.session.set({ _mp: masterPassword });
+    } catch {}
+  }
+
+  async function clearSessionStorage() {
+    if (!hasSessionStorage) return;
+    try {
+      await browser.storage.session.remove('_mp');
+    } catch {}
+  }
+
+  async function restoreSession() {
+    if (!hasSessionStorage) return;
+    try {
+      const data = await browser.storage.session.get('_mp');
+      if (data._mp) {
+        masterPassword = data._mp as string;
+        resetIdleTimer();
+        reconnectGiftRelays();
+      }
+    } catch {}
+  }
+
   // Auto-lock after 20 minutes of inactivity
   const IDLE_TIMEOUT_MS = 20 * 60 * 1000;
   let lastActivityAt = 0;
@@ -126,6 +157,7 @@ export default defineBackground(() => {
     sessions.clear();
     authorizedBridgeSessionKey = null;
     disconnectAllGiftRelays();
+    clearSessionStorage();
     browser.runtime.sendMessage({
       type: 'BYOKY_INTERNAL',
       action: 'sessionChanged',
@@ -178,6 +210,9 @@ export default defineBackground(() => {
 
   // Mutex for gift budget updates to prevent concurrent overwrites
   const giftBudgetLocks = new Map<string, Promise<void>>();
+
+  // Restore session after MV3 service worker restart
+  restoreSession();
 
   // --- Open side panel on icon click (Chrome) ---
 
@@ -825,6 +860,7 @@ export default defineBackground(() => {
           masterPassword = password;
           unlockFailures = 0;
           unlockLockedUntil = 0;
+          persistSession();
           resetIdleTimer();
           processPendingAfterUnlock();
           reconnectGiftRelays();
@@ -844,6 +880,7 @@ export default defineBackground(() => {
         sessions.clear();
         authorizedBridgeSessionKey = null;
         disconnectAllGiftRelays();
+        clearSessionStorage();
         if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
         return { success: true };
 
@@ -911,6 +948,7 @@ export default defineBackground(() => {
         sessions.clear();
         authorizedBridgeSessionKey = null;
         disconnectAllGiftRelays();
+        clearSessionStorage();
         if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
         unlockFailures = 0;
         unlockLockedUntil = 0;
