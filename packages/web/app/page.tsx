@@ -152,11 +152,22 @@ function Hero() {
         <FadeIn delay={0.3}>
           <div className="hero-actions">
             <a
-              href="https://github.com/MichaelLod/byoky"
+              href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon"
               className="btn btn-primary"
+              target="_blank"
+              rel="noopener noreferrer"
             >
               <DownloadIcon />
-              Install Extension
+              Chrome Extension
+            </a>
+            <a
+              href="https://addons.mozilla.org/en-US/firefox/addon/byoky/"
+              className="btn btn-primary"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <DownloadIcon />
+              Firefox Extension
             </a>
             <a
               href="/demo"

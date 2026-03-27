@@ -46,9 +46,8 @@ function createNativeWrapper(hostPath: string, manifestDir: string): string {
   return wrapperPath;
 }
 
-// Development-only extension ID (unpacked). Set BYOKY_EXTENSION_ID or pass
-// --extension-id to override with the published Chrome Web Store ID.
-const DEFAULT_EXTENSION_ID = process.env.BYOKY_EXTENSION_ID || 'ahhecmfcclkjdgjnmackoacldnmgmipl';
+const PUBLISHED_EXTENSION_ID = 'igjohldpldlahcjmefdhlnbcpldlgmon';
+const DEV_EXTENSION_ID = 'ahhecmfcclkjdgjnmackoacldnmgmipl';
 
 function buildManifest(hostPath: string, browserType: 'chrome' | 'firefox', extensionId?: string): object {
   const base = {
@@ -59,12 +58,15 @@ function buildManifest(hostPath: string, browserType: 'chrome' | 'firefox', exte
   };
 
   if (browserType === 'chrome') {
-    const id = extensionId || DEFAULT_EXTENSION_ID;
+    const origins = extensionId
+      ? [`chrome-extension://${extensionId}/`]
+      : [
+          `chrome-extension://${PUBLISHED_EXTENSION_ID}/`,
+          `chrome-extension://${DEV_EXTENSION_ID}/`,
+        ];
     return {
       ...base,
-      allowed_origins: [
-        `chrome-extension://${id}/`,
-      ],
+      allowed_origins: origins,
     };
   }
 
