@@ -139,7 +139,7 @@ function Hero() {
           </div>
           <h1>
             <span className="hero-eyebrow">Bring Your Own Key.</span>
-            <span className="hero-gradient">Use any AI app without sharing your keys.</span>
+            <span className="hero-gradient">MetaMask for AI API Keys.</span>
           </h1>
         </FadeIn>
         <FadeIn delay={0.2}>
