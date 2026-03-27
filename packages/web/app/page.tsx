@@ -177,15 +177,15 @@ function Hero() {
             </a>
             <a
               href="/apps"
-              className="btn btn-primary"
+              className="btn btn-secondary"
             >
-              MiniApps
+              MiniApps (Preview)
             </a>
             <a
               href="/dev"
               className="btn btn-secondary"
             >
-              MiniApp Creator
+              App Creator (Preview)
             </a>
             <a
               href="/built-with"
@@ -331,17 +331,14 @@ function ForDevelopers() {
     <section className="dev-section">
       <div className="container">
         <FadeIn>
-          <h2>Describe your app. We build it.</h2>
+          <h2>Two lines of code. Full AI power.</h2>
           <p className="subtitle">
-            The Byoky MiniApp Creator turns your idea into a working app — powered
-            by your own AI keys. Push to GitHub in one click. Zero cost.
+            Integrate with any AI provider using their native SDK.
+            Just swap in Byoky&apos;s fetch — keys never touch your app.
           </p>
-          <a href="/dev" className="btn btn-primary" style={{ marginBottom: 16 }}>
-            Open MiniApp Creator
-          </a>
           <p className="subtitle" style={{ fontSize: 14, marginBottom: 0, marginTop: 0 }}>
-            or <code style={{ fontFamily: 'var(--font-code)', color: 'var(--teal-light)', fontSize: 13 }}>npx create-byoky-app</code> to scaffold locally
-            {' · '}<code style={{ fontFamily: 'var(--font-code)', color: 'var(--teal-light)', fontSize: 13 }}>npm install @byoky/sdk</code> to add to an existing project
+            <code style={{ fontFamily: 'var(--font-code)', color: 'var(--teal-light)', fontSize: 13 }}>npm install @byoky/sdk</code> to add to an existing project
+            {' · '}<code style={{ fontFamily: 'var(--font-code)', color: 'var(--teal-light)', fontSize: 13 }}>npx create-byoky-app</code> to scaffold a new one
           </p>
         </FadeIn>
         <div className="dev-layout">
@@ -912,10 +909,10 @@ function Footer() {
               GitHub
             </a>
             <a href="/apps">
-              MiniApps
+              MiniApps (Preview)
             </a>
             <a href="/dev">
-              MiniApp Creator
+              App Creator (Preview)
             </a>
             <a href="/demo">
               Demo
