@@ -246,7 +246,7 @@ const byokyPlugin = {
           },
         ],
         wizard: {
-          onboarding: {
+          setup: {
             choiceId: openclawId,
             choiceLabel: `${provider.name} (via Byoky)`,
             choiceHint: 'Route through Byoky wallet',
