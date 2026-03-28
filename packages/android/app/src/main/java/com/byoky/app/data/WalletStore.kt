@@ -321,6 +321,13 @@ class WalletStore(context: Context) {
         saveGiftPreferences()
     }
 
+    fun updateGiftedCredentialUsage(giftId: String, usedTokens: Int) {
+        _giftedCredentials.value = _giftedCredentials.value.map { gc ->
+            if (gc.giftId == giftId) gc.copy(usedTokens = usedTokens) else gc
+        }
+        saveGiftedCredentials()
+    }
+
     // MARK: - Reset
 
     fun resetWallet() {
