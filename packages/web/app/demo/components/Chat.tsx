@@ -167,7 +167,6 @@ export function Chat({ session }: Props) {
   const [selectedProvider, setSelectedProvider] = useState<string>('');
   const [attachedImage, setAttachedImage] = useState<{ file: File; preview: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
 
   const availableProviders = Object.entries(session.providers)
     .filter(([, v]) => v.available)
@@ -181,11 +180,6 @@ export function Chat({ session }: Props) {
     }
   }, [availableProviders, selectedProvider]);
 
-  useEffect(() => {
-    if (messages.length > 0) {
-      scrollRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }
-  }, [messages]);
 
   function handleAttach() { fileInputRef.current?.click(); }
 
@@ -448,7 +442,6 @@ export function Chat({ session }: Props) {
             </div>
           </div>
         ))}
-        <div ref={scrollRef} />
       </div>
 
       {attachedImage && (
