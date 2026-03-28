@@ -26,23 +26,33 @@ export function Dashboard() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <h2 className="page-title" style={{ marginBottom: 0 }}>Credentials</h2>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <button
-            className="text-link"
-            title={cloudVaultEnabled ? 'Cloud Vault on' : 'Cloud Vault off'}
-            style={{ color: cloudVaultEnabled ? 'var(--accent)' : 'var(--text-muted)', fontSize: '16px', lineHeight: 1 }}
-            onClick={() => {
-              if (cloudVaultEnabled) {
-                disableCloudVault();
-              } else {
-                setShowVaultWarning(true);
-              }
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />
-            </svg>
-          </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <label className="toggle-switch" title={cloudVaultEnabled ? 'Cloud Vault on' : 'Cloud Vault off'}>
+            <input
+              type="checkbox"
+              checked={cloudVaultEnabled}
+              onChange={() => {
+                if (cloudVaultEnabled) {
+                  disableCloudVault();
+                } else {
+                  setShowVaultWarning(true);
+                }
+              }}
+            />
+            <span className="toggle-slider" />
+          </label>
+          <span style={{ color: cloudVaultEnabled ? 'var(--accent)' : 'var(--text-muted)', display: 'flex', alignItems: 'center' }}>
+            {cloudVaultEnabled ? (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />
+                <line x1="2" y1="2" x2="22" y2="22" />
+              </svg>
+            )}
+          </span>
           <button className="text-link" onClick={() => lock()}>
             Lock
           </button>
@@ -50,22 +60,22 @@ export function Dashboard() {
       </div>
 
       {showVaultWarning && (
-        <div className="warning-box" style={{ marginBottom: '16px' }}>
-          <p style={{ margin: '0 0 8px' }}>
-            <strong>Your keys will leave this device.</strong> They&apos;ll be encrypted
-            and stored on vault.byoky.com so websites can use them even when you&apos;re offline.
+        <div className="vault-warning-modal">
+          <p style={{ margin: '0 0 12px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+            <strong style={{ color: 'var(--danger)' }}>Your keys will leave this device.</strong>{' '}
+            They&apos;ll be encrypted and stored on vault.byoky.com so websites can use them even when you&apos;re offline.
           </p>
           <div style={{ display: 'flex', gap: '8px' }}>
             <button
               className="btn btn-secondary"
-              style={{ flex: 1, fontSize: '12px' }}
+              style={{ flex: 1 }}
               onClick={() => setShowVaultWarning(false)}
             >
               Cancel
             </button>
             <button
               className="btn btn-primary"
-              style={{ flex: 1, fontSize: '12px' }}
+              style={{ flex: 1 }}
               onClick={() => { setShowVaultWarning(false); navigate('settings'); }}
             >
               Set Up
