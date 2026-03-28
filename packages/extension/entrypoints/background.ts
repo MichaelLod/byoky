@@ -2531,6 +2531,7 @@ export default defineBackground(() => {
     const credentials = await getStoredCredentials();
     const gcData = await browser.storage.local.get('giftedCredentials');
     const giftedCreds = (gcData.giftedCredentials ?? []) as GiftedCredential[];
+    const giftPrefs = await getGiftPreferences();
 
     for (const [sessionKey, session] of sessions) {
       const requested = session.requestedProviders;
@@ -2543,12 +2544,14 @@ export default defineBackground(() => {
 
       for (const providerId of providerIds) {
         const cred = credentials.find(c => c.providerId === providerId);
-        const gc = !cred ? giftedCreds.find(g => g.providerId === providerId && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens) : undefined;
-        providerMap[providerId] = { available: !!(cred || gc), authMethod: cred?.authMethod ?? 'api_key', ...(gc ? { gift: true } : {}) };
-        if (cred) {
-          newSessionProviders.push({ providerId, credentialId: cred.id, available: true, authMethod: cred.authMethod });
-        } else if (gc) {
+        const gc = giftedCreds.find(g => g.providerId === providerId && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens);
+        const preferGift = gc && giftPrefs[providerId] === gc.giftId;
+        const useGift = preferGift || (!cred && gc);
+        providerMap[providerId] = { available: !!(cred || gc), authMethod: useGift ? 'api_key' : (cred?.authMethod ?? 'api_key'), ...(useGift ? { gift: true } : {}) };
+        if (useGift && gc) {
           newSessionProviders.push({ providerId, credentialId: gc.id, available: true, authMethod: 'api_key', giftId: gc.giftId, giftRelayUrl: gc.relayUrl, giftAuthToken: gc.authToken });
+        } else if (cred) {
+          newSessionProviders.push({ providerId, credentialId: cred.id, available: true, authMethod: cred.authMethod });
         }
       }
 
