@@ -1,8 +1,24 @@
 import { useWalletStore } from '../store';
-import { PROVIDERS } from '@byoky/core';
+import { PROVIDERS, isGiftExpired, giftBudgetRemaining, giftBudgetPercent } from '@byoky/core';
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
+  return String(n);
+}
+
+function formatExpiry(ms: number): string {
+  const diff = ms - Date.now();
+  if (diff <= 0) return 'Expired';
+  const days = Math.floor(diff / (24 * 60 * 60 * 1000));
+  const hours = Math.floor((diff % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
+  if (days > 0) return `${days}d ${hours}h`;
+  return `${hours}h`;
+}
 
 export function Dashboard() {
-  const { credentials, navigate, lock, removeCredential } = useWalletStore();
+  const { credentials, giftedCredentials, navigate, lock, removeCredential } = useWalletStore();
+  const activeGifts = giftedCredentials.filter((gc) => !isGiftExpired(gc));
 
   return (
     <div>
@@ -61,6 +77,51 @@ export function Dashboard() {
           >
             Add credential
           </button>
+        </>
+      )}
+
+      {activeGifts.length > 0 && (
+        <>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '24px', marginBottom: '8px' }}>
+            <h3 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em', margin: 0 }}>
+              Active Gifts
+            </h3>
+            <button className="text-link" onClick={() => navigate('gifts')}>
+              Manage
+            </button>
+          </div>
+          {activeGifts.map((gc) => {
+            const pct = giftBudgetPercent(gc);
+            const remaining = giftBudgetRemaining(gc);
+            return (
+              <div key={gc.id} className="card gift-card">
+                <div className="card-header">
+                  <span className="card-title">{gc.providerName}</span>
+                  <span className="badge badge-gift">Gift</span>
+                </div>
+                <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
+                  <span className="badge badge-provider">
+                    from {gc.senderLabel}
+                  </span>
+                </div>
+                <div className="gift-budget" style={{ marginTop: '8px' }}>
+                  <div className="gift-budget-text">
+                    <span>{formatTokens(remaining)} remaining</span>
+                    <span className="gift-budget-total">/ {formatTokens(gc.maxTokens)}</span>
+                  </div>
+                  <div className="allowance-bar">
+                    <div
+                      className={`allowance-bar-fill ${pct >= 90 ? 'over' : ''}`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                </div>
+                <div className="card-subtitle" style={{ marginTop: '6px' }}>
+                  Expires in {formatExpiry(gc.expiresAt)}
+                </div>
+              </div>
+            );
+          })}
         </>
       )}
     </div>

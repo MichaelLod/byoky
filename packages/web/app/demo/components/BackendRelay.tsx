@@ -207,7 +207,7 @@ export function BackendRelay({ session }: Props) {
         >
           {availableProviders.map((id) => (
             <option key={id} value={id}>
-              {PROVIDER_NAMES[id] ?? id}
+              {PROVIDER_NAMES[id] ?? id}{session.providers[id]?.gift ? ' (Gift)' : ''}
             </option>
           ))}
         </select>
