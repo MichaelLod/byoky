@@ -1577,6 +1577,24 @@ export default defineBackground(() => {
         }));
       };
 
+      let requestSent = false;
+
+      function sendRelayRequest() {
+        if (requestSent) return;
+        requestSent = true;
+        ws.send(JSON.stringify({
+          type: 'relay:request',
+          requestId: msg.requestId,
+          providerId: msg.providerId,
+          url: msg.url,
+          method: msg.method,
+          headers: msg.headers,
+          body: msg.body,
+        }));
+        // Request phase timeout: 2 minutes
+        setPhaseTimeout(120_000, 'GIFT_TIMEOUT', 'Gift relay request timed out', 504);
+      }
+
       ws.onmessage = (event) => {
         try {
           const raw = typeof event.data === 'string' ? event.data : '';
@@ -1596,29 +1614,17 @@ export default defineBackground(() => {
               return;
             }
             authenticated = true;
-            if (!data.peerOnline) {
-              clearActiveTimeout();
-              ws.close();
-              responsePort.postMessage({
-                type: 'BYOKY_PROXY_RESPONSE_ERROR',
-                requestId: msg.requestId,
-                status: 503,
-                error: { code: 'GIFT_SENDER_OFFLINE', message: 'Gift sender is not online' },
-              });
-              return;
+            if (data.peerOnline) {
+              sendRelayRequest();
+            } else {
+              // Wait up to 15s for sender to come online
+              setPhaseTimeout(15_000, 'GIFT_SENDER_OFFLINE', 'Gift sender is not online', 503);
             }
-            // Send the relay request
-            ws.send(JSON.stringify({
-              type: 'relay:request',
-              requestId: msg.requestId,
-              providerId: msg.providerId,
-              url: msg.url,
-              method: msg.method,
-              headers: msg.headers,
-              body: msg.body,
-            }));
-            // Request phase timeout: 2 minutes
-            setPhaseTimeout(120_000, 'GIFT_TIMEOUT', 'Gift relay request timed out', 504);
+          }
+
+          // Sender came online while we were waiting
+          if (data.type === 'relay:peer:status' && data.online && authenticated && !requestSent) {
+            sendRelayRequest();
           }
 
           // Forward relay responses to the port
@@ -2396,6 +2402,8 @@ export default defineBackground(() => {
     try {
       const ws = new WebSocket(gift.relayUrl);
 
+      let pingInterval: ReturnType<typeof setInterval> | null = null;
+
       ws.onopen = () => {
         ws.send(JSON.stringify({
           type: 'relay:auth',
@@ -2403,6 +2411,12 @@ export default defineBackground(() => {
           authToken: gift.authToken,
           role: 'sender',
         }));
+        // Keep connection alive — relay has 5min idle timeout
+        pingInterval = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'relay:ping' }));
+          }
+        }, 2 * 60 * 1000);
       };
 
       ws.onmessage = async (event) => {
@@ -2427,6 +2441,7 @@ export default defineBackground(() => {
       };
 
       ws.onclose = () => {
+        if (pingInterval) clearInterval(pingInterval);
         giftRelayConnections.delete(gift.id);
         // Reconnect if gift is still active and wallet is unlocked
         setTimeout(async () => {
