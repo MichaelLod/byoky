@@ -1677,7 +1677,6 @@ export default defineBackground(() => {
       setPhaseTimeout(30_000, 'GIFT_TIMEOUT', 'Gift relay connection timed out', 504);
 
       ws.onopen = () => {
-        console.log(`[gift-relay] recipient auth for ${sp.giftId?.slice(0, 8)}`);
         ws.send(JSON.stringify({
           type: 'relay:auth',
           roomId: sp.giftId,
@@ -2535,7 +2534,6 @@ export default defineBackground(() => {
           const msg = JSON.parse(raw);
 
           if (msg.type === 'relay:auth:result') {
-            console.log(`[gift-relay] sender auth for ${gift.id.slice(0, 8)}: ${msg.success ? 'ok' : msg.error}`);
             if (!msg.success) {
               ws.close();
               giftRelayConnections.delete(gift.id);
