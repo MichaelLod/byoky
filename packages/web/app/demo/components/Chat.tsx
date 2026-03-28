@@ -228,9 +228,7 @@ export function Chat({ session }: Props) {
 
     try {
       const proxyFetch = session.createFetch(selectedProvider);
-      // Disable streaming when images are present — large base64 payloads can break the bridge
-      const hasImages = !!userMessage.image || prevMessages.some(m => m.image);
-      const useStream = !hasImages;
+      const useStream = true;
 
       if (selectedProvider === 'anthropic') {
         type CB = { type: string; text?: string; source?: { type: string; media_type: string; data: string } };
