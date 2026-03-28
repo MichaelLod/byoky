@@ -53,6 +53,8 @@ export interface RelayAuth {
   roomId: string;
   authToken: string;
   role: 'sender' | 'recipient';
+  /** Sender priority — higher value wins. Default 1 (primary). Vault fallback uses 0. */
+  priority?: number;
 }
 
 export interface RelayAuthResult {
