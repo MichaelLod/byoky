@@ -4,6 +4,7 @@ import {
   parseModel,
   parseUsage,
   extractUsageFromParsed,
+  injectStreamUsageOptions,
   computeAllowanceCheck,
   validateProxyUrl,
 } from '../src/proxy-utils.js';
@@ -295,6 +296,19 @@ describe('extractUsageFromParsed', () => {
     });
   }
 
+  it('parses Groq x_groq streaming usage', () => {
+    const parsed = {
+      x_groq: {
+        id: 'req_123',
+        usage: { prompt_tokens: 30, completion_tokens: 45, total_tokens: 75 },
+      },
+    };
+    expect(extractUsageFromParsed('groq', parsed)).toEqual({
+      inputTokens: 30,
+      outputTokens: 45,
+    });
+  });
+
   it('returns undefined when no usage present', () => {
     expect(extractUsageFromParsed('openai', { choices: [] })).toBeUndefined();
   });
@@ -422,6 +436,70 @@ describe('parseUsage', () => {
       inputTokens: 128000,
       outputTokens: 4096,
     });
+  });
+});
+
+// ── injectStreamUsageOptions ──────────────────────────
+
+describe('injectStreamUsageOptions', () => {
+  it('injects stream_options for OpenAI streaming request', () => {
+    const body = JSON.stringify({ model: 'gpt-4o', stream: true, messages: [] });
+    const result = JSON.parse(injectStreamUsageOptions('openai', body)!);
+    expect(result.stream_options).toEqual({ include_usage: true });
+    expect(result.stream).toBe(true);
+    expect(result.model).toBe('gpt-4o');
+  });
+
+  it('injects for azure_openai', () => {
+    const body = JSON.stringify({ model: 'gpt-4', stream: true });
+    const result = JSON.parse(injectStreamUsageOptions('azure_openai', body)!);
+    expect(result.stream_options).toEqual({ include_usage: true });
+  });
+
+  it('injects for together', () => {
+    const body = JSON.stringify({ stream: true });
+    const result = JSON.parse(injectStreamUsageOptions('together', body)!);
+    expect(result.stream_options).toEqual({ include_usage: true });
+  });
+
+  it('injects for deepseek', () => {
+    const body = JSON.stringify({ stream: true });
+    const result = JSON.parse(injectStreamUsageOptions('deepseek', body)!);
+    expect(result.stream_options).toEqual({ include_usage: true });
+  });
+
+  it('does not inject for non-streaming request', () => {
+    const body = JSON.stringify({ model: 'gpt-4o', messages: [] });
+    expect(injectStreamUsageOptions('openai', body)).toBe(body);
+  });
+
+  it('does not inject for anthropic', () => {
+    const body = JSON.stringify({ stream: true });
+    expect(injectStreamUsageOptions('anthropic', body)).toBe(body);
+  });
+
+  it('does not inject for gemini', () => {
+    const body = JSON.stringify({ stream: true });
+    expect(injectStreamUsageOptions('gemini', body)).toBe(body);
+  });
+
+  it('preserves existing stream_options fields', () => {
+    const body = JSON.stringify({ stream: true, stream_options: { custom: 'value' } });
+    const result = JSON.parse(injectStreamUsageOptions('openai', body)!);
+    expect(result.stream_options).toEqual({ custom: 'value', include_usage: true });
+  });
+
+  it('no-ops when include_usage already set', () => {
+    const body = JSON.stringify({ stream: true, stream_options: { include_usage: true } });
+    expect(injectStreamUsageOptions('openai', body)).toBe(body);
+  });
+
+  it('returns undefined for undefined body', () => {
+    expect(injectStreamUsageOptions('openai', undefined)).toBeUndefined();
+  });
+
+  it('returns non-JSON body unchanged', () => {
+    expect(injectStreamUsageOptions('openai', 'not-json')).toBe('not-json');
   });
 });
 

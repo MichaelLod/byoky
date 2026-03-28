@@ -93,6 +93,41 @@ export function parseModel(body?: string): string | undefined {
 }
 
 /**
+ * Providers that require `stream_options: { include_usage: true }` to report
+ * token usage in streaming (SSE) responses. Without this flag their streaming
+ * chunks never contain a `usage` object and we record 0 tokens.
+ */
+const STREAM_USAGE_PROVIDERS = new Set([
+  'openai',
+  'azure_openai',
+  'together',
+  'deepseek',
+]);
+
+/**
+ * Inject `stream_options.include_usage` into the request body for providers
+ * that don't report token usage in streaming responses by default.
+ * Returns the (possibly modified) body string. No-ops for non-JSON or
+ * non-streaming requests.
+ */
+export function injectStreamUsageOptions(
+  providerId: string,
+  body?: string,
+): string | undefined {
+  if (!body || !STREAM_USAGE_PROVIDERS.has(providerId)) return body;
+  try {
+    const parsed = JSON.parse(body);
+    if (parsed.stream === true && !parsed.stream_options?.include_usage) {
+      parsed.stream_options = { ...parsed.stream_options, include_usage: true };
+      return JSON.stringify(parsed);
+    }
+  } catch {
+    // not JSON — return as-is
+  }
+  return body;
+}
+
+/**
  * Parse token usage from a provider API response body.
  * Handles both regular JSON responses and SSE streaming responses.
  */
@@ -156,6 +191,17 @@ export function extractUsageFromParsed(
     const meta = parsed.usageMetadata as Record<string, number> | undefined;
     if (meta?.promptTokenCount != null) {
       return sanitizeTokenCounts(meta.promptTokenCount, meta.candidatesTokenCount ?? 0);
+    }
+  }
+
+  // Groq streaming: usage is nested under x_groq.usage instead of top-level usage
+  if (providerId === 'groq') {
+    const xGroq = parsed.x_groq as Record<string, unknown> | undefined;
+    if (xGroq?.usage) {
+      const groqUsage = xGroq.usage as Record<string, number>;
+      if (groqUsage.prompt_tokens != null && groqUsage.completion_tokens != null) {
+        return sanitizeTokenCounts(groqUsage.prompt_tokens, groqUsage.completion_tokens);
+      }
     }
   }
 

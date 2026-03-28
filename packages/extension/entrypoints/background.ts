@@ -21,6 +21,7 @@ import {
   buildHeaders,
   parseModel,
   parseUsage,
+  injectStreamUsageOptions,
   computeAllowanceCheck,
   validateProxyUrl,
   injectClaudeCodeSystemPrompt,
@@ -453,7 +454,8 @@ export default defineBackground(() => {
           return;
         }
 
-        const reconstructed = reconstructBody(msg.body, msg.bodyEncoding);
+        const proxyBody = msg.bodyEncoding ? msg.body : injectStreamUsageOptions(msg.providerId, msg.body);
+        const reconstructed = reconstructBody(proxyBody, msg.bodyEncoding);
         const fetchHeaders = { ...realHeaders };
         if (reconstructed.stripContentType) delete fetchHeaders['content-type'];
 
@@ -2035,10 +2037,11 @@ export default defineBackground(() => {
         return;
       }
 
+      const bridgeBody = injectStreamUsageOptions(providerId, body);
       const response = await fetch(url, {
         method,
         headers: realHeaders,
-        body: body || undefined,
+        body: bridgeBody || undefined,
       });
 
       const responseHeaders: Record<string, string> = {};
@@ -2541,7 +2544,8 @@ export default defineBackground(() => {
         const controller = new AbortController();
         const requestTimeout = setTimeout(() => controller.abort(), 120_000);
 
-        const giftReconstructed = reconstructBody(msg.body, msg.bodyEncoding);
+        const giftBody = injectStreamUsageOptions(gift.providerId, msg.body);
+        const giftReconstructed = reconstructBody(giftBody, undefined);
         const giftFetchHeaders = { ...realHeaders };
         if (giftReconstructed.stripContentType) delete giftFetchHeaders['content-type'];
 
