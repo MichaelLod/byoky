@@ -17,10 +17,18 @@ import { PasswordMeter } from '../components/PasswordMeter';
 export function Settings() {
   const {
     credentials, navigate, lock,
-    cloudVaultEnabled, cloudVaultEmail, cloudVaultTokenExpired, cloudVaultPendingCount,
+    cloudVaultEnabled, cloudVaultUsername, cloudVaultTokenExpired, cloudVaultPendingCount,
     disableCloudVault,
   } = useWalletStore();
   const [modal, setModal] = useState<'export' | 'import' | 'cloud-vault' | 'cloud-vault-relogin' | null>(null);
+
+  if (modal === 'export') {
+    return <ExportModal onClose={() => setModal(null)} />;
+  }
+
+  if (modal === 'import') {
+    return <ImportModal onClose={() => setModal(null)} />;
+  }
 
   if (modal === 'cloud-vault') {
     return <CloudVaultModal onClose={() => setModal(null)} />;
@@ -81,7 +89,7 @@ export function Settings() {
         </div>
         {cloudVaultEnabled && (
           <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-            <p style={{ margin: '0 0 4px' }}>Synced as {cloudVaultEmail}</p>
+            <p style={{ margin: '0 0 4px' }}>Synced as {cloudVaultUsername}</p>
             {cloudVaultTokenExpired && (
               <div className="warning-box" style={{ marginTop: '8px' }}>
                 <strong>Session expired</strong> — your credentials are safe but
@@ -126,8 +134,6 @@ export function Settings() {
         Back
       </button>
 
-      {modal === 'export' && <ExportModal onClose={() => setModal(null)} />}
-      {modal === 'import' && <ImportModal onClose={() => setModal(null)} />}
     </div>
   );
 }
@@ -180,55 +186,54 @@ function ExportModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="export-modal-overlay" onClick={onClose}>
-      <div className="export-modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Export Vault</h3>
-        <p>
-          Choose a password to encrypt your backup file. You&apos;ll need this
-          password to import it later.
-        </p>
+    <div>
+      <h2 className="page-title">Export Vault</h2>
+      <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+        Choose a password to encrypt your backup file. You&apos;ll need this
+        password to import it later.
+      </p>
 
-        {error && <div className="error">{error}</div>}
+      {error && <div className="error">{error}</div>}
 
-        <form onSubmit={handleExport}>
-          <div className="form-group">
-            <label htmlFor="export-pw">Export password</label>
-            <input
-              id="export-pw"
-              type="password"
-              value={exportPassword}
-              onChange={(e) => setExportPassword(e.target.value)}
-              placeholder="At least 12 characters"
-              autoFocus
-            />
-            {exportPassword.length > 0 && <PasswordMeter strength={strength} />}
-          </div>
+      <form onSubmit={handleExport}>
+        <div className="form-group">
+          <label htmlFor="export-pw">Export password</label>
+          <input
+            id="export-pw"
+            type="password"
+            value={exportPassword}
+            onChange={(e) => setExportPassword(e.target.value)}
+            placeholder="At least 12 characters"
+            autoFocus
+          />
+          {exportPassword.length > 0 && <PasswordMeter strength={strength} />}
+        </div>
 
-          <div className="form-group">
-            <label htmlFor="export-confirm">Confirm password</label>
-            <input
-              id="export-confirm"
-              type="password"
-              value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
-              placeholder="Repeat password"
-            />
-          </div>
+        <div className="form-group">
+          <label htmlFor="export-confirm">Confirm password</label>
+          <input
+            id="export-confirm"
+            type="password"
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            placeholder="Repeat password"
+          />
+        </div>
 
-          <div className="export-modal-actions">
-            <button type="button" className="btn btn-secondary" onClick={onClose}>
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={exporting || exportPassword.length < MIN_PASSWORD_LENGTH || strength.score < 2}
-            >
-              {exporting ? 'Exporting...' : 'Export'}
-            </button>
-          </div>
-        </form>
-      </div>
+        <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
+          <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="btn btn-primary"
+            style={{ flex: 1 }}
+            disabled={exporting || exportPassword.length < MIN_PASSWORD_LENGTH || strength.score < 2}
+          >
+            {exporting ? 'Exporting...' : 'Export'}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
@@ -298,85 +303,84 @@ function ImportModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="export-modal-overlay" onClick={onClose}>
-      <div className="export-modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Import Vault</h3>
-        <p>
-          Import a .byoky backup file. This will <strong>replace</strong> all
-          existing credentials.
-        </p>
+    <div>
+      <h2 className="page-title">Import Vault</h2>
+      <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+        Import a .byoky backup file. This will <strong>replace</strong> all
+        existing credentials.
+      </p>
 
-        {error && <div className="error">{error}</div>}
+      {error && <div className="error">{error}</div>}
 
-        <form onSubmit={handleImport}>
-          <div className="form-group">
-            <label>Vault file</label>
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".byoky"
-              onChange={handleFileSelect}
-              style={{ display: 'none' }}
-            />
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => fileRef.current?.click()}
-              style={{ width: '100%', fontSize: '13px' }}
-            >
-              {fileName || 'Choose .byoky file'}
-            </button>
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="import-pw">Export password</label>
-            <input
-              id="import-pw"
-              type="password"
-              value={importPassword}
-              onChange={(e) => setImportPassword(e.target.value)}
-              placeholder="Password used during export"
-            />
-          </div>
-
-          <div className="warning-box">
-            <strong>Warning:</strong> Importing will replace all existing
-            credentials in your wallet. This cannot be undone.
-          </div>
-
-          <label
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              marginTop: '12px',
-              fontSize: '12px',
-              color: 'var(--text-secondary)',
-              cursor: 'pointer',
-            }}
+      <form onSubmit={handleImport}>
+        <div className="form-group">
+          <label>Vault file</label>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".byoky"
+            onChange={handleFileSelect}
+            style={{ display: 'none' }}
+          />
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => fileRef.current?.click()}
+            style={{ width: '100%', fontSize: '13px' }}
           >
-            <input
-              type="checkbox"
-              checked={confirmed}
-              onChange={(e) => setConfirmed(e.target.checked)}
-            />
-            I understand this will replace my vault
-          </label>
+            {fileName || 'Choose .byoky file'}
+          </button>
+        </div>
 
-          <div className="export-modal-actions">
-            <button type="button" className="btn btn-secondary" onClick={onClose}>
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={importing || !fileData || !importPassword || !confirmed}
-            >
-              {importing ? 'Importing...' : 'Import'}
-            </button>
-          </div>
-        </form>
-      </div>
+        <div className="form-group">
+          <label htmlFor="import-pw">Export password</label>
+          <input
+            id="import-pw"
+            type="password"
+            value={importPassword}
+            onChange={(e) => setImportPassword(e.target.value)}
+            placeholder="Password used during export"
+          />
+        </div>
+
+        <div className="warning-box">
+          <strong>Warning:</strong> Importing will replace all existing
+          credentials in your wallet. This cannot be undone.
+        </div>
+
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            marginTop: '12px',
+            fontSize: '12px',
+            color: 'var(--text-secondary)',
+            cursor: 'pointer',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={confirmed}
+            onChange={(e) => setConfirmed(e.target.checked)}
+          />
+          I understand this will replace my vault
+        </label>
+
+        <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
+          <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="btn btn-primary"
+            style={{ flex: 1 }}
+            disabled={importing || !fileData || !importPassword || !confirmed}
+          >
+            {importing ? 'Importing...' : 'Import'}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
@@ -386,7 +390,7 @@ function CloudVaultModal({ onClose }: { onClose: () => void }) {
   const [step, setStep] = useState<'warning' | 'auth'>('warning');
   const [understood, setUnderstood] = useState(false);
   const [isSignup, setIsSignup] = useState(true);
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
   const strength = checkPasswordStrength(password);
@@ -395,11 +399,11 @@ function CloudVaultModal({ onClose }: { onClose: () => void }) {
     e.preventDefault();
     clearError();
 
-    if (!email || !password) return;
+    if (!username || !password) return;
     if (isSignup && password.length < MIN_PASSWORD_LENGTH) return;
     if (isSignup && strength.score < 2) return;
 
-    await enableCloudVault(email, password, isSignup);
+    await enableCloudVault(username, password, isSignup);
     if (!useWalletStore.getState().error) {
       onClose();
     }
@@ -487,13 +491,14 @@ function CloudVaultModal({ onClose }: { onClose: () => void }) {
 
           <form onSubmit={handleSubmit}>
             <div className="form-group">
-              <label htmlFor="vault-email">Email</label>
+              <label htmlFor="vault-username">Username</label>
               <input
-                id="vault-email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
+                id="vault-username"
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="Choose a username"
+                autoComplete="username"
                 autoFocus
               />
             </div>
@@ -520,7 +525,7 @@ function CloudVaultModal({ onClose }: { onClose: () => void }) {
                 style={{ flex: 1 }}
                 disabled={
                   loading ||
-                  !email ||
+                  !username ||
                   !password ||
                   (isSignup && (password.length < MIN_PASSWORD_LENGTH || strength.score < 2))
                 }
@@ -536,7 +541,7 @@ function CloudVaultModal({ onClose }: { onClose: () => void }) {
 }
 
 function CloudVaultReloginModal({ onClose }: { onClose: () => void }) {
-  const { cloudVaultEmail, reloginCloudVault, loading, error, clearError } = useWalletStore();
+  const { cloudVaultUsername, reloginCloudVault, loading, error, clearError } = useWalletStore();
   const [password, setPassword] = useState('');
 
   async function handleSubmit(e: FormEvent) {
@@ -560,11 +565,11 @@ function CloudVaultReloginModal({ onClose }: { onClose: () => void }) {
 
       <form onSubmit={handleSubmit}>
         <div className="form-group">
-          <label htmlFor="relogin-email">Email</label>
+          <label htmlFor="relogin-username">Username</label>
           <input
-            id="relogin-email"
-            type="email"
-            value={cloudVaultEmail ?? ''}
+            id="relogin-username"
+            type="text"
+            value={cloudVaultUsername ?? ''}
             disabled
           />
         </div>
