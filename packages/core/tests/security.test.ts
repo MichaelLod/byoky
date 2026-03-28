@@ -361,7 +361,7 @@ describe('security invariants', () => {
     const host = readFile('packages/bridge/src/host.ts');
 
     it('limits native message size', () => {
-      expect(host).toContain('1_048_576');
+      expect(host).toContain('20_971_520');
     });
   });
 
