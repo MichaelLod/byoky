@@ -78,7 +78,9 @@ export function SessionInfo({ session }: Props) {
         <div className="session-card">
           <div className="session-card-label">Providers</div>
           <div className="session-card-value">
-            {providers.length > 0 ? providers.join(', ') : 'None'}
+            {providers.length > 0
+              ? providers.map((id) => session.providers[id]?.gift ? `${id} (gift)` : id).join(', ')
+              : 'None'}
           </div>
         </div>
         <div className="session-card">

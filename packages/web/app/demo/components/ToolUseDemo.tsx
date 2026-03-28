@@ -251,7 +251,7 @@ export function ToolUseDemo({ session }: Props) {
           >
             {supportedProviders.map((id) => (
               <option key={id} value={id}>
-                {id === 'anthropic' ? 'Anthropic (Claude)' : `${openaiCompatible[id]?.name ?? id}`}
+                {id === 'anthropic' ? 'Anthropic (Claude)' : `${openaiCompatible[id]?.name ?? id}`}{session.providers[id]?.gift ? ' (Gift)' : ''}
               </option>
             ))}
           </select>
