@@ -15,15 +15,23 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.byoky.app.data.WalletStore
 import com.byoky.app.ui.theme.*
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(wallet: WalletStore) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val cloudVaultEnabled by wallet.cloudVaultEnabled.collectAsState()
+    val cloudVaultEmail by wallet.cloudVaultEmail.collectAsState()
+    val cloudVaultTokenExpired by wallet.cloudVaultTokenExpired.collectAsState()
+    var showCloudVaultSetup by remember { mutableStateOf(false) }
+    var showCloudVaultRelogin by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -61,6 +69,70 @@ fun SettingsScreen(wallet: WalletStore) {
                         color = TextSecondary,
                         fontSize = 14.sp,
                     )
+                }
+            }
+
+            // Cloud Vault
+            Card(
+                colors = CardDefaults.cardColors(containerColor = BgCard),
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Cloud, null, tint = Accent, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(10.dp))
+                            Text("Cloud Vault", fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                        }
+                        Switch(
+                            checked = cloudVaultEnabled,
+                            onCheckedChange = { enabled ->
+                                if (enabled) {
+                                    showCloudVaultSetup = true
+                                } else {
+                                    scope.launch { wallet.disableCloudVault() }
+                                }
+                            },
+                            colors = SwitchDefaults.colors(checkedTrackColor = Accent),
+                        )
+                    }
+
+                    if (cloudVaultEnabled) {
+                        cloudVaultEmail?.let { email ->
+                            Spacer(Modifier.height(8.dp))
+                            Text("Synced as $email", color = TextMuted, fontSize = 12.sp)
+                        }
+                        if (cloudVaultTokenExpired) {
+                            Spacer(Modifier.height(8.dp))
+                            Surface(
+                                onClick = { showCloudVaultRelogin = true },
+                                color = BgCard,
+                                shape = RoundedCornerShape(8.dp),
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Icon(Icons.Default.Warning, null, tint = Warning, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Session expired — tap to re-login", color = Warning, fontSize = 13.sp)
+                                }
+                            }
+                        }
+                    } else {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Websites can use your keys even when this device is offline.",
+                            color = TextSecondary,
+                            fontSize = 14.sp,
+                        )
+                    }
                 }
             }
 
@@ -162,6 +234,197 @@ fun SettingsScreen(wallet: WalletStore) {
             }
         }
     }
+
+    if (showCloudVaultSetup) {
+        CloudVaultSetupDialog(
+            wallet = wallet,
+            onDismiss = { showCloudVaultSetup = false },
+        )
+    }
+
+    if (showCloudVaultRelogin) {
+        CloudVaultReloginDialog(
+            wallet = wallet,
+            onDismiss = { showCloudVaultRelogin = false },
+        )
+    }
+}
+
+@Composable
+private fun CloudVaultSetupDialog(wallet: WalletStore, onDismiss: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    var step by remember { mutableStateOf("warning") } // "warning" or "auth"
+    var understood by remember { mutableStateOf(false) }
+    var isSignup by remember { mutableStateOf(true) }
+    var email by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = { if (!loading) onDismiss() },
+        containerColor = BgCard,
+        title = {
+            Text(
+                when (step) {
+                    "warning" -> "Your keys will leave this device"
+                    else -> if (isSignup) "Create Vault Account" else "Login to Vault"
+                },
+                color = TextPrimary,
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (step == "warning") {
+                    Text(
+                        "When Cloud Vault is enabled, your API keys are sent to vault.byoky.com over an encrypted connection and stored with AES-256-GCM encryption using a key derived from your vault password.",
+                        color = TextSecondary,
+                        fontSize = 14.sp,
+                    )
+                    Text(
+                        "This means websites can use your credentials even when this device is offline — but your keys will be stored on a remote server.",
+                        color = TextSecondary,
+                        fontSize = 14.sp,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = understood,
+                            onCheckedChange = { understood = it },
+                            colors = CheckboxDefaults.colors(checkedColor = Accent),
+                        )
+                        Text(
+                            "I understand my keys will be stored on a remote server",
+                            color = TextSecondary,
+                            fontSize = 13.sp,
+                        )
+                    }
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = isSignup,
+                            onClick = { isSignup = true; error = null },
+                            label = { Text("Sign Up") },
+                        )
+                        FilterChip(
+                            selected = !isSignup,
+                            onClick = { isSignup = false; error = null },
+                            label = { Text("Login") },
+                        )
+                    }
+                    error?.let {
+                        Text(it, color = Warning, fontSize = 13.sp)
+                    }
+                    OutlinedTextField(
+                        value = email,
+                        onValueChange = { email = it },
+                        label = { Text("Email") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        label = { Text("Password") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            if (step == "warning") {
+                TextButton(
+                    onClick = { step = "auth" },
+                    enabled = understood,
+                ) { Text("Continue") }
+            } else {
+                TextButton(
+                    onClick = {
+                        loading = true
+                        error = null
+                        scope.launch {
+                            try {
+                                wallet.enableCloudVault(email, password, isSignup)
+                                onDismiss()
+                            } catch (e: Exception) {
+                                error = e.message
+                            }
+                            loading = false
+                        }
+                    },
+                    enabled = !loading && email.isNotBlank() && password.isNotBlank() &&
+                        (!isSignup || password.length >= 12),
+                ) { Text(if (loading) "Connecting..." else if (isSignup) "Sign Up" else "Login") }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !loading) { Text("Cancel") }
+        },
+    )
+}
+
+@Composable
+private fun CloudVaultReloginDialog(wallet: WalletStore, onDismiss: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    val email by wallet.cloudVaultEmail.collectAsState()
+    var password by remember { mutableStateOf("") }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = { if (!loading) onDismiss() },
+        containerColor = BgCard,
+        title = { Text("Re-login to Cloud Vault", color = TextPrimary) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "Your session has expired. Enter your vault password to reconnect.",
+                    color = TextSecondary,
+                    fontSize = 14.sp,
+                )
+                error?.let {
+                    Text(it, color = Warning, fontSize = 13.sp)
+                }
+                OutlinedTextField(
+                    value = email ?: "",
+                    onValueChange = {},
+                    label = { Text("Email") },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = false,
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("Password") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    loading = true
+                    error = null
+                    scope.launch {
+                        try {
+                            wallet.reloginCloudVault(password)
+                            onDismiss()
+                        } catch (e: Exception) {
+                            error = e.message
+                        }
+                        loading = false
+                    }
+                },
+                enabled = !loading && password.isNotBlank(),
+            ) { Text(if (loading) "Logging in..." else "Login") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !loading) { Text("Cancel") }
+        },
+    )
 }
 
 @Composable

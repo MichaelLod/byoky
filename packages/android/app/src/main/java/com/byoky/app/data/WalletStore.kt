@@ -5,11 +5,19 @@ import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.byoky.app.crypto.CryptoService
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.TimeUnit
 
 enum class WalletStatus { UNINITIALIZED, LOCKED, UNLOCKED }
 
@@ -59,10 +67,31 @@ class WalletStore(context: Context) {
     private val _lockoutEndTime = MutableStateFlow<Long?>(null)
     val lockoutEndTime: StateFlow<Long?> = _lockoutEndTime.asStateFlow()
 
+    private val _cloudVaultEnabled = MutableStateFlow(false)
+    val cloudVaultEnabled: StateFlow<Boolean> = _cloudVaultEnabled.asStateFlow()
+
+    private val _cloudVaultEmail = MutableStateFlow<String?>(null)
+    val cloudVaultEmail: StateFlow<String?> = _cloudVaultEmail.asStateFlow()
+
+    private val _cloudVaultTokenExpired = MutableStateFlow(false)
+    val cloudVaultTokenExpired: StateFlow<Boolean> = _cloudVaultTokenExpired.asStateFlow()
+
     private var masterPassword: String? = null
     private var backgroundTime: Long? = null
+    private var vaultToken: String? = null
+    private var vaultSessionId: String? = null
+    private var vaultTokenIssuedAt: Long = 0
+    private var vaultCredentialMap: MutableMap<String, String> = mutableMapOf()
 
     private val autoLockTimeout = 300_000L // 5 minutes
+
+    private val vaultClient = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
+        .writeTimeout(10, TimeUnit.SECONDS)
+        .build()
+
+    private val vaultScope = CoroutineScope(Dispatchers.IO)
 
     init {
         _status.value = if (prefs.contains("password_hash")) WalletStatus.LOCKED else WalletStatus.UNINITIALIZED
@@ -101,6 +130,8 @@ class WalletStore(context: Context) {
         loadRequestLogs()
         loadGifts()
         loadGiftedCredentials()
+        loadCloudVaultState()
+        vaultScope.launch { syncPendingCredentials() }
         return UnlockResult.Success
     }
 
@@ -180,12 +211,16 @@ class WalletStore(context: Context) {
         prefs.edit().putString("key_${credential.id}", encrypted).apply()
         _credentials.value = _credentials.value + credential
         saveCredentials()
+        val localId = credential.id
+        vaultScope.launch { syncAddToVault(localId, providerId, label, authMethod.name.lowercase(), apiKey) }
     }
 
     fun removeCredential(credential: Credential) {
+        val localId = credential.id
         prefs.edit().remove("key_${credential.id}").apply()
         _credentials.value = _credentials.value.filter { it.id != credential.id }
         saveCredentials()
+        vaultScope.launch { syncRemoveFromVault(localId) }
     }
 
     fun decryptKey(credential: Credential): String {
@@ -289,7 +324,22 @@ class WalletStore(context: Context) {
         editor.remove("requestLogs")
         editor.remove("gifts")
         editor.remove("giftedCredentials")
+        editor.remove("cloudVault_enabled")
+        editor.remove("cloudVault_email")
+        editor.remove("cloudVault_token")
+        editor.remove("cloudVault_sessionId")
+        editor.remove("cloudVault_tokenIssuedAt")
+        editor.remove("cloudVault_tokenExpired")
+        editor.remove("cloudVault_credentialMap")
         editor.apply()
+
+        _cloudVaultEnabled.value = false
+        _cloudVaultEmail.value = null
+        _cloudVaultTokenExpired.value = false
+        vaultToken = null
+        vaultSessionId = null
+        vaultTokenIssuedAt = 0
+        vaultCredentialMap.clear()
 
         // Clear in-memory state
         _credentials.value = emptyList()
@@ -572,5 +622,220 @@ class WalletStore(context: Context) {
             })
         }
         prefs.edit().putString("giftedCredentials", arr.toString()).apply()
+    }
+
+    // MARK: - Cloud Vault
+
+    companion object {
+        private const val VAULT_URL = "https://vault.byoky.com"
+        private val JSON_MEDIA = "application/json".toMediaType()
+        private const val SIX_DAYS_MS = 6L * 24 * 60 * 60 * 1000
+    }
+
+    private fun loadCloudVaultState() {
+        _cloudVaultEnabled.value = prefs.getBoolean("cloudVault_enabled", false)
+        _cloudVaultEmail.value = prefs.getString("cloudVault_email", null)
+        vaultToken = prefs.getString("cloudVault_token", null)
+        vaultSessionId = prefs.getString("cloudVault_sessionId", null)
+        vaultTokenIssuedAt = prefs.getLong("cloudVault_tokenIssuedAt", 0)
+        _cloudVaultTokenExpired.value = prefs.getBoolean("cloudVault_tokenExpired", false)
+
+        val mapJson = prefs.getString("cloudVault_credentialMap", null)
+        vaultCredentialMap = if (mapJson != null) {
+            try {
+                val obj = JSONObject(mapJson)
+                val map = mutableMapOf<String, String>()
+                obj.keys().forEach { key -> map[key] = obj.getString(key) }
+                map
+            } catch (_: Exception) { mutableMapOf() }
+        } else { mutableMapOf() }
+
+        if (_cloudVaultEnabled.value && vaultTokenIssuedAt > 0 &&
+            System.currentTimeMillis() - vaultTokenIssuedAt > SIX_DAYS_MS) {
+            _cloudVaultTokenExpired.value = true
+            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
+        }
+    }
+
+    private fun saveCloudVaultConfig() {
+        prefs.edit()
+            .putBoolean("cloudVault_enabled", _cloudVaultEnabled.value)
+            .putString("cloudVault_email", _cloudVaultEmail.value)
+            .putString("cloudVault_token", vaultToken)
+            .putString("cloudVault_sessionId", vaultSessionId)
+            .putLong("cloudVault_tokenIssuedAt", vaultTokenIssuedAt)
+            .putBoolean("cloudVault_tokenExpired", _cloudVaultTokenExpired.value)
+            .apply()
+        saveVaultCredentialMap()
+    }
+
+    private fun saveVaultCredentialMap() {
+        val obj = JSONObject()
+        vaultCredentialMap.forEach { (k, v) -> obj.put(k, v) }
+        prefs.edit().putString("cloudVault_credentialMap", obj.toString()).apply()
+    }
+
+    private fun vaultRequest(
+        path: String,
+        method: String,
+        body: JSONObject? = null,
+        token: String? = null,
+    ): Triple<Boolean, Int, JSONObject> {
+        return try {
+            val builder = Request.Builder().url("$VAULT_URL$path")
+            token?.let { builder.addHeader("Authorization", "Bearer $it") }
+
+            when (method) {
+                "POST" -> {
+                    val reqBody = (body?.toString() ?: "{}").toRequestBody(JSON_MEDIA)
+                    builder.post(reqBody)
+                }
+                "DELETE" -> builder.delete()
+                else -> builder.get()
+            }
+
+            val response = vaultClient.newCall(builder.build()).execute()
+            val responseBody = response.body?.string() ?: "{}"
+            val json = try { JSONObject(responseBody) } catch (_: Exception) { JSONObject() }
+            Triple(response.isSuccessful, response.code, json)
+        } catch (_: Exception) {
+            Triple(false, 0, JSONObject())
+        }
+    }
+
+    suspend fun enableCloudVault(email: String, password: String, isSignup: Boolean) {
+        val path = if (isSignup) "/auth/signup" else "/auth/login"
+        val body = JSONObject().put("email", email).put("password", password)
+        val (ok, _, data) = vaultRequest(path, "POST", body)
+        if (!ok) {
+            val err = data.optJSONObject("error")
+            throw IllegalStateException(err?.optString("message") ?: if (isSignup) "Signup failed" else "Login failed")
+        }
+        val token = data.getString("token")
+        val sessionId = data.getString("sessionId")
+
+        vaultToken = token
+        vaultSessionId = sessionId
+        vaultTokenIssuedAt = System.currentTimeMillis()
+        _cloudVaultEnabled.value = true
+        _cloudVaultEmail.value = email
+        _cloudVaultTokenExpired.value = false
+        vaultCredentialMap.clear()
+        saveCloudVaultConfig()
+
+        syncAllCredentialsToVault()
+    }
+
+    suspend fun disableCloudVault() {
+        val token = vaultToken
+        if (token != null && !_cloudVaultTokenExpired.value) {
+            try { vaultRequest("/auth/logout", "POST", token = token) } catch (_: Exception) {}
+        }
+
+        _cloudVaultEnabled.value = false
+        _cloudVaultEmail.value = null
+        _cloudVaultTokenExpired.value = false
+        vaultToken = null
+        vaultSessionId = null
+        vaultTokenIssuedAt = 0
+        vaultCredentialMap.clear()
+        prefs.edit()
+            .remove("cloudVault_enabled")
+            .remove("cloudVault_email")
+            .remove("cloudVault_token")
+            .remove("cloudVault_sessionId")
+            .remove("cloudVault_tokenIssuedAt")
+            .remove("cloudVault_tokenExpired")
+            .remove("cloudVault_credentialMap")
+            .apply()
+    }
+
+    suspend fun reloginCloudVault(password: String) {
+        val email = _cloudVaultEmail.value ?: throw IllegalStateException("No vault account configured")
+        val body = JSONObject().put("email", email).put("password", password)
+        val (ok, _, data) = vaultRequest("/auth/login", "POST", body)
+        if (!ok) {
+            val err = data.optJSONObject("error")
+            throw IllegalStateException(err?.optString("message") ?: "Login failed")
+        }
+        vaultToken = data.getString("token")
+        vaultSessionId = data.getString("sessionId")
+        vaultTokenIssuedAt = System.currentTimeMillis()
+        _cloudVaultTokenExpired.value = false
+        saveCloudVaultConfig()
+
+        syncPendingCredentials()
+    }
+
+    private fun syncAddToVault(localId: String, providerId: String, label: String, authMethod: String, plainKey: String) {
+        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
+        val token = vaultToken ?: return
+
+        val body = JSONObject()
+            .put("providerId", providerId)
+            .put("apiKey", plainKey)
+            .put("label", label)
+            .put("authMethod", authMethod)
+        val (ok, status, data) = vaultRequest("/credentials", "POST", body, token)
+
+        if (status == 401) {
+            _cloudVaultTokenExpired.value = true
+            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
+            return
+        }
+        if (ok) {
+            val vaultId = data.optJSONObject("credential")?.optString("id")
+            if (vaultId != null) {
+                vaultCredentialMap[localId] = vaultId
+                saveVaultCredentialMap()
+            }
+        }
+    }
+
+    private fun syncRemoveFromVault(localId: String) {
+        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
+        val token = vaultToken ?: return
+        val vaultId = vaultCredentialMap[localId] ?: return
+
+        val (_, status, _) = vaultRequest("/credentials/$vaultId", "DELETE", token = token)
+
+        if (status == 401) {
+            _cloudVaultTokenExpired.value = true
+            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
+            return
+        }
+        vaultCredentialMap.remove(localId)
+        saveVaultCredentialMap()
+    }
+
+    private fun syncPendingCredentials() {
+        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
+        if (vaultTokenIssuedAt > 0 && System.currentTimeMillis() - vaultTokenIssuedAt > SIX_DAYS_MS) {
+            _cloudVaultTokenExpired.value = true
+            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
+            return
+        }
+        val pw = masterPassword ?: return
+        for (cred in _credentials.value) {
+            if (vaultCredentialMap.containsKey(cred.id)) continue
+            try {
+                val plainKey = CryptoService.decrypt(
+                    prefs.getString("key_${cred.id}", null) ?: continue, pw,
+                )
+                syncAddToVault(cred.id, cred.providerId, cred.label, cred.authMethod.name.lowercase(), plainKey)
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun syncAllCredentialsToVault() {
+        val pw = masterPassword ?: return
+        for (cred in _credentials.value) {
+            try {
+                val plainKey = CryptoService.decrypt(
+                    prefs.getString("key_${cred.id}", null) ?: continue, pw,
+                )
+                syncAddToVault(cred.id, cred.providerId, cred.label, cred.authMethod.name.lowercase(), plainKey)
+            } catch (_: Exception) {}
+        }
     }
 }

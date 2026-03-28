@@ -37,6 +37,10 @@ interface WalletState {
   tokenAllowances: TokenAllowance[];
   gifts: Gift[];
   giftedCredentials: GiftedCredential[];
+  cloudVaultEnabled: boolean;
+  cloudVaultEmail: string | null;
+  cloudVaultTokenExpired: boolean;
+  cloudVaultPendingCount: number;
   currentPage: Page;
   loading: boolean;
   error: string | null;
@@ -60,6 +64,9 @@ interface WalletState {
   revokeGift: (giftId: string) => Promise<void>;
   redeemGift: (giftLinkEncoded: string) => Promise<void>;
   removeGiftedCredential: (id: string) => Promise<void>;
+  enableCloudVault: (email: string, password: string, isSignup: boolean) => Promise<void>;
+  disableCloudVault: () => Promise<void>;
+  reloginCloudVault: (password: string) => Promise<void>;
   resetWallet: () => Promise<void>;
   refreshData: () => Promise<void>;
   clearError: () => void;
@@ -84,6 +91,10 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   tokenAllowances: [],
   gifts: [],
   giftedCredentials: [],
+  cloudVaultEnabled: false,
+  cloudVaultEmail: null,
+  cloudVaultTokenExpired: false,
+  cloudVaultPendingCount: 0,
   currentPage: 'unlock',
   loading: true,
   error: null,
@@ -275,6 +286,36 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     await get().refreshData();
   },
 
+  enableCloudVault: async (email: string, password: string, isSignup: boolean) => {
+    set({ loading: true, error: null });
+    try {
+      const action = isSignup ? 'cloudVaultSignup' : 'cloudVaultLogin';
+      const result = await sendInternal(action, { email, password });
+      if (result.error) throw new Error(result.error as string);
+      await get().refreshData();
+      set({ loading: false });
+    } catch (e) {
+      set({ error: (e as Error).message, loading: false });
+    }
+  },
+
+  disableCloudVault: async () => {
+    await sendInternal('cloudVaultDisable');
+    set({ cloudVaultEnabled: false, cloudVaultEmail: null, cloudVaultTokenExpired: false, cloudVaultPendingCount: 0 });
+  },
+
+  reloginCloudVault: async (password: string) => {
+    set({ loading: true, error: null });
+    try {
+      const result = await sendInternal('cloudVaultRelogin', { password });
+      if (result.error) throw new Error(result.error as string);
+      await get().refreshData();
+      set({ loading: false });
+    } catch (e) {
+      set({ error: (e as Error).message, loading: false });
+    }
+  },
+
   resetWallet: async () => {
     await sendInternal('resetWallet');
     set({
@@ -288,13 +329,17 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       tokenAllowances: [],
       gifts: [],
       giftedCredentials: [],
+      cloudVaultEnabled: false,
+      cloudVaultEmail: null,
+      cloudVaultTokenExpired: false,
+      cloudVaultPendingCount: 0,
       currentPage: 'setup',
       error: null,
     });
   },
 
   refreshData: async () => {
-    const [credResult, sessionResult, logResult, approvalResult, trustedResult, allowanceResult, giftResult, giftedResult] = await Promise.all([
+    const [credResult, sessionResult, logResult, approvalResult, trustedResult, allowanceResult, giftResult, giftedResult, vaultResult] = await Promise.all([
       sendInternal('getCredentials'),
       sendInternal('getSessions'),
       sendInternal('getRequestLog'),
@@ -303,6 +348,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       sendInternal('getAllowances'),
       sendInternal('getGifts'),
       sendInternal('getGiftedCredentials'),
+      sendInternal('cloudVaultStatus'),
     ]);
 
     const metas: CredentialMeta[] = ((credResult.credentials ?? []) as Array<Record<string, unknown>>).map(
@@ -326,6 +372,10 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       tokenAllowances: (allowanceResult.allowances ?? []) as TokenAllowance[],
       gifts: (giftResult.gifts ?? []) as Gift[],
       giftedCredentials: (giftedResult.giftedCredentials ?? []) as GiftedCredential[],
+      cloudVaultEnabled: vaultResult.enabled as boolean ?? false,
+      cloudVaultEmail: vaultResult.email as string ?? null,
+      cloudVaultTokenExpired: vaultResult.tokenExpired as boolean ?? false,
+      cloudVaultPendingCount: vaultResult.pendingCount as number ?? 0,
     });
   },
 
