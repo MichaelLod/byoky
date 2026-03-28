@@ -1848,11 +1848,13 @@ export default defineBackground(() => {
           }
 
           if (data.type === 'relay:response:done' && data.requestId === msg.requestId) {
+            clearActiveTimeout();
             responsePort.postMessage({
               type: 'BYOKY_PROXY_RESPONSE_DONE',
               requestId: msg.requestId,
             });
-            ws.close();
+            // Delay close to allow relay:usage message to arrive from sender
+            setTimeout(() => ws.close(), 2000);
             const fullBody = chunks.join('');
             const model = parseModel(msg.body);
             const usage = parseUsage(msg.providerId, fullBody);
