@@ -26,8 +26,9 @@ fun RedeemGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
     val rawPayload = remember(linkText) {
         val trimmed = linkText.trim()
         when {
-            trimmed.startsWith("byoky://gift/") -> trimmed.removePrefix("byoky://gift/")
+            trimmed.startsWith("https://byoky.com/gift#") -> trimmed.removePrefix("https://byoky.com/gift#")
             trimmed.startsWith("https://byoky.com/gift/") -> trimmed.removePrefix("https://byoky.com/gift/")
+            trimmed.startsWith("byoky://gift/") -> trimmed.removePrefix("byoky://gift/")
             else -> trimmed
         }
     }
@@ -74,7 +75,7 @@ fun RedeemGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
                         linkText = it
                         error = null
                     },
-                    placeholder = { Text("Paste gift link or byoky://gift/...") },
+                    placeholder = { Text("Paste gift link") },
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 120.dp),
