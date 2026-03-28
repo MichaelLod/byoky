@@ -215,10 +215,15 @@ export default defineBackground(() => {
   // Restore session after MV3 service worker restart
   restoreSession();
 
-  // --- Open side panel on icon click (Chrome) ---
+  // --- Open side panel on icon click (Chrome) / sidebar (Firefox) ---
 
   if (typeof chrome !== 'undefined' && chrome.sidePanel) {
     chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  } else if (typeof browser !== 'undefined' && browser.sidebarAction) {
+    // Firefox: no popup is set, so onClicked fires → toggle the sidebar
+    browser.browserAction.onClicked.addListener(() => {
+      browser.sidebarAction.toggle();
+    });
   }
 
   // --- Message handling ---
