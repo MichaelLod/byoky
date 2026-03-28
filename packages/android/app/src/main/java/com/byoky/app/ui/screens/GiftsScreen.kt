@@ -105,7 +105,7 @@ fun GiftsScreen(
                         Text("Received", fontWeight = FontWeight.SemiBold, color = TextPrimary)
                     }
                     items(activeReceived, key = { it.id }) { gc ->
-                        ReceivedGiftCard(gc) { wallet.removeGiftedCredential(gc.id) }
+                        ReceivedGiftCard(gc, wallet = wallet) { wallet.removeGiftedCredential(gc.id) }
                     }
                 }
 
@@ -118,7 +118,7 @@ fun GiftsScreen(
                         SentGiftCard(gift, wallet, dimmed = true)
                     }
                     items(expiredReceived, key = { "recv-${it.id}" }) { gc ->
-                        ReceivedGiftCard(gc, dimmed = true) { wallet.removeGiftedCredential(gc.id) }
+                        ReceivedGiftCard(gc, wallet = wallet, dimmed = true) { wallet.removeGiftedCredential(gc.id) }
                     }
                 }
             }
@@ -265,6 +265,7 @@ private fun SentGiftCard(gift: Gift, wallet: WalletStore, dimmed: Boolean = fals
 @Composable
 private fun ReceivedGiftCard(
     gc: GiftedCredential,
+    wallet: WalletStore,
     dimmed: Boolean = false,
     onRemove: () -> Unit,
 ) {
@@ -272,6 +273,9 @@ private fun ReceivedGiftCard(
     val percent = giftBudgetPercent(gc.usedTokens, gc.maxTokens)
     val expired = isGiftExpired(gc.expiresAt)
     val alpha = if (dimmed) 0.5f else 1f
+    val hasOwnKey = wallet.credentials.collectAsState().value.any { it.providerId == gc.providerId }
+    val prefs = wallet.giftPreferences.collectAsState().value
+    val isPreferred = prefs[gc.providerId] == gc.giftId
 
     Card(
         colors = CardDefaults.cardColors(containerColor = BgCard.copy(alpha = alpha)),
@@ -321,6 +325,28 @@ private fun ReceivedGiftCard(
                 color = if (percent > 80) Warning else Accent,
                 trackColor = BgHover,
             )
+
+            if (hasOwnKey && !expired && !dimmed) {
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "Use instead of own key",
+                        fontSize = 12.sp,
+                        color = TextSecondary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Switch(
+                        checked = isPreferred,
+                        onCheckedChange = { checked ->
+                            wallet.setGiftPreference(gc.providerId, if (checked) gc.giftId else null)
+                        },
+                        colors = SwitchDefaults.colors(checkedTrackColor = Accent),
+                    )
+                }
+            }
 
             Spacer(Modifier.height(10.dp))
             Row(
