@@ -239,17 +239,16 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   },
 
   createGift: async (credentialId, providerId, label, maxTokens, expiresInMs, relayUrl) => {
-    set({ loading: true, error: null });
+    set({ error: null });
     try {
       const result = await sendInternal('createGift', {
         credentialId, providerId, label, maxTokens, expiresInMs, relayUrl,
       });
       if (result.error) throw new Error(result.error as string);
       await get().refreshData();
-      set({ loading: false });
       return result.giftLink as string;
     } catch (e) {
-      set({ error: (e as Error).message, loading: false });
+      set({ error: (e as Error).message });
       return null;
     }
   },
