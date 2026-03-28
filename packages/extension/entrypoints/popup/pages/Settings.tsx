@@ -20,7 +20,9 @@ export function Settings() {
     cloudVaultEnabled, cloudVaultUsername, cloudVaultTokenExpired, cloudVaultPendingCount,
     disableCloudVault,
   } = useWalletStore();
-  const [modal, setModal] = useState<'export' | 'import' | 'cloud-vault' | 'cloud-vault-relogin' | null>(null);
+  const [modal, setModal] = useState<'export' | 'import' | 'cloud-vault' | 'cloud-vault-relogin' | null>(
+    cloudVaultEnabled ? null : 'cloud-vault',
+  );
 
   if (modal === 'export') {
     return <ExportModal onClose={() => setModal(null)} />;

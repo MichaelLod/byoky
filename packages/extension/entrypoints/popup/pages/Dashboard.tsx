@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { useWalletStore } from '../store';
 import { PROVIDERS, isGiftExpired, giftBudgetRemaining, giftBudgetPercent } from '@byoky/core';
 
@@ -19,7 +18,6 @@ function formatExpiry(ms: number): string {
 
 export function Dashboard() {
   const { credentials, giftedCredentials, navigate, lock, removeCredential, cloudVaultEnabled, disableCloudVault } = useWalletStore();
-  const [showVaultWarning, setShowVaultWarning] = useState(false);
   const activeGifts = giftedCredentials.filter((gc) => !isGiftExpired(gc));
 
   return (
@@ -35,7 +33,7 @@ export function Dashboard() {
                 if (cloudVaultEnabled) {
                   disableCloudVault();
                 } else {
-                  setShowVaultWarning(true);
+                  navigate('settings');
                 }
               }}
             />
@@ -58,31 +56,6 @@ export function Dashboard() {
           </button>
         </div>
       </div>
-
-      {showVaultWarning && (
-        <div className="vault-warning-modal">
-          <p style={{ margin: '0 0 12px', fontSize: '13px', color: 'var(--text-secondary)' }}>
-            Enable Cloud Vault to let websites use your credentials even when this device is offline.
-            Your keys will be encrypted and stored on vault.byoky.com.
-          </p>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button
-              className="btn btn-secondary"
-              style={{ flex: 1 }}
-              onClick={() => setShowVaultWarning(false)}
-            >
-              Cancel
-            </button>
-            <button
-              className="btn btn-primary"
-              style={{ flex: 1 }}
-              onClick={() => { setShowVaultWarning(false); navigate('settings'); }}
-            >
-              Set Up
-            </button>
-          </div>
-        </div>
-      )}
 
       {credentials.length === 0 ? (
         <div className="empty-state">
