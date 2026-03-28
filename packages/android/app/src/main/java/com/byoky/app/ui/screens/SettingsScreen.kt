@@ -251,7 +251,7 @@ fun SettingsScreen(wallet: WalletStore) {
 }
 
 @Composable
-private fun CloudVaultSetupDialog(wallet: WalletStore, onDismiss: () -> Unit) {
+fun CloudVaultSetupDialog(wallet: WalletStore, onDismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
     var step by remember { mutableStateOf("warning") } // "warning" or "auth"
     var understood by remember { mutableStateOf(false) }
