@@ -1,8 +1,11 @@
 package com.byoky.app.relay
 
 import android.util.Base64
+import com.byoky.app.data.GiftedCredential
 import com.byoky.app.data.Provider
 import com.byoky.app.data.WalletStore
+import com.byoky.app.data.isGiftExpired
+import com.byoky.app.proxy.ProxyService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -181,6 +184,14 @@ class RelayPairService {
                 put("authMethod", if (credential.authMethod == com.byoky.app.data.AuthMethod.API_KEY) "api_key" else "oauth")
             })
         }
+        for (gc in wallet.giftedCredentials.value) {
+            if (!providers.has(gc.providerId) && !isGiftExpired(gc.expiresAt) && gc.usedTokens < gc.maxTokens) {
+                providers.put(gc.providerId, JSONObject().apply {
+                    put("available", true)
+                    put("authMethod", "api_key")
+                })
+            }
+        }
         sendJSON(JSONObject().apply {
             put("type", "relay:pair:hello")
             put("providers", providers)
@@ -209,7 +220,6 @@ class RelayPairService {
             return
         }
 
-        // Validate URL matches provider
         val providerHost = java.net.URL(provider.baseUrl).host
         val requestHost = try { java.net.URL(urlString).host } catch (_: Exception) { null }
         if (requestHost != providerHost) {
@@ -227,23 +237,44 @@ class RelayPairService {
         scope.launch {
             _requestCount.value++
             try {
-                val credential = wallet.credentials.value.firstOrNull { it.providerId == providerId }
-                if (credential == null) {
+                // Resolve credential: prefer gift if explicitly preferred or no own key
+                val prefs = wallet.giftPreferences.value
+                val giftedCreds = wallet.giftedCredentials.value
+                val ownCred = wallet.credentials.value.firstOrNull { it.providerId == providerId }
+
+                var useGift: GiftedCredential? = null
+                val preferredGiftId = prefs[providerId]
+                if (preferredGiftId != null) {
+                    useGift = giftedCreds.firstOrNull {
+                        it.giftId == preferredGiftId && it.providerId == providerId
+                                && !isGiftExpired(it.expiresAt) && it.usedTokens < it.maxTokens
+                    }
+                }
+                if (useGift == null && ownCred == null) {
+                    useGift = giftedCreds.firstOrNull {
+                        it.providerId == providerId && !isGiftExpired(it.expiresAt) && it.usedTokens < it.maxTokens
+                    }
+                }
+
+                if (useGift != null) {
+                    proxyRelayRequestViaGift(useGift, requestId, providerId, urlString, method, headers, bodyString)
+                    return@launch
+                }
+
+                if (ownCred == null) {
                     sendRelayError(requestId, "NO_CREDENTIAL", "No credential for $providerId")
                     return@launch
                 }
 
-                val apiKey = wallet.decryptKey(credential)
+                val apiKey = wallet.decryptKey(ownCred)
 
                 val filteredHeaders = headers.filterKeys {
                     it.lowercase() !in setOf("host", "authorization", "x-api-key")
                 }.toMutableMap()
 
-                // Apply auth
-                applyAuth(filteredHeaders, providerId, credential.authMethod, apiKey, bodyString)
+                applyAuth(filteredHeaders, providerId, ownCred.authMethod, apiKey, bodyString)
 
-                // Setup tokens require the Claude Code system prompt
-                val finalBody = if (providerId == "anthropic" && credential.authMethod == com.byoky.app.data.AuthMethod.OAUTH && bodyString != null) {
+                val finalBody = if (providerId == "anthropic" && ownCred.authMethod == com.byoky.app.data.AuthMethod.OAUTH && bodyString != null) {
                     try {
                         val parsed = JSONObject(bodyString)
                         val prefix = "You are Claude Code, Anthropic's official CLI for Claude."
@@ -256,9 +287,11 @@ class RelayPairService {
                     bodyString
                 }
 
-                val requestBody = if (finalBody != null && method.uppercase() in setOf("POST", "PUT", "PATCH")) {
+                val injectedBody = injectStreamUsageOptions(providerId, finalBody)
+
+                val requestBody = if (injectedBody != null && method.uppercase() in setOf("POST", "PUT", "PATCH")) {
                     val contentType = filteredHeaders["content-type"] ?: "application/json"
-                    finalBody.toByteArray(Charsets.UTF_8)
+                    injectedBody.toByteArray(Charsets.UTF_8)
                         .toRequestBody(contentType.toMediaTypeOrNull())
                 } else null
 
@@ -274,10 +307,11 @@ class RelayPairService {
 
                 val response = proxyClient.newCall(request).execute()
 
-                // Send response meta
                 val responseHeaders = JSONObject()
                 response.headers.forEach { (name, value) ->
-                    responseHeaders.put(name.lowercase(), value)
+                    if (name.lowercase() !in ProxyService.SENSITIVE_RESPONSE_HEADERS) {
+                        responseHeaders.put(name.lowercase(), value)
+                    }
                 }
 
                 sendJSON(JSONObject().apply {
@@ -288,7 +322,6 @@ class RelayPairService {
                     put("headers", responseHeaders)
                 })
 
-                // Stream response body in chunks
                 val body = response.body
                 val fullResponse = StringBuilder()
                 if (body != null) {
@@ -323,10 +356,9 @@ class RelayPairService {
                     put("requestId", requestId)
                 })
 
-                // Log request
-                val origin = pairedOrigin ?: "relay"
+                val logOrigin = pairedOrigin ?: "relay"
                 wallet.logRequest(
-                    appOrigin = origin,
+                    appOrigin = logOrigin,
                     providerId = providerId,
                     method = method,
                     url = urlString,
@@ -338,6 +370,142 @@ class RelayPairService {
                 sendRelayError(requestId, "PROXY_ERROR", e.message ?: "Unknown error")
             }
         }
+    }
+
+    private fun proxyRelayRequestViaGift(
+        gc: GiftedCredential,
+        requestId: String,
+        providerId: String,
+        url: String,
+        method: String,
+        headers: Map<String, String>,
+        bodyString: String?,
+    ) {
+        val filteredHeaders = headers.filterKeys {
+            it.lowercase() !in setOf("host", "authorization", "x-api-key")
+        }
+
+        val wsReq = Request.Builder().url(gc.relayUrl).build()
+        proxyClient.newWebSocket(wsReq, object : WebSocketListener() {
+            var authenticated = false
+            var reqSent = false
+
+            override fun onOpen(ws: WebSocket, resp: Response) {
+                ws.send(JSONObject().apply {
+                    put("type", "relay:auth")
+                    put("roomId", gc.giftId)
+                    put("authToken", gc.authToken)
+                    put("role", "recipient")
+                }.toString())
+            }
+
+            fun sendReq(ws: WebSocket) {
+                if (reqSent) return
+                reqSent = true
+                ws.send(JSONObject().apply {
+                    put("type", "relay:request")
+                    put("requestId", requestId)
+                    put("providerId", providerId)
+                    put("url", url)
+                    put("method", method)
+                    put("headers", JSONObject(filteredHeaders))
+                    bodyString?.let { put("body", it) }
+                }.toString())
+            }
+
+            override fun onMessage(ws: WebSocket, text: String) {
+                try {
+                    val json = JSONObject(text)
+                    when (json.optString("type")) {
+                        "relay:auth:result" -> {
+                            if (json.optBoolean("success")) {
+                                authenticated = true
+                                if (json.optBoolean("peerOnline", false)) sendReq(ws)
+                            } else {
+                                sendRelayError(requestId, "GIFT_AUTH_FAILED", "Gift auth failed")
+                                ws.close(1000, null)
+                            }
+                        }
+                        "relay:peer:status" -> {
+                            if (json.optBoolean("online") && authenticated && !reqSent) sendReq(ws)
+                        }
+                        "relay:response:meta" -> {
+                            if (json.optString("requestId") == requestId) {
+                                val hdrs = json.optJSONObject("headers")
+                                val filteredHdrs = JSONObject()
+                                hdrs?.keys()?.forEach { k ->
+                                    if (k.lowercase() !in ProxyService.SENSITIVE_RESPONSE_HEADERS) {
+                                        filteredHdrs.put(k.lowercase(), hdrs.getString(k))
+                                    }
+                                }
+                                sendJSON(JSONObject().apply {
+                                    put("type", "relay:response:meta")
+                                    put("requestId", requestId)
+                                    put("status", json.optInt("status"))
+                                    put("statusText", json.optString("statusText", ""))
+                                    put("headers", filteredHdrs)
+                                })
+                            }
+                        }
+                        "relay:response:chunk" -> {
+                            if (json.optString("requestId") == requestId) {
+                                sendJSON(JSONObject().apply {
+                                    put("type", "relay:response:chunk")
+                                    put("requestId", requestId)
+                                    put("chunk", json.optString("chunk", ""))
+                                })
+                            }
+                        }
+                        "relay:response:done" -> {
+                            if (json.optString("requestId") == requestId) {
+                                sendJSON(JSONObject().apply {
+                                    put("type", "relay:response:done")
+                                    put("requestId", requestId)
+                                })
+                                Thread { Thread.sleep(2000); ws.close(1000, null) }.start()
+                            }
+                        }
+                        "relay:response:error" -> {
+                            if (json.optString("requestId") == requestId) {
+                                sendJSON(JSONObject().apply {
+                                    put("type", "relay:response:error")
+                                    put("requestId", requestId)
+                                    put("error", json.optJSONObject("error") ?: JSONObject().apply {
+                                        put("code", "GIFT_ERROR")
+                                        put("message", "Gift relay error")
+                                    })
+                                })
+                                ws.close(1000, null)
+                            }
+                        }
+                        "relay:usage" -> {
+                            if (json.optString("giftId") == gc.giftId) {
+                                wallet?.updateGiftedCredentialUsage(gc.giftId, json.optInt("usedTokens"))
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+
+            override fun onFailure(ws: WebSocket, t: Throwable, resp: Response?) {
+                sendRelayError(requestId, "GIFT_RELAY_ERROR", "Gift relay failed: ${t.message}")
+            }
+        })
+    }
+
+    private fun injectStreamUsageOptions(providerId: String, body: String?): String? {
+        if (body == null || providerId !in STREAM_USAGE_PROVIDERS) return body
+        return try {
+            val parsed = JSONObject(body)
+            if (parsed.optBoolean("stream", false)) {
+                val streamOptions = parsed.optJSONObject("stream_options") ?: JSONObject()
+                if (!streamOptions.optBoolean("include_usage", false)) {
+                    streamOptions.put("include_usage", true)
+                    parsed.put("stream_options", streamOptions)
+                    parsed.toString()
+                } else body
+            } else body
+        } catch (_: Exception) { body }
     }
 
     private fun applyAuth(
@@ -354,7 +522,6 @@ class RelayPairService {
             if (!headers.containsKey("Accept") && !headers.containsKey("accept")) {
                 headers["Accept"] = "application/json"
             }
-            // Merge beta flags
             val oauthBeta = listOf(
                 "claude-code-20250219",
                 "oauth-2025-04-20",
@@ -388,5 +555,9 @@ class RelayPairService {
 
     private fun sendJSON(obj: JSONObject) {
         webSocket?.send(obj.toString())
+    }
+
+    companion object {
+        private val STREAM_USAGE_PROVIDERS = setOf("openai", "azure-openai", "together", "deepseek")
     }
 }
