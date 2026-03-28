@@ -38,18 +38,22 @@ fun WalletScreen(wallet: WalletStore, onNavigateToSettings: () -> Unit = {}) {
             TopAppBar(
                 title = { Text("Wallet") },
                 actions = {
-                    IconButton(onClick = {
+                    TextButton(onClick = {
                         if (cloudVaultEnabled) {
                             scope.launch { wallet.disableCloudVault() }
                         } else {
                             showCloudVaultSetup = true
                         }
                     }) {
-                        Icon(
-                            if (cloudVaultEnabled) Icons.Default.Cloud else Icons.Default.CloudOff,
-                            "Cloud Vault",
-                            tint = if (cloudVaultEnabled) Accent else TextMuted,
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Vault", fontSize = 14.sp, color = if (cloudVaultEnabled) Accent else TextMuted)
+                            Icon(
+                                if (cloudVaultEnabled) Icons.Default.Cloud else Icons.Default.CloudOff,
+                                "Cloud Vault",
+                                tint = if (cloudVaultEnabled) Accent else TextMuted,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
                     }
                     IconButton(onClick = { showAddSheet = true }) {
                         Icon(Icons.Default.AddCircle, "Add credential", tint = Accent)
