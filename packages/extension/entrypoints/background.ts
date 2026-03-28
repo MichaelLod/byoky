@@ -2787,7 +2787,10 @@ export default defineBackground(() => {
 
           await new Promise<void>((resolve) => {
             const nativePort = browser.runtime.connectNative(BRIDGE_HOST);
-            const body = injectStreamUsageOptions(gift.providerId, msg.body);
+            let body = injectStreamUsageOptions(gift.providerId, msg.body);
+            if (gift.providerId === 'anthropic') {
+              body = injectClaudeCodeSystemPrompt(body);
+            }
             nativePort.postMessage({
               type: 'proxy',
               requestId: msg.requestId,
@@ -2862,19 +2865,12 @@ export default defineBackground(() => {
         const giftFetchHeaders = { ...realHeaders };
         if (giftReconstructed.stripContentType) delete giftFetchHeaders['content-type'];
 
-        console.log('[gift-proxy] url:', msg.url, 'headers:', JSON.stringify(giftFetchHeaders), 'body:', typeof giftReconstructed.body === 'string' ? giftReconstructed.body.slice(0, 500) : giftReconstructed.body);
-
         const response = await fetch(msg.url, {
           method: msg.method,
           headers: giftFetchHeaders,
           body: giftReconstructed.body,
           signal: controller.signal,
         });
-
-        if (!response.ok) {
-          const errText = await response.clone().text().catch(() => '');
-          console.log('[gift-proxy] error response:', response.status, errText.slice(0, 500));
-        }
 
         const respHeaders: Record<string, string> = {};
         response.headers.forEach((v, k) => { respHeaders[k] = v; });

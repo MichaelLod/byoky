@@ -233,7 +233,15 @@ export function CreateGift() {
             </span>
           </div>
 
-          {!cloudVaultEnabled && (
+          {selectedCred?.authMethod === 'oauth' && (
+            <div className="warning-box">
+              <strong>Bridge required.</strong> This credential is a setup token.
+              The Byoky Bridge must be installed and your browser must stay
+              open for gift recipients to use this gift.
+            </div>
+          )}
+
+          {!cloudVaultEnabled && selectedCred?.authMethod !== 'oauth' && (
             <div className="warning-box">
               <strong>Device must stay online.</strong> Since Cloud Vault is off,
               gift recipients can only use this gift while your browser is running
