@@ -134,6 +134,7 @@ export default defineBackground(() => {
       if (data._mp) {
         masterPassword = data._mp as string;
         resetIdleTimer();
+        await migrateGiftTokens(data._mp as string);
         reconnectGiftRelays();
       }
     } catch {}
@@ -871,6 +872,7 @@ export default defineBackground(() => {
           persistSession();
           resetIdleTimer();
           processPendingAfterUnlock();
+          await migrateGiftTokens(password);
           reconnectGiftRelays();
         } else {
           unlockFailures++;
@@ -1196,12 +1198,11 @@ export default defineBackground(() => {
           active: true,
           relayUrl,
         };
-        // Encrypt authToken before persisting to storage
-        const encryptedAuthToken = await encrypt(authToken, masterPassword!);
-        const storageGift = { ...gift, authToken: encryptedAuthToken };
+        // authToken is stored in plaintext — it's already shared via the gift link URL,
+        // so encrypting it adds no security. The API key itself remains encrypted.
         const data = await browser.storage.local.get('gifts');
         const gifts = (data.gifts ?? []) as Gift[];
-        gifts.push(storageGift);
+        gifts.push(gift);
         await browser.storage.local.set({ gifts });
         const { encoded } = createGiftLink(gift);
         connectGiftRelay(gift);
@@ -1569,6 +1570,7 @@ export default defineBackground(() => {
       setPhaseTimeout(30_000, 'GIFT_TIMEOUT', 'Gift relay connection timed out', 504);
 
       ws.onopen = () => {
+        console.log(`[gift-relay] recipient auth for ${sp.giftId?.slice(0, 8)}, token prefix: ${sp.giftAuthToken?.slice(0, 8)}`);
         ws.send(JSON.stringify({
           type: 'relay:auth',
           roomId: sp.giftId,
@@ -1609,7 +1611,7 @@ export default defineBackground(() => {
                 type: 'BYOKY_PROXY_RESPONSE_ERROR',
                 requestId: msg.requestId,
                 status: 403,
-                error: { code: 'GIFT_AUTH_FAILED', message: 'Gift authentication failed' },
+                error: { code: 'GIFT_AUTH_FAILED', message: `Gift authentication failed: ${data.error ?? 'unknown'}` },
               });
               return;
             }
@@ -2425,10 +2427,13 @@ export default defineBackground(() => {
           if (raw.length > 10_485_760) return;
           const msg = JSON.parse(raw);
 
-          if (msg.type === 'relay:auth:result' && !msg.success) {
-            ws.close();
-            giftRelayConnections.delete(gift.id);
-            return;
+          if (msg.type === 'relay:auth:result') {
+            console.log(`[gift-relay] sender auth for ${gift.id.slice(0, 8)}: ${msg.success ? 'ok' : msg.error}, token prefix: ${gift.authToken.slice(0, 8)}`);
+            if (!msg.success) {
+              ws.close();
+              giftRelayConnections.delete(gift.id);
+              return;
+            }
           }
 
           // Proxy request from recipient
@@ -2446,7 +2451,7 @@ export default defineBackground(() => {
         // Reconnect if gift is still active and wallet is unlocked
         setTimeout(async () => {
           if (!masterPassword) return;
-          const gifts = await decryptGiftsFromStorage(masterPassword);
+          const gifts = await getGiftsFromStorage();
           const current = gifts.find((g) => g.id === gift.id);
           if (current?.active && current.expiresAt > Date.now()) {
             connectGiftRelay(current);
@@ -2479,23 +2484,30 @@ export default defineBackground(() => {
     }
   }
 
-  async function decryptGiftsFromStorage(password: string): Promise<Gift[]> {
+  async function getGiftsFromStorage(): Promise<Gift[]> {
     const data = await browser.storage.local.get('gifts');
-    const stored = (data.gifts ?? []) as Gift[];
-    const result: Gift[] = [];
-    for (const gift of stored) {
-      if (!gift.active || gift.expiresAt <= Date.now()) {
-        result.push(gift);
-        continue;
-      }
-      try {
-        const decryptedToken = await decrypt(gift.authToken, password);
-        result.push({ ...gift, authToken: decryptedToken });
-      } catch {
-        result.push(gift);
+    return (data.gifts ?? []) as Gift[];
+  }
+
+  // Migrate old encrypted authTokens to plaintext
+  async function migrateGiftTokens(password: string) {
+    const data = await browser.storage.local.get('gifts');
+    const gifts = (data.gifts ?? []) as Gift[];
+    let changed = false;
+    for (const gift of gifts) {
+      // Old tokens are base64 (encrypted), new ones start with gft_
+      if (gift.authToken && !gift.authToken.startsWith('gft_')) {
+        try {
+          gift.authToken = await decrypt(gift.authToken, password);
+          changed = true;
+        } catch {
+          // Can't decrypt — leave as-is
+        }
       }
     }
-    return result;
+    if (changed) {
+      await browser.storage.local.set({ gifts });
+    }
   }
 
   async function handleGiftProxyRequest(
@@ -2647,7 +2659,7 @@ export default defineBackground(() => {
 
   async function reconnectGiftRelays() {
     if (!masterPassword) return;
-    const gifts = await decryptGiftsFromStorage(masterPassword);
+    const gifts = await getGiftsFromStorage();
     for (const gift of gifts) {
       if (gift.active && gift.expiresAt > Date.now()) {
         connectGiftRelay(gift);

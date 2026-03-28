@@ -96,8 +96,20 @@ wss.on("connection", (ws) => {
         expected.copy(a);
         provided.copy(b);
         if (!timingSafeEqual(a, b) || expected.length !== provided.length) {
-          send(ws, { type: "relay:auth:result", success: false, error: "auth token mismatch" });
-          return;
+          // If the room has no active connections, it's stale — delete it
+          // so the next connection can create a fresh room with the correct token
+          const senderDead = !room.sender || room.sender.readyState !== WebSocket.OPEN;
+          const recipientDead = !room.recipient || room.recipient.readyState !== WebSocket.OPEN;
+          if (senderDead && recipientDead) {
+            rooms.delete(roomId);
+            console.log(`[auth] deleted stale room ${roomId.slice(0, 8)}... (token mismatch, no active peers)`);
+            // Create fresh room with the new token
+            room = { authToken, lastActivity: Date.now() };
+            rooms.set(roomId, room);
+          } else {
+            send(ws, { type: "relay:auth:result", success: false, error: "auth token mismatch" });
+            return;
+          }
         }
         if (room[role] && room[role]!.readyState === WebSocket.OPEN) {
           send(ws, { type: "relay:auth:result", success: false, error: `${role} already connected` });
