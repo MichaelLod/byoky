@@ -228,6 +228,9 @@ export function Chat({ session }: Props) {
 
     try {
       const proxyFetch = session.createFetch(selectedProvider);
+      // Disable streaming when images are present — large base64 payloads can break the bridge
+      const hasImages = !!userMessage.image || prevMessages.some(m => m.image);
+      const useStream = !hasImages;
 
       if (selectedProvider === 'anthropic') {
         type CB = { type: string; text?: string; source?: { type: string; media_type: string; data: string } };
@@ -246,7 +249,7 @@ export function Chat({ session }: Props) {
         const response = await proxyFetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
           headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' },
-          body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1024, stream: true, messages: apiMessages }),
+          body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1024, ...(useStream && { stream: true }), messages: apiMessages }),
         });
 
         if (!response.ok) {
@@ -260,7 +263,7 @@ export function Chat({ session }: Props) {
           throw new Error(errMsg);
         }
 
-        if (response.body) {
+        if (useStream && response.body) {
           for await (const event of parseSSE(response)) {
             const e = event as { type?: string; delta?: { text?: string } };
             if (e.type === 'content_block_delta' && e.delta?.text) appendToken(e.delta.text);
@@ -315,14 +318,14 @@ export function Chat({ session }: Props) {
         const response = await proxyFetch(config.url, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ model: config.model, messages: apiMessages, max_tokens: 1024, stream: true }),
+          body: JSON.stringify({ model: config.model, messages: apiMessages, max_tokens: 1024, ...(useStream && { stream: true }) }),
         });
         if (!response.ok) {
           const err = (await response.json()).error;
           throw new Error(err?.message || `API error: ${response.status}`);
         }
 
-        if (response.body) {
+        if (useStream && response.body) {
           for await (const event of parseSSE(response)) {
             const e = event as { choices?: Array<{ delta?: { content?: string } }> };
             if (e.choices?.[0]?.delta?.content) appendToken(e.choices[0].delta.content);
@@ -338,14 +341,14 @@ export function Chat({ session }: Props) {
         const response = await proxyFetch(config.url, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ model: config.model, messages: allMessages, max_tokens: 1024, stream: true }),
+          body: JSON.stringify({ model: config.model, messages: allMessages, max_tokens: 1024, ...(useStream && { stream: true }) }),
         });
         if (!response.ok) {
           const err = (await response.json()).error;
           throw new Error(err?.message || `API error: ${response.status}`);
         }
 
-        if (response.body) {
+        if (useStream && response.body) {
           for await (const event of parseSSE(response)) {
             const e = event as { choices?: Array<{ delta?: { content?: string } }> };
             if (e.choices?.[0]?.delta?.content) appendToken(e.choices[0].delta.content);
