@@ -182,7 +182,9 @@ export function Chat({ session }: Props) {
   }, [availableProviders, selectedProvider]);
 
   useEffect(() => {
-    scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (messages.length > 0) {
+      scrollRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
   }, [messages]);
 
   function handleAttach() { fileInputRef.current?.click(); }
