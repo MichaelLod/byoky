@@ -1,4 +1,4 @@
-import { useState, useRef, type FormEvent } from 'react';
+import { useState, useRef, useEffect, useCallback, type FormEvent } from 'react';
 import { useWalletStore } from '../store';
 import {
   checkPasswordStrength,
@@ -389,13 +389,42 @@ function ImportModal({ onClose }: { onClose: () => void }) {
 
 function CloudVaultModal({ onClose }: { onClose: () => void }) {
   const { enableCloudVault, loading, error, clearError } = useWalletStore();
-  const [step, setStep] = useState<'warning' | 'auth'>('warning');
-  const [understood, setUnderstood] = useState(false);
   const [isSignup, setIsSignup] = useState(true);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [usernameStatus, setUsernameStatus] = useState<'idle' | 'checking' | 'available' | 'taken' | 'invalid'>('idle');
+  const checkTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const strength = checkPasswordStrength(password);
+
+  const checkUsername = useCallback((value: string) => {
+    clearTimeout(checkTimer.current);
+    const trimmed = value.toLowerCase().trim();
+    if (!trimmed || trimmed.length < 3) {
+      setUsernameStatus('idle');
+      return;
+    }
+    if (!/^[a-z0-9][a-z0-9_-]{1,28}[a-z0-9]$/.test(trimmed)) {
+      setUsernameStatus('invalid');
+      return;
+    }
+    setUsernameStatus('checking');
+    checkTimer.current = setTimeout(async () => {
+      const result = await sendInternal('cloudVaultCheckUsername', { username: trimmed });
+      if (result.available) {
+        setUsernameStatus('available');
+      } else {
+        setUsernameStatus(result.reason === 'invalid' ? 'invalid' : 'taken');
+      }
+    }, 400);
+  }, []);
+
+  useEffect(() => () => clearTimeout(checkTimer.current), []);
+
+  function handleUsernameChange(value: string) {
+    setUsername(value);
+    if (isSignup) checkUsername(value);
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -404,6 +433,7 @@ function CloudVaultModal({ onClose }: { onClose: () => void }) {
     if (!username || !password) return;
     if (isSignup && password.length < MIN_PASSWORD_LENGTH) return;
     if (isSignup && strength.score < 2) return;
+    if (isSignup && usernameStatus === 'taken') return;
 
     await enableCloudVault(username, password, isSignup);
     if (!useWalletStore.getState().error) {
@@ -414,61 +444,15 @@ function CloudVaultModal({ onClose }: { onClose: () => void }) {
   return (
     <div>
       <h2 className="page-title">
-        {step === 'warning' ? 'Cloud Vault' : isSignup ? 'Create Vault Account' : 'Login to Vault'}
+        {isSignup ? 'Create Vault Account' : 'Login to Vault'}
       </h2>
 
-      {step === 'warning' ? (
-        <>
-          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: '0 0 12px' }}>
-            Cloud Vault lets websites use your credentials even when this device
-            is offline. Your keys are sent to vault.byoky.com over an encrypted
-            connection and stored with AES-256-GCM encryption using a key
-            derived from your vault password.
-          </p>
-          <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '0 0 12px' }}>
-            Note: your keys will be stored on a remote server.
-          </p>
-
-          <label
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              fontSize: '12px',
-              color: 'var(--text-secondary)',
-              cursor: 'pointer',
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={understood}
-              onChange={(e) => setUnderstood(e.target.checked)}
-            />
-            I understand my keys will be stored remotely
-          </label>
-
-          <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
-            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={onClose}>
-              Cancel
-            </button>
-            <button
-              className="btn btn-primary"
-              style={{ flex: 1 }}
-              disabled={!understood}
-              onClick={() => setStep('auth')}
-            >
-              Continue
-            </button>
-          </div>
-        </>
-      ) : (
-        <>
           <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
             <button
               type="button"
               className={`btn ${isSignup ? 'btn-primary' : 'btn-secondary'}`}
               style={{ flex: 1, fontSize: '12px' }}
-              onClick={() => { setIsSignup(true); clearError(); }}
+              onClick={() => { setIsSignup(true); setUsernameStatus('idle'); clearError(); }}
             >
               Sign Up
             </button>
@@ -476,7 +460,7 @@ function CloudVaultModal({ onClose }: { onClose: () => void }) {
               type="button"
               className={`btn ${!isSignup ? 'btn-primary' : 'btn-secondary'}`}
               style={{ flex: 1, fontSize: '12px' }}
-              onClick={() => { setIsSignup(false); clearError(); }}
+              onClick={() => { setIsSignup(false); setUsernameStatus('idle'); clearError(); }}
             >
               Login
             </button>
@@ -491,11 +475,26 @@ function CloudVaultModal({ onClose }: { onClose: () => void }) {
                 id="vault-username"
                 type="text"
                 value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                onChange={(e) => handleUsernameChange(e.target.value)}
                 placeholder="Choose a username"
                 autoComplete="username"
                 autoFocus
               />
+              {isSignup && username.length >= 3 && (
+                <p style={{
+                  fontSize: '11px',
+                  margin: '4px 0 0',
+                  color: usernameStatus === 'available' ? 'var(--success, #4caf50)'
+                    : usernameStatus === 'taken' ? 'var(--error, #ef4444)'
+                    : usernameStatus === 'invalid' ? 'var(--error, #ef4444)'
+                    : 'var(--text-muted)',
+                }}>
+                  {usernameStatus === 'checking' && 'Checking availability...'}
+                  {usernameStatus === 'available' && 'Username is available'}
+                  {usernameStatus === 'taken' && 'Username is already taken'}
+                  {usernameStatus === 'invalid' && 'Letters, numbers, hyphens, underscores only (3-30 chars)'}
+                </p>
+              )}
             </div>
 
             <div className="form-group">
@@ -522,15 +521,14 @@ function CloudVaultModal({ onClose }: { onClose: () => void }) {
                   loading ||
                   !username ||
                   !password ||
-                  (isSignup && (password.length < MIN_PASSWORD_LENGTH || strength.score < 2))
+                  (isSignup && (password.length < MIN_PASSWORD_LENGTH || strength.score < 2)) ||
+                  (isSignup && (usernameStatus === 'taken' || usernameStatus === 'invalid'))
                 }
               >
                 {loading ? 'Connecting...' : isSignup ? 'Sign Up' : 'Login'}
               </button>
             </div>
           </form>
-        </>
-      )}
     </div>
   );
 }
