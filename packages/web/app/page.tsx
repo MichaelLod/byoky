@@ -1,4 +1,5 @@
 import { FadeIn } from './components/FadeIn';
+import { AnimatedCounter } from './components/AnimatedCounter';
 
 export default function Home() {
   return (
@@ -32,6 +33,7 @@ function Hero() {
     <section className="hero">
       <div className="hero-glow" aria-hidden />
       <div className="hero-glow-secondary" aria-hidden />
+      <div className="hero-glow-tertiary" aria-hidden />
       <div className="container">
         <FadeIn>
           <div className="hero-badge">
@@ -41,6 +43,9 @@ function Hero() {
         </FadeIn>
         <FadeIn delay={0.1}>
           <div className="hero-mascot">
+            <div className="hero-ripple" aria-hidden />
+            <div className="hero-ripple hero-ripple-2" aria-hidden />
+            <div className="hero-ripple hero-ripple-3" aria-hidden />
             <svg width="96" height="96" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
               <polygon points="40,5 64,3 88,5 64,14" fill="#0ea5e9"/>
               <polygon points="40,5 22,12 44,18" fill="#0284c7"/>
@@ -282,13 +287,13 @@ function ZeroCost() {
           </FadeIn>
           <FadeIn delay={0.2}>
             <div className="zero-cost-card">
-              <span className="zero-cost-stat">15</span>
+              <AnimatedCounter value={15} />
               <span className="zero-cost-label">AI providers supported</span>
             </div>
           </FadeIn>
           <FadeIn delay={0.3}>
             <div className="zero-cost-card">
-              <span className="zero-cost-stat">2</span>
+              <AnimatedCounter value={2} />
               <span className="zero-cost-label">lines to integrate</span>
             </div>
           </FadeIn>
@@ -537,6 +542,26 @@ function Security() {
 /* ─── Providers ────────────────────────────────── */
 
 function Providers() {
+  const row1 = [
+    { name: 'Anthropic', type: 'API Key + Setup Token', cls: 'anthropic', letter: 'A' },
+    { name: 'OpenAI', type: 'API Key', cls: 'openai', letter: 'O' },
+    { name: 'Google Gemini', type: 'API Key + OAuth', cls: 'gemini', letter: 'G' },
+    { name: 'Mistral', type: 'API Key', cls: 'mistral', letter: 'M' },
+    { name: 'xAI (Grok)', type: 'API Key', cls: 'xai', letter: 'X' },
+    { name: 'DeepSeek', type: 'API Key', cls: 'deepseek', letter: 'D' },
+    { name: 'Cohere', type: 'API Key', cls: 'cohere', letter: 'C' },
+    { name: 'Groq', type: 'API Key', cls: 'groq', letter: 'G' },
+  ];
+  const row2 = [
+    { name: 'Perplexity', type: 'API Key', cls: 'perplexity', letter: 'P' },
+    { name: 'Together AI', type: 'API Key', cls: 'together', letter: 'T' },
+    { name: 'Fireworks AI', type: 'API Key', cls: 'fireworks', letter: 'F' },
+    { name: 'OpenRouter', type: 'API Key', cls: 'openrouter', letter: 'O' },
+    { name: 'Hugging Face', type: 'API Key + OAuth', cls: 'huggingface', letter: 'H' },
+    { name: 'Replicate', type: 'API Key', cls: 'replicate', letter: 'R' },
+    { name: 'Azure OpenAI', type: 'API Key', cls: 'azure', letter: 'A' },
+  ];
+
   return (
     <section className="providers-section">
       <div className="container">
@@ -546,116 +571,33 @@ function Providers() {
             15 providers supported. Bring credentials from any of them.
           </p>
         </FadeIn>
-        <FadeIn delay={0.1}>
-          <div className="providers-grid">
-            <div className="provider-card">
-              <div className="provider-logo provider-logo-anthropic">A</div>
-              <div>
-                <div className="provider-name">Anthropic</div>
-                <div className="provider-type">API Key + Setup Token</div>
-              </div>
-            </div>
-            <div className="provider-card">
-              <div className="provider-logo provider-logo-openai">O</div>
-              <div>
-                <div className="provider-name">OpenAI</div>
-                <div className="provider-type">API Key</div>
-              </div>
-            </div>
-            <div className="provider-card">
-              <div className="provider-logo provider-logo-gemini">G</div>
-              <div>
-                <div className="provider-name">Google Gemini</div>
-                <div className="provider-type">API Key + OAuth</div>
-              </div>
-            </div>
-            <div className="provider-card">
-              <div className="provider-logo provider-logo-mistral">M</div>
-              <div>
-                <div className="provider-name">Mistral</div>
-                <div className="provider-type">API Key</div>
-              </div>
-            </div>
-            <div className="provider-card">
-              <div className="provider-logo provider-logo-xai">X</div>
-              <div>
-                <div className="provider-name">xAI (Grok)</div>
-                <div className="provider-type">API Key</div>
-              </div>
-            </div>
-            <div className="provider-card">
-              <div className="provider-logo provider-logo-deepseek">D</div>
-              <div>
-                <div className="provider-name">DeepSeek</div>
-                <div className="provider-type">API Key</div>
-              </div>
-            </div>
-            <div className="provider-card">
-              <div className="provider-logo provider-logo-cohere">C</div>
-              <div>
-                <div className="provider-name">Cohere</div>
-                <div className="provider-type">API Key</div>
-              </div>
-            </div>
-            <div className="provider-card">
-              <div className="provider-logo provider-logo-groq">G</div>
-              <div>
-                <div className="provider-name">Groq</div>
-                <div className="provider-type">API Key</div>
-              </div>
-            </div>
-            <div className="provider-card">
-              <div className="provider-logo provider-logo-perplexity">P</div>
-              <div>
-                <div className="provider-name">Perplexity</div>
-                <div className="provider-type">API Key</div>
-              </div>
-            </div>
-            <div className="provider-card">
-              <div className="provider-logo provider-logo-together">T</div>
-              <div>
-                <div className="provider-name">Together AI</div>
-                <div className="provider-type">API Key</div>
-              </div>
-            </div>
-            <div className="provider-card">
-              <div className="provider-logo provider-logo-fireworks">F</div>
-              <div>
-                <div className="provider-name">Fireworks AI</div>
-                <div className="provider-type">API Key</div>
-              </div>
-            </div>
-            <div className="provider-card">
-              <div className="provider-logo provider-logo-openrouter">O</div>
-              <div>
-                <div className="provider-name">OpenRouter</div>
-                <div className="provider-type">API Key</div>
-              </div>
-            </div>
-            <div className="provider-card">
-              <div className="provider-logo provider-logo-huggingface">H</div>
-              <div>
-                <div className="provider-name">Hugging Face</div>
-                <div className="provider-type">API Key + OAuth</div>
-              </div>
-            </div>
-            <div className="provider-card">
-              <div className="provider-logo provider-logo-replicate">R</div>
-              <div>
-                <div className="provider-name">Replicate</div>
-                <div className="provider-type">API Key</div>
-              </div>
-            </div>
-            <div className="provider-card">
-              <div className="provider-logo provider-logo-azure">A</div>
-              <div>
-                <div className="provider-name">Azure OpenAI</div>
-                <div className="provider-type">API Key</div>
-              </div>
-            </div>
-          </div>
-        </FadeIn>
       </div>
+      <FadeIn delay={0.1}>
+        <div className="providers-marquee">
+          <div className="providers-track">
+            {[...row1, ...row1].map((p, i) => (
+              <div key={i} className="provider-card">
+                <div className={`provider-logo provider-logo-${p.cls}`}>{p.letter}</div>
+                <div>
+                  <div className="provider-name">{p.name}</div>
+                  <div className="provider-type">{p.type}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="providers-track providers-track-reverse">
+            {[...row2, ...row2].map((p, i) => (
+              <div key={i} className="provider-card">
+                <div className={`provider-logo provider-logo-${p.cls}`}>{p.letter}</div>
+                <div>
+                  <div className="provider-name">{p.name}</div>
+                  <div className="provider-type">{p.type}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </FadeIn>
     </section>
   );
 }
