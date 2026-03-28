@@ -17,6 +17,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 enum class WalletStatus { UNINITIALIZED, LOCKED, UNLOCKED }
@@ -81,7 +82,7 @@ class WalletStore(context: Context) {
     private var vaultToken: String? = null
     private var vaultSessionId: String? = null
     private var vaultTokenIssuedAt: Long = 0
-    private var vaultCredentialMap: MutableMap<String, String> = mutableMapOf()
+    private var vaultCredentialMap: ConcurrentHashMap<String, String> = ConcurrentHashMap()
 
     private val autoLockTimeout = 300_000L // 5 minutes
 
@@ -644,11 +645,11 @@ class WalletStore(context: Context) {
         vaultCredentialMap = if (mapJson != null) {
             try {
                 val obj = JSONObject(mapJson)
-                val map = mutableMapOf<String, String>()
+                val map = ConcurrentHashMap<String, String>()
                 obj.keys().forEach { key -> map[key] = obj.getString(key) }
                 map
-            } catch (_: Exception) { mutableMapOf() }
-        } else { mutableMapOf() }
+            } catch (_: Exception) { ConcurrentHashMap() }
+        } else { ConcurrentHashMap() }
 
         if (_cloudVaultEnabled.value && vaultTokenIssuedAt > 0 &&
             System.currentTimeMillis() - vaultTokenIssuedAt > SIX_DAYS_MS) {

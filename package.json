@@ -1,6 +1,6 @@
 {
   "name": "byoky",
-  "version": "0.4.13",
+  "version": "0.4.15",
   "private": true,
   "description": "Bring Your Own Key — Secure wallet for your AI credentials",
   "scripts": {
