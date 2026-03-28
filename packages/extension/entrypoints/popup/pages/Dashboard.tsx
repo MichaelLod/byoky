@@ -62,8 +62,8 @@ export function Dashboard() {
       {showVaultWarning && (
         <div className="vault-warning-modal">
           <p style={{ margin: '0 0 12px', fontSize: '13px', color: 'var(--text-secondary)' }}>
-            <strong style={{ color: 'var(--danger)' }}>Your keys will leave this device.</strong>{' '}
-            They&apos;ll be encrypted and stored on vault.byoky.com so websites can use them even when you&apos;re offline.
+            Enable Cloud Vault to let websites use your credentials even when this device is offline.
+            Your keys will be encrypted and stored on vault.byoky.com.
           </p>
           <div style={{ display: 'flex', gap: '8px' }}>
             <button
