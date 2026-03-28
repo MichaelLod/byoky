@@ -1,8 +1,8 @@
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import { eq, and, lt, desc } from 'drizzle-orm';
+import { eq, and, lt, lte, desc, sql } from 'drizzle-orm';
 import crypto from 'node:crypto';
-import { users, credentials, sessions, requestLog } from './schema.js';
+import { users, credentials, sessions, requestLog, gifts } from './schema.js';
 
 export type Db = ReturnType<typeof drizzle>;
 
@@ -135,4 +135,80 @@ export async function logRequest(
     outputTokens: outputTokens ?? null,
     model: model ?? null,
   });
+}
+
+// --- Gifts ---
+
+export async function createGift(
+  id: string,
+  userId: string,
+  providerId: string,
+  authMethod: string,
+  encryptedApiKey: string,
+  encryptedRelayToken: string,
+  relayUrl: string,
+  maxTokens: number,
+  usedTokens: number,
+  expiresAt: number,
+) {
+  const [row] = await getDb().insert(gifts).values({
+    id, userId, providerId, authMethod, encryptedApiKey, encryptedRelayToken,
+    relayUrl, maxTokens, usedTokens, expiresAt, createdAt: Date.now(), active: true,
+  }).returning();
+  return row;
+}
+
+export async function getGiftsByUser(userId: string) {
+  return getDb().select().from(gifts).where(eq(gifts.userId, userId));
+}
+
+export async function getGiftById(userId: string, giftId: string) {
+  const [row] = await getDb().select().from(gifts)
+    .where(and(eq(gifts.id, giftId), eq(gifts.userId, userId)))
+    .limit(1);
+  return row;
+}
+
+export async function deleteGift(userId: string, giftId: string) {
+  await getDb().delete(gifts)
+    .where(and(eq(gifts.id, giftId), eq(gifts.userId, userId)));
+}
+
+/**
+ * Atomically increment usedTokens by delta.
+ * Only applies if the new total would not exceed maxTokens.
+ * Returns the updated row, or undefined if the update was rejected (over budget).
+ */
+export async function incrementGiftUsage(giftId: string, delta: number) {
+  const [row] = await getDb().update(gifts)
+    .set({ usedTokens: sql`${gifts.usedTokens} + ${delta}` })
+    .where(and(
+      eq(gifts.id, giftId),
+      lte(sql`${gifts.usedTokens} + ${delta}`, gifts.maxTokens),
+    ))
+    .returning({ usedTokens: gifts.usedTokens });
+  return row;
+}
+
+/** Force-set usedTokens (for recording usage even when over budget). */
+export async function forceUpdateGiftUsage(giftId: string, delta: number) {
+  await getDb().update(gifts)
+    .set({ usedTokens: sql`${gifts.usedTokens} + ${delta}` })
+    .where(eq(gifts.id, giftId));
+}
+
+export async function getActiveGifts() {
+  return getDb().select().from(gifts)
+    .where(eq(gifts.active, true));
+}
+
+export async function countActiveGiftsByUser(userId: string): Promise<number> {
+  const [row] = await getDb().select({ count: sql<number>`count(*)::int` })
+    .from(gifts)
+    .where(and(eq(gifts.userId, userId), eq(gifts.active, true)));
+  return row?.count ?? 0;
+}
+
+export async function deleteExpiredGifts() {
+  await getDb().delete(gifts).where(lt(gifts.expiresAt, Date.now()));
 }

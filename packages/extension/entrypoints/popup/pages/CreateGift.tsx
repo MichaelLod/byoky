@@ -235,9 +235,17 @@ export function CreateGift() {
 
           {selectedCred?.authMethod === 'oauth' && (
             <div className="warning-box">
-              <strong>Bridge required.</strong> This credential is a setup token.
-              The Byoky Bridge must be installed and your browser must stay
-              open for gift recipients to use this gift.
+              <strong>Browser and Bridge must stay online.</strong> This credential
+              is a setup token that requires the Byoky Bridge. Gift recipients can
+              only use this gift while your browser is running, the extension is
+              active, and the Bridge is installed — even with Cloud Vault enabled.
+            </div>
+          )}
+
+          {cloudVaultEnabled && selectedCred?.authMethod !== 'oauth' && (
+            <div className="info-box">
+              <strong>Cloud Vault fallback enabled.</strong> When your browser
+              is closed, the vault server will handle gift requests automatically.
             </div>
           )}
 

@@ -1,4 +1,4 @@
-import { pgTable, text, integer, bigint, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, bigint, boolean, index, uniqueIndex } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id: text('id').primaryKey(),
@@ -31,6 +31,23 @@ export const sessions = pgTable('sessions', {
 }, (t) => [
   index('idx_sessions_user').on(t.userId),
   uniqueIndex('idx_sessions_token_hash').on(t.tokenHash),
+]);
+
+export const gifts = pgTable('gifts', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  providerId: text('provider_id').notNull(),
+  authMethod: text('auth_method').notNull(),
+  encryptedApiKey: text('encrypted_api_key').notNull(),
+  encryptedRelayToken: text('encrypted_relay_token').notNull(),
+  relayUrl: text('relay_url').notNull(),
+  maxTokens: integer('max_tokens').notNull(),
+  usedTokens: integer('used_tokens').notNull().default(0),
+  expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  active: boolean('active').notNull().default(true),
+}, (t) => [
+  index('idx_gifts_user').on(t.userId),
 ]);
 
 export const requestLog = pgTable('request_log', {
