@@ -97,6 +97,7 @@ export interface ConnectResponse {
     {
       available: boolean;
       authMethod: AuthMethod;
+      gift?: boolean;
     }
   >;
 }

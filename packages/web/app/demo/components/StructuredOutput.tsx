@@ -150,7 +150,7 @@ export function StructuredOutput({ session }: Props) {
           >
             {supportedProviders.map((id) => (
               <option key={id} value={id}>
-                {id === 'anthropic' ? 'Anthropic (Claude)' : openaiCompat[id]?.name ?? id}
+                {id === 'anthropic' ? 'Anthropic (Claude)' : openaiCompat[id]?.name ?? id}{session.providers[id]?.gift ? ' (Gift)' : ''}
               </option>
             ))}
           </select>
