@@ -204,24 +204,152 @@
   flex-direction: column;
   align-items: center;
   text-align: center;
-  max-width: 460px;
+  max-width: 560px;
   width: 100%;
   margin: 0 auto;
   position: relative;
 }
 
-.demo-app .connect-icon {
-  display: inline-flex;
+/* ── Connect Flow Visual ── */
+
+.demo-app .connect-flow-visual {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  margin-bottom: 36px;
+  padding: 24px 0;
+}
+
+.demo-app .connect-flow-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 72px;
+}
+
+.demo-app .connect-flow-node span {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: -0.01em;
+}
+
+.demo-app .connect-flow-node small {
+  font-size: 9px;
+  color: var(--text-muted);
+  margin-top: -2px;
+}
+
+.demo-app .connect-flow-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  display: flex;
   align-items: center;
   justify-content: center;
-  width: 88px;
-  height: 88px;
-  border-radius: 22px;
-  background: linear-gradient(135deg, rgba(14, 165, 233, 0.1), rgba(14, 165, 233, 0.04));
-  border: 1px solid rgba(14, 165, 233, 0.15);
+  color: var(--text-secondary);
+  transition: all 0.3s;
+}
+
+.demo-app .connect-flow-node-highlight .connect-flow-icon {
+  background: rgba(14, 165, 233, 0.1);
+  border-color: rgba(14, 165, 233, 0.3);
   color: var(--teal);
-  margin-bottom: 28px;
-  box-shadow: 0 0 40px rgba(14, 165, 233, 0.08);
+  box-shadow: 0 0 20px rgba(14, 165, 233, 0.12);
+}
+
+.demo-app .connect-flow-node-highlight span {
+  color: var(--teal-light);
+}
+
+.demo-app .connect-flow-node-highlight small {
+  color: var(--teal);
+}
+
+.demo-app .connect-flow-line {
+  position: relative;
+  width: 48px;
+  height: 2px;
+  background: var(--border);
+  margin-top: 21px;
+  overflow: hidden;
+  border-radius: 1px;
+}
+
+.demo-app .connect-flow-pulse {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 16px;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, var(--teal), transparent);
+  animation: flow-move 2s ease-in-out infinite;
+}
+
+.demo-app .connect-flow-pulse-2 { animation-delay: 0.4s; }
+.demo-app .connect-flow-pulse-3 { animation-delay: 0.8s; }
+
+@keyframes flow-move {
+  0% { left: -16px; opacity: 0; }
+  50% { opacity: 1; }
+  100% { left: 48px; opacity: 0; }
+}
+
+/* ── Connect Capabilities ── */
+
+.demo-app .connect-capabilities {
+  margin-top: 32px;
+  width: 100%;
+}
+
+.demo-app .connect-capabilities h3 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  font-weight: 600;
+}
+
+.demo-app .connect-caps-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  text-align: left;
+}
+
+.demo-app .connect-cap {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.demo-app .connect-cap strong {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.demo-app .connect-cap span {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+/* ── Connect Install Links ── */
+
+.demo-app .connect-install-links {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+  justify-content: center;
 }
 
 .demo-app .connect-card h2 {
@@ -504,6 +632,132 @@
 @keyframes demo-typing {
   0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
   30% { opacity: 1; transform: translateY(-4px); }
+}
+
+/* ── Streaming Cursor ── */
+
+.demo-app .message-streaming .message-content::after {
+  content: '\25CB';
+  display: inline;
+  animation: cursor-blink 0.6s steps(2) infinite;
+  color: var(--teal);
+  margin-left: 2px;
+  font-size: 12px;
+}
+
+@keyframes cursor-blink {
+  0% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* ── Markdown ── */
+
+.demo-app .message-content .md-code-block {
+  position: relative;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  margin: 8px 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--text);
+  white-space: pre;
+}
+
+.demo-app .message-content .md-code-lang {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.demo-app .message-content .md-inline-code {
+  background: rgba(14, 165, 233, 0.1);
+  border: 1px solid rgba(14, 165, 233, 0.12);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  color: var(--teal-light);
+}
+
+.demo-app .message-content .md-list {
+  padding-left: 20px;
+  margin: 6px 0;
+  color: var(--text-secondary);
+}
+
+.demo-app .message-content .md-list li {
+  margin-bottom: 4px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.demo-app .message-content .md-heading {
+  font-weight: 600;
+  margin: 10px 0 4px;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.demo-app .message-content h2.md-heading { font-size: 1.15em; }
+.demo-app .message-content h3.md-heading { font-size: 1.05em; }
+.demo-app .message-content h4.md-heading { font-size: 0.95em; }
+
+.demo-app .message-content p {
+  margin: 0 0 6px;
+}
+
+.demo-app .message-content p:last-child {
+  margin-bottom: 0;
+}
+
+/* ── Chat Suggestions ── */
+
+.demo-app .chat-empty-icon {
+  color: var(--teal);
+  opacity: 0.4;
+  margin-bottom: 16px;
+}
+
+.demo-app .chat-suggestions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 20px;
+  max-width: 480px;
+}
+
+.demo-app .chat-suggestion {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s, background 0.2s;
+  text-align: left;
+}
+
+.demo-app .chat-suggestion:hover {
+  border-color: var(--teal-dark);
+  color: var(--text);
+  background: var(--bg-elevated);
+}
+
+.demo-app .chat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 /* ── Chat Input ── */
@@ -1180,6 +1434,30 @@
 
   .demo-app .connect-card h2 {
     font-size: 22px;
+  }
+
+  .demo-app .connect-flow-visual {
+    gap: 0;
+  }
+
+  .demo-app .connect-flow-line {
+    width: 24px;
+  }
+
+  .demo-app .connect-flow-node {
+    min-width: 56px;
+  }
+
+  .demo-app .connect-caps-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .demo-app .chat-suggestions {
+    grid-template-columns: 1fr;
+  }
+
+  .demo-app .connect-install-links {
+    flex-direction: column;
   }
 
   .demo-app .session-grid {
