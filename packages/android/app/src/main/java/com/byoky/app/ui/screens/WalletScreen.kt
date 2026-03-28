@@ -46,7 +46,7 @@ fun WalletScreen(wallet: WalletStore, onNavigateToSettings: () -> Unit = {}) {
                         }
                     }) {
                         Icon(
-                            Icons.Default.Cloud,
+                            if (cloudVaultEnabled) Icons.Default.Cloud else Icons.Default.CloudOff,
                             "Cloud Vault",
                             tint = if (cloudVaultEnabled) Accent else TextMuted,
                         )
