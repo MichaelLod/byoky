@@ -87,18 +87,45 @@ export function DemoApp() {
         {restoring ? null : !session ? (
           <div className="connect-page">
             <div className="connect-card">
-              <div className="connect-icon">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                  <path d="M9 12l2 2 4-4" />
-                </svg>
+              <div className="connect-flow-visual">
+                <div className="connect-flow-node">
+                  <div className="connect-flow-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4" /></svg>
+                  </div>
+                  <span>Your Keys</span>
+                </div>
+                <div className="connect-flow-line"><span className="connect-flow-pulse" /></div>
+                <div className="connect-flow-node connect-flow-node-highlight">
+                  <div className="connect-flow-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
+                  </div>
+                  <span>Byoky Wallet</span>
+                  <small>encrypted</small>
+                </div>
+                <div className="connect-flow-line"><span className="connect-flow-pulse connect-flow-pulse-2" /></div>
+                <div className="connect-flow-node">
+                  <div className="connect-flow-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><path d="M9 12l2 2 4-4" /></svg>
+                  </div>
+                  <span>Proxy</span>
+                  <small>no keys exposed</small>
+                </div>
+                <div className="connect-flow-line"><span className="connect-flow-pulse connect-flow-pulse-3" /></div>
+                <div className="connect-flow-node">
+                  <div className="connect-flow-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
+                  </div>
+                  <span>AI API</span>
+                </div>
               </div>
+
               <h2>Connect your Byoky wallet</h2>
               <p>
-                This demo app uses the Byoky SDK to chat with AI models using your own
-                API keys. Your keys never leave your device.
+                This demo uses your own API keys to chat with Claude, GPT-4o, Gemini,
+                and 12 more providers. Your keys never leave your device.
               </p>
               <button className="btn btn-primary btn-lg" onClick={handleConnect}>
+                <WalletIcon />
                 Connect Wallet
               </button>
               <div className="connect-features">
@@ -115,14 +142,48 @@ export function DemoApp() {
                   Revoke access anytime from the wallet
                 </div>
               </div>
+              <div className="connect-capabilities">
+                <h3>What you&apos;ll get</h3>
+                <div className="connect-caps-grid">
+                  <div className="connect-cap">
+                    <strong>Streaming Chat</strong>
+                    <span>Multi-provider AI chat with real-time streaming</span>
+                  </div>
+                  <div className="connect-cap">
+                    <strong>Tool Use</strong>
+                    <span>Watch AI call functions in an agentic loop</span>
+                  </div>
+                  <div className="connect-cap">
+                    <strong>Structured Output</strong>
+                    <span>Extract JSON from any text with schema validation</span>
+                  </div>
+                  <div className="connect-cap">
+                    <strong>Backend Relay</strong>
+                    <span>See server-to-browser key proxying in action</span>
+                  </div>
+                </div>
+              </div>
             </div>
             <div className="connect-install">
-              <p>
-                Don&apos;t have Byoky?{' '}
-                <a href="https://byoky.com" target="_blank" rel="noopener noreferrer">
-                  Get the app or extension
+              <p>Don&apos;t have Byoky?</p>
+              <div className="connect-install-links">
+                <a
+                  href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon"
+                  className="btn btn-ghost"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Chrome Extension
                 </a>
-              </p>
+                <a
+                  href="https://addons.mozilla.org/en-US/firefox/addon/byoky/"
+                  className="btn btn-ghost"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Firefox Extension
+                </a>
+              </div>
             </div>
           </div>
         ) : (
