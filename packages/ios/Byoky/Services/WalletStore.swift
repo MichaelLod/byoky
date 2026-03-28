@@ -12,10 +12,11 @@ final class WalletStore: ObservableObject {
     @Published var requestLogs: [RequestLog] = []
     @Published var gifts: [Gift] = []
     @Published var giftedCredentials: [GiftedCredential] = []
+    @Published var tokenAllowances: [TokenAllowance] = []
     @Published var bridgeStatus: BridgeStatus = .inactive
     @Published var lockoutEndTime: Date?
     @Published var cloudVaultEnabled = false
-    @Published var cloudVaultEmail: String?
+    @Published var cloudVaultUsername: String?
     @Published var cloudVaultTokenExpired = false
 
     private let keychain = KeychainService.shared
@@ -29,6 +30,7 @@ final class WalletStore: ObservableObject {
     private let requestLogKey = "requestLog"
     private let giftsKey = "gifts"
     private let giftedCredentialsKey = "giftedCredentials"
+    private let tokenAllowancesKey = "tokenAllowances"
 
     private static let vaultURL = "https://vault.byoky.com"
     private var vaultToken: String?
@@ -130,6 +132,7 @@ final class WalletStore: ObservableObject {
         loadRequestLogs()
         loadGifts()
         loadGiftedCredentials()
+        loadTokenAllowances()
         try migrateCredentials(password: password)
         loadCloudVaultState()
         Task { await syncPendingCredentials() }
@@ -147,6 +150,7 @@ final class WalletStore: ObservableObject {
         requestLogs = []
         gifts = []
         giftedCredentials = []
+        tokenAllowances = []
         status = .locked
         backgroundTime = nil
         AppGroupSync.shared.syncWalletState(isUnlocked: false, providers: [])
@@ -176,6 +180,7 @@ final class WalletStore: ObservableObject {
         try? keychain.delete(key: requestLogKey)
         try? keychain.delete(key: giftsKey)
         try? keychain.delete(key: giftedCredentialsKey)
+        try? keychain.delete(key: tokenAllowancesKey)
         clearCloudVaultState()
 
         // Clear in-memory state
@@ -184,6 +189,7 @@ final class WalletStore: ObservableObject {
         requestLogs = []
         gifts = []
         giftedCredentials = []
+        tokenAllowances = []
         bridgeStatus = .inactive
 
         // Reset brute-force state
@@ -315,6 +321,34 @@ final class WalletStore: ObservableObject {
         try saveSessions()
     }
 
+    // MARK: - Token Allowances
+
+    func setAllowance(_ allowance: TokenAllowance) {
+        if let idx = tokenAllowances.firstIndex(where: { $0.origin == allowance.origin }) {
+            tokenAllowances[idx] = allowance
+        } else {
+            tokenAllowances.append(allowance)
+        }
+        saveTokenAllowances()
+    }
+
+    func removeAllowance(origin: String) {
+        tokenAllowances.removeAll { $0.origin == origin }
+        saveTokenAllowances()
+    }
+
+    func checkAllowance(origin: String, providerId: String) -> AllowanceCheck {
+        let allowance = tokenAllowances.first { $0.origin == origin }
+        let entries = requestLogs.filter { $0.appOrigin == origin && $0.statusCode < 400 }
+        return AllowanceCheck.compute(allowance: allowance, entries: entries, providerId: providerId)
+    }
+
+    func tokenUsage(for origin: String) -> Int {
+        requestLogs
+            .filter { $0.appOrigin == origin && $0.statusCode < 400 }
+            .reduce(0) { $0 + ($1.inputTokens ?? 0) + ($1.outputTokens ?? 0) }
+    }
+
     // MARK: - Persistence
 
     private func loadCredentials() throws {
@@ -395,6 +429,18 @@ final class WalletStore: ObservableObject {
 
     private func saveRequestLogs() {
         try? keychain.saveCodable(key: requestLogKey, value: requestLogs)
+    }
+
+    private func loadTokenAllowances() {
+        do {
+            tokenAllowances = try keychain.loadCodable(key: tokenAllowancesKey, as: [TokenAllowance].self)
+        } catch {
+            tokenAllowances = []
+        }
+    }
+
+    private func saveTokenAllowances() {
+        try? keychain.saveCodable(key: tokenAllowancesKey, value: tokenAllowances)
     }
 
     // MARK: - Gifts (Sender)
@@ -489,7 +535,7 @@ final class WalletStore: ObservableObject {
 
     private func loadCloudVaultState() {
         cloudVaultEnabled = (try? keychain.loadString(key: "cloudVault_enabled")) == "true"
-        cloudVaultEmail = try? keychain.loadString(key: "cloudVault_email")
+        cloudVaultUsername = try? keychain.loadString(key: "cloudVault_username")
         vaultToken = try? keychain.loadString(key: "cloudVault_token")
         vaultSessionId = try? keychain.loadString(key: "cloudVault_sessionId")
         cloudVaultTokenExpired = (try? keychain.loadString(key: "cloudVault_tokenExpired")) == "true"
@@ -512,7 +558,7 @@ final class WalletStore: ObservableObject {
 
     private func saveCloudVaultConfig() {
         try? keychain.saveString(key: "cloudVault_enabled", value: cloudVaultEnabled ? "true" : "false")
-        if let email = cloudVaultEmail { try? keychain.saveString(key: "cloudVault_email", value: email) }
+        if let username = cloudVaultUsername { try? keychain.saveString(key: "cloudVault_username", value: username) }
         if let token = vaultToken { try? keychain.saveString(key: "cloudVault_token", value: token) }
         if let sid = vaultSessionId { try? keychain.saveString(key: "cloudVault_sessionId", value: sid) }
         if let issued = vaultTokenIssuedAt {
@@ -530,13 +576,13 @@ final class WalletStore: ObservableObject {
 
     private func clearCloudVaultState() {
         cloudVaultEnabled = false
-        cloudVaultEmail = nil
+        cloudVaultUsername = nil
         cloudVaultTokenExpired = false
         vaultToken = nil
         vaultSessionId = nil
         vaultTokenIssuedAt = nil
         vaultCredentialMap = [:]
-        for key in ["cloudVault_enabled", "cloudVault_email", "cloudVault_token", "cloudVault_sessionId",
+        for key in ["cloudVault_enabled", "cloudVault_username", "cloudVault_token", "cloudVault_sessionId",
                      "cloudVault_tokenIssuedAt", "cloudVault_tokenExpired", "cloudVault_credentialMap"] {
             try? keychain.delete(key: key)
         }
@@ -560,9 +606,9 @@ final class WalletStore: ObservableObject {
         }
     }
 
-    func enableCloudVault(email: String, password: String, isSignup: Bool) async throws {
+    func enableCloudVault(username: String, password: String, isSignup: Bool) async throws {
         let path = isSignup ? "/auth/signup" : "/auth/login"
-        let result = await vaultRequest(path: path, method: "POST", body: ["email": email, "password": password])
+        let result = await vaultRequest(path: path, method: "POST", body: ["username": username, "password": password])
         if !result.ok {
             let err = result.data["error"] as? [String: Any]
             throw CloudVaultError.authFailed(err?["message"] as? String ?? (isSignup ? "Signup failed" : "Login failed"))
@@ -576,7 +622,7 @@ final class WalletStore: ObservableObject {
         vaultSessionId = sessionId
         vaultTokenIssuedAt = Date()
         cloudVaultEnabled = true
-        cloudVaultEmail = email
+        cloudVaultUsername = username
         cloudVaultTokenExpired = false
         vaultCredentialMap = [:]
         saveCloudVaultConfig()
@@ -592,10 +638,10 @@ final class WalletStore: ObservableObject {
     }
 
     func reloginCloudVault(password: String) async throws {
-        guard let email = cloudVaultEmail else {
+        guard let username = cloudVaultUsername else {
             throw CloudVaultError.authFailed("No vault account configured")
         }
-        let result = await vaultRequest(path: "/auth/login", method: "POST", body: ["email": email, "password": password])
+        let result = await vaultRequest(path: "/auth/login", method: "POST", body: ["username": username, "password": password])
         if !result.ok {
             let err = result.data["error"] as? [String: Any]
             throw CloudVaultError.authFailed(err?["message"] as? String ?? "Login failed")

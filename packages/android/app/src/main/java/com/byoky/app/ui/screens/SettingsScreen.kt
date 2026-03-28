@@ -28,7 +28,7 @@ fun SettingsScreen(wallet: WalletStore) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val cloudVaultEnabled by wallet.cloudVaultEnabled.collectAsState()
-    val cloudVaultEmail by wallet.cloudVaultEmail.collectAsState()
+    val cloudVaultUsername by wallet.cloudVaultUsername.collectAsState()
     val cloudVaultTokenExpired by wallet.cloudVaultTokenExpired.collectAsState()
     var showCloudVaultSetup by remember { mutableStateOf(false) }
     var showCloudVaultRelogin by remember { mutableStateOf(false) }
@@ -102,9 +102,9 @@ fun SettingsScreen(wallet: WalletStore) {
                     }
 
                     if (cloudVaultEnabled) {
-                        cloudVaultEmail?.let { email ->
+                        cloudVaultUsername?.let { username ->
                             Spacer(Modifier.height(8.dp))
-                            Text("Synced as $email", color = TextMuted, fontSize = 12.sp)
+                            Text("Synced as $username", color = TextMuted, fontSize = 12.sp)
                         }
                         if (cloudVaultTokenExpired) {
                             Spacer(Modifier.height(8.dp))
@@ -256,7 +256,7 @@ fun CloudVaultSetupDialog(wallet: WalletStore, onDismiss: () -> Unit) {
     var step by remember { mutableStateOf("warning") } // "warning" or "auth"
     var understood by remember { mutableStateOf(false) }
     var isSignup by remember { mutableStateOf(true) }
-    var email by remember { mutableStateOf("") }
+    var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -315,9 +315,9 @@ fun CloudVaultSetupDialog(wallet: WalletStore, onDismiss: () -> Unit) {
                         Text(it, color = Warning, fontSize = 13.sp)
                     }
                     OutlinedTextField(
-                        value = email,
-                        onValueChange = { email = it },
-                        label = { Text("Email") },
+                        value = username,
+                        onValueChange = { username = it },
+                        label = { Text("Username") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                     )
@@ -345,7 +345,7 @@ fun CloudVaultSetupDialog(wallet: WalletStore, onDismiss: () -> Unit) {
                         error = null
                         scope.launch {
                             try {
-                                wallet.enableCloudVault(email, password, isSignup)
+                                wallet.enableCloudVault(username, password, isSignup)
                                 onDismiss()
                             } catch (e: Exception) {
                                 error = e.message
@@ -353,7 +353,7 @@ fun CloudVaultSetupDialog(wallet: WalletStore, onDismiss: () -> Unit) {
                             loading = false
                         }
                     },
-                    enabled = !loading && email.isNotBlank() && password.isNotBlank() &&
+                    enabled = !loading && username.isNotBlank() && password.isNotBlank() &&
                         (!isSignup || password.length >= 12),
                 ) { Text(if (loading) "Connecting..." else if (isSignup) "Sign Up" else "Login") }
             }
@@ -367,7 +367,7 @@ fun CloudVaultSetupDialog(wallet: WalletStore, onDismiss: () -> Unit) {
 @Composable
 private fun CloudVaultReloginDialog(wallet: WalletStore, onDismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
-    val email by wallet.cloudVaultEmail.collectAsState()
+    val username by wallet.cloudVaultUsername.collectAsState()
     var password by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -387,9 +387,9 @@ private fun CloudVaultReloginDialog(wallet: WalletStore, onDismiss: () -> Unit) 
                     Text(it, color = Warning, fontSize = 13.sp)
                 }
                 OutlinedTextField(
-                    value = email ?: "",
+                    value = username ?: "",
                     onValueChange = {},
-                    label = { Text("Email") },
+                    label = { Text("Username") },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = false,
                 )
