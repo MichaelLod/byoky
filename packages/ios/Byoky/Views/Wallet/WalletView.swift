@@ -35,8 +35,12 @@ struct WalletView: View {
                                 showCloudVaultSetup = true
                             }
                         } label: {
-                            Image(systemName: wallet.cloudVaultEnabled ? "cloud.fill" : "icloud.slash")
-                                .foregroundStyle(wallet.cloudVaultEnabled ? Theme.accent : .secondary)
+                            HStack(spacing: 4) {
+                                Text("Vault")
+                                    .font(.subheadline)
+                                Image(systemName: wallet.cloudVaultEnabled ? "cloud.fill" : "icloud.slash")
+                            }
+                            .foregroundStyle(wallet.cloudVaultEnabled ? Theme.accent : .secondary)
                         }
 
                         Button {

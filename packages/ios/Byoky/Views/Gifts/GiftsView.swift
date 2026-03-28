@@ -254,7 +254,16 @@ struct SentGiftRow: View {
 // MARK: - Received Gift Row
 
 struct ReceivedGiftRow: View {
+    @EnvironmentObject var wallet: WalletStore
     let credential: GiftedCredential
+
+    private var hasOwnKey: Bool {
+        wallet.credentials.contains { $0.providerId == credential.providerId }
+    }
+
+    private var isPreferred: Bool {
+        wallet.giftPreferences[credential.providerId] == credential.giftId
+    }
 
     private var remaining: Int {
         giftedBudgetRemaining(credential)
@@ -303,6 +312,15 @@ struct ReceivedGiftRow: View {
                 Text(expiryText)
                     .font(.caption2)
                     .foregroundStyle(isGiftedCredentialExpired(credential) ? .red : .secondary)
+            }
+
+            if hasOwnKey && !isGiftedCredentialExpired(credential) {
+                Toggle("Use instead of own key", isOn: Binding(
+                    get: { isPreferred },
+                    set: { wallet.setGiftPreference(providerId: credential.providerId, giftId: $0 ? credential.giftId : nil) }
+                ))
+                .font(.caption)
+                .tint(Theme.accent)
             }
         }
         .padding(.vertical, 4)

@@ -12,6 +12,7 @@ final class WalletStore: ObservableObject {
     @Published var requestLogs: [RequestLog] = []
     @Published var gifts: [Gift] = []
     @Published var giftedCredentials: [GiftedCredential] = []
+    @Published var giftPreferences: [String: String] = [:]  // providerId -> giftId
     @Published var tokenAllowances: [TokenAllowance] = []
     @Published var bridgeStatus: BridgeStatus = .inactive
     @Published var lockoutEndTime: Date?
@@ -30,6 +31,7 @@ final class WalletStore: ObservableObject {
     private let requestLogKey = "requestLog"
     private let giftsKey = "gifts"
     private let giftedCredentialsKey = "giftedCredentials"
+    private let giftPreferencesKey = "giftPreferences"
     private let tokenAllowancesKey = "tokenAllowances"
 
     private static let vaultURL = "https://vault.byoky.com"
@@ -132,6 +134,7 @@ final class WalletStore: ObservableObject {
         loadRequestLogs()
         loadGifts()
         loadGiftedCredentials()
+        loadGiftPreferences()
         loadTokenAllowances()
         try migrateCredentials(password: password)
         loadCloudVaultState()
@@ -150,6 +153,7 @@ final class WalletStore: ObservableObject {
         requestLogs = []
         gifts = []
         giftedCredentials = []
+        giftPreferences = [:]
         tokenAllowances = []
         status = .locked
         backgroundTime = nil
@@ -503,8 +507,23 @@ final class WalletStore: ObservableObject {
     }
 
     func removeGiftedCredential(id: String) {
+        if let gc = giftedCredentials.first(where: { $0.id == id }) {
+            if giftPreferences[gc.providerId] == gc.giftId {
+                giftPreferences.removeValue(forKey: gc.providerId)
+                saveGiftPreferences()
+            }
+        }
         giftedCredentials.removeAll { $0.id == id }
         saveGiftedCredentials()
+    }
+
+    func setGiftPreference(providerId: String, giftId: String?) {
+        if let giftId {
+            giftPreferences[providerId] = giftId
+        } else {
+            giftPreferences.removeValue(forKey: providerId)
+        }
+        saveGiftPreferences()
     }
 
     private func loadGifts() {
@@ -529,6 +548,18 @@ final class WalletStore: ObservableObject {
 
     private func saveGiftedCredentials() {
         try? keychain.saveCodable(key: giftedCredentialsKey, value: giftedCredentials)
+    }
+
+    private func loadGiftPreferences() {
+        do {
+            giftPreferences = try keychain.loadCodable(key: giftPreferencesKey, as: [String: String].self)
+        } catch {
+            giftPreferences = [:]
+        }
+    }
+
+    private func saveGiftPreferences() {
+        try? keychain.saveCodable(key: giftPreferencesKey, value: giftPreferences)
     }
 
     // MARK: - Cloud Vault
