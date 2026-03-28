@@ -14,6 +14,9 @@ final class WalletStore: ObservableObject {
     @Published var giftedCredentials: [GiftedCredential] = []
     @Published var bridgeStatus: BridgeStatus = .inactive
     @Published var lockoutEndTime: Date?
+    @Published var cloudVaultEnabled = false
+    @Published var cloudVaultEmail: String?
+    @Published var cloudVaultTokenExpired = false
 
     private let keychain = KeychainService.shared
     private let crypto = CryptoService.shared
@@ -26,6 +29,12 @@ final class WalletStore: ObservableObject {
     private let requestLogKey = "requestLog"
     private let giftsKey = "gifts"
     private let giftedCredentialsKey = "giftedCredentials"
+
+    private static let vaultURL = "https://vault.byoky.com"
+    private var vaultToken: String?
+    private var vaultSessionId: String?
+    private var vaultTokenIssuedAt: Date?
+    private var vaultCredentialMap: [String: String] = [:]
 
     private let autoLockTimeout: TimeInterval = 300
     private var backgroundTime: Date?
@@ -122,6 +131,8 @@ final class WalletStore: ObservableObject {
         loadGifts()
         loadGiftedCredentials()
         try migrateCredentials(password: password)
+        loadCloudVaultState()
+        Task { await syncPendingCredentials() }
 
         AppGroupSync.shared.syncWalletState(
             isUnlocked: true,
@@ -165,6 +176,7 @@ final class WalletStore: ObservableObject {
         try? keychain.delete(key: requestLogKey)
         try? keychain.delete(key: giftsKey)
         try? keychain.delete(key: giftedCredentialsKey)
+        clearCloudVaultState()
 
         // Clear in-memory state
         credentials = []
@@ -240,9 +252,13 @@ final class WalletStore: ObservableObject {
             isUnlocked: true,
             providers: credentials.map(\.providerId)
         )
+
+        let localId = credential.id
+        Task { await syncAddToVault(localId: localId, providerId: providerId, label: label, authMethod: authMethod.rawValue, plainKey: apiKey) }
     }
 
     func removeCredential(_ credential: Credential) throws {
+        let localId = credential.id
         try keychain.delete(key: "key_\(credential.id)")
         credentials.removeAll { $0.id == credential.id }
         try saveCredentials()
@@ -251,6 +267,8 @@ final class WalletStore: ObservableObject {
             isUnlocked: true,
             providers: credentials.map(\.providerId)
         )
+
+        Task { await syncRemoveFromVault(localId: localId) }
     }
 
     func decryptKey(for credential: Credential) throws -> String {
@@ -466,6 +484,191 @@ final class WalletStore: ObservableObject {
     private func saveGiftedCredentials() {
         try? keychain.saveCodable(key: giftedCredentialsKey, value: giftedCredentials)
     }
+
+    // MARK: - Cloud Vault
+
+    private func loadCloudVaultState() {
+        cloudVaultEnabled = (try? keychain.loadString(key: "cloudVault_enabled")) == "true"
+        cloudVaultEmail = try? keychain.loadString(key: "cloudVault_email")
+        vaultToken = try? keychain.loadString(key: "cloudVault_token")
+        vaultSessionId = try? keychain.loadString(key: "cloudVault_sessionId")
+        cloudVaultTokenExpired = (try? keychain.loadString(key: "cloudVault_tokenExpired")) == "true"
+        if let ts = try? keychain.loadString(key: "cloudVault_tokenIssuedAt"), let epoch = Double(ts) {
+            vaultTokenIssuedAt = Date(timeIntervalSince1970: epoch)
+        }
+        if let mapJson = try? keychain.loadString(key: "cloudVault_credentialMap"),
+           let data = mapJson.data(using: .utf8),
+           let map = try? JSONDecoder().decode([String: String].self, from: data) {
+            vaultCredentialMap = map
+        } else {
+            vaultCredentialMap = [:]
+        }
+
+        if cloudVaultEnabled, let issued = vaultTokenIssuedAt, Date().timeIntervalSince(issued) > 6 * 24 * 3600 {
+            cloudVaultTokenExpired = true
+            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
+        }
+    }
+
+    private func saveCloudVaultConfig() {
+        try? keychain.saveString(key: "cloudVault_enabled", value: cloudVaultEnabled ? "true" : "false")
+        if let email = cloudVaultEmail { try? keychain.saveString(key: "cloudVault_email", value: email) }
+        if let token = vaultToken { try? keychain.saveString(key: "cloudVault_token", value: token) }
+        if let sid = vaultSessionId { try? keychain.saveString(key: "cloudVault_sessionId", value: sid) }
+        if let issued = vaultTokenIssuedAt {
+            try? keychain.saveString(key: "cloudVault_tokenIssuedAt", value: String(issued.timeIntervalSince1970))
+        }
+        try? keychain.saveString(key: "cloudVault_tokenExpired", value: cloudVaultTokenExpired ? "true" : "false")
+        saveVaultCredentialMap()
+    }
+
+    private func saveVaultCredentialMap() {
+        if let data = try? JSONEncoder().encode(vaultCredentialMap), let json = String(data: data, encoding: .utf8) {
+            try? keychain.saveString(key: "cloudVault_credentialMap", value: json)
+        }
+    }
+
+    private func clearCloudVaultState() {
+        cloudVaultEnabled = false
+        cloudVaultEmail = nil
+        cloudVaultTokenExpired = false
+        vaultToken = nil
+        vaultSessionId = nil
+        vaultTokenIssuedAt = nil
+        vaultCredentialMap = [:]
+        for key in ["cloudVault_enabled", "cloudVault_email", "cloudVault_token", "cloudVault_sessionId",
+                     "cloudVault_tokenIssuedAt", "cloudVault_tokenExpired", "cloudVault_credentialMap"] {
+            try? keychain.delete(key: key)
+        }
+    }
+
+    private func vaultRequest(path: String, method: String, body: [String: Any]? = nil, token: String? = nil) async -> (ok: Bool, status: Int, data: [String: Any]) {
+        guard let url = URL(string: Self.vaultURL + path) else { return (false, 0, [:]) }
+        var request = URLRequest(url: url, timeoutInterval: 10)
+        request.httpMethod = method
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        if let body { request.httpBody = try? JSONSerialization.data(withJSONObject: body) }
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let json = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+            return (200..<300 ~= status, status, json)
+        } catch {
+            return (false, 0, [:])
+        }
+    }
+
+    func enableCloudVault(email: String, password: String, isSignup: Bool) async throws {
+        let path = isSignup ? "/auth/signup" : "/auth/login"
+        let result = await vaultRequest(path: path, method: "POST", body: ["email": email, "password": password])
+        if !result.ok {
+            let err = result.data["error"] as? [String: Any]
+            throw CloudVaultError.authFailed(err?["message"] as? String ?? (isSignup ? "Signup failed" : "Login failed"))
+        }
+        guard let token = result.data["token"] as? String,
+              let sessionId = result.data["sessionId"] as? String else {
+            throw CloudVaultError.authFailed("Invalid server response")
+        }
+
+        vaultToken = token
+        vaultSessionId = sessionId
+        vaultTokenIssuedAt = Date()
+        cloudVaultEnabled = true
+        cloudVaultEmail = email
+        cloudVaultTokenExpired = false
+        vaultCredentialMap = [:]
+        saveCloudVaultConfig()
+
+        await syncAllCredentialsToVault()
+    }
+
+    func disableCloudVault() async {
+        if let token = vaultToken, !cloudVaultTokenExpired {
+            _ = await vaultRequest(path: "/auth/logout", method: "POST", token: token)
+        }
+        clearCloudVaultState()
+    }
+
+    func reloginCloudVault(password: String) async throws {
+        guard let email = cloudVaultEmail else {
+            throw CloudVaultError.authFailed("No vault account configured")
+        }
+        let result = await vaultRequest(path: "/auth/login", method: "POST", body: ["email": email, "password": password])
+        if !result.ok {
+            let err = result.data["error"] as? [String: Any]
+            throw CloudVaultError.authFailed(err?["message"] as? String ?? "Login failed")
+        }
+        guard let token = result.data["token"] as? String,
+              let sessionId = result.data["sessionId"] as? String else {
+            throw CloudVaultError.authFailed("Invalid server response")
+        }
+
+        vaultToken = token
+        vaultSessionId = sessionId
+        vaultTokenIssuedAt = Date()
+        cloudVaultTokenExpired = false
+        saveCloudVaultConfig()
+
+        await syncPendingCredentials()
+    }
+
+    private func syncAddToVault(localId: String, providerId: String, label: String, authMethod: String, plainKey: String) async {
+        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
+
+        let result = await vaultRequest(path: "/credentials", method: "POST", body: [
+            "providerId": providerId, "apiKey": plainKey, "label": label, "authMethod": authMethod,
+        ], token: token)
+
+        if result.status == 401 {
+            cloudVaultTokenExpired = true
+            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
+            return
+        }
+        if result.ok, let cred = result.data["credential"] as? [String: Any], let vaultId = cred["id"] as? String {
+            vaultCredentialMap[localId] = vaultId
+            saveVaultCredentialMap()
+        }
+    }
+
+    private func syncRemoveFromVault(localId: String) async {
+        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
+        guard let vaultId = vaultCredentialMap[localId] else { return }
+
+        let result = await vaultRequest(path: "/credentials/\(vaultId)", method: "DELETE", token: token)
+
+        if result.status == 401 {
+            cloudVaultTokenExpired = true
+            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
+            return
+        }
+        vaultCredentialMap.removeValue(forKey: localId)
+        saveVaultCredentialMap()
+    }
+
+    private func syncPendingCredentials() async {
+        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
+        if let issued = vaultTokenIssuedAt, Date().timeIntervalSince(issued) > 6 * 24 * 3600 {
+            cloudVaultTokenExpired = true
+            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
+            return
+        }
+        _ = token // suppress unused warning since used via syncAddToVault
+
+        for credential in credentials {
+            guard vaultCredentialMap[credential.id] == nil else { continue }
+            guard let plainKey = try? decryptKey(for: credential) else { continue }
+            await syncAddToVault(localId: credential.id, providerId: credential.providerId, label: credential.label, authMethod: credential.authMethod.rawValue, plainKey: plainKey)
+        }
+    }
+
+    private func syncAllCredentialsToVault() async {
+        for credential in credentials {
+            guard let plainKey = try? decryptKey(for: credential) else { continue }
+            await syncAddToVault(localId: credential.id, providerId: credential.providerId, label: credential.label, authMethod: credential.authMethod.rawValue, plainKey: plainKey)
+        }
+    }
 }
 
 enum WalletError: LocalizedError {
@@ -482,6 +685,16 @@ enum WalletError: LocalizedError {
         case .passwordHashFailed: return "Failed to hash password"
         case .credentialNotFound: return "Credential not found"
         case .lockedOut(let seconds): return "Too many attempts. Try again in \(seconds)s"
+        }
+    }
+}
+
+enum CloudVaultError: LocalizedError {
+    case authFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .authFailed(let message): return message
         }
     }
 }

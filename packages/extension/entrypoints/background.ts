@@ -874,6 +874,7 @@ export default defineBackground(() => {
           processPendingAfterUnlock();
           await migrateGiftTokens(password);
           reconnectGiftRelays();
+          enqueueVaultSync(() => syncPendingCredentials());
         } else {
           unlockFailures++;
           if (unlockFailures >= 5) {
@@ -929,6 +930,7 @@ export default defineBackground(() => {
         creds.push(newCred);
         await browser.storage.local.set({ credentials: creds });
         refreshSessionProviders();
+        fireVaultSync(newCred.id as string, cpId, cLabel, cAuth, cleanValue).catch(() => {});
         return { success: true };
       }
 
@@ -940,6 +942,7 @@ export default defineBackground(() => {
           credentials: rmCreds.filter((c) => c.id !== rmId),
         });
         refreshSessionProviders();
+        fireVaultRemove(rmId).catch(() => {});
         return { success: true };
       }
 
@@ -1133,6 +1136,12 @@ export default defineBackground(() => {
           }),
         );
         await browser.storage.local.set({ credentials: imported });
+        // Re-sync all imported credentials to cloud vault
+        const cvState = await getCloudVaultState();
+        if (cvState.enabled && cvState.token && !cvState.tokenExpired) {
+          await saveCloudVaultState({ credentialMap: {} });
+          enqueueVaultSync(() => syncAllCredentialsToVault(cvState.token!));
+        }
         return { success: true, count: imported.length };
       }
 
@@ -1270,6 +1279,100 @@ export default defineBackground(() => {
           giftedCredentials: giftedCreds.filter((gc) => gc.id !== id),
         });
         refreshSessionProviders();
+        return { success: true };
+      }
+
+      // --- Cloud Vault ---
+
+      case 'cloudVaultSignup': {
+        if (!masterPassword) return { error: 'Wallet is locked' };
+        const { email, password } = message.payload as { email: string; password: string };
+        const result = await vaultFetch('/auth/signup', 'POST', { email, password });
+        if (!result.ok) {
+          const err = result.data.error as Record<string, string> | undefined;
+          return { error: err?.message ?? 'Signup failed' };
+        }
+        const token = result.data.token as string;
+        const sessionId = result.data.sessionId as string;
+        await saveCloudVaultState({
+          enabled: true,
+          email,
+          token,
+          sessionId,
+          tokenIssuedAt: Date.now(),
+          tokenExpired: false,
+          credentialMap: {},
+        });
+        enqueueVaultSync(() => syncAllCredentialsToVault(token));
+        return { success: true };
+      }
+
+      case 'cloudVaultLogin': {
+        if (!masterPassword) return { error: 'Wallet is locked' };
+        const { email, password } = message.payload as { email: string; password: string };
+        const result = await vaultFetch('/auth/login', 'POST', { email, password });
+        if (!result.ok) {
+          const err = result.data.error as Record<string, string> | undefined;
+          return { error: err?.message ?? 'Login failed' };
+        }
+        const token = result.data.token as string;
+        const sessionId = result.data.sessionId as string;
+        await saveCloudVaultState({
+          enabled: true,
+          email,
+          token,
+          sessionId,
+          tokenIssuedAt: Date.now(),
+          tokenExpired: false,
+          credentialMap: {},
+        });
+        enqueueVaultSync(() => syncAllCredentialsToVault(token));
+        return { success: true };
+      }
+
+      case 'cloudVaultDisable': {
+        const state = await getCloudVaultState();
+        if (state.token && !state.tokenExpired) {
+          vaultFetch('/auth/logout', 'POST', undefined, state.token).catch(() => {});
+        }
+        await clearCloudVaultState();
+        return { success: true };
+      }
+
+      case 'cloudVaultStatus': {
+        const state = await getCloudVaultState();
+        let pendingCount = 0;
+        if (state.enabled) {
+          const credentials = await getStoredCredentials();
+          pendingCount = credentials.filter((c) => !state.credentialMap[c.id]).length;
+        }
+        return {
+          enabled: state.enabled,
+          email: state.email,
+          tokenExpired: state.tokenExpired || (state.enabled && state.tokenIssuedAt > 0 && isVaultTokenExpired(state.tokenIssuedAt)),
+          pendingCount,
+        };
+      }
+
+      case 'cloudVaultRelogin': {
+        if (!masterPassword) return { error: 'Wallet is locked' };
+        const { password } = message.payload as { password: string };
+        const state = await getCloudVaultState();
+        if (!state.email) return { error: 'No vault account configured' };
+        const result = await vaultFetch('/auth/login', 'POST', { email: state.email, password });
+        if (!result.ok) {
+          const err = result.data.error as Record<string, string> | undefined;
+          return { error: err?.message ?? 'Login failed' };
+        }
+        const token = result.data.token as string;
+        const sessionId = result.data.sessionId as string;
+        await saveCloudVaultState({
+          token,
+          sessionId,
+          tokenIssuedAt: Date.now(),
+          tokenExpired: false,
+        });
+        enqueueVaultSync(() => syncPendingCredentials());
         return { success: true };
       }
 
@@ -2574,6 +2677,89 @@ export default defineBackground(() => {
         const apiKey = await decryptCredentialKey(credential);
         const realHeaders = buildHeaders(gift.providerId, msg.headers, apiKey, credential.authMethod);
 
+        // OAuth tokens route through Bridge (native messaging) to avoid CORS restrictions
+        if (credential.authMethod === 'oauth') {
+          const bridgeOk = await checkBridgeAvailable();
+          if (!bridgeOk) {
+            ws.send(JSON.stringify({
+              type: 'relay:response:error',
+              requestId: msg.requestId,
+              error: { code: 'BRIDGE_UNAVAILABLE', message: 'Gift sender needs Byoky Bridge installed for OAuth credentials' },
+            }));
+            return;
+          }
+
+          await new Promise<void>((resolve) => {
+            const nativePort = browser.runtime.connectNative(BRIDGE_HOST);
+            const body = credential.authMethod === 'oauth' && gift.providerId === 'anthropic'
+              ? injectClaudeCodeSystemPrompt(msg.body)
+              : injectStreamUsageOptions(gift.providerId, msg.body);
+            nativePort.postMessage({
+              type: 'proxy',
+              requestId: msg.requestId,
+              url: msg.url,
+              method: msg.method,
+              headers: realHeaders,
+              body,
+            });
+
+            const chunks: string[] = [];
+            let responded = false;
+
+            nativePort.onMessage.addListener((raw: unknown) => {
+              const resp = raw as { type: string; requestId: string; status?: number; headers?: Record<string, string>; chunk?: string };
+              if (resp.requestId !== msg.requestId) return;
+
+              if (resp.type === 'proxy_response_meta') {
+                responded = true;
+                ws.send(JSON.stringify({
+                  type: 'relay:response:meta',
+                  requestId: msg.requestId,
+                  status: resp.status,
+                  statusText: resp.status === 200 ? 'OK' : 'Error',
+                  headers: resp.headers ?? {},
+                }));
+              } else if (resp.type === 'proxy_response_chunk') {
+                chunks.push(resp.chunk ?? '');
+                ws.send(JSON.stringify({
+                  type: 'relay:response:chunk',
+                  requestId: msg.requestId,
+                  chunk: resp.chunk,
+                }));
+              } else if (resp.type === 'proxy_response_done') {
+                ws.send(JSON.stringify({
+                  type: 'relay:response:done',
+                  requestId: msg.requestId,
+                }));
+                nativePort.disconnect();
+                updateGiftUsage(gift, gift.providerId, chunks.join(''), ws);
+                resolve();
+              } else if (resp.type === 'proxy_error') {
+                responded = true;
+                ws.send(JSON.stringify({
+                  type: 'relay:response:error',
+                  requestId: msg.requestId,
+                  error: { code: 'BRIDGE_ERROR', message: 'Bridge request failed' },
+                }));
+                nativePort.disconnect();
+                resolve();
+              }
+            });
+
+            nativePort.onDisconnect.addListener(() => {
+              if (!responded) {
+                ws.send(JSON.stringify({
+                  type: 'relay:response:error',
+                  requestId: msg.requestId,
+                  error: { code: 'BRIDGE_ERROR', message: 'Bridge disconnected unexpectedly' },
+                }));
+              }
+              resolve();
+            });
+          });
+          return;
+        }
+
         const controller = new AbortController();
         const requestTimeout = setTimeout(() => controller.abort(), 120_000);
 
@@ -2627,24 +2813,7 @@ export default defineBackground(() => {
           requestId: msg.requestId,
         }));
 
-        // Update usage within the same lock scope
-        const fullBody = chunks.join('');
-        const usage = parseUsage(gift.providerId, fullBody);
-        if (usage) {
-          const totalTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
-          const refreshData = await browser.storage.local.get('gifts');
-          const refreshGifts = (refreshData.gifts ?? []) as Gift[];
-          const gIdx = refreshGifts.findIndex((rg) => rg.id === gift.id);
-          if (gIdx !== -1 && refreshGifts[gIdx].usedTokens + totalTokens <= refreshGifts[gIdx].maxTokens) {
-            refreshGifts[gIdx].usedTokens += totalTokens;
-            await browser.storage.local.set({ gifts: refreshGifts });
-            ws.send(JSON.stringify({
-              type: 'relay:usage',
-              giftId: gift.id,
-              usedTokens: refreshGifts[gIdx].usedTokens,
-            }));
-          }
-        }
+        await updateGiftUsage(gift, gift.providerId, chunks.join(''), ws);
       } catch {
         ws.send(JSON.stringify({
           type: 'relay:response:error',
@@ -2657,6 +2826,25 @@ export default defineBackground(() => {
     await lock;
   }
 
+  async function updateGiftUsage(gift: Gift, providerId: string, fullBody: string, ws: WebSocket) {
+    const usage = parseUsage(providerId, fullBody);
+    if (usage) {
+      const totalTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
+      const refreshData = await browser.storage.local.get('gifts');
+      const refreshGifts = (refreshData.gifts ?? []) as Gift[];
+      const gIdx = refreshGifts.findIndex((rg) => rg.id === gift.id);
+      if (gIdx !== -1 && refreshGifts[gIdx].usedTokens + totalTokens <= refreshGifts[gIdx].maxTokens) {
+        refreshGifts[gIdx].usedTokens += totalTokens;
+        await browser.storage.local.set({ gifts: refreshGifts });
+        ws.send(JSON.stringify({
+          type: 'relay:usage',
+          giftId: gift.id,
+          usedTokens: refreshGifts[gIdx].usedTokens,
+        }));
+      }
+    }
+  }
+
   async function reconnectGiftRelays() {
     if (!masterPassword) return;
     const gifts = await getGiftsFromStorage();
@@ -2665,5 +2853,205 @@ export default defineBackground(() => {
         connectGiftRelay(gift);
       }
     }
+  }
+
+  // --- Cloud Vault sync ---
+
+  const VAULT_URL = 'https://vault.byoky.com';
+  let vaultSyncQueue: Promise<void> = Promise.resolve();
+
+  function enqueueVaultSync<T>(fn: () => Promise<T>): Promise<T> {
+    const result = vaultSyncQueue.then(fn, fn);
+    vaultSyncQueue = result.then(() => {}, () => {});
+    return result;
+  }
+
+  async function vaultFetch(
+    path: string,
+    method: string,
+    body?: Record<string, unknown>,
+    token?: string,
+  ): Promise<{ ok: boolean; status: number; data: Record<string, unknown> }> {
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    if (token) headers['authorization'] = `Bearer ${token}`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const resp = await fetch(`${VAULT_URL}${path}`, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      });
+      const data = await resp.json().catch(() => ({})) as Record<string, unknown>;
+      return { ok: resp.ok, status: resp.status, data };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  async function getCloudVaultState(): Promise<{
+    enabled: boolean;
+    email: string | null;
+    token: string | null;
+    sessionId: string | null;
+    tokenIssuedAt: number;
+    tokenExpired: boolean;
+    credentialMap: Record<string, string>;
+  }> {
+    const data = await browser.storage.local.get([
+      'cloudVault.enabled',
+      'cloudVault.email',
+      'cloudVault.token',
+      'cloudVault.sessionId',
+      'cloudVault.tokenIssuedAt',
+      'cloudVault.tokenExpired',
+      'cloudVault.credentialMap',
+    ]);
+    return {
+      enabled: data['cloudVault.enabled'] as boolean ?? false,
+      email: data['cloudVault.email'] as string ?? null,
+      token: data['cloudVault.token'] as string ?? null,
+      sessionId: data['cloudVault.sessionId'] as string ?? null,
+      tokenIssuedAt: data['cloudVault.tokenIssuedAt'] as number ?? 0,
+      tokenExpired: data['cloudVault.tokenExpired'] as boolean ?? false,
+      credentialMap: (data['cloudVault.credentialMap'] as Record<string, string>) ?? {},
+    };
+  }
+
+  async function saveCloudVaultState(
+    updates: Record<string, unknown>,
+  ): Promise<void> {
+    const storageUpdates: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(updates)) {
+      storageUpdates[`cloudVault.${key}`] = value;
+    }
+    await browser.storage.local.set(storageUpdates);
+  }
+
+  async function clearCloudVaultState(): Promise<void> {
+    await browser.storage.local.remove([
+      'cloudVault.enabled',
+      'cloudVault.email',
+      'cloudVault.token',
+      'cloudVault.sessionId',
+      'cloudVault.tokenIssuedAt',
+      'cloudVault.tokenExpired',
+      'cloudVault.credentialMap',
+    ]);
+  }
+
+  function isVaultTokenExpired(tokenIssuedAt: number): boolean {
+    return Date.now() - tokenIssuedAt > 6 * 24 * 60 * 60 * 1000; // 6 days
+  }
+
+  async function handleVaultAuthError(): Promise<void> {
+    await saveCloudVaultState({ tokenExpired: true });
+  }
+
+  async function syncCredentialToVault(
+    localId: string,
+    providerId: string,
+    label: string,
+    authMethod: string,
+    plainKey: string,
+    token: string,
+  ): Promise<void> {
+    const result = await vaultFetch('/credentials', 'POST', {
+      providerId,
+      apiKey: plainKey,
+      label,
+      authMethod,
+    }, token);
+
+    if (result.status === 401) {
+      await handleVaultAuthError();
+      return;
+    }
+
+    if (result.ok) {
+      const vaultCred = result.data.credential as Record<string, unknown>;
+      const vaultId = vaultCred.id as string;
+      const state = await getCloudVaultState();
+      state.credentialMap[localId] = vaultId;
+      await saveCloudVaultState({ credentialMap: state.credentialMap });
+    }
+  }
+
+  async function syncRemoveFromVault(
+    localId: string,
+    token: string,
+  ): Promise<void> {
+    const state = await getCloudVaultState();
+    const vaultId = state.credentialMap[localId];
+    if (!vaultId) return;
+
+    const result = await vaultFetch(`/credentials/${vaultId}`, 'DELETE', undefined, token);
+
+    if (result.status === 401) {
+      await handleVaultAuthError();
+      return;
+    }
+
+    delete state.credentialMap[localId];
+    await saveCloudVaultState({ credentialMap: state.credentialMap });
+  }
+
+  async function syncPendingCredentials(): Promise<void> {
+    if (!masterPassword) return;
+    const state = await getCloudVaultState();
+    if (!state.enabled || !state.token || state.tokenExpired) return;
+    if (isVaultTokenExpired(state.tokenIssuedAt)) {
+      await handleVaultAuthError();
+      return;
+    }
+
+    const credentials = await getStoredCredentials();
+    for (const cred of credentials) {
+      if (state.credentialMap[cred.id]) continue;
+      try {
+        const plainKey = await decryptCredentialKey(cred);
+        await syncCredentialToVault(
+          cred.id, cred.providerId, cred.label, cred.authMethod, plainKey, state.token,
+        );
+      } catch {
+        // Non-blocking — will retry next time
+      }
+    }
+  }
+
+  async function syncAllCredentialsToVault(token: string): Promise<void> {
+    if (!masterPassword) return;
+    const credentials = await getStoredCredentials();
+    for (const cred of credentials) {
+      try {
+        const plainKey = await decryptCredentialKey(cred);
+        await syncCredentialToVault(
+          cred.id, cred.providerId, cred.label, cred.authMethod, plainKey, token,
+        );
+      } catch {
+        // Non-blocking — pending sync will pick these up
+      }
+    }
+  }
+
+  async function fireVaultSync(localId: string, providerId: string, label: string, authMethod: string, plainKey: string): Promise<void> {
+    const state = await getCloudVaultState();
+    if (!state.enabled || !state.token || state.tokenExpired) return;
+    if (isVaultTokenExpired(state.tokenIssuedAt)) {
+      await handleVaultAuthError();
+      return;
+    }
+    enqueueVaultSync(() => syncCredentialToVault(localId, providerId, label, authMethod, plainKey, state.token!));
+  }
+
+  async function fireVaultRemove(localId: string): Promise<void> {
+    const state = await getCloudVaultState();
+    if (!state.enabled || !state.token || state.tokenExpired) return;
+    if (isVaultTokenExpired(state.tokenIssuedAt)) {
+      await handleVaultAuthError();
+      return;
+    }
+    enqueueVaultSync(() => syncRemoveFromVault(localId, state.token!));
   }
 });

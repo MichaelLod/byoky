@@ -31,7 +31,7 @@ export function ConnectedApps() {
   const {
     sessions, revokeSession, trustedSites, removeTrustedSite,
     requestLog, tokenAllowances, setAllowance, removeAllowance,
-    giftedCredentials,
+    giftedCredentials, cloudVaultEnabled,
   } = useWalletStore();
   const activeGiftProviders = new Set(
     giftedCredentials.filter((gc) => !isGiftExpired(gc) && gc.usedTokens < gc.maxTokens).map((gc) => gc.providerId),
@@ -64,6 +64,14 @@ export function ConnectedApps() {
           </button>
         )}
       </div>
+
+      {sessions.length > 0 && !cloudVaultEnabled && (
+        <div className="warning-box" style={{ marginBottom: '12px' }}>
+          <strong>Device must stay online.</strong> Connected apps can only make
+          requests while your browser is running and this extension is active.
+          Enable Cloud Vault in Settings for offline access.
+        </div>
+      )}
 
       {sessions.length === 0 && trustedSites.length === 0 && (
         <div className="empty-state">
