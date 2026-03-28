@@ -16,15 +16,8 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
   gemini: {
     id: 'gemini',
     name: 'Google Gemini',
-    authMethods: ['api_key', 'oauth'],
+    authMethods: ['api_key'],
     baseUrl: 'https://generativelanguage.googleapis.com',
-    oauthConfig: {
-      clientId: '699663966637-gr4d994198r4g6jvip25ffg85kree6ck.apps.googleusercontent.com',
-      authorizationUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
-      tokenUrl: 'https://oauth2.googleapis.com/token',
-      scopes: ['https://www.googleapis.com/auth/generative-language'],
-      extraAuthParams: { access_type: 'offline', prompt: 'consent' },
-    },
   },
   mistral: {
     id: 'mistral',
@@ -89,14 +82,8 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
   huggingface: {
     id: 'huggingface',
     name: 'Hugging Face',
-    authMethods: ['api_key', 'oauth'],
+    authMethods: ['api_key'],
     baseUrl: 'https://api-inference.huggingface.co',
-    oauthConfig: {
-      clientId: '031aeb11-725b-498a-93f9-d3599d84f57c',
-      authorizationUrl: 'https://huggingface.co/oauth/authorize',
-      tokenUrl: 'https://huggingface.co/oauth/token',
-      scopes: ['inference-api'],
-    },
   },
   azure_openai: {
     id: 'azure_openai',

@@ -94,8 +94,8 @@ struct SettingsView: View {
             .tint(Theme.accent)
 
             if wallet.cloudVaultEnabled {
-                if let email = wallet.cloudVaultEmail {
-                    LabeledContent("Account", value: email)
+                if let username = wallet.cloudVaultUsername {
+                    LabeledContent("Account", value: username)
                         .font(.caption)
                 }
 
@@ -245,7 +245,7 @@ struct CloudVaultSetupView: View {
     @State private var step: SetupStep = .warning
     @State private var understood = false
     @State private var isSignup = true
-    @State private var email = ""
+    @State private var username = ""
     @State private var password = ""
     @State private var loading = false
     @State private var error: String?
@@ -325,10 +325,9 @@ struct CloudVaultSetupView: View {
 
                 VStack(spacing: 16) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Email").font(.caption.weight(.medium))
-                        TextField("you@example.com", text: $email)
-                            .textContentType(.emailAddress)
-                            .keyboardType(.emailAddress)
+                        Text("Username").font(.caption.weight(.medium))
+                        TextField("Choose a username", text: $username)
+                            .textContentType(.username)
                             .autocapitalization(.none)
                             .textFieldStyle(.roundedBorder)
                     }
@@ -353,7 +352,7 @@ struct CloudVaultSetupView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accent)
-                .disabled(loading || email.isEmpty || password.isEmpty || (isSignup && password.count < 12))
+                .disabled(loading || username.isEmpty || password.isEmpty || (isSignup && password.count < 12))
             }
             .padding(24)
         }
@@ -364,7 +363,7 @@ struct CloudVaultSetupView: View {
         error = nil
         Task {
             do {
-                try await wallet.enableCloudVault(email: email, password: password, isSignup: isSignup)
+                try await wallet.enableCloudVault(username: username, password: password, isSignup: isSignup)
                 dismiss()
             } catch {
                 self.error = error.localizedDescription
@@ -398,8 +397,8 @@ struct CloudVaultReloginView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Email").font(.caption.weight(.medium))
-                        TextField("", text: .constant(wallet.cloudVaultEmail ?? ""))
+                        Text("Username").font(.caption.weight(.medium))
+                        TextField("", text: .constant(wallet.cloudVaultUsername ?? ""))
                             .disabled(true)
                             .textFieldStyle(.roundedBorder)
                     }
