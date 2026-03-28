@@ -15,9 +15,13 @@ export function RedeemGift() {
 
     if (!value.trim()) return;
 
-    // Extract encoded part from byoky://gift/... or raw base64
+    // Extract encoded part from URL or raw base64
     let encoded = value.trim();
-    if (encoded.startsWith('byoky://gift/')) {
+    if (encoded.startsWith('https://byoky.com/gift#')) {
+      encoded = encoded.replace('https://byoky.com/gift#', '');
+    } else if (encoded.startsWith('https://byoky.com/gift/')) {
+      encoded = encoded.replace('https://byoky.com/gift/', '');
+    } else if (encoded.startsWith('byoky://gift/')) {
       encoded = encoded.replace('byoky://gift/', '');
     }
 
@@ -41,7 +45,11 @@ export function RedeemGift() {
     if (!preview) return;
 
     let encoded = linkInput.trim();
-    if (encoded.startsWith('byoky://gift/')) {
+    if (encoded.startsWith('https://byoky.com/gift#')) {
+      encoded = encoded.replace('https://byoky.com/gift#', '');
+    } else if (encoded.startsWith('https://byoky.com/gift/')) {
+      encoded = encoded.replace('https://byoky.com/gift/', '');
+    } else if (encoded.startsWith('byoky://gift/')) {
       encoded = encoded.replace('byoky://gift/', '');
     }
 
@@ -81,7 +89,7 @@ export function RedeemGift() {
             id="gift-link"
             value={linkInput}
             onChange={(e) => handleParse(e.target.value)}
-            placeholder="byoky://gift/..."
+            placeholder="https://byoky.com/gift#... or byoky://gift/..."
             rows={3}
           />
         </div>

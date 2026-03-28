@@ -100,11 +100,27 @@ describe('decodeGiftLink with invalid input', () => {
   });
 });
 
-describe('decodeGiftLink with byoky:// prefix', () => {
+describe('decodeGiftLink with URL prefixes', () => {
   it('strips the byoky://gift/ prefix and decodes', () => {
     const link = makeValidGiftLink();
     const encoded = encodeGiftLink(link);
     const url = `byoky://gift/${encoded}`;
+    const decoded = decodeGiftLink(url);
+    expect(decoded).toEqual(link);
+  });
+
+  it('strips the https://byoky.com/gift# prefix and decodes', () => {
+    const link = makeValidGiftLink();
+    const encoded = encodeGiftLink(link);
+    const url = `https://byoky.com/gift#${encoded}`;
+    const decoded = decodeGiftLink(url);
+    expect(decoded).toEqual(link);
+  });
+
+  it('strips the https://byoky.com/gift/ prefix and decodes', () => {
+    const link = makeValidGiftLink();
+    const encoded = encodeGiftLink(link);
+    const url = `https://byoky.com/gift/${encoded}`;
     const decoded = decodeGiftLink(url);
     expect(decoded).toEqual(link);
   });
@@ -305,11 +321,11 @@ describe('createGiftLink', () => {
 });
 
 describe('giftLinkToUrl', () => {
-  it('returns a byoky://gift/ URL', () => {
+  it('returns an https://byoky.com/gift# URL', () => {
     const link = makeValidGiftLink();
     const encoded = encodeGiftLink(link);
     const url = giftLinkToUrl(encoded);
-    expect(url).toBe(`byoky://gift/${encoded}`);
+    expect(url).toBe(`https://byoky.com/gift#${encoded}`);
   });
 
   it('produces a URL that decodeGiftLink can parse', () => {

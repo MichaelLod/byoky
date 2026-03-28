@@ -794,7 +794,7 @@ test.describe.serial('Byoky wallet E2E flow', () => {
     // Submit the gift creation form
     await extensionPage.click('button:has-text("Create Gift")');
     await expect(extensionPage.locator('text=Gift Created')).toBeVisible({ timeout: 10_000 });
-    await expect(extensionPage.locator('text=byoky://gift/')).toBeVisible();
+    await expect(extensionPage.locator('text=https://byoky.com/gift#')).toBeVisible();
     await expect(extensionPage.locator('text=Copy Gift Link')).toBeVisible();
     // Navigate back
     await extensionPage.click('button:has-text("Done")');
