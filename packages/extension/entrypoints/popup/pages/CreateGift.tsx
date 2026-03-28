@@ -12,13 +12,14 @@ const EXPIRY_OPTIONS = [
 const BUDGET_PRESETS = [10_000, 50_000, 100_000, 500_000, 1_000_000];
 
 export function CreateGift() {
-  const { credentials, createGift, navigate, error, loading } = useWalletStore();
+  const { credentials, createGift, navigate, error } = useWalletStore();
   const [credentialId, setCredentialId] = useState(credentials[0]?.id ?? '');
   const [maxTokens, setMaxTokens] = useState(100_000);
   const [expiryMs, setExpiryMs] = useState(EXPIRY_OPTIONS[1].ms);
   const [relayUrl, setRelayUrl] = useState('wss://relay.byoky.com');
   const [giftLink, setGiftLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   // Sync credentialId when credentials load after mount
   if (!credentialId && credentials.length > 0) {
@@ -31,6 +32,7 @@ export function CreateGift() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!selectedCred) return;
+    setSubmitting(true);
     const encoded = await createGift(
       credentialId,
       selectedCred.providerId,
@@ -39,6 +41,7 @@ export function CreateGift() {
       expiryMs,
       relayUrl,
     );
+    setSubmitting(false);
     if (encoded) {
       setGiftLink(giftLinkToUrl(encoded));
     }
@@ -238,8 +241,8 @@ export function CreateGift() {
             >
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary" disabled={loading || !credentialId}>
-              Create Gift
+            <button type="submit" className="btn btn-primary" disabled={submitting || !credentialId}>
+              {submitting ? 'Creating...' : 'Create Gift'}
             </button>
           </div>
         </form>
