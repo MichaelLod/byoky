@@ -275,23 +275,22 @@ struct CloudVaultSetupView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("Your keys will leave this device", systemImage: "exclamationmark.triangle")
+                    Label("Cloud Vault", systemImage: "cloud")
                         .font(.headline)
-                        .foregroundStyle(.orange)
 
-                    Text("When Cloud Vault is enabled, your API keys are sent to vault.byoky.com over an encrypted connection and stored with AES-256-GCM encryption using a key derived from your vault password.")
+                    Text("Cloud Vault lets websites use your credentials even when this device is offline. Your keys are sent to vault.byoky.com over an encrypted connection and stored with AES-256-GCM encryption using a key derived from your vault password.")
                         .font(.callout)
                         .foregroundStyle(.secondary)
 
-                    Text("This means websites can use your credentials even when this device is offline — but your keys will be stored on a remote server.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+                    Text("Note: your keys will be stored on a remote server.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
                 }
                 .padding(16)
-                .background(Color.orange.opacity(0.08))
+                .background(Color(.secondarySystemGroupedBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 12))
 
-                Toggle("I understand my keys will be stored on a remote server", isOn: $understood)
+                Toggle("I understand my keys will be stored remotely", isOn: $understood)
                     .font(.callout)
 
                 Button {
