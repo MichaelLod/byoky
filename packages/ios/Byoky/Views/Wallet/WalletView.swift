@@ -4,6 +4,7 @@ struct WalletView: View {
     @EnvironmentObject var wallet: WalletStore
     @State private var showAddCredential = false
     @State private var showSettings = false
+    @State private var showCloudVaultSetup = false
 
     var body: some View {
         NavigationStack {
@@ -26,10 +27,23 @@ struct WalletView: View {
                     }
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        showAddCredential = true
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
+                    HStack(spacing: 12) {
+                        Button {
+                            if wallet.cloudVaultEnabled {
+                                Task { await wallet.disableCloudVault() }
+                            } else {
+                                showCloudVaultSetup = true
+                            }
+                        } label: {
+                            Image(systemName: wallet.cloudVaultEnabled ? "cloud.fill" : "cloud")
+                                .foregroundStyle(wallet.cloudVaultEnabled ? Theme.accent : .secondary)
+                        }
+
+                        Button {
+                            showAddCredential = true
+                        } label: {
+                            Image(systemName: "plus.circle.fill")
+                        }
                     }
                 }
             }
@@ -40,6 +54,10 @@ struct WalletView: View {
                 NavigationStack {
                     SettingsView()
                 }
+            }
+            .sheet(isPresented: $showCloudVaultSetup) {
+                CloudVaultSetupView()
+                    .environmentObject(wallet)
             }
         }
     }
