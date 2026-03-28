@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useWalletStore } from '../store';
-import { PROVIDERS, type TokenAllowance } from '@byoky/core';
+import { PROVIDERS, isGiftExpired, type TokenAllowance } from '@byoky/core';
 
 function timeAgo(timestamp: number): string {
   const seconds = Math.floor((Date.now() - timestamp) / 1000);
@@ -31,7 +31,11 @@ export function ConnectedApps() {
   const {
     sessions, revokeSession, trustedSites, removeTrustedSite,
     requestLog, tokenAllowances, setAllowance, removeAllowance,
+    giftedCredentials,
   } = useWalletStore();
+  const activeGiftProviders = new Set(
+    giftedCredentials.filter((gc) => !isGiftExpired(gc) && gc.usedTokens < gc.maxTokens).map((gc) => gc.providerId),
+  );
   const [editingOrigin, setEditingOrigin] = useState<string | null>(null);
 
   function getOriginUsage(origin: string) {
@@ -112,9 +116,11 @@ export function ConnectedApps() {
                 .filter((p) => p.available)
                 .map((p) => {
                   const provider = PROVIDERS[p.providerId];
+                  const isGift = p.giftId || activeGiftProviders.has(p.providerId);
                   return (
-                    <span key={p.providerId} className="badge badge-provider">
+                    <span key={p.providerId} className={`badge badge-provider${isGift ? ' badge-gift-provider' : ''}`}>
                       {provider?.name ?? p.providerId}
+                      {isGift && <span className="gift-indicator"> (gift)</span>}
                     </span>
                   );
                 })}

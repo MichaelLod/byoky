@@ -550,7 +550,7 @@ export default defineBackground(() => {
   function buildSessionResponse(session: Session, requestId: string) {
     const providerMap: ConnectResponse['providers'] = {};
     for (const sp of session.providers) {
-      providerMap[sp.providerId] = { available: sp.available, authMethod: sp.authMethod };
+      providerMap[sp.providerId] = { available: sp.available, authMethod: sp.authMethod, ...(sp.giftId ? { gift: true } : {}) };
     }
     return {
       type: 'BYOKY_CONNECT_RESPONSE',
@@ -789,6 +789,7 @@ export default defineBackground(() => {
       providerMap[req.id] = {
         available: !!(cred || gc),
         authMethod: cred?.authMethod ?? 'api_key',
+        ...(gc ? { gift: true } : {}),
       };
       if (cred) {
         sessionProviders.push({
@@ -816,7 +817,7 @@ export default defineBackground(() => {
       // auto-approvals always scope providers before calling createSession.
       const resolved = await resolveAllProviders();
       for (const rp of resolved) {
-        providerMap[rp.id] = { available: true, authMethod: rp.authMethod };
+        providerMap[rp.id] = { available: true, authMethod: rp.authMethod, ...(rp.sessionProvider.giftId ? { gift: true } : {}) };
         sessionProviders.push(rp.sessionProvider);
       }
     }
@@ -2289,7 +2290,7 @@ export default defineBackground(() => {
       for (const providerId of providerIds) {
         const cred = credentials.find(c => c.providerId === providerId);
         const gc = !cred ? giftedCreds.find(g => g.providerId === providerId && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens) : undefined;
-        providerMap[providerId] = { available: !!(cred || gc), authMethod: cred?.authMethod ?? 'api_key' };
+        providerMap[providerId] = { available: !!(cred || gc), authMethod: cred?.authMethod ?? 'api_key', ...(gc ? { gift: true } : {}) };
         if (cred) {
           newSessionProviders.push({ providerId, credentialId: cred.id, available: true, authMethod: cred.authMethod });
         } else if (gc) {

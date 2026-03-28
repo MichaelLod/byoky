@@ -387,7 +387,9 @@ export function Chat({ session }: Props) {
           <label>Provider:</label>
           <select value={selectedProvider} onChange={e => setSelectedProvider(e.target.value)}>
             {availableProviders.map(id => (
-              <option key={id} value={id}>{getProviderLabel(id)}</option>
+              <option key={id} value={id}>
+                {getProviderLabel(id)}{session.providers[id]?.gift ? ' (Gift)' : ''}
+              </option>
             ))}
           </select>
         </div>
