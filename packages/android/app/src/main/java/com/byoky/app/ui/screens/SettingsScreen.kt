@@ -260,6 +260,24 @@ fun CloudVaultSetupDialog(wallet: WalletStore, onDismiss: () -> Unit) {
     var password by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    val usernameRegex = remember { Regex("^[a-z0-9][a-z0-9_-]{1,28}[a-z0-9]$") }
+    val isUsernameValid = username.lowercase().trim().matches(usernameRegex)
+    var usernameStatus by remember { mutableStateOf("idle") } // idle, checking, available, taken, invalid
+    var checkJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+
+    fun checkUsernameAvailability(value: String) {
+        checkJob?.cancel()
+        val trimmed = value.lowercase().trim()
+        if (trimmed.length < 3) { usernameStatus = "idle"; return }
+        if (!trimmed.matches(usernameRegex)) { usernameStatus = "invalid"; return }
+        usernameStatus = "checking"
+        checkJob = scope.launch {
+            kotlinx.coroutines.delay(400)
+            val (available, reason) = wallet.checkUsernameAvailability(trimmed)
+            if (!isActive) return@launch
+            usernameStatus = if (available) "available" else if (reason == "invalid") "invalid" else "taken"
+        }
+    }
 
     AlertDialog(
         onDismissRequest = { if (!loading) onDismiss() },
@@ -316,10 +334,25 @@ fun CloudVaultSetupDialog(wallet: WalletStore, onDismiss: () -> Unit) {
                     }
                     OutlinedTextField(
                         value = username,
-                        onValueChange = { username = it },
+                        onValueChange = {
+                            username = it
+                            if (isSignup) checkUsernameAvailability(it)
+                        },
                         label = { Text("Username") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
+                        isError = isSignup && username.isNotEmpty() && usernameStatus in listOf("taken", "invalid"),
+                        supportingText = if (isSignup && username.trim().length >= 3) {
+                            {
+                                when (usernameStatus) {
+                                    "checking" -> Text("Checking availability...", color = TextSecondary)
+                                    "available" -> Text("Username is available", color = Success)
+                                    "taken" -> Text("Username is already taken", color = Danger)
+                                    "invalid" -> Text("Letters, numbers, hyphens, underscores only (3\u201330 chars)", color = Danger)
+                                    else -> {}
+                                }
+                            }
+                        } else null,
                     )
                     OutlinedTextField(
                         value = password,
@@ -354,7 +387,8 @@ fun CloudVaultSetupDialog(wallet: WalletStore, onDismiss: () -> Unit) {
                         }
                     },
                     enabled = !loading && username.isNotBlank() && password.isNotBlank() &&
-                        (!isSignup || password.length >= 12),
+                        (!isSignup || password.length >= 12) &&
+                        (!isSignup || (isUsernameValid && usernameStatus !in listOf("taken", "invalid", "checking"))),
                 ) { Text(if (loading) "Connecting..." else if (isSignup) "Sign Up" else "Login") }
             }
         },
