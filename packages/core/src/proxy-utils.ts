@@ -139,8 +139,31 @@ export function parseUsage(
     // For streaming responses (SSE), try to find usage in the last data chunk
     if (body.includes('data: ')) {
       const lines = body.split('\n').filter((l) => l.startsWith('data: ') && !l.includes('[DONE]'));
-      // Anthropic streaming: message_stop event has usage in a preceding message_delta
-      // OpenAI streaming: last chunk may include usage
+
+      // Anthropic streaming: input_tokens is in message_start.message.usage,
+      // output_tokens is in message_delta.usage — combine both.
+      if (providerId === 'anthropic') {
+        let inputTokens: number | undefined;
+        let outputTokens: number | undefined;
+        for (const line of lines) {
+          try {
+            const parsed = JSON.parse(line.replace('data: ', ''));
+            if (parsed.type === 'message_start') {
+              const u = (parsed.message as Record<string, unknown>)?.usage as Record<string, number> | undefined;
+              if (u?.input_tokens != null) inputTokens = u.input_tokens;
+            } else if (parsed.type === 'message_delta') {
+              const u = parsed.usage as Record<string, number> | undefined;
+              if (u?.output_tokens != null) outputTokens = u.output_tokens;
+            }
+          } catch { continue; }
+        }
+        if (inputTokens != null && outputTokens != null) {
+          return sanitizeTokenCounts(inputTokens, outputTokens);
+        }
+        return undefined;
+      }
+
+      // OpenAI-compatible streaming: last chunk may include usage
       for (let i = lines.length - 1; i >= 0; i--) {
         const json = lines[i].replace('data: ', '');
         try {

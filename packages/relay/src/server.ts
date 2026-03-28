@@ -5,6 +5,7 @@ import { timingSafeEqual } from "node:crypto";
 
 interface Room {
   sender?: WebSocket;
+  senderPriority: number;
   recipient?: WebSocket;
   authToken: string;
   lastActivity: number;
@@ -64,6 +65,8 @@ wss.on("connection", (ws) => {
       if (msg.type !== "relay:auth") return;
 
       const { roomId, authToken, role } = msg;
+      // Clamp priority to 0–1: 0 = fallback (vault), 1 = primary (extension)
+      const priority = typeof msg.priority === "number" ? Math.max(0, Math.min(1, Math.floor(msg.priority))) : 1;
       if (
         typeof roomId !== "string" ||
         typeof authToken !== "string" ||
@@ -74,7 +77,7 @@ wss.on("connection", (ws) => {
         return;
       }
 
-      console.log(`[auth] attempt: ${role} for room ${roomId.slice(0, 8)}...`);
+      console.log(`[auth] attempt: ${role} (priority ${priority}) for room ${roomId.slice(0, 8)}...`);
 
       // Rate limit auth attempts per room
       const now = Date.now();
@@ -109,7 +112,7 @@ wss.on("connection", (ws) => {
             rooms.delete(roomId);
             console.log(`[auth] deleted stale room ${roomId.slice(0, 8)}... (token mismatch, idle ${Math.round(staleMs / 1000)}s, no active peers)`);
             // Create fresh room with the new token
-            room = { authToken, lastActivity: Date.now() };
+            room = { authToken, senderPriority: 0, lastActivity: Date.now() };
             rooms.set(roomId, room);
           } else {
             console.log(`[auth] rejected: token mismatch for room ${roomId.slice(0, 8)}...`);
@@ -118,16 +121,25 @@ wss.on("connection", (ws) => {
           }
         }
         if (room[role] && room[role]!.readyState === WebSocket.OPEN) {
-          console.log(`[auth] rejected: ${role} already connected in room ${roomId.slice(0, 8)}...`);
-          send(ws, { type: "relay:auth:result", success: false, error: `${role} already connected` });
-          return;
+          // Sender priority takeover: higher priority kicks lower priority
+          if (role === "sender" && priority > room.senderPriority) {
+            console.log(`[auth] takeover: new sender (priority ${priority}) kicks existing (priority ${room.senderPriority}) in room ${roomId.slice(0, 8)}...`);
+            send(room.sender!, { type: "relay:peer:status", online: false, kicked: true });
+            room.sender!.close(4001, "replaced by higher-priority sender");
+            room.sender = undefined;
+          } else {
+            console.log(`[auth] rejected: ${role} already connected in room ${roomId.slice(0, 8)}...`);
+            send(ws, { type: "relay:auth:result", success: false, error: `${role} already connected` });
+            return;
+          }
         }
       } else {
-        room = { authToken, lastActivity: Date.now() };
+        room = { authToken, senderPriority: 0, lastActivity: Date.now() };
         rooms.set(roomId, room);
       }
 
       room[role] = ws;
+      if (role === "sender") room.senderPriority = priority;
       touchRoom(room);
       authedRoomId = roomId;
       authedRole = role;
@@ -185,6 +197,7 @@ wss.on("connection", (ws) => {
     if (!room) return;
 
     room[authedRole] = undefined;
+    if (authedRole === "sender") room.senderPriority = 0;
 
     const peer = authedRole === "sender" ? room.recipient : room.sender;
     if (peer && peer.readyState === WebSocket.OPEN) {

@@ -4,6 +4,7 @@ import { auth } from './routes/auth.js';
 import { credentials } from './routes/credentials.js';
 import { proxy } from './routes/proxy.js';
 import { connect } from './routes/connect.js';
+import { gifts } from './routes/gifts.js';
 import { rateLimitMiddleware } from './middleware/rate-limit.js';
 
 const app = new Hono();
@@ -28,6 +29,7 @@ app.route('/auth', auth);
 app.route('/credentials', credentials);
 app.route('/proxy', proxy);
 app.route('/connect', connect);
+app.route('/gifts', gifts);
 
 app.onError((err, c) => {
   console.error('Unhandled error:', err);

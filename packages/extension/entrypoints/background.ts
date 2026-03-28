@@ -1289,6 +1289,10 @@ export default defineBackground(() => {
         await browser.storage.local.set({ gifts });
         const { encoded } = createGiftLink(gift);
         connectGiftRelay(gift);
+
+        // Register with Cloud Vault as fallback sender
+        registerGiftWithVault(gift, credentialId).catch(() => {});
+
         return { success: true, giftLink: encoded };
       }
 
@@ -1306,6 +1310,7 @@ export default defineBackground(() => {
           gifts[idx].active = false;
           await browser.storage.local.set({ gifts });
           disconnectGiftRelay(giftId);
+          unregisterGiftFromVault(giftId).catch(() => {});
         }
         return { success: true };
       }
@@ -2598,6 +2603,7 @@ export default defineBackground(() => {
           roomId: gift.id,
           authToken: gift.authToken,
           role: 'sender',
+          priority: 1, // primary — takes over from vault fallback (priority 0)
         }));
         // Keep connection alive — relay has 5min idle timeout
         pingInterval = setInterval(() => {
@@ -2947,6 +2953,8 @@ export default defineBackground(() => {
     const gifts = await getGiftsFromStorage();
     for (const gift of gifts) {
       if (gift.active && gift.expiresAt > Date.now()) {
+        // Sync usage from vault before reconnecting (vault may have handled requests while we were offline)
+        syncGiftUsageFromVault(gift.id).catch(() => {});
         connectGiftRelay(gift);
       }
     }
@@ -3169,5 +3177,90 @@ export default defineBackground(() => {
       return;
     }
     enqueueVaultSync(() => syncRemoveFromVault(localId, state.token!));
+  }
+
+  // --- Cloud Vault gift relay ---
+
+  async function registerGiftWithVault(gift: Gift, credentialId: string): Promise<void> {
+    const state = await getCloudVaultState();
+    if (!state.enabled || !state.token || state.tokenExpired) return;
+    if (isVaultTokenExpired(state.tokenIssuedAt)) {
+      await handleVaultAuthError();
+      return;
+    }
+    if (!masterPassword) return;
+
+    const credentials = await getStoredCredentials();
+    const credential = credentials.find((c) => c.id === credentialId);
+    if (!credential) return;
+
+    let apiKey: string;
+    try {
+      apiKey = await decryptCredentialKey(credential);
+    } catch {
+      return;
+    }
+
+    enqueueVaultSync(async () => {
+      const result = await vaultFetch('/gifts', 'POST', {
+        giftId: gift.id,
+        providerId: gift.providerId,
+        authMethod: credential.authMethod,
+        apiKey,
+        relayAuthToken: gift.authToken,
+        relayUrl: gift.relayUrl,
+        maxTokens: gift.maxTokens,
+        usedTokens: gift.usedTokens,
+        expiresAt: gift.expiresAt,
+      }, state.token!);
+
+      if (result.status === 401) {
+        await handleVaultAuthError();
+      }
+    });
+  }
+
+  async function unregisterGiftFromVault(giftId: string): Promise<void> {
+    const state = await getCloudVaultState();
+    if (!state.enabled || !state.token || state.tokenExpired) return;
+    if (isVaultTokenExpired(state.tokenIssuedAt)) {
+      await handleVaultAuthError();
+      return;
+    }
+
+    enqueueVaultSync(async () => {
+      const result = await vaultFetch(`/gifts/${giftId}`, 'DELETE', undefined, state.token!);
+      if (result.status === 401) {
+        await handleVaultAuthError();
+      }
+    });
+  }
+
+  async function syncGiftUsageFromVault(giftId: string): Promise<void> {
+    const state = await getCloudVaultState();
+    if (!state.enabled || !state.token || state.tokenExpired) return;
+    if (isVaultTokenExpired(state.tokenIssuedAt)) {
+      await handleVaultAuthError();
+      return;
+    }
+
+    const result = await vaultFetch(`/gifts/${giftId}`, 'GET', undefined, state.token!);
+    if (result.status === 401) {
+      await handleVaultAuthError();
+      return;
+    }
+    if (!result.ok) return;
+
+    const vaultGift = result.data.gift as { usedTokens: number } | undefined;
+    if (!vaultGift) return;
+
+    // If vault tracked more usage, update local
+    const data = await browser.storage.local.get('gifts');
+    const gifts = (data.gifts ?? []) as Gift[];
+    const idx = gifts.findIndex((g) => g.id === giftId);
+    if (idx !== -1 && vaultGift.usedTokens > gifts[idx].usedTokens) {
+      gifts[idx].usedTokens = vaultGift.usedTokens;
+      await browser.storage.local.set({ gifts });
+    }
   }
 });
