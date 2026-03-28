@@ -178,6 +178,14 @@ final class RelayPairService: ObservableObject {
                 "authMethod": credential.authMethod == .apiKey ? "api_key" : "oauth",
             ]
         }
+        for gc in wallet.giftedCredentials {
+            if providers[gc.providerId] == nil && !isGiftedCredentialExpired(gc) && gc.usedTokens < gc.maxTokens {
+                providers[gc.providerId] = [
+                    "available": true,
+                    "authMethod": "api_key",
+                ]
+            }
+        }
 
         let msg: [String: Any] = [
             "type": "relay:pair:hello",
@@ -215,10 +223,79 @@ final class RelayPairService: ObservableObject {
             await MainActor.run { requestCount += 1 }
 
             do {
-                let credential = await MainActor.run {
-                    wallet.credentials.first { $0.providerId == providerId }
+                let prefs = await MainActor.run { wallet.giftPreferences }
+                let giftedCreds = await MainActor.run { wallet.giftedCredentials }
+                let ownCred = await MainActor.run { wallet.credentials.first { $0.providerId == providerId } }
+
+                var useGift: GiftedCredential?
+                if let preferredGiftId = prefs[providerId],
+                   let gc = giftedCreds.first(where: {
+                       $0.giftId == preferredGiftId && $0.providerId == providerId
+                       && !isGiftedCredentialExpired($0) && $0.usedTokens < $0.maxTokens
+                   }) {
+                    useGift = gc
+                } else if ownCred == nil {
+                    useGift = giftedCreds.first(where: {
+                        $0.providerId == providerId && !isGiftedCredentialExpired($0) && $0.usedTokens < $0.maxTokens
+                    })
                 }
-                guard let credential else {
+
+                if let gc = useGift {
+                    let filteredHeaders = headers.filter {
+                        !["host", "authorization", "x-api-key"].contains($0.key.lowercased())
+                    }
+                    for try await event in proxyViaGiftRelay(
+                        giftedCredential: gc,
+                        requestId: requestId,
+                        providerId: providerId,
+                        url: urlString,
+                        method: method,
+                        headers: filteredHeaders,
+                        body: bodyString
+                    ) {
+                        switch event {
+                        case .meta(let status, let statusText, let hdrs):
+                            var filtered = hdrs
+                            for h in sensitiveResponseHeaders { filtered.removeValue(forKey: h) }
+                            self.sendJSON([
+                                "type": "relay:response:meta",
+                                "requestId": requestId,
+                                "status": status,
+                                "statusText": statusText,
+                                "headers": filtered,
+                            ])
+                        case .chunk(let chunk):
+                            self.sendJSON([
+                                "type": "relay:response:chunk",
+                                "requestId": requestId,
+                                "chunk": chunk,
+                            ])
+                        case .done:
+                            self.sendJSON([
+                                "type": "relay:response:done",
+                                "requestId": requestId,
+                            ])
+                        case .usage(let giftId, let usedTokens):
+                            await MainActor.run { wallet.updateGiftedCredentialUsage(giftId: giftId, usedTokens: usedTokens) }
+                        }
+                    }
+
+                    let giftOrigin = await MainActor.run { self.pairedOrigin ?? "relay" }
+                    await MainActor.run {
+                        wallet.logRequest(
+                            appOrigin: giftOrigin,
+                            providerId: providerId,
+                            method: method,
+                            url: urlString,
+                            statusCode: 0,
+                            requestBody: bodyString?.data(using: .utf8),
+                            responseBody: nil
+                        )
+                    }
+                    return
+                }
+
+                guard let credential = ownCred else {
                     sendRelayError(requestId: requestId, code: "NO_CREDENTIAL", message: "No credential for \(providerId)")
                     return
                 }
@@ -231,8 +308,9 @@ final class RelayPairService: ObservableObject {
                 request.httpMethod = method
                 request.timeoutInterval = 120
 
-                if let bodyString {
-                    request.httpBody = bodyString.data(using: .utf8)
+                let finalBody = injectStreamUsageOptions(providerId: providerId, body: bodyString)
+                if let finalBody {
+                    request.httpBody = finalBody.data(using: .utf8)
                 }
 
                 for (key, value) in headers {
@@ -251,7 +329,9 @@ final class RelayPairService: ObservableObject {
 
                 var responseHeaders: [String: String] = [:]
                 for (key, value) in httpResponse.allHeaderFields {
-                    responseHeaders[String(describing: key).lowercased()] = String(describing: value)
+                    let lower = String(describing: key).lowercased()
+                    if sensitiveResponseHeaders.contains(lower) { continue }
+                    responseHeaders[lower] = String(describing: value)
                 }
 
                 sendJSON([

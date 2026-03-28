@@ -526,6 +526,13 @@ final class WalletStore: ObservableObject {
         saveGiftPreferences()
     }
 
+    func updateGiftedCredentialUsage(giftId: String, usedTokens: Int) {
+        if let idx = giftedCredentials.firstIndex(where: { $0.giftId == giftId }) {
+            giftedCredentials[idx].usedTokens = usedTokens
+            saveGiftedCredentials()
+        }
+    }
+
     private func loadGifts() {
         do {
             gifts = try keychain.loadCodable(key: giftsKey, as: [Gift].self)
