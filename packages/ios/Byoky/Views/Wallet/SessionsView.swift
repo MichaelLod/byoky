@@ -36,7 +36,16 @@ struct SessionsView: View {
         }
     }
 
+    @ViewBuilder
     private var activeSessions: some View {
+        if !wallet.cloudVaultEnabled {
+            Section {
+                Label("Your device must stay online for connected apps to work. Enable Cloud Vault in Settings for offline access.", systemImage: "wifi")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+
         Section {
             ForEach(Array(wallet.sessions)) { session in
                 VStack(alignment: .leading, spacing: 6) {

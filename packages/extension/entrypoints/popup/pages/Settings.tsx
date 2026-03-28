@@ -15,8 +15,12 @@ async function sendInternal(action: string, payload?: unknown): Promise<Record<s
 import { PasswordMeter } from '../components/PasswordMeter';
 
 export function Settings() {
-  const { credentials, navigate, lock } = useWalletStore();
-  const [modal, setModal] = useState<'export' | 'import' | null>(null);
+  const {
+    credentials, navigate, lock,
+    cloudVaultEnabled, cloudVaultEmail, cloudVaultTokenExpired, cloudVaultPendingCount,
+    disableCloudVault,
+  } = useWalletStore();
+  const [modal, setModal] = useState<'export' | 'import' | 'cloud-vault' | 'cloud-vault-relogin' | null>(null);
 
   return (
     <div>
@@ -47,6 +51,57 @@ export function Settings() {
       </div>
 
       <div className="settings-section">
+        <h3>Cloud Vault</h3>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+            Sync credentials to the cloud
+          </span>
+          <label className="toggle-switch">
+            <input
+              type="checkbox"
+              checked={cloudVaultEnabled}
+              onChange={() => {
+                if (cloudVaultEnabled) {
+                  disableCloudVault();
+                } else {
+                  setModal('cloud-vault');
+                }
+              }}
+            />
+            <span className="toggle-slider" />
+          </label>
+        </div>
+        {cloudVaultEnabled && (
+          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+            <p style={{ margin: '0 0 4px' }}>Synced as {cloudVaultEmail}</p>
+            {cloudVaultTokenExpired && (
+              <div className="warning-box" style={{ marginTop: '8px' }}>
+                <strong>Session expired</strong> — your credentials are safe but
+                new changes won&apos;t sync until you re-login.
+                <button
+                  className="btn btn-secondary"
+                  style={{ marginTop: '8px', width: '100%', fontSize: '12px' }}
+                  onClick={() => setModal('cloud-vault-relogin')}
+                >
+                  Re-login
+                </button>
+              </div>
+            )}
+            {!cloudVaultTokenExpired && cloudVaultPendingCount > 0 && (
+              <p style={{ color: 'var(--accent)', margin: '4px 0 0' }}>
+                {cloudVaultPendingCount} credential{cloudVaultPendingCount !== 1 ? 's' : ''} pending sync
+              </p>
+            )}
+          </div>
+        )}
+        {!cloudVaultEnabled && (
+          <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+            Websites can use your keys even when this device is offline.
+          </p>
+        )}
+      </div>
+
+      <div className="settings-section">
         <h3>Security</h3>
         <div className="settings-actions">
           <button className="btn btn-secondary" onClick={() => lock()}>
@@ -65,6 +120,8 @@ export function Settings() {
 
       {modal === 'export' && <ExportModal onClose={() => setModal(null)} />}
       {modal === 'import' && <ImportModal onClose={() => setModal(null)} />}
+      {modal === 'cloud-vault' && <CloudVaultModal onClose={() => setModal(null)} />}
+      {modal === 'cloud-vault-relogin' && <CloudVaultReloginModal onClose={() => setModal(null)} />}
     </div>
   );
 }
@@ -310,6 +367,218 @@ function ImportModal({ onClose }: { onClose: () => void }) {
               disabled={importing || !fileData || !importPassword || !confirmed}
             >
               {importing ? 'Importing...' : 'Import'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function CloudVaultModal({ onClose }: { onClose: () => void }) {
+  const { enableCloudVault, loading, error, clearError } = useWalletStore();
+  const [step, setStep] = useState<'warning' | 'auth'>('warning');
+  const [understood, setUnderstood] = useState(false);
+  const [isSignup, setIsSignup] = useState(true);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+
+  const strength = checkPasswordStrength(password);
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    clearError();
+
+    if (!email || !password) return;
+    if (isSignup && password.length < MIN_PASSWORD_LENGTH) return;
+    if (isSignup && strength.score < 2) return;
+
+    await enableCloudVault(email, password, isSignup);
+    if (!useWalletStore.getState().error) {
+      onClose();
+    }
+  }
+
+  return (
+    <div className="export-modal-overlay" onClick={onClose}>
+      <div className="export-modal" onClick={(e) => e.stopPropagation()}>
+        {step === 'warning' ? (
+          <>
+            <h3>Your keys will leave this device</h3>
+            <p>
+              When Cloud Vault is enabled, your API keys are sent to
+              vault.byoky.com over an encrypted connection and stored with
+              AES-256-GCM encryption using a key derived from your vault
+              password.
+            </p>
+            <p>
+              This means websites can use your credentials even when this device
+              is offline — but your keys will be stored on a remote server.
+            </p>
+
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                marginTop: '12px',
+                fontSize: '12px',
+                color: 'var(--text-secondary)',
+                cursor: 'pointer',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={understood}
+                onChange={(e) => setUnderstood(e.target.checked)}
+              />
+              I understand my keys will be stored on a remote server
+            </label>
+
+            <div className="export-modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={onClose}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={!understood}
+                onClick={() => setStep('auth')}
+              >
+                Continue
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <h3>{isSignup ? 'Create Vault Account' : 'Login to Vault'}</h3>
+
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+              <button
+                type="button"
+                className={`btn ${isSignup ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ flex: 1, fontSize: '12px' }}
+                onClick={() => { setIsSignup(true); clearError(); }}
+              >
+                Sign Up
+              </button>
+              <button
+                type="button"
+                className={`btn ${!isSignup ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ flex: 1, fontSize: '12px' }}
+                onClick={() => { setIsSignup(false); clearError(); }}
+              >
+                Login
+              </button>
+            </div>
+
+            {error && <div className="error">{error}</div>}
+
+            <form onSubmit={handleSubmit}>
+              <div className="form-group">
+                <label htmlFor="vault-email">Email</label>
+                <input
+                  id="vault-email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  autoFocus
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="vault-pw">Password</label>
+                <input
+                  id="vault-pw"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder={isSignup ? 'At least 12 characters' : 'Your vault password'}
+                />
+                {isSignup && password.length > 0 && <PasswordMeter strength={strength} />}
+              </div>
+
+              <div className="export-modal-actions">
+                <button type="button" className="btn btn-secondary" onClick={onClose}>
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={
+                    loading ||
+                    !email ||
+                    !password ||
+                    (isSignup && (password.length < MIN_PASSWORD_LENGTH || strength.score < 2))
+                  }
+                >
+                  {loading ? 'Connecting...' : isSignup ? 'Sign Up' : 'Login'}
+                </button>
+              </div>
+            </form>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CloudVaultReloginModal({ onClose }: { onClose: () => void }) {
+  const { cloudVaultEmail, reloginCloudVault, loading, error, clearError } = useWalletStore();
+  const [password, setPassword] = useState('');
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    clearError();
+    if (!password) return;
+    await reloginCloudVault(password);
+    if (!useWalletStore.getState().error) {
+      onClose();
+    }
+  }
+
+  return (
+    <div className="export-modal-overlay" onClick={onClose}>
+      <div className="export-modal" onClick={(e) => e.stopPropagation()}>
+        <h3>Re-login to Cloud Vault</h3>
+        <p>Your session has expired. Enter your vault password to reconnect.</p>
+
+        {error && <div className="error">{error}</div>}
+
+        <form onSubmit={handleSubmit}>
+          <div className="form-group">
+            <label htmlFor="relogin-email">Email</label>
+            <input
+              id="relogin-email"
+              type="email"
+              value={cloudVaultEmail ?? ''}
+              disabled
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="relogin-pw">Password</label>
+            <input
+              id="relogin-pw"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Your vault password"
+              autoFocus
+            />
+          </div>
+
+          <div className="export-modal-actions">
+            <button type="button" className="btn btn-secondary" onClick={onClose}>
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={loading || !password}
+            >
+              {loading ? 'Logging in...' : 'Login'}
             </button>
           </div>
         </form>

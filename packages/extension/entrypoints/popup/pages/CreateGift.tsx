@@ -12,7 +12,7 @@ const EXPIRY_OPTIONS = [
 const BUDGET_PRESETS = [10_000, 50_000, 100_000, 500_000, 1_000_000];
 
 export function CreateGift() {
-  const { credentials, createGift, navigate, error } = useWalletStore();
+  const { credentials, createGift, navigate, error, cloudVaultEnabled } = useWalletStore();
   const [credentialId, setCredentialId] = useState(credentials[0]?.id ?? '');
   const [maxTokens, setMaxTokens] = useState(100_000);
   const [expiryMs, setExpiryMs] = useState(EXPIRY_OPTIONS[1].ms);
@@ -232,6 +232,14 @@ export function CreateGift() {
               are relayed through your wallet and proxied to the provider.
             </span>
           </div>
+
+          {!cloudVaultEnabled && (
+            <div className="warning-box">
+              <strong>Device must stay online.</strong> Since Cloud Vault is off,
+              gift recipients can only use this gift while your browser is running
+              and this extension is active.
+            </div>
+          )}
 
           <div style={{ display: 'flex', gap: '8px' }}>
             <button
