@@ -7,6 +7,14 @@ export default defineConfig({
     if (manifest.background && 'scripts' in manifest.background) {
       (manifest.background as Record<string, unknown>).persistent = false;
     }
+    // Firefox: remove default_popup so icon click fires onClicked → opens sidebar
+    const m = manifest as unknown as Record<string, unknown>;
+    if (m.sidebar_action) {
+      const action = m.browser_action as Record<string, unknown> | undefined;
+      if (action) {
+        delete action.default_popup;
+      }
+    }
   },
   manifest: {
     name: 'Byoky',
