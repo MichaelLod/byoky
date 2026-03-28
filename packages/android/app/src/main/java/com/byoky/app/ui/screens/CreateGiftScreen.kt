@@ -43,6 +43,7 @@ private val expiryPresets = listOf(
 @Composable
 fun CreateGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
     val credentials by wallet.credentials.collectAsState()
+    val cloudVaultEnabled by wallet.cloudVaultEnabled.collectAsState()
     val context = LocalContext.current
 
     var selectedCredential by remember { mutableStateOf<Credential?>(null) }
@@ -214,6 +215,26 @@ fun CreateGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
                     ),
                     shape = RoundedCornerShape(12.dp),
                 )
+
+                if (!cloudVaultEnabled) {
+                    Spacer(Modifier.height(8.dp))
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Warning.copy(alpha = 0.1f)),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Icon(Icons.Default.Wifi, null, tint = Warning, modifier = Modifier.size(16.dp))
+                            Text(
+                                "Your device must stay online for the recipient to use this gift. Enable Cloud Vault in Settings for offline access.",
+                                color = Warning,
+                                fontSize = 13.sp,
+                            )
+                        }
+                    }
+                }
 
                 Spacer(Modifier.height(8.dp))
 

@@ -22,6 +22,7 @@ import android.text.format.DateUtils
 @Composable
 fun SessionsScreen(wallet: WalletStore) {
     val sessions by wallet.sessions.collectAsState()
+    val cloudVaultEnabled by wallet.cloudVaultEnabled.collectAsState()
 
     Scaffold(
         topBar = {
@@ -66,6 +67,26 @@ fun SessionsScreen(wallet: WalletStore) {
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                if (!cloudVaultEnabled) {
+                    item {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Warning.copy(alpha = 0.1f)),
+                            shape = RoundedCornerShape(12.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Icon(Icons.Default.Wifi, null, tint = Warning, modifier = Modifier.size(16.dp))
+                                Text(
+                                    "Your device must stay online for connected apps to work. Enable Cloud Vault in Settings for offline access.",
+                                    color = Warning,
+                                    fontSize = 13.sp,
+                                )
+                            }
+                        }
+                    }
+                }
                 item {
                     Text(
                         "${sessions.size} active session${if (sessions.size == 1) "" else "s"}",
