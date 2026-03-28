@@ -16,7 +16,7 @@ const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 
 const rooms = new Map<string, Room>();
 const authAttempts = new Map<string, number[]>();
-const AUTH_RATE_LIMIT = 5;
+const AUTH_RATE_LIMIT = 10;
 const AUTH_RATE_WINDOW = 60_000;
 
 function send(ws: WebSocket, data: unknown): void {
@@ -79,16 +79,17 @@ wss.on("connection", (ws) => {
 
       console.log(`[auth] attempt: ${role} (priority ${priority}) for room ${roomId.slice(0, 8)}...`);
 
-      // Rate limit auth attempts per room
+      // Rate limit auth attempts per room+role
       const now = Date.now();
-      const attempts = (authAttempts.get(roomId) ?? []).filter((t) => now - t < AUTH_RATE_WINDOW);
+      const rateLimitKey = `${roomId}:${role}`;
+      const attempts = (authAttempts.get(rateLimitKey) ?? []).filter((t) => now - t < AUTH_RATE_WINDOW);
       if (attempts.length >= AUTH_RATE_LIMIT) {
-        console.log(`[auth] rejected: rate limited for room ${roomId.slice(0, 8)}...`);
+        console.log(`[auth] rejected: rate limited for ${role} in room ${roomId.slice(0, 8)}...`);
         send(ws, { type: "relay:auth:result", success: false, error: "too many auth attempts" });
         return;
       }
       attempts.push(now);
-      authAttempts.set(roomId, attempts);
+      authAttempts.set(rateLimitKey, attempts);
 
       let room = rooms.get(roomId);
 
