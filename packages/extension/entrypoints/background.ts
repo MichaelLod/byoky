@@ -1095,7 +1095,39 @@ export default defineBackground(() => {
             return result;
           }),
         );
-        const vault = { version: 1, exportedAt: Date.now(), credentials: reEncrypted };
+        // Export gifts (sender side) — re-encrypt authToken with export password
+        const giftsData = await browser.storage.local.get('gifts');
+        const storedGifts = (giftsData.gifts ?? []) as Gift[];
+        const exportedGifts = await Promise.all(
+          storedGifts.map(async (g) => {
+            const result = { ...g };
+            if (g.authToken) {
+              try {
+                const plain = g.authToken.startsWith('gft_') ? g.authToken : await decrypt(g.authToken, pw);
+                result.authToken = await encrypt(plain, exportPassword);
+              } catch {
+                result.authToken = await encrypt(g.authToken, exportPassword);
+              }
+            }
+            return result;
+          }),
+        );
+        // Export gifted credentials (recipient side) — encrypt authToken for export
+        const gcData = await browser.storage.local.get('giftedCredentials');
+        const storedGifted = (gcData.giftedCredentials ?? []) as GiftedCredential[];
+        const exportedGifted = await Promise.all(
+          storedGifted.map(async (gc) => {
+            const result = { ...gc };
+            if (gc.authToken) {
+              result.authToken = await encrypt(gc.authToken, exportPassword);
+            }
+            return result;
+          }),
+        );
+        const vault = {
+          version: 2, exportedAt: Date.now(), credentials: reEncrypted,
+          gifts: exportedGifts, giftedCredentials: exportedGifted,
+        };
         const vaultJson = JSON.stringify(vault);
         const encryptedVault = await encrypt(vaultJson, exportPassword);
         return { encryptedVault };
@@ -1116,7 +1148,10 @@ export default defineBackground(() => {
         if (vaultJson.length > 10_485_760) {
           return { error: 'Vault file too large' };
         }
-        const vault = JSON.parse(vaultJson) as { version?: number; credentials?: unknown[] };
+        const vault = JSON.parse(vaultJson) as {
+          version?: number; credentials?: unknown[];
+          gifts?: unknown[]; giftedCredentials?: unknown[];
+        };
         if (!vault.version || !vault.credentials) {
           return { error: 'Invalid vault file format' };
         }
@@ -1136,12 +1171,50 @@ export default defineBackground(() => {
           }),
         );
         await browser.storage.local.set({ credentials: imported });
+        // Import gifts (sender side) — re-encrypt authToken with master password
+        if (vault.gifts && Array.isArray(vault.gifts)) {
+          disconnectAllGiftRelays();
+          const importedGifts = await Promise.all(
+            vault.gifts.map(async (g: unknown) => {
+              const gift = g as Record<string, unknown>;
+              if (gift.authToken && typeof gift.authToken === 'string') {
+                try {
+                  const plain = await decrypt(gift.authToken, impPw);
+                  gift.authToken = await encrypt(plain, pw);
+                } catch {
+                  // Leave as-is if decryption fails
+                }
+              }
+              return gift;
+            }),
+          );
+          await browser.storage.local.set({ gifts: importedGifts });
+          reconnectGiftRelays();
+        }
+        // Import gifted credentials (recipient side) — decrypt authToken back to plaintext
+        if (vault.giftedCredentials && Array.isArray(vault.giftedCredentials)) {
+          const importedGifted = await Promise.all(
+            vault.giftedCredentials.map(async (gc: unknown) => {
+              const cred = gc as Record<string, unknown>;
+              if (cred.authToken && typeof cred.authToken === 'string') {
+                try {
+                  cred.authToken = await decrypt(cred.authToken, impPw);
+                } catch {
+                  // Leave as-is if decryption fails
+                }
+              }
+              return cred;
+            }),
+          );
+          await browser.storage.local.set({ giftedCredentials: importedGifted });
+        }
         // Re-sync all imported credentials to cloud vault
         const cvState = await getCloudVaultState();
         if (cvState.enabled && cvState.token && !cvState.tokenExpired) {
           await saveCloudVaultState({ credentialMap: {} });
           enqueueVaultSync(() => syncAllCredentialsToVault(cvState.token!));
         }
+        refreshSessionProviders();
         return { success: true, count: imported.length };
       }
 
@@ -1285,11 +1358,18 @@ export default defineBackground(() => {
 
       // --- Cloud Vault ---
 
+      case 'cloudVaultCheckUsername': {
+        const { username } = message.payload as { username: string };
+        const result = await vaultFetch(`/auth/check-username/${encodeURIComponent(username)}`, 'GET');
+        if (!result.ok) return { available: false };
+        return result.data as { available: boolean; reason?: string };
+      }
+
       case 'cloudVaultSignup': {
         const rlErr = checkVaultAuthRate(); if (rlErr) return rlErr;
         if (!masterPassword) return { error: 'Wallet is locked' };
-        const { email, password } = message.payload as { email: string; password: string };
-        const result = await vaultFetch('/auth/signup', 'POST', { email, password });
+        const { username, password } = message.payload as { username: string; password: string };
+        const result = await vaultFetch('/auth/signup', 'POST', { username, password });
         if (!result.ok) {
           const err = result.data.error as Record<string, string> | undefined;
           return { error: err?.message ?? 'Signup failed' };
@@ -1298,7 +1378,7 @@ export default defineBackground(() => {
         const sessionId = result.data.sessionId as string;
         await saveCloudVaultState({
           enabled: true,
-          email,
+          username,
           token,
           sessionId,
           tokenIssuedAt: Date.now(),
@@ -1312,8 +1392,8 @@ export default defineBackground(() => {
       case 'cloudVaultLogin': {
         const rlErr = checkVaultAuthRate(); if (rlErr) return rlErr;
         if (!masterPassword) return { error: 'Wallet is locked' };
-        const { email, password } = message.payload as { email: string; password: string };
-        const result = await vaultFetch('/auth/login', 'POST', { email, password });
+        const { username, password } = message.payload as { username: string; password: string };
+        const result = await vaultFetch('/auth/login', 'POST', { username, password });
         if (!result.ok) {
           const err = result.data.error as Record<string, string> | undefined;
           return { error: err?.message ?? 'Login failed' };
@@ -1322,7 +1402,7 @@ export default defineBackground(() => {
         const sessionId = result.data.sessionId as string;
         await saveCloudVaultState({
           enabled: true,
-          email,
+          username,
           token,
           sessionId,
           tokenIssuedAt: Date.now(),
@@ -1351,7 +1431,7 @@ export default defineBackground(() => {
         }
         return {
           enabled: state.enabled,
-          email: state.email,
+          username: state.username,
           tokenExpired: state.tokenExpired || (state.enabled && state.tokenIssuedAt > 0 && isVaultTokenExpired(state.tokenIssuedAt)),
           pendingCount,
         };
@@ -1362,8 +1442,8 @@ export default defineBackground(() => {
         if (!masterPassword) return { error: 'Wallet is locked' };
         const { password } = message.payload as { password: string };
         const state = await getCloudVaultState();
-        if (!state.email) return { error: 'No vault account configured' };
-        const result = await vaultFetch('/auth/login', 'POST', { email: state.email, password });
+        if (!state.username) return { error: 'No vault account configured' };
+        const result = await vaultFetch('/auth/login', 'POST', { username: state.username, password });
         if (!result.ok) {
           const err = result.data.error as Record<string, string> | undefined;
           return { error: err?.message ?? 'Login failed' };
@@ -2917,7 +2997,7 @@ export default defineBackground(() => {
 
   async function getCloudVaultState(): Promise<{
     enabled: boolean;
-    email: string | null;
+    username: string | null;
     token: string | null;
     sessionId: string | null;
     tokenIssuedAt: number;
@@ -2926,7 +3006,7 @@ export default defineBackground(() => {
   }> {
     const data = await browser.storage.local.get([
       'cloudVault.enabled',
-      'cloudVault.email',
+      'cloudVault.username',
       'cloudVault.token',
       'cloudVault.sessionId',
       'cloudVault.tokenIssuedAt',
@@ -2939,7 +3019,7 @@ export default defineBackground(() => {
     }
     return {
       enabled: data['cloudVault.enabled'] as boolean ?? false,
-      email: data['cloudVault.email'] as string ?? null,
+      username: data['cloudVault.username'] as string ?? null,
       token,
       sessionId: data['cloudVault.sessionId'] as string ?? null,
       tokenIssuedAt: data['cloudVault.tokenIssuedAt'] as number ?? 0,
@@ -2965,7 +3045,7 @@ export default defineBackground(() => {
   async function clearCloudVaultState(): Promise<void> {
     await browser.storage.local.remove([
       'cloudVault.enabled',
-      'cloudVault.email',
+      'cloudVault.username',
       'cloudVault.token',
       'cloudVault.sessionId',
       'cloudVault.tokenIssuedAt',

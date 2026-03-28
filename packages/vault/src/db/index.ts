@@ -21,17 +21,17 @@ export function getDb(): Db {
 
 // --- Users ---
 
-export async function createUser(email: string, passwordHash: string, encryptionSalt: string) {
+export async function createUser(username: string, passwordHash: string, encryptionSalt: string) {
   const id = crypto.randomUUID();
   const now = Date.now();
   const [row] = await getDb().insert(users).values({
-    id, email, passwordHash, encryptionSalt, createdAt: now,
+    id, username, passwordHash, encryptionSalt, createdAt: now,
   }).returning();
   return row;
 }
 
-export async function getUserByEmail(email: string) {
-  const [row] = await getDb().select().from(users).where(eq(users.email, email)).limit(1);
+export async function getUserByUsername(username: string) {
+  const [row] = await getDb().select().from(users).where(eq(users.username, username)).limit(1);
   return row;
 }
 

@@ -8,7 +8,7 @@ const DATABASE_URL = process.env.DATABASE_URL;
 if (!DATABASE_URL) throw new Error('DATABASE_URL required for integration tests');
 
 const TEST_PREFIX = `test_${Date.now()}_`;
-const testEmail = `${TEST_PREFIX}user@example.com`;
+const testUsername = `${TEST_PREFIX}user`;
 const testPassword = 'MyStr0ng!Pass#2024';
 
 let token: string;
@@ -34,10 +34,10 @@ afterAll(async () => {
   stopIdleSweep();
   evictAll();
   const db = getDb();
-  await db.execute(sql`DELETE FROM request_log WHERE user_id IN (SELECT id FROM users WHERE email = ${testEmail})`);
-  await db.execute(sql`DELETE FROM credentials WHERE user_id IN (SELECT id FROM users WHERE email = ${testEmail})`);
-  await db.execute(sql`DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE email = ${testEmail})`);
-  await db.execute(sql`DELETE FROM users WHERE email = ${testEmail}`);
+  await db.execute(sql`DELETE FROM request_log WHERE user_id IN (SELECT id FROM users WHERE username = ${testUsername})`);
+  await db.execute(sql`DELETE FROM credentials WHERE user_id IN (SELECT id FROM users WHERE username = ${testUsername})`);
+  await db.execute(sql`DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE username = ${testUsername})`);
+  await db.execute(sql`DELETE FROM users WHERE username = ${testUsername}`);
 });
 
 describe('vault integration', () => {
@@ -57,18 +57,18 @@ describe('vault integration', () => {
       const res = await req('/auth/signup', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: testEmail, password: 'short' }),
+        body: JSON.stringify({ username: testUsername, password: 'short' }),
       });
       expect(res.status).toBe(400);
       const body = await res.json();
       expect(body.error.code).toBe('WEAK_PASSWORD');
     });
 
-    it('rejects invalid email', async () => {
+    it('rejects invalid username', async () => {
       const res = await req('/auth/signup', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: 'notanemail', password: testPassword }),
+        body: JSON.stringify({ username: 'a', password: testPassword }),
       });
       expect(res.status).toBe(400);
     });
@@ -77,21 +77,21 @@ describe('vault integration', () => {
       const res = await req('/auth/signup', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: testEmail, password: testPassword }),
+        body: JSON.stringify({ username: testUsername, password: testPassword }),
       });
       expect(res.status).toBe(201);
       const body = await res.json();
       expect(body.token).toBeDefined();
-      expect(body.user.email).toBe(testEmail);
+      expect(body.user.username).toBe(testUsername);
       expect(body.sessionId).toBeDefined();
       token = body.token;
     });
 
-    it('rejects duplicate email', async () => {
+    it('rejects duplicate username', async () => {
       const res = await req('/auth/signup', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: testEmail, password: testPassword }),
+        body: JSON.stringify({ username: testUsername, password: testPassword }),
       });
       expect(res.status).toBe(409);
     });
@@ -102,16 +102,16 @@ describe('vault integration', () => {
       const res = await req('/auth/login', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: testEmail, password: 'WrongP@ssw0rd!!!' }),
+        body: JSON.stringify({ username: testUsername, password: 'WrongP@ssw0rd!!!' }),
       });
       expect(res.status).toBe(401);
     });
 
-    it('rejects unknown email', async () => {
+    it('rejects unknown username', async () => {
       const res = await req('/auth/login', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: 'nobody@example.com', password: testPassword }),
+        body: JSON.stringify({ username: 'nobody-exists-here', password: testPassword }),
       });
       expect(res.status).toBe(401);
     });
@@ -120,12 +120,12 @@ describe('vault integration', () => {
       const res = await req('/auth/login', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: testEmail, password: testPassword }),
+        body: JSON.stringify({ username: testUsername, password: testPassword }),
       });
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.token).toBeDefined();
-      expect(body.user.email).toBe(testEmail);
+      expect(body.user.username).toBe(testUsername);
       token = body.token;
     });
   });

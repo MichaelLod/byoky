@@ -2,7 +2,7 @@ import { pgTable, text, integer, bigint, index, uniqueIndex } from 'drizzle-orm/
 
 export const users = pgTable('users', {
   id: text('id').primaryKey(),
-  email: text('email').unique().notNull(),
+  username: text('username').unique().notNull(),
   passwordHash: text('password_hash').notNull(),
   encryptionSalt: text('encryption_salt').notNull(),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
