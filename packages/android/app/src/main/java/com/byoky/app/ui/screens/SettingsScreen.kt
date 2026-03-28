@@ -267,7 +267,7 @@ fun CloudVaultSetupDialog(wallet: WalletStore, onDismiss: () -> Unit) {
         title = {
             Text(
                 when (step) {
-                    "warning" -> "Your keys will leave this device"
+                    "warning" -> "Cloud Vault"
                     else -> if (isSignup) "Create Vault Account" else "Login to Vault"
                 },
                 color = TextPrimary,
@@ -277,14 +277,14 @@ fun CloudVaultSetupDialog(wallet: WalletStore, onDismiss: () -> Unit) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (step == "warning") {
                     Text(
-                        "When Cloud Vault is enabled, your API keys are sent to vault.byoky.com over an encrypted connection and stored with AES-256-GCM encryption using a key derived from your vault password.",
+                        "Cloud Vault lets websites use your credentials even when this device is offline. Your keys are sent to vault.byoky.com over an encrypted connection and stored with AES-256-GCM encryption.",
                         color = TextSecondary,
                         fontSize = 14.sp,
                     )
                     Text(
-                        "This means websites can use your credentials even when this device is offline — but your keys will be stored on a remote server.",
-                        color = TextSecondary,
-                        fontSize = 14.sp,
+                        "Note: your keys will be stored on a remote server.",
+                        color = TextMuted,
+                        fontSize = 13.sp,
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(
@@ -293,7 +293,7 @@ fun CloudVaultSetupDialog(wallet: WalletStore, onDismiss: () -> Unit) {
                             colors = CheckboxDefaults.colors(checkedColor = Accent),
                         )
                         Text(
-                            "I understand my keys will be stored on a remote server",
+                            "I understand my keys will be stored remotely",
                             color = TextSecondary,
                             fontSize = 13.sp,
                         )

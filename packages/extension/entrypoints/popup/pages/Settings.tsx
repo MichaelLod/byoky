@@ -307,7 +307,7 @@ function ImportModal({ onClose }: { onClose: () => void }) {
       <h2 className="page-title">Import Vault</h2>
       <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
         Import a .byoky backup file. This will <strong>replace</strong> all
-        existing credentials.
+        existing credentials and gifts.
       </p>
 
       {error && <div className="error">{error}</div>}
@@ -345,7 +345,7 @@ function ImportModal({ onClose }: { onClose: () => void }) {
 
         <div className="warning-box">
           <strong>Warning:</strong> Importing will replace all existing
-          credentials in your wallet. This cannot be undone.
+          credentials and gifts in your wallet. This cannot be undone.
         </div>
 
         <label
@@ -417,28 +417,21 @@ function CloudVaultModal({ onClose }: { onClose: () => void }) {
 
       {step === 'warning' ? (
         <>
-          <div className="warning-box">
-            <p style={{ margin: '0 0 8px' }}>
-              <strong>Your keys will leave this device.</strong>
-            </p>
-            <p style={{ margin: '0 0 8px' }}>
-              When Cloud Vault is enabled, your API keys are sent to
-              vault.byoky.com over an encrypted connection and stored with
-              AES-256-GCM encryption using a key derived from your vault
-              password.
-            </p>
-            <p style={{ margin: 0 }}>
-              This means websites can use your credentials even when this device
-              is offline — but your keys will be stored on a remote server.
-            </p>
-          </div>
+          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: '0 0 12px' }}>
+            Cloud Vault lets websites use your credentials even when this device
+            is offline. Your keys are sent to vault.byoky.com over an encrypted
+            connection and stored with AES-256-GCM encryption using a key
+            derived from your vault password.
+          </p>
+          <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '0 0 12px' }}>
+            Note: your keys will be stored on a remote server.
+          </p>
 
           <label
             style={{
               display: 'flex',
               alignItems: 'center',
               gap: '8px',
-              marginTop: '12px',
               fontSize: '12px',
               color: 'var(--text-secondary)',
               cursor: 'pointer',
@@ -449,7 +442,7 @@ function CloudVaultModal({ onClose }: { onClose: () => void }) {
               checked={understood}
               onChange={(e) => setUnderstood(e.target.checked)}
             />
-            I understand my keys will be stored on a remote server
+            I understand my keys will be stored remotely
           </label>
 
           <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
