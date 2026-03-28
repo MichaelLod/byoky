@@ -43,9 +43,6 @@ function Hero() {
         </FadeIn>
         <FadeIn delay={0.1}>
           <div className="hero-mascot">
-            <div className="hero-ripple" aria-hidden />
-            <div className="hero-ripple hero-ripple-2" aria-hidden />
-            <div className="hero-ripple hero-ripple-3" aria-hidden />
             <svg width="96" height="96" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
               <polygon points="40,5 64,3 88,5 64,14" fill="#0ea5e9"/>
               <polygon points="40,5 22,12 44,18" fill="#0284c7"/>
