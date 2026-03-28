@@ -781,6 +781,15 @@ class WalletStore(context: Context) {
         }
     }
 
+    fun checkUsernameAvailability(username: String): Pair<Boolean, String?> {
+        val encoded = java.net.URLEncoder.encode(username, "UTF-8")
+        val (ok, _, data) = vaultRequest("/auth/check-username/$encoded", "GET")
+        if (!ok) return Pair(false, null)
+        val available = data.optBoolean("available", false)
+        val reason = data.optString("reason", "").takeIf { it.isNotEmpty() }
+        return Pair(available, reason)
+    }
+
     suspend fun enableCloudVault(username: String, password: String, isSignup: Boolean) {
         val path = if (isSignup) "/auth/signup" else "/auth/login"
         val body = JSONObject().put("username", username).put("password", password)

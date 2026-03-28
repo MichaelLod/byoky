@@ -249,8 +249,44 @@ struct CloudVaultSetupView: View {
     @State private var password = ""
     @State private var loading = false
     @State private var error: String?
+    @State private var usernameStatus: UsernameStatus = .idle
+    @State private var checkTask: Task<Void, Never>?
 
     enum SetupStep { case warning, auth }
+    enum UsernameStatus: Equatable { case idle, checking, available, taken, invalid }
+
+    private static let usernamePattern = "^[a-z0-9][a-z0-9_-]{1,28}[a-z0-9]$"
+
+    private var isUsernameValid: Bool {
+        let trimmed = username.lowercased().trimmingCharacters(in: .whitespaces)
+        guard trimmed.count >= 3, trimmed.count <= 30 else { return false }
+        return trimmed.range(of: Self.usernamePattern, options: .regularExpression) != nil
+    }
+
+    private func onUsernameChanged(_ value: String) {
+        checkTask?.cancel()
+        let trimmed = value.lowercased().trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, trimmed.count >= 3 else {
+            usernameStatus = .idle
+            return
+        }
+        guard trimmed.range(of: Self.usernamePattern, options: .regularExpression) != nil else {
+            usernameStatus = .invalid
+            return
+        }
+        usernameStatus = .checking
+        checkTask = Task {
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled else { return }
+            let result = await wallet.checkUsernameAvailability(trimmed)
+            guard !Task.isCancelled else { return }
+            if result.available {
+                usernameStatus = .available
+            } else {
+                usernameStatus = result.reason == "invalid" ? .invalid : .taken
+            }
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -330,6 +366,30 @@ struct CloudVaultSetupView: View {
                             .textContentType(.username)
                             .autocapitalization(.none)
                             .textFieldStyle(.roundedBorder)
+                            .onChange(of: username) { _, value in
+                                if isSignup { onUsernameChanged(value) }
+                            }
+                        if isSignup && username.count >= 3 {
+                            Group {
+                                switch usernameStatus {
+                                case .checking:
+                                    Text("Checking availability...")
+                                        .foregroundStyle(.secondary)
+                                case .available:
+                                    Text("Username is available")
+                                        .foregroundStyle(.green)
+                                case .taken:
+                                    Text("Username is already taken")
+                                        .foregroundStyle(.red)
+                                case .invalid:
+                                    Text("Letters, numbers, hyphens, underscores only (3\u{2013}30 chars)")
+                                        .foregroundStyle(.red)
+                                case .idle:
+                                    EmptyView()
+                                }
+                            }
+                            .font(.caption2)
+                        }
                     }
 
                     VStack(alignment: .leading, spacing: 6) {
@@ -352,7 +412,7 @@ struct CloudVaultSetupView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accent)
-                .disabled(loading || username.isEmpty || password.isEmpty || (isSignup && password.count < 12))
+                .disabled(loading || username.isEmpty || password.isEmpty || (isSignup && password.count < 12) || (isSignup && (usernameStatus == .taken || usernameStatus == .invalid || usernameStatus == .checking || !isUsernameValid)))
             }
             .padding(24)
         }
