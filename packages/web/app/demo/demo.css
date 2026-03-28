@@ -813,11 +813,13 @@
 }
 
 .demo-app .chat-attachment-preview {
-  width: 40px;
-  height: 40px;
+  width: 48px;
+  height: 48px;
   object-fit: cover;
   border-radius: 6px;
   border: 1px solid var(--border);
+  flex-shrink: 0;
+  overflow: hidden;
 }
 
 .demo-app .chat-attachment-name {
