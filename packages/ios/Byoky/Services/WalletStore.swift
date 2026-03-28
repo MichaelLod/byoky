@@ -606,6 +606,14 @@ final class WalletStore: ObservableObject {
         }
     }
 
+    func checkUsernameAvailability(_ username: String) async -> (available: Bool, reason: String?) {
+        let result = await vaultRequest(path: "/auth/check-username/\(username.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? username)", method: "GET")
+        if !result.ok { return (false, nil) }
+        let available = result.data["available"] as? Bool ?? false
+        let reason = result.data["reason"] as? String
+        return (available, reason)
+    }
+
     func enableCloudVault(username: String, password: String, isSignup: Bool) async throws {
         let path = isSignup ? "/auth/signup" : "/auth/login"
         let result = await vaultRequest(path: path, method: "POST", body: ["username": username, "password": password])
