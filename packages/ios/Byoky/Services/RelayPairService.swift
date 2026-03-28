@@ -201,6 +201,13 @@ final class RelayPairService: ObservableObject {
             return
         }
 
+        let origin = pairedOrigin ?? "relay"
+        let allowanceCheck = wallet.checkAllowance(origin: origin, providerId: providerId)
+        if !allowanceCheck.allowed {
+            sendRelayError(requestId: requestId, code: "QUOTA_EXCEEDED", message: allowanceCheck.reason ?? "Token allowance exceeded")
+            return
+        }
+
         let headers = json["headers"] as? [String: String] ?? [:]
         let bodyString = json["body"] as? String
 

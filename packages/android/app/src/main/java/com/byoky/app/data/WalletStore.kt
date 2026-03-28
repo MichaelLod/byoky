@@ -62,6 +62,9 @@ class WalletStore(context: Context) {
     private val _giftedCredentials = MutableStateFlow<List<GiftedCredential>>(emptyList())
     val giftedCredentials: StateFlow<List<GiftedCredential>> = _giftedCredentials.asStateFlow()
 
+    private val _tokenAllowances = MutableStateFlow<List<TokenAllowance>>(emptyList())
+    val tokenAllowances: StateFlow<List<TokenAllowance>> = _tokenAllowances.asStateFlow()
+
     private val _bridgeStatus = MutableStateFlow(BridgeStatus.INACTIVE)
     val bridgeStatus: StateFlow<BridgeStatus> = _bridgeStatus.asStateFlow()
 
@@ -71,8 +74,8 @@ class WalletStore(context: Context) {
     private val _cloudVaultEnabled = MutableStateFlow(false)
     val cloudVaultEnabled: StateFlow<Boolean> = _cloudVaultEnabled.asStateFlow()
 
-    private val _cloudVaultEmail = MutableStateFlow<String?>(null)
-    val cloudVaultEmail: StateFlow<String?> = _cloudVaultEmail.asStateFlow()
+    private val _cloudVaultUsername = MutableStateFlow<String?>(null)
+    val cloudVaultUsername: StateFlow<String?> = _cloudVaultUsername.asStateFlow()
 
     private val _cloudVaultTokenExpired = MutableStateFlow(false)
     val cloudVaultTokenExpired: StateFlow<Boolean> = _cloudVaultTokenExpired.asStateFlow()
@@ -131,6 +134,7 @@ class WalletStore(context: Context) {
         loadRequestLogs()
         loadGifts()
         loadGiftedCredentials()
+        loadTokenAllowances()
         loadCloudVaultState()
         vaultScope.launch { syncPendingCredentials() }
         return UnlockResult.Success
@@ -143,6 +147,7 @@ class WalletStore(context: Context) {
         _requestLogs.value = emptyList()
         _gifts.value = emptyList()
         _giftedCredentials.value = emptyList()
+        _tokenAllowances.value = emptyList()
         _status.value = WalletStatus.LOCKED
         backgroundTime = null
     }
@@ -325,8 +330,9 @@ class WalletStore(context: Context) {
         editor.remove("requestLogs")
         editor.remove("gifts")
         editor.remove("giftedCredentials")
+        editor.remove("tokenAllowances")
         editor.remove("cloudVault_enabled")
-        editor.remove("cloudVault_email")
+        editor.remove("cloudVault_username")
         editor.remove("cloudVault_token")
         editor.remove("cloudVault_sessionId")
         editor.remove("cloudVault_tokenIssuedAt")
@@ -335,7 +341,7 @@ class WalletStore(context: Context) {
         editor.apply()
 
         _cloudVaultEnabled.value = false
-        _cloudVaultEmail.value = null
+        _cloudVaultUsername.value = null
         _cloudVaultTokenExpired.value = false
         vaultToken = null
         vaultSessionId = null
@@ -348,6 +354,7 @@ class WalletStore(context: Context) {
         _requestLogs.value = emptyList()
         _gifts.value = emptyList()
         _giftedCredentials.value = emptyList()
+        _tokenAllowances.value = emptyList()
         _bridgeStatus.value = BridgeStatus.INACTIVE
 
         // Reset brute-force state
@@ -625,6 +632,76 @@ class WalletStore(context: Context) {
         prefs.edit().putString("giftedCredentials", arr.toString()).apply()
     }
 
+    // MARK: - Token Allowances
+
+    fun setAllowance(allowance: TokenAllowance) {
+        val list = _tokenAllowances.value.toMutableList()
+        val idx = list.indexOfFirst { it.origin == allowance.origin }
+        if (idx >= 0) list[idx] = allowance else list.add(allowance)
+        _tokenAllowances.value = list
+        saveTokenAllowances()
+    }
+
+    fun removeAllowance(origin: String) {
+        _tokenAllowances.value = _tokenAllowances.value.filter { it.origin != origin }
+        saveTokenAllowances()
+    }
+
+    fun checkAllowance(origin: String, providerId: String): AllowanceCheck.Result {
+        val allowance = _tokenAllowances.value.firstOrNull { it.origin == origin }
+        val entries = _requestLogs.value.filter { it.appOrigin == origin && it.statusCode < 400 }
+        return AllowanceCheck.compute(allowance, entries, providerId)
+    }
+
+    fun tokenUsage(origin: String): Int {
+        return _requestLogs.value
+            .filter { it.appOrigin == origin && it.statusCode < 400 }
+            .sumOf { (it.inputTokens ?: 0) + (it.outputTokens ?: 0) }
+    }
+
+    private fun loadTokenAllowances() {
+        val json = prefs.getString("tokenAllowances", null) ?: return
+        try {
+            val arr = JSONArray(json)
+            val list = mutableListOf<TokenAllowance>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                val providerLimits = if (obj.has("providerLimits")) {
+                    val pl = obj.getJSONObject("providerLimits")
+                    val map = mutableMapOf<String, Int>()
+                    pl.keys().forEach { key -> map[key] = pl.getInt(key) }
+                    map
+                } else null
+                list.add(
+                    TokenAllowance(
+                        origin = obj.getString("origin"),
+                        totalLimit = if (obj.has("totalLimit")) obj.getInt("totalLimit") else null,
+                        providerLimits = providerLimits,
+                    )
+                )
+            }
+            _tokenAllowances.value = list
+        } catch (_: Exception) {
+            _tokenAllowances.value = emptyList()
+        }
+    }
+
+    private fun saveTokenAllowances() {
+        val arr = JSONArray()
+        _tokenAllowances.value.forEach { a ->
+            arr.put(JSONObject().apply {
+                put("origin", a.origin)
+                a.totalLimit?.let { put("totalLimit", it) }
+                a.providerLimits?.let { pl ->
+                    put("providerLimits", JSONObject().apply {
+                        pl.forEach { (k, v) -> put(k, v) }
+                    })
+                }
+            })
+        }
+        prefs.edit().putString("tokenAllowances", arr.toString()).apply()
+    }
+
     // MARK: - Cloud Vault
 
     companion object {
@@ -635,7 +712,7 @@ class WalletStore(context: Context) {
 
     private fun loadCloudVaultState() {
         _cloudVaultEnabled.value = prefs.getBoolean("cloudVault_enabled", false)
-        _cloudVaultEmail.value = prefs.getString("cloudVault_email", null)
+        _cloudVaultUsername.value = prefs.getString("cloudVault_username", null)
         vaultToken = prefs.getString("cloudVault_token", null)
         vaultSessionId = prefs.getString("cloudVault_sessionId", null)
         vaultTokenIssuedAt = prefs.getLong("cloudVault_tokenIssuedAt", 0)
@@ -661,7 +738,7 @@ class WalletStore(context: Context) {
     private fun saveCloudVaultConfig() {
         prefs.edit()
             .putBoolean("cloudVault_enabled", _cloudVaultEnabled.value)
-            .putString("cloudVault_email", _cloudVaultEmail.value)
+            .putString("cloudVault_username", _cloudVaultUsername.value)
             .putString("cloudVault_token", vaultToken)
             .putString("cloudVault_sessionId", vaultSessionId)
             .putLong("cloudVault_tokenIssuedAt", vaultTokenIssuedAt)
@@ -704,9 +781,9 @@ class WalletStore(context: Context) {
         }
     }
 
-    suspend fun enableCloudVault(email: String, password: String, isSignup: Boolean) {
+    suspend fun enableCloudVault(username: String, password: String, isSignup: Boolean) {
         val path = if (isSignup) "/auth/signup" else "/auth/login"
-        val body = JSONObject().put("email", email).put("password", password)
+        val body = JSONObject().put("username", username).put("password", password)
         val (ok, _, data) = vaultRequest(path, "POST", body)
         if (!ok) {
             val err = data.optJSONObject("error")
@@ -719,7 +796,7 @@ class WalletStore(context: Context) {
         vaultSessionId = sessionId
         vaultTokenIssuedAt = System.currentTimeMillis()
         _cloudVaultEnabled.value = true
-        _cloudVaultEmail.value = email
+        _cloudVaultUsername.value = username
         _cloudVaultTokenExpired.value = false
         vaultCredentialMap.clear()
         saveCloudVaultConfig()
@@ -734,7 +811,7 @@ class WalletStore(context: Context) {
         }
 
         _cloudVaultEnabled.value = false
-        _cloudVaultEmail.value = null
+        _cloudVaultUsername.value = null
         _cloudVaultTokenExpired.value = false
         vaultToken = null
         vaultSessionId = null
@@ -742,7 +819,7 @@ class WalletStore(context: Context) {
         vaultCredentialMap.clear()
         prefs.edit()
             .remove("cloudVault_enabled")
-            .remove("cloudVault_email")
+            .remove("cloudVault_username")
             .remove("cloudVault_token")
             .remove("cloudVault_sessionId")
             .remove("cloudVault_tokenIssuedAt")
@@ -752,8 +829,8 @@ class WalletStore(context: Context) {
     }
 
     suspend fun reloginCloudVault(password: String) {
-        val email = _cloudVaultEmail.value ?: throw IllegalStateException("No vault account configured")
-        val body = JSONObject().put("email", email).put("password", password)
+        val username = _cloudVaultUsername.value ?: throw IllegalStateException("No vault account configured")
+        val body = JSONObject().put("username", username).put("password", password)
         val (ok, _, data) = vaultRequest("/auth/login", "POST", body)
         if (!ok) {
             val err = data.optJSONObject("error")
