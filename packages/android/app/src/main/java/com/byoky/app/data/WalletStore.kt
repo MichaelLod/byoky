@@ -62,6 +62,9 @@ class WalletStore(context: Context) {
     private val _giftedCredentials = MutableStateFlow<List<GiftedCredential>>(emptyList())
     val giftedCredentials: StateFlow<List<GiftedCredential>> = _giftedCredentials.asStateFlow()
 
+    private val _giftPreferences = MutableStateFlow<Map<String, String>>(emptyMap())
+    val giftPreferences: StateFlow<Map<String, String>> = _giftPreferences.asStateFlow()
+
     private val _tokenAllowances = MutableStateFlow<List<TokenAllowance>>(emptyList())
     val tokenAllowances: StateFlow<List<TokenAllowance>> = _tokenAllowances.asStateFlow()
 
@@ -134,6 +137,7 @@ class WalletStore(context: Context) {
         loadRequestLogs()
         loadGifts()
         loadGiftedCredentials()
+        loadGiftPreferences()
         loadTokenAllowances()
         loadCloudVaultState()
         vaultScope.launch { syncPendingCredentials() }
@@ -147,6 +151,7 @@ class WalletStore(context: Context) {
         _requestLogs.value = emptyList()
         _gifts.value = emptyList()
         _giftedCredentials.value = emptyList()
+        _giftPreferences.value = emptyMap()
         _tokenAllowances.value = emptyList()
         _status.value = WalletStatus.LOCKED
         backgroundTime = null
@@ -298,8 +303,22 @@ class WalletStore(context: Context) {
     }
 
     fun removeGiftedCredential(id: String) {
+        val gc = _giftedCredentials.value.find { it.id == id }
+        if (gc != null && _giftPreferences.value[gc.providerId] == gc.giftId) {
+            _giftPreferences.value = _giftPreferences.value - gc.providerId
+            saveGiftPreferences()
+        }
         _giftedCredentials.value = _giftedCredentials.value.filter { it.id != id }
         saveGiftedCredentials()
+    }
+
+    fun setGiftPreference(providerId: String, giftId: String?) {
+        _giftPreferences.value = if (giftId != null) {
+            _giftPreferences.value + (providerId to giftId)
+        } else {
+            _giftPreferences.value - providerId
+        }
+        saveGiftPreferences()
     }
 
     // MARK: - Reset
@@ -330,6 +349,7 @@ class WalletStore(context: Context) {
         editor.remove("requestLogs")
         editor.remove("gifts")
         editor.remove("giftedCredentials")
+        editor.remove("giftPreferences")
         editor.remove("tokenAllowances")
         editor.remove("cloudVault_enabled")
         editor.remove("cloudVault_username")
@@ -630,6 +650,24 @@ class WalletStore(context: Context) {
             })
         }
         prefs.edit().putString("giftedCredentials", arr.toString()).apply()
+    }
+
+    private fun loadGiftPreferences() {
+        val json = prefs.getString("giftPreferences", null) ?: return
+        try {
+            val obj = JSONObject(json)
+            val map = mutableMapOf<String, String>()
+            obj.keys().forEach { key -> map[key] = obj.getString(key) }
+            _giftPreferences.value = map
+        } catch (_: Exception) {
+            _giftPreferences.value = emptyMap()
+        }
+    }
+
+    private fun saveGiftPreferences() {
+        val obj = JSONObject()
+        _giftPreferences.value.forEach { (k, v) -> obj.put(k, v) }
+        prefs.edit().putString("giftPreferences", obj.toString()).apply()
     }
 
     // MARK: - Token Allowances

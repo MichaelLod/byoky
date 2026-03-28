@@ -735,9 +735,20 @@ export default defineBackground(() => {
     const credentials = await getStoredCredentials();
     const gcData = await browser.storage.local.get('giftedCredentials');
     const giftedCreds = (gcData.giftedCredentials ?? []) as GiftedCredential[];
+    const giftPrefs = await getGiftPreferences();
     const result: Array<{ id: string; authMethod: AuthMethod; sessionProvider: Session['providers'][number] }> = [];
     const seen = new Set<string>();
+
+    // First pass: check if any provider should prefer a gift
+    const preferredGiftProviders = new Set<string>();
+    for (const gc of giftedCreds) {
+      if (gc.expiresAt > Date.now() && gc.usedTokens < gc.maxTokens && giftPrefs[gc.providerId] === gc.giftId) {
+        preferredGiftProviders.add(gc.providerId);
+      }
+    }
+
     for (const cred of credentials) {
+      if (preferredGiftProviders.has(cred.providerId)) continue; // gift preferred, skip own key
       seen.add(cred.providerId);
       result.push({
         id: cred.providerId,
@@ -752,6 +763,7 @@ export default defineBackground(() => {
     }
     for (const gc of giftedCreds) {
       if (gc.expiresAt > Date.now() && gc.usedTokens < gc.maxTokens && !seen.has(gc.providerId)) {
+        seen.add(gc.providerId);
         result.push({
           id: gc.providerId,
           authMethod: 'api_key',
@@ -789,22 +801,20 @@ export default defineBackground(() => {
     const providerMap: ConnectResponse['providers'] = {};
     const sessionProviders: Session['providers'] = [];
 
+    const giftPrefs = await getGiftPreferences();
+
     for (const req of request.providers ?? []) {
       const cred = credentials.find((c) => c.providerId === req.id);
-      const gc = !cred ? giftedCreds.find((g) => g.providerId === req.id && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens) : undefined;
+      const gc = giftedCreds.find((g) => g.providerId === req.id && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens);
+      // Prefer gift if user explicitly chose it, otherwise prefer own key
+      const preferGift = gc && giftPrefs[req.id] === gc.giftId;
+      const useGift = preferGift || (!cred && gc);
       providerMap[req.id] = {
         available: !!(cred || gc),
-        authMethod: cred?.authMethod ?? 'api_key',
-        ...(gc ? { gift: true } : {}),
+        authMethod: useGift ? 'api_key' : (cred?.authMethod ?? 'api_key'),
+        ...(useGift ? { gift: true } : {}),
       };
-      if (cred) {
-        sessionProviders.push({
-          providerId: req.id,
-          credentialId: cred.id,
-          available: true,
-          authMethod: cred.authMethod,
-        });
-      } else if (gc) {
+      if (useGift && gc) {
         sessionProviders.push({
           providerId: req.id,
           credentialId: gc.id,
@@ -813,6 +823,13 @@ export default defineBackground(() => {
           giftId: gc.giftId,
           giftRelayUrl: gc.relayUrl,
           giftAuthToken: gc.authToken,
+        });
+      } else if (cred) {
+        sessionProviders.push({
+          providerId: req.id,
+          credentialId: cred.id,
+          available: true,
+          authMethod: cred.authMethod,
         });
       }
     }
@@ -1354,9 +1371,35 @@ export default defineBackground(() => {
         const { id } = message.payload as { id: string };
         const data = await browser.storage.local.get('giftedCredentials');
         const giftedCreds = (data.giftedCredentials ?? []) as GiftedCredential[];
+        const removed = giftedCreds.find((gc) => gc.id === id);
         await browser.storage.local.set({
           giftedCredentials: giftedCreds.filter((gc) => gc.id !== id),
         });
+        // Clear preference if it pointed to this gift
+        if (removed) {
+          const prefs = await getGiftPreferences();
+          if (prefs[removed.providerId] === removed.giftId) {
+            delete prefs[removed.providerId];
+            await browser.storage.local.set({ giftPreferences: prefs });
+          }
+        }
+        refreshSessionProviders();
+        return { success: true };
+      }
+
+      case 'getGiftPreferences': {
+        return { preferences: await getGiftPreferences() };
+      }
+
+      case 'setGiftPreference': {
+        const { providerId, giftId } = message.payload as { providerId: string; giftId: string | null };
+        const prefs = await getGiftPreferences();
+        if (giftId) {
+          prefs[providerId] = giftId;
+        } else {
+          delete prefs[providerId];
+        }
+        await browser.storage.local.set({ giftPreferences: prefs });
         refreshSessionProviders();
         return { success: true };
       }
@@ -2330,6 +2373,11 @@ export default defineBackground(() => {
   async function getStoredCredentials(): Promise<Credential[]> {
     const data = await browser.storage.local.get('credentials');
     return (data.credentials as Credential[]) ?? [];
+  }
+
+  async function getGiftPreferences(): Promise<Record<string, string>> {
+    const data = await browser.storage.local.get('giftPreferences');
+    return (data.giftPreferences as Record<string, string>) ?? {};
   }
 
   async function resolveCredential(

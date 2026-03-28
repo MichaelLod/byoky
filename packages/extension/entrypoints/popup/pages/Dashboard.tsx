@@ -17,14 +17,16 @@ function formatExpiry(ms: number): string {
 }
 
 export function Dashboard() {
-  const { credentials, giftedCredentials, navigate, lock, removeCredential, cloudVaultEnabled, disableCloudVault } = useWalletStore();
+  const { credentials, giftedCredentials, giftPreferences, navigate, lock, removeCredential, setGiftPreference, cloudVaultEnabled, disableCloudVault } = useWalletStore();
   const activeGifts = giftedCredentials.filter((gc) => !isGiftExpired(gc));
+  const ownProviderIds = new Set(credentials.map((c) => c.providerId));
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <h2 className="page-title" style={{ marginBottom: 0 }}>Credentials</h2>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <span style={{ fontSize: '12px', color: cloudVaultEnabled ? 'var(--accent)' : 'var(--text-muted)' }}>Vault</span>
           <label className="toggle-switch" title={cloudVaultEnabled ? 'Cloud Vault on' : 'Cloud Vault off'}>
             <input
               type="checkbox"
@@ -39,18 +41,6 @@ export function Dashboard() {
             />
             <span className="toggle-slider" />
           </label>
-          <span style={{ color: cloudVaultEnabled ? 'var(--accent)' : 'var(--text-muted)', display: 'flex', alignItems: 'center' }}>
-            {cloudVaultEnabled ? (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />
-              </svg>
-            ) : (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />
-                <line x1="2" y1="2" x2="22" y2="22" />
-              </svg>
-            )}
-          </span>
           <button className="text-link" onClick={() => lock()}>
             Lock
           </button>
@@ -121,6 +111,8 @@ export function Dashboard() {
           {activeGifts.map((gc) => {
             const pct = giftBudgetPercent(gc);
             const remaining = giftBudgetRemaining(gc);
+            const hasOwnKey = ownProviderIds.has(gc.providerId);
+            const isPreferred = giftPreferences[gc.providerId] === gc.giftId;
             return (
               <div key={gc.id} className="card gift-card">
                 <div className="card-header">
@@ -144,6 +136,17 @@ export function Dashboard() {
                     />
                   </div>
                 </div>
+                {hasOwnKey && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px', cursor: 'pointer', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                    <input
+                      type="checkbox"
+                      checked={isPreferred}
+                      onChange={() => setGiftPreference(gc.providerId, isPreferred ? null : gc.giftId)}
+                      style={{ margin: 0 }}
+                    />
+                    Use instead of own key
+                  </label>
+                )}
                 <div className="card-subtitle" style={{ marginTop: '6px' }}>
                   Expires in {formatExpiry(gc.expiresAt)}
                 </div>
