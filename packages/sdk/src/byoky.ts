@@ -9,7 +9,7 @@ import { createVaultFetch } from './vault-fetch.js';
 
 export interface VaultConnectOptions {
   vaultUrl: string;
-  email?: string;
+  username?: string;
   password?: string;
   token?: string;
 }
@@ -152,13 +152,13 @@ export class Byoky {
     let token = options.token;
 
     if (!token) {
-      if (!options.email || !options.password) {
-        throw new ByokyError(ByokyErrorCode.UNKNOWN, 'Either token or email+password required for vault connection');
+      if (!options.username || !options.password) {
+        throw new ByokyError(ByokyErrorCode.UNKNOWN, 'Either token or username+password required for vault connection');
       }
       const loginResp = await fetch(`${vaultUrl.replace(/\/$/, '')}/auth/login`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: options.email, password: options.password }),
+        body: JSON.stringify({ username: options.username, password: options.password }),
       });
       if (!loginResp.ok) {
         const err = await loginResp.json().catch(() => ({})) as Record<string, unknown>;

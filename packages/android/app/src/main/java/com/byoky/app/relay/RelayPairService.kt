@@ -196,6 +196,13 @@ class RelayPairService {
         val urlString = json.optString("url") ?: return
         val method = json.optString("method") ?: return
 
+        val origin = pairedOrigin ?: "relay"
+        val allowanceCheck = wallet.checkAllowance(origin, providerId)
+        if (!allowanceCheck.allowed) {
+            sendRelayError(requestId, "QUOTA_EXCEEDED", allowanceCheck.reason ?: "Token allowance exceeded")
+            return
+        }
+
         val provider = Provider.find(providerId)
         if (provider == null) {
             sendRelayError(requestId, "NO_PROVIDER", "Unknown provider: $providerId")
