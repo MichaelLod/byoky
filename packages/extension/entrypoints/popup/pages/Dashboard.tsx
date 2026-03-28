@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useWalletStore } from '../store';
 import { PROVIDERS, isGiftExpired, giftBudgetRemaining, giftBudgetPercent } from '@byoky/core';
 
@@ -17,17 +18,61 @@ function formatExpiry(ms: number): string {
 }
 
 export function Dashboard() {
-  const { credentials, giftedCredentials, navigate, lock, removeCredential } = useWalletStore();
+  const { credentials, giftedCredentials, navigate, lock, removeCredential, cloudVaultEnabled, disableCloudVault } = useWalletStore();
+  const [showVaultWarning, setShowVaultWarning] = useState(false);
   const activeGifts = giftedCredentials.filter((gc) => !isGiftExpired(gc));
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <h2 className="page-title" style={{ marginBottom: 0 }}>Credentials</h2>
-        <button className="text-link" onClick={() => lock()}>
-          Lock
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <button
+            className="text-link"
+            title={cloudVaultEnabled ? 'Cloud Vault on' : 'Cloud Vault off'}
+            style={{ color: cloudVaultEnabled ? 'var(--accent)' : 'var(--text-muted)', fontSize: '16px', lineHeight: 1 }}
+            onClick={() => {
+              if (cloudVaultEnabled) {
+                disableCloudVault();
+              } else {
+                setShowVaultWarning(true);
+              }
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />
+            </svg>
+          </button>
+          <button className="text-link" onClick={() => lock()}>
+            Lock
+          </button>
+        </div>
       </div>
+
+      {showVaultWarning && (
+        <div className="warning-box" style={{ marginBottom: '16px' }}>
+          <p style={{ margin: '0 0 8px' }}>
+            <strong>Your keys will leave this device.</strong> They&apos;ll be encrypted
+            and stored on vault.byoky.com so websites can use them even when you&apos;re offline.
+          </p>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              className="btn btn-secondary"
+              style={{ flex: 1, fontSize: '12px' }}
+              onClick={() => setShowVaultWarning(false)}
+            >
+              Cancel
+            </button>
+            <button
+              className="btn btn-primary"
+              style={{ flex: 1, fontSize: '12px' }}
+              onClick={() => { setShowVaultWarning(false); navigate('settings'); }}
+            >
+              Set Up
+            </button>
+          </div>
+        </div>
+      )}
 
       {credentials.length === 0 ? (
         <div className="empty-state">

@@ -22,18 +22,35 @@ import com.byoky.app.data.Credential
 import com.byoky.app.data.Provider
 import com.byoky.app.data.WalletStore
 import com.byoky.app.ui.theme.*
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WalletScreen(wallet: WalletStore, onNavigateToSettings: () -> Unit = {}) {
     val credentials by wallet.credentials.collectAsState()
+    val cloudVaultEnabled by wallet.cloudVaultEnabled.collectAsState()
     var showAddSheet by remember { mutableStateOf(false) }
+    var showCloudVaultSetup by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Wallet") },
                 actions = {
+                    IconButton(onClick = {
+                        if (cloudVaultEnabled) {
+                            scope.launch { wallet.disableCloudVault() }
+                        } else {
+                            showCloudVaultSetup = true
+                        }
+                    }) {
+                        Icon(
+                            Icons.Default.Cloud,
+                            "Cloud Vault",
+                            tint = if (cloudVaultEnabled) Accent else TextMuted,
+                        )
+                    }
                     IconButton(onClick = { showAddSheet = true }) {
                         Icon(Icons.Default.AddCircle, "Add credential", tint = Accent)
                     }
@@ -78,6 +95,13 @@ fun WalletScreen(wallet: WalletStore, onNavigateToSettings: () -> Unit = {}) {
 
         if (showAddSheet) {
             AddCredentialSheet(wallet) { showAddSheet = false }
+        }
+
+        if (showCloudVaultSetup) {
+            CloudVaultSetupDialog(
+                wallet = wallet,
+                onDismiss = { showCloudVaultSetup = false },
+            )
         }
     }
 }
