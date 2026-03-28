@@ -1207,11 +1207,12 @@ export default defineBackground(() => {
           active: true,
           relayUrl,
         };
-        // authToken is stored in plaintext — it's already shared via the gift link URL,
-        // so encrypting it adds no security. The API key itself remains encrypted.
+        // Encrypt authToken at rest for defense-in-depth (protects against local storage exfiltration)
+        const encryptedAuthToken = await encrypt(authToken, masterPassword!);
+        const storageGift = { ...gift, authToken: encryptedAuthToken };
         const data = await browser.storage.local.get('gifts');
         const gifts = (data.gifts ?? []) as Gift[];
-        gifts.push(gift);
+        gifts.push(storageGift);
         await browser.storage.local.set({ gifts });
         const { encoded } = createGiftLink(gift);
         connectGiftRelay(gift);
@@ -1285,6 +1286,7 @@ export default defineBackground(() => {
       // --- Cloud Vault ---
 
       case 'cloudVaultSignup': {
+        const rlErr = checkVaultAuthRate(); if (rlErr) return rlErr;
         if (!masterPassword) return { error: 'Wallet is locked' };
         const { email, password } = message.payload as { email: string; password: string };
         const result = await vaultFetch('/auth/signup', 'POST', { email, password });
@@ -1308,6 +1310,7 @@ export default defineBackground(() => {
       }
 
       case 'cloudVaultLogin': {
+        const rlErr = checkVaultAuthRate(); if (rlErr) return rlErr;
         if (!masterPassword) return { error: 'Wallet is locked' };
         const { email, password } = message.payload as { email: string; password: string };
         const result = await vaultFetch('/auth/login', 'POST', { email, password });
@@ -1355,6 +1358,7 @@ export default defineBackground(() => {
       }
 
       case 'cloudVaultRelogin': {
+        const rlErr = checkVaultAuthRate(); if (rlErr) return rlErr;
         if (!masterPassword) return { error: 'Wallet is locked' };
         const { password } = message.payload as { password: string };
         const state = await getCloudVaultState();
@@ -1673,7 +1677,7 @@ export default defineBackground(() => {
       setPhaseTimeout(30_000, 'GIFT_TIMEOUT', 'Gift relay connection timed out', 504);
 
       ws.onopen = () => {
-        console.log(`[gift-relay] recipient auth for ${sp.giftId?.slice(0, 8)}, token prefix: ${sp.giftAuthToken?.slice(0, 8)}`);
+        console.log(`[gift-relay] recipient auth for ${sp.giftId?.slice(0, 8)}`);
         ws.send(JSON.stringify({
           type: 'relay:auth',
           roomId: sp.giftId,
@@ -2531,7 +2535,7 @@ export default defineBackground(() => {
           const msg = JSON.parse(raw);
 
           if (msg.type === 'relay:auth:result') {
-            console.log(`[gift-relay] sender auth for ${gift.id.slice(0, 8)}: ${msg.success ? 'ok' : msg.error}, token prefix: ${gift.authToken.slice(0, 8)}`);
+            console.log(`[gift-relay] sender auth for ${gift.id.slice(0, 8)}: ${msg.success ? 'ok' : msg.error}`);
             if (!msg.success) {
               ws.close();
               giftRelayConnections.delete(gift.id);
@@ -2588,23 +2592,37 @@ export default defineBackground(() => {
   }
 
   async function getGiftsFromStorage(): Promise<Gift[]> {
+    if (!masterPassword) return [];
     const data = await browser.storage.local.get('gifts');
-    return (data.gifts ?? []) as Gift[];
+    const stored = (data.gifts ?? []) as Gift[];
+    const result: Gift[] = [];
+    for (const gift of stored) {
+      if (!gift.active || gift.expiresAt <= Date.now()) {
+        result.push(gift);
+        continue;
+      }
+      try {
+        const decryptedToken = await decrypt(gift.authToken, masterPassword);
+        result.push({ ...gift, authToken: decryptedToken });
+      } catch {
+        result.push(gift);
+      }
+    }
+    return result;
   }
 
-  // Migrate old encrypted authTokens to plaintext
+  // Migrate old plaintext authTokens (gft_*) to encrypted
   async function migrateGiftTokens(password: string) {
     const data = await browser.storage.local.get('gifts');
     const gifts = (data.gifts ?? []) as Gift[];
     let changed = false;
     for (const gift of gifts) {
-      // Old tokens are base64 (encrypted), new ones start with gft_
-      if (gift.authToken && !gift.authToken.startsWith('gft_')) {
+      if (gift.authToken && gift.authToken.startsWith('gft_')) {
         try {
-          gift.authToken = await decrypt(gift.authToken, password);
+          gift.authToken = await encrypt(gift.authToken, password);
           changed = true;
         } catch {
-          // Can't decrypt — leave as-is
+          // Can't encrypt — leave as-is
         }
       }
     }
@@ -2691,9 +2709,7 @@ export default defineBackground(() => {
 
           await new Promise<void>((resolve) => {
             const nativePort = browser.runtime.connectNative(BRIDGE_HOST);
-            const body = credential.authMethod === 'oauth' && gift.providerId === 'anthropic'
-              ? injectClaudeCodeSystemPrompt(msg.body)
-              : injectStreamUsageOptions(gift.providerId, msg.body);
+            const body = injectStreamUsageOptions(gift.providerId, msg.body);
             nativePort.postMessage({
               type: 'proxy',
               requestId: msg.requestId,
@@ -2859,6 +2875,17 @@ export default defineBackground(() => {
 
   const VAULT_URL = 'https://vault.byoky.com';
   let vaultSyncQueue: Promise<void> = Promise.resolve();
+  let vaultAuthAttempts: number[] = [];
+
+  function checkVaultAuthRate(): { error: string } | null {
+    const now = Date.now();
+    vaultAuthAttempts = vaultAuthAttempts.filter((t) => now - t < 60_000);
+    if (vaultAuthAttempts.length >= 5) {
+      return { error: 'Too many auth attempts — try again in a minute' };
+    }
+    vaultAuthAttempts.push(now);
+    return null;
+  }
 
   function enqueueVaultSync<T>(fn: () => Promise<T>): Promise<T> {
     const result = vaultSyncQueue.then(fn, fn);
@@ -2908,10 +2935,14 @@ export default defineBackground(() => {
       'cloudVault.tokenExpired',
       'cloudVault.credentialMap',
     ]);
+    let token: string | null = data['cloudVault.token'] as string ?? null;
+    if (token && masterPassword) {
+      try { token = await decrypt(token, masterPassword); } catch { token = null; }
+    }
     return {
       enabled: data['cloudVault.enabled'] as boolean ?? false,
       email: data['cloudVault.email'] as string ?? null,
-      token: data['cloudVault.token'] as string ?? null,
+      token,
       sessionId: data['cloudVault.sessionId'] as string ?? null,
       tokenIssuedAt: data['cloudVault.tokenIssuedAt'] as number ?? 0,
       tokenExpired: data['cloudVault.tokenExpired'] as boolean ?? false,
@@ -2924,7 +2955,11 @@ export default defineBackground(() => {
   ): Promise<void> {
     const storageUpdates: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(updates)) {
-      storageUpdates[`cloudVault.${key}`] = value;
+      if (key === 'token' && typeof value === 'string' && masterPassword) {
+        storageUpdates['cloudVault.token'] = await encrypt(value, masterPassword);
+      } else {
+        storageUpdates[`cloudVault.${key}`] = value;
+      }
     }
     await browser.storage.local.set(storageUpdates);
   }

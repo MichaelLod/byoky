@@ -74,7 +74,7 @@ wss.on("connection", (ws) => {
         return;
       }
 
-      console.log(`[auth] attempt: ${role} for room ${roomId.slice(0, 8)}... token=${authToken.slice(0, 12)}...`);
+      console.log(`[auth] attempt: ${role} for room ${roomId.slice(0, 8)}...`);
 
       // Rate limit auth attempts per room
       const now = Date.now();
@@ -104,14 +104,15 @@ wss.on("connection", (ws) => {
           // so the next connection can create a fresh room with the correct token
           const senderDead = !room.sender || room.sender.readyState !== WebSocket.OPEN;
           const recipientDead = !room.recipient || room.recipient.readyState !== WebSocket.OPEN;
-          if (senderDead && recipientDead) {
+          const staleMs = Date.now() - room.lastActivity;
+          if (senderDead && recipientDead && staleMs > IDLE_TIMEOUT_MS) {
             rooms.delete(roomId);
-            console.log(`[auth] deleted stale room ${roomId.slice(0, 8)}... (token mismatch, no active peers)`);
+            console.log(`[auth] deleted stale room ${roomId.slice(0, 8)}... (token mismatch, idle ${Math.round(staleMs / 1000)}s, no active peers)`);
             // Create fresh room with the new token
             room = { authToken, lastActivity: Date.now() };
             rooms.set(roomId, room);
           } else {
-            console.log(`[auth] rejected: token mismatch for room ${roomId.slice(0, 8)}... expected=${room.authToken.slice(0, 12)}... got=${authToken.slice(0, 12)}... sender=${!senderDead} recipient=${!recipientDead}`);
+            console.log(`[auth] rejected: token mismatch for room ${roomId.slice(0, 8)}...`);
             send(ws, { type: "relay:auth:result", success: false, error: "auth token mismatch" });
             return;
           }
