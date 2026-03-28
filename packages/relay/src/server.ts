@@ -69,14 +69,18 @@ wss.on("connection", (ws) => {
         typeof authToken !== "string" ||
         (role !== "sender" && role !== "recipient")
       ) {
+        console.log(`[auth] rejected: invalid payload from ${role ?? "unknown"}`);
         send(ws, { type: "relay:auth:result", success: false, error: "invalid auth payload" });
         return;
       }
+
+      console.log(`[auth] attempt: ${role} for room ${roomId.slice(0, 8)}... token=${authToken.slice(0, 12)}...`);
 
       // Rate limit auth attempts per room
       const now = Date.now();
       const attempts = (authAttempts.get(roomId) ?? []).filter((t) => now - t < AUTH_RATE_WINDOW);
       if (attempts.length >= AUTH_RATE_LIMIT) {
+        console.log(`[auth] rejected: rate limited for room ${roomId.slice(0, 8)}...`);
         send(ws, { type: "relay:auth:result", success: false, error: "too many auth attempts" });
         return;
       }
@@ -107,11 +111,13 @@ wss.on("connection", (ws) => {
             room = { authToken, lastActivity: Date.now() };
             rooms.set(roomId, room);
           } else {
+            console.log(`[auth] rejected: token mismatch for room ${roomId.slice(0, 8)}... expected=${room.authToken.slice(0, 12)}... got=${authToken.slice(0, 12)}... sender=${!senderDead} recipient=${!recipientDead}`);
             send(ws, { type: "relay:auth:result", success: false, error: "auth token mismatch" });
             return;
           }
         }
         if (room[role] && room[role]!.readyState === WebSocket.OPEN) {
+          console.log(`[auth] rejected: ${role} already connected in room ${roomId.slice(0, 8)}...`);
           send(ws, { type: "relay:auth:result", success: false, error: `${role} already connected` });
           return;
         }
