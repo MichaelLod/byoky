@@ -815,11 +815,12 @@
 .demo-app .chat-attachment-preview {
   width: 48px;
   height: 48px;
-  object-fit: cover;
   border-radius: 6px;
   border: 1px solid var(--border);
   flex-shrink: 0;
-  overflow: hidden;
+  background-size: cover;
+  background-position: center;
+  background-color: var(--bg-elevated);
 }
 
 .demo-app .chat-attachment-name {

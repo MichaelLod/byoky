@@ -446,7 +446,7 @@ export function Chat({ session }: Props) {
 
       {attachedImage && (
         <div className="chat-attachment">
-          <img src={attachedImage.preview} alt="Attached" className="chat-attachment-preview" />
+          <div className="chat-attachment-preview" style={{ backgroundImage: `url(${attachedImage.preview})` }} />
           <span className="chat-attachment-name">{attachedImage.file.name}</span>
           <button className="chat-attachment-remove" onClick={removeAttachment}>&times;</button>
         </div>
