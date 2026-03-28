@@ -38,7 +38,7 @@ interface WalletState {
   gifts: Gift[];
   giftedCredentials: GiftedCredential[];
   cloudVaultEnabled: boolean;
-  cloudVaultEmail: string | null;
+  cloudVaultUsername: string | null;
   cloudVaultTokenExpired: boolean;
   cloudVaultPendingCount: number;
   currentPage: Page;
@@ -64,7 +64,7 @@ interface WalletState {
   revokeGift: (giftId: string) => Promise<void>;
   redeemGift: (giftLinkEncoded: string) => Promise<void>;
   removeGiftedCredential: (id: string) => Promise<void>;
-  enableCloudVault: (email: string, password: string, isSignup: boolean) => Promise<void>;
+  enableCloudVault: (username: string, password: string, isSignup: boolean) => Promise<void>;
   disableCloudVault: () => Promise<void>;
   reloginCloudVault: (password: string) => Promise<void>;
   resetWallet: () => Promise<void>;
@@ -92,7 +92,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   gifts: [],
   giftedCredentials: [],
   cloudVaultEnabled: false,
-  cloudVaultEmail: null,
+  cloudVaultUsername: null,
   cloudVaultTokenExpired: false,
   cloudVaultPendingCount: 0,
   currentPage: 'unlock',
@@ -286,11 +286,11 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     await get().refreshData();
   },
 
-  enableCloudVault: async (email: string, password: string, isSignup: boolean) => {
+  enableCloudVault: async (username: string, password: string, isSignup: boolean) => {
     set({ loading: true, error: null });
     try {
       const action = isSignup ? 'cloudVaultSignup' : 'cloudVaultLogin';
-      const result = await sendInternal(action, { email, password });
+      const result = await sendInternal(action, { username, password });
       if (result.error) throw new Error(result.error as string);
       await get().refreshData();
       set({ loading: false });
@@ -301,7 +301,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
 
   disableCloudVault: async () => {
     await sendInternal('cloudVaultDisable');
-    set({ cloudVaultEnabled: false, cloudVaultEmail: null, cloudVaultTokenExpired: false, cloudVaultPendingCount: 0 });
+    set({ cloudVaultEnabled: false, cloudVaultUsername: null, cloudVaultTokenExpired: false, cloudVaultPendingCount: 0 });
   },
 
   reloginCloudVault: async (password: string) => {
@@ -330,7 +330,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       gifts: [],
       giftedCredentials: [],
       cloudVaultEnabled: false,
-      cloudVaultEmail: null,
+      cloudVaultUsername: null,
       cloudVaultTokenExpired: false,
       cloudVaultPendingCount: 0,
       currentPage: 'setup',
@@ -373,7 +373,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       gifts: (giftResult.gifts ?? []) as Gift[],
       giftedCredentials: (giftedResult.giftedCredentials ?? []) as GiftedCredential[],
       cloudVaultEnabled: vaultResult.enabled as boolean ?? false,
-      cloudVaultEmail: vaultResult.email as string ?? null,
+      cloudVaultUsername: vaultResult.username as string ?? null,
       cloudVaultTokenExpired: vaultResult.tokenExpired as boolean ?? false,
       cloudVaultPendingCount: vaultResult.pendingCount as number ?? 0,
     });

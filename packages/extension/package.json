@@ -1,6 +1,6 @@
 {
   "name": "@byoky/extension",
-  "version": "0.4.15",
+  "version": "0.4.17",
   "private": true,
   "type": "module",
   "scripts": {
