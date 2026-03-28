@@ -1,6 +1,6 @@
 {
   "name": "@byoky/relay",
-  "version": "0.4.15",
+  "version": "0.4.17",
   "description": "WebSocket relay server for Byoky",
   "type": "module",
   "main": "dist/server.js",

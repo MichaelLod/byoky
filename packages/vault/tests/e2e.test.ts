@@ -3,7 +3,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 const VAULT_URL = process.env.VAULT_URL ?? 'https://vault.byoky.com';
 
 const TEST_PREFIX = `e2e_${Date.now()}_`;
-const testEmail = `${TEST_PREFIX}user@example.com`;
+const testUsername = `${TEST_PREFIX}user`;
 const testPassword = 'MyStr0ng!Pass#2024';
 
 let token: string;
@@ -34,7 +34,7 @@ describe('vault e2e', () => {
       const res = await api('/auth/signup', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: testEmail, password: 'weak' }),
+        body: JSON.stringify({ username: testUsername, password: 'weak' }),
       });
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -45,12 +45,12 @@ describe('vault e2e', () => {
       const res = await api('/auth/signup', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: testEmail, password: testPassword }),
+        body: JSON.stringify({ username: testUsername, password: testPassword }),
       });
       expect(res.status).toBe(201);
       const body = await res.json();
       expect(body.token).toBeDefined();
-      expect(body.user.email).toBe(testEmail);
+      expect(body.user.username).toBe(testUsername);
       token = body.token;
     });
 
@@ -58,7 +58,7 @@ describe('vault e2e', () => {
       const res = await api('/auth/signup', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: testEmail, password: testPassword }),
+        body: JSON.stringify({ username: testUsername, password: testPassword }),
       });
       expect(res.status).toBe(409);
     });
@@ -71,7 +71,7 @@ describe('vault e2e', () => {
       const res = await api('/auth/login', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: testEmail, password: 'WrongP@ssw0rd!!!' }),
+        body: JSON.stringify({ username: testUsername, password: 'WrongP@ssw0rd!!!' }),
       });
       expect(res.status).toBe(401);
     });
@@ -80,7 +80,7 @@ describe('vault e2e', () => {
       const res = await api('/auth/login', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email: testEmail, password: testPassword }),
+        body: JSON.stringify({ username: testUsername, password: testPassword }),
       });
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -269,7 +269,7 @@ afterAll(async () => {
   const loginRes = await api('/auth/login', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: testEmail, password: testPassword }),
+    body: JSON.stringify({ username: testUsername, password: testPassword }),
   });
   if (loginRes.ok) {
     const { token: cleanupToken } = await loginRes.json();
