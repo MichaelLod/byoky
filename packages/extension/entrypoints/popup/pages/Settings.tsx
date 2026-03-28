@@ -22,6 +22,14 @@ export function Settings() {
   } = useWalletStore();
   const [modal, setModal] = useState<'export' | 'import' | 'cloud-vault' | 'cloud-vault-relogin' | null>(null);
 
+  if (modal === 'cloud-vault') {
+    return <CloudVaultModal onClose={() => setModal(null)} />;
+  }
+
+  if (modal === 'cloud-vault-relogin') {
+    return <CloudVaultReloginModal onClose={() => setModal(null)} />;
+  }
+
   return (
     <div>
       <h2 className="page-title">Settings</h2>
@@ -120,8 +128,6 @@ export function Settings() {
 
       {modal === 'export' && <ExportModal onClose={() => setModal(null)} />}
       {modal === 'import' && <ImportModal onClose={() => setModal(null)} />}
-      {modal === 'cloud-vault' && <CloudVaultModal onClose={() => setModal(null)} />}
-      {modal === 'cloud-vault-relogin' && <CloudVaultReloginModal onClose={() => setModal(null)} />}
     </div>
   );
 }
@@ -400,126 +406,131 @@ function CloudVaultModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="export-modal-overlay" onClick={onClose}>
-      <div className="export-modal" onClick={(e) => e.stopPropagation()}>
-        {step === 'warning' ? (
-          <>
-            <h3>Your keys will leave this device</h3>
-            <p>
+    <div>
+      <h2 className="page-title">
+        {step === 'warning' ? 'Cloud Vault' : isSignup ? 'Create Vault Account' : 'Login to Vault'}
+      </h2>
+
+      {step === 'warning' ? (
+        <>
+          <div className="warning-box">
+            <p style={{ margin: '0 0 8px' }}>
+              <strong>Your keys will leave this device.</strong>
+            </p>
+            <p style={{ margin: '0 0 8px' }}>
               When Cloud Vault is enabled, your API keys are sent to
               vault.byoky.com over an encrypted connection and stored with
               AES-256-GCM encryption using a key derived from your vault
               password.
             </p>
-            <p>
+            <p style={{ margin: 0 }}>
               This means websites can use your credentials even when this device
               is offline — but your keys will be stored on a remote server.
             </p>
+          </div>
 
-            <label
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                marginTop: '12px',
-                fontSize: '12px',
-                color: 'var(--text-secondary)',
-                cursor: 'pointer',
-              }}
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              marginTop: '12px',
+              fontSize: '12px',
+              color: 'var(--text-secondary)',
+              cursor: 'pointer',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={understood}
+              onChange={(e) => setUnderstood(e.target.checked)}
+            />
+            I understand my keys will be stored on a remote server
+          </label>
+
+          <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
+            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={onClose}>
+              Cancel
+            </button>
+            <button
+              className="btn btn-primary"
+              style={{ flex: 1 }}
+              disabled={!understood}
+              onClick={() => setStep('auth')}
             >
-              <input
-                type="checkbox"
-                checked={understood}
-                onChange={(e) => setUnderstood(e.target.checked)}
-              />
-              I understand my keys will be stored on a remote server
-            </label>
+              Continue
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+            <button
+              type="button"
+              className={`btn ${isSignup ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ flex: 1, fontSize: '12px' }}
+              onClick={() => { setIsSignup(true); clearError(); }}
+            >
+              Sign Up
+            </button>
+            <button
+              type="button"
+              className={`btn ${!isSignup ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ flex: 1, fontSize: '12px' }}
+              onClick={() => { setIsSignup(false); clearError(); }}
+            >
+              Login
+            </button>
+          </div>
 
-            <div className="export-modal-actions">
-              <button type="button" className="btn btn-secondary" onClick={onClose}>
+          {error && <div className="error">{error}</div>}
+
+          <form onSubmit={handleSubmit}>
+            <div className="form-group">
+              <label htmlFor="vault-email">Email</label>
+              <input
+                id="vault-email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                autoFocus
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="vault-pw">Password</label>
+              <input
+                id="vault-pw"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={isSignup ? 'At least 12 characters' : 'Your vault password'}
+              />
+              {isSignup && password.length > 0 && <PasswordMeter strength={strength} />}
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
+              <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={onClose}>
                 Cancel
               </button>
               <button
-                type="button"
+                type="submit"
                 className="btn btn-primary"
-                disabled={!understood}
-                onClick={() => setStep('auth')}
+                style={{ flex: 1 }}
+                disabled={
+                  loading ||
+                  !email ||
+                  !password ||
+                  (isSignup && (password.length < MIN_PASSWORD_LENGTH || strength.score < 2))
+                }
               >
-                Continue
+                {loading ? 'Connecting...' : isSignup ? 'Sign Up' : 'Login'}
               </button>
             </div>
-          </>
-        ) : (
-          <>
-            <h3>{isSignup ? 'Create Vault Account' : 'Login to Vault'}</h3>
-
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-              <button
-                type="button"
-                className={`btn ${isSignup ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ flex: 1, fontSize: '12px' }}
-                onClick={() => { setIsSignup(true); clearError(); }}
-              >
-                Sign Up
-              </button>
-              <button
-                type="button"
-                className={`btn ${!isSignup ? 'btn-primary' : 'btn-secondary'}`}
-                style={{ flex: 1, fontSize: '12px' }}
-                onClick={() => { setIsSignup(false); clearError(); }}
-              >
-                Login
-              </button>
-            </div>
-
-            {error && <div className="error">{error}</div>}
-
-            <form onSubmit={handleSubmit}>
-              <div className="form-group">
-                <label htmlFor="vault-email">Email</label>
-                <input
-                  id="vault-email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  autoFocus
-                />
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="vault-pw">Password</label>
-                <input
-                  id="vault-pw"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder={isSignup ? 'At least 12 characters' : 'Your vault password'}
-                />
-                {isSignup && password.length > 0 && <PasswordMeter strength={strength} />}
-              </div>
-
-              <div className="export-modal-actions">
-                <button type="button" className="btn btn-secondary" onClick={onClose}>
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  disabled={
-                    loading ||
-                    !email ||
-                    !password ||
-                    (isSignup && (password.length < MIN_PASSWORD_LENGTH || strength.score < 2))
-                  }
-                >
-                  {loading ? 'Connecting...' : isSignup ? 'Sign Up' : 'Login'}
-                </button>
-              </div>
-            </form>
-          </>
-        )}
-      </div>
+          </form>
+        </>
+      )}
     </div>
   );
 }
@@ -539,50 +550,51 @@ function CloudVaultReloginModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="export-modal-overlay" onClick={onClose}>
-      <div className="export-modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Re-login to Cloud Vault</h3>
-        <p>Your session has expired. Enter your vault password to reconnect.</p>
+    <div>
+      <h2 className="page-title">Re-login to Cloud Vault</h2>
+      <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+        Your session has expired. Enter your vault password to reconnect.
+      </p>
 
-        {error && <div className="error">{error}</div>}
+      {error && <div className="error">{error}</div>}
 
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label htmlFor="relogin-email">Email</label>
-            <input
-              id="relogin-email"
-              type="email"
-              value={cloudVaultEmail ?? ''}
-              disabled
-            />
-          </div>
+      <form onSubmit={handleSubmit}>
+        <div className="form-group">
+          <label htmlFor="relogin-email">Email</label>
+          <input
+            id="relogin-email"
+            type="email"
+            value={cloudVaultEmail ?? ''}
+            disabled
+          />
+        </div>
 
-          <div className="form-group">
-            <label htmlFor="relogin-pw">Password</label>
-            <input
-              id="relogin-pw"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Your vault password"
-              autoFocus
-            />
-          </div>
+        <div className="form-group">
+          <label htmlFor="relogin-pw">Password</label>
+          <input
+            id="relogin-pw"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Your vault password"
+            autoFocus
+          />
+        </div>
 
-          <div className="export-modal-actions">
-            <button type="button" className="btn btn-secondary" onClick={onClose}>
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={loading || !password}
-            >
-              {loading ? 'Logging in...' : 'Login'}
-            </button>
-          </div>
-        </form>
-      </div>
+        <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
+          <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="btn btn-primary"
+            style={{ flex: 1 }}
+            disabled={loading || !password}
+          >
+            {loading ? 'Logging in...' : 'Login'}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
