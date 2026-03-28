@@ -92,7 +92,7 @@ const MAX_GIFT_LINK_SIZE = 8_192; // 8 KB
 export function decodeGiftLink(encoded: string): GiftLink | null {
   try {
     if (encoded.length > MAX_GIFT_LINK_SIZE) return null;
-    const clean = encoded.replace(/^byoky:\/\/gift\//, '');
+    const clean = encoded.replace(/^byoky:\/\/gift\//, '').replace(/^https:\/\/byoky\.com\/gift[#/]/, '');
     const bytes = base64UrlDecode(clean);
     const json = new TextDecoder().decode(bytes);
     const parsed = JSON.parse(json);
@@ -104,7 +104,7 @@ export function decodeGiftLink(encoded: string): GiftLink | null {
 }
 
 export function giftLinkToUrl(encoded: string): string {
-  return `byoky://gift/${encoded}`;
+  return `https://byoky.com/gift#${encoded}`;
 }
 
 // --- Validation ---

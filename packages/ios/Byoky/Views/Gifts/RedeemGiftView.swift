@@ -22,7 +22,7 @@ struct RedeemGiftView: View {
             } header: {
                 Text("Gift Link")
             } footer: {
-                Text("Paste the gift link (byoky://gift/...) or just the encoded payload.")
+                Text("Paste the gift link or just the encoded payload.")
             }
 
             if let link = previewLink {
@@ -97,7 +97,11 @@ struct RedeemGiftView: View {
         var encoded = linkText.trimmingCharacters(in: .whitespacesAndNewlines)
         if encoded.isEmpty { return }
 
-        if encoded.hasPrefix("byoky://gift/") {
+        if encoded.hasPrefix("https://byoky.com/gift#") {
+            encoded = String(encoded.dropFirst("https://byoky.com/gift#".count))
+        } else if encoded.hasPrefix("https://byoky.com/gift/") {
+            encoded = String(encoded.dropFirst("https://byoky.com/gift/".count))
+        } else if encoded.hasPrefix("byoky://gift/") {
             encoded = String(encoded.dropFirst("byoky://gift/".count))
         }
 
@@ -112,7 +116,11 @@ struct RedeemGiftView: View {
 
     private func redeem() {
         var encoded = linkText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if encoded.hasPrefix("byoky://gift/") {
+        if encoded.hasPrefix("https://byoky.com/gift#") {
+            encoded = String(encoded.dropFirst("https://byoky.com/gift#".count))
+        } else if encoded.hasPrefix("https://byoky.com/gift/") {
+            encoded = String(encoded.dropFirst("https://byoky.com/gift/".count))
+        } else if encoded.hasPrefix("byoky://gift/") {
             encoded = String(encoded.dropFirst("byoky://gift/".count))
         }
 

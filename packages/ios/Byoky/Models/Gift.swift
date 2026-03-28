@@ -56,7 +56,7 @@ func decodeGiftLink(_ encoded: String) throws -> GiftLink {
 }
 
 func giftLinkToUrl(_ encoded: String) -> String {
-    "byoky://gift/\(encoded)"
+    "https://byoky.com/gift#\(encoded)"
 }
 
 func validateGiftLink(_ link: GiftLink) throws {

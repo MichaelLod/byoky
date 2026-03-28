@@ -86,7 +86,7 @@ fun decodeGiftLink(encoded: String): GiftLink? {
     }
 }
 
-fun giftLinkToUrl(encoded: String): String = "byoky://gift/$encoded"
+fun giftLinkToUrl(encoded: String): String = "https://byoky.com/gift#$encoded"
 
 fun validateGiftLink(link: GiftLink): Pair<Boolean, String?> {
     if (link.v != 1) return Pair(false, "Unsupported gift version")
