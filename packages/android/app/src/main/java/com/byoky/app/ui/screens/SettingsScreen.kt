@@ -274,7 +274,7 @@ fun CloudVaultSetupDialog(wallet: WalletStore, onDismiss: () -> Unit) {
         checkJob = scope.launch {
             kotlinx.coroutines.delay(400)
             val (available, reason) = wallet.checkUsernameAvailability(trimmed)
-            if (!isActive) return@launch
+            if (!coroutineContext[kotlinx.coroutines.Job]!!.isActive) return@launch
             usernameStatus = if (available) "available" else if (reason == "invalid") "invalid" else "taken"
         }
     }
