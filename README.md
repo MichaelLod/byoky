@@ -51,6 +51,22 @@
 3. Visit any Byoky-enabled app → approve access → keys stay in the vault
 ```
 
+## Install
+
+| Platform | Status | Link |
+|----------|--------|------|
+| Chrome | Available | [Chrome Web Store](https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon) |
+| Firefox | Available | [Mozilla Add-ons](https://addons.mozilla.org/en-US/firefox/addon/byoky/) |
+| Safari (iOS) | Available | [App Store](https://apps.apple.com/app/byoky/id6760779919) |
+| Safari (macOS) | Coming soon | — |
+| Android | Coming soon | — |
+| npm `@byoky/sdk` | Available | [npmjs.com](https://www.npmjs.com/package/@byoky/sdk) |
+| npm `@byoky/core` | Available | [npmjs.com](https://www.npmjs.com/package/@byoky/core) |
+| npm `@byoky/bridge` | Available | [npmjs.com](https://www.npmjs.com/package/@byoky/bridge) |
+| npm `@byoky/relay` | Available | [npmjs.com](https://www.npmjs.com/package/@byoky/relay) |
+| npm `@byoky/openclaw-plugin` | Available | [npmjs.com](https://www.npmjs.com/package/@byoky/openclaw-plugin) |
+| npm `create-byoky-app` | Available | [npmjs.com](https://www.npmjs.com/package/create-byoky-app) |
+
 ## Quick Start
 
 ### For Users
@@ -58,6 +74,8 @@
 **Chrome:** [Install from Chrome Web Store](https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon)
 
 **Firefox:** [Install from Mozilla Add-ons](https://addons.mozilla.org/en-US/firefox/addon/byoky/)
+
+**iOS (Safari):** [Install from App Store](https://apps.apple.com/app/byoky/id6760779919)
 
 ### For Developers
 
