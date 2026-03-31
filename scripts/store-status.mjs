@@ -21,8 +21,9 @@ async function chromeWebStoreStatus() {
     )
     const xml = await res.text()
     // Parse version and status from XML: <updatecheck status="ok" version="0.4.18" .../>
-    const versionMatch = xml.match(/version="([^"]+)"/)
-    const statusMatch = xml.match(/status="([^"]+)"/)
+    // Scope to <updatecheck to avoid matching the XML declaration (e.g. version="1.0")
+    const versionMatch = xml.match(/<updatecheck[^>]+version="([^"]+)"/)
+    const statusMatch = xml.match(/<updatecheck[^>]+status="([^"]+)"/)
     const version = versionMatch?.[1]
     const status = statusMatch?.[1] // 'ok' = extension is live and available
     return {
