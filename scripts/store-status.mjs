@@ -8,35 +8,28 @@ const IOS_BUNDLE_ID = 'com.byoky.app'
 const MACOS_BUNDLE_ID = 'com.byoky.app' // same bundle ID, different platform
 
 async function chromeWebStoreStatus() {
-  const { CHROME_EXTENSION_ID, CHROME_CLIENT_ID, CHROME_CLIENT_SECRET, CHROME_REFRESH_TOKEN } = process.env
-  if (!CHROME_EXTENSION_ID || !CHROME_CLIENT_ID) {
+  const { CHROME_EXTENSION_ID } = process.env
+  if (!CHROME_EXTENSION_ID) {
     return { platform: 'Chrome', status: 'not configured' }
   }
 
   try {
-    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: CHROME_CLIENT_ID,
-        client_secret: CHROME_CLIENT_SECRET,
-        refresh_token: CHROME_REFRESH_TOKEN,
-        grant_type: 'refresh_token',
-      }),
-    })
-    const { access_token } = await tokenRes.json()
-
+    // Use the public CRX update check endpoint — no auth needed, returns the actual live published version.
+    // The Web Store API (projection=DRAFT) only exposes draft/pipeline state, not what's live on the store.
     const res = await fetch(
-      `https://www.googleapis.com/chromewebstore/v1.1/items/${CHROME_EXTENSION_ID}?projection=DRAFT`,
-      { headers: { Authorization: `Bearer ${access_token}` } }
+      `https://clients2.google.com/service/update2/crx?response=updatecheck&acceptformat=crx3&prodversion=130.0&x=id%3D${CHROME_EXTENSION_ID}%26v%3D0.0.0%26uc`
     )
-    const data = await res.json()
-    // Response shape: { kind, id, crxVersion, uploadState }
-    // uploadState is "NOT_FOUND" when no pending draft upload (live version is current)
+    const xml = await res.text()
+    // Parse version and status from XML: <updatecheck status="ok" version="0.4.18" .../>
+    // Scope to <updatecheck to avoid matching the XML declaration (e.g. version="1.0")
+    const versionMatch = xml.match(/<updatecheck[^>]+version="([^"]+)"/)
+    const statusMatch = xml.match(/<updatecheck[^>]+status="([^"]+)"/)
+    const version = versionMatch?.[1]
+    const status = statusMatch?.[1] // 'ok' = extension is live and available
     return {
       platform: 'Chrome',
-      version: data.crxVersion,
-      status: data.uploadState || 'unknown',
+      version,
+      status: status || 'unknown',
     }
   } catch (e) {
     return { platform: 'Chrome', status: 'error', error: e.message }
