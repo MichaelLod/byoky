@@ -27,15 +27,18 @@ async function chromeWebStoreStatus() {
     const { access_token } = await tokenRes.json()
 
     const res = await fetch(
-      `https://www.googleapis.com/chromewebstore/v1.1/items/${CHROME_EXTENSION_ID}?projection=PUBLISHED`,
+      `https://www.googleapis.com/chromewebstore/v1.1/items/${CHROME_EXTENSION_ID}?projection=DRAFT`,
       { headers: { Authorization: `Bearer ${access_token}` } }
     )
     const data = await res.json()
+    // The API returns status as an array (e.g. ["OK"]) and statusDetail as an array of strings
+    const statusArr = Array.isArray(data.status) ? data.status : (data.status ? [data.status] : [])
+    const statusDetailArr = Array.isArray(data.statusDetail) ? data.statusDetail : (data.statusDetail ? [data.statusDetail] : [])
     return {
       platform: 'Chrome',
       version: data.crxVersion,
-      status: data.status,
-      statusDetail: data.statusDetail,
+      status: statusArr.join(', ') || 'unknown',
+      statusDetail: statusDetailArr.join(', ') || undefined,
     }
   } catch (e) {
     return { platform: 'Chrome', status: 'error', error: e.message }
