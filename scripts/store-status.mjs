@@ -27,15 +27,16 @@ async function chromeWebStoreStatus() {
     const { access_token } = await tokenRes.json()
 
     const res = await fetch(
-      `https://www.googleapis.com/chromewebstore/v1.1/items/${CHROME_EXTENSION_ID}?projection=PUBLISHED`,
+      `https://www.googleapis.com/chromewebstore/v1.1/items/${CHROME_EXTENSION_ID}?projection=DRAFT`,
       { headers: { Authorization: `Bearer ${access_token}` } }
     )
     const data = await res.json()
+    // Response shape: { kind, id, crxVersion, uploadState }
+    // uploadState is "NOT_FOUND" when no pending draft upload (live version is current)
     return {
       platform: 'Chrome',
       version: data.crxVersion,
-      status: data.status,
-      statusDetail: data.statusDetail,
+      status: data.uploadState || 'unknown',
     }
   } catch (e) {
     return { platform: 'Chrome', status: 'error', error: e.message }
