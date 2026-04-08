@@ -15,6 +15,8 @@ export default function Home() {
       <div className="divider" />
       <Providers />
       <div className="divider" />
+      <Security />
+      <div className="divider" />
       <OpenSource />
       <Footer />
     </>
