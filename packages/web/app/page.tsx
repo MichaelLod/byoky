@@ -23,31 +23,44 @@ export default function Home() {
 /* ─── For Consumers ───────────────────────────────── */
 
 function ForConsumers() {
+  const cardStyle: React.CSSProperties = {
+    background: 'var(--bg-elevated, rgba(255,255,255,0.04))',
+    border: '1px solid var(--border, rgba(255,255,255,0.08))',
+    borderRadius: '16px',
+    padding: '28px',
+    textAlign: 'center',
+  };
+  const iconStyle: React.CSSProperties = {
+    width: '48px', height: '48px', borderRadius: '12px',
+    background: 'var(--accent, #0ea5e9)', display: 'inline-flex',
+    alignItems: 'center', justifyContent: 'center', marginBottom: '16px',
+    color: '#fff',
+  };
   return (
-    <section className="section">
+    <section className="zero-cost-section">
       <div className="container">
         <FadeIn>
-          <h2 className="section-title">One wallet for all your AI</h2>
-          <p className="section-subtitle">
+          <h2 className="zero-cost-heading">One wallet for all your AI</h2>
+          <p className="zero-cost-body">
             Stop juggling subscriptions. Add your card once, use any AI app.
           </p>
         </FadeIn>
         <FadeIn delay={0.1}>
-          <div className="grid grid-3" style={{ marginTop: '40px' }}>
-            <div className="feature-card">
-              <div className="feature-icon"><WalletIcon /></div>
-              <h3>Add card once</h3>
-              <p>No API keys, no per-app subscriptions. One balance works everywhere.</p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '24px', marginTop: '48px', maxWidth: '900px', marginLeft: 'auto', marginRight: 'auto' }}>
+            <div style={cardStyle}>
+              <div style={iconStyle}><WalletIcon /></div>
+              <h3 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '8px' }}>Add card once</h3>
+              <p style={{ fontSize: '14px', opacity: 0.7, lineHeight: 1.5 }}>No API keys, no per-app subscriptions. One balance works everywhere.</p>
             </div>
-            <div className="feature-card">
-              <div className="feature-icon"><EyeIcon /></div>
-              <h3>See every charge</h3>
-              <p>Real-time balance, transaction history, per-app spending. Full transparency.</p>
+            <div style={cardStyle}>
+              <div style={iconStyle}><EyeIcon /></div>
+              <h3 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '8px' }}>See every charge</h3>
+              <p style={{ fontSize: '14px', opacity: 0.7, lineHeight: 1.5 }}>Real-time balance, transaction history, per-app spending. Full transparency.</p>
             </div>
-            <div className="feature-card">
-              <div className="feature-icon"><GaugeIcon /></div>
-              <h3>Switch models instantly</h3>
-              <p>Group your apps by use case. Switch from Claude to GPT with one click.</p>
+            <div style={cardStyle}>
+              <div style={iconStyle}><GaugeIcon /></div>
+              <h3 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '8px' }}>Switch models instantly</h3>
+              <p style={{ fontSize: '14px', opacity: 0.7, lineHeight: 1.5 }}>Group your apps by use case. Switch from Claude to GPT with one click.</p>
             </div>
           </div>
         </FadeIn>
