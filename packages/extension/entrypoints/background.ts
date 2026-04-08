@@ -14,6 +14,9 @@ import {
   type GiftedCredential,
   type GiftLink,
   type SerializedFormDataEntry,
+  type Group,
+  type AppGroups,
+  DEFAULT_GROUP_ID,
   decrypt,
   encrypt,
   verifyPassword,
@@ -802,12 +805,21 @@ export default defineBackground(() => {
     const sessionProviders: Session['providers'] = [];
 
     const giftPrefs = await getGiftPreferences();
+    // Resolve the group this app belongs to (auto-assigns to default if first contact)
+    const group = await getGroupForOrigin(origin);
 
     for (const req of request.providers ?? []) {
-      const cred = credentials.find((c) => c.providerId === req.id);
+      // If the group is bound to this provider with a specific credential pin,
+      // it overrides everything else for credential selection.
+      const groupPinnedCred =
+        group && group.providerId === req.id && group.credentialId
+          ? credentials.find((c) => c.id === group.credentialId)
+          : undefined;
+
+      const cred = groupPinnedCred ?? credentials.find((c) => c.providerId === req.id);
       const gc = giftedCreds.find((g) => g.providerId === req.id && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens);
-      // Prefer gift if user explicitly chose it, otherwise prefer own key
-      const preferGift = gc && giftPrefs[req.id] === gc.giftId;
+      // Group pin wins over gift preference. Otherwise prefer gift if user explicitly chose it, else prefer own key.
+      const preferGift = !groupPinnedCred && gc && giftPrefs[req.id] === gc.giftId;
       const useGift = preferGift || (!cred && gc);
       providerMap[req.id] = {
         available: !!(cred || gc),
@@ -932,6 +944,7 @@ export default defineBackground(() => {
         const encValue = await encrypt(cleanValue, masterPassword);
         const data = await browser.storage.local.get('credentials');
         const creds = (data.credentials ?? []) as Array<Record<string, unknown>>;
+        const isFirstCredential = creds.length === 0;
         const newCred: Record<string, unknown> = {
           id: crypto.randomUUID(),
           providerId: cpId,
@@ -946,6 +959,29 @@ export default defineBackground(() => {
         }
         creds.push(newCred);
         await browser.storage.local.set({ credentials: creds });
+
+        // First credential becomes the default group's pin. If the default
+        // group already exists with no pin, adopt this credential.
+        const groups = await getGroups();
+        const defIdx = groups.findIndex((g) => g.id === DEFAULT_GROUP_ID);
+        if (defIdx < 0) {
+          groups.unshift({
+            id: DEFAULT_GROUP_ID,
+            name: 'Default',
+            providerId: cpId,
+            credentialId: newCred.id as string,
+            createdAt: Date.now(),
+          });
+          await setGroups(groups);
+        } else if (isFirstCredential || !groups[defIdx].credentialId) {
+          groups[defIdx] = {
+            ...groups[defIdx],
+            providerId: cpId,
+            credentialId: newCred.id as string,
+          };
+          await setGroups(groups);
+        }
+
         refreshSessionProviders();
         fireVaultSync(newCred.id as string, cpId, cLabel, cAuth, cleanValue).catch(() => {});
         return { success: true };
@@ -958,6 +994,16 @@ export default defineBackground(() => {
         await browser.storage.local.set({
           credentials: rmCreds.filter((c) => c.id !== rmId),
         });
+        // Clear any group pin pointing at the removed credential
+        const groups = await getGroups();
+        let mutated = false;
+        for (let i = 0; i < groups.length; i++) {
+          if (groups[i].credentialId === rmId) {
+            groups[i] = { ...groups[i], credentialId: undefined };
+            mutated = true;
+          }
+        }
+        if (mutated) await setGroups(groups);
         refreshSessionProviders();
         fireVaultRemove(rmId).catch(() => {});
         return { success: true };
@@ -1400,6 +1446,49 @@ export default defineBackground(() => {
           delete prefs[providerId];
         }
         await browser.storage.local.set({ giftPreferences: prefs });
+        refreshSessionProviders();
+        return { success: true };
+      }
+
+      // --- Groups (alias layer) ---
+
+      case 'getGroups': {
+        // Ensure a default group exists so the UI never has to synthesize one.
+        await ensureDefaultGroup();
+        return { groups: await getGroups(), appGroups: await getAppGroups() };
+      }
+
+      case 'createGroup': {
+        const result = await createGroup(message.payload as {
+          name: string; providerId: string; credentialId?: string; model?: string;
+        });
+        if (result.error) return { error: result.error };
+        return { group: result.group };
+      }
+
+      case 'updateGroup': {
+        const { id, patch } = message.payload as {
+          id: string;
+          patch: { name?: string; providerId?: string; credentialId?: string | null; model?: string | null };
+        };
+        const result = await updateGroup(id, patch);
+        if (result.error) return { error: result.error };
+        refreshSessionProviders();
+        return { group: result.group };
+      }
+
+      case 'deleteGroup': {
+        const { id } = message.payload as { id: string };
+        const result = await deleteGroup(id);
+        if (result.error) return { error: result.error };
+        refreshSessionProviders();
+        return { success: true };
+      }
+
+      case 'setAppGroup': {
+        const { origin, groupId } = message.payload as { origin: string; groupId: string };
+        const result = await setAppGroup(origin, groupId);
+        if (result.error) return { error: result.error };
         refreshSessionProviders();
         return { success: true };
       }
@@ -2539,13 +2628,20 @@ export default defineBackground(() => {
         ...new Set([...credentials.map(c => c.providerId), ...giftedCreds.filter(g => g.expiresAt > Date.now() && g.usedTokens < g.maxTokens).map(g => g.providerId)]),
       ];
 
+      // Re-resolve group binding for this session's origin (may have changed)
+      const group = await getGroupForOrigin(session.appOrigin);
+
       const providerMap: ConnectResponse['providers'] = {};
       const newSessionProviders: Session['providers'] = [];
 
       for (const providerId of providerIds) {
-        const cred = credentials.find(c => c.providerId === providerId);
+        const groupPinnedCred =
+          group && group.providerId === providerId && group.credentialId
+            ? credentials.find(c => c.id === group.credentialId)
+            : undefined;
+        const cred = groupPinnedCred ?? credentials.find(c => c.providerId === providerId);
         const gc = giftedCreds.find(g => g.providerId === providerId && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens);
-        const preferGift = gc && giftPrefs[providerId] === gc.giftId;
+        const preferGift = !groupPinnedCred && gc && giftPrefs[providerId] === gc.giftId;
         const useGift = preferGift || (!cred && gc);
         providerMap[providerId] = { available: !!(cred || gc), authMethod: useGift ? 'api_key' : (cred?.authMethod ?? 'api_key'), ...(useGift ? { gift: true } : {}) };
         if (useGift && gc) {
@@ -2609,6 +2705,179 @@ export default defineBackground(() => {
     await browser.storage.local.set({
       tokenAllowances: allowances.filter((a) => a.origin !== origin),
     });
+  }
+
+  // --- Groups (alias layer) ---
+
+  async function getGroups(): Promise<Group[]> {
+    const data = await browser.storage.local.get('groups');
+    return (data.groups as Group[]) ?? [];
+  }
+
+  async function setGroups(groups: Group[]) {
+    await browser.storage.local.set({ groups });
+  }
+
+  async function getAppGroups(): Promise<AppGroups> {
+    const data = await browser.storage.local.get('appGroups');
+    return (data.appGroups as AppGroups) ?? {};
+  }
+
+  async function setAppGroups(appGroups: AppGroups) {
+    await browser.storage.local.set({ appGroups });
+  }
+
+  // Ensures the default group exists. Called on first credential add and
+  // before any group resolution. Returns the default group.
+  async function ensureDefaultGroup(): Promise<Group> {
+    const groups = await getGroups();
+    let def = groups.find((g) => g.id === DEFAULT_GROUP_ID);
+    if (def) return def;
+
+    // Pick a sensible default provider/credential: the first credential the
+    // user has added. If they have none yet, the default group is created
+    // lazily on first add and we use the freshly-added credential's provider.
+    const credentials = await getStoredCredentials();
+    const first = credentials[0];
+    def = {
+      id: DEFAULT_GROUP_ID,
+      name: 'Default',
+      providerId: first?.providerId ?? 'anthropic',
+      credentialId: first?.id,
+      createdAt: Date.now(),
+    };
+    groups.unshift(def);
+    await setGroups(groups);
+    return def;
+  }
+
+  // Returns the group an origin currently belongs to. Auto-assigns to the
+  // default group if no binding exists yet (and persists the assignment, so
+  // the next call is a pure lookup).
+  async function getGroupForOrigin(origin: string): Promise<Group | undefined> {
+    const appGroups = await getAppGroups();
+    let groupId = appGroups[origin];
+    const groups = await getGroups();
+
+    // No binding → assign to default
+    if (!groupId) {
+      const def = await ensureDefaultGroup();
+      appGroups[origin] = def.id;
+      await setAppGroups(appGroups);
+      return def;
+    }
+
+    let group = groups.find((g) => g.id === groupId);
+    // Stale binding (group was deleted) → fall back to default
+    if (!group) {
+      const def = await ensureDefaultGroup();
+      appGroups[origin] = def.id;
+      await setAppGroups(appGroups);
+      return def;
+    }
+    return group;
+  }
+
+  async function createGroup(input: {
+    name: string;
+    providerId: string;
+    credentialId?: string;
+    model?: string;
+  }): Promise<{ group?: Group; error?: string }> {
+    const name = input.name?.trim();
+    if (!name || name.length > 200) return { error: 'Group name must be 1-200 characters' };
+    if (!PROVIDERS[input.providerId]) return { error: 'Invalid provider' };
+    if (input.credentialId) {
+      const creds = await getStoredCredentials();
+      const cred = creds.find((c) => c.id === input.credentialId);
+      if (!cred) return { error: 'Credential not found' };
+      if (cred.providerId !== input.providerId) return { error: 'Credential does not match provider' };
+    }
+    const groups = await getGroups();
+    if (groups.some((g) => g.name.toLowerCase() === name.toLowerCase())) {
+      return { error: 'A group with this name already exists' };
+    }
+    const group: Group = {
+      id: crypto.randomUUID(),
+      name,
+      providerId: input.providerId,
+      credentialId: input.credentialId,
+      model: input.model?.trim() || undefined,
+      createdAt: Date.now(),
+    };
+    groups.push(group);
+    await setGroups(groups);
+    return { group };
+  }
+
+  async function updateGroup(
+    id: string,
+    patch: { name?: string; providerId?: string; credentialId?: string | null; model?: string | null },
+  ): Promise<{ group?: Group; error?: string }> {
+    const groups = await getGroups();
+    const idx = groups.findIndex((g) => g.id === id);
+    if (idx < 0) return { error: 'Group not found' };
+    const current = groups[idx];
+
+    const next: Group = { ...current };
+    if (patch.name !== undefined) {
+      const name = patch.name.trim();
+      if (!name || name.length > 200) return { error: 'Group name must be 1-200 characters' };
+      if (id !== DEFAULT_GROUP_ID && groups.some((g) => g.id !== id && g.name.toLowerCase() === name.toLowerCase())) {
+        return { error: 'A group with this name already exists' };
+      }
+      next.name = name;
+    }
+    if (patch.providerId !== undefined) {
+      if (!PROVIDERS[patch.providerId]) return { error: 'Invalid provider' };
+      next.providerId = patch.providerId;
+      // Provider change invalidates the credential pin unless explicitly set in this patch
+      if (patch.credentialId === undefined) next.credentialId = undefined;
+    }
+    if (patch.credentialId !== undefined) {
+      if (patch.credentialId === null) {
+        next.credentialId = undefined;
+      } else {
+        const creds = await getStoredCredentials();
+        const cred = creds.find((c) => c.id === patch.credentialId);
+        if (!cred) return { error: 'Credential not found' };
+        if (cred.providerId !== next.providerId) return { error: 'Credential does not match provider' };
+        next.credentialId = patch.credentialId;
+      }
+    }
+    if (patch.model !== undefined) {
+      next.model = patch.model === null ? undefined : (patch.model.trim() || undefined);
+    }
+    groups[idx] = next;
+    await setGroups(groups);
+    return { group: next };
+  }
+
+  async function deleteGroup(id: string): Promise<{ success?: boolean; error?: string }> {
+    if (id === DEFAULT_GROUP_ID) return { error: 'Cannot delete the default group' };
+    const groups = await getGroups();
+    if (!groups.some((g) => g.id === id)) return { error: 'Group not found' };
+    await setGroups(groups.filter((g) => g.id !== id));
+    // Reassign any apps that pointed at this group back to the default
+    const appGroups = await getAppGroups();
+    let mutated = false;
+    for (const origin of Object.keys(appGroups)) {
+      if (appGroups[origin] === id) {
+        appGroups[origin] = DEFAULT_GROUP_ID;
+        mutated = true;
+      }
+    }
+    if (mutated) await setAppGroups(appGroups);
+    return { success: true };
+  }
+
+  async function setAppGroup(origin: string, groupId: string): Promise<{ success?: boolean; error?: string }> {
+    const groups = await getGroups();
+    if (!groups.some((g) => g.id === groupId)) return { error: 'Group not found' };
+    const appGroups = await getAppGroups();
+    appGroups[origin] = groupId;
+    await setAppGroups(appGroups);
+    return { success: true };
   }
 
   async function checkAllowance(
