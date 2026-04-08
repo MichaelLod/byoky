@@ -409,7 +409,8 @@ function ForDevelopers() {
             This is the actual button your users see. <a href="/demo/pay" style={{ color: 'var(--teal)' }}>Try the live demo &rarr;</a>
           </p>
           <p className="subtitle" style={{ fontSize: 14, marginBottom: 0, marginTop: 0 }}>
-            <code style={{ fontFamily: 'var(--font-code)', color: 'var(--teal-light)', fontSize: 13 }}>npm install @byoky/sdk</code> to get started
+            <code style={{ fontFamily: 'var(--font-code)', color: 'var(--teal-light)', fontSize: 13 }}>npm install @byoky/sdk</code> to add to an existing project
+            {' · '}<code style={{ fontFamily: 'var(--font-code)', color: 'var(--teal-light)', fontSize: 13 }}>npx create-byoky-app</code> to scaffold a new one
           </p>
         </FadeIn>
         <div className="dev-layout">
@@ -424,7 +425,7 @@ function ForDevelopers() {
                     <h4>Zero inference cost</h4>
                     <p>
                       Users pay for their own AI usage through their Byoky wallet.
-                      Your AWS/API bill goes to zero.
+                      Your AWS/API bill goes to zero. Revenue share via Stripe Connect.
                     </p>
                   </div>
                 </div>
@@ -433,10 +434,10 @@ function ForDevelopers() {
                     <CheckIcon />
                   </div>
                   <div>
-                    <h4>Higher paywall conversion</h4>
+                    <h4>Native SDK compatibility</h4>
                     <p>
-                      Users with Byoky wallets have balance ready to spend. One tap,
-                      no card entry. Set your own discount to boost conversion.
+                      Works with official SDKs from Anthropic, OpenAI, Gemini,
+                      Mistral, and 11 more providers. Just swap in Byoky&apos;s fetch.
                     </p>
                   </div>
                 </div>
@@ -445,10 +446,10 @@ function ForDevelopers() {
                     <CheckIcon />
                   </div>
                   <div>
-                    <h4>15+ providers, one SDK</h4>
+                    <h4>Streaming out of the box</h4>
                     <p>
-                      Anthropic, OpenAI, Gemini, Mistral, and 11 more. Switch providers
-                      with a config change. No new accounts or billing.
+                      Full SSE streaming support through the proxy. No
+                      special handling needed.
                     </p>
                   </div>
                 </div>
@@ -457,10 +458,22 @@ function ForDevelopers() {
                     <CheckIcon />
                   </div>
                   <div>
-                    <h4>Revenue share via Stripe Connect</h4>
+                    <h4>Backend relay</h4>
                     <p>
-                      Set your discount. Byoky takes a small commission, you get the rest.
-                      Payouts via Stripe Connect. Tiered rates as you scale.
+                      Your server makes LLM calls through the user&apos;s wallet
+                      via WebSocket. Keys never leave the wallet — even server-side.
+                    </p>
+                  </div>
+                </div>
+                <div className="dev-feature">
+                  <div className="dev-feature-icon">
+                    <CheckIcon />
+                  </div>
+                  <div>
+                    <h4>CLI &amp; local apps</h4>
+                    <p>
+                      The Byoky Bridge lets CLI tools and desktop apps route
+                      through the wallet via a local HTTP proxy.
                     </p>
                   </div>
                 </div>
@@ -472,7 +485,19 @@ function ForDevelopers() {
                     <h4>No extension required</h4>
                     <p>
                       Works with or without the browser extension. Web wallet
-                      login popup for zero-friction onboarding. Extension is optional.
+                      popup for zero-friction onboarding. Extension is optional.
+                    </p>
+                  </div>
+                </div>
+                <div className="dev-feature">
+                  <div className="dev-feature-icon">
+                    <CheckIcon />
+                  </div>
+                  <div>
+                    <h4>Token gifts</h4>
+                    <p>
+                      Let users share token access without sharing API keys.
+                      Relay-backed with budget caps, expiry, and instant revocation.
                     </p>
                   </div>
                 </div>
