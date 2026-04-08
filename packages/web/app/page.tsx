@@ -380,8 +380,33 @@ function ForDevelopers() {
         <FadeIn>
           <h2>Ship AI apps. Pay $0 for inference.</h2>
           <p className="subtitle">
-            Add a &ldquo;Pay with Byoky&rdquo; button to your paywall. Users pay from their wallet.
+            Add a button to your paywall. Users pay from their wallet.
             You get zero inference cost and revenue share via Stripe Connect.
+          </p>
+          {/* Live preview of the PayButton */}
+          <div style={{ margin: '32px 0', display: 'flex', justifyContent: 'center' }}>
+            <a
+              href="/demo/pay"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: '10px',
+                padding: '16px 32px', borderRadius: '14px',
+                background: 'var(--teal)', color: '#fff',
+                fontSize: '17px', fontWeight: 600,
+                boxShadow: '0 4px 16px var(--teal-glow)',
+                textDecoration: 'none',
+                transition: 'all 0.15s',
+              }}
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" />
+                <path d="M3 5v14a2 2 0 0 0 2 2h16v-5" />
+                <path d="M18 12a2 2 0 0 0 0 4h4v-4Z" />
+              </svg>
+              Pay with Byoky — 50% off
+            </a>
+          </div>
+          <p style={{ fontSize: '13px', color: 'var(--text-muted)', textAlign: 'center', marginBottom: '24px' }}>
+            This is the actual button your users see. <a href="/demo/pay" style={{ color: 'var(--teal)' }}>Try the live demo &rarr;</a>
           </p>
           <p className="subtitle" style={{ fontSize: 14, marginBottom: 0, marginTop: 0 }}>
             <code style={{ fontFamily: 'var(--font-code)', color: 'var(--teal-light)', fontSize: 13 }}>npm install @byoky/sdk</code> to get started
