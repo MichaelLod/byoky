@@ -183,58 +183,10 @@ section {
   overflow: hidden;
 }
 
-.hero-glow {
-  position: absolute;
-  top: -30%;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 1000px;
-  height: 700px;
-  background: radial-gradient(
-    ellipse at 30% 50%,
-    rgba(255, 79, 0, 0.08) 0%,
-    rgba(255, 79, 0, 0.02) 40%,
-    transparent 70%
-  );
-  filter: blur(60px);
-  animation: aurora-1 12s ease-in-out infinite;
-  pointer-events: none;
-}
-
-.hero-glow-secondary {
-  position: absolute;
-  top: -15%;
-  left: 60%;
-  transform: translateX(-50%);
-  width: 800px;
-  height: 500px;
-  background: radial-gradient(
-    ellipse at 70% 40%,
-    rgba(255, 107, 43, 0.05) 0%,
-    rgba(255, 79, 0, 0.03) 40%,
-    transparent 65%
-  );
-  filter: blur(80px);
-  animation: aurora-2 16s ease-in-out infinite;
-  pointer-events: none;
-}
-
+.hero-glow,
+.hero-glow-secondary,
 .hero-glow-tertiary {
-  position: absolute;
-  top: -10%;
-  left: 40%;
-  transform: translateX(-50%);
-  width: 600px;
-  height: 400px;
-  background: radial-gradient(
-    ellipse at center,
-    rgba(255, 79, 0, 0.04) 0%,
-    rgba(204, 63, 0, 0.02) 50%,
-    transparent 70%
-  );
-  filter: blur(70px);
-  animation: aurora-3 20s ease-in-out infinite;
-  pointer-events: none;
+  display: none;
 }
 
 .hero-badge {
@@ -297,11 +249,11 @@ section {
 .hero-gradient {
   background: linear-gradient(
     90deg,
-    var(--text) 0%,
-    var(--teal-light) 25%,
-    var(--text) 50%,
-    var(--teal-light) 75%,
-    var(--text) 100%
+    var(--teal) 0%,
+    #e91e90 25%,
+    var(--teal) 50%,
+    #e91e90 75%,
+    var(--teal) 100%
   );
   background-size: 200% 100%;
   -webkit-background-clip: text;
