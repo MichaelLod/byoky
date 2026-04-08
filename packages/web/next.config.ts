@@ -8,6 +8,11 @@ const nextConfig: NextConfig = {
     ];
   },
   async headers() {
+    // Dev mode needs 'unsafe-eval' for React Refresh / HMR. Skip the strict
+    // CSP entirely in dev — production keeps the full lockdown.
+    if (process.env.NODE_ENV === 'development') {
+      return [];
+    }
     return [
       {
         source: '/(.*)',
