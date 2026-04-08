@@ -1599,6 +1599,11 @@ export default defineBackground(() => {
 
       // --- Billing ---
 
+      case 'getVaultToken': {
+        const cvState = await getCloudVaultState();
+        return { token: cvState.token ?? null };
+      }
+
       case 'billingGetBalance': {
         const cvState = await getCloudVaultState();
         if (!cvState.token) return { balance: null };

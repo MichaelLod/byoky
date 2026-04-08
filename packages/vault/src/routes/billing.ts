@@ -187,10 +187,21 @@ billing.post('/topup', async (c) => {
     return c.json({ error: { code: 'NO_CUSTOMER', message: 'Billing not set up' } }, 400);
   }
 
+  // Find default payment method
+  const [defaultPm] = await getDb()
+    .select()
+    .from(paymentMethods)
+    .where(eq(paymentMethods.userId, userId))
+    .limit(1);
+
+  if (!defaultPm) {
+    return c.json({ error: { code: 'NO_PAYMENT_METHOD', message: 'No payment method on file. Add a card first.' } }, 400);
+  }
+
   const intent = await chargeCustomer(
     balance.stripeCustomerId,
     amountCents,
-    undefined,
+    defaultPm.stripePaymentMethodId,
     { byoky_user_id: userId, type: 'manual_topup' },
   );
 

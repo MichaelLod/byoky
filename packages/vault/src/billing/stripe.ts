@@ -62,6 +62,7 @@ export async function chargeCustomer(
     currency: 'usd',
     customer: customerId,
     confirm: true,
+    off_session: true,
     automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
     metadata: metadata ?? {},
   };
