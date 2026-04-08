@@ -60,56 +60,48 @@ export default function DeveloperDashboard() {
         <CodeExample />
       </div>
 
-      {/* Your Apps — requires login */}
-      <div style={{ borderTop: '1px solid var(--border)', paddingTop: '24px' }}>
-        <h2 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '16px' }}>Your Apps</h2>
+      {/* Login form — shown when sign in clicked */}
+      {showLogin && !isLoggedIn && (
+        <div style={{ maxWidth: '380px', marginBottom: '32px', padding: '20px', background: 'var(--bg-surface)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+          {error && <div style={{ color: '#ef4444', fontSize: '13px', marginBottom: '12px' }}>{error}</div>}
+          <form onSubmit={async (e) => { e.preventDefault(); const ok = await login(username, password); if (!ok) setError('Invalid credentials'); else setShowLogin(false); }}>
+            <input type="text" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} style={inputStyle} />
+            <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} style={{ ...inputStyle, marginTop: '8px' }} />
+            <button type="submit" style={{ marginTop: '12px', padding: '10px 20px', borderRadius: '10px', background: 'var(--teal)', color: '#fff', border: 'none', fontSize: '14px', fontWeight: 600, cursor: 'pointer' }}>Sign In</button>
+          </form>
+        </div>
+      )}
 
-        {/* Login form — only shown when requested */}
-        {showLogin && !isLoggedIn && (
-          <div style={{ maxWidth: '380px', marginBottom: '16px', padding: '20px', background: 'var(--bg-surface)', borderRadius: '12px', border: '1px solid var(--border)' }}>
-            {error && <div style={{ color: '#ef4444', fontSize: '13px', marginBottom: '12px' }}>{error}</div>}
-            <form onSubmit={async (e) => { e.preventDefault(); const ok = await login(username, password); if (!ok) setError('Invalid credentials'); else setShowLogin(false); }}>
-              <input type="text" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} style={inputStyle} />
-              <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} style={{ ...inputStyle, marginTop: '8px' }} />
-              <button type="submit" style={{ marginTop: '12px', padding: '10px 20px', borderRadius: '10px', background: 'var(--teal)', color: '#fff', border: 'none', fontSize: '14px', fontWeight: 600, cursor: 'pointer' }}>Sign In</button>
-            </form>
-          </div>
-        )}
-
-        {/* App list — shown when logged in */}
-        {isLoggedIn && apps.length > 0 && (
-          <div>
-            {apps.map(app => (
-              <a key={app.id} href={`/developer/apps/${app.id}`} style={{
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                background: 'var(--bg-surface)', border: '1px solid var(--border)',
-                borderRadius: '12px', padding: '16px 20px', marginBottom: '8px', textDecoration: 'none', color: 'inherit',
-              }}>
-                <div>
-                  <div style={{ fontWeight: 600, marginBottom: '4px' }}>{app.name}</div>
-                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                    {app.id} &middot; {app.discountPercent}% discount &middot; {app.totalUsers} users
+      {/* Your Apps — only shown when logged in */}
+      {isLoggedIn && (
+        <div style={{ borderTop: '1px solid var(--border)', paddingTop: '24px' }}>
+          <h2 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '16px' }}>Your Apps</h2>
+          {apps.length > 0 ? (
+            <div>
+              {apps.map(app => (
+                <a key={app.id} href={`/developer/apps/${app.id}`} style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  background: 'var(--bg-surface)', border: '1px solid var(--border)',
+                  borderRadius: '12px', padding: '16px 20px', marginBottom: '8px', textDecoration: 'none', color: 'inherit',
+                }}>
+                  <div>
+                    <div style={{ fontWeight: 600, marginBottom: '4px' }}>{app.name}</div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                      {app.id} &middot; {app.discountPercent}% discount &middot; {app.totalUsers} users
+                    </div>
                   </div>
-                </div>
-                <span style={{ color: 'var(--teal)', fontSize: '14px' }}>Stats &rarr;</span>
-              </a>
-            ))}
-          </div>
-        )}
-
-        {isLoggedIn && apps.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '24px', background: 'var(--bg-surface)', border: '1px dashed var(--border)', borderRadius: '12px' }}>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: '12px' }}>No apps registered yet</p>
-            <a href="/developer/setup" style={{ color: 'var(--teal)', fontSize: '14px' }}>Get started with the SDK &rarr;</a>
-          </div>
-        )}
-
-        {!isLoggedIn && !showLogin && (
-          <p style={{ color: 'var(--text-muted)', fontSize: '14px' }}>
-            Sign in to register apps, view analytics, and manage your API keys.
-          </p>
-        )}
-      </div>
+                  <span style={{ color: 'var(--teal)', fontSize: '14px' }}>Stats &rarr;</span>
+                </a>
+              ))}
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '24px', background: 'var(--bg-surface)', border: '1px dashed var(--border)', borderRadius: '12px' }}>
+              <p style={{ color: 'var(--text-secondary)', marginBottom: '12px' }}>No apps registered yet</p>
+              <a href="/developer/setup" style={{ color: 'var(--teal)', fontSize: '14px' }}>Get started with the SDK &rarr;</a>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
