@@ -217,62 +217,13 @@ function Hero() {
               Pay with Byoky
             </a>
           </div>
-          <div className="hero-actions">
-            <a
-              href="/demo/pay"
-              className="btn btn-secondary"
-            >
-              Try the Demo
-            </a>
-            <a
-              href="/developer/setup"
-              className="btn btn-secondary"
-            >
-              Developer Docs
-            </a>
-            <a
-              href="/marketplace"
-              className="btn btn-secondary"
-            >
-              App Marketplace
-            </a>
-          </div>
-          <div className="hero-actions" style={{ marginTop: '12px' }}>
-            <a
-              href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon"
-              className="btn btn-secondary"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <DownloadIcon />
-              Chrome Extension
-            </a>
-            <a
-              href="https://addons.mozilla.org/en-US/firefox/addon/byoky/"
-              className="btn btn-secondary"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <DownloadIcon />
-              Firefox Extension
-            </a>
-            <a
-              href="/wallet"
-              className="btn btn-secondary"
-            >
-              <WalletIcon />
-              Web Wallet
-            </a>
-            <a
-              href="https://github.com/MichaelLod/byoky"
-              className="btn btn-secondary"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <GitHubIcon />
-              GitHub
-            </a>
-          </div>
+          <p style={{ fontSize: '14px', color: 'var(--text-muted)', marginTop: '8px' }}>
+            Also available as a{' '}
+            <a href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--teal)' }}>Chrome</a>
+            {' '}&amp;{' '}
+            <a href="https://addons.mozilla.org/en-US/firefox/addon/byoky/" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--teal)' }}>Firefox</a>
+            {' '}extension
+          </p>
         </FadeIn>
       </div>
     </section>
