@@ -194,10 +194,33 @@ function Hero() {
           </p>
         </FadeIn>
         <FadeIn delay={0.3}>
+          {/* Live PayButton — this is the real thing */}
+          <div style={{ margin: '8px 0 24px', display: 'flex', justifyContent: 'center' }}>
+            <a
+              href="/demo/pay"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: '10px',
+                padding: '18px 36px', borderRadius: '14px',
+                background: 'var(--teal)', color: '#fff',
+                fontSize: '18px', fontWeight: 700,
+                boxShadow: '0 6px 24px var(--teal-glow)',
+                textDecoration: 'none',
+                transition: 'all 0.2s',
+                letterSpacing: '-0.01em',
+              }}
+            >
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" />
+                <path d="M3 5v14a2 2 0 0 0 2 2h16v-5" />
+                <path d="M18 12a2 2 0 0 0 0 4h4v-4Z" />
+              </svg>
+              Pay with Byoky
+            </a>
+          </div>
           <div className="hero-actions">
             <a
               href="/demo/pay"
-              className="btn btn-primary"
+              className="btn btn-secondary"
             >
               Try the Demo
             </a>
