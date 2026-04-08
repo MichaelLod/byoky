@@ -1,5 +1,6 @@
 import { FadeIn } from './components/FadeIn';
 import { AnimatedCounter } from './components/AnimatedCounter';
+import { CopySnippet } from './components/CopySnippet';
 
 export default function Home() {
   return (
@@ -120,19 +121,7 @@ function Hero() {
             </a>
           </div>
           <div style={{ display: 'flex', justifyContent: 'center', marginTop: '16px' }}>
-            <code style={{
-              display: 'inline-flex', alignItems: 'center', gap: '8px',
-              padding: '10px 20px', borderRadius: '10px',
-              background: 'var(--bg-elevated)', border: '1px solid var(--border)',
-              fontFamily: 'var(--font-code)', fontSize: '14px', color: 'var(--text-secondary)',
-              letterSpacing: '0.01em', cursor: 'pointer',
-            }}
-              onClick={() => { navigator.clipboard.writeText('npm install @byoky/sdk'); }}
-              title="Click to copy"
-            >
-              <span style={{ color: 'var(--text-muted)' }}>$</span> npm install @byoky/sdk
-              <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '4px' }}>&#128203;</span>
-            </code>
+            <CopySnippet text="npm install @byoky/sdk" display="npm install @byoky/sdk" />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px', marginTop: '12px' }}>
             <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Also available as extension:</span>
