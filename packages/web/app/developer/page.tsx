@@ -57,7 +57,7 @@ export default function DeveloperDashboard() {
         <p style={{ color: 'var(--text-secondary)', fontSize: '14px', marginBottom: '20px' }}>
           Every example works through the Byoky proxy — your app never touches an API key.
         </p>
-        <div className="demo-app">
+        <div className="demo-app dev-code-example">
           <CodeExample />
         </div>
       </div>
