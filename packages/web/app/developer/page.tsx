@@ -50,6 +50,37 @@ export default function DeveloperDashboard() {
         <a href="/demo/pay" style={linkBtn}>Live Demo</a>
       </div>
 
+      {/* What you can build */}
+      <div style={{ marginBottom: '32px' }}>
+        <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '8px' }}>What you can build</h2>
+        <p style={{ color: 'var(--text-secondary)', fontSize: '14px', marginBottom: '20px' }}>
+          Every example works through the Byoky proxy — your app never touches an API key.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px', marginBottom: '16px' }}>
+          {[
+            { name: 'Native SDK', desc: 'Use official SDKs from Anthropic, OpenAI, Gemini — just swap in Byoky\'s fetch' },
+            { name: 'Structured Output', desc: 'JSON mode, function calling, structured responses — all work through the proxy' },
+            { name: 'Streaming', desc: 'Full SSE streaming. No special handling needed' },
+            { name: 'Tool Use', desc: 'Function calling and tool use work transparently' },
+            { name: 'Vision', desc: 'Multimodal models. Binary data base64-encoded automatically' },
+            { name: 'Backend Relay', desc: 'Server-side LLM calls through the user\'s wallet via WebSocket' },
+            { name: 'Multi-Provider', desc: 'Switch between 15+ providers with a config change' },
+            { name: 'Bridge Proxy', desc: 'CLI and desktop apps route through the local Byoky Bridge' },
+          ].map((item) => (
+            <div key={item.name} style={{
+              padding: '14px 18px', borderRadius: '10px',
+              background: 'var(--bg-surface)', border: '1px solid var(--border)',
+            }}>
+              <h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '3px' }}>{item.name}</h4>
+              <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.4 }}>{item.desc}</p>
+            </div>
+          ))}
+        </div>
+        <a href="/demo" style={{ color: 'var(--teal)', fontSize: '14px', fontWeight: 500 }}>
+          Try the interactive playground &rarr;
+        </a>
+      </div>
+
       {/* Your Apps — requires login */}
       <div style={{ borderTop: '1px solid var(--border)', paddingTop: '24px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>

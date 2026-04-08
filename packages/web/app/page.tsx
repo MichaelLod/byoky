@@ -15,12 +15,6 @@ export default function Home() {
       <div className="divider" />
       <Providers />
       <div className="divider" />
-      <WhatYouCanBuild />
-      <div className="divider" />
-      <MobileWallet />
-      <div className="divider" />
-      <OpenClawIntegration />
-      <div className="divider" />
       <Security />
       <div className="divider" />
       <OpenSource />
