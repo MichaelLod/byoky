@@ -3,26 +3,26 @@
    ============================================= */
 
 :root {
-  --bg: #04040a;
-  --bg-surface: #090914;
-  --bg-card: #0d0d1a;
-  --bg-elevated: #121224;
+  --bg: #ffffff;
+  --bg-surface: #f8f9fa;
+  --bg-card: #ffffff;
+  --bg-elevated: #f1f3f5;
 
-  --border: #1a1a34;
-  --border-hover: #2a2a50;
+  --border: #e2e8f0;
+  --border-hover: #cbd5e1;
 
-  --text: #e2e2ec;
-  --text-secondary: #7a7a9c;
-  --text-muted: #464866;
+  --text: #1a1a2e;
+  --text-secondary: #64748b;
+  --text-muted: #94a3b8;
 
   --teal: #0ea5e9;
-  --teal-light: #7dd3fc;
+  --teal-light: #0284c7;
   --teal-dark: #0369a1;
-  --teal-glow: rgba(14, 165, 233, 0.2);
+  --teal-glow: rgba(14, 165, 233, 0.12);
 
-  --green: #86efac;
-  --cyan: #67e8f9;
-  --amber: #38bdf8;
+  --green: #22c55e;
+  --cyan: #06b6d4;
+  --amber: #0ea5e9;
 
   --font-sans: var(--font-sora), system-ui, -apple-system, sans-serif;
   --font-code: var(--font-mono), 'Fira Code', 'Consolas', monospace;
@@ -65,7 +65,7 @@ body::before {
   inset: 0;
   background-image: radial-gradient(
     circle at 1px 1px,
-    rgba(255, 255, 255, 0.018) 1px,
+    rgba(0, 0, 0, 0.03) 1px,
     transparent 0
   );
   background-size: 40px 40px;
@@ -192,8 +192,8 @@ section {
   height: 700px;
   background: radial-gradient(
     ellipse at 30% 50%,
-    rgba(14, 165, 233, 0.18) 0%,
-    rgba(14, 165, 233, 0.04) 40%,
+    rgba(14, 165, 233, 0.08) 0%,
+    rgba(14, 165, 233, 0.02) 40%,
     transparent 70%
   );
   filter: blur(60px);
@@ -210,8 +210,8 @@ section {
   height: 500px;
   background: radial-gradient(
     ellipse at 70% 40%,
-    rgba(134, 239, 172, 0.1) 0%,
-    rgba(56, 189, 248, 0.06) 40%,
+    rgba(134, 239, 172, 0.05) 0%,
+    rgba(56, 189, 248, 0.03) 40%,
     transparent 65%
   );
   filter: blur(80px);
@@ -228,8 +228,8 @@ section {
   height: 400px;
   background: radial-gradient(
     ellipse at center,
-    rgba(139, 92, 246, 0.08) 0%,
-    rgba(14, 165, 233, 0.04) 50%,
+    rgba(139, 92, 246, 0.04) 0%,
+    rgba(14, 165, 233, 0.02) 50%,
     transparent 70%
   );
   filter: blur(70px);
@@ -599,7 +599,7 @@ section {
   align-items: center;
   gap: 7px;
   padding: 14px 18px;
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(0, 0, 0, 0.02);
   border-bottom: 1px solid var(--border);
 }
 
@@ -834,7 +834,7 @@ section {
 }
 
 .provider-logo-xai {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.05);
   color: #e4e4ec;
 }
 
@@ -879,7 +879,7 @@ section {
 }
 
 .provider-logo-replicate {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.04);
   color: #e4e4ec;
 }
 
