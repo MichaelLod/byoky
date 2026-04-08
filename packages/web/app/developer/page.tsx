@@ -32,7 +32,17 @@ export default function DeveloperDashboard() {
 
   return (
     <div>
-      <h1 style={{ fontSize: '28px', fontWeight: 700, marginBottom: '8px' }}>Developer Dashboard</h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+        <h1 style={{ fontSize: '28px', fontWeight: 700 }}>Developer Dashboard</h1>
+        {!isLoggedIn && (
+          <button onClick={() => setShowLogin(!showLogin)} style={{
+            padding: '8px 16px', borderRadius: '8px', background: 'var(--teal)', color: '#fff',
+            border: 'none', fontSize: '13px', fontWeight: 600, cursor: 'pointer',
+          }}>
+            Sign in
+          </button>
+        )}
+      </div>
       <p style={{ color: 'var(--text-secondary)', marginBottom: '32px' }}>
         Ship AI apps. Never pay an API bill.
       </p>
@@ -52,17 +62,7 @@ export default function DeveloperDashboard() {
 
       {/* Your Apps — requires login */}
       <div style={{ borderTop: '1px solid var(--border)', paddingTop: '24px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-          <h2 style={{ fontSize: '18px', fontWeight: 600 }}>Your Apps</h2>
-          {!isLoggedIn && (
-            <button onClick={() => setShowLogin(!showLogin)} style={{
-              padding: '8px 16px', borderRadius: '8px', background: 'var(--teal)', color: '#fff',
-              border: 'none', fontSize: '13px', fontWeight: 600, cursor: 'pointer',
-            }}>
-              Sign in to manage apps
-            </button>
-          )}
-        </div>
+        <h2 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '16px' }}>Your Apps</h2>
 
         {/* Login form — only shown when requested */}
         {showLogin && !isLoggedIn && (
