@@ -45,8 +45,8 @@ const DEFAULT_BRIDGE_PORT = 19280;
 
 const ANTHROPIC_MODELS: ModelDef[] = [
   {
-    id: 'claude-opus-4-20250514',
-    name: 'Claude Opus 4',
+    id: 'claude-opus-4-6',
+    name: 'Claude Opus 4.6',
     reasoning: true,
     input: ['text', 'image'],
     cost: { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 },
@@ -54,8 +54,8 @@ const ANTHROPIC_MODELS: ModelDef[] = [
     maxTokens: 32_000,
   },
   {
-    id: 'claude-sonnet-4-20250514',
-    name: 'Claude Sonnet 4',
+    id: 'claude-sonnet-4-6',
+    name: 'Claude Sonnet 4.6',
     reasoning: true,
     input: ['text', 'image'],
     cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },

@@ -37,6 +37,7 @@
 
 - **For users** — One wallet for all your AI credentials. Add keys, approve apps, revoke access, export encrypted backups. Full visibility into every request.
 - **For developers** — Two lines of code. Use your favorite provider SDK. Keys never touch your app.
+- **Groups** — Bucket connected apps by purpose (e.g. "Personal", "Work"). Pin each group to a specific credential, then drag apps between groups to switch which key they use. Live sessions reroute automatically — no code changes in any app.
 - **Token gifts** — Share token access with friends or teammates without sharing your API key. Set budgets and expiration. All requests relay through your wallet.
 
 <p align="center">
@@ -220,6 +221,8 @@ OpenClaw → HTTP → Bridge (localhost) → Native Messaging → Extension → 
 
 All 15 providers are available through the plugin. Install the bridge, connect your wallet, and OpenClaw uses your Byoky credentials transparently. See the [OpenClaw plugin](packages/openclaw-plugin) for setup instructions.
 
+**Setup tokens too.** Since v0.4.19, OpenClaw (and any other third-party agent framework) can use a Claude.ai setup token as the byoky-anthropic credential — not just a `sk-ant-api03-...` API key. The bridge transparently rewrites tool names and relocates the framework's system prompt out of the system field on the way out, then reverses tool names on the streaming response, so Anthropic's first-party detection accepts the request without breaking the agent's behavior.
+
 #### Remote OpenClaw (Cloud Deployment)
 
 Run OpenClaw on a remote server (Railway, Fly.io, etc.) and keep your API keys on your device. The relay bridges the gap — your cloud instance never sees your credentials.
@@ -341,6 +344,9 @@ pnpm --filter @byoky/extension build:all     # Chrome + Firefox + Safari
 - [x] iOS app (wallet + Safari extension + relay pairing)
 - [x] Developer Hub + create-byoky-app CLI scaffolder
 - [x] MiniApps marketplace (byoky.com/apps)
+- [x] Alias groups — drag apps between groups to swap which credential they use
+- [x] Setup token compatibility for third-party agents (OpenClaw etc.) — transparent tool name + system prompt rewriting
+- [ ] Cross-provider translation — drag an app from a Claude group to a GPT group and have requests transparently rewrite (request body, response body, SSE streams)
 - [ ] Remote OpenClaw via relay (cloud deployment, zero key exposure)
 - [ ] Password change (re-encrypt vault with new master password)
 

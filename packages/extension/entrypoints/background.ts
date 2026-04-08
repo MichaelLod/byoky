@@ -28,6 +28,7 @@ import {
   computeAllowanceCheck,
   validateProxyUrl,
   injectClaudeCodeSystemPrompt,
+  rewriteToolNamesForClaudeCode,
   createGiftLink,
   decodeGiftLink,
   validateGiftLink,
@@ -456,10 +457,15 @@ export default defineBackground(() => {
         const realHeaders = buildHeaders(msg.providerId, msg.headers, apiKey, credential.authMethod);
 
         // OAuth tokens for Anthropic route through the bridge (Node.js) to bypass TLS fingerprint detection.
-        // Setup tokens require the Claude Code system prompt — inject it for OAuth requests.
+        // Setup tokens require the Claude Code system prompt + Claude-Code-shaped tool names.
+        // When the tool name rewriter fires, also relocate the system prompt (third-party framework).
         if (credential.authMethod === 'oauth' && msg.providerId === 'anthropic') {
-          const body = injectClaudeCodeSystemPrompt(msg.body);
-          await proxyViaBridge(port, { ...msg, body }, realHeaders, session);
+          const { body: rewrittenBody, toolNameMap } = rewriteToolNamesForClaudeCode(msg.body);
+          const isThirdParty = Object.keys(toolNameMap).length > 0;
+          const body = injectClaudeCodeSystemPrompt(rewrittenBody, {
+            relocateExisting: isThirdParty,
+          });
+          await proxyViaBridge(port, { ...msg, body }, realHeaders, session, toolNameMap);
           return;
         }
 
@@ -2098,6 +2104,7 @@ export default defineBackground(() => {
     msg: ProxyRequest,
     headers: Record<string, string>,
     session: Session,
+    toolNameMap: Record<string, string> = {},
   ): Promise<void> {
     const available = await checkBridgeAvailable();
     if (!available) {
@@ -2123,6 +2130,7 @@ export default defineBackground(() => {
         method: msg.method,
         headers,
         body: msg.body,
+        toolNameMap,
       });
 
       let bridgeResponded = false;
@@ -2361,13 +2369,26 @@ export default defineBackground(() => {
       if (credential.authMethod === 'oauth' && providerId === 'anthropic') {
         if (!bridgeProxyPort) return;
 
+        // Rewrite non-Claude-Code tool names (e.g. OpenClaw's `read`/`exec`) to
+        // PascalCase aliases so Anthropic's third-party detector accepts the
+        // request as Claude Code. When the rewriter fires, the request is from
+        // a third-party framework — also relocate its system prompt out of the
+        // system field (Anthropic also classifies on system content). The bridge
+        // reverses the tool name mapping on the streaming response.
+        const { body: rewrittenBody, toolNameMap } = rewriteToolNamesForClaudeCode(body);
+        const isThirdParty = Object.keys(toolNameMap).length > 0;
+        const finalBody = injectClaudeCodeSystemPrompt(rewrittenBody, {
+          relocateExisting: isThirdParty,
+        });
+
         bridgeProxyPort.postMessage({
           type: 'proxy_direct_fetch',
           requestId,
           url,
           method,
           headers: realHeaders,
-          body: injectClaudeCodeSystemPrompt(body),
+          body: finalBody,
+          toolNameMap,
         });
         const model = parseModel(body);
         logRequest(session, { providerId, url, method } as ProxyRequest, 200).then((logId) => {
@@ -3116,8 +3137,14 @@ export default defineBackground(() => {
           await new Promise<void>((resolve) => {
             const nativePort = browser.runtime.connectNative(BRIDGE_HOST);
             let body = injectStreamUsageOptions(gift.providerId, msg.body);
+            let toolNameMap: Record<string, string> = {};
             if (gift.providerId === 'anthropic') {
-              body = injectClaudeCodeSystemPrompt(body);
+              const rewritten = rewriteToolNamesForClaudeCode(body);
+              const isThirdParty = Object.keys(rewritten.toolNameMap).length > 0;
+              body = injectClaudeCodeSystemPrompt(rewritten.body, {
+                relocateExisting: isThirdParty,
+              });
+              toolNameMap = rewritten.toolNameMap;
             }
             nativePort.postMessage({
               type: 'proxy',
@@ -3126,6 +3153,7 @@ export default defineBackground(() => {
               method: msg.method,
               headers: realHeaders,
               body,
+              toolNameMap,
             });
 
             const chunks: string[] = [];

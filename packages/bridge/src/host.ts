@@ -18,6 +18,7 @@ import {
   type ProxyRequestOut,
   type ProxyResponseMessage,
 } from './proxy-server.js';
+import { createToolNameSSERewriter } from '@byoky/core';
 
 interface BridgeRequest {
   type: 'proxy';
@@ -26,6 +27,8 @@ interface BridgeRequest {
   method: string;
   headers: Record<string, string>;
   body: string;
+  /** Reverse map (alias → original) for rewriting tool_use names in SSE response chunks. */
+  toolNameMap?: Record<string, string>;
 }
 
 interface DirectFetchRequest {
@@ -35,6 +38,8 @@ interface DirectFetchRequest {
   method: string;
   headers: Record<string, string>;
   body?: string;
+  /** Reverse map (alias → original) for rewriting tool_use names in SSE response chunks. */
+  toolNameMap?: Record<string, string>;
 }
 
 interface BridgeResponseMeta {
@@ -168,14 +173,18 @@ async function handleMessage(msg: unknown): Promise<void> {
   // OAuth token proxy (Web SDK path — extension delegates fetch to Node.js)
   if (message.type === 'proxy') {
     const req = msg as BridgeRequest;
-    await handleStreamingFetch(req.requestId, req.url, req.method, req.headers, req.body, 'bridge');
+    await handleStreamingFetch(
+      req.requestId, req.url, req.method, req.headers, req.body, 'bridge', req.toolNameMap,
+    );
     return;
   }
 
   // Direct fetch (CLI path — extension resolves creds, bridge does the fetch directly)
   if (message.type === 'proxy_direct_fetch') {
     const req = msg as DirectFetchRequest;
-    await handleStreamingFetch(req.requestId, req.url, req.method, req.headers, req.body, 'proxy_http');
+    await handleStreamingFetch(
+      req.requestId, req.url, req.method, req.headers, req.body, 'proxy_http', req.toolNameMap,
+    );
     return;
   }
 
@@ -216,6 +225,7 @@ async function handleStreamingFetch(
   headers: Record<string, string>,
   body: string | undefined,
   mode: 'bridge' | 'proxy_http',
+  toolNameMap: Record<string, string> = {},
 ): Promise<void> {
   const send = (msg: unknown) => {
     if (mode === 'bridge') {
@@ -227,6 +237,10 @@ async function handleStreamingFetch(
 
   const prefix = mode === 'bridge' ? 'proxy_response' : 'proxy_http_response';
   const errorType = mode === 'bridge' ? 'proxy_error' : 'proxy_http_error';
+
+  // SSE rewriter that translates Claude-Code aliases back to the framework's
+  // original tool names. Identity passthrough when the map is empty.
+  const rewriter = createToolNameSSERewriter(toolNameMap);
 
   const controller = new AbortController();
   const fetchTimeout = setTimeout(() => controller.abort(), 120_000);
@@ -250,8 +264,12 @@ async function handleStreamingFetch(
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
-        send({ type: `${prefix}_chunk`, requestId, chunk: decoder.decode(value, { stream: true }) });
+        const raw = decoder.decode(value, { stream: true });
+        const rewritten = rewriter.process(raw);
+        if (rewritten) send({ type: `${prefix}_chunk`, requestId, chunk: rewritten });
       }
+      const tail = rewriter.flush();
+      if (tail) send({ type: `${prefix}_chunk`, requestId, chunk: tail });
     }
 
     send({ type: `${prefix}_done`, requestId });

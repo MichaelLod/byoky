@@ -269,24 +269,289 @@ export function computeAllowanceCheck(
   return { allowed: true };
 }
 
+const CLAUDE_CODE_SYSTEM_PREFIX = "You are Claude Code, Anthropic's official CLI for Claude.";
+
 /**
  * Inject the Claude Code system prompt prefix into a JSON request body.
- * Only used for bridge/CLI sessions that go through the Claude Code OAuth path.
+ *
+ * Two modes based on `relocateExisting`:
+ *  - false (default, for Claude Code CLI): prepend the prefix to whatever system
+ *    field already exists (preserving the user's system content as a Claude Code
+ *    extension).
+ *  - true (for non-Claude-Code frameworks like OpenClaw): replace the system
+ *    field with ONLY the Claude Code prefix, and move the original system content
+ *    into the first user message wrapped in <system_context> tags. Anthropic's
+ *    third-party detection inspects the system field content; relocating it lets
+ *    arbitrary frameworks pass the check.
  */
-export function injectClaudeCodeSystemPrompt(body: string | undefined): string | undefined {
+export function injectClaudeCodeSystemPrompt(
+  body: string | undefined,
+  options?: { relocateExisting?: boolean },
+): string | undefined {
   if (!body) return body;
   try {
-    const parsed = JSON.parse(body);
-    const prefix = "You are Claude Code, Anthropic's official CLI for Claude.";
-    if (!parsed.system) {
-      parsed.system = prefix;
-    } else if (typeof parsed.system === 'string') {
-      parsed.system = `${prefix}\n\n${parsed.system}`;
-    } else if (Array.isArray(parsed.system)) {
-      parsed.system = [{ type: 'text', text: prefix }, ...parsed.system];
+    const parsed = JSON.parse(body) as Record<string, unknown>;
+    const relocate = options?.relocateExisting === true;
+
+    if (relocate) {
+      // Extract the original system text (if any)
+      const originalSystem = extractSystemText(parsed.system);
+      // Replace system with bare Claude Code prefix
+      parsed.system = CLAUDE_CODE_SYSTEM_PREFIX;
+      // Prepend original system content to the first user message as a context block
+      if (originalSystem && Array.isArray(parsed.messages) && parsed.messages.length > 0) {
+        parsed.messages = relocateSystemToFirstUserMessage(
+          parsed.messages,
+          originalSystem,
+        );
+      }
+    } else {
+      // Original behavior: prepend prefix to existing system
+      if (!parsed.system) {
+        parsed.system = CLAUDE_CODE_SYSTEM_PREFIX;
+      } else if (typeof parsed.system === 'string') {
+        parsed.system = `${CLAUDE_CODE_SYSTEM_PREFIX}\n\n${parsed.system}`;
+      } else if (Array.isArray(parsed.system)) {
+        parsed.system = [{ type: 'text', text: CLAUDE_CODE_SYSTEM_PREFIX }, ...parsed.system];
+      }
     }
     return JSON.stringify(parsed);
   } catch {
     return body;
   }
 }
+
+/**
+ * Concatenate any system field shape (string, text-block array, or undefined)
+ * into a single string for relocation. Non-text blocks are skipped.
+ */
+function extractSystemText(system: unknown): string {
+  if (!system) return '';
+  if (typeof system === 'string') return system;
+  if (Array.isArray(system)) {
+    return system
+      .map((block) => {
+        if (typeof block === 'string') return block;
+        if (block && typeof block === 'object' && (block as { type?: unknown }).type === 'text') {
+          return String((block as { text?: unknown }).text ?? '');
+        }
+        return '';
+      })
+      .filter((s) => s.length > 0)
+      .join('\n\n');
+  }
+  return '';
+}
+
+/**
+ * Prepend the original system content to the first user message in a messages
+ * array, wrapped in <system_context> tags. Returns a new messages array.
+ *
+ * The first message must be a user-role message (Anthropic API requires this).
+ * If the first message has structured content (array of blocks), the context is
+ * added as a new text block at the start. If it has plain string content, the
+ * context is concatenated.
+ */
+function relocateSystemToFirstUserMessage(
+  messages: unknown[],
+  systemText: string,
+): unknown[] {
+  const wrapped = `<system_context>\n${systemText}\n</system_context>\n\n`;
+  const out = [...messages];
+  const first = out[0] as { role?: unknown; content?: unknown } | undefined;
+  if (!first || first.role !== 'user') return out;
+
+  if (typeof first.content === 'string') {
+    out[0] = { ...first, content: `${wrapped}${first.content}` };
+  } else if (Array.isArray(first.content)) {
+    out[0] = {
+      ...first,
+      content: [{ type: 'text', text: wrapped }, ...first.content],
+    };
+  }
+  return out;
+}
+
+/**
+ * Rewrite tool names in an Anthropic /v1/messages request body so the request
+ * looks like it came from Claude Code (Anthropic's first-party CLI).
+ *
+ * Why: when an OAuth setup token is used to call /v1/messages, Anthropic
+ * classifies the request as "Claude Code" or "third-party" based partly on
+ * tool names. Tools whose names don't match the canonical Claude Code set
+ * (Read, Edit, Bash, ...) get rejected with a billing error even when the
+ * Claude Code system prompt is injected.
+ *
+ * This function:
+ *  1. Detects "non-Claude-Code" tool names (lowercase or snake_case)
+ *  2. Builds a bidirectional mapping (original ↔ PascalCase alias)
+ *  3. Rewrites the tools[] array, all past tool_use blocks in messages,
+ *     and all tool_result blocks (which reference tool_use_id, not name —
+ *     so those don't need rewriting)
+ *
+ * Returns { body, toolNameMap } where toolNameMap goes from CC-alias → original,
+ * so the caller can pass it to `rewriteToolUseInSSEChunk` to translate the
+ * streaming response back to names the framework expects.
+ *
+ * If no rewriting is needed (all names already PascalCase or no tools), returns
+ * the body unchanged with an empty map.
+ */
+export function rewriteToolNamesForClaudeCode(
+  body: string | undefined,
+): { body: string | undefined; toolNameMap: Record<string, string> } {
+  if (!body) return { body, toolNameMap: {} };
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return { body, toolNameMap: {} };
+  }
+
+  const tools = parsed.tools;
+  if (!Array.isArray(tools) || tools.length === 0) {
+    return { body, toolNameMap: {} };
+  }
+
+  // Detect: any tool with a non-PascalCase name needs the rewrite
+  const needsRewrite = tools.some((t) => {
+    const name = (t as { name?: unknown })?.name;
+    return typeof name === 'string' && !/^[A-Z][A-Za-z0-9]*$/.test(name);
+  });
+  if (!needsRewrite) return { body, toolNameMap: {} };
+
+  // Build forward (original → alias) and reverse (alias → original) maps
+  const forward: Record<string, string> = {};
+  const reverse: Record<string, string> = {};
+  for (const t of tools) {
+    const name = (t as { name?: unknown })?.name;
+    if (typeof name !== 'string') continue;
+    if (forward[name]) continue;
+    const alias = toClaudeCodeToolName(name, new Set(Object.values(forward)));
+    forward[name] = alias;
+    reverse[alias] = name;
+  }
+
+  // Rewrite the tools[] array
+  parsed.tools = tools.map((t) => {
+    const tt = t as { name?: unknown };
+    if (typeof tt.name === 'string' && forward[tt.name]) {
+      return { ...t, name: forward[tt.name] };
+    }
+    return t;
+  });
+
+  // Rewrite tool_use blocks in past assistant messages (so the conversation
+  // history stays consistent — Claude needs the names in past tool_use to
+  // match what's in tools[])
+  const messages = parsed.messages;
+  if (Array.isArray(messages)) {
+    for (const msg of messages) {
+      const content = (msg as { content?: unknown })?.content;
+      if (!Array.isArray(content)) continue;
+      for (const block of content) {
+        const b = block as { type?: unknown; name?: unknown };
+        if (b.type === 'tool_use' && typeof b.name === 'string' && forward[b.name]) {
+          (b as { name: string }).name = forward[b.name];
+        }
+      }
+    }
+  }
+
+  return { body: JSON.stringify(parsed), toolNameMap: reverse };
+}
+
+/**
+ * Convert a tool name to Claude-Code-style PascalCase. Handles snake_case,
+ * camelCase, and lowercase. Disambiguates collisions by appending a digit.
+ */
+function toClaudeCodeToolName(name: string, taken: Set<string>): string {
+  // snake_case or kebab-case → PascalCase
+  let pascal = name
+    .split(/[_\-]/)
+    .filter((p) => p.length > 0)
+    .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+    .join('');
+  // already-camelCase: just uppercase the first letter
+  if (pascal === name && name.length > 0) {
+    pascal = name.charAt(0).toUpperCase() + name.slice(1);
+  }
+  // collision: append a digit
+  let candidate = pascal;
+  let n = 2;
+  while (taken.has(candidate)) {
+    candidate = `${pascal}${n}`;
+    n++;
+  }
+  return candidate;
+}
+
+/**
+ * Stateful rewriter for an Anthropic SSE response stream that translates
+ * `tool_use` block names from Claude-Code-style aliases back to the upstream
+ * framework's original names.
+ *
+ * Use:
+ *   const r = createToolNameSSERewriter(map);
+ *   for each chunk: emit(r.process(chunk));
+ *   on stream end:  emit(r.flush());
+ *
+ * Empty map → identity passthrough (no buffering, no parsing).
+ */
+export function createToolNameSSERewriter(
+  toolNameMap: Record<string, string>,
+): { process: (chunk: string) => string; flush: () => string } {
+  if (Object.keys(toolNameMap).length === 0) {
+    return {
+      process: (chunk) => chunk,
+      flush: () => '',
+    };
+  }
+  let buffer = '';
+  return {
+    process: (chunk: string): string => {
+      buffer += chunk;
+      let out = '';
+      let idx: number;
+      // SSE frames are terminated by \n\n
+      while ((idx = buffer.indexOf('\n\n')) !== -1) {
+        const frame = buffer.slice(0, idx + 2);
+        buffer = buffer.slice(idx + 2);
+        out += rewriteSSEFrame(frame, toolNameMap);
+      }
+      return out;
+    },
+    flush: (): string => {
+      const leftover = buffer;
+      buffer = '';
+      return leftover;
+    },
+  };
+}
+
+/**
+ * Rewrite a single complete SSE frame. If the frame is a content_block_start
+ * with a tool_use block, rewrite its name using the alias→original map.
+ */
+function rewriteSSEFrame(frame: string, toolNameMap: Record<string, string>): string {
+  // Frame format: "event: <type>\ndata: <json>\n\n"
+  const dataMatch = /^data: (.+)$/m.exec(frame);
+  if (!dataMatch) return frame;
+  const dataLine = dataMatch[1];
+  try {
+    const data = JSON.parse(dataLine);
+    if (
+      data?.type === 'content_block_start' &&
+      data?.content_block?.type === 'tool_use' &&
+      typeof data.content_block.name === 'string' &&
+      toolNameMap[data.content_block.name]
+    ) {
+      data.content_block.name = toolNameMap[data.content_block.name];
+      const rewrittenData = JSON.stringify(data);
+      return frame.replace(dataLine, rewrittenData);
+    }
+  } catch {
+    // not JSON or unexpected shape — pass through
+  }
+  return frame;
+}
+
