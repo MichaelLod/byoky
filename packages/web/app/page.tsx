@@ -15,6 +15,12 @@ export default function Home() {
       <div className="divider" />
       <Providers />
       <div className="divider" />
+      <WhatYouCanBuild />
+      <div className="divider" />
+      <MobileWallet />
+      <div className="divider" />
+      <OpenClawIntegration />
+      <div className="divider" />
       <Security />
       <div className="divider" />
       <OpenSource />
@@ -271,6 +277,69 @@ function ZeroCost() {
             If your users have API keys, you have a product. No billing
             integration, no usage caps, no margin pressure.
           </p>
+        </FadeIn>
+      </div>
+    </section>
+  );
+}
+
+/* ─── What You Can Build ──────────────────────────── */
+
+function WhatYouCanBuild() {
+  const tabs = [
+    { name: 'Native SDK', desc: 'Use official SDKs from Anthropic, OpenAI, Gemini — just swap in Byoky\'s fetch' },
+    { name: 'Structured Output', desc: 'JSON mode, function calling, structured responses — all work through the proxy' },
+    { name: 'Streaming', desc: 'Full SSE streaming support. No special handling needed' },
+    { name: 'Tool Use', desc: 'Function calling and tool use work transparently through the proxy layer' },
+    { name: 'Vision', desc: 'Send images to multimodal models. Binary data is base64-encoded automatically' },
+    { name: 'Backend Relay', desc: 'Your server makes LLM calls through the user\'s wallet via WebSocket' },
+    { name: 'Multi-Provider', desc: 'Switch between 15+ providers with a config change. One SDK, all models' },
+    { name: 'Bridge Proxy', desc: 'CLI and desktop apps route through the local Byoky Bridge. Keys never leave the extension' },
+  ];
+
+  return (
+    <section className="zero-cost-section">
+      <div className="container">
+        <FadeIn>
+          <h2 className="zero-cost-heading">What you can build</h2>
+          <p className="zero-cost-body">
+            Every example works through the Byoky proxy — your app never touches an API key.
+          </p>
+        </FadeIn>
+        <FadeIn delay={0.1}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center', marginTop: '32px', marginBottom: '24px' }}>
+            {tabs.map((tab) => (
+              <span
+                key={tab.name}
+                style={{
+                  padding: '8px 16px', borderRadius: '8px',
+                  background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+                  fontSize: '13px', fontWeight: 500, color: 'var(--text-secondary)',
+                }}
+              >
+                {tab.name}
+              </span>
+            ))}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', maxWidth: '800px', margin: '0 auto' }}>
+            {tabs.map((tab) => (
+              <div
+                key={tab.name}
+                style={{
+                  padding: '16px 20px', borderRadius: '12px',
+                  background: 'var(--bg-card)', border: '1px solid var(--border)',
+                }}
+              >
+                <h4 style={{ fontSize: '14px', fontWeight: 600, marginBottom: '4px' }}>{tab.name}</h4>
+                <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>{tab.desc}</p>
+              </div>
+            ))}
+          </div>
+          <div style={{ textAlign: 'center', marginTop: '24px' }}>
+            <a href="/demo" style={{ color: 'var(--teal)', fontSize: '14px', fontWeight: 500 }}>
+              Try the interactive playground &rarr;
+            </a>
+          </div>
         </FadeIn>
       </div>
     </section>
