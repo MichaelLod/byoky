@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import '../demo/demo.css';
 
 export const metadata: Metadata = {
   title: 'Developer Portal',
