@@ -90,7 +90,7 @@ export default function WalletConnect() {
           <div style={{ textAlign: 'center', padding: '24px 0' }}>
             <div style={{ fontSize: '48px', marginBottom: '12px' }}>&#10003;</div>
             <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '4px' }}>Connected</h2>
-            <p style={{ color: '#71717a', fontSize: '14px' }}>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
               Returning to the app...
             </p>
           </div>
@@ -105,7 +105,7 @@ export default function WalletConnect() {
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: '24px' }}>
           <div style={{ fontSize: '24px', fontWeight: 700, marginBottom: '4px' }}>Byoky</div>
-          <p style={{ color: '#71717a', fontSize: '14px' }}>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
             {mode === 'login' ? 'Sign in to your wallet' : 'Create your AI wallet'}
           </p>
         </div>
@@ -113,14 +113,14 @@ export default function WalletConnect() {
         {/* Tabs */}
         <div style={{
           display: 'flex', marginBottom: '20px',
-          background: 'rgba(255,255,255,0.04)', borderRadius: '10px', padding: '3px',
+          background: 'var(--bg-elevated)', borderRadius: '10px', padding: '3px',
         }}>
           <button
             onClick={() => { setMode('login'); setError(null); }}
             style={{
               flex: 1, padding: '8px', borderRadius: '8px', border: 'none',
-              background: mode === 'login' ? 'rgba(255,255,255,0.1)' : 'transparent',
-              color: mode === 'login' ? '#e4e4e7' : '#71717a',
+              background: mode === 'login' ? 'var(--bg-elevated)' : 'transparent',
+              color: mode === 'login' ? 'var(--text)' : '#71717a',
               fontSize: '13px', fontWeight: 600, cursor: 'pointer',
             }}
           >
@@ -130,8 +130,8 @@ export default function WalletConnect() {
             onClick={() => { setMode('signup'); setError(null); }}
             style={{
               flex: 1, padding: '8px', borderRadius: '8px', border: 'none',
-              background: mode === 'signup' ? 'rgba(255,255,255,0.1)' : 'transparent',
-              color: mode === 'signup' ? '#e4e4e7' : '#71717a',
+              background: mode === 'signup' ? 'var(--bg-elevated)' : 'transparent',
+              color: mode === 'signup' ? 'var(--text)' : '#71717a',
               fontSize: '13px', fontWeight: 600, cursor: 'pointer',
             }}
           >
@@ -150,7 +150,7 @@ export default function WalletConnect() {
 
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: '12px' }}>
-            <label style={{ display: 'block', fontSize: '13px', color: '#a1a1aa', marginBottom: '6px' }}>
+            <label style={{ display: 'block', fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '6px' }}>
               Username
             </label>
             <input
@@ -165,7 +165,7 @@ export default function WalletConnect() {
           </div>
 
           <div style={{ marginBottom: '12px' }}>
-            <label style={{ display: 'block', fontSize: '13px', color: '#a1a1aa', marginBottom: '6px' }}>
+            <label style={{ display: 'block', fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '6px' }}>
               Password
             </label>
             <input
@@ -180,7 +180,7 @@ export default function WalletConnect() {
 
           {mode === 'signup' && (
             <div style={{ marginBottom: '12px' }}>
-              <label style={{ display: 'block', fontSize: '13px', color: '#a1a1aa', marginBottom: '6px' }}>
+              <label style={{ display: 'block', fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '6px' }}>
                 Confirm Password
               </label>
               <input
@@ -199,7 +199,7 @@ export default function WalletConnect() {
             disabled={loading}
             style={{
               width: '100%', padding: '12px', borderRadius: '10px',
-              border: 'none', background: loading ? '#374151' : '#0ea5e9',
+              border: 'none', background: loading ? 'var(--border-hover)' : 'var(--teal)',
               color: '#fff', fontSize: '15px', fontWeight: 600,
               cursor: loading ? 'not-allowed' : 'pointer',
               marginTop: '4px',
@@ -209,7 +209,7 @@ export default function WalletConnect() {
           </button>
         </form>
 
-        <p style={{ fontSize: '11px', color: '#52525b', textAlign: 'center', marginTop: '16px', lineHeight: 1.5 }}>
+        <p style={{ fontSize: '11px', color: 'var(--text-muted)', textAlign: 'center', marginTop: '16px', lineHeight: 1.5 }}>
           {mode === 'signup'
             ? 'Your wallet encrypts everything locally. We never see your API keys.'
             : 'One account, every AI app. No API keys needed.'}
@@ -224,17 +224,17 @@ const containerStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  background: '#09090b',
-  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-  color: '#e4e4e7',
+  background: 'var(--bg)',
+  fontFamily: 'var(--font-sans, -apple-system, BlinkMacSystemFont, sans-serif)',
+  color: 'var(--text)',
 };
 
 const cardStyle: React.CSSProperties = {
   width: '100%',
   maxWidth: '380px',
   padding: '32px',
-  background: '#18181b',
-  border: '1px solid rgba(255,255,255,0.08)',
+  background: 'var(--bg-card)',
+  border: '1px solid var(--border)',
   borderRadius: '16px',
 };
 
@@ -242,9 +242,9 @@ const inputStyle: React.CSSProperties = {
   width: '100%',
   padding: '10px 14px',
   borderRadius: '8px',
-  border: '1px solid rgba(255,255,255,0.1)',
-  background: '#09090b',
-  color: '#e4e4e7',
+  border: '1px solid var(--border)',
+  background: 'var(--bg-surface)',
+  color: 'var(--text)',
   fontSize: '14px',
   outline: 'none',
   boxSizing: 'border-box',
