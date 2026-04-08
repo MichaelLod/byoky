@@ -1,6 +1,10 @@
 import { useState } from 'react';
 import { useWalletStore } from '../store';
-import { PROVIDERS, isGiftExpired, type TokenAllowance } from '@byoky/core';
+import {
+  PROVIDERS, isGiftExpired,
+  type TokenAllowance, type Group, type Session, type CredentialMeta,
+  DEFAULT_GROUP_ID,
+} from '@byoky/core';
 
 function timeAgo(timestamp: number): string {
   const seconds = Math.floor((Date.now() - timestamp) / 1000);
@@ -27,16 +31,23 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
+const DRAG_MIME = 'application/x-byoky-app-origin';
+
 export function ConnectedApps() {
   const {
     sessions, revokeSession, trustedSites, removeTrustedSite,
     requestLog, tokenAllowances, setAllowance, removeAllowance,
     giftedCredentials, cloudVaultEnabled,
+    groups, appGroups, credentials,
+    createGroup, updateGroup, deleteGroup, setAppGroup,
   } = useWalletStore();
   const activeGiftProviders = new Set(
     giftedCredentials.filter((gc) => !isGiftExpired(gc) && gc.usedTokens < gc.maxTokens).map((gc) => gc.providerId),
   );
   const [editingOrigin, setEditingOrigin] = useState<string | null>(null);
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
+  const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const [dragOriginOver, setDragOriginOver] = useState<string | null>(null);
 
   function getOriginUsage(origin: string) {
     const entries = requestLog.filter((e) => e.appOrigin === origin && e.status < 400);
@@ -48,6 +59,30 @@ export function ConnectedApps() {
       byProvider[entry.providerId] = (byProvider[entry.providerId] ?? 0) + tokens;
     }
     return { total, byProvider };
+  }
+
+  // Bucket sessions by their assigned group (default if none).
+  const sessionsByGroup = new Map<string, Session[]>();
+  for (const g of groups) sessionsByGroup.set(g.id, []);
+  if (!sessionsByGroup.has(DEFAULT_GROUP_ID)) sessionsByGroup.set(DEFAULT_GROUP_ID, []);
+  for (const session of sessions) {
+    const groupId = appGroups[session.appOrigin] ?? DEFAULT_GROUP_ID;
+    const bucket = sessionsByGroup.get(groupId) ?? sessionsByGroup.get(DEFAULT_GROUP_ID)!;
+    bucket.push(session);
+  }
+
+  // Make sure default appears first, then user groups in creation order.
+  // The background ensures a default group exists on getGroups, so we don't synthesize.
+  const orderedGroups = [
+    ...groups.filter((g) => g.id === DEFAULT_GROUP_ID),
+    ...groups.filter((g) => g.id !== DEFAULT_GROUP_ID),
+  ];
+
+  async function handleDrop(targetGroupId: string, origin: string) {
+    setDragOriginOver(null);
+    const currentGroupId = appGroups[origin] ?? DEFAULT_GROUP_ID;
+    if (currentGroupId === targetGroupId) return;
+    await setAppGroup(origin, targetGroupId);
   }
 
   return (
@@ -88,95 +123,220 @@ export function ConnectedApps() {
         </div>
       )}
 
-      {sessions.map((session) => {
-        const usage = getOriginUsage(session.appOrigin);
-        const allowance = tokenAllowances.find((a) => a.origin === session.appOrigin);
-        const isEditing = editingOrigin === session.appOrigin;
-        const pct = allowance?.totalLimit ? Math.min(100, (usage.total / allowance.totalLimit) * 100) : 0;
-        const isOver = allowance?.totalLimit != null && usage.total >= allowance.totalLimit;
+      {/* Groups: each is a drop target. Apps in the group are listed inside. */}
+      {orderedGroups.map((group) => {
+        const groupSessions = sessionsByGroup.get(group.id) ?? [];
+        const provider = PROVIDERS[group.providerId];
+        const pinnedCred = group.credentialId ? credentials.find((c) => c.id === group.credentialId) : undefined;
+        const isDefault = group.id === DEFAULT_GROUP_ID;
+        const isDropTarget = dragOriginOver === group.id;
 
         return (
-          <div key={session.id} className="card connected-app-card">
-            <div className="card-header" style={{ marginBottom: '10px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-                <div className="app-favicon">
-                  {formatOrigin(session.appOrigin).charAt(0).toUpperCase()}
+          <div
+            key={group.id}
+            className={`group-section${isDropTarget ? ' group-section--drop' : ''}`}
+            style={{
+              border: isDropTarget ? '2px dashed var(--accent)' : '1px solid var(--border)',
+              borderRadius: '8px',
+              padding: '10px',
+              marginBottom: '12px',
+              background: isDropTarget ? 'var(--accent-faint, rgba(99,102,241,0.06))' : 'transparent',
+              transition: 'background 0.1s, border-color 0.1s',
+            }}
+            onDragOver={(e) => {
+              if (e.dataTransfer.types.includes(DRAG_MIME)) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                if (dragOriginOver !== group.id) setDragOriginOver(group.id);
+              }
+            }}
+            onDragLeave={(e) => {
+              if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+              if (dragOriginOver === group.id) setDragOriginOver(null);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              const origin = e.dataTransfer.getData(DRAG_MIME);
+              if (origin) handleDrop(group.id, origin);
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <strong style={{ fontSize: '13px' }}>{group.name}</strong>
+                  <span className="badge badge-provider">{provider?.name ?? group.providerId}</span>
+                  {group.model && <span className="badge">{group.model}</span>}
                 </div>
-                <div style={{ minWidth: 0 }}>
-                  <span className="card-title" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {formatOrigin(session.appOrigin)}
-                  </span>
-                  <div className="card-subtitle">
-                    Connected {timeAgo(session.createdAt)}
-                  </div>
+                <div className="card-subtitle" style={{ marginTop: '2px' }}>
+                  {pinnedCred ? `Using ${pinnedCred.label}` : 'Any credential for this provider'}
                 </div>
               </div>
-              <button
-                className="btn btn-danger btn-sm"
-                onClick={() => revokeSession(session.id)}
-              >
-                Disconnect
-              </button>
-            </div>
-
-            <div className="connected-providers">
-              {session.providers
-                .filter((p) => p.available)
-                .map((p) => {
-                  const provider = PROVIDERS[p.providerId];
-                  const isGift = p.giftId || activeGiftProviders.has(p.providerId);
-                  return (
-                    <span key={p.providerId} className={`badge badge-provider${isGift ? ' badge-gift-provider' : ''}`}>
-                      {provider?.name ?? p.providerId}
-                      {isGift && <span className="gift-indicator"> (gift)</span>}
-                    </span>
-                  );
-                })}
-            </div>
-
-            {/* Token usage & allowance */}
-            <div className="allowance-section">
-              <div className="allowance-usage-row">
-                <span className="allowance-used">{formatTokens(usage.total)} tokens used</span>
-                {allowance?.totalLimit != null && (
-                  <span className={`allowance-limit ${isOver ? 'over' : ''}`}>
-                    / {formatTokens(allowance.totalLimit)}
-                  </span>
-                )}
-                <button
-                  className="text-link allowance-edit-btn"
-                  onClick={() => setEditingOrigin(isEditing ? null : session.appOrigin)}
-                >
-                  {allowance ? 'Edit limit' : 'Set limit'}
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <button className="text-link" style={{ fontSize: '12px' }} onClick={() => setEditingGroupId(editingGroupId === group.id ? null : group.id)}>
+                  Edit
                 </button>
+                {!isDefault && (
+                  <button
+                    className="text-link"
+                    style={{ fontSize: '12px', color: 'var(--danger)' }}
+                    onClick={() => {
+                      if (confirm(`Delete group "${group.name}"? Apps in this group will move back to Default.`)) {
+                        deleteGroup(group.id);
+                      }
+                    }}
+                  >
+                    Delete
+                  </button>
+                )}
               </div>
-              {allowance?.totalLimit != null && (
-                <div className="allowance-bar">
-                  <div
-                    className={`allowance-bar-fill ${isOver ? 'over' : ''}`}
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-              )}
             </div>
 
-            {isEditing && (
-              <AllowanceForm
-                origin={session.appOrigin}
-                providers={session.providers.filter((p) => p.available).map((p) => p.providerId)}
-                allowance={allowance}
-                onSave={(a) => { setAllowance(a); setEditingOrigin(null); }}
-                onRemove={() => { removeAllowance(session.appOrigin); setEditingOrigin(null); }}
-                onCancel={() => setEditingOrigin(null)}
+            {editingGroupId === group.id && (
+              <GroupForm
+                group={group}
+                credentials={credentials}
+                onSave={async (patch) => {
+                  const ok = await updateGroup(group.id, patch);
+                  if (ok) setEditingGroupId(null);
+                }}
+                onCancel={() => setEditingGroupId(null)}
               />
             )}
 
-            <div className="connected-meta">
-              <span>{session.appOrigin}</span>
-            </div>
+            {groupSessions.length === 0 ? (
+              <div className="card-subtitle" style={{ padding: '8px 4px', fontStyle: 'italic' }}>
+                {isDropTarget ? 'Drop to assign' : 'Drag an app here to assign it to this group'}
+              </div>
+            ) : (
+              groupSessions.map((session) => {
+                const usage = getOriginUsage(session.appOrigin);
+                const allowance = tokenAllowances.find((a) => a.origin === session.appOrigin);
+                const isEditing = editingOrigin === session.appOrigin;
+                const pct = allowance?.totalLimit ? Math.min(100, (usage.total / allowance.totalLimit) * 100) : 0;
+                const isOver = allowance?.totalLimit != null && usage.total >= allowance.totalLimit;
+
+                return (
+                  <div
+                    key={session.id}
+                    className="card connected-app-card"
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.effectAllowed = 'move';
+                      e.dataTransfer.setData(DRAG_MIME, session.appOrigin);
+                    }}
+                    onDragEnd={() => setDragOriginOver(null)}
+                    style={{ cursor: 'grab' }}
+                  >
+                    <div className="card-header" style={{ marginBottom: '10px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                        <div className="app-favicon">
+                          {formatOrigin(session.appOrigin).charAt(0).toUpperCase()}
+                        </div>
+                        <div style={{ minWidth: 0 }}>
+                          <span className="card-title" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {formatOrigin(session.appOrigin)}
+                          </span>
+                          <div className="card-subtitle">
+                            Connected {timeAgo(session.createdAt)}
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        className="btn btn-danger btn-sm"
+                        onClick={() => revokeSession(session.id)}
+                      >
+                        Disconnect
+                      </button>
+                    </div>
+
+                    <div className="connected-providers">
+                      {session.providers
+                        .filter((p) => p.available)
+                        .map((p) => {
+                          const provider = PROVIDERS[p.providerId];
+                          const isGift = p.giftId || activeGiftProviders.has(p.providerId);
+                          return (
+                            <span key={p.providerId} className={`badge badge-provider${isGift ? ' badge-gift-provider' : ''}`}>
+                              {provider?.name ?? p.providerId}
+                              {isGift && <span className="gift-indicator"> (gift)</span>}
+                            </span>
+                          );
+                        })}
+                    </div>
+
+                    {/* Token usage & allowance */}
+                    <div className="allowance-section">
+                      <div className="allowance-usage-row">
+                        <span className="allowance-used">{formatTokens(usage.total)} tokens used</span>
+                        {allowance?.totalLimit != null && (
+                          <span className={`allowance-limit ${isOver ? 'over' : ''}`}>
+                            / {formatTokens(allowance.totalLimit)}
+                          </span>
+                        )}
+                        <button
+                          className="text-link allowance-edit-btn"
+                          onClick={() => setEditingOrigin(isEditing ? null : session.appOrigin)}
+                        >
+                          {allowance ? 'Edit limit' : 'Set limit'}
+                        </button>
+                      </div>
+                      {allowance?.totalLimit != null && (
+                        <div className="allowance-bar">
+                          <div
+                            className={`allowance-bar-fill ${isOver ? 'over' : ''}`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    {isEditing && (
+                      <AllowanceForm
+                        origin={session.appOrigin}
+                        providers={session.providers.filter((p) => p.available).map((p) => p.providerId)}
+                        allowance={allowance}
+                        onSave={(a) => { setAllowance(a); setEditingOrigin(null); }}
+                        onRemove={() => { removeAllowance(session.appOrigin); setEditingOrigin(null); }}
+                        onCancel={() => setEditingOrigin(null)}
+                      />
+                    )}
+
+                    <div className="connected-meta">
+                      <span>{session.appOrigin}</span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         );
       })}
+
+      <button
+        className="btn btn-secondary btn-sm"
+        style={{ marginTop: '4px', marginBottom: '16px' }}
+        onClick={() => setShowCreateGroup(true)}
+      >
+        + New group
+      </button>
+
+      {showCreateGroup && (
+        <div className="card" style={{ marginBottom: '16px' }}>
+          <GroupForm
+            credentials={credentials}
+            onSave={async (patch) => {
+              const id = await createGroup({
+                name: patch.name ?? 'Untitled',
+                providerId: patch.providerId ?? 'anthropic',
+                credentialId: patch.credentialId ?? undefined,
+                model: patch.model ?? undefined,
+              });
+              if (id) setShowCreateGroup(false);
+            }}
+            onCancel={() => setShowCreateGroup(false)}
+          />
+        </div>
+      )}
 
       {trustedSites.length > 0 && (
         <div style={{ marginTop: sessions.length > 0 ? '24px' : '0' }}>
@@ -217,6 +377,89 @@ export function ConnectedApps() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function GroupForm({
+  group,
+  credentials,
+  onSave,
+  onCancel,
+}: {
+  group?: Group;
+  credentials: CredentialMeta[];
+  onSave: (patch: { name?: string; providerId?: string; credentialId?: string | null; model?: string | null }) => void;
+  onCancel: () => void;
+}) {
+  const isDefault = group?.id === DEFAULT_GROUP_ID;
+  const [name, setName] = useState(group?.name ?? '');
+  const [providerId, setProviderId] = useState(group?.providerId ?? (credentials[0]?.providerId ?? 'anthropic'));
+  const [credentialId, setCredentialId] = useState<string>(group?.credentialId ?? '');
+  const [model, setModel] = useState(group?.model ?? '');
+
+  const matchingCreds = credentials.filter((c) => c.providerId === providerId);
+
+  function handleSave() {
+    onSave({
+      name: isDefault ? undefined : name,
+      providerId,
+      credentialId: credentialId || null,
+      model: model || null,
+    });
+  }
+
+  return (
+    <div style={{ marginTop: '8px' }}>
+      {!isDefault && (
+        <div className="form-group">
+          <label>Group name</label>
+          <input
+            type="text"
+            placeholder="e.g. Engineering"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            maxLength={200}
+          />
+        </div>
+      )}
+      <div className="form-group">
+        <label>Provider</label>
+        <select
+          value={providerId}
+          onChange={(e) => {
+            setProviderId(e.target.value);
+            setCredentialId('');
+          }}
+        >
+          {Object.values(PROVIDERS).map((p) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+      </div>
+      <div className="form-group">
+        <label>Credential (optional)</label>
+        <select value={credentialId} onChange={(e) => setCredentialId(e.target.value)}>
+          <option value="">Any {PROVIDERS[providerId]?.name ?? providerId} credential</option>
+          {matchingCreds.map((c) => (
+            <option key={c.id} value={c.id}>{c.label}</option>
+          ))}
+        </select>
+      </div>
+      <div className="form-group">
+        <label>Default model (optional)</label>
+        <input
+          type="text"
+          placeholder="e.g. claude-sonnet-4-5"
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          maxLength={200}
+        />
+      </div>
+      <div style={{ display: 'flex', gap: '8px' }}>
+        <button className="btn btn-primary btn-sm" onClick={handleSave}>Save</button>
+        <button className="btn btn-secondary btn-sm" onClick={onCancel}>Cancel</button>
+      </div>
     </div>
   );
 }

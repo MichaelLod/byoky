@@ -239,3 +239,27 @@ export interface TokenAllowance {
   totalLimit?: number;
   providerLimits?: Record<string, number>;
 }
+
+// --- Groups (alias layer) ---
+//
+// A Group is a logical bucket that apps can be assigned to. The group binds
+// a (provider, credential, model) tuple. Reassigning a group's binding
+// transparently reroutes every app in that group on the next session.
+//
+// The 'default' group always exists and is where new apps land before the
+// user has chosen otherwise. Apps with no explicit binding in `appGroups`
+// are treated as belonging to the default group.
+
+export const DEFAULT_GROUP_ID = 'default';
+
+export interface Group {
+  id: string;            // stable id; DEFAULT_GROUP_ID is reserved for the default group
+  name: string;          // user-facing label
+  providerId: ProviderId;
+  credentialId?: string; // optional pin to a specific credential; if absent, any credential for this provider
+  model?: string;        // optional default model; phase 1 informational, phase 2 substituted into requests
+  createdAt: number;
+}
+
+// origin → group id; absence means the app belongs to DEFAULT_GROUP_ID
+export type AppGroups = Record<string, string>;
