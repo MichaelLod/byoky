@@ -32,7 +32,7 @@ function ForConsumers() {
   };
   const iconStyle: React.CSSProperties = {
     width: '48px', height: '48px', borderRadius: '12px',
-    background: 'var(--accent, #0ea5e9)', display: 'inline-flex',
+    background: 'var(--accent, #FF4F00)', display: 'inline-flex',
     alignItems: 'center', justifyContent: 'center', marginBottom: '16px',
     color: '#fff',
   };
@@ -87,25 +87,25 @@ function Hero() {
         <FadeIn delay={0.1}>
           <div className="hero-mascot">
             <svg width="96" height="96" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <polygon points="40,5 64,3 88,5 64,14" fill="#0ea5e9"/>
-              <polygon points="40,5 22,12 44,18" fill="#0284c7"/>
-              <polygon points="88,5 106,12 84,18" fill="#0284c7"/>
-              <polygon points="40,5 44,18 64,14" fill="#0369a1"/>
-              <polygon points="88,5 84,18 64,14" fill="#0369a1"/>
-              <polygon points="22,12 12,26 36,26" fill="#075985"/>
-              <polygon points="22,12 36,26 44,18" fill="#0369a1"/>
-              <polygon points="106,12 116,26 92,26" fill="#075985"/>
-              <polygon points="106,12 92,26 84,18" fill="#0369a1"/>
-              <polygon points="44,18 36,26 56,30" fill="#0c4a6e"/>
-              <polygon points="84,18 92,26 72,30" fill="#0c4a6e"/>
-              <polygon points="44,18 56,30 64,14" fill="#075985"/>
-              <polygon points="84,18 72,30 64,14" fill="#075985"/>
-              <polygon points="64,14 56,30 64,28" fill="#0c4a6e"/>
-              <polygon points="64,14 72,30 64,28" fill="#0c4a6e"/>
-              <polygon points="12,26 6,42 30,40" fill="#082f49"/>
-              <polygon points="12,26 30,40 36,26" fill="#082f49"/>
-              <polygon points="116,26 122,42 98,40" fill="#082f49"/>
-              <polygon points="116,26 98,40 92,26" fill="#082f49"/>
+              <polygon points="40,5 64,3 88,5 64,14" fill="#FF4F00"/>
+              <polygon points="40,5 22,12 44,18" fill="#E04500"/>
+              <polygon points="88,5 106,12 84,18" fill="#E04500"/>
+              <polygon points="40,5 44,18 64,14" fill="#CC3F00"/>
+              <polygon points="88,5 84,18 64,14" fill="#CC3F00"/>
+              <polygon points="22,12 12,26 36,26" fill="#B33700"/>
+              <polygon points="22,12 36,26 44,18" fill="#CC3F00"/>
+              <polygon points="106,12 116,26 92,26" fill="#B33700"/>
+              <polygon points="106,12 92,26 84,18" fill="#CC3F00"/>
+              <polygon points="44,18 36,26 56,30" fill="#993000"/>
+              <polygon points="84,18 92,26 72,30" fill="#993000"/>
+              <polygon points="44,18 56,30 64,14" fill="#B33700"/>
+              <polygon points="84,18 72,30 64,14" fill="#B33700"/>
+              <polygon points="64,14 56,30 64,28" fill="#993000"/>
+              <polygon points="64,14 72,30 64,28" fill="#993000"/>
+              <polygon points="12,26 6,42 30,40" fill="#802800"/>
+              <polygon points="12,26 30,40 36,26" fill="#802800"/>
+              <polygon points="116,26 122,42 98,40" fill="#802800"/>
+              <polygon points="116,26 98,40 92,26" fill="#802800"/>
               <polygon points="36,26 30,40 48,38" fill="#1e0a4a"/>
               <polygon points="36,26 48,38 56,30" fill="#251055"/>
               <polygon points="92,26 98,40 80,38" fill="#1e0a4a"/>
@@ -176,9 +176,9 @@ function Hero() {
               <polygon points="80,82 80,110 92,112" fill="#0d0525"/>
               <polygon points="58,88 64,88 60,114" fill="#0a0420"/>
               <polygon points="70,88 64,88 68,114" fill="#0a0420"/>
-              <circle cx="24" cy="46" r="4.5" fill="#7dd3fc"/>
+              <circle cx="24" cy="46" r="4.5" fill="#FF8C4D"/>
               <circle cx="24" cy="46" r="2.2" fill="#e0d4ff"/>
-              <circle cx="104" cy="46" r="4.5" fill="#7dd3fc"/>
+              <circle cx="104" cy="46" r="4.5" fill="#FF8C4D"/>
               <circle cx="104" cy="46" r="2.2" fill="#e0d4ff"/>
             </svg>
           </div>

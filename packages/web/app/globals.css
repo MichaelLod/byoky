@@ -15,14 +15,14 @@
   --text-secondary: #64748b;
   --text-muted: #94a3b8;
 
-  --teal: #0ea5e9;
-  --teal-light: #0284c7;
-  --teal-dark: #0369a1;
-  --teal-glow: rgba(14, 165, 233, 0.12);
+  --teal: #FF4F00;
+  --teal-light: #FF6B2B;
+  --teal-dark: #CC3F00;
+  --teal-glow: rgba(255, 79, 0, 0.15);
 
   --green: #22c55e;
-  --cyan: #06b6d4;
-  --amber: #0ea5e9;
+  --cyan: #FF6B2B;
+  --amber: #FF4F00;
 
   --font-sans: var(--font-sora), system-ui, -apple-system, sans-serif;
   --font-code: var(--font-mono), 'Fira Code', 'Consolas', monospace;
@@ -192,8 +192,8 @@ section {
   height: 700px;
   background: radial-gradient(
     ellipse at 30% 50%,
-    rgba(14, 165, 233, 0.08) 0%,
-    rgba(14, 165, 233, 0.02) 40%,
+    rgba(255, 79, 0, 0.08) 0%,
+    rgba(255, 79, 0, 0.02) 40%,
     transparent 70%
   );
   filter: blur(60px);
@@ -210,8 +210,8 @@ section {
   height: 500px;
   background: radial-gradient(
     ellipse at 70% 40%,
-    rgba(134, 239, 172, 0.05) 0%,
-    rgba(56, 189, 248, 0.03) 40%,
+    rgba(255, 107, 43, 0.05) 0%,
+    rgba(255, 79, 0, 0.03) 40%,
     transparent 65%
   );
   filter: blur(80px);
@@ -228,8 +228,8 @@ section {
   height: 400px;
   background: radial-gradient(
     ellipse at center,
-    rgba(139, 92, 246, 0.04) 0%,
-    rgba(14, 165, 233, 0.02) 50%,
+    rgba(255, 79, 0, 0.04) 0%,
+    rgba(204, 63, 0, 0.02) 50%,
     transparent 70%
   );
   filter: blur(70px);
@@ -261,7 +261,7 @@ section {
 .hero-mascot svg {
   position: relative;
   z-index: 1;
-  filter: drop-shadow(0 0 30px rgba(14, 165, 233, 0.3));
+  filter: drop-shadow(0 0 30px rgba(255, 79, 0, 0.3));
   animation: float 6s ease-in-out infinite;
 }
 
@@ -376,7 +376,7 @@ section {
 }
 
 .step:hover .step-number {
-  box-shadow: 0 0 24px rgba(14, 165, 233, 0.2);
+  box-shadow: 0 0 24px rgba(255, 79, 0, 0.2);
   border-color: var(--teal-dark);
 }
 
@@ -580,16 +580,16 @@ section {
   background: #07070f;
   overflow: hidden;
   box-shadow:
-    0 0 80px rgba(14, 165, 233, 0.08),
-    0 0 40px rgba(14, 165, 233, 0.04),
+    0 0 80px rgba(255, 79, 0, 0.08),
+    0 0 40px rgba(255, 79, 0, 0.04),
     0 20px 60px rgba(0, 0, 0, 0.5);
   transition: box-shadow 0.4s, transform 0.4s;
 }
 
 .code-window:hover {
   box-shadow:
-    0 0 100px rgba(14, 165, 233, 0.12),
-    0 0 60px rgba(14, 165, 233, 0.06),
+    0 0 100px rgba(255, 79, 0, 0.12),
+    0 0 60px rgba(255, 79, 0, 0.06),
     0 24px 80px rgba(0, 0, 0, 0.5);
   transform: translateY(-2px);
 }
@@ -639,12 +639,12 @@ section {
 }
 
 /* Syntax tokens */
-.tk { color: #7dd3fc; }       /* keyword */
+.tk { color: #FF6B2B; }       /* keyword */
 .ts { color: #86efac; }       /* string */
-.tt { color: #67e8f9; }       /* type */
+.tt { color: #FF8C4D; }       /* type */
 .tp { color: var(--text); }   /* property */
 .tc { color: var(--text-muted); } /* comment */
-.tv { color: #38bdf8; }       /* value */
+.tv { color: #FF6B2B; }       /* value */
 .tn { color: var(--text-secondary); } /* punctuation */
 
 /* =============================================
@@ -700,8 +700,8 @@ section {
 .security-card:hover {
   border-color: var(--teal);
   box-shadow:
-    0 0 30px rgba(14, 165, 233, 0.1),
-    0 0 60px rgba(14, 165, 233, 0.05);
+    0 0 30px rgba(255, 79, 0, 0.1),
+    0 0 60px rgba(255, 79, 0, 0.05);
   transform: translateY(-2px);
 }
 
@@ -1009,7 +1009,7 @@ section {
 .openclaw-flow-step.openclaw-flow-highlight {
   border-color: var(--teal);
   background: var(--teal-glow);
-  box-shadow: 0 0 20px rgba(14, 165, 233, 0.15);
+  box-shadow: 0 0 20px rgba(255, 79, 0, 0.15);
 }
 
 .openclaw-flow-label {
@@ -1210,7 +1210,7 @@ section {
   height: 400px;
   background: radial-gradient(
     ellipse at center,
-    rgba(14, 165, 233, 0.1) 0%,
+    rgba(255, 79, 0, 0.1) 0%,
     transparent 70%
   );
   filter: blur(40px);
@@ -1259,7 +1259,7 @@ section {
 
 .built-with-card:hover {
   border-color: var(--teal-dark);
-  box-shadow: 0 0 40px rgba(14, 165, 233, 0.08);
+  box-shadow: 0 0 40px rgba(255, 79, 0, 0.08);
   transform: translateY(-2px);
 }
 
