@@ -120,13 +120,37 @@ function Hero() {
               Pay with Byoky
             </a>
           </div>
-          <p style={{ fontSize: '14px', color: 'var(--text-muted)', marginTop: '8px' }}>
-            Also available as a{' '}
-            <a href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--teal)' }}>Chrome</a>
-            {' '}&amp;{' '}
-            <a href="https://addons.mozilla.org/en-US/firefox/addon/byoky/" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--teal)' }}>Firefox</a>
-            {' '}extension
-          </p>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px', marginTop: '12px' }}>
+            <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Also available as extension:</span>
+            <a
+              href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon"
+              target="_blank" rel="noopener noreferrer"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: 'var(--text-secondary)', textDecoration: 'none' }}
+            >
+              <svg width="18" height="18" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="24" cy="24" r="22" fill="#fff" stroke="#ddd" strokeWidth="1"/>
+                <path d="M24 8a16 16 0 0 1 13.86 8H24v0z" fill="#EA4335"/>
+                <path d="M37.86 16A16 16 0 0 1 24 40l6.93-12z" fill="#FBBC05"/>
+                <path d="M24 40A16 16 0 0 1 10.14 16l6.93 12z" fill="#34A853"/>
+                <path d="M10.14 16A16 16 0 0 1 24 8v8z" fill="#4285F4"/>
+                <circle cx="24" cy="24" r="6" fill="#fff"/>
+                <circle cx="24" cy="24" r="4" fill="#4285F4"/>
+              </svg>
+              Chrome
+            </a>
+            <a
+              href="https://addons.mozilla.org/en-US/firefox/addon/byoky/"
+              target="_blank" rel="noopener noreferrer"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: 'var(--text-secondary)', textDecoration: 'none' }}
+            >
+              <svg width="18" height="18" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="24" cy="24" r="22" fill="#fff" stroke="#ddd" strokeWidth="1"/>
+                <path d="M38 18c-1-4-4-7-8-9 2 2 3 5 3 7 0 3-2 6-5 7-4 1-7-1-7-1s1 5 6 6c4 1 8-1 10-4 1-1 1-3 1-6z" fill="#FF4F00"/>
+                <path d="M14 30c-1-3 0-6 2-9 1-2 3-3 5-4-2 2-3 4-2 7 0 2 2 4 4 5 3 1 6 0 7-2-1 3-4 6-8 6-3 1-6-1-8-3z" fill="#FF9500"/>
+              </svg>
+              Firefox
+            </a>
+          </div>
         </FadeIn>
       </div>
     </section>
