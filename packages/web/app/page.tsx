@@ -86,14 +86,13 @@ function Hero() {
         </FadeIn>
         <FadeIn delay={0.1}>
           <h1>
-            <span className="hero-eyebrow">Ship AI apps.</span>
-            <span className="hero-gradient">Never pay an API bill.</span>
+            <span className="hero-gradient">Kill your API bill.</span>
           </h1>
         </FadeIn>
         <FadeIn delay={0.2}>
           <p>
-            One wallet for users. Zero inference cost for developers.
-            Add a &ldquo;Pay with Byoky&rdquo; button — users pay from their balance, you pay nothing.
+            Your users pay for their own AI. You keep building.
+            Byoky handles the payments, the billing, and 15 providers — in 2 lines of code.
           </p>
         </FadeIn>
         <FadeIn delay={0.3}>
