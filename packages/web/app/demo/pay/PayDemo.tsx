@@ -126,27 +126,27 @@ export function PayDemo() {
   const connected = session != null;
 
   return (
-    <div style={{ minHeight: '100vh', background: '#09090b', color: '#e4e4e7', fontFamily: 'var(--font-sora), -apple-system, sans-serif' }}>
+    <div style={{ minHeight: '100vh', background: 'var(--bg)', color: 'var(--text)', fontFamily: 'var(--font-sora), -apple-system, sans-serif' }}>
       {/* Header */}
       <div style={{
-        borderBottom: '1px solid rgba(255,255,255,0.08)',
+        borderBottom: '1px solid var(--border)',
         padding: '12px 24px',
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <span style={{ fontWeight: 700, fontSize: '16px' }}>DemoChat</span>
-          <span style={{ fontSize: '11px', color: '#52525b', background: 'rgba(255,255,255,0.06)', padding: '2px 8px', borderRadius: '4px' }}>
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)', background: 'var(--bg-elevated)', padding: '2px 8px', borderRadius: '4px' }}>
             Powered by Byoky
           </span>
         </div>
         {connected && (
-          <div style={{ fontSize: '13px', color: '#71717a' }}>
+          <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
               <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e' }} />
               Wallet connected
             </span>
             {balance !== null && (
-              <span style={{ marginLeft: '12px', color: '#0ea5e9', fontWeight: 600 }}>
+              <span style={{ marginLeft: '12px', color: 'var(--teal)', fontWeight: 600 }}>
                 ${(balance / 100).toFixed(2)}
               </span>
             )}
@@ -160,7 +160,7 @@ export function PayDemo() {
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
             <div style={{ textAlign: 'center', maxWidth: '400px' }}>
               <h1 style={{ fontSize: '28px', fontWeight: 700, marginBottom: '8px' }}>DemoChat</h1>
-              <p style={{ color: '#71717a', marginBottom: '32px', lineHeight: 1.6 }}>
+              <p style={{ color: 'var(--text-secondary)', marginBottom: '32px', lineHeight: 1.6 }}>
                 An AI chat app that costs the developer $0. Users pay from their Byoky wallet.
               </p>
 
@@ -180,7 +180,7 @@ export function PayDemo() {
                 style={{
                   display: 'inline-flex', alignItems: 'center', gap: '10px',
                   padding: '14px 28px', borderRadius: '12px',
-                  background: connecting ? '#374151' : '#0ea5e9',
+                  background: connecting ? 'var(--border-hover)' : 'var(--teal)',
                   color: '#fff', border: 'none',
                   fontSize: '16px', fontWeight: 600,
                   cursor: connecting ? 'not-allowed' : 'pointer',
@@ -210,7 +210,7 @@ export function PayDemo() {
                 )}
               </button>
 
-              <p style={{ fontSize: '12px', color: '#52525b', marginTop: '16px' }}>
+              <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '16px' }}>
                 One wallet, every AI app. No API keys needed.
               </p>
 
@@ -219,7 +219,7 @@ export function PayDemo() {
                 onClick={() => setShowCode(!showCode)}
                 style={{
                   marginTop: '32px', background: 'none', border: 'none',
-                  color: '#0ea5e9', fontSize: '13px', cursor: 'pointer',
+                  color: 'var(--teal)', fontSize: '13px', cursor: 'pointer',
                   textDecoration: 'underline', textUnderlineOffset: '3px',
                 }}
               >
@@ -229,7 +229,7 @@ export function PayDemo() {
               {showCode && (
                 <pre style={{
                   marginTop: '12px', textAlign: 'left',
-                  background: '#18181b', border: '1px solid rgba(255,255,255,0.06)',
+                  background: 'var(--bg-elevated)', border: '1px solid var(--border)',
                   borderRadius: '10px', padding: '16px', fontSize: '12px',
                   fontFamily: 'var(--font-mono), monospace', lineHeight: 1.7,
                   overflow: 'auto',
@@ -260,7 +260,7 @@ PayButton.mount('#paywall', {
           <>
             <div style={{ flex: 1, overflowY: 'auto', marginBottom: '16px' }}>
               {messages.length === 0 && (
-                <div style={{ textAlign: 'center', color: '#52525b', marginTop: '80px' }}>
+                <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: '80px' }}>
                   <p style={{ fontSize: '15px' }}>Ask me anything. Each message costs a fraction of a cent.</p>
                   <p style={{ fontSize: '12px', marginTop: '8px' }}>Powered by Gemini 2.0 Flash via Byoky</p>
                 </div>
@@ -278,8 +278,8 @@ PayButton.mount('#paywall', {
                     maxWidth: '80%',
                     padding: '12px 16px',
                     borderRadius: msg.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
-                    background: msg.role === 'user' ? '#0ea5e9' : '#27272a',
-                    color: msg.role === 'user' ? '#fff' : '#e4e4e7',
+                    background: msg.role === 'user' ? 'var(--teal)' : 'var(--bg-elevated)',
+                    color: msg.role === 'user' ? '#fff' : 'var(--text)',
                     fontSize: '14px', lineHeight: 1.5,
                     whiteSpace: 'pre-wrap',
                   }}>
@@ -291,7 +291,7 @@ PayButton.mount('#paywall', {
                 <div style={{ display: 'flex', marginBottom: '12px' }}>
                   <div style={{
                     padding: '12px 16px', borderRadius: '16px 16px 16px 4px',
-                    background: '#27272a', color: '#71717a', fontSize: '14px',
+                    background: 'var(--bg-elevated)', color: 'var(--text-secondary)', fontSize: '14px',
                   }}>
                     Thinking...
                   </div>
@@ -312,8 +312,8 @@ PayButton.mount('#paywall', {
                 autoFocus
                 style={{
                   flex: 1, padding: '14px 18px',
-                  borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)',
-                  background: '#18181b', color: '#e4e4e7',
+                  borderRadius: '12px', border: '1px solid var(--border)',
+                  background: 'var(--bg-surface)', color: 'var(--text)',
                   fontSize: '14px', outline: 'none',
                   fontFamily: 'inherit',
                 }}
@@ -323,7 +323,7 @@ PayButton.mount('#paywall', {
                 disabled={loading || !input.trim()}
                 style={{
                   padding: '14px 20px', borderRadius: '12px',
-                  background: loading || !input.trim() ? '#27272a' : '#0ea5e9',
+                  background: loading || !input.trim() ? 'var(--bg-elevated)' : 'var(--teal)',
                   color: '#fff', border: 'none',
                   fontSize: '14px', fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer',
                 }}
