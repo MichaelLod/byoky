@@ -52,14 +52,8 @@ export default function DeveloperDashboard() {
       </div>
 
       {/* What you can build — interactive code examples */}
-      <div style={{ marginBottom: '32px' }}>
-        <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '8px' }}>What you can build</h2>
-        <p style={{ color: 'var(--text-secondary)', fontSize: '14px', marginBottom: '20px' }}>
-          Every example works through the Byoky proxy — your app never touches an API key.
-        </p>
-        <div className="demo-app dev-code-example">
-          <CodeExample />
-        </div>
+      <div style={{ marginBottom: '32px' }} className="demo-app dev-code-example">
+        <CodeExample />
       </div>
 
       {/* Your Apps — requires login */}
