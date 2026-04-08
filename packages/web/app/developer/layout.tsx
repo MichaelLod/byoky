@@ -33,6 +33,39 @@ const devOverrideCSS = `
 .dev-code-example .code-filename {
   color: #7a7a9c;
 }
+.dev-code-example .code-example h2 {
+  background: linear-gradient(to bottom, #1a1a2e, #64748b);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.dev-code-example .code-tab {
+  color: var(--text-secondary);
+  border-color: var(--border);
+}
+.dev-code-example .code-tab:hover {
+  color: var(--text);
+  border-color: var(--border-hover);
+}
+.dev-code-example .code-tab-active {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: #fff;
+}
+.dev-code-example .code-tab-active:hover {
+  color: #fff;
+}
+.dev-code-example .code-tab-desc {
+  color: var(--text-secondary);
+}
+.dev-code-example .code-links .btn {
+  color: var(--text-secondary);
+  border-color: var(--border);
+}
+.dev-code-example .code-links .btn:hover {
+  color: var(--text);
+  border-color: var(--border-hover);
+}
 `;
 
 export const metadata: Metadata = {
