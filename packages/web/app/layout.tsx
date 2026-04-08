@@ -112,7 +112,7 @@ export default function RootLayout({
         />
         <nav style={{
           position: 'sticky', top: 0, zIndex: 100,
-          borderBottom: '1px solid var(--border)',
+          borderBottom: 'none',
           background: 'rgba(255,255,255,0.85)',
           backdropFilter: 'blur(12px)',
           WebkitBackdropFilter: 'blur(12px)',
