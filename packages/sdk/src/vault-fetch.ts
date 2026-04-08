@@ -2,6 +2,7 @@ export function createVaultFetch(
   vaultUrl: string,
   token: string,
   providerId: string,
+  appId?: string,
 ): typeof fetch {
   const proxyUrl = `${vaultUrl.replace(/\/$/, '')}/proxy`;
 
@@ -24,7 +25,7 @@ export function createVaultFetch(
         'content-type': 'application/json',
         'authorization': `Bearer ${token}`,
       },
-      body: JSON.stringify({ providerId, url, method, headers, body }),
+      body: JSON.stringify({ providerId, url, method, headers, body, appId }),
     });
 
     return response;

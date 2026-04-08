@@ -11,6 +11,9 @@ import {
   type GiftedCredential,
   type Group,
   type AppGroups,
+  type Balance,
+  type Transaction,
+  type PaymentMethodInfo,
   hashPassword,
 } from '@byoky/core';
 
@@ -26,7 +29,10 @@ type Page =
   | 'settings'
   | 'gifts'
   | 'create-gift'
-  | 'redeem-gift';
+  | 'redeem-gift'
+  | 'balance'
+  | 'add-funds'
+  | 'payment-methods';
 
 interface WalletState {
   isInitialized: boolean;
@@ -42,6 +48,9 @@ interface WalletState {
   giftPreferences: Record<string, string>;
   groups: Group[];
   appGroups: AppGroups;
+  balance: Balance | null;
+  paymentMethods: PaymentMethodInfo[];
+  transactions: Transaction[];
   cloudVaultEnabled: boolean;
   cloudVaultUsername: string | null;
   cloudVaultTokenExpired: boolean;
@@ -74,6 +83,11 @@ interface WalletState {
   updateGroup: (id: string, patch: { name?: string; providerId?: string; credentialId?: string | null; model?: string | null }) => Promise<boolean>;
   deleteGroup: (id: string) => Promise<boolean>;
   setAppGroup: (origin: string, groupId: string) => Promise<boolean>;
+  fetchBalance: () => Promise<void>;
+  fetchTransactions: () => Promise<void>;
+  fetchPaymentMethods: () => Promise<void>;
+  topUp: (amountCents: number) => Promise<boolean>;
+  updateAutoTopUp: (enabled: boolean, amountCents?: number, thresholdCents?: number) => Promise<void>;
   enableCloudVault: (username: string, password: string, isSignup: boolean) => Promise<void>;
   disableCloudVault: () => Promise<void>;
   reloginCloudVault: (password: string) => Promise<void>;
@@ -104,6 +118,9 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   giftPreferences: {},
   groups: [],
   appGroups: {},
+  balance: null,
+  paymentMethods: [],
+  transactions: [],
   cloudVaultEnabled: false,
   cloudVaultUsername: null,
   cloudVaultTokenExpired: false,
@@ -170,6 +187,9 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       giftPreferences: {},
       groups: [],
       appGroups: {},
+      balance: null,
+      paymentMethods: [],
+      transactions: [],
       currentPage: 'unlock',
     });
   },
@@ -352,6 +372,41 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     return true;
   },
 
+  fetchBalance: async () => {
+    const result = await sendInternal('billingGetBalance');
+    if (result.balance) {
+      set({ balance: result.balance as Balance });
+    }
+  },
+
+  fetchTransactions: async () => {
+    const result = await sendInternal('billingGetTransactions');
+    set({ transactions: (result.transactions ?? []) as Transaction[] });
+  },
+
+  fetchPaymentMethods: async () => {
+    const result = await sendInternal('billingGetPaymentMethods');
+    set({ paymentMethods: (result.paymentMethods ?? []) as PaymentMethodInfo[] });
+  },
+
+  topUp: async (amountCents: number) => {
+    set({ error: null });
+    try {
+      const result = await sendInternal('billingTopUp', { amountCents });
+      if (result.error) throw new Error(result.error as string);
+      await get().fetchBalance();
+      return true;
+    } catch (e) {
+      set({ error: (e as Error).message });
+      return false;
+    }
+  },
+
+  updateAutoTopUp: async (enabled: boolean, amountCents?: number, thresholdCents?: number) => {
+    await sendInternal('billingUpdateAutoTopUp', { enabled, amountCents, thresholdCents });
+    await get().fetchBalance();
+  },
+
   enableCloudVault: async (username: string, password: string, isSignup: boolean) => {
     set({ loading: true, error: null });
     try {
@@ -397,6 +452,9 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       giftedCredentials: [],
       groups: [],
       appGroups: {},
+      balance: null,
+      paymentMethods: [],
+      transactions: [],
       cloudVaultEnabled: false,
       cloudVaultUsername: null,
       cloudVaultTokenExpired: false,

@@ -5,6 +5,10 @@ import { credentials } from './routes/credentials.js';
 import { proxy } from './routes/proxy.js';
 import { connect } from './routes/connect.js';
 import { gifts } from './routes/gifts.js';
+import { billing } from './routes/billing.js';
+import { developer } from './routes/developer.js';
+import { groupsRouter } from './routes/groups.js';
+import { marketplace } from './routes/marketplace.js';
 import { rateLimitMiddleware } from './middleware/rate-limit.js';
 
 const app = new Hono();
@@ -30,6 +34,10 @@ app.route('/credentials', credentials);
 app.route('/proxy', proxy);
 app.route('/connect', connect);
 app.route('/gifts', gifts);
+app.route('/billing', billing);
+app.route('/developer', developer);
+app.route('/groups', groupsRouter);
+app.route('/marketplace', marketplace);
 
 app.onError((err, c) => {
   console.error('Unhandled error:', err);

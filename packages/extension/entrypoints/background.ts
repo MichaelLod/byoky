@@ -1597,6 +1597,52 @@ export default defineBackground(() => {
         return { success: true };
       }
 
+      // --- Billing ---
+
+      case 'billingGetBalance': {
+        const cvState = await getCloudVaultState();
+        if (!cvState.token) return { balance: null };
+        const result = await vaultFetch('/billing/balance', 'GET', undefined, cvState.token);
+        return { balance: result.ok ? result.data : null };
+      }
+
+      case 'billingGetTransactions': {
+        const cvState = await getCloudVaultState();
+        if (!cvState.token) return { transactions: [] };
+        const result = await vaultFetch('/billing/transactions', 'GET', undefined, cvState.token);
+        return { transactions: result.ok ? result.data.transactions : [] };
+      }
+
+      case 'billingGetPaymentMethods': {
+        const cvState = await getCloudVaultState();
+        if (!cvState.token) return { paymentMethods: [] };
+        const result = await vaultFetch('/billing/payment-methods', 'GET', undefined, cvState.token);
+        return { paymentMethods: result.ok ? result.data.paymentMethods : [] };
+      }
+
+      case 'billingTopUp': {
+        const cvState = await getCloudVaultState();
+        if (!cvState.token) return { error: 'Not connected to vault' };
+        const { amountCents } = message.payload as { amountCents: number };
+        const result = await vaultFetch('/billing/topup', 'POST', { amountCents }, cvState.token);
+        if (!result.ok) {
+          const err = result.data.error as Record<string, string> | undefined;
+          return { error: err?.message ?? 'Top up failed' };
+        }
+        return { success: true, newBalanceCents: result.data.newBalanceCents };
+      }
+
+      case 'billingUpdateAutoTopUp': {
+        const cvState = await getCloudVaultState();
+        if (!cvState.token) return { error: 'Not connected to vault' };
+        const { enabled, amountCents, thresholdCents } = message.payload as {
+          enabled: boolean; amountCents?: number; thresholdCents?: number;
+        };
+        const result = await vaultFetch('/billing/auto-topup', 'POST', { enabled, amountCents, thresholdCents }, cvState.token);
+        if (!result.ok) return { error: 'Failed to update auto top-up settings' };
+        return { success: true };
+      }
+
       default:
         return { error: 'Unknown action' };
     }

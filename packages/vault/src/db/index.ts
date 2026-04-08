@@ -126,7 +126,7 @@ export async function logRequest(
   inputTokens?: number,
   outputTokens?: number,
   model?: string,
-) {
+): Promise<string> {
   const id = crypto.randomUUID();
   await getDb().insert(requestLog).values({
     id, userId, sessionId, providerId, url, method, status,
@@ -135,6 +135,7 @@ export async function logRequest(
     outputTokens: outputTokens ?? null,
     model: model ?? null,
   });
+  return id;
 }
 
 // --- Gifts ---

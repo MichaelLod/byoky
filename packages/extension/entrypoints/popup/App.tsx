@@ -12,6 +12,9 @@ import { Settings } from './pages/Settings';
 import { Gifts } from './pages/Gifts';
 import { CreateGift } from './pages/CreateGift';
 import { RedeemGift } from './pages/RedeemGift';
+import { BalancePage } from './pages/Balance';
+import { AddFunds } from './pages/AddFunds';
+import { PaymentMethods } from './pages/PaymentMethods';
 
 export default function App() {
   const { currentPage, sessions, pendingApprovals, loading, init } = useWalletStore();
@@ -68,6 +71,16 @@ export default function App() {
                 <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" />
                 <path d="M3 5v14a2 2 0 0 0 2 2h16v-5" />
                 <path d="M18 12a2 2 0 0 0 0 4h4v-4z" />
+              </svg>
+            </button>
+            <button
+              className={currentPage === 'balance' || currentPage === 'add-funds' || currentPage === 'payment-methods' ? 'active' : ''}
+              onClick={() => useWalletStore.getState().navigate('balance')}
+              title="Balance"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="1" x2="12" y2="23" />
+                <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
               </svg>
             </button>
             <button
@@ -146,6 +159,9 @@ export default function App() {
           {currentPage === 'gifts' && <Gifts />}
           {currentPage === 'create-gift' && <CreateGift />}
           {currentPage === 'redeem-gift' && <RedeemGift />}
+          {currentPage === 'balance' && <BalancePage />}
+          {currentPage === 'add-funds' && <AddFunds />}
+          {currentPage === 'payment-methods' && <PaymentMethods />}
         </div>
       </main>
       {(currentPage === 'setup' || currentPage === 'unlock') && (

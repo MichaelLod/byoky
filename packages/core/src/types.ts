@@ -98,6 +98,8 @@ export interface ConnectResponse {
       available: boolean;
       authMethod: AuthMethod;
       gift?: boolean;
+      /** User is paying via Byoky balance (no own API key). */
+      creditMode?: boolean;
     }
   >;
 }
@@ -158,6 +160,8 @@ export type MessageType =
   | 'BYOKY_SESSION_USAGE_RESPONSE'
   | 'BYOKY_SESSION_REVOKED'
   | 'BYOKY_PROVIDERS_UPDATED'
+  | 'BYOKY_BALANCE_QUERY'
+  | 'BYOKY_BALANCE_RESPONSE'
   | 'BYOKY_ERROR';
 
 export interface ByokyMessage {
@@ -173,6 +177,8 @@ export interface SessionUsage {
   requests: number;
   inputTokens: number;
   outputTokens: number;
+  /** Total cost in cents (credit-mode only). */
+  costCents?: number;
   byProvider: Record<string, {
     requests: number;
     inputTokens: number;
@@ -194,6 +200,8 @@ export enum ByokyErrorCode {
   PROXY_ERROR = 'PROXY_ERROR',
   RELAY_CONNECTION_FAILED = 'RELAY_CONNECTION_FAILED',
   RELAY_DISCONNECTED = 'RELAY_DISCONNECTED',
+  INSUFFICIENT_BALANCE = 'INSUFFICIENT_BALANCE',
+  PAYMENT_REQUIRED = 'PAYMENT_REQUIRED',
   UNKNOWN = 'UNKNOWN',
 }
 

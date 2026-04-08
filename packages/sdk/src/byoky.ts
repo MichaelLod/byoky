@@ -1,4 +1,4 @@
-import type { AuthMethod, ConnectRequest, ConnectResponse, SessionUsage } from '@byoky/core';
+import type { AuthMethod, ConnectRequest, ConnectResponse, SessionUsage, Balance, DeveloperAppInfo } from '@byoky/core';
 import { ByokyError, ByokyErrorCode, isByokyMessage, encodePairPayload } from '@byoky/core';
 import { isExtensionInstalled, getStoreUrl } from './detect.js';
 import { createProxyFetch } from './proxy-fetch.js';
@@ -35,14 +35,23 @@ export interface ByokyOptions {
   timeout?: number;
   /** Relay server URL for mobile wallet pairing. Default: wss://relay.byoky.com */
   relayUrl?: string;
+  /** Developer app ID for attribution and discount. Get this from the developer portal. */
+  appId?: string;
+  /** Vault server URL. Default: https://vault.byoky.com */
+  vaultUrl?: string;
 }
 
 export class Byoky {
   private timeout: number;
   private relayUrl: string;
+  /** Developer app ID — passed in all proxy requests for attribution + discount. */
+  readonly appId?: string;
+  private vaultUrl: string;
 
   constructor(options: ByokyOptions = {}) {
     this.timeout = options.timeout ?? 60_000;
+    this.appId = options.appId;
+    this.vaultUrl = (options.vaultUrl ?? 'https://vault.byoky.com').replace(/\/$/, '');
     const relayUrl = options.relayUrl ?? 'wss://relay.byoky.com';
     try {
       const parsed = new URL(relayUrl);
@@ -186,7 +195,7 @@ export class Byoky {
       sessionKey,
       proxyUrl: `${vaultUrl.replace(/\/$/, '')}/proxy`,
       providers: connectData.providers,
-      createFetch: (providerId: string) => createVaultFetch(vaultUrl, vaultToken, providerId),
+      createFetch: (providerId: string) => createVaultFetch(vaultUrl, vaultToken, providerId, this.appId),
       createRelay: () => { throw new Error('Relay not supported in vault mode'); },
       disconnect: () => {},
       isConnected: async () => true,
@@ -194,6 +203,50 @@ export class Byoky {
       onDisconnect: () => () => {},
       onProvidersUpdated: () => () => {},
     };
+  }
+
+  /**
+   * Connect to a Byoky wallet in payment mode. Shorthand for connect() that
+   * always shows the modal and signals credit-mode intent.
+   */
+  async pay(options: {
+    providers?: ConnectRequest['providers'];
+    modal?: boolean | ModalOptions;
+  } = {}): Promise<ByokySession> {
+    return this.connect({
+      providers: options.providers,
+      modal: options.modal ?? true,
+    });
+  }
+
+  /**
+   * Query the current user's wallet balance from the vault.
+   * Requires an active vault session (via connectViaVault).
+   */
+  async getBalance(): Promise<Balance | null> {
+    try {
+      const resp = await fetch(`${this.vaultUrl}/billing/balance`, {
+        headers: { 'content-type': 'application/json' },
+      });
+      if (!resp.ok) return null;
+      return await resp.json() as Balance;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Fetch developer app info (name, discount, etc.) for the configured appId.
+   */
+  async getAppInfo(): Promise<DeveloperAppInfo | null> {
+    if (!this.appId) return null;
+    try {
+      const resp = await fetch(`${this.vaultUrl}/developer/apps/${this.appId}/public`);
+      if (!resp.ok) return null;
+      return await resp.json() as DeveloperAppInfo;
+    } catch {
+      return null;
+    }
   }
 
   // --- Relay pairing ---

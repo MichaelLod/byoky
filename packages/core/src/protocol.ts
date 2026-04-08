@@ -49,3 +49,14 @@ export function createErrorMessage(
 ): ByokyMessage {
   return createMessage('BYOKY_ERROR', { code, message }, requestId);
 }
+
+export function createBalanceQuery(sessionKey: string): ByokyMessage {
+  return createMessage('BYOKY_BALANCE_QUERY', { sessionKey });
+}
+
+export function createBalanceResponse(
+  balance: { amountCents: number; currency: string },
+  requestId: string,
+): ByokyMessage {
+  return createMessage('BYOKY_BALANCE_RESPONSE', balance, requestId);
+}

@@ -1,5 +1,16 @@
 import { pgTable, text, integer, bigint, boolean, index, uniqueIndex } from 'drizzle-orm/pg-core';
 
+// Re-export billing schema tables
+export {
+  balances,
+  transactions,
+  paymentMethods,
+  developerApps,
+  pricing,
+  groups,
+  appGroups,
+} from './billing-schema.js';
+
 export const users = pgTable('users', {
   id: text('id').primaryKey(),
   username: text('username').unique().notNull(),

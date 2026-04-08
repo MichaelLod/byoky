@@ -5,6 +5,8 @@ import { createUser, getUserByUsername, createSession, deleteSession } from '../
 import { signJwt, hashToken } from '../jwt.js';
 import { cacheKey, evictKey } from '../session-keys.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { createCustomer } from '../billing/stripe.js';
+import { initBalance } from '../billing/ledger.js';
 
 const SALT_LENGTH = 16;
 const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -56,6 +58,15 @@ auth.post('/signup', async (c) => {
   await createSession(user.id, hashToken(token), Date.now() + SESSION_DURATION_MS, sessionId);
 
   cacheKey(user.id, encryptionKey);
+
+  // Initialize billing: create Stripe customer + balance record
+  try {
+    const stripeCustomerId = await createCustomer(user.id);
+    await initBalance(user.id, stripeCustomerId);
+  } catch (err) {
+    console.error(`Failed to initialize billing for user ${user.id}:`, err);
+    // Non-blocking — billing can be set up later
+  }
 
   return c.json({
     token,
