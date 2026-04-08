@@ -459,9 +459,9 @@ function Security() {
     <section className="security-section">
       <div className="container">
         <FadeIn>
-          <h2>Built for paranoia.</h2>
+          <h2>Want to manage your own keys?</h2>
           <p className="subtitle">
-            Security isn&apos;t a feature — it&apos;s the entire point.
+            Install the browser extension. Bring your own API keys. Full local encryption, zero cloud dependency.
           </p>
         </FadeIn>
         <div className="security-grid">

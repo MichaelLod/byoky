@@ -627,11 +627,7 @@ section {
   position: relative;
   padding: 28px;
   border-radius: 14px;
-  background: linear-gradient(
-    145deg,
-    rgba(13, 13, 26, 0.8),
-    rgba(9, 9, 20, 0.6)
-  );
+  background: var(--bg-card);
   border: 1px solid var(--border);
   transition: border-color 0.3s, box-shadow 0.3s, transform 0.3s;
   overflow: hidden;
