@@ -1,0 +1,302 @@
+'use client';
+
+import { useState, useRef, useEffect } from 'react';
+
+const VAULT_URL = process.env.NEXT_PUBLIC_VAULT_URL || 'http://localhost:3100';
+
+// Demo app ID — in production this comes from developer portal registration
+const DEMO_APP_ID = 'demo';
+
+interface Message {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export function PayDemo() {
+  const [connected, setConnected] = useState(false);
+  const [vaultToken, setVaultToken] = useState<string | null>(null);
+  const [balance, setBalance] = useState<number | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [showCode, setShowCode] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // Simulate wallet connection (in production, SDK handles this)
+  async function connectWallet() {
+    const username = prompt('Enter your Byoky username:');
+    if (!username) return;
+    const password = prompt('Enter your password:');
+    if (!password) return;
+
+    try {
+      const resp = await fetch(`${VAULT_URL}/auth/login`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      if (!resp.ok) {
+        alert('Login failed. Make sure you have a Byoky account.');
+        return;
+      }
+      const data = await resp.json() as { token: string };
+      setVaultToken(data.token);
+      setConnected(true);
+
+      // Fetch balance
+      const balResp = await fetch(`${VAULT_URL}/billing/balance`, {
+        headers: { authorization: `Bearer ${data.token}` },
+      });
+      if (balResp.ok) {
+        const bal = await balResp.json() as { amountCents: number };
+        setBalance(bal.amountCents);
+      }
+    } catch {
+      alert('Could not connect to Byoky vault. Is it running on localhost:3100?');
+    }
+  }
+
+  async function sendMessage() {
+    if (!input.trim() || !vaultToken || loading) return;
+    const userMsg = input.trim();
+    setInput('');
+    setMessages((prev) => [...prev, { role: 'user', content: userMsg }]);
+    setLoading(true);
+
+    try {
+      // Build conversation for Gemini
+      const contents = [...messages, { role: 'user', content: userMsg }].map((m) => ({
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: m.content }],
+      }));
+
+      const resp = await fetch(`${VAULT_URL}/proxy`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${vaultToken}`,
+        },
+        body: JSON.stringify({
+          providerId: 'gemini',
+          url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
+          method: 'POST',
+          body: JSON.stringify({ contents }),
+          appId: DEMO_APP_ID,
+        }),
+      });
+
+      const data = await resp.json() as {
+        candidates?: Array<{ content: { parts: Array<{ text: string }> } }>;
+        error?: { message: string };
+      };
+
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (text) {
+        setMessages((prev) => [...prev, { role: 'assistant', content: text }]);
+      } else {
+        setMessages((prev) => [...prev, { role: 'assistant', content: `Error: ${data.error?.message ?? 'Unknown error'}` }]);
+      }
+
+      // Refresh balance
+      const balResp = await fetch(`${VAULT_URL}/billing/balance`, {
+        headers: { authorization: `Bearer ${vaultToken}` },
+      });
+      if (balResp.ok) {
+        const bal = await balResp.json() as { amountCents: number };
+        setBalance(bal.amountCents);
+      }
+    } catch (err) {
+      setMessages((prev) => [...prev, { role: 'assistant', content: `Error: ${err}` }]);
+    }
+    setLoading(false);
+  }
+
+  return (
+    <div style={{ minHeight: '100vh', background: '#09090b', color: '#e4e4e7', fontFamily: 'var(--font-sora), -apple-system, sans-serif' }}>
+      {/* Header */}
+      <div style={{
+        borderBottom: '1px solid rgba(255,255,255,0.08)',
+        padding: '12px 24px',
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <span style={{ fontWeight: 700, fontSize: '16px' }}>DemoChat</span>
+          <span style={{ fontSize: '11px', color: '#52525b', background: 'rgba(255,255,255,0.06)', padding: '2px 8px', borderRadius: '4px' }}>
+            Powered by Byoky
+          </span>
+        </div>
+        {connected && balance !== null && (
+          <div style={{ fontSize: '13px', color: '#71717a' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e' }} />
+              Wallet connected
+            </span>
+            <span style={{ marginLeft: '12px', color: '#0ea5e9', fontWeight: 600 }}>
+              ${(balance / 100).toFixed(2)}
+            </span>
+          </div>
+        )}
+      </div>
+
+      <div style={{ maxWidth: '720px', margin: '0 auto', padding: '24px', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 53px)' }}>
+        {/* Not connected — show paywall */}
+        {!connected && (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+            <div style={{ textAlign: 'center', maxWidth: '400px' }}>
+              <h1 style={{ fontSize: '28px', fontWeight: 700, marginBottom: '8px' }}>DemoChat</h1>
+              <p style={{ color: '#71717a', marginBottom: '32px', lineHeight: 1.6 }}>
+                An AI chat app that costs the developer $0. Users pay from their Byoky wallet.
+              </p>
+
+              {/* The PayButton equivalent */}
+              <button
+                onClick={connectWallet}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '10px',
+                  padding: '14px 28px', borderRadius: '12px',
+                  background: '#0ea5e9', color: '#fff', border: 'none',
+                  fontSize: '16px', fontWeight: 600, cursor: 'pointer',
+                  transition: 'all 0.15s',
+                  boxShadow: '0 4px 12px rgba(14, 165, 233, 0.3)',
+                }}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" />
+                  <path d="M3 5v14a2 2 0 0 0 2 2h16v-5" />
+                  <path d="M18 12a2 2 0 0 0 0 4h4v-4Z" />
+                </svg>
+                Pay with Byoky — 50% off
+              </button>
+
+              <p style={{ fontSize: '12px', color: '#52525b', marginTop: '16px' }}>
+                One wallet, every AI app. No API keys needed.
+              </p>
+
+              {/* Developer code snippet */}
+              <button
+                onClick={() => setShowCode(!showCode)}
+                style={{
+                  marginTop: '32px', background: 'none', border: 'none',
+                  color: '#0ea5e9', fontSize: '13px', cursor: 'pointer',
+                  textDecoration: 'underline', textUnderlineOffset: '3px',
+                }}
+              >
+                {showCode ? 'Hide' : 'See'} developer code
+              </button>
+
+              {showCode && (
+                <pre style={{
+                  marginTop: '12px', textAlign: 'left',
+                  background: '#18181b', border: '1px solid rgba(255,255,255,0.06)',
+                  borderRadius: '10px', padding: '16px', fontSize: '12px',
+                  fontFamily: 'var(--font-mono), monospace', lineHeight: 1.7,
+                  overflow: 'auto',
+                }}>
+                  <code>{`import { Byoky, PayButton } from '@byoky/sdk';
+
+const byoky = new Byoky({
+  appId: 'app_your_id_here'
+});
+
+// That's it. Two lines to add AI payments.
+PayButton.mount('#paywall', {
+  byoky,
+  onSession: (session) => {
+    const fetch = session.createFetch('gemini');
+    // Every API call is paid by the user's wallet
+    // Developer pays $0 for inference
+  }
+});`}</code>
+                </pre>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Connected — show chat */}
+        {connected && (
+          <>
+            {/* Messages */}
+            <div style={{ flex: 1, overflowY: 'auto', marginBottom: '16px' }}>
+              {messages.length === 0 && (
+                <div style={{ textAlign: 'center', color: '#52525b', marginTop: '80px' }}>
+                  <p style={{ fontSize: '15px' }}>Ask me anything. Each message costs a fraction of a cent.</p>
+                  <p style={{ fontSize: '12px', marginTop: '8px' }}>Powered by Gemini 2.0 Flash via Byoky credit-mode</p>
+                </div>
+              )}
+              {messages.map((msg, i) => (
+                <div
+                  key={i}
+                  style={{
+                    display: 'flex',
+                    justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                    marginBottom: '12px',
+                  }}
+                >
+                  <div style={{
+                    maxWidth: '80%',
+                    padding: '12px 16px',
+                    borderRadius: msg.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
+                    background: msg.role === 'user' ? '#0ea5e9' : '#27272a',
+                    color: msg.role === 'user' ? '#fff' : '#e4e4e7',
+                    fontSize: '14px', lineHeight: 1.5,
+                    whiteSpace: 'pre-wrap',
+                  }}>
+                    {msg.content}
+                  </div>
+                </div>
+              ))}
+              {loading && (
+                <div style={{ display: 'flex', marginBottom: '12px' }}>
+                  <div style={{
+                    padding: '12px 16px', borderRadius: '16px 16px 16px 4px',
+                    background: '#27272a', color: '#71717a', fontSize: '14px',
+                  }}>
+                    Thinking...
+                  </div>
+                </div>
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+
+            {/* Input */}
+            <form
+              onSubmit={(e) => { e.preventDefault(); sendMessage(); }}
+              style={{ display: 'flex', gap: '8px' }}
+            >
+              <input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="Type a message..."
+                disabled={loading}
+                style={{
+                  flex: 1, padding: '14px 18px',
+                  borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)',
+                  background: '#18181b', color: '#e4e4e7',
+                  fontSize: '14px', outline: 'none',
+                  fontFamily: 'inherit',
+                }}
+              />
+              <button
+                type="submit"
+                disabled={loading || !input.trim()}
+                style={{
+                  padding: '14px 20px', borderRadius: '12px',
+                  background: loading || !input.trim() ? '#27272a' : '#0ea5e9',
+                  color: '#fff', border: 'none',
+                  fontSize: '14px', fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer',
+                }}
+              >
+                Send
+              </button>
+            </form>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
