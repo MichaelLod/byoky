@@ -88,14 +88,14 @@ export class Byoky {
     const { onPairingReady, useRelay, modal, ...connectRequest } = request;
 
     if (modal) {
-      const modalOpts = typeof modal === 'object' ? modal : {};
-      const connectModal = new ConnectModal(modalOpts);
-      return connectModal.show({
-        hasExtension: isExtensionInstalled(),
-        connectExtension: () => this.sendConnectRequest(connectRequest).then((r) => this.buildSession(r)),
-        connectRelay: (onReady) => this.connectViaRelay(connectRequest, onReady),
-        getStoreUrl: () => getStoreUrl(),
-      });
+      const hasExt = isExtensionInstalled();
+      if (hasExt) {
+        // Extension found — use it directly, skip modal
+        const response = await this.sendConnectRequest(connectRequest);
+        return this.buildSession(response);
+      }
+      // No extension — go straight to web wallet (no modal needed)
+      return this.connectViaWebWallet();
     }
 
     // Go directly to relay if explicitly requested
@@ -114,12 +114,8 @@ export class Byoky {
       return this.connectViaRelay(connectRequest, onPairingReady);
     }
 
-    // No extension, no relay callback — throw
-    const storeUrl = getStoreUrl();
-    if (storeUrl) {
-      window.open(storeUrl, '_blank');
-    }
-    throw ByokyError.walletNotInstalled();
+    // No extension, no relay — fall back to web wallet (vault mode)
+    return this.connectViaWebWallet();
   }
 
   /**
@@ -150,6 +146,72 @@ export class Byoky {
     if (!connected) return null;
 
     return this.buildSession(savedResponse);
+  }
+
+  /**
+   * Connect via the web wallet popup. Opens a popup to byoky.com/wallet/connect,
+   * user logs in or signs up, and the token is returned via postMessage.
+   * Then connects via vault mode.
+   */
+  private connectViaWebWallet(): Promise<ByokySession> {
+    const walletUrl = `${this.vaultUrl.replace(/:\d+$/, ':3001')}/wallet/connect`;
+    const width = 420;
+    const height = 580;
+    const left = window.screenX + (window.outerWidth - width) / 2;
+    const top = window.screenY + (window.outerHeight - height) / 2;
+
+    return new Promise<ByokySession>((resolve, reject) => {
+      const popup = window.open(
+        walletUrl,
+        'byoky-wallet',
+        `width=${width},height=${height},left=${left},top=${top},popup=yes`,
+      );
+
+      if (!popup) {
+        reject(new ByokyError(ByokyErrorCode.UNKNOWN, 'Could not open wallet popup. Please allow popups for this site.'));
+        return;
+      }
+
+      const timeout = setTimeout(() => {
+        cleanup();
+        reject(new ByokyError(ByokyErrorCode.UNKNOWN, 'Wallet connection timed out'));
+      }, this.timeout);
+
+      const onMessage = async (event: MessageEvent) => {
+        const data = event.data;
+        if (data?.type !== 'BYOKY_WALLET_AUTH' || !data.token) return;
+
+        cleanup();
+
+        try {
+          const vaultUrl = data.vaultUrl || this.vaultUrl;
+          const session = await this.connectViaVault({
+            vaultUrl,
+            token: data.token,
+          });
+          resolve(session);
+        } catch (err) {
+          reject(err instanceof Error ? err : new Error(String(err)));
+        }
+      };
+
+      // Poll for popup close (user closed without completing)
+      const pollClose = setInterval(() => {
+        if (popup.closed) {
+          cleanup();
+          reject(new ByokyError(ByokyErrorCode.USER_REJECTED, 'Wallet popup was closed'));
+        }
+      }, 500);
+
+      function cleanup() {
+        clearTimeout(timeout);
+        clearInterval(pollClose);
+        window.removeEventListener('message', onMessage);
+        try { popup?.close(); } catch {}
+      }
+
+      window.addEventListener('message', onMessage);
+    });
   }
 
   /**
