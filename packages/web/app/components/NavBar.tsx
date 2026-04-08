@@ -47,7 +47,7 @@ export function NavBar() {
                 textDecoration: 'none',
                 fontWeight: isActive(link.href) ? 600 : 400,
                 background: isActive(link.href) ? 'rgba(255, 79, 0, 0.08)' : 'transparent',
-                transition: 'all 0.15s',
+                transition: 'color 0.3s ease, background 0.3s ease, font-weight 0.3s ease',
               }}
             >
               {link.label}
