@@ -418,11 +418,17 @@ export default defineBackground(() => {
 
       let credential = await resolveCredential(session, msg.providerId);
       if (!credential) {
+        // No local credential — try credit-mode via vault proxy
+        const cvState = await getCloudVaultState();
+        if (cvState.token) {
+          await proxyViaCreditMode(port, msg, cvState.token, session);
+          return;
+        }
         port.postMessage({
           type: 'BYOKY_PROXY_RESPONSE_ERROR',
           requestId: msg.requestId,
           status: 403,
-          error: { code: 'PROVIDER_UNAVAILABLE', message: `No credential for ${msg.providerId}` },
+          error: { code: 'PROVIDER_UNAVAILABLE', message: `No credential for ${msg.providerId}. Connect to Cloud Vault to use credit-mode.` },
         });
         return;
       }
@@ -1871,6 +1877,67 @@ export default defineBackground(() => {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  // --- Credit-mode proxy via vault ---
+  // When user has no local credential, route through vault which uses platform API keys
+  // and deducts from user's balance.
+
+  async function proxyViaCreditMode(
+    responsePort: Runtime.Port,
+    msg: ProxyRequest,
+    vaultToken: string,
+    _session: Session,
+  ) {
+    try {
+      const resp = await fetch(`${VAULT_URL}/proxy`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'authorization': `Bearer ${vaultToken}`,
+        },
+        body: JSON.stringify({
+          providerId: msg.providerId,
+          url: msg.url,
+          method: msg.method,
+          headers: msg.headers ?? {},
+          body: msg.body,
+        }),
+      });
+
+      // Read full body first (MV3 service workers may not support streaming reads reliably)
+      const responseText = await resp.text();
+
+      const respHeaders: Record<string, string> = {};
+      resp.headers.forEach((v, k) => { respHeaders[k] = v; });
+
+      responsePort.postMessage({
+        type: 'BYOKY_PROXY_RESPONSE_META',
+        requestId: msg.requestId,
+        status: resp.status,
+        statusText: resp.statusText,
+        headers: respHeaders,
+      });
+
+      responsePort.postMessage({
+        type: 'BYOKY_PROXY_RESPONSE_CHUNK',
+        requestId: msg.requestId,
+        chunk: responseText,
+      });
+
+      responsePort.postMessage({
+        type: 'BYOKY_PROXY_RESPONSE_DONE',
+        requestId: msg.requestId,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Credit-mode proxy failed';
+      responsePort.postMessage({
+        type: 'BYOKY_PROXY_RESPONSE_ERROR',
+        requestId: msg.requestId,
+        status: 502,
+        error: { code: 'UPSTREAM_ERROR', message },
+      });
     }
   }
 
@@ -3335,7 +3402,7 @@ export default defineBackground(() => {
 
   // --- Cloud Vault sync ---
 
-  const VAULT_URL = 'https://vault.byoky.com';
+  const VAULT_URL = import.meta.env.VITE_VAULT_URL || 'https://vault.byoky.com';
   let vaultSyncQueue: Promise<void> = Promise.resolve();
   let vaultAuthAttempts: number[] = [];
 

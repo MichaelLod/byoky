@@ -1,11 +1,9 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { Byoky, type ByokySession } from '@byoky/sdk';
 
 const VAULT_URL = process.env.NEXT_PUBLIC_VAULT_URL || 'http://localhost:3100';
-
-// Demo app ID — in production this comes from developer portal registration
-const DEMO_APP_ID = 'demo';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -13,107 +11,117 @@ interface Message {
 }
 
 export function PayDemo() {
-  const [connected, setConnected] = useState(false);
-  const [vaultToken, setVaultToken] = useState<string | null>(null);
+  const [session, setSession] = useState<ByokySession | null>(null);
   const [balance, setBalance] = useState<number | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [connecting, setConnecting] = useState(false);
   const [showCode, setShowCode] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const byokyRef = useRef<Byoky | null>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Simulate wallet connection (in production, SDK handles this)
+  // Initialize SDK
+  useEffect(() => {
+    byokyRef.current = new Byoky({
+      appId: 'demo',
+      vaultUrl: VAULT_URL,
+    });
+  }, []);
+
   async function connectWallet() {
-    const username = prompt('Enter your Byoky username:');
-    if (!username) return;
-    const password = prompt('Enter your password:');
-    if (!password) return;
+    if (!byokyRef.current || connecting) return;
+    setConnecting(true);
+    setError(null);
 
     try {
-      const resp = await fetch(`${VAULT_URL}/auth/login`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ username, password }),
+      // This triggers the extension's connect flow:
+      // - If extension installed → shows approval popup in extension
+      // - If not installed → shows modal with install link / QR for mobile
+      const sess = await byokyRef.current.connect({
+        providers: [{ id: 'gemini', required: true }],
+        modal: true,
       });
-      if (!resp.ok) {
-        alert('Login failed. Make sure you have a Byoky account.');
-        return;
-      }
-      const data = await resp.json() as { token: string };
-      setVaultToken(data.token);
-      setConnected(true);
+      setSession(sess);
 
-      // Fetch balance
-      const balResp = await fetch(`${VAULT_URL}/billing/balance`, {
-        headers: { authorization: `Bearer ${data.token}` },
-      });
-      if (balResp.ok) {
-        const bal = await balResp.json() as { amountCents: number };
-        setBalance(bal.amountCents);
+      // Fetch balance from vault
+      try {
+        const bal = await byokyRef.current.getBalance();
+        if (bal) setBalance(bal.amountCents);
+      } catch {
+        // Balance fetch is non-critical
       }
-    } catch {
-      alert('Could not connect to Byoky vault. Is it running on localhost:3100?');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Connection failed';
+      setError(msg);
     }
+    setConnecting(false);
   }
 
   async function sendMessage() {
-    if (!input.trim() || !vaultToken || loading) return;
+    if (!input.trim() || !session || loading) return;
     const userMsg = input.trim();
     setInput('');
     setMessages((prev) => [...prev, { role: 'user', content: userMsg }]);
     setLoading(true);
 
     try {
-      // Build conversation for Gemini
+      // Use the SDK's proxied fetch — routes through extension → vault → Gemini
+      const proxyFetch = session.createFetch('gemini');
+
       const contents = [...messages, { role: 'user', content: userMsg }].map((m) => ({
         role: m.role === 'assistant' ? 'model' : 'user',
         parts: [{ text: m.content }],
       }));
 
-      const resp = await fetch(`${VAULT_URL}/proxy`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          authorization: `Bearer ${vaultToken}`,
-        },
-        body: JSON.stringify({
-          providerId: 'gemini',
-          url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
+      const resp = await proxyFetch(
+        'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
+        {
           method: 'POST',
+          headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ contents }),
-          appId: DEMO_APP_ID,
-        }),
-      });
+        },
+      );
 
       const data = await resp.json() as {
         candidates?: Array<{ content: { parts: Array<{ text: string }> } }>;
-        error?: { message: string };
+        error?: { message: string; code: string };
       };
 
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
       if (text) {
         setMessages((prev) => [...prev, { role: 'assistant', content: text }]);
       } else {
-        setMessages((prev) => [...prev, { role: 'assistant', content: `Error: ${data.error?.message ?? 'Unknown error'}` }]);
+        setMessages((prev) => [...prev, {
+          role: 'assistant',
+          content: `Error: ${data.error?.message ?? 'No response from model'}`,
+        }]);
       }
 
       // Refresh balance
-      const balResp = await fetch(`${VAULT_URL}/billing/balance`, {
-        headers: { authorization: `Bearer ${vaultToken}` },
-      });
-      if (balResp.ok) {
-        const bal = await balResp.json() as { amountCents: number };
-        setBalance(bal.amountCents);
+      try {
+        const usage = await session.getUsage();
+        if (usage.costCents != null) {
+          setBalance((prev) => prev != null ? prev - (usage.costCents ?? 0) : null);
+        }
+      } catch {
+        // Usage fetch non-critical
       }
     } catch (err) {
-      setMessages((prev) => [...prev, { role: 'assistant', content: `Error: ${err}` }]);
+      setMessages((prev) => [...prev, {
+        role: 'assistant',
+        content: `Error: ${err instanceof Error ? err.message : String(err)}`,
+      }]);
     }
     setLoading(false);
   }
+
+  const connected = session != null;
 
   return (
     <div style={{ minHeight: '100vh', background: '#09090b', color: '#e4e4e7', fontFamily: 'var(--font-sora), -apple-system, sans-serif' }}>
@@ -129,15 +137,17 @@ export function PayDemo() {
             Powered by Byoky
           </span>
         </div>
-        {connected && balance !== null && (
+        {connected && (
           <div style={{ fontSize: '13px', color: '#71717a' }}>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
               <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e' }} />
               Wallet connected
             </span>
-            <span style={{ marginLeft: '12px', color: '#0ea5e9', fontWeight: 600 }}>
-              ${(balance / 100).toFixed(2)}
-            </span>
+            {balance !== null && (
+              <span style={{ marginLeft: '12px', color: '#0ea5e9', fontWeight: 600 }}>
+                ${(balance / 100).toFixed(2)}
+              </span>
+            )}
           </div>
         )}
       </div>
@@ -152,24 +162,50 @@ export function PayDemo() {
                 An AI chat app that costs the developer $0. Users pay from their Byoky wallet.
               </p>
 
-              {/* The PayButton equivalent */}
+              {error && (
+                <div style={{
+                  marginBottom: '16px', padding: '10px 14px', borderRadius: '8px',
+                  background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', fontSize: '13px',
+                }}>
+                  {error}
+                </div>
+              )}
+
+              {/* The PayButton */}
               <button
                 onClick={connectWallet}
+                disabled={connecting}
                 style={{
                   display: 'inline-flex', alignItems: 'center', gap: '10px',
                   padding: '14px 28px', borderRadius: '12px',
-                  background: '#0ea5e9', color: '#fff', border: 'none',
-                  fontSize: '16px', fontWeight: 600, cursor: 'pointer',
+                  background: connecting ? '#374151' : '#0ea5e9',
+                  color: '#fff', border: 'none',
+                  fontSize: '16px', fontWeight: 600,
+                  cursor: connecting ? 'not-allowed' : 'pointer',
                   transition: 'all 0.15s',
-                  boxShadow: '0 4px 12px rgba(14, 165, 233, 0.3)',
+                  boxShadow: connecting ? 'none' : '0 4px 12px rgba(14, 165, 233, 0.3)',
                 }}
               >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" />
-                  <path d="M3 5v14a2 2 0 0 0 2 2h16v-5" />
-                  <path d="M18 12a2 2 0 0 0 0 4h4v-4Z" />
-                </svg>
-                Pay with Byoky — 50% off
+                {connecting ? (
+                  <>
+                    <span style={{
+                      width: '18px', height: '18px',
+                      border: '2px solid rgba(255,255,255,0.3)',
+                      borderTopColor: '#fff', borderRadius: '50%',
+                      animation: 'spin 0.6s linear infinite',
+                    }} />
+                    Connecting...
+                  </>
+                ) : (
+                  <>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" />
+                      <path d="M3 5v14a2 2 0 0 0 2 2h16v-5" />
+                      <path d="M18 12a2 2 0 0 0 0 4h4v-4Z" />
+                    </svg>
+                    Pay with Byoky — 50% off
+                  </>
+                )}
               </button>
 
               <p style={{ fontSize: '12px', color: '#52525b', marginTop: '16px' }}>
@@ -220,12 +256,11 @@ PayButton.mount('#paywall', {
         {/* Connected — show chat */}
         {connected && (
           <>
-            {/* Messages */}
             <div style={{ flex: 1, overflowY: 'auto', marginBottom: '16px' }}>
               {messages.length === 0 && (
                 <div style={{ textAlign: 'center', color: '#52525b', marginTop: '80px' }}>
                   <p style={{ fontSize: '15px' }}>Ask me anything. Each message costs a fraction of a cent.</p>
-                  <p style={{ fontSize: '12px', marginTop: '8px' }}>Powered by Gemini 2.0 Flash via Byoky credit-mode</p>
+                  <p style={{ fontSize: '12px', marginTop: '8px' }}>Powered by Gemini 2.0 Flash via Byoky</p>
                 </div>
               )}
               {messages.map((msg, i) => (
@@ -263,7 +298,6 @@ PayButton.mount('#paywall', {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Input */}
             <form
               onSubmit={(e) => { e.preventDefault(); sendMessage(); }}
               style={{ display: 'flex', gap: '8px' }}
@@ -273,6 +307,7 @@ PayButton.mount('#paywall', {
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="Type a message..."
                 disabled={loading}
+                autoFocus
                 style={{
                   flex: 1, padding: '14px 18px',
                   borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)',
@@ -297,6 +332,12 @@ PayButton.mount('#paywall', {
           </>
         )}
       </div>
+
+      <style>{`
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
 }
