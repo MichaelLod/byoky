@@ -125,7 +125,7 @@ function Hero() {
             <a
               href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon"
               target="_blank" rel="noopener noreferrer"
-              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: 'var(--text-secondary)', textDecoration: 'none' }}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: 'var(--teal)', textDecoration: 'none', fontWeight: 500 }}
             >
               <svg width="18" height="18" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
                 <circle cx="24" cy="24" r="22" fill="#fff" stroke="#ddd" strokeWidth="1"/>
@@ -141,7 +141,7 @@ function Hero() {
             <a
               href="https://addons.mozilla.org/en-US/firefox/addon/byoky/"
               target="_blank" rel="noopener noreferrer"
-              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: 'var(--text-secondary)', textDecoration: 'none' }}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: 'var(--teal)', textDecoration: 'none', fontWeight: 500 }}
             >
               <svg width="18" height="18" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
                 <circle cx="24" cy="24" r="22" fill="#fff" stroke="#ddd" strokeWidth="1"/>
