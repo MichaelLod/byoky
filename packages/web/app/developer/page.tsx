@@ -44,12 +44,6 @@ export default function DeveloperDashboard() {
         <StatCard label="Your cost" value="$0" sub="users pay from their wallet" />
       </div>
 
-      {/* Quick actions — always visible */}
-      <div style={{ display: 'flex', gap: '12px', marginBottom: '32px' }}>
-        <a href="/developer/setup" style={{ ...linkBtn, background: 'var(--teal)', color: '#fff', border: 'none' }}>Integration Guide</a>
-        <a href="/developer/payouts" style={linkBtn}>Payouts &amp; Pricing</a>
-        <a href="/demo/pay" style={linkBtn}>Live Demo</a>
-      </div>
 
       {/* What you can build — interactive code examples */}
       <div style={{ marginBottom: '32px' }} className="demo-app dev-code-example">
