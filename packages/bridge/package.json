@@ -1,6 +1,6 @@
 {
   "name": "@byoky/bridge",
-  "version": "0.4.18",
+  "version": "0.4.19",
   "description": "Native messaging bridge for Byoky — routes setup token requests through Claude Code CLI",
   "type": "module",
   "main": "dist/host.js",
@@ -26,6 +26,9 @@
     "type": "git",
     "url": "https://github.com/MichaelLod/byoky.git",
     "directory": "packages/bridge"
+  },
+  "dependencies": {
+    "@byoky/core": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "25.5.0",
