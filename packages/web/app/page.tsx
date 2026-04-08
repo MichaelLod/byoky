@@ -87,7 +87,7 @@ function Hero() {
         </FadeIn>
         <FadeIn delay={0.1}>
           <h1>
-            <span className="hero-gradient">Kill your API bill.</span>
+            <span className="hero-gradient">Kill your API bill with one button.</span>
           </h1>
         </FadeIn>
         <FadeIn delay={0.2}>
