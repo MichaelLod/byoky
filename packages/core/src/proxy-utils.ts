@@ -70,6 +70,9 @@ export function buildHeaders(
     headers['anthropic-version'] = headers['anthropic-version'] ?? '2023-06-01';
   } else if (providerId === 'azure_openai') {
     headers['api-key'] = apiKey;
+  } else if (providerId === 'gemini') {
+    // Gemini uses ?key= query param — do not set Authorization header.
+    // The caller (proxy) appends the key to the URL.
   } else {
     headers['authorization'] = `Bearer ${apiKey}`;
   }

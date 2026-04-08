@@ -102,11 +102,18 @@ proxy.post('/', async (c) => {
     credential?.authMethod ?? 'api_key',
   );
 
+  // --- Gemini uses ?key= query param instead of Authorization header ---
+  let finalUrl = url!;
+  if (providerId === 'gemini') {
+    const sep = finalUrl.includes('?') ? '&' : '?';
+    finalUrl = `${finalUrl}${sep}key=${apiKey}`;
+  }
+
   // --- Make upstream request ---
 
   let upstreamResponse: Response;
   try {
-    upstreamResponse = await fetch(url, {
+    upstreamResponse = await fetch(finalUrl, {
       method: method ?? 'POST',
       headers: upstreamHeaders,
       body: reqBody,

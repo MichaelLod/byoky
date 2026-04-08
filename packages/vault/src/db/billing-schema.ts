@@ -1,5 +1,10 @@
 import { pgTable, text, integer, bigint, boolean, index, uniqueIndex } from 'drizzle-orm/pg-core';
-import { users } from './schema.js';
+
+// Inline users table reference to avoid cross-file import that breaks drizzle-kit CJS resolver.
+// The actual users table is defined in schema.ts — this is a lightweight duplicate for FK references only.
+const users = pgTable('users', {
+  id: text('id').primaryKey(),
+});
 
 // --- Balances ---
 
