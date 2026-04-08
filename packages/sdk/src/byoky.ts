@@ -39,6 +39,8 @@ export interface ByokyOptions {
   appId?: string;
   /** Vault server URL. Default: https://vault.byoky.com */
   vaultUrl?: string;
+  /** Web wallet URL for extensionless login/signup. Default: https://byoky.com */
+  walletUrl?: string;
 }
 
 export class Byoky {
@@ -47,11 +49,13 @@ export class Byoky {
   /** Developer app ID — passed in all proxy requests for attribution + discount. */
   readonly appId?: string;
   private vaultUrl: string;
+  private walletUrl: string;
 
   constructor(options: ByokyOptions = {}) {
     this.timeout = options.timeout ?? 60_000;
     this.appId = options.appId;
     this.vaultUrl = (options.vaultUrl ?? 'https://vault.byoky.com').replace(/\/$/, '');
+    this.walletUrl = (options.walletUrl ?? 'https://byoky.com').replace(/\/$/, '');
     const relayUrl = options.relayUrl ?? 'wss://relay.byoky.com';
     try {
       const parsed = new URL(relayUrl);
@@ -154,7 +158,7 @@ export class Byoky {
    * Then connects via vault mode.
    */
   private connectViaWebWallet(): Promise<ByokySession> {
-    const walletUrl = `${this.vaultUrl.replace(/:\d+$/, ':3001')}/wallet/connect`;
+    const walletUrl = `${this.walletUrl}/wallet/connect`;
     const width = 420;
     const height = 580;
     const left = window.screenX + (window.outerWidth - width) / 2;

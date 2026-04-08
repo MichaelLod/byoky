@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Byoky, type ByokySession } from '@byoky/sdk';
 
 const VAULT_URL = process.env.NEXT_PUBLIC_VAULT_URL || 'http://localhost:3100';
+const WALLET_URL = process.env.NEXT_PUBLIC_WALLET_URL || 'http://localhost:3001';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -31,6 +32,7 @@ export function PayDemo() {
     byokyRef.current = new Byoky({
       appId: 'demo',
       vaultUrl: VAULT_URL,
+      walletUrl: WALLET_URL,
     });
   }, []);
 

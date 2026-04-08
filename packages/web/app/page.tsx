@@ -6,23 +6,53 @@ export default function Home() {
     <>
       <Hero />
       <div className="divider" />
-      <ZeroCost />
+      <ForConsumers />
       <div className="divider" />
       <ForDevelopers />
       <div className="divider" />
       <HowItWorks />
       <div className="divider" />
-      <Security />
-      <div className="divider" />
       <Providers />
-      <div className="divider" />
-      <MobileWallet />
-      <div className="divider" />
-      <OpenClawIntegration />
       <div className="divider" />
       <OpenSource />
       <Footer />
     </>
+  );
+}
+
+/* ─── For Consumers ───────────────────────────────── */
+
+function ForConsumers() {
+  return (
+    <section className="section">
+      <div className="container">
+        <FadeIn>
+          <h2 className="section-title">One wallet for all your AI</h2>
+          <p className="section-subtitle">
+            Stop juggling subscriptions. Add your card once, use any AI app.
+          </p>
+        </FadeIn>
+        <FadeIn delay={0.1}>
+          <div className="grid grid-3" style={{ marginTop: '40px' }}>
+            <div className="feature-card">
+              <div className="feature-icon"><WalletIcon /></div>
+              <h3>Add card once</h3>
+              <p>No API keys, no per-app subscriptions. One balance works everywhere.</p>
+            </div>
+            <div className="feature-card">
+              <div className="feature-icon"><EyeIcon /></div>
+              <h3>See every charge</h3>
+              <p>Real-time balance, transaction history, per-app spending. Full transparency.</p>
+            </div>
+            <div className="feature-card">
+              <div className="feature-icon"><GaugeIcon /></div>
+              <h3>Switch models instantly</h3>
+              <p>Group your apps by use case. Switch from Claude to GPT with one click.</p>
+            </div>
+          </div>
+        </FadeIn>
+      </div>
+    </section>
   );
 }
 
@@ -38,7 +68,7 @@ function Hero() {
         <FadeIn>
           <div className="hero-badge">
             <span className="hero-badge-dot" />
-            Open-source wallet for AI keys
+            The payment layer for AI apps
           </div>
         </FadeIn>
         <FadeIn delay={0.1}>
@@ -140,41 +170,35 @@ function Hero() {
             </svg>
           </div>
           <h1>
-            <span className="hero-eyebrow">Bring Your Own Key.</span>
-            <span className="hero-gradient">MetaMask for AI API Keys.</span>
+            <span className="hero-eyebrow">Ship AI apps.</span>
+            <span className="hero-gradient">Never pay an API bill.</span>
           </h1>
         </FadeIn>
         <FadeIn delay={0.2}>
           <p>
-            A browser wallet that keeps your AI API keys encrypted and local.
-            Apps get proxied access — never the keys themselves.
+            One wallet for users. Zero inference cost for developers.
+            Add a &ldquo;Pay with Byoky&rdquo; button — users pay from their balance, you pay nothing.
           </p>
         </FadeIn>
         <FadeIn delay={0.3}>
           <div className="hero-actions">
             <a
-              href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon"
+              href="/demo/pay"
               className="btn btn-primary"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <DownloadIcon />
-              Chrome Extension
-            </a>
-            <a
-              href="https://addons.mozilla.org/en-US/firefox/addon/byoky/"
-              className="btn btn-primary"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <DownloadIcon />
-              Firefox Extension
-            </a>
-            <a
-              href="/demo"
-              className="btn btn-secondary"
             >
               Try the Demo
+            </a>
+            <a
+              href="/developer/setup"
+              className="btn btn-secondary"
+            >
+              Developer Docs
+            </a>
+            <a
+              href="/marketplace"
+              className="btn btn-secondary"
+            >
+              App Marketplace
             </a>
             <a
               href="https://github.com/MichaelLod/byoky"
@@ -207,46 +231,46 @@ function HowItWorks() {
               <div className="step-number">
                 <WalletIcon />
               </div>
-              <h3>Install the wallet</h3>
+              <h3>User creates wallet</h3>
               <p>
-                Add the Byoky extension to Chrome, Firefox, or Safari. Set a
-                master password to encrypt your vault.
+                Sign up on any Byoky-enabled app. Add a card once — balance
+                works across every integrated app.
               </p>
             </div>
           </FadeIn>
           <FadeIn delay={0.2}>
             <div className="step">
               <div className="step-number">
-                <KeyIcon />
+                <LinkIcon />
               </div>
-              <h3>Add your keys</h3>
+              <h3>Developer adds the button</h3>
               <p>
-                Paste API keys or add a Claude setup token. Everything is
-                encrypted locally with AES-256-GCM. Multiple keys per provider.
+                Two lines of code. npm install @byoky/sdk, mount the PayButton
+                at your paywall. Set your discount.
               </p>
             </div>
           </FadeIn>
           <FadeIn delay={0.3}>
             <div className="step">
               <div className="step-number">
-                <LinkIcon />
+                <CheckIcon />
               </div>
-              <h3>Connect to any app</h3>
+              <h3>User pays, you build</h3>
               <p>
-                Visit any Byoky-enabled app. Approve access in one click. Your
-                keys stay in the vault — always.
+                Every API call flows through Byoky. User&apos;s balance is charged,
+                developer gets revenue share. Zero inference cost.
               </p>
             </div>
           </FadeIn>
           <FadeIn delay={0.4}>
             <div className="step">
               <div className="step-number">
-                <GiftIcon />
+                <GaugeIcon />
               </div>
-              <h3>Gift tokens</h3>
+              <h3>Scale with the network</h3>
               <p>
-                Share token access without sharing your API key. Set a budget,
-                generate a gift link, and revoke anytime. Relay-backed — zero key exposure.
+                More apps integrate Byoky, more users create wallets,
+                more users discover your app. The flywheel spins.
               </p>
             </div>
           </FadeIn>
@@ -314,14 +338,13 @@ function ForDevelopers() {
     <section className="dev-section">
       <div className="container">
         <FadeIn>
-          <h2>Two lines of code. Full AI power.</h2>
+          <h2>Ship AI apps. Pay $0 for inference.</h2>
           <p className="subtitle">
-            Integrate with any AI provider using their native SDK.
-            Just swap in Byoky&apos;s fetch — keys never touch your app.
+            Add a &ldquo;Pay with Byoky&rdquo; button to your paywall. Users pay from their wallet.
+            You get zero inference cost and revenue share via Stripe Connect.
           </p>
           <p className="subtitle" style={{ fontSize: 14, marginBottom: 0, marginTop: 0 }}>
-            <code style={{ fontFamily: 'var(--font-code)', color: 'var(--teal-light)', fontSize: 13 }}>npm install @byoky/sdk</code> to add to an existing project
-            {' · '}<code style={{ fontFamily: 'var(--font-code)', color: 'var(--teal-light)', fontSize: 13 }}>npx create-byoky-app</code> to scaffold a new one
+            <code style={{ fontFamily: 'var(--font-code)', color: 'var(--teal-light)', fontSize: 13 }}>npm install @byoky/sdk</code> to get started
           </p>
         </FadeIn>
         <div className="dev-layout">
@@ -333,10 +356,10 @@ function ForDevelopers() {
                     <CheckIcon />
                   </div>
                   <div>
-                    <h4>Native SDK compatibility</h4>
+                    <h4>Zero inference cost</h4>
                     <p>
-                      Works with official SDKs from Anthropic, OpenAI, Gemini,
-                      Mistral, and 11 more providers. Just swap in Byoky&apos;s fetch.
+                      Users pay for their own AI usage through their Byoky wallet.
+                      Your AWS/API bill goes to zero.
                     </p>
                   </div>
                 </div>
@@ -345,10 +368,10 @@ function ForDevelopers() {
                     <CheckIcon />
                   </div>
                   <div>
-                    <h4>Streaming out of the box</h4>
+                    <h4>Higher paywall conversion</h4>
                     <p>
-                      Full SSE streaming support through the extension proxy. No
-                      special handling needed.
+                      Users with Byoky wallets have balance ready to spend. One tap,
+                      no card entry. Set your own discount to boost conversion.
                     </p>
                   </div>
                 </div>
@@ -357,10 +380,10 @@ function ForDevelopers() {
                     <CheckIcon />
                   </div>
                   <div>
-                    <h4>Backend relay</h4>
+                    <h4>15+ providers, one SDK</h4>
                     <p>
-                      Your server makes LLM calls through the user&apos;s browser
-                      via WebSocket. Keys never leave the extension — even server-side.
+                      Anthropic, OpenAI, Gemini, Mistral, and 11 more. Switch providers
+                      with a config change. No new accounts or billing.
                     </p>
                   </div>
                 </div>
@@ -369,10 +392,10 @@ function ForDevelopers() {
                     <CheckIcon />
                   </div>
                   <div>
-                    <h4>CLI &amp; local apps</h4>
+                    <h4>Revenue share via Stripe Connect</h4>
                     <p>
-                      The Byoky Bridge lets CLI tools and desktop apps route
-                      through the wallet via a local HTTP proxy. Keys stay in the extension.
+                      Set your discount. Byoky takes a small commission, you get the rest.
+                      Payouts via Stripe Connect. Tiered rates as you scale.
                     </p>
                   </div>
                 </div>
@@ -381,10 +404,10 @@ function ForDevelopers() {
                     <CheckIcon />
                   </div>
                   <div>
-                    <h4>Token gifts</h4>
+                    <h4>No extension required</h4>
                     <p>
-                      Let users share token access without sharing API keys.
-                      Relay-backed with budget caps, expiry, and instant revocation.
+                      Works with or without the browser extension. Web wallet
+                      login popup for zero-friction onboarding. Extension is optional.
                     </p>
                   </div>
                 </div>
