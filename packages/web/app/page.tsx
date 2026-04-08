@@ -213,6 +213,33 @@ function Hero() {
             >
               App Marketplace
             </a>
+          </div>
+          <div className="hero-actions" style={{ marginTop: '12px' }}>
+            <a
+              href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon"
+              className="btn btn-secondary"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <DownloadIcon />
+              Chrome Extension
+            </a>
+            <a
+              href="https://addons.mozilla.org/en-US/firefox/addon/byoky/"
+              className="btn btn-secondary"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <DownloadIcon />
+              Firefox Extension
+            </a>
+            <a
+              href="/wallet"
+              className="btn btn-secondary"
+            >
+              <WalletIcon />
+              Web Wallet
+            </a>
             <a
               href="https://github.com/MichaelLod/byoky"
               className="btn btn-secondary"
