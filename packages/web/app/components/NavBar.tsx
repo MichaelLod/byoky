@@ -1,6 +1,7 @@
 'use client';
 
 import { usePathname } from 'next/navigation';
+import { useRef, useState, useEffect } from 'react';
 
 const links = [
   { href: '/', label: 'Home' },
@@ -10,18 +11,39 @@ const links = [
   { href: '/wallet', label: 'Wallet' },
 ];
 
+function isActive(pathname: string, href: string) {
+  if (href === '/') return pathname === '/';
+  return pathname.startsWith(href);
+}
+
 export function NavBar() {
   const pathname = usePathname();
+  const containerRef = useRef<HTMLDivElement>(null);
+  const linkRefs = useRef<(HTMLAnchorElement | null)[]>([]);
+  const [indicator, setIndicator] = useState({ left: 0, width: 0 });
+  const [mounted, setMounted] = useState(false);
 
-  function isActive(href: string) {
-    if (href === '/') return pathname === '/';
-    return pathname.startsWith(href);
-  }
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    const activeIndex = links.findIndex((l) => isActive(pathname, l.href));
+    const el = linkRefs.current[activeIndex];
+    const container = containerRef.current;
+    if (el && container) {
+      const containerRect = container.getBoundingClientRect();
+      const elRect = el.getBoundingClientRect();
+      setIndicator({
+        left: elRect.left - containerRect.left,
+        width: elRect.width,
+      });
+    }
+  }, [pathname]);
 
   return (
     <nav style={{
       position: 'sticky', top: 0, zIndex: 100,
-      borderBottom: 'none',
       background: 'rgba(255,255,255,0.85)',
       backdropFilter: 'blur(12px)',
       WebkitBackdropFilter: 'blur(12px)',
@@ -35,19 +57,36 @@ export function NavBar() {
         <a href="/" style={{ fontWeight: 800, fontSize: '20px', color: 'var(--text)', textDecoration: 'none', letterSpacing: '-0.02em' }}>
           Byoky
         </a>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '14px' }}>
-          {links.map((link) => (
+        <div ref={containerRef} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '14px', position: 'relative' }}>
+          {/* Sliding highlight indicator */}
+          {mounted && indicator.width > 0 && (
+            <div style={{
+              position: 'absolute',
+              left: indicator.left,
+              width: indicator.width,
+              height: '34px',
+              borderRadius: '8px',
+              background: 'rgba(255, 79, 0, 0.08)',
+              transition: 'left 0.35s cubic-bezier(0.4, 0, 0.2, 1), width 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              pointerEvents: 'none',
+            }} />
+          )}
+          {links.map((link, i) => (
             <a
               key={link.href}
               href={link.href}
+              ref={(el) => { linkRefs.current[i] = el; }}
               style={{
                 padding: '8px 14px',
                 borderRadius: '8px',
-                color: isActive(link.href) ? 'var(--teal)' : 'var(--text-secondary)',
+                color: isActive(pathname, link.href) ? 'var(--teal)' : 'var(--text-secondary)',
                 textDecoration: 'none',
-                fontWeight: isActive(link.href) ? 600 : 400,
-                background: isActive(link.href) ? 'rgba(255, 79, 0, 0.08)' : 'transparent',
-                transition: 'color 0.3s ease, background 0.3s ease, font-weight 0.3s ease',
+                fontWeight: isActive(pathname, link.href) ? 600 : 400,
+                transition: 'color 0.3s ease',
+                position: 'relative',
+                zIndex: 1,
               }}
             >
               {link.label}
@@ -57,7 +96,7 @@ export function NavBar() {
             padding: '8px 16px', borderRadius: '8px',
             background: 'var(--teal)', color: '#fff',
             textDecoration: 'none', fontWeight: 600, fontSize: '13px',
-            marginLeft: '4px',
+            marginLeft: '4px', position: 'relative', zIndex: 1,
           }}>
             Try Byoky
           </a>
@@ -65,7 +104,7 @@ export function NavBar() {
             href="https://github.com/MichaelLod/byoky"
             target="_blank"
             rel="noopener noreferrer"
-            style={{ display: 'flex', alignItems: 'center', padding: '8px', color: 'var(--text-secondary)', marginLeft: '4px' }}
+            style={{ display: 'flex', alignItems: 'center', padding: '8px', color: 'var(--text-secondary)', marginLeft: '4px', position: 'relative', zIndex: 1 }}
             title="GitHub"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
