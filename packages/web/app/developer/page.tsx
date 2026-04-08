@@ -15,6 +15,7 @@ interface App {
 export default function DeveloperDashboard() {
   const { token, login, isLoggedIn } = useVaultToken();
   const [apps, setApps] = useState<App[]>([]);
+  const [showLogin, setShowLogin] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -26,63 +27,88 @@ export default function DeveloperDashboard() {
     }).catch(() => {});
   }, [token]);
 
-  if (!isLoggedIn) {
-    return (
-      <div>
-        <h1 style={{ fontSize: '28px', fontWeight: 700, marginBottom: '8px' }}>Developer Dashboard</h1>
-        <p style={{ color: '#a1a1aa', marginBottom: '24px' }}>Sign in to manage your apps</p>
-        {error && <div style={{ color: '#ef4444', fontSize: '13px', marginBottom: '12px' }}>{error}</div>}
-        <form onSubmit={async (e) => { e.preventDefault(); const ok = await login(username, password); if (!ok) setError('Invalid credentials'); }} style={{ maxWidth: '380px' }}>
-          <input type="text" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} style={inputStyle} />
-          <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} style={{ ...inputStyle, marginTop: '8px' }} />
-          <button type="submit" style={{ marginTop: '12px', padding: '10px 20px', borderRadius: '10px', background: '#0ea5e9', color: '#fff', border: 'none', fontSize: '14px', fontWeight: 600, cursor: 'pointer' }}>Sign In</button>
-        </form>
-      </div>
-    );
-  }
-
   const totalUsers = apps.reduce((sum, a) => sum + a.totalUsers, 0);
 
   return (
     <div>
       <h1 style={{ fontSize: '28px', fontWeight: 700, marginBottom: '8px' }}>Developer Dashboard</h1>
-      <p style={{ color: '#a1a1aa', marginBottom: '32px' }}>Ship AI apps. Never pay an API bill.</p>
+      <p style={{ color: 'var(--text-secondary)', marginBottom: '32px' }}>
+        Ship AI apps. Never pay an API bill.
+      </p>
 
+      {/* Always-visible stats */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '32px' }}>
-        <StatCard label="Total Users" value={totalUsers.toLocaleString()} sub="across all apps" />
-        <StatCard label="Apps" value={String(apps.length)} sub="registered" />
-        <StatCard label="Status" value="Active" sub="all systems operational" />
+        <StatCard label="Providers" value="15+" sub="supported out of the box" />
+        <StatCard label="Integration" value="2 lines" sub="npm install + mount" />
+        <StatCard label="Your cost" value="$0" sub="users pay from their wallet" />
       </div>
 
-      {apps.length > 0 ? (
-        <div>
-          <h2 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '12px' }}>Your Apps</h2>
-          {apps.map(app => (
-            <a key={app.id} href={`/developer/apps/${app.id}`} style={{
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-              background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
-              borderRadius: '12px', padding: '16px 20px', marginBottom: '8px', textDecoration: 'none', color: 'inherit',
-            }}>
-              <div>
-                <div style={{ fontWeight: 600, marginBottom: '4px' }}>{app.name}</div>
-                <div style={{ fontSize: '12px', color: '#71717a' }}>
-                  {app.id} &middot; {app.discountPercent}% discount &middot; {app.totalUsers} users
-                </div>
-              </div>
-              <span style={{ color: '#0ea5e9', fontSize: '14px' }}>Stats &rarr;</span>
-            </a>
-          ))}
-        </div>
-      ) : (
-        <div style={{ textAlign: 'center', padding: '32px', background: 'rgba(255,255,255,0.02)', border: '1px dashed rgba(255,255,255,0.1)', borderRadius: '12px' }}>
-          <p style={{ color: '#71717a', marginBottom: '16px' }}>No apps registered yet</p>
-          <a href="/developer/setup" style={{ padding: '10px 20px', borderRadius: '10px', background: '#0ea5e9', color: '#fff', textDecoration: 'none', fontSize: '14px', fontWeight: 500 }}>Get Started</a>
-        </div>
-      )}
+      {/* Quick actions — always visible */}
+      <div style={{ display: 'flex', gap: '12px', marginBottom: '32px' }}>
+        <a href="/developer/setup" style={{ ...linkBtn, background: 'var(--teal)', color: '#fff', border: 'none' }}>Integration Guide</a>
+        <a href="/developer/payouts" style={linkBtn}>Payouts &amp; Pricing</a>
+        <a href="/demo/pay" style={linkBtn}>Live Demo</a>
+      </div>
 
-      <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
-        <a href="/developer/apps" style={{ ...linkBtn, background: '#0ea5e9', color: '#fff' }}>Manage Apps</a>
-        <a href="/developer/setup" style={linkBtn}>Integration Guide</a>
+      {/* Your Apps — requires login */}
+      <div style={{ borderTop: '1px solid var(--border)', paddingTop: '24px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <h2 style={{ fontSize: '18px', fontWeight: 600 }}>Your Apps</h2>
+          {!isLoggedIn && (
+            <button onClick={() => setShowLogin(!showLogin)} style={{
+              padding: '8px 16px', borderRadius: '8px', background: 'var(--teal)', color: '#fff',
+              border: 'none', fontSize: '13px', fontWeight: 600, cursor: 'pointer',
+            }}>
+              Sign in to manage apps
+            </button>
+          )}
+        </div>
+
+        {/* Login form — only shown when requested */}
+        {showLogin && !isLoggedIn && (
+          <div style={{ maxWidth: '380px', marginBottom: '16px', padding: '20px', background: 'var(--bg-surface)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+            {error && <div style={{ color: '#ef4444', fontSize: '13px', marginBottom: '12px' }}>{error}</div>}
+            <form onSubmit={async (e) => { e.preventDefault(); const ok = await login(username, password); if (!ok) setError('Invalid credentials'); else setShowLogin(false); }}>
+              <input type="text" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} style={inputStyle} />
+              <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} style={{ ...inputStyle, marginTop: '8px' }} />
+              <button type="submit" style={{ marginTop: '12px', padding: '10px 20px', borderRadius: '10px', background: 'var(--teal)', color: '#fff', border: 'none', fontSize: '14px', fontWeight: 600, cursor: 'pointer' }}>Sign In</button>
+            </form>
+          </div>
+        )}
+
+        {/* App list — shown when logged in */}
+        {isLoggedIn && apps.length > 0 && (
+          <div>
+            {apps.map(app => (
+              <a key={app.id} href={`/developer/apps/${app.id}`} style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                background: 'var(--bg-surface)', border: '1px solid var(--border)',
+                borderRadius: '12px', padding: '16px 20px', marginBottom: '8px', textDecoration: 'none', color: 'inherit',
+              }}>
+                <div>
+                  <div style={{ fontWeight: 600, marginBottom: '4px' }}>{app.name}</div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                    {app.id} &middot; {app.discountPercent}% discount &middot; {app.totalUsers} users
+                  </div>
+                </div>
+                <span style={{ color: 'var(--teal)', fontSize: '14px' }}>Stats &rarr;</span>
+              </a>
+            ))}
+          </div>
+        )}
+
+        {isLoggedIn && apps.length === 0 && (
+          <div style={{ textAlign: 'center', padding: '24px', background: 'var(--bg-surface)', border: '1px dashed var(--border)', borderRadius: '12px' }}>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: '12px' }}>No apps registered yet</p>
+            <a href="/developer/setup" style={{ color: 'var(--teal)', fontSize: '14px' }}>Get started with the SDK &rarr;</a>
+          </div>
+        )}
+
+        {!isLoggedIn && !showLogin && (
+          <p style={{ color: 'var(--text-muted)', fontSize: '14px' }}>
+            Sign in to register apps, view analytics, and manage your API keys.
+          </p>
+        )}
       </div>
     </div>
   );
@@ -91,22 +117,22 @@ export default function DeveloperDashboard() {
 function StatCard({ label, value, sub }: { label: string; value: string; sub: string }) {
   return (
     <div style={{
-      background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
+      background: 'var(--bg-surface)', border: '1px solid var(--border)',
       borderRadius: '12px', padding: '20px',
     }}>
-      <div style={{ fontSize: '12px', color: '#71717a', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>{label}</div>
+      <div style={{ fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>{label}</div>
       <div style={{ fontSize: '28px', fontWeight: 700 }}>{value}</div>
-      <div style={{ fontSize: '12px', color: '#52525b', marginTop: '4px' }}>{sub}</div>
+      <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>{sub}</div>
     </div>
   );
 }
 
 const inputStyle: React.CSSProperties = {
-  width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)',
-  background: 'rgba(255,255,255,0.04)', color: '#e4e4e7', fontSize: '14px', outline: 'none', boxSizing: 'border-box',
+  width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--border)',
+  background: 'var(--bg)', color: 'var(--text)', fontSize: '14px', outline: 'none', boxSizing: 'border-box',
 };
 const linkBtn: React.CSSProperties = {
   display: 'inline-flex', alignItems: 'center', gap: '8px', padding: '10px 20px', borderRadius: '10px',
-  background: 'rgba(255,255,255,0.06)', color: '#e4e4e7', border: '1px solid rgba(255,255,255,0.1)',
+  background: 'var(--bg-surface)', color: 'var(--text)', border: '1px solid var(--border)',
   textDecoration: 'none', fontSize: '14px', fontWeight: 500,
 };
