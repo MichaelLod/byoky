@@ -48,6 +48,21 @@ export default function DeveloperLayout({
   return (
     <div className="developer-portal">
       <style dangerouslySetInnerHTML={{ __html: devOverrideCSS }} />
+      <nav style={{
+        borderBottom: '1px solid var(--border)',
+        padding: '0 24px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '20px',
+        fontSize: '14px',
+        maxWidth: '960px',
+        margin: '0 auto',
+      }}>
+        <a href="/developer" style={{ padding: '12px 0', color: 'var(--text-secondary)', textDecoration: 'none', borderBottom: '2px solid transparent' }}>Dashboard</a>
+        <a href="/developer/apps" style={{ padding: '12px 0', color: 'var(--text-secondary)', textDecoration: 'none', borderBottom: '2px solid transparent' }}>Apps</a>
+        <a href="/developer/setup" style={{ padding: '12px 0', color: 'var(--text-secondary)', textDecoration: 'none', borderBottom: '2px solid transparent' }}>Setup</a>
+        <a href="/developer/payouts" style={{ padding: '12px 0', color: 'var(--text-secondary)', textDecoration: 'none', borderBottom: '2px solid transparent' }}>Payouts</a>
+      </nav>
       <main style={{ maxWidth: '960px', margin: '0 auto', padding: '32px 24px' }}>
         {children}
       </main>
