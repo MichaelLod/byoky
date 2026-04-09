@@ -3181,19 +3181,22 @@ data: [DONE]
       id: "deepseek",
       name: "DeepSeek",
       authMethods: ["api_key"],
-      baseUrl: "https://api.deepseek.com"
+      baseUrl: "https://api.deepseek.com",
+      chatPath: "/chat/completions"
     },
     perplexity: {
       id: "perplexity",
       name: "Perplexity",
       authMethods: ["api_key"],
-      baseUrl: "https://api.perplexity.ai"
+      baseUrl: "https://api.perplexity.ai",
+      chatPath: "/chat/completions"
     },
     groq: {
       id: "groq",
       name: "Groq",
       authMethods: ["api_key"],
-      baseUrl: "https://api.groq.com"
+      baseUrl: "https://api.groq.com",
+      chatPath: "/openai/v1/chat/completions"
     },
     together: {
       id: "together",
@@ -3205,7 +3208,8 @@ data: [DONE]
       id: "fireworks",
       name: "Fireworks AI",
       authMethods: ["api_key"],
-      baseUrl: "https://api.fireworks.ai"
+      baseUrl: "https://api.fireworks.ai",
+      chatPath: "/inference/v1/chat/completions"
     },
     openrouter: {
       id: "openrouter",
@@ -3252,12 +3256,20 @@ data: [DONE]
     if (!dst || !hasAdapter(dst)) return false;
     return src !== dst;
   }
+  function sameFamily(srcProviderId, dstProviderId) {
+    const src = familyOf(srcProviderId);
+    if (!src) return false;
+    return src === familyOf(dstProviderId);
+  }
   function rewriteProxyUrl(dstProviderId, model, stream) {
     const provider = PROVIDERS[dstProviderId];
     if (!provider) return null;
     const family = familyOf(dstProviderId);
     if (!family || !hasAdapter(family)) return null;
     const base = provider.baseUrl.replace(/\/$/, "");
+    if (provider.chatPath) {
+      return `${base}${provider.chatPath}`;
+    }
     return getAdapter(family).buildChatUrl(base, model, stream);
   }
 
@@ -3333,6 +3345,9 @@ data: [DONE]
     shouldTranslate(srcProviderId, dstProviderId) {
       return shouldTranslate(srcProviderId, dstProviderId);
     },
+    sameFamily(srcProviderId, dstProviderId) {
+      return sameFamily(srcProviderId, dstProviderId);
+    },
     buildTranslationContext(srcProviderId, dstProviderId, srcModel, dstModel, isStreaming, requestId) {
       const srcFamily = familyOf(srcProviderId);
       const dstFamily = familyOf(dstProviderId);
@@ -3374,7 +3389,7 @@ data: [DONE]
         capabilities: m.capabilities
       });
     },
-    version: "0.5.0"
+    version: "0.5.1"
   };
   globalThis.BYOKY_TRANSLATE = bridge;
 })();

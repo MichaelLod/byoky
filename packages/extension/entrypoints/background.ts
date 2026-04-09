@@ -4,6 +4,7 @@ import {
   type Session,
   type SessionProvider,
   type SessionTranslation,
+  type SessionSwap,
   type RequestLogEntry,
   type PendingApproval,
   type TrustedSite,
@@ -39,6 +40,7 @@ import {
   decodeGiftLink,
   validateGiftLink,
   shouldTranslate,
+  sameFamily,
   familyOf,
   rewriteProxyUrl,
   translateRequest,
@@ -444,9 +446,14 @@ export default defineBackground(() => {
       // Cross-family translation context (set when the resolved group routes
       // this app to a credential in a different provider family).
       const translation = sessionProvider?.translation;
+      // Same-family swap context (set when the resolved group routes this
+      // app to a different provider in the same translation family — no
+      // translation needed, just URL rewrite + credential swap + optional
+      // body.model override).
+      const swap = sessionProvider?.swap;
       // The "effective" provider id is the one we actually call upstream:
-      // the destination if translation is on, otherwise the source.
-      const effectiveProviderId = translation?.dstProviderId ?? msg.providerId;
+      // the destination if translation or swap is on, otherwise the source.
+      const effectiveProviderId = translation?.dstProviderId ?? swap?.dstProviderId ?? msg.providerId;
 
       // Refresh OAuth token if expired or about to expire. Key off the
       // credential's own providerId so cross-family routing still refreshes
@@ -518,6 +525,25 @@ export default defineBackground(() => {
             return;
           }
           translatedUrl = rewritten;
+        } else if (swap) {
+          // Same-family swap: no translation layer, just URL rewrite +
+          // optional body.model override. Binary bodies pass through
+          // unchanged (we only touch the JSON when swap.dstModel is set).
+          const isStreaming = detectStreamingRequest(msg.body);
+          const rewritten = rewriteProxyUrl(swap.dstProviderId, swap.dstModel ?? '', isStreaming);
+          if (!rewritten) {
+            port.postMessage({
+              type: 'BYOKY_PROXY_RESPONSE_ERROR',
+              requestId: msg.requestId,
+              status: 502,
+              error: { code: 'SWAP_FAILED', message: `Cannot rewrite URL for destination provider ${swap.dstProviderId}` },
+            });
+            return;
+          }
+          translatedUrl = rewritten;
+          if (swap.dstModel && !msg.bodyEncoding && msg.body) {
+            translatedBody = rewriteModelInJsonBody(msg.body, swap.dstModel);
+          }
         }
 
         const realHeaders = buildHeaders(effectiveProviderId, msg.headers, apiKey, credential.authMethod);
@@ -963,11 +989,21 @@ export default defineBackground(() => {
       // record translation metadata so the proxy handler knows to translate.
       const crossRoute = resolveCrossFamilyRoute(group, req.id, credentials);
 
-      const cred = groupPinnedCred ?? crossRoute?.cred ?? credentials.find((c) => c.providerId === req.id);
+      // Same-family swap: the group's bound provider differs from what the
+      // app asked for, and both providers are in the SAME family (identical
+      // wire format). No translation needed — just URL rewrite + credential
+      // swap + optional model override. Only consulted when cross-family
+      // routing doesn't apply, so the two are mutually exclusive.
+      const swapRoute = !crossRoute
+        ? resolveSameFamilySwapRoute(group, req.id, credentials)
+        : undefined;
+
+      const cred = groupPinnedCred ?? crossRoute?.cred ?? swapRoute?.cred ?? credentials.find((c) => c.providerId === req.id);
       const gc = giftedCreds.find((g) => g.providerId === req.id && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens);
-      // Group pin wins over gift preference. Cross-family routing also wins
-      // over gifts. Otherwise prefer gift if user explicitly chose it, else prefer own key.
-      const preferGift = !groupPinnedCred && !crossRoute && gc && giftPrefs[req.id] === gc.giftId;
+      // Group pin wins over gift preference. Cross-family routing and
+      // same-family swap also win over gifts. Otherwise prefer gift if user
+      // explicitly chose it, else prefer own key.
+      const preferGift = !groupPinnedCred && !crossRoute && !swapRoute && gc && giftPrefs[req.id] === gc.giftId;
       const useGift = preferGift || (!cred && gc);
       providerMap[req.id] = {
         available: !!(cred || gc),
@@ -992,6 +1028,7 @@ export default defineBackground(() => {
           authMethod: cred.authMethod,
         };
         if (crossRoute) sp.translation = crossRoute.translation;
+        else if (swapRoute) sp.swap = swapRoute.swap;
         sessionProviders.push(sp);
       }
     }
@@ -2565,10 +2602,12 @@ export default defineBackground(() => {
       return;
     }
 
-    // Cross-family translation context (mirrors the popup port path).
+    // Cross-family translation + same-family swap context
+    // (mirrors the popup port path).
     const sessionProvider = session.providers.find((sp) => sp.providerId === providerId);
     const translation = sessionProvider?.translation;
-    const effectiveProviderId = translation?.dstProviderId ?? providerId;
+    const swap = sessionProvider?.swap;
+    const effectiveProviderId = translation?.dstProviderId ?? swap?.dstProviderId ?? providerId;
 
     if (!validateProxyUrl(providerId, url)) {
       bridgeProxyPort?.postMessage({
@@ -2607,6 +2646,22 @@ export default defineBackground(() => {
           return;
         }
         translatedUrl = rewritten;
+      } else if (swap) {
+        // Same-family swap: URL rewrite + optional body.model override.
+        const isStreaming = detectStreamingRequest(body);
+        const rewritten = rewriteProxyUrl(swap.dstProviderId, swap.dstModel ?? '', isStreaming);
+        if (!rewritten) {
+          bridgeProxyPort?.postMessage({
+            type: 'proxy_http_error',
+            requestId,
+            error: `Cannot rewrite URL for destination provider ${swap.dstProviderId}`,
+          });
+          return;
+        }
+        translatedUrl = rewritten;
+        if (swap.dstModel && body) {
+          translatedBody = rewriteModelInJsonBody(body, swap.dstModel);
+        }
       }
 
       const realHeaders = buildHeaders(effectiveProviderId, headers, apiKey, credential.authMethod);
@@ -2843,6 +2898,23 @@ export default defineBackground(() => {
   }
 
   /**
+   * Surgically rewrite the top-level `model` field of a JSON request body to
+   * `newModel`. Returns the original body unchanged if parsing fails — we'd
+   * rather pass through and let the destination return a real error than
+   * silently corrupt the request. Used by the same-family swap path when
+   * the group pins a destination model.
+   */
+  function rewriteModelInJsonBody(body: string, newModel: string): string {
+    try {
+      const parsed = JSON.parse(body) as Record<string, unknown>;
+      parsed.model = newModel;
+      return JSON.stringify(parsed);
+    } catch {
+      return body;
+    }
+  }
+
+  /**
    * Run the request body through the canonical-IR translation pipeline.
    * Throws TranslationError on shapes the destination cannot represent.
    */
@@ -2930,6 +3002,49 @@ export default defineBackground(() => {
     };
   }
 
+  /**
+   * Resolve a same-family swap decision for a single requested provider.
+   *
+   * Two providers in the same translation family (e.g. Groq and OpenAI, both
+   * in the openai family) speak identical wire protocols, so "routing"
+   * collapses to: swap credentials, rewrite the destination URL, and
+   * (optionally) override the body's model field. No translation layer.
+   *
+   * Conditions:
+   *  1. A group is resolved for this app
+   *  2. group.providerId != requestedProviderId
+   *  3. both providers live in the same family (per sameFamily())
+   *  4. a credential exists for group.providerId
+   *
+   * Notably, `group.model` is *not* required — a swap works even when the
+   * group has no model pinned. If present, it flows into SessionSwap.dstModel
+   * so the proxy handler can substitute it into the request body before
+   * forwarding. Pinned credential preferred; falls back to any credential
+   * for that provider.
+   */
+  function resolveSameFamilySwapRoute(
+    group: Group | undefined,
+    requestedProviderId: string,
+    credentials: Credential[],
+  ): { cred: Credential; swap: SessionSwap } | undefined {
+    if (!group) return undefined;
+    if (group.providerId === requestedProviderId) return undefined;
+    if (!sameFamily(requestedProviderId, group.providerId)) return undefined;
+    const cred =
+      (group.credentialId
+        ? credentials.find((c) => c.id === group.credentialId)
+        : undefined) ?? credentials.find((c) => c.providerId === group.providerId);
+    if (!cred) return undefined;
+    return {
+      cred,
+      swap: {
+        srcProviderId: requestedProviderId,
+        dstProviderId: group.providerId,
+        dstModel: group.model || undefined,
+      },
+    };
+  }
+
   async function decryptCredentialKey(
     credential: Credential,
   ): Promise<string> {
@@ -2963,8 +3078,10 @@ export default defineBackground(() => {
 
     // Pull cross-family routing info from the session provider so we can
     // record what we actually called upstream (vs what the SDK requested).
+    // Translation and swap are mutually exclusive — at most one is set.
     const sp = session.providers.find((p) => p.providerId === req.providerId);
     const translation = sp?.translation;
+    const swap = sp?.swap;
 
     const entry: RequestLogEntry = {
       id,
@@ -2980,6 +3097,9 @@ export default defineBackground(() => {
     if (translation) {
       entry.actualProviderId = translation.dstProviderId;
       entry.actualModel = translation.dstModel;
+    } else if (swap) {
+      entry.actualProviderId = swap.dstProviderId;
+      if (swap.dstModel) entry.actualModel = swap.dstModel;
     }
 
     // Capture the group routing this request, if any (the resolver auto-
@@ -3115,9 +3235,12 @@ export default defineBackground(() => {
             ? credentials.find(c => c.id === group.credentialId)
             : undefined;
         const crossRoute = resolveCrossFamilyRoute(group, providerId, credentials);
-        const cred = groupPinnedCred ?? crossRoute?.cred ?? credentials.find(c => c.providerId === providerId);
+        const swapRoute = !crossRoute
+          ? resolveSameFamilySwapRoute(group, providerId, credentials)
+          : undefined;
+        const cred = groupPinnedCred ?? crossRoute?.cred ?? swapRoute?.cred ?? credentials.find(c => c.providerId === providerId);
         const gc = giftedCreds.find(g => g.providerId === providerId && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens);
-        const preferGift = !groupPinnedCred && !crossRoute && gc && giftPrefs[providerId] === gc.giftId;
+        const preferGift = !groupPinnedCred && !crossRoute && !swapRoute && gc && giftPrefs[providerId] === gc.giftId;
         const useGift = preferGift || (!cred && gc);
         providerMap[providerId] = { available: !!(cred || gc), authMethod: useGift ? 'api_key' : (cred?.authMethod ?? 'api_key'), ...(useGift ? { gift: true } : {}) };
         if (useGift && gc) {
@@ -3125,6 +3248,7 @@ export default defineBackground(() => {
         } else if (cred) {
           const sp: SessionProvider = { providerId, credentialId: cred.id, available: true, authMethod: cred.authMethod };
           if (crossRoute) sp.translation = crossRoute.translation;
+          else if (swapRoute) sp.swap = swapRoute.swap;
           newSessionProviders.push(sp);
         }
       }

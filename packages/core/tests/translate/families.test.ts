@@ -4,6 +4,7 @@ import { describe, it, expect } from 'vitest';
 import {
   familyOf,
   shouldTranslate,
+  sameFamily,
   isChatCompletionsEndpoint,
   rewriteProxyUrl,
 } from '../../src/translate/index.js';
@@ -55,6 +56,30 @@ describe('shouldTranslate', () => {
   });
 });
 
+describe('sameFamily', () => {
+  it('is true for two providers within the openai family', () => {
+    expect(sameFamily('openai', 'groq')).toBe(true);
+    expect(sameFamily('groq', 'deepseek')).toBe(true);
+    expect(sameFamily('xai', 'openai')).toBe(true);
+  });
+
+  it('is true for a provider compared against itself', () => {
+    expect(sameFamily('anthropic', 'anthropic')).toBe(true);
+    expect(sameFamily('openai', 'openai')).toBe(true);
+  });
+
+  it('is false for cross-family pairs', () => {
+    expect(sameFamily('anthropic', 'openai')).toBe(false);
+    expect(sameFamily('groq', 'anthropic')).toBe(false);
+    expect(sameFamily('gemini', 'cohere')).toBe(false);
+  });
+
+  it('is false when either provider is unknown', () => {
+    expect(sameFamily('not-real', 'openai')).toBe(false);
+    expect(sameFamily('openai', 'not-real')).toBe(false);
+  });
+});
+
 describe('isChatCompletionsEndpoint', () => {
   it('matches the canonical Anthropic path', () => {
     expect(isChatCompletionsEndpoint('anthropic', 'https://api.anthropic.com/v1/messages')).toBe(true);
@@ -78,8 +103,19 @@ describe('rewriteProxyUrl', () => {
   it('produces the destination provider canonical chat URL', () => {
     expect(rewriteProxyUrl('anthropic', 'claude-sonnet-4-6', false))
       .toBe('https://api.anthropic.com/v1/messages');
-    expect(rewriteProxyUrl('openai', 'gpt-5.4', false))
+    expect(rewriteProxyUrl('openai', 'gpt-4o', false))
       .toBe('https://api.openai.com/v1/chat/completions');
+  });
+
+  it('honors chatPath overrides for openai-family providers with non-default paths', () => {
+    expect(rewriteProxyUrl('groq', 'llama-3.3-70b-versatile', false))
+      .toBe('https://api.groq.com/openai/v1/chat/completions');
+    expect(rewriteProxyUrl('fireworks', 'any-model', false))
+      .toBe('https://api.fireworks.ai/inference/v1/chat/completions');
+    expect(rewriteProxyUrl('perplexity', 'sonar', false))
+      .toBe('https://api.perplexity.ai/chat/completions');
+    expect(rewriteProxyUrl('deepseek', 'deepseek-chat', false))
+      .toBe('https://api.deepseek.com/chat/completions');
   });
 
   it('returns null for unknown providers', () => {
