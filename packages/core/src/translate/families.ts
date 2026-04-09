@@ -11,8 +11,8 @@ import { PROVIDERS } from '../providers.js';
  * different families need translation in between.
  *
  * Only families with a defined translator pair are listed. Providers not in
- * either set (gemini, cohere, replicate, huggingface) cannot be the source or
- * destination of a translated request — they still work for pass-through.
+ * either set (gemini, cohere) cannot be the source or destination of a
+ * translated request — they still work for pass-through.
  */
 
 const ANTHROPIC_FAMILY: ReadonlySet<ProviderId> = new Set<ProviderId>([
@@ -27,7 +27,7 @@ const ANTHROPIC_FAMILY: ReadonlySet<ProviderId> = new Set<ProviderId>([
  * against any of them as a destination.
  *
  * Notably absent: gemini (Google's own dialect), cohere (Cohere v2 chat
- * format), replicate (model-specific shapes), huggingface (model-specific).
+ * format).
  */
 const OPENAI_FAMILY: ReadonlySet<ProviderId> = new Set<ProviderId>([
   'openai',

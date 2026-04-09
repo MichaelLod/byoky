@@ -36,14 +36,11 @@ export default defineConfig({
       'https://api.groq.com/*',
       'https://api.together.xyz/*',
       'https://api.fireworks.ai/*',
-      'https://api.replicate.com/*',
       'https://openrouter.ai/*',
-      'https://api-inference.huggingface.co/*',
       'https://*.openai.azure.com/*',
       // OAuth endpoints (narrowed to token exchange paths)
       'https://console.anthropic.com/v1/oauth/*',
       'https://oauth2.googleapis.com/token',
-      'https://huggingface.co/oauth/token',
     ],
     browser_specific_settings: {
       gecko: {

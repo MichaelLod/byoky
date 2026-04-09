@@ -215,8 +215,6 @@ const PROVIDERS: ByokyProvider[] = [
   { id: 'together', name: 'Together AI', api: 'openai-completions', models: EMPTY_MODELS },
   { id: 'fireworks', name: 'Fireworks AI', api: 'openai-completions', models: EMPTY_MODELS },
   { id: 'openrouter', name: 'OpenRouter', api: 'openai-completions', models: EMPTY_MODELS },
-  { id: 'replicate', name: 'Replicate', api: 'openai-completions', models: EMPTY_MODELS },
-  { id: 'huggingface', name: 'Hugging Face', api: 'openai-completions', models: EMPTY_MODELS },
   { id: 'azure_openai', name: 'Azure OpenAI', api: 'openai-completions', models: EMPTY_MODELS },
 ];
 

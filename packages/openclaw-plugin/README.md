@@ -55,8 +55,6 @@ The plugin registers all 15 Byoky providers with OpenClaw:
 | Together AI | `byoky-together` | Set model manually |
 | Fireworks AI | `byoky-fireworks` | Set model manually |
 | OpenRouter | `byoky-openrouter` | Set model manually |
-| Replicate | `byoky-replicate` | Set model manually |
-| Hugging Face | `byoky-huggingface` | Set model manually |
 | Azure OpenAI | `byoky-azure_openai` | Set model manually |
 
 To connect a different provider:

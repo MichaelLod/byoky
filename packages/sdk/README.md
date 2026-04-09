@@ -177,7 +177,7 @@ if (!isExtensionInstalled()) {
 
 ## Supported Providers
 
-Anthropic, OpenAI, Google Gemini, Mistral, xAI, DeepSeek, Cohere, Groq, Perplexity, Together AI, Fireworks AI, OpenRouter, Replicate, Hugging Face, Azure OpenAI.
+Anthropic, OpenAI, Google Gemini, Mistral, xAI, DeepSeek, Cohere, Groq, Perplexity, Together AI, Fireworks AI, OpenRouter, Azure OpenAI.
 
 ## License
 
