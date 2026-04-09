@@ -35,18 +35,22 @@ data class Provider(
             Provider("openai", "OpenAI", "https://api.openai.com", "sparkles"),
             Provider("gemini", "Google Gemini", "https://generativelanguage.googleapis.com", "auto_awesome"),
             Provider("mistral", "Mistral", "https://api.mistral.ai", "air"),
-            Provider("cohere", "Cohere", "https://api.cohere.ai", "chat_bubble"),
+            Provider("cohere", "Cohere", "https://api.cohere.com", "chat_bubble"),
             Provider("xai", "xAI (Grok)", "https://api.x.ai", "bolt"),
             Provider("deepseek", "DeepSeek", "https://api.deepseek.com", "search"),
             Provider("perplexity", "Perplexity", "https://api.perplexity.ai", "help"),
             Provider("groq", "Groq", "https://api.groq.com", "speed"),
             Provider("together", "Together AI", "https://api.together.xyz", "group"),
             Provider("fireworks", "Fireworks AI", "https://api.fireworks.ai", "local_fire_department"),
-            Provider("replicate", "Replicate", "https://api.replicate.com", "content_copy"),
             Provider("openrouter", "OpenRouter", "https://openrouter.ai/api", "route"),
-            Provider("huggingface", "Hugging Face", "https://api-inference.huggingface.co", "sentiment_satisfied"),
-            Provider("azure-openai", "Azure OpenAI", "https://openai.azure.com", "cloud"),
+            Provider("azure_openai", "Azure OpenAI", "https://openai.azure.com", "cloud"),
         )
+
+        /**
+         * Provider IDs that were removed from the registry. Used by WalletStore on
+         * unlock to prune any stored credentials that reference dead providers.
+         */
+        val removedProviderIds = setOf("replicate", "huggingface", "azure-openai")
 
         fun find(id: String): Provider? = all.firstOrNull { it.id == id }
     }

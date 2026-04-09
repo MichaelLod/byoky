@@ -133,6 +133,7 @@ class WalletStore(context: Context) {
         masterPassword = password
         _status.value = WalletStatus.UNLOCKED
         loadCredentials()
+        pruneRemovedProviders()
         loadSessions()
         loadRequestLogs()
         loadGifts()
@@ -461,6 +462,21 @@ class WalletStore(context: Context) {
             )
         }
         _credentials.value = list
+    }
+
+    /**
+     * Drop any stored credentials that reference providers we've removed from
+     * the registry (replicate, huggingface, the legacy "azure-openai" id).
+     * Runs once per unlock; cheap if there's nothing to do.
+     */
+    private fun pruneRemovedProviders() {
+        val stale = _credentials.value.filter { it.providerId in Provider.removedProviderIds }
+        if (stale.isEmpty()) return
+        val editor = prefs.edit()
+        stale.forEach { editor.remove("key_${it.id}") }
+        editor.apply()
+        _credentials.value = _credentials.value.filterNot { it.providerId in Provider.removedProviderIds }
+        saveCredentials()
     }
 
     private fun saveCredentials() {

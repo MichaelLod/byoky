@@ -130,6 +130,7 @@ final class WalletStore: ObservableObject {
 
         status = .unlocked
         try loadCredentials()
+        try pruneRemovedProviders()
         try loadSessions()
         loadRequestLogs()
         loadGifts()
@@ -293,6 +294,19 @@ final class WalletStore: ObservableObject {
     }
 
     // MARK: - Migration
+
+    /// Drop any stored credentials that reference providers we've removed from
+    /// the registry (e.g. replicate, huggingface, the legacy "azure-openai" id).
+    /// Runs once per unlock; cheap if there's nothing to do.
+    private func pruneRemovedProviders() throws {
+        let stale = credentials.filter { Provider.removedProviderIds.contains($0.providerId) }
+        guard !stale.isEmpty else { return }
+        for credential in stale {
+            try? keychain.delete(key: "key_\(credential.id)")
+        }
+        credentials.removeAll { Provider.removedProviderIds.contains($0.providerId) }
+        try saveCredentials()
+    }
 
     private func migrateCredentials(password: String) throws {
         guard let key = masterKey else { return }
