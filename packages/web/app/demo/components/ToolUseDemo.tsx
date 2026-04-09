@@ -102,6 +102,11 @@ const openaiCompatible: Record<string, { url: string; model: string; name: strin
   openrouter:   { url: 'https://openrouter.ai/api/v1/chat/completions',    model: 'anthropic/claude-sonnet-4',     name: 'Claude Sonnet' },
 };
 
+// Static list of providers the tool-use tab knows how to call. The dropdown
+// shows all of them — even when the wallet has no credential — so the user
+// can exercise cross-family routing via the bound group.
+const dropdownProviders: string[] = ['anthropic', ...Object.keys(openaiCompatible)];
+
 interface Props {
   session: ByokySession;
 }
@@ -112,17 +117,11 @@ export function ToolUseDemo({ session }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const availableProviders = Object.entries(session.providers)
-    .filter(([, v]) => v.available)
-    .map(([id]) => id);
-
-  // Providers that support tool use: Anthropic + all OpenAI-compatible
-  const supportedProviders = availableProviders.filter(
-    (id) => id === 'anthropic' || id in openaiCompatible,
-  );
-
+  // Default to anthropic if directly available, else first directly-available,
+  // else just anthropic so the dropdown is populated even with zero credentials.
+  const firstDirect = dropdownProviders.find(id => session.providers[id]?.available === true);
   const [selectedProvider, setSelectedProvider] = useState(
-    supportedProviders.includes('anthropic') ? 'anthropic' : supportedProviders[0] ?? '',
+    session.providers['anthropic']?.available ? 'anthropic' : firstDirect ?? 'anthropic',
   );
 
   const providerLabel = selectedProvider === 'anthropic'
@@ -243,32 +242,27 @@ export function ToolUseDemo({ session }: Props) {
     <div className="demo-panel">
       <div className="demo-header">
         <h3>Tool Use</h3>
-        {supportedProviders.length > 1 ? (
-          <select
-            className="demo-provider-select"
-            value={selectedProvider}
-            onChange={(e) => setSelectedProvider(e.target.value)}
-          >
-            {supportedProviders.map((id) => (
-              <option key={id} value={id}>
-                {id === 'anthropic' ? 'Anthropic (Claude)' : `${openaiCompatible[id]?.name ?? id}`}{session.providers[id]?.gift ? ' (Gift)' : ''}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <span className="demo-provider">via {providerLabel}</span>
-        )}
+        <select
+          className="demo-provider-select"
+          value={selectedProvider}
+          onChange={(e) => setSelectedProvider(e.target.value)}
+        >
+          {dropdownProviders.map((id) => {
+            const meta = session.providers[id];
+            const direct = meta?.available === true;
+            const isGift = meta?.gift;
+            const suffix = isGift ? ' (Gift)' : direct ? '' : ' (via routing)';
+            const label = id === 'anthropic' ? 'Anthropic (Claude)' : openaiCompatible[id]?.name ?? id;
+            return (
+              <option key={id} value={id}>{label}{suffix}</option>
+            );
+          })}
+        </select>
       </div>
       <p className="demo-desc">
         The model calls tools (get_weather, convert_temperature) and gets results back.
         Watch the full agentic loop in real time.
       </p>
-
-      {supportedProviders.length === 0 && (
-        <div className="demo-error">
-          Tool use requires a provider with function calling support. Add a key for Anthropic, OpenAI, Groq, Mistral, DeepSeek, xAI, or others.
-        </div>
-      )}
 
       <div className="demo-samples">
         {prompts.map((text, i) => (
@@ -293,7 +287,7 @@ export function ToolUseDemo({ session }: Props) {
       <button
         className="btn btn-primary"
         onClick={handleRun}
-        disabled={loading || !input.trim() || supportedProviders.length === 0}
+        disabled={loading || !input.trim()}
         style={{ width: 'auto', alignSelf: 'flex-start' }}
       >
         {loading ? 'Running...' : 'Run'}
