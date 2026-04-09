@@ -111,8 +111,9 @@
 }
 
 .demo-app .btn-primary:hover:not(:disabled) {
-  background: var(--teal-light);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.3), 0 0 30px rgba(255, 79, 0, 0.25);
+  background: #a3e635;
+  color: #1a1a2e;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1), 0 0 30px rgba(163, 230, 53, 0.3);
   transform: translateY(-1px);
 }
 
