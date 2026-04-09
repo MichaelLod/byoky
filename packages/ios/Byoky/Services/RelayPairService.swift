@@ -477,7 +477,7 @@ final class RelayPairService: ObservableObject {
             request.httpMethod = method
             request.timeoutInterval = 120
             // Inject stream_options for openai-family providers that need it.
-            let injected = injectStreamUsageOptions(providerId: translation.dstProviderId, body: translatedBody)
+            let injected = injectStreamUsageOptions(providerId: translation.dstProviderId, body: translatedBody) ?? translatedBody
             request.httpBody = injected.data(using: .utf8)
 
             for (key, value) in headers {

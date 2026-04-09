@@ -35,7 +35,7 @@ struct PairView: View {
     }
 
     private var idleSection: some View {
-        Group {
+        SwiftUI.Group {
             Section {
                 VStack(spacing: 16) {
                     Image(systemName: "qrcode.viewfinder")
@@ -97,7 +97,7 @@ struct PairView: View {
     }
 
     private func pairedSection(origin: String) -> some View {
-        Group {
+        SwiftUI.Group {
             Section {
                 VStack(spacing: 16) {
                     Image(systemName: "checkmark.circle.fill")
