@@ -1,4 +1,4 @@
-import type { RequestLogEntry, TokenAllowance } from './types.js';
+import type { RequestLogEntry, TokenAllowance, CapabilitySet } from './types.js';
 import { PROVIDERS } from './providers.js';
 
 /**
@@ -81,6 +81,70 @@ export function buildHeaders(
  * Parse the model name from a request body (JSON).
  */
 const MAX_BODY_PARSE_SIZE = 10_485_760; // 10 MB
+
+/**
+ * Inspect a request body and return the set of advanced capabilities it uses.
+ *
+ * Used by the request logger to record per-request capability fingerprints,
+ * which the popup later aggregates by app to surface drag-time warnings when
+ * a user is about to route an app to a model that lacks one of those
+ * capabilities.
+ *
+ * Inspects the body shape generously: tries both Anthropic and OpenAI shapes
+ * since either dialect may be on the wire (the source-side body is what we
+ * inspect, before any translation).
+ */
+export function detectRequestCapabilities(body?: string): CapabilitySet {
+  const empty: CapabilitySet = {
+    tools: false,
+    vision: false,
+    structuredOutput: false,
+    reasoning: false,
+  };
+  if (!body || body.length > MAX_BODY_PARSE_SIZE) return empty;
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(body) as Record<string, unknown>;
+  } catch {
+    return empty;
+  }
+
+  const out: CapabilitySet = { ...empty };
+
+  // tools[] is the same key in both Anthropic and OpenAI dialects.
+  if (Array.isArray(parsed.tools) && parsed.tools.length > 0) {
+    out.tools = true;
+  }
+
+  // OpenAI structured output: response_format with json_schema (not just json_object).
+  const rf = parsed.response_format as { type?: string } | undefined;
+  if (rf && typeof rf === 'object' && rf.type === 'json_schema') {
+    out.structuredOutput = true;
+  }
+
+  // Anthropic extended thinking is opted-in via the `thinking` field.
+  if (parsed.thinking != null) {
+    out.reasoning = true;
+  }
+
+  // Vision: walk messages[] looking for image/image_url content blocks.
+  if (Array.isArray(parsed.messages)) {
+    outer: for (const msg of parsed.messages) {
+      const content = (msg as { content?: unknown })?.content;
+      if (!Array.isArray(content)) continue;
+      for (const block of content) {
+        if (!block || typeof block !== 'object') continue;
+        const type = (block as { type?: unknown }).type;
+        if (type === 'image' || type === 'image_url') {
+          out.vision = true;
+          break outer;
+        }
+      }
+    }
+  }
+
+  return out;
+}
 
 export function parseModel(body?: string): string | undefined {
   if (!body || body.length > MAX_BODY_PARSE_SIZE) return undefined;
@@ -483,6 +547,46 @@ function toClaudeCodeToolName(name: string, taken: Set<string>): string {
     n++;
   }
   return candidate;
+}
+
+/**
+ * Rewrite tool_use block names in a non-streaming Anthropic Messages JSON
+ * response, translating Claude-Code-style aliases back to the upstream
+ * framework's original names.
+ *
+ * The SSE rewriter (createToolNameSSERewriter) only handles streaming
+ * responses where each `data: <json>\n\n` frame contains one event. When the
+ * caller requests `stream: false`, Anthropic returns the full Messages object
+ * as a single JSON body — no SSE framing. This helper is the JSON-body
+ * counterpart, used by the bridge when Content-Type is application/json.
+ *
+ * Walks the top-level `content[]` array and rewrites any `tool_use` block's
+ * `name` field via the alias→original map. Empty map → identity passthrough.
+ * Unparseable JSON → identity passthrough (the bridge would fail elsewhere).
+ */
+export function rewriteToolNamesInJSONBody(
+  body: string,
+  toolNameMap: Record<string, string>,
+): string {
+  if (Object.keys(toolNameMap).length === 0) return body;
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(body) as Record<string, unknown>;
+  } catch {
+    return body;
+  }
+  const content = parsed.content;
+  if (!Array.isArray(content)) return body;
+  let mutated = false;
+  for (const block of content) {
+    if (!block || typeof block !== 'object') continue;
+    const b = block as { type?: unknown; name?: unknown };
+    if (b.type === 'tool_use' && typeof b.name === 'string' && toolNameMap[b.name]) {
+      (b as { name: string }).name = toolNameMap[b.name];
+      mutated = true;
+    }
+  }
+  return mutated ? JSON.stringify(parsed) : body;
 }
 
 /**
