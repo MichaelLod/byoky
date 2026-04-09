@@ -42,18 +42,21 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     name: 'DeepSeek',
     authMethods: ['api_key'],
     baseUrl: 'https://api.deepseek.com',
+    chatPath: '/chat/completions',
   },
   perplexity: {
     id: 'perplexity',
     name: 'Perplexity',
     authMethods: ['api_key'],
     baseUrl: 'https://api.perplexity.ai',
+    chatPath: '/chat/completions',
   },
   groq: {
     id: 'groq',
     name: 'Groq',
     authMethods: ['api_key'],
     baseUrl: 'https://api.groq.com',
+    chatPath: '/openai/v1/chat/completions',
   },
   together: {
     id: 'together',
@@ -66,6 +69,7 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     name: 'Fireworks AI',
     authMethods: ['api_key'],
     baseUrl: 'https://api.fireworks.ai',
+    chatPath: '/inference/v1/chat/completions',
   },
   openrouter: {
     id: 'openrouter',

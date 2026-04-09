@@ -67,6 +67,24 @@ export function shouldTranslate(
 }
 
 /**
+ * True iff both providers are in a known family AND share the same family.
+ *
+ * Used by the routing resolver to detect *same-family swaps* — two providers
+ * with the same wire format but different endpoints/credentials (e.g. the app
+ * SDK targets Groq, the user's group routes to OpenAI). Same-family swaps
+ * skip translation entirely and only need: URL rewrite, credential swap,
+ * body model substitution.
+ */
+export function sameFamily(
+  srcProviderId: ProviderId,
+  dstProviderId: ProviderId,
+): boolean {
+  const src = familyOf(srcProviderId);
+  if (!src) return false;
+  return src === familyOf(dstProviderId);
+}
+
+/**
  * Check whether a URL targets the canonical chat endpoint for the given
  * family. Translation only handles the chat surface — embeddings, audio,
  * file uploads, etc. cannot be translated and should hard-fail rather than
@@ -97,5 +115,11 @@ export function rewriteProxyUrl(
   const family = familyOf(dstProviderId);
   if (!family || !hasAdapter(family)) return null;
   const base = provider.baseUrl.replace(/\/$/, '');
+  // Providers that diverge from the openai adapter's default chat path
+  // (`/v1/chat/completions`) declare the real path via chatPath — e.g. groq
+  // uses `/openai/v1/chat/completions`, fireworks uses `/inference/v1/...`.
+  if (provider.chatPath) {
+    return `${base}${provider.chatPath}`;
+  }
   return getAdapter(family).buildChatUrl(base, model, stream);
 }

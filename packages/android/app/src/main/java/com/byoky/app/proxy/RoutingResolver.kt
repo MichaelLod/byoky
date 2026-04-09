@@ -26,10 +26,14 @@ object RoutingResolver {
     /**
      * Resolve the routing decision for a request.
      *
-     * Returns null (signaling "no credential available") if neither the
-     * requested provider nor any cross-family destination has a credential.
-     * Returns a decision with `translation == null` for normal pass-through.
-     * Returns a decision with `translation != null` for cross-family routes.
+     * Resolution order (matches the extension's background.ts):
+     *   1. Cross-family translation (group binds to a different family)
+     *   2. Same-family swap (group binds to a different openai-family
+     *      provider with the same wire format)
+     *   3. Direct credential for the provider the SDK called
+     *
+     * Returns null (signaling "no credential available") only when none of
+     * the above yields a usable credential.
      */
     fun resolve(
         requestedProviderId: String,
@@ -38,12 +42,15 @@ object RoutingResolver {
         credentials: List<Credential>,
         engine: TranslationEngine,
     ): RoutingDecision? {
-        // Try cross-family routing first — wins over both gifts and direct
-        // credentials when applicable, matching the extension's resolution order.
+        // 1. Cross-family translation.
         val cross = tryCrossFamily(requestedProviderId, requestedModel, group, credentials, engine)
         if (cross != null) return cross
 
-        // Direct match — credential for the provider the SDK called.
+        // 2. Same-family swap.
+        val swap = trySameFamilySwap(requestedProviderId, group, credentials, engine)
+        if (swap != null) return swap
+
+        // 3. Direct credential match.
         val direct = credentials.firstOrNull { it.providerId == requestedProviderId }
         if (direct != null) return RoutingDecision(direct, translation = null)
 
@@ -82,6 +89,46 @@ object RoutingResolver {
                 srcModel = requestedModel,
                 dstModel = dstModel,
             )
+        )
+    }
+
+    /**
+     * Same-family swap resolution. Two providers in the same family (e.g.
+     * Groq and OpenAI, both in the openai family) speak identical wire
+     * protocols, so "routing" collapses to: swap credentials, rewrite the
+     * destination URL, and optionally override the body's model field.
+     *
+     * Preconditions (all must hold):
+     *   - a group exists
+     *   - the group targets a *different* provider than what the SDK called
+     *   - both providers are in the same family (per the JS bridge)
+     *   - a credential is available for the destination
+     *
+     * Notably, `group.model` is *not* required here — a swap works even
+     * when the group has no model pinned (we just forward the SDK's model).
+     * If the group does pin a model, we pass it along as `swapDstModel`
+     * so the caller can substitute it into the request body.
+     */
+    private fun trySameFamilySwap(
+        requestedProviderId: String,
+        group: Group?,
+        credentials: List<Credential>,
+        engine: TranslationEngine,
+    ): RoutingDecision? {
+        if (group == null) return null
+        if (group.providerId == requestedProviderId) return null
+
+        // Must be same family AND not a no-op.
+        if (!engine.sameFamily(requestedProviderId, group.providerId)) return null
+
+        // Credential preference: pinned first, then any credential for the destination provider.
+        val pinned = group.credentialId?.let { id -> credentials.firstOrNull { it.id == id } }
+        val cred = pinned ?: credentials.firstOrNull { it.providerId == group.providerId } ?: return null
+
+        return RoutingDecision(
+            credential = cred,
+            swapToProviderId = group.providerId,
+            swapDstModel = group.model?.takeIf { it.isNotEmpty() },
         )
     }
 

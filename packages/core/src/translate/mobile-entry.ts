@@ -23,7 +23,12 @@ import {
   translateResponse as _translateResponse,
   createStreamTranslator as _createStreamTranslator,
 } from './index.js';
-import { familyOf, shouldTranslate as _shouldTranslate, rewriteProxyUrl as _rewriteProxyUrl } from './families.js';
+import {
+  familyOf,
+  shouldTranslate as _shouldTranslate,
+  sameFamily as _sameFamily,
+  rewriteProxyUrl as _rewriteProxyUrl,
+} from './families.js';
 import { modelsForProvider, getModel } from '../models.js';
 import type { TranslationContext } from './types.js';
 
@@ -59,6 +64,13 @@ interface MobileBridge {
    * `dstProviderId`. False for same-family pairs and unknown providers.
    */
   shouldTranslate(srcProviderId: string, dstProviderId: string): boolean;
+
+  /**
+   * True iff both providers belong to the same known family — i.e. a
+   * same-family swap is possible. Used by the routing resolver to decide
+   * between the translation path and the (simpler) swap path.
+   */
+  sameFamily(srcProviderId: string, dstProviderId: string): boolean;
 
   /**
    * Build a JSON-encoded TranslationContext for use with translateRequest /
@@ -142,6 +154,9 @@ const bridge: MobileBridge = {
   shouldTranslate(srcProviderId, dstProviderId) {
     return _shouldTranslate(srcProviderId, dstProviderId);
   },
+  sameFamily(srcProviderId, dstProviderId) {
+    return _sameFamily(srcProviderId, dstProviderId);
+  },
   buildTranslationContext(srcProviderId, dstProviderId, srcModel, dstModel, isStreaming, requestId) {
     const srcFamily = familyOf(srcProviderId);
     const dstFamily = familyOf(dstProviderId);
@@ -183,7 +198,7 @@ const bridge: MobileBridge = {
       capabilities: m.capabilities,
     });
   },
-  version: '0.5.0',
+  version: '0.5.1',
 };
 
 (globalThis as Record<string, unknown>).BYOKY_TRANSLATE = bridge;

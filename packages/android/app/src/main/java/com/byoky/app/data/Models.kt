@@ -164,13 +164,29 @@ data class RoutingTranslation(
 )
 
 /**
- * Result of running RoutingResolver on a request. `translation == null` means
- * pass-through (no translation needed); a non-null value means rewrite the
- * upstream URL, swap credentials, and call the JS bridge.
+ * Result of running RoutingResolver on a request. Three mutually exclusive
+ * shapes, collapsed into one data class for ergonomic call sites:
+ *
+ *   1. Pass-through:       translation == null && swapToProviderId == null
+ *   2. Cross-family:       translation != null
+ *   3. Same-family swap:   swapToProviderId != null
+ *
+ * Same-family swaps skip the JS translation bridge entirely — only URL
+ * rewrite, credential swap, and (optionally) body model substitution are
+ * needed, because both providers speak identical wire formats.
  */
 data class RoutingDecision(
     val credential: Credential,
-    val translation: RoutingTranslation?,
+    val translation: RoutingTranslation? = null,
+    /** Destination provider id for a same-family swap; null otherwise. */
+    val swapToProviderId: String? = null,
+    /**
+     * When set, rewrite the outgoing body's `model` field to this value
+     * before forwarding. Used by same-family swaps where the group binds a
+     * specific destination model that should override the SDK's choice.
+     */
+    val swapDstModel: String? = null,
 ) {
     val needsTranslation: Boolean get() = translation != null
+    val needsSwap: Boolean get() = swapToProviderId != null
 }
