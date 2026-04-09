@@ -67,6 +67,12 @@ data class RequestLog(
     val inputTokens: Int? = null,
     val outputTokens: Int? = null,
     val model: String? = null,
+    /** Provider we actually called upstream when cross-family routing kicked in. */
+    val actualProviderId: String? = null,
+    /** Model we actually called upstream when routing changed it. */
+    val actualModel: String? = null,
+    /** Group that routed this request. Mobile uses the default group globally. */
+    val groupId: String? = null,
 )
 
 data class TokenAllowance(
@@ -107,4 +113,65 @@ enum class BridgeStatus {
 
     var port: Int = 0
     var errorMessage: String? = null
+}
+
+/**
+ * Stable id for the always-present default group. Mirrors `DEFAULT_GROUP_ID`
+ * in `packages/core/src/types.ts`. Apps with no explicit binding land here.
+ */
+const val DEFAULT_GROUP_ID = "default"
+
+/**
+ * A logical bucket that an app's requests are routed through. Binding the
+ * group to (provider, credential, model) lets us reroute every app in the
+ * group transparently — and, when the destination is in a different family
+ * than what the app called, drives cross-family translation.
+ *
+ * Mirrors `Group` in `packages/core/src/types.ts`. Mobile groups today are
+ * global routing rules (the proxy doesn't track per-app origin), so the
+ * default group is the only one consulted in the proxy path. Multi-group
+ * support is wired through CRUD for forward compat.
+ */
+data class Group(
+    val id: String,
+    val name: String,
+    val providerId: String,
+    val credentialId: String? = null,
+    val model: String? = null,
+    val createdAt: Long = System.currentTimeMillis(),
+) {
+    companion object {
+        fun makeDefault(providerId: String = "anthropic", credentialId: String? = null) = Group(
+            id = DEFAULT_GROUP_ID,
+            name = "Default",
+            providerId = providerId,
+            credentialId = credentialId,
+            model = null,
+        )
+    }
+}
+
+/**
+ * Cross-family routing context attached to a request when the resolver
+ * decided this request needs translation. Threaded through the proxy path
+ * so the JS bridge knows what to translate to and from. Mirrors
+ * `SessionTranslation` in `packages/core/src/types.ts`.
+ */
+data class RoutingTranslation(
+    val srcProviderId: String,
+    val dstProviderId: String,
+    val srcModel: String,
+    val dstModel: String,
+)
+
+/**
+ * Result of running RoutingResolver on a request. `translation == null` means
+ * pass-through (no translation needed); a non-null value means rewrite the
+ * upstream URL, swap credentials, and call the JS bridge.
+ */
+data class RoutingDecision(
+    val credential: Credential,
+    val translation: RoutingTranslation?,
+) {
+    val needsTranslation: Boolean get() = translation != null
 }

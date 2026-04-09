@@ -177,6 +177,69 @@ class TranslationEngine private constructor(private val appContext: Context) {
     } catch (_: Throwable) { null }
 
     // ──────────────────────────────────────────────────────────────────────
+    // Routing helpers
+    //
+    // Wrappers around bridge functions used by RoutingResolver. The native
+    // side intentionally does not duplicate the family→providers mapping —
+    // it lives in core. These thin wrappers are the only place mobile asks
+    // "is this pair translatable?" and "what's the destination URL?"
+    // ──────────────────────────────────────────────────────────────────────
+
+    /**
+     * True iff a request from `srcProviderId` should be translated to
+     * `dstProviderId`. False on errors / unknown providers — caller treats
+     * false as "no translation, use direct credential lookup".
+     */
+    fun shouldTranslate(srcProviderId: String, dstProviderId: String): Boolean {
+        return try {
+            val expr = "BYOKY_TRANSLATE.shouldTranslate(${jsLiteral(srcProviderId)}, ${jsLiteral(dstProviderId)}) ? '1' : '0'"
+            evalSync(expr) == "1"
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    /**
+     * Build a JSON-encoded TranslationContext for use with translateRequest /
+     * translateResponse / createStreamTranslator. Throws if either provider
+     * is outside a known family — caller is expected to gate on
+     * shouldTranslate first.
+     */
+    fun buildTranslationContext(
+        srcProviderId: String,
+        dstProviderId: String,
+        srcModel: String,
+        dstModel: String,
+        isStreaming: Boolean,
+        requestId: String,
+    ): String {
+        val args = listOf(
+            jsLiteral(srcProviderId),
+            jsLiteral(dstProviderId),
+            jsLiteral(srcModel),
+            jsLiteral(dstModel),
+            if (isStreaming) "true" else "false",
+            jsLiteral(requestId),
+        ).joinToString(", ")
+        return evalSync("BYOKY_TRANSLATE.buildTranslationContext($args)")
+    }
+
+    /**
+     * Rewrite an upstream URL when routing cross-family. Returns null when
+     * the destination has no adapter or can't build a URL.
+     */
+    fun rewriteProxyUrl(dstProviderId: String, model: String, stream: Boolean): String? {
+        return try {
+            val expr =
+                "(function(){var u=BYOKY_TRANSLATE.rewriteProxyUrl(${jsLiteral(dstProviderId)},${jsLiteral(model)},${if (stream) "true" else "false"});return u==null?'':String(u);})()"
+            val result = evalSync(expr)
+            result.ifEmpty { null }
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
     // Internals
     // ──────────────────────────────────────────────────────────────────────
 

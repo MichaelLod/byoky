@@ -14,6 +14,8 @@ final class WalletStore: ObservableObject {
     @Published var giftedCredentials: [GiftedCredential] = []
     @Published var giftPreferences: [String: String] = [:]  // providerId -> giftId
     @Published var tokenAllowances: [TokenAllowance] = []
+    @Published var groups: [Group] = []
+    @Published var appGroups: AppGroups = [:]
     @Published var bridgeStatus: BridgeStatus = .inactive
     @Published var lockoutEndTime: Date?
     @Published var cloudVaultEnabled = false
@@ -33,6 +35,8 @@ final class WalletStore: ObservableObject {
     private let giftedCredentialsKey = "giftedCredentials"
     private let giftPreferencesKey = "giftPreferences"
     private let tokenAllowancesKey = "tokenAllowances"
+    private let groupsKey = "groups"
+    private let appGroupsKey = "appGroups"
 
     private static let vaultURL = "https://vault.byoky.com"
     private var vaultToken: String?
@@ -137,6 +141,9 @@ final class WalletStore: ObservableObject {
         loadGiftedCredentials()
         loadGiftPreferences()
         loadTokenAllowances()
+        loadGroups()
+        loadAppGroups()
+        try ensureDefaultGroup()
         try migrateCredentials(password: password)
         loadCloudVaultState()
         Task { await syncPendingCredentials() }
@@ -156,6 +163,8 @@ final class WalletStore: ObservableObject {
         giftedCredentials = []
         giftPreferences = [:]
         tokenAllowances = []
+        groups = []
+        appGroups = [:]
         status = .locked
         backgroundTime = nil
         AppGroupSync.shared.syncWalletState(isUnlocked: false, providers: [])
@@ -186,6 +195,8 @@ final class WalletStore: ObservableObject {
         try? keychain.delete(key: giftsKey)
         try? keychain.delete(key: giftedCredentialsKey)
         try? keychain.delete(key: tokenAllowancesKey)
+        try? keychain.delete(key: groupsKey)
+        try? keychain.delete(key: appGroupsKey)
         clearCloudVaultState()
 
         // Clear in-memory state
@@ -195,6 +206,8 @@ final class WalletStore: ObservableObject {
         gifts = []
         giftedCredentials = []
         tokenAllowances = []
+        groups = []
+        appGroups = [:]
         bridgeStatus = .inactive
 
         // Reset brute-force state
@@ -459,6 +472,166 @@ final class WalletStore: ObservableObject {
 
     private func saveTokenAllowances() {
         try? keychain.saveCodable(key: tokenAllowancesKey, value: tokenAllowances)
+    }
+
+    // MARK: - Groups
+    //
+    // Groups are routing rules. Mobile uses the default group as a global rule
+    // because the SDK protocol doesn't yet carry per-app origin. The CRUD
+    // surface is full so a future SDK protocol bump can flip on per-app
+    // routing without changing storage shape.
+
+    private func loadGroups() {
+        do {
+            groups = try keychain.loadCodable(key: groupsKey, as: [Group].self)
+        } catch {
+            groups = []
+        }
+    }
+
+    private func saveGroups() throws {
+        try keychain.saveCodable(key: groupsKey, value: groups)
+    }
+
+    private func loadAppGroups() {
+        do {
+            appGroups = try keychain.loadCodable(key: appGroupsKey, as: AppGroups.self)
+        } catch {
+            appGroups = [:]
+        }
+    }
+
+    private func saveAppGroups() throws {
+        try keychain.saveCodable(key: appGroupsKey, value: appGroups)
+    }
+
+    /// Make sure the default group exists. Called once per unlock. If no
+    /// default exists yet, pick a sensible default provider from the user's
+    /// first credential (or fall back to anthropic).
+    private func ensureDefaultGroup() throws {
+        if groups.contains(where: { $0.id == defaultGroupId }) { return }
+        let first = credentials.first
+        let def = Group.makeDefault(
+            providerId: first?.providerId ?? "anthropic",
+            credentialId: first?.id
+        )
+        groups.insert(def, at: 0)
+        try saveGroups()
+    }
+
+    /// Returns the group that should route this origin's requests. Mobile
+    /// today returns the default group for any origin. When per-app routing
+    /// lands, this will look up `appGroups[origin]` and fall back to default.
+    func groupForOrigin(_ origin: String) -> Group? {
+        if let bound = appGroups[origin], let group = groups.first(where: { $0.id == bound }) {
+            return group
+        }
+        return groups.first(where: { $0.id == defaultGroupId })
+    }
+
+    enum GroupError: LocalizedError {
+        case nameInvalid
+        case nameDuplicate
+        case providerInvalid
+        case credentialNotFound
+        case credentialMismatch
+        case notFound
+        case cannotDeleteDefault
+
+        var errorDescription: String? {
+            switch self {
+            case .nameInvalid: return "Group name must be 1–200 characters"
+            case .nameDuplicate: return "A group with this name already exists"
+            case .providerInvalid: return "Invalid provider"
+            case .credentialNotFound: return "Credential not found"
+            case .credentialMismatch: return "Credential does not match provider"
+            case .notFound: return "Group not found"
+            case .cannotDeleteDefault: return "Cannot delete the default group"
+            }
+        }
+    }
+
+    @discardableResult
+    func createGroup(name: String, providerId: String, credentialId: String? = nil, model: String? = nil) throws -> Group {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, trimmed.count <= 200 else { throw GroupError.nameInvalid }
+        guard Provider.find(providerId) != nil else { throw GroupError.providerInvalid }
+        if let credentialId {
+            guard let cred = credentials.first(where: { $0.id == credentialId }) else { throw GroupError.credentialNotFound }
+            guard cred.providerId == providerId else { throw GroupError.credentialMismatch }
+        }
+        if groups.contains(where: { $0.name.lowercased() == trimmed.lowercased() }) {
+            throw GroupError.nameDuplicate
+        }
+        let group = Group(
+            id: UUID().uuidString,
+            name: trimmed,
+            providerId: providerId,
+            credentialId: credentialId,
+            model: model?.trimmingCharacters(in: .whitespaces).nilIfEmpty,
+            createdAt: Date()
+        )
+        groups.append(group)
+        try saveGroups()
+        return group
+    }
+
+    @discardableResult
+    func updateGroup(
+        id: String,
+        name: String? = nil,
+        providerId: String? = nil,
+        credentialId: String?? = nil, // double optional: nil = no change, .some(nil) = unset
+        model: String?? = nil
+    ) throws -> Group {
+        guard let idx = groups.firstIndex(where: { $0.id == id }) else { throw GroupError.notFound }
+        var next = groups[idx]
+
+        if let name {
+            let trimmed = name.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty, trimmed.count <= 200 else { throw GroupError.nameInvalid }
+            if id != defaultGroupId,
+               groups.contains(where: { $0.id != id && $0.name.lowercased() == trimmed.lowercased() }) {
+                throw GroupError.nameDuplicate
+            }
+            next.name = trimmed
+        }
+        if let providerId {
+            guard Provider.find(providerId) != nil else { throw GroupError.providerInvalid }
+            next.providerId = providerId
+            // Provider change invalidates credential pin unless this same patch sets it.
+            if credentialId == nil { next.credentialId = nil }
+        }
+        if case .some(let value) = credentialId {
+            if let value {
+                guard let cred = credentials.first(where: { $0.id == value }) else { throw GroupError.credentialNotFound }
+                guard cred.providerId == next.providerId else { throw GroupError.credentialMismatch }
+                next.credentialId = value
+            } else {
+                next.credentialId = nil
+            }
+        }
+        if case .some(let value) = model {
+            next.model = value?.trimmingCharacters(in: .whitespaces).nilIfEmpty
+        }
+
+        groups[idx] = next
+        try saveGroups()
+        return next
+    }
+
+    func deleteGroup(id: String) throws {
+        guard id != defaultGroupId else { throw GroupError.cannotDeleteDefault }
+        guard groups.contains(where: { $0.id == id }) else { throw GroupError.notFound }
+        groups.removeAll { $0.id == id }
+        try saveGroups()
+        // Reassign any apps that pointed at this group back to the default.
+        var mutated = false
+        for (origin, gid) in appGroups where gid == id {
+            appGroups[origin] = defaultGroupId
+            mutated = true
+        }
+        if mutated { try saveAppGroups() }
     }
 
     // MARK: - Gifts (Sender)
