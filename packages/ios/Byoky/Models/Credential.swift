@@ -24,6 +24,20 @@ struct Credential: Identifiable, Codable {
 
     /// Apply auth headers and body modifications for this credential's auth method.
     static func applyAuth(to request: inout URLRequest, providerId: String, authMethod: AuthMethod, apiKey: String) {
+        // Azure OpenAI uses an `api-key` header, not `Authorization: Bearer`.
+        // This matches the extension behavior in proxy-utils.ts:71. Without
+        // this special case, mobile sends the wrong header and Azure rejects
+        // the request with 401.
+        if providerId == "azure_openai" {
+            request.setValue(apiKey, forHTTPHeaderField: "api-key")
+            return
+        }
+        // Gemini uses `x-goog-api-key`. Both header and ?key= query param
+        // work; the header is safer (query params get sanitized out of logs).
+        if providerId == "gemini" {
+            request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+            return
+        }
         if providerId == "anthropic" && authMethod == .oauth {
             // Setup tokens require CLI-like headers and Bearer auth
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -104,11 +118,22 @@ struct Provider: Identifiable, Hashable {
     static func validateUrl(_ urlString: String, for providerId: String) -> URL? {
         guard let provider = find(providerId),
               let url = URL(string: urlString),
-              let providerUrl = URL(string: provider.baseUrl),
               let urlHost = url.host,
-              let providerHost = providerUrl.host,
-              urlHost == providerHost,
               url.scheme == "https" else {
+            return nil
+        }
+        // Azure OpenAI uses per-resource subdomains like
+        // `mycompany.openai.azure.com`. Strict host equality against the
+        // placeholder baseUrl `openai.azure.com` would reject every real
+        // Azure URL. Allow any host that ends in `.openai.azure.com`.
+        // Mirrors the extension's wildcard `*.openai.azure.com/*` host
+        // pattern in wxt.config.ts:40.
+        if providerId == "azure_openai" {
+            return urlHost.hasSuffix(".openai.azure.com") ? url : nil
+        }
+        guard let providerUrl = URL(string: provider.baseUrl),
+              let providerHost = providerUrl.host,
+              urlHost == providerHost else {
             return nil
         }
         return url

@@ -753,6 +753,19 @@ class ProxyService(
         authMethod: AuthMethod,
         apiKey: String,
     ) {
+        // Azure OpenAI uses an `api-key` header, not Bearer auth. Mirrors the
+        // extension's behavior in proxy-utils.ts:71. Without this special case
+        // mobile sends the wrong header and Azure responds with 401.
+        if (providerId == "azure_openai") {
+            headers["api-key"] = apiKey
+            return
+        }
+        // Gemini uses `x-goog-api-key` (header is safer than ?key= query param,
+        // which gets sanitized out of logs).
+        if (providerId == "gemini") {
+            headers["x-goog-api-key"] = apiKey
+            return
+        }
         if (providerId == "anthropic" && authMethod == AuthMethod.OAUTH) {
             headers["Authorization"] = "Bearer $apiKey"
             headers["User-Agent"] = "claude-cli/2.1.76"
@@ -781,7 +794,11 @@ class ProxyService(
     }
 
     companion object {
-        private val STREAM_USAGE_PROVIDERS = setOf("openai", "azure-openai", "together", "deepseek")
+        // Note: this set tracks providers that need stream_options injection
+        // for token usage in streaming responses. Uses the canonical
+        // azure_openai id (underscore) — the legacy hyphenated form has
+        // been removed from the registry as of Phase 0.
+        private val STREAM_USAGE_PROVIDERS = setOf("openai", "azure_openai", "together", "deepseek")
         val SENSITIVE_RESPONSE_HEADERS = setOf(
             "server", "x-request-id", "x-cloud-trace-context",
             "set-cookie", "set-cookie2", "alt-svc", "via",
