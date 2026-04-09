@@ -428,10 +428,17 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
   if (ir.toolChoice) {
     switch (ir.toolChoice.type) {
       case 'any':
-      case 'tool':
-        // Cohere has no named forced tool — use REQUIRED.
         out.tool_choice = 'REQUIRED';
         break;
+      case 'tool':
+        // Cohere has no named forced tool. Silently downgrading "force tool
+        // X" to REQUIRED (any tool) lets the destination model invoke the
+        // wrong tool, which breaks app logic with no signal to the caller.
+        // Fail loud so the caller knows their constraint can't be honored.
+        throw new TranslationError(
+          'UNSUPPORTED_FEATURE',
+          'Cohere does not support forcing a specific tool by name.',
+        );
       case 'none':
         out.tool_choice = 'NONE';
         break;
