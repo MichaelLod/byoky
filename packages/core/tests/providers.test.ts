@@ -22,20 +22,14 @@ describe('PROVIDERS', () => {
     expect(PROVIDERS.openai.authMethods).toEqual(['api_key']);
   });
 
-  it('gemini supports api_key and oauth', () => {
-    expect(PROVIDERS.gemini.authMethods).toContain('api_key');
-    expect(PROVIDERS.gemini.authMethods).toContain('oauth');
-    expect(PROVIDERS.gemini.oauthConfig).toBeDefined();
-    expect(PROVIDERS.gemini.oauthConfig?.authorizationUrl).toContain('google.com');
-    expect(PROVIDERS.gemini.oauthConfig?.scopes).toContain('https://www.googleapis.com/auth/generative-language');
+  it('gemini supports api_key only', () => {
+    expect(PROVIDERS.gemini.authMethods).toEqual(['api_key']);
+    expect(PROVIDERS.gemini.oauthConfig).toBeUndefined();
   });
 
-  it('huggingface supports api_key and oauth', () => {
-    expect(PROVIDERS.huggingface.authMethods).toContain('api_key');
-    expect(PROVIDERS.huggingface.authMethods).toContain('oauth');
-    expect(PROVIDERS.huggingface.oauthConfig).toBeDefined();
-    expect(PROVIDERS.huggingface.oauthConfig?.authorizationUrl).toContain('huggingface.co');
-    expect(PROVIDERS.huggingface.oauthConfig?.scopes).toContain('inference-api');
+  it('huggingface supports api_key only', () => {
+    expect(PROVIDERS.huggingface.authMethods).toEqual(['api_key']);
+    expect(PROVIDERS.huggingface.oauthConfig).toBeUndefined();
   });
 
   it('all providers have required fields', () => {
