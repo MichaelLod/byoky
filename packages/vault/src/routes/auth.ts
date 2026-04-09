@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import crypto from 'node:crypto';
 import { hashPassword, verifyPassword, deriveKey, checkPasswordStrength } from '@byoky/core';
-import { createUser, getUserByUsername, createSession, deleteSession } from '../db/index.js';
+import { createUser, getUserByUsername, createUserSession, deleteUserSession } from '../db/index.js';
 import { signJwt, hashToken } from '../jwt.js';
 import { cacheKey, evictKey } from '../session-keys.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -53,7 +53,7 @@ auth.post('/signup', async (c) => {
 
   const sessionId = crypto.randomUUID();
   const token = signJwt(user.id, sessionId, SESSION_DURATION_MS);
-  await createSession(user.id, hashToken(token), Date.now() + SESSION_DURATION_MS, sessionId);
+  await createUserSession(user.id, hashToken(token), Date.now() + SESSION_DURATION_MS, sessionId);
 
   cacheKey(user.id, encryptionKey);
 
@@ -89,7 +89,7 @@ auth.post('/login', async (c) => {
 
   const sessionId = crypto.randomUUID();
   const token = signJwt(user.id, sessionId, SESSION_DURATION_MS);
-  await createSession(user.id, hashToken(token), Date.now() + SESSION_DURATION_MS, sessionId);
+  await createUserSession(user.id, hashToken(token), Date.now() + SESSION_DURATION_MS, sessionId);
 
   cacheKey(user.id, encryptionKey);
 
@@ -103,7 +103,7 @@ auth.post('/login', async (c) => {
 auth.post('/logout', authMiddleware, async (c) => {
   const userId = c.get('userId');
   const sessionId = c.get('sessionId');
-  await deleteSession(sessionId);
+  await deleteUserSession(sessionId);
   evictKey(userId);
   return c.json({ ok: true });
 });

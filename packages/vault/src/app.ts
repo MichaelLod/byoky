@@ -4,6 +4,7 @@ import { auth } from './routes/auth.js';
 import { credentials } from './routes/credentials.js';
 import { proxy } from './routes/proxy.js';
 import { connect } from './routes/connect.js';
+import { groups } from './routes/groups.js';
 import { gifts } from './routes/gifts.js';
 import { rateLimitMiddleware } from './middleware/rate-limit.js';
 
@@ -18,7 +19,7 @@ app.use('/*', cors({
     if (/^(chrome|moz|safari-web)-extension:\/\//.test(origin)) return origin;
     return undefined;
   },
-  allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization'],
   maxAge: 86400,
 }));
@@ -29,6 +30,7 @@ app.route('/auth', auth);
 app.route('/credentials', credentials);
 app.route('/proxy', proxy);
 app.route('/connect', connect);
+app.route('/groups', groups);
 app.route('/gifts', gifts);
 
 app.onError((err, c) => {
