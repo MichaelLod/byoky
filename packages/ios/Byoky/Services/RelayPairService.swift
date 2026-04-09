@@ -586,19 +586,44 @@ final class RelayPairService: ObservableObject {
                 return
             }
 
-            // 2xx + streaming: per-line stream translator. .lines is UTF-8-safe.
+            // 2xx + streaming: feed raw bytes through the SSE stream
+            // translator. We CANNOT use bytes.lines here because Apple's
+            // AsyncLineSequence collapses adjacent line terminators —
+            // i.e. it does not yield empty strings for the blank lines
+            // that separate SSE events. The OpenAI / Anthropic stream
+            // parsers in @byoky/core split frames on `\n\n`, so dropping
+            // the blank lines means the parser never sees a frame
+            // terminator and silently swallows the entire stream.
+            //
+            // Instead: accumulate raw bytes into a small buffer, flush
+            // the buffer to the JS bridge on every newline or every 4KB.
+            // The parser reassembles `\n\n` framing from the resulting
+            // chunks and emits events as soon as a frame is complete.
+            //
             // 2xx + non-streaming: accumulate full body, translateResponse once.
             if isStreaming {
                 let streamHandle = try engine.createStreamTranslator(contextJson: ctxJson)
                 var releasedExplicitly = false
+                var buffer = Data()
                 defer {
                     if !releasedExplicitly {
                         engine.releaseStreamTranslator(handle: streamHandle)
                     }
                 }
-                for try await line in bytes.lines {
-                    let chunk = line + "\n"
-                    let translated = try engine.processStreamChunk(handle: streamHandle, chunk: chunk)
+                for try await byte in bytes {
+                    buffer.append(byte)
+                    if buffer.count >= 4096 || byte == 0x0A {
+                        if let s = String(data: buffer, encoding: .utf8) {
+                            let translated = try engine.processStreamChunk(handle: streamHandle, chunk: s)
+                            if !translated.isEmpty {
+                                sendJSON(["type": "relay:response:chunk", "requestId": requestId, "chunk": translated])
+                            }
+                        }
+                        buffer.removeAll(keepingCapacity: true)
+                    }
+                }
+                if !buffer.isEmpty, let s = String(data: buffer, encoding: .utf8) {
+                    let translated = try engine.processStreamChunk(handle: streamHandle, chunk: s)
                     if !translated.isEmpty {
                         sendJSON(["type": "relay:response:chunk", "requestId": requestId, "chunk": translated])
                     }
