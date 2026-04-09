@@ -18,7 +18,7 @@ import {
   type ProxyRequestOut,
   type ProxyResponseMessage,
 } from './proxy-server.js';
-import { createToolNameSSERewriter } from '@byoky/core';
+import { createToolNameSSERewriter, rewriteToolNamesInJSONBody } from '@byoky/core';
 
 interface BridgeRequest {
   type: 'proxy';
@@ -240,6 +240,8 @@ async function handleStreamingFetch(
 
   // SSE rewriter that translates Claude-Code aliases back to the framework's
   // original tool names. Identity passthrough when the map is empty.
+  // Used only for streaming responses (text/event-stream); non-streaming
+  // JSON responses go through the JSON-body rewriter at the end.
   const rewriter = createToolNameSSERewriter(toolNameMap);
 
   const controller = new AbortController();
@@ -258,18 +260,36 @@ async function handleStreamingFetch(
 
     send({ type: `${prefix}_meta`, requestId, status: res.status, headers: resHeaders });
 
+    // Decide between streaming and one-shot rewrite paths based on the
+    // response Content-Type. Streaming SSE → use the SSE rewriter chunk by
+    // chunk. JSON body → buffer everything, then rewrite once at the end.
+    const isStreaming = (resHeaders['content-type'] ?? '').includes('text/event-stream');
+
     if (res.body) {
       const reader = (res.body as ReadableStream<Uint8Array>).getReader();
       const decoder = new TextDecoder();
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const raw = decoder.decode(value, { stream: true });
-        const rewritten = rewriter.process(raw);
-        if (rewritten) send({ type: `${prefix}_chunk`, requestId, chunk: rewritten });
+      if (isStreaming) {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const raw = decoder.decode(value, { stream: true });
+          const rewritten = rewriter.process(raw);
+          if (rewritten) send({ type: `${prefix}_chunk`, requestId, chunk: rewritten });
+        }
+        const tail = rewriter.flush();
+        if (tail) send({ type: `${prefix}_chunk`, requestId, chunk: tail });
+      } else {
+        // Non-streaming JSON: buffer the whole body, JSON-rewrite tool
+        // names, send as one chunk.
+        let buffered = '';
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffered += decoder.decode(value, { stream: true });
+        }
+        const rewritten = rewriteToolNamesInJSONBody(buffered, toolNameMap);
+        send({ type: `${prefix}_chunk`, requestId, chunk: rewritten });
       }
-      const tail = rewriter.flush();
-      if (tail) send({ type: `${prefix}_chunk`, requestId, chunk: tail });
     }
 
     send({ type: `${prefix}_done`, requestId });
