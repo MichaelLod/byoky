@@ -3,7 +3,7 @@ import { app } from './app.js';
 import { initDb } from './db/index.js';
 import { startIdleSweep } from './session-keys.js';
 import { startRateLimitCleanup } from './middleware/rate-limit.js';
-import { deleteExpiredSessions } from './db/index.js';
+import { deleteExpiredUserSessions, deleteExpiredAppSessions } from './db/index.js';
 import { startGiftRelay } from './gift-relay.js';
 
 const PORT = parseInt(process.env.PORT ?? '3100', 10);
@@ -18,9 +18,10 @@ initDb(DATABASE_URL);
 startIdleSweep();
 startRateLimitCleanup();
 
-// Clean up expired sessions periodically
+// Clean up expired sessions periodically (both user and app sessions).
 const sessionCleanupInterval = setInterval(() => {
-  deleteExpiredSessions();
+  deleteExpiredUserSessions();
+  deleteExpiredAppSessions();
 }, 60 * 60 * 1000); // every hour
 sessionCleanupInterval.unref();
 

@@ -2,7 +2,17 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { eq, and, lt, lte, desc, sql } from 'drizzle-orm';
 import crypto from 'node:crypto';
-import { users, credentials, sessions, requestLog, gifts } from './schema.js';
+import {
+  users,
+  credentials,
+  userSessions,
+  appSessions,
+  groups,
+  appGroups,
+  requestLog,
+  gifts,
+} from './schema.js';
+import { DEFAULT_GROUP_ID } from '@byoky/core';
 
 export type Db = ReturnType<typeof drizzle>;
 
@@ -19,7 +29,7 @@ export function getDb(): Db {
   return db;
 }
 
-// --- Users ---
+// ─── Users ────────────────────────────────────────────────────────────────
 
 export async function createUser(username: string, passwordHash: string, encryptionSalt: string) {
   const id = crypto.randomUUID();
@@ -27,6 +37,20 @@ export async function createUser(username: string, passwordHash: string, encrypt
   const [row] = await getDb().insert(users).values({
     id, username, passwordHash, encryptionSalt, createdAt: now,
   }).returning();
+
+  // Every new user gets an empty default group. The default group binds
+  // nothing — it exists so that the resolver can fall through to direct
+  // credential lookup until the user creates a real binding.
+  await getDb().insert(groups).values({
+    userId: id,
+    id: DEFAULT_GROUP_ID,
+    name: 'Default',
+    providerId: '',
+    credentialId: null,
+    model: null,
+    createdAt: now,
+  });
+
   return row;
 }
 
@@ -40,35 +64,76 @@ export async function getUserById(id: string) {
   return row;
 }
 
-// --- Sessions ---
+// ─── User sessions ────────────────────────────────────────────────────────
 
-export async function createSession(userId: string, tokenHash: string, expiresAt: number, id?: string) {
+export async function createUserSession(userId: string, tokenHash: string, expiresAt: number, id?: string) {
   id = id ?? crypto.randomUUID();
   const now = Date.now();
-  const [row] = await getDb().insert(sessions).values({
+  const [row] = await getDb().insert(userSessions).values({
     id, userId, tokenHash, createdAt: now, expiresAt, lastActivityAt: now,
   }).returning();
   return row;
 }
 
-export async function getSessionByTokenHash(tokenHash: string) {
-  const [row] = await getDb().select().from(sessions).where(eq(sessions.tokenHash, tokenHash)).limit(1);
+export async function getUserSessionByTokenHash(tokenHash: string) {
+  const [row] = await getDb().select().from(userSessions).where(eq(userSessions.tokenHash, tokenHash)).limit(1);
   return row;
 }
 
-export async function updateSessionActivity(sessionId: string) {
-  await getDb().update(sessions).set({ lastActivityAt: Date.now() }).where(eq(sessions.id, sessionId));
+export async function updateUserSessionActivity(sessionId: string) {
+  await getDb().update(userSessions).set({ lastActivityAt: Date.now() }).where(eq(userSessions.id, sessionId));
 }
 
-export async function deleteSession(sessionId: string) {
-  await getDb().delete(sessions).where(eq(sessions.id, sessionId));
+export async function deleteUserSession(sessionId: string) {
+  await getDb().delete(userSessions).where(eq(userSessions.id, sessionId));
 }
 
-export async function deleteExpiredSessions() {
-  await getDb().delete(sessions).where(lt(sessions.expiresAt, Date.now()));
+export async function deleteExpiredUserSessions() {
+  await getDb().delete(userSessions).where(lt(userSessions.expiresAt, Date.now()));
 }
 
-// --- Credentials ---
+// ─── App sessions ─────────────────────────────────────────────────────────
+
+export async function createAppSession(
+  userId: string,
+  userSessionId: string,
+  origin: string,
+  tokenHash: string,
+  expiresAt: number,
+) {
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  const [row] = await getDb().insert(appSessions).values({
+    id,
+    userId,
+    userSessionId,
+    origin,
+    tokenHash,
+    createdAt: now,
+    expiresAt,
+    lastActivityAt: now,
+  }).returning();
+  return row;
+}
+
+export async function getAppSessionByTokenHash(tokenHash: string) {
+  const [row] = await getDb().select().from(appSessions).where(eq(appSessions.tokenHash, tokenHash)).limit(1);
+  return row;
+}
+
+export async function updateAppSessionActivity(sessionId: string) {
+  await getDb().update(appSessions).set({ lastActivityAt: Date.now() }).where(eq(appSessions.id, sessionId));
+}
+
+export async function deleteAppSession(sessionId: string) {
+  await getDb().delete(appSessions).where(eq(appSessions.id, sessionId));
+}
+
+export async function deleteExpiredAppSessions() {
+  await getDb().delete(appSessions).where(lt(appSessions.expiresAt, Date.now()));
+}
+
+// ─── Credentials ──────────────────────────────────────────────────────────
 
 export async function createCredential(
   userId: string,
@@ -114,30 +179,145 @@ export async function updateCredentialLastUsed(credentialId: string) {
   await getDb().update(credentials).set({ lastUsedAt: Date.now() }).where(eq(credentials.id, credentialId));
 }
 
-// --- Request log ---
+// ─── Groups ───────────────────────────────────────────────────────────────
 
-export async function logRequest(
+export async function listGroupsByUser(userId: string) {
+  return getDb().select().from(groups).where(eq(groups.userId, userId));
+}
+
+export async function getGroupByUserAndId(userId: string, groupId: string) {
+  const [row] = await getDb().select().from(groups)
+    .where(and(eq(groups.userId, userId), eq(groups.id, groupId)))
+    .limit(1);
+  return row;
+}
+
+export async function upsertGroup(
   userId: string,
-  sessionId: string,
+  groupId: string,
+  name: string,
   providerId: string,
-  url: string,
-  method: string,
-  status: number,
-  inputTokens?: number,
-  outputTokens?: number,
-  model?: string,
+  credentialId: string | null,
+  model: string | null,
 ) {
+  const now = Date.now();
+  const existing = await getGroupByUserAndId(userId, groupId);
+  if (existing) {
+    const [row] = await getDb().update(groups)
+      .set({ name, providerId, credentialId, model })
+      .where(and(eq(groups.userId, userId), eq(groups.id, groupId)))
+      .returning();
+    return row;
+  }
+  const [row] = await getDb().insert(groups).values({
+    userId,
+    id: groupId,
+    name,
+    providerId,
+    credentialId,
+    model,
+    createdAt: now,
+  }).returning();
+  return row;
+}
+
+export async function deleteGroup(userId: string, groupId: string) {
+  if (groupId === DEFAULT_GROUP_ID) return false;
+  const result = await getDb().delete(groups)
+    .where(and(eq(groups.userId, userId), eq(groups.id, groupId)));
+  // Any apps that pointed at this group fall back to the default group on
+  // next lookup (because their app_groups row is also gone).
+  await getDb().delete(appGroups)
+    .where(and(eq(appGroups.userId, userId), eq(appGroups.groupId, groupId)));
+  return result.length > 0;
+}
+
+// ─── App → group bindings ────────────────────────────────────────────────
+
+export async function listAppGroupsByUser(userId: string) {
+  return getDb().select().from(appGroups).where(eq(appGroups.userId, userId));
+}
+
+export async function getAppGroup(userId: string, origin: string) {
+  const [row] = await getDb().select().from(appGroups)
+    .where(and(eq(appGroups.userId, userId), eq(appGroups.origin, origin)))
+    .limit(1);
+  return row;
+}
+
+export async function setAppGroup(userId: string, origin: string, groupId: string) {
+  const now = Date.now();
+  const existing = await getAppGroup(userId, origin);
+  if (existing) {
+    const [row] = await getDb().update(appGroups)
+      .set({ groupId })
+      .where(and(eq(appGroups.userId, userId), eq(appGroups.origin, origin)))
+      .returning();
+    return row;
+  }
+  const [row] = await getDb().insert(appGroups).values({
+    userId, origin, groupId, createdAt: now,
+  }).returning();
+  return row;
+}
+
+export async function deleteAppGroup(userId: string, origin: string) {
+  await getDb().delete(appGroups)
+    .where(and(eq(appGroups.userId, userId), eq(appGroups.origin, origin)));
+}
+
+/**
+ * Resolve the group an app belongs to. If the app has no explicit binding,
+ * the user's default group is returned. The default group always exists
+ * (created at user signup), so this returns undefined only when the user
+ * row is gone — i.e. shouldn't happen in normal flow.
+ */
+export async function resolveGroupForOrigin(userId: string, origin: string) {
+  const binding = await getAppGroup(userId, origin);
+  const groupId = binding?.groupId ?? DEFAULT_GROUP_ID;
+  return getGroupByUserAndId(userId, groupId);
+}
+
+// ─── Request log ──────────────────────────────────────────────────────────
+
+export interface RequestLogInput {
+  userId: string;
+  appSessionId?: string;
+  appOrigin?: string;
+  providerId: string;
+  actualProviderId?: string;
+  model?: string;
+  actualModel?: string;
+  groupId?: string;
+  url: string;
+  method: string;
+  status: number;
+  inputTokens?: number;
+  outputTokens?: number;
+}
+
+export async function logRequest(input: RequestLogInput) {
   const id = crypto.randomUUID();
   await getDb().insert(requestLog).values({
-    id, userId, sessionId, providerId, url, method, status,
+    id,
+    userId: input.userId,
+    appSessionId: input.appSessionId ?? null,
+    appOrigin: input.appOrigin ?? null,
+    providerId: input.providerId,
+    actualProviderId: input.actualProviderId ?? null,
+    model: input.model ?? null,
+    actualModel: input.actualModel ?? null,
+    groupId: input.groupId ?? null,
+    url: input.url,
+    method: input.method,
+    status: input.status,
     timestamp: Date.now(),
-    inputTokens: inputTokens ?? null,
-    outputTokens: outputTokens ?? null,
-    model: model ?? null,
+    inputTokens: input.inputTokens ?? null,
+    outputTokens: input.outputTokens ?? null,
   });
 }
 
-// --- Gifts ---
+// ─── Gifts ────────────────────────────────────────────────────────────────
 
 export async function createGift(
   id: string,
