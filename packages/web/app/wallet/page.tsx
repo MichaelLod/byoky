@@ -49,120 +49,23 @@ export default function WalletDashboard() {
 
   if (!isLoggedIn) {
     return (
-      <div style={{ maxWidth: '860px', margin: '0 auto', padding: '48px 24px' }}>
-        <div style={{ display: 'flex', gap: '40px', alignItems: 'flex-start' }}>
-          {/* Left: login */}
-          <div style={{ flex: 1 }}>
-            <div style={{
-              background: 'var(--bg-card)', border: '1px solid var(--border)',
-              borderRadius: '20px', padding: '36px',
-              boxShadow: '0 4px 24px rgba(0,0,0,0.06)',
-            }}>
-              <h1 style={{ fontSize: '24px', fontWeight: 700, marginBottom: '6px' }}>Your AI Wallet</h1>
-              <p style={{ color: 'var(--text-secondary)', marginBottom: '24px', fontSize: '14px', lineHeight: 1.6 }}>
-                One balance. Every AI app. Choose how you want to manage it.
-              </p>
+      <div style={{ maxWidth: '900px', margin: '0 auto', padding: '48px 24px' }}>
+        <h1 style={{ fontSize: '32px', fontWeight: 800, textAlign: 'center', marginBottom: '6px', letterSpacing: '-0.02em' }}>
+          Stop overpaying for AI.
+        </h1>
+        <p style={{ color: 'var(--text-secondary)', textAlign: 'center', fontSize: '16px', maxWidth: '520px', margin: '0 auto 40px' }}>
+          One wallet replaces 5 subscriptions. Pay only for what you use — across every AI app. Save 50% or more.
+        </p>
 
-              {/* Three options */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '24px' }}>
-                <a
-                  href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon"
-                  target="_blank" rel="noopener noreferrer"
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: '12px',
-                    padding: '14px 18px', borderRadius: '12px',
-                    background: 'var(--bg-surface)', border: '1px solid var(--border)',
-                    textDecoration: 'none', color: 'var(--text)',
-                    transition: 'border-color 0.2s',
-                  }}
-                >
-                  <svg width="24" height="24" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" style={{ flexShrink: 0 }}>
-                    <circle cx="24" cy="24" r="22" fill="#fff" stroke="#ddd" strokeWidth="1"/>
-                    <path d="M24 8a16 16 0 0 1 13.86 8H24v0z" fill="#EA4335"/>
-                    <path d="M37.86 16A16 16 0 0 1 24 40l6.93-12z" fill="#FBBC05"/>
-                    <path d="M24 40A16 16 0 0 1 10.14 16l6.93 12z" fill="#34A853"/>
-                    <path d="M10.14 16A16 16 0 0 1 24 8v8z" fill="#4285F4"/>
-                    <circle cx="24" cy="24" r="6" fill="#fff"/>
-                    <circle cx="24" cy="24" r="4" fill="#4285F4"/>
-                  </svg>
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: '14px' }}>Chrome Extension</div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Full local encryption. Keys never leave your device.</div>
-                  </div>
-                </a>
-
-                <a
-                  href="https://addons.mozilla.org/en-US/firefox/addon/byoky/"
-                  target="_blank" rel="noopener noreferrer"
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: '12px',
-                    padding: '14px 18px', borderRadius: '12px',
-                    background: 'var(--bg-surface)', border: '1px solid var(--border)',
-                    textDecoration: 'none', color: 'var(--text)',
-                    transition: 'border-color 0.2s',
-                  }}
-                >
-                  <svg width="24" height="24" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" style={{ flexShrink: 0 }}>
-                    <circle cx="24" cy="24" r="22" fill="#fff" stroke="#ddd" strokeWidth="1"/>
-                    <path d="M38 18c-1-4-4-7-8-9 2 2 3 5 3 7 0 3-2 6-5 7-4 1-7-1-7-1s1 5 6 6c4 1 8-1 10-4 1-1 1-3 1-6z" fill="#FF4F00"/>
-                    <path d="M14 30c-1-3 0-6 2-9 1-2 3-3 5-4-2 2-3 4-2 7 0 2 2 4 4 5 3 1 6 0 7-2-1 3-4 6-8 6-3 1-6-1-8-3z" fill="#FF9500"/>
-                  </svg>
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: '14px' }}>Firefox Extension</div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Same security. Works on Firefox.</div>
-                  </div>
-                </a>
-
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: '12px',
-                  padding: '14px 18px', borderRadius: '12px',
-                  background: 'var(--bg-surface)', border: '2px solid var(--teal)',
-                  color: 'var(--text)',
-                }}>
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                    <circle cx="12" cy="12" r="10"/>
-                    <path d="M2 12h20"/>
-                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
-                  </svg>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600, fontSize: '14px' }}>Online Wallet <span style={{ fontSize: '11px', color: 'var(--teal)', fontWeight: 700, marginLeft: '6px' }}>No install</span></div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Works in any browser. No extension needed.</div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Divider */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: '4px 0 20px' }}>
-                <div style={{ flex: 1, height: '1px', background: 'var(--border)' }} />
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>already have an account?</span>
-                <div style={{ flex: 1, height: '1px', background: 'var(--border)' }} />
-              </div>
-
-              {error && <div style={{ color: '#ef4444', fontSize: '13px', marginBottom: '12px', padding: '8px 12px', background: 'rgba(239,68,68,0.06)', borderRadius: '8px' }}>{error}</div>}
-
-              <form onSubmit={async (e) => {
-                e.preventDefault();
-                const ok = await login(username, password);
-                if (!ok) setError('Invalid credentials');
-              }}>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <input type="text" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
-                  <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
-                </div>
-                <button type="submit" style={{ ...btnStyle, marginTop: '10px', width: '100%' }}>Sign In</button>
-              </form>
-            </div>
-          </div>
-
-          {/* Right: mockup */}
+        <div style={{ display: 'flex', gap: '32px', alignItems: 'stretch' }}>
+          {/* Left: mockup */}
           <div style={{
             width: '280px', flexShrink: 0,
             background: 'var(--bg-surface)', border: '1px solid var(--border)',
             borderRadius: '16px', padding: '16px',
-            pointerEvents: 'none', opacity: 0.9,
+            pointerEvents: 'none',
             boxShadow: '0 4px 24px rgba(0,0,0,0.06)',
           }}>
-            {/* Balance */}
             <div style={{
               background: 'linear-gradient(135deg, var(--teal) 0%, #e91e90 100%)',
               borderRadius: '12px', padding: '16px', color: '#fff', marginBottom: '12px',
@@ -171,8 +74,6 @@ export default function WalletDashboard() {
               <div style={{ fontSize: '24px', fontWeight: 700 }}>$12.50</div>
               <div style={{ fontSize: '10px', opacity: 0.7, marginTop: '2px' }}>Auto top-up enabled</div>
             </div>
-
-            {/* Apps */}
             <div style={{ fontSize: '9px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '4px' }}>Connected Apps</div>
             {['DemoChat', 'CodeAssist', 'WriterAI'].map((app) => (
               <div key={app} style={{
@@ -191,8 +92,6 @@ export default function WalletDashboard() {
                 <span style={{ fontSize: '9px', color: 'var(--text-muted)' }}>$0.03</span>
               </div>
             ))}
-
-            {/* Transactions */}
             <div style={{ fontSize: '9px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: '10px', marginBottom: '4px' }}>Recent</div>
             {[
               { label: 'Gemini', amount: '-$0.01', color: 'var(--text)' },
@@ -207,6 +106,51 @@ export default function WalletDashboard() {
                 <span style={{ fontSize: '11px', fontWeight: 600, color: txn.color }}>{txn.amount}</span>
               </div>
             ))}
+          </div>
+
+          {/* Right: get started */}
+          <div style={{ flex: 1 }}>
+            <div style={{
+              background: 'var(--bg-card)', border: '1px solid var(--border)',
+              borderRadius: '20px', padding: '32px',
+              boxShadow: '0 4px 24px rgba(0,0,0,0.06)',
+              height: '100%', display: 'flex', flexDirection: 'column',
+            }}>
+              <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '6px' }}>Get your wallet</h2>
+              <p style={{ color: 'var(--text-secondary)', marginBottom: '20px', fontSize: '13px', lineHeight: 1.6 }}>
+                Choose how you want to manage your AI spending.
+              </p>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px', flex: 1 }}>
+                <a href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon" target="_blank" rel="noopener noreferrer" style={optionStyle}>
+                  <svg width="20" height="20" viewBox="0 0 48 48" style={{ flexShrink: 0 }}><circle cx="24" cy="24" r="22" fill="#fff" stroke="#ddd" strokeWidth="1"/><path d="M24 8a16 16 0 0 1 13.86 8H24v0z" fill="#EA4335"/><path d="M37.86 16A16 16 0 0 1 24 40l6.93-12z" fill="#FBBC05"/><path d="M24 40A16 16 0 0 1 10.14 16l6.93 12z" fill="#34A853"/><path d="M10.14 16A16 16 0 0 1 24 8v8z" fill="#4285F4"/><circle cx="24" cy="24" r="6" fill="#fff"/><circle cx="24" cy="24" r="4" fill="#4285F4"/></svg>
+                  <div><div style={{ fontWeight: 600, fontSize: '13px' }}>Chrome Extension</div><div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Local encryption. Keys on your device.</div></div>
+                </a>
+                <a href="https://addons.mozilla.org/en-US/firefox/addon/byoky/" target="_blank" rel="noopener noreferrer" style={optionStyle}>
+                  <svg width="20" height="20" viewBox="0 0 48 48" style={{ flexShrink: 0 }}><circle cx="24" cy="24" r="22" fill="#fff" stroke="#ddd" strokeWidth="1"/><path d="M38 18c-1-4-4-7-8-9 2 2 3 5 3 7 0 3-2 6-5 7-4 1-7-1-7-1s1 5 6 6c4 1 8-1 10-4 1-1 1-3 1-6z" fill="#FF4F00"/><path d="M14 30c-1-3 0-6 2-9 1-2 3-3 5-4-2 2-3 4-2 7 0 2 2 4 4 5 3 1 6 0 7-2-1 3-4 6-8 6-3 1-6-1-8-3z" fill="#FF9500"/></svg>
+                  <div><div style={{ fontWeight: 600, fontSize: '13px' }}>Firefox Extension</div><div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Same security. Works on Firefox.</div></div>
+                </a>
+                <a href="/wallet/connect" style={{ ...optionStyle, border: '2px solid var(--teal)' }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                  <div style={{ flex: 1 }}><div style={{ fontWeight: 600, fontSize: '13px' }}>Online Wallet <span style={{ fontSize: '10px', color: 'var(--teal)', fontWeight: 700, marginLeft: '4px' }}>No install</span></div><div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Any browser. No extension needed.</div></div>
+                </a>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: '0 0 16px' }}>
+                <div style={{ flex: 1, height: '1px', background: 'var(--border)' }} />
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>already have an account?</span>
+                <div style={{ flex: 1, height: '1px', background: 'var(--border)' }} />
+              </div>
+
+              {error && <div style={{ color: '#ef4444', fontSize: '13px', marginBottom: '10px', padding: '8px 12px', background: 'rgba(239,68,68,0.06)', borderRadius: '8px' }}>{error}</div>}
+              <form onSubmit={async (e) => { e.preventDefault(); const ok = await login(username, password); if (!ok) setError('Invalid credentials'); }}>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input type="text" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+                  <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+                </div>
+                <button type="submit" style={{ ...btnStyle, marginTop: '10px', width: '100%' }}>Sign In</button>
+              </form>
+            </div>
           </div>
         </div>
       </div>
@@ -285,6 +229,13 @@ const btnStyle: React.CSSProperties = {
 const cardStyle: React.CSSProperties = {
   background: 'var(--bg-surface)', border: '1px solid var(--border)',
   borderRadius: '10px', padding: '12px 16px', marginBottom: '6px',
+};
+const optionStyle: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', gap: '12px',
+  padding: '12px 14px', borderRadius: '10px',
+  background: 'var(--bg-surface)', border: '1px solid var(--border)',
+  textDecoration: 'none', color: 'var(--text)',
+  transition: 'border-color 0.2s',
 };
 const sectionTitle: React.CSSProperties = {
   fontSize: '13px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase',
