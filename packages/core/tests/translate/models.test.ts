@@ -36,8 +36,9 @@ describe('MODELS', () => {
   });
 
   it('every entry declares its family', () => {
+    const valid = new Set(['anthropic', 'openai', 'gemini', 'cohere']);
     for (const m of MODELS) {
-      expect(m.family === 'anthropic' || m.family === 'openai').toBe(true);
+      expect(valid.has(m.family)).toBe(true);
     }
   });
 });
@@ -46,11 +47,15 @@ describe('DEFAULT_MODELS', () => {
   it('points at registered models for each family', () => {
     expect(getModel(DEFAULT_MODELS.anthropic)).toBeDefined();
     expect(getModel(DEFAULT_MODELS.openai)).toBeDefined();
+    expect(getModel(DEFAULT_MODELS.gemini)).toBeDefined();
+    expect(getModel(DEFAULT_MODELS.cohere)).toBeDefined();
   });
 
   it('default per family belongs to that family', () => {
     expect(getModel(DEFAULT_MODELS.anthropic)?.family).toBe('anthropic');
     expect(getModel(DEFAULT_MODELS.openai)?.family).toBe('openai');
+    expect(getModel(DEFAULT_MODELS.gemini)?.family).toBe('gemini');
+    expect(getModel(DEFAULT_MODELS.cohere)?.family).toBe('cohere');
   });
 });
 
@@ -80,9 +85,12 @@ describe('modelsForProvider', () => {
 
 describe('modelsForFamily', () => {
   it('groups by family across providers', () => {
-    const anthFamily = modelsForFamily('anthropic');
-    const openaiFamily = modelsForFamily('openai');
-    expect(anthFamily.length + openaiFamily.length).toBe(MODELS.length);
+    const total =
+      modelsForFamily('anthropic').length +
+      modelsForFamily('openai').length +
+      modelsForFamily('gemini').length +
+      modelsForFamily('cohere').length;
+    expect(total).toBe(MODELS.length);
   });
 });
 

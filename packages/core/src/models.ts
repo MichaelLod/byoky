@@ -28,7 +28,7 @@ export type { CapabilitySet } from './types.js';
  * family can substitute for each other without translation; two models in
  * different families require the translation layer to bridge them.
  */
-export type ModelFamily = 'anthropic' | 'openai';
+export type ModelFamily = 'anthropic' | 'openai' | 'gemini' | 'cohere';
 
 export interface ModelCapabilities {
   /** Function/tool calling. */
@@ -142,6 +142,43 @@ export const MODELS: ModelEntry[] = [
       vision: false,
     },
   },
+
+  // ─── Google Gemini ───────────────────────────────────────────────────────
+  {
+    id: 'gemini-2.5-pro',
+    providerId: 'gemini',
+    family: 'gemini',
+    displayName: 'Gemini 2.5 Pro',
+    contextWindow: 1_000_000,
+    maxOutput: 65_536,
+    capabilities: FRONTIER,
+  },
+  {
+    id: 'gemini-2.5-flash',
+    providerId: 'gemini',
+    family: 'gemini',
+    displayName: 'Gemini 2.5 Flash',
+    contextWindow: 1_000_000,
+    maxOutput: 65_536,
+    capabilities: FRONTIER,
+  },
+
+  // ─── Cohere ──────────────────────────────────────────────────────────────
+  {
+    id: 'command-a-03-2025',
+    providerId: 'cohere',
+    family: 'cohere',
+    displayName: 'Command A',
+    contextWindow: 256_000,
+    maxOutput: 8_000,
+    capabilities: {
+      ...FRONTIER,
+      // Command A does not accept image inputs at the chat API surface.
+      vision: false,
+      // No structured output constraint equivalent to OpenAI json_schema.
+      structuredOutput: false,
+    },
+  },
 ];
 
 /**
@@ -154,6 +191,8 @@ export const MODELS: ModelEntry[] = [
 export const DEFAULT_MODELS: Record<ModelFamily, string> = {
   anthropic: 'claude-sonnet-4-6',
   openai: 'gpt-5.4',
+  gemini: 'gemini-2.5-pro',
+  cohere: 'command-a-03-2025',
 };
 
 /**

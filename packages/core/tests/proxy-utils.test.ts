@@ -110,13 +110,14 @@ describe('buildHeaders', () => {
     expect(headers['x-api-key']).toBeUndefined();
   });
 
-  it('sets Bearer token for Gemini', () => {
+  it('sets x-goog-api-key for Gemini (not Bearer — Google AI Studio rejects Authorization)', () => {
     const headers = buildHeaders('gemini', {}, 'AIza-key');
-    expect(headers['authorization']).toBe('Bearer AIza-key');
+    expect(headers['x-goog-api-key']).toBe('AIza-key');
+    expect(headers['authorization']).toBeUndefined();
   });
 
   const bearerProviders = [
-    'openai', 'gemini', 'mistral', 'cohere', 'xai', 'deepseek',
+    'openai', 'mistral', 'cohere', 'xai', 'deepseek',
     'perplexity', 'groq', 'together', 'fireworks', 'openrouter',
   ];
 

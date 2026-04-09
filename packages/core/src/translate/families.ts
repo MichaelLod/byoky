@@ -1,6 +1,7 @@
 import type { ProviderId } from '../types.js';
 import type { ModelFamily } from '../models.js';
 import { PROVIDERS } from '../providers.js';
+import { getAdapter, hasAdapter } from './adapter.js';
 
 /**
  * Translation family detection.
@@ -10,46 +11,39 @@ import { PROVIDERS } from '../providers.js';
  * substitute for each other byte-for-byte (modulo auth). Two providers in
  * different families need translation in between.
  *
- * Only families with a defined translator pair are listed. Providers not in
- * either set (gemini, cohere) cannot be the source or destination of a
- * translated request — they still work for pass-through.
+ * All four supported families are wired in: anthropic, openai, gemini, cohere.
+ * Adding a new provider that speaks an existing dialect is a one-line change
+ * to the relevant provider set; adding a new family requires writing an
+ * adapter (see adapter.ts) and appending it here.
  */
 
-const ANTHROPIC_FAMILY: ReadonlySet<ProviderId> = new Set<ProviderId>([
-  'anthropic',
-]);
-
-/**
- * The OpenAI Chat Completions family.
- *
- * These providers all expose a `/v1/chat/completions`-compatible endpoint
- * with OpenAI-style request/response shapes. The OpenAI translator works
- * against any of them as a destination.
- *
- * Notably absent: gemini (Google's own dialect), cohere (Cohere v2 chat
- * format).
- */
-const OPENAI_FAMILY: ReadonlySet<ProviderId> = new Set<ProviderId>([
-  'openai',
-  'azure_openai',
-  'groq',
-  'together',
-  'deepseek',
-  'xai',
-  'perplexity',
-  'fireworks',
-  'openrouter',
-  'mistral',
-]);
+const FAMILY_PROVIDERS: Record<ModelFamily, ReadonlySet<ProviderId>> = {
+  anthropic: new Set<ProviderId>(['anthropic']),
+  openai: new Set<ProviderId>([
+    'openai',
+    'azure_openai',
+    'groq',
+    'together',
+    'deepseek',
+    'xai',
+    'perplexity',
+    'fireworks',
+    'openrouter',
+    'mistral',
+  ]),
+  gemini: new Set<ProviderId>(['gemini']),
+  cohere: new Set<ProviderId>(['cohere']),
+};
 
 /**
  * Map a provider id to its translation family. Returns null for providers
- * outside the translatable families — translation cannot be performed when
- * either side returns null.
+ * outside any known family — translation cannot be performed when either
+ * side returns null.
  */
 export function familyOf(providerId: ProviderId): ModelFamily | null {
-  if (ANTHROPIC_FAMILY.has(providerId)) return 'anthropic';
-  if (OPENAI_FAMILY.has(providerId)) return 'openai';
+  for (const family of Object.keys(FAMILY_PROVIDERS) as ModelFamily[]) {
+    if (FAMILY_PROVIDERS[family].has(providerId)) return family;
+  }
   return null;
 }
 
@@ -58,35 +52,18 @@ export function familyOf(providerId: ProviderId): ModelFamily | null {
  *
  * True iff:
  *  - both providers are in known families
+ *  - both families have registered adapters
  *  - the families differ (same family = pass-through)
- *
- * Used at proxy entry to decide whether to invoke the translation pipeline
- * or run the existing identity path.
  */
 export function shouldTranslate(
   srcProviderId: ProviderId,
   dstProviderId: ProviderId,
 ): boolean {
   const src = familyOf(srcProviderId);
-  if (!src) return false;
+  if (!src || !hasAdapter(src)) return false;
   const dst = familyOf(dstProviderId);
-  if (!dst) return false;
+  if (!dst || !hasAdapter(dst)) return false;
   return src !== dst;
-}
-
-/**
- * The canonical chat-completions endpoint path for a family. Used to rewrite
- * the request URL when routing across families: the SDK's URL targets the
- * source family's endpoint, but the actual fetch needs to hit the destination
- * family's endpoint.
- */
-export function canonicalChatEndpoint(family: ModelFamily): string {
-  switch (family) {
-    case 'anthropic':
-      return '/v1/messages';
-    case 'openai':
-      return '/v1/chat/completions';
-  }
 }
 
 /**
@@ -96,29 +73,29 @@ export function canonicalChatEndpoint(family: ModelFamily): string {
  * silently route somewhere broken.
  */
 export function isChatCompletionsEndpoint(family: ModelFamily, url: string): boolean {
-  try {
-    const u = new URL(url);
-    return u.pathname === canonicalChatEndpoint(family) || u.pathname.endsWith(canonicalChatEndpoint(family));
-  } catch {
-    return false;
-  }
+  if (!hasAdapter(family)) return false;
+  return getAdapter(family).matchesChatEndpoint(url);
 }
 
 /**
  * Rewrite a proxy request URL to target the destination provider's canonical
  * chat endpoint. The source URL was constructed by the SDK against the source
- * provider's base URL; we replace the origin and path with the destination's
- * equivalents.
+ * provider's base URL; we replace it with a destination URL built from the
+ * destination adapter's own rules (which for gemini means putting the model
+ * in the path and switching the method on `stream`).
  *
- * Returns null if the destination provider isn't registered or its family
- * has no canonical chat endpoint — translation should not proceed in either
- * case.
+ * Returns null if the destination provider isn't registered, its family has
+ * no adapter, or the family can't build a URL for the given inputs.
  */
-export function rewriteProxyUrl(dstProviderId: ProviderId): string | null {
+export function rewriteProxyUrl(
+  dstProviderId: ProviderId,
+  model: string,
+  stream: boolean,
+): string | null {
   const provider = PROVIDERS[dstProviderId];
   if (!provider) return null;
   const family = familyOf(dstProviderId);
-  if (!family) return null;
+  if (!family || !hasAdapter(family)) return null;
   const base = provider.baseUrl.replace(/\/$/, '');
-  return `${base}${canonicalChatEndpoint(family)}`;
+  return getAdapter(family).buildChatUrl(base, model, stream);
 }
