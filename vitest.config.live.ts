@@ -18,6 +18,6 @@ export default defineConfig({
     testTimeout: 30_000,
     // Loads `.env.local` at repo root into process.env so tests can read
     // OPENAI_API_KEY / ANTHROPIC_API_KEY without requiring shell exports.
-    setupFiles: ['./vitest.setup.live.ts'],
+    setupFiles: ['./vitest.setup.env.ts'],
   },
 });
