@@ -342,6 +342,49 @@ final class WalletStore: ObservableObject {
 
     // MARK: - Sessions
 
+    /// Default expiry window for relay-paired sessions. The pair stays in the
+    /// Apps screen for 30 days even if the WebSocket drops between requests —
+    /// the user revokes explicitly when they're done. Lines up with how the
+    /// extension treats sessions as durable trust records, not live sockets.
+    private static let relaySessionTTL: TimeInterval = 30 * 24 * 60 * 60
+
+    /// Upsert a session for `appOrigin`. Used by `RelayPairService` when a
+    /// pair handshake completes — durable record so the app shows up in the
+    /// Apps screen across reconnects. Re-pairing the same origin updates the
+    /// providers list and resets the expiry, but keeps the existing session id.
+    @discardableResult
+    func upsertSession(appOrigin: String, providers: [String]) throws -> Session {
+        let now = Date()
+        let expiresAt = now.addingTimeInterval(Self.relaySessionTTL)
+
+        if let idx = sessions.firstIndex(where: { $0.appOrigin == appOrigin }) {
+            let existing = sessions[idx]
+            let updated = Session(
+                id: existing.id,
+                appOrigin: appOrigin,
+                sessionKey: existing.sessionKey,
+                providers: providers,
+                createdAt: existing.createdAt,
+                expiresAt: expiresAt
+            )
+            sessions[idx] = updated
+            try saveSessions()
+            return updated
+        }
+
+        let session = Session(
+            id: UUID().uuidString,
+            appOrigin: appOrigin,
+            sessionKey: UUID().uuidString,
+            providers: providers,
+            createdAt: now,
+            expiresAt: expiresAt
+        )
+        sessions.append(session)
+        try saveSessions()
+        return session
+    }
+
     func revokeSession(_ session: Session) throws {
         sessions.removeAll { $0.id == session.id }
         try saveSessions()
@@ -487,10 +530,11 @@ final class WalletStore: ObservableObject {
 
     // MARK: - Groups
     //
-    // Groups are routing rules. Mobile uses the default group as a global rule
-    // because the SDK protocol doesn't yet carry per-app origin. The CRUD
-    // surface is full so a future SDK protocol bump can flip on per-app
-    // routing without changing storage shape.
+    // Groups are routing rules. Each app origin is bound to a group via
+    // `appGroups` (origin → groupId), set from the Apps screen. The default
+    // group catches anything not explicitly bound. RoutingResolver looks up
+    // `groupForOrigin(_:)` on every request to decide credentials + (when
+    // cross-family) translation destination.
 
     private func loadGroups() {
         do {
@@ -530,14 +574,25 @@ final class WalletStore: ObservableObject {
         try saveGroups()
     }
 
-    /// Returns the group that should route this origin's requests. Mobile
-    /// today returns the default group for any origin. When per-app routing
-    /// lands, this will look up `appGroups[origin]` and fall back to default.
+    /// Returns the group that should route this origin's requests — the user's
+    /// per-app binding from `appGroups`, falling back to the default group when
+    /// no binding exists. Used by both `ProxyService` and `RelayPairService`
+    /// before each upstream call.
     func groupForOrigin(_ origin: String) -> Group? {
         if let bound = appGroups[origin], let group = groups.first(where: { $0.id == bound }) {
             return group
         }
         return groups.first(where: { $0.id == defaultGroupId })
+    }
+
+    /// Bind an app origin to a group. Called from the Apps screen when the
+    /// user assigns a connected app to a group (the per-app routing knob).
+    /// `RoutingResolver` picks this up on the next request via
+    /// `groupForOrigin(_:)` — no other plumbing required.
+    func setAppGroup(origin: String, groupId: String) throws {
+        guard groups.contains(where: { $0.id == groupId }) else { throw GroupError.notFound }
+        appGroups[origin] = groupId
+        try saveAppGroups()
     }
 
     enum GroupError: LocalizedError {

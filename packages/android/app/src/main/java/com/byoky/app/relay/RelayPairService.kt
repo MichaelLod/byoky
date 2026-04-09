@@ -170,6 +170,18 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
             "relay:pair:ack" -> {
                 pairedOrigin = payload.appOrigin
                 _status.value = PairStatus.PAIRED.also { it.appOrigin = payload.appOrigin }
+                // Durable Session record so the app shows up in the Apps screen
+                // across reconnects. The user revokes explicitly when done.
+                // Providers list reflects what the wallet can currently serve;
+                // gifted credentials are advertised separately via sendPairHello.
+                wallet?.let { w ->
+                    val providerIds = w.credentials.value.map { it.providerId }.distinct()
+                    try {
+                        w.upsertSession(payload.appOrigin, providerIds)
+                    } catch (_: Exception) {
+                        // Best-effort: pairing still succeeds even if persistence fails
+                    }
+                }
             }
             "relay:request" -> handleRelayRequest(json)
             "relay:peer:status" -> {

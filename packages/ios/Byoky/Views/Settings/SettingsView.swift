@@ -7,13 +7,11 @@ struct SettingsView: View {
     @State private var showCloudVaultRelogin = false
 
     @State private var debugSelfTestReport: String?
-    @State private var showRoutingEditor = false
 
     var body: some View {
         NavigationStack {
             List {
                 safariExtensionSection
-                routingSection
                 cloudVaultSection
                 securitySection
                 #if DEBUG
@@ -22,10 +20,6 @@ struct SettingsView: View {
                 aboutSection
             }
             .navigationTitle("Settings")
-            .sheet(isPresented: $showRoutingEditor) {
-                GroupEditorSheet()
-                    .environmentObject(wallet)
-            }
             .sheet(isPresented: $showSafariGuide) {
                 SafariExtensionGuide()
             }
@@ -130,52 +124,6 @@ struct SettingsView: View {
             Text("Safari Extension")
         } footer: {
             Text("The Safari extension lets websites connect to your wallet. You need to enable it once in Safari settings.")
-        }
-    }
-
-    private var routingSection: some View {
-        Section {
-            Button {
-                showRoutingEditor = true
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "arrow.triangle.branch")
-                        .font(.system(size: 20))
-                        .foregroundStyle(Theme.accent)
-                        .frame(width: 32)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Cross-family routing")
-                            .font(.body.weight(.medium))
-                            .foregroundStyle(.primary)
-                        if let group = wallet.groups.first(where: { $0.id == defaultGroupId }) {
-                            let provider = Provider.find(group.providerId)?.name ?? group.providerId
-                            if let model = group.model, !model.isEmpty {
-                                Text("Routing to: \(provider) · \(model)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            } else {
-                                Text("Pass-through (no model configured)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        } else {
-                            Text("Tap to configure")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-        } header: {
-            Text("Routing")
-        } footer: {
-            Text("When an app requests a different provider family, route the call through this destination instead. Same-family requests always pass through unchanged.")
         }
     }
 
@@ -623,158 +571,3 @@ struct CloudVaultReloginView: View {
     }
 }
 
-/// Edit the default group's destination provider + model. Mobile uses the
-/// default group as a global routing rule (no per-app origin yet), so this
-/// sheet is the single point of control for cross-family translation. The
-/// data model supports multi-group editing for forward compat, but only
-/// the default is exposed in the UI today.
-struct GroupEditorSheet: View {
-    @EnvironmentObject var wallet: WalletStore
-    @Environment(\.dismiss) var dismiss
-
-    @State private var providerId: String = "anthropic"
-    @State private var model: String = ""
-    @State private var error: String?
-    @State private var suggestedModels: [(id: String, displayName: String)] = []
-    @State private var selectedModelInfo: String?
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    Picker("Destination provider", selection: $providerId) {
-                        ForEach(Provider.all, id: \.id) { provider in
-                            Text(provider.name).tag(provider.id)
-                        }
-                    }
-                    .onChange(of: providerId) { _, newValue in
-                        loadSuggestedModels(for: newValue)
-                    }
-
-                    TextField("Destination model (e.g. gpt-4o)", text: $model)
-                        .autocapitalization(.none)
-                        .disableAutocorrection(true)
-                        .onChange(of: model) { _, newValue in
-                            updateModelInfo(for: newValue)
-                        }
-
-                    if !suggestedModels.isEmpty {
-                        ForEach(suggestedModels, id: \.id) { entry in
-                            Button {
-                                model = entry.id
-                                updateModelInfo(for: entry.id)
-                            } label: {
-                                HStack {
-                                    Text(entry.displayName)
-                                        .font(.callout)
-                                        .foregroundStyle(.primary)
-                                    Spacer()
-                                    Text(entry.id)
-                                        .font(.caption.monospaced())
-                                        .foregroundStyle(.tertiary)
-                                }
-                            }
-                        }
-                    }
-                } header: {
-                    Text("Default group")
-                } footer: {
-                    if let info = selectedModelInfo {
-                        Text(info).font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        Text("All requests from apps in a different provider family will be routed here. Same-family requests pass through unchanged. Leave model empty to disable routing.")
-                    }
-                }
-
-                if let error {
-                    Section {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
-                }
-
-                Section {
-                    Button("Save") {
-                        save()
-                    }
-                    .disabled(providerId.isEmpty)
-
-                    if !model.isEmpty {
-                        Button("Disable routing", role: .destructive) {
-                            model = ""
-                            save()
-                        }
-                    }
-                }
-            }
-            .navigationTitle("Routing")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-            }
-            .onAppear {
-                if let group = wallet.groups.first(where: { $0.id == defaultGroupId }) {
-                    providerId = group.providerId
-                    model = group.model ?? ""
-                }
-                loadSuggestedModels(for: providerId)
-                if !model.isEmpty { updateModelInfo(for: model) }
-            }
-        }
-    }
-
-    /// Pull the @byoky/core registry's known models for this provider, via
-    /// the JS bridge. Empty list means the registry has no entries — the
-    /// user can still type a custom model name.
-    private func loadSuggestedModels(for provider: String) {
-        let json = TranslationEngine.shared.getModelsForProvider(provider)
-        guard let data = json.data(using: .utf8),
-              let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
-            suggestedModels = []
-            return
-        }
-        suggestedModels = arr.compactMap { entry in
-            guard let id = entry["id"] as? String,
-                  let displayName = entry["displayName"] as? String else { return nil }
-            return (id: id, displayName: displayName)
-        }
-    }
-
-    /// Look up the chosen model in the registry and produce a one-line
-    /// capability summary for the footer. Empty when the model isn't in
-    /// the registry — that's fine, the user can still type custom names.
-    private func updateModelInfo(for modelId: String) {
-        guard let json = TranslationEngine.shared.describeModel(modelId),
-              let data = json.data(using: .utf8),
-              let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let caps = parsed["capabilities"] as? [String: Any] else {
-            selectedModelInfo = nil
-            return
-        }
-        var bits: [String] = []
-        if caps["tools"] as? Bool == true { bits.append("tools") }
-        if caps["vision"] as? Bool == true { bits.append("vision") }
-        if caps["structuredOutput"] as? Bool == true { bits.append("JSON schema") }
-        if caps["reasoning"] as? Bool == true { bits.append("reasoning") }
-        let context = parsed["contextWindow"] as? Int ?? 0
-        let display = parsed["displayName"] as? String ?? modelId
-        let contextK = context >= 1000 ? "\(context / 1000)K" : "\(context)"
-        selectedModelInfo = "\(display): \(contextK) ctx · " + bits.joined(separator: " · ")
-    }
-
-    private func save() {
-        do {
-            try wallet.updateGroup(
-                id: defaultGroupId,
-                providerId: providerId,
-                model: .some(model.isEmpty ? nil : model)
-            )
-            dismiss()
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
-}

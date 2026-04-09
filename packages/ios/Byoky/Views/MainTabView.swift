@@ -23,9 +23,9 @@ struct MainTabView: View {
                     Label("Usage", systemImage: "chart.bar")
                 }
 
-            SessionsView()
+            AppsView()
                 .tabItem {
-                    Label("Sessions", systemImage: "link")
+                    Label("Apps", systemImage: "square.stack.3d.up")
                 }
         }
         .tint(Theme.accent)
