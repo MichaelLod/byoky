@@ -177,9 +177,7 @@ export function startProxyServer(config: ProxyConfig): Server {
       groq: 'https://api.groq.com',
       together: 'https://api.together.xyz',
       fireworks: 'https://api.fireworks.ai',
-      replicate: 'https://api.replicate.com',
       openrouter: 'https://openrouter.ai/api',
-      huggingface: 'https://api-inference.huggingface.co',
       azure_openai: 'https://YOUR_RESOURCE.openai.azure.com',
     };
 

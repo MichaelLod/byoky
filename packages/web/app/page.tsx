@@ -554,8 +554,6 @@ function Providers() {
     { name: 'Together AI', type: 'API Key', cls: 'together', letter: 'T' },
     { name: 'Fireworks AI', type: 'API Key', cls: 'fireworks', letter: 'F' },
     { name: 'OpenRouter', type: 'API Key', cls: 'openrouter', letter: 'O' },
-    { name: 'Hugging Face', type: 'API Key + OAuth', cls: 'huggingface', letter: 'H' },
-    { name: 'Replicate', type: 'API Key', cls: 'replicate', letter: 'R' },
     { name: 'Azure OpenAI', type: 'API Key', cls: 'azure', letter: 'A' },
   ];
 

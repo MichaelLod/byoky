@@ -58,7 +58,7 @@ curl http://127.0.0.1:19280/anthropic/v1/messages \
 
 ## Supported Providers
 
-Anthropic, OpenAI, Google Gemini, Mistral, Cohere, xAI, DeepSeek, Perplexity, Groq, Together AI, Fireworks AI, Replicate, OpenRouter, Hugging Face, Azure OpenAI.
+Anthropic, OpenAI, Google Gemini, Mistral, Cohere, xAI, DeepSeek, Perplexity, Groq, Together AI, Fireworks AI, OpenRouter, Azure OpenAI.
 
 ## License
 

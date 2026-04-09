@@ -261,13 +261,11 @@ No environment variables. No secrets management. No leaked `.env` files. Your ke
 | Groq | ✓ | — | Available |
 | Together AI | ✓ | — | Available |
 | Fireworks AI | ✓ | — | Available |
-| Replicate | ✓ | — | Available |
 | OpenRouter | ✓ | — | Available |
-| Hugging Face | ✓ | HF OAuth | Available |
 | Azure OpenAI | ✓ | — | Available |
 | *Custom* | ✓ | — | Extensible |
 
-> **OAuth**: Sign in with your Google or Hugging Face account — no API key needed. **Setup Token**: Use your Claude Pro/Max subscription via `claude setup-token`. API keys use pay-per-use billing from the provider console.
+> **Setup Token**: Use your Claude Pro/Max subscription via `claude setup-token`. API keys use pay-per-use billing from the provider console.
 
 ## Architecture
 

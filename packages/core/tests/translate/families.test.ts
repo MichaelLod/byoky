@@ -21,8 +21,6 @@ describe('familyOf', () => {
   it('returns null for providers outside known families', () => {
     expect(familyOf('gemini')).toBeNull();
     expect(familyOf('cohere')).toBeNull();
-    expect(familyOf('replicate')).toBeNull();
-    expect(familyOf('huggingface')).toBeNull();
     expect(familyOf('not-a-real-provider')).toBeNull();
   });
 });
@@ -44,7 +42,7 @@ describe('shouldTranslate', () => {
   it('is false when either side is outside the supported families', () => {
     expect(shouldTranslate('anthropic', 'gemini')).toBe(false);
     expect(shouldTranslate('gemini', 'openai')).toBe(false);
-    expect(shouldTranslate('cohere', 'replicate')).toBe(false);
+    expect(shouldTranslate('cohere', 'gemini')).toBe(false);
   });
 });
 

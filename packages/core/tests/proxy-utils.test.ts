@@ -117,8 +117,7 @@ describe('buildHeaders', () => {
 
   const bearerProviders = [
     'openai', 'gemini', 'mistral', 'cohere', 'xai', 'deepseek',
-    'perplexity', 'groq', 'together', 'fireworks', 'replicate',
-    'openrouter', 'huggingface',
+    'perplexity', 'groq', 'together', 'fireworks', 'openrouter',
   ];
 
   for (const provider of bearerProviders) {
