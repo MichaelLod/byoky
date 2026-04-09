@@ -58,6 +58,10 @@ export function DemoApp() {
           <h1 className="logo">Byoky <span className="logo-sub">demo</span></h1>
           <p className="header-desc">Example app showing Byoky wallet integration</p>
         </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto', marginRight: '16px' }}>
+          <span style={{ fontSize: '13px', color: 'var(--text-secondary)', padding: '6px 12px', borderRadius: '8px', background: 'var(--bg-elevated)', fontWeight: 600 }}>BYOK Demo</span>
+          <a href="/demo/pay" style={{ fontSize: '13px', color: 'var(--text-muted)', padding: '6px 12px', borderRadius: '8px', textDecoration: 'none', border: '1px solid var(--border)' }}>Pay Button Demo</a>
+        </div>
         <div className="header-right">
           {session ? (
             <div className="connected">

@@ -138,6 +138,10 @@ export function PayDemo() {
           <span style={{ fontSize: '11px', color: 'var(--text-muted)', background: 'var(--bg-elevated)', padding: '2px 8px', borderRadius: '4px' }}>
             Powered by Byoky
           </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '12px' }}>
+            <a href="/demo" style={{ fontSize: '12px', color: 'var(--text-muted)', padding: '4px 10px', borderRadius: '6px', textDecoration: 'none', border: '1px solid var(--border)' }}>BYOK Demo</a>
+            <span style={{ fontSize: '12px', color: 'var(--text-secondary)', padding: '4px 10px', borderRadius: '6px', background: 'var(--bg-elevated)', fontWeight: 600 }}>Pay Button</span>
+          </div>
         </div>
         {connected && (
           <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>

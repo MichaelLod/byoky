@@ -5,7 +5,7 @@ import { useRef, useState, useEffect } from 'react';
 
 const links = [
   { href: '/', label: 'Home' },
-  { href: '/demo/pay', label: 'Demo' },
+  { href: '/demo', label: 'Demo' },
   { href: '/developer', label: 'Developers' },
   { href: '/marketplace', label: 'Apps' },
   { href: '/wallet', label: 'Wallet' },
@@ -92,7 +92,7 @@ export function NavBar() {
               {link.label}
             </a>
           ))}
-          <a href="/demo/pay" style={{
+          <a href="/demo" style={{
             padding: '8px 16px', borderRadius: '8px',
             background: 'var(--teal)', color: '#fff',
             textDecoration: 'none', fontWeight: 600, fontSize: '13px',
