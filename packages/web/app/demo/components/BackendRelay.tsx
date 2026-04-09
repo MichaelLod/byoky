@@ -9,6 +9,11 @@ const PROVIDER_NAMES: Record<string, string> = {
   deepseek: 'DeepSeek', groq: 'Groq', perplexity: 'Perplexity',
 };
 
+// Static list of providers the backend-relay tab knows how to call. The
+// dropdown shows all of them — even when the wallet has no credential — so
+// the user can exercise cross-family routing via the bound group.
+const dropdownProviders: string[] = Object.keys(PROVIDER_NAMES);
+
 interface LogEntry {
   id: number;
   from: 'client' | 'server';
@@ -29,10 +34,6 @@ export function BackendRelay({ session }: Props) {
   const [error, setError] = useState('');
   const [provider, setProvider] = useState('anthropic');
   const counter = useRef(0);
-
-  const availableProviders = Object.entries(session.providers)
-    .filter(([, v]) => v.available)
-    .map(([id]) => id);
 
   async function run() {
     setRunning(true);
@@ -205,11 +206,15 @@ export function BackendRelay({ session }: Props) {
           value={provider}
           onChange={(e) => setProvider(e.target.value)}
         >
-          {availableProviders.map((id) => (
-            <option key={id} value={id}>
-              {PROVIDER_NAMES[id] ?? id}{session.providers[id]?.gift ? ' (Gift)' : ''}
-            </option>
-          ))}
+          {dropdownProviders.map((id) => {
+            const meta = session.providers[id];
+            const direct = meta?.available === true;
+            const isGift = meta?.gift;
+            const suffix = isGift ? ' (Gift)' : direct ? '' : ' (via routing)';
+            return (
+              <option key={id} value={id}>{PROVIDER_NAMES[id] ?? id}{suffix}</option>
+            );
+          })}
         </select>
       </div>
 

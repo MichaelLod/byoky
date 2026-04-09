@@ -27,6 +27,13 @@ const openaiCompatible: Record<string, { url: string; model: string; name: strin
 
 const visionProviders = new Set(['anthropic', 'openai', 'gemini']);
 
+// Static list of providers the chat tab knows how to call. The dropdown shows
+// all of them — even when the wallet has no credential for a given provider —
+// so the user can exercise cross-family routing (e.g. select OpenAI when only
+// an Anthropic credential is in the wallet, and let the wallet translate the
+// request via the bound group's destination).
+const dropdownProviders: string[] = ['anthropic', 'gemini', ...Object.keys(openaiCompatible)];
+
 const suggestedPrompts = [
   'Explain how API keys work in 3 sentences',
   'Write a TypeScript function that reverses a string',
@@ -168,17 +175,16 @@ export function Chat({ session }: Props) {
   const [attachedImage, setAttachedImage] = useState<{ file: File; preview: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const availableProviders = Object.entries(session.providers)
-    .filter(([, v]) => v.available)
-    .map(([id]) => id);
-
   const supportsVision = visionProviders.has(selectedProvider);
 
   useEffect(() => {
-    if (availableProviders.length > 0 && !selectedProvider) {
-      setSelectedProvider(availableProviders[0]);
-    }
-  }, [availableProviders, selectedProvider]);
+    if (selectedProvider) return;
+    // Prefer a directly-available provider as the default; fall back to the
+    // first in the list (so the dropdown is still populated even with zero
+    // credentials, and the user can pair the wallet first then send).
+    const firstDirect = dropdownProviders.find(id => session.providers[id]?.available === true);
+    setSelectedProvider(firstDirect ?? dropdownProviders[0]);
+  }, [session.providers, selectedProvider]);
 
 
   function handleAttach() { fileInputRef.current?.click(); }
@@ -386,11 +392,17 @@ export function Chat({ session }: Props) {
         <div className="provider-select">
           <label>Provider:</label>
           <select value={selectedProvider} onChange={e => setSelectedProvider(e.target.value)}>
-            {availableProviders.map(id => (
-              <option key={id} value={id}>
-                {getProviderLabel(id)}{session.providers[id]?.gift ? ' (Gift)' : ''}
-              </option>
-            ))}
+            {dropdownProviders.map(id => {
+              const meta = session.providers[id];
+              const direct = meta?.available === true;
+              const isGift = meta?.gift;
+              const suffix = isGift ? ' (Gift)' : direct ? '' : ' (via routing)';
+              return (
+                <option key={id} value={id}>
+                  {getProviderLabel(id)}{suffix}
+                </option>
+              );
+            })}
           </select>
         </div>
         <div className="chat-header-actions">
