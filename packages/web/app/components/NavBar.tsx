@@ -7,7 +7,7 @@ const links = [
   { href: '/', label: 'Home' },
   { href: '/demo/pay', label: 'Demo' },
   { href: '/developer', label: 'Developers' },
-  { href: '/marketplace', label: 'Marketplace' },
+  { href: '/marketplace', label: 'Apps' },
   { href: '/wallet', label: 'Wallet' },
 ];
 
