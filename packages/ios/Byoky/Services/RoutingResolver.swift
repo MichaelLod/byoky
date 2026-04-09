@@ -79,12 +79,14 @@ struct RoutingResolver {
             return nil
         }
 
-        // Credential preference: pinned first, fallback to any credential for the destination provider.
-        var resolved: Credential? = nil
+        // Pin enforcement: when a pin is set we honor it strictly. A stale
+        // pin returns nil rather than silently swapping to a different
+        // credential of the same provider — that would mask the user's
+        // cost-attribution intent.
+        let resolved: Credential?
         if let pinnedId = group.credentialId {
             resolved = credentials.first(where: { $0.id == pinnedId })
-        }
-        if resolved == nil {
+        } else {
             resolved = credentials.first(where: { $0.providerId == group.providerId })
         }
         guard let cred = resolved else { return nil }
@@ -129,12 +131,12 @@ struct RoutingResolver {
             return nil
         }
 
-        // Credential preference: pinned first, then any credential for the destination provider.
-        var resolved: Credential? = nil
+        // Strict pin enforcement: stale pin → nil, no silent fallback to a
+        // different credential of the destination provider.
+        let resolved: Credential?
         if let pinnedId = group.credentialId {
             resolved = credentials.first(where: { $0.id == pinnedId })
-        }
-        if resolved == nil {
+        } else {
             resolved = credentials.first(where: { $0.providerId == group.providerId })
         }
         guard let cred = resolved else { return nil }

@@ -100,8 +100,12 @@ export async function createAppSession(
   origin: string,
   tokenHash: string,
   expiresAt: number,
+  id?: string,
 ) {
-  const id = crypto.randomUUID();
+  // Caller may supply the id when it needs the row id to match a value
+  // already embedded in a JWT (the appAuthMiddleware checks payload.sid
+  // against this id for defense in depth).
+  id = id ?? crypto.randomUUID();
   const now = Date.now();
   const [row] = await getDb().insert(appSessions).values({
     id,

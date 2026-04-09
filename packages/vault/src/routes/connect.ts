@@ -14,6 +14,7 @@ import {
 } from '../db/index.js';
 import { signJwt, hashToken } from '../jwt.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { normalizeOrigin } from '../origin.js';
 
 const APP_SESSION_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -26,9 +27,11 @@ connect.use('/*', authMiddleware);
  * app_session token scoped to a specific origin plus availability for the
  * providers the app requested.
  *
- * Origin source: prefer the body field for precision, fall back to the
- * browser's CORS Origin header. Node SDK consumers must pass the body
- * field; browser SDK consumers get the header for free.
+ * Origin source: the browser's CORS Origin header is authoritative when
+ * present (the browser controls it; JS cannot forge it). Node SDK consumers
+ * pass the body field. When both are present they MUST agree — otherwise
+ * a script running on origin A could mint an app session keyed to origin
+ * B and have the user's wallet UI mis-attribute usage.
  *
  * Availability for each requested provider is computed by running the
  * routing resolver against the user's credentials and the resolved group.
@@ -45,8 +48,24 @@ connect.post('/', async (c) => {
     providers?: { id: string; required?: boolean }[];
   }>().catch(() => ({}) as { appOrigin?: string; providers?: { id: string; required?: boolean }[] });
 
-  const headerOrigin = c.req.header('origin');
-  const origin = (body.appOrigin || headerOrigin || '').trim();
+  const headerOrigin = c.req.header('origin') ? normalizeOrigin(c.req.header('origin')!) : '';
+  const bodyOrigin = body.appOrigin ? normalizeOrigin(body.appOrigin) : '';
+
+  // If both are present they must agree. The browser-set Origin header is
+  // load-bearing in the browser SDK path; allowing the body to win would
+  // let a page-side script claim an arbitrary origin. Both go through
+  // normalizeOrigin first so casing/trailing-slash variance doesn't reject
+  // otherwise-matching origins.
+  if (bodyOrigin && headerOrigin && bodyOrigin !== headerOrigin) {
+    return c.json({
+      error: {
+        code: 'ORIGIN_MISMATCH',
+        message: 'appOrigin body field does not match Origin request header',
+      },
+    }, 400);
+  }
+
+  const origin = headerOrigin || bodyOrigin || '';
 
   if (!origin) {
     return c.json({
@@ -108,12 +127,15 @@ connect.post('/', async (c) => {
 
   const appSessionId = crypto.randomUUID();
   const token = signJwt(userId, appSessionId, APP_SESSION_DURATION_MS);
+  // Pass appSessionId so the DB row's id matches the JWT's `sid` claim.
+  // appAuthMiddleware verifies they agree.
   await createAppSession(
     userId,
     userSessionId,
     origin,
     hashToken(token),
     Date.now() + APP_SESSION_DURATION_MS,
+    appSessionId,
   );
 
   return c.json({
