@@ -39,14 +39,15 @@ import {
   createGiftLink,
   decodeGiftLink,
   validateGiftLink,
-  shouldTranslate,
-  sameFamily,
   familyOf,
   rewriteProxyUrl,
   translateRequest,
   translateResponse,
   createStreamTranslator,
   TranslationError,
+  resolveCrossFamilyRoute,
+  resolveSameFamilySwapRoute,
+  buildNoCredentialMessage,
 } from '@byoky/core';
 import type { Runtime } from 'wxt/browser';
 
@@ -2975,121 +2976,6 @@ export default defineBackground(() => {
     return createStreamTranslator(ctx);
   }
 
-  /**
-   * Resolve a cross-family routing decision for a single requested provider.
-   *
-   * Returns a credential + translation context iff the resolved group binds
-   * the request's provider to a credential in a different translation family.
-   * Otherwise returns undefined and the caller falls back to same-family
-   * resolution (group pin or any-credential lookup).
-   *
-   * Conditions for cross-family routing:
-   *  1. A group is resolved for this app
-   *  2. group.providerId != requestedProviderId
-   *  3. shouldTranslate(requested, group.providerId) — both in known families
-   *  4. group.model is set (translation needs a destination model)
-   *  5. A credential exists for group.providerId
-   *
-   * Pinned credential preferred; falls back to any credential for that provider.
-   */
-  /**
-   * Compose a human-readable, actionable error message for the
-   * `NO_CREDENTIAL` failure mode. Mirrors the iOS / Android implementations
-   * verbatim so the three platforms surface the same wording.
-   *
-   * Three branches by data shape:
-   *   1. Group binds to a provider != requested → user has a routing rule
-   *      but the destination has no key. Tell them to add the destination
-   *      key or rebind the group.
-   *   2. Group binds to the requested provider (or no group) and the user
-   *      has *some* credentials → tell them to move the app to a group
-   *      bound to one of their existing keys, or add a key.
-   *   3. Wallet is empty → tell them to add any key.
-   */
-  function buildNoCredentialMessage(
-    requestedProviderId: string,
-    userCredentialProviderIds: string[],
-    group: Group | undefined,
-  ): string {
-    const req = requestedProviderId;
-    const groupBinding = group?.providerId;
-    if (groupBinding && groupBinding !== req) {
-      return `This app is bound to a group that routes to ${groupBinding}, but you have no ${groupBinding} credential in your wallet. Add a ${groupBinding} credential, or rebind this group to a provider you do have a key for.`;
-    }
-    if (userCredentialProviderIds.length > 0) {
-      const list = userCredentialProviderIds.join(', ');
-      return `This app requested ${req} but you have no ${req} credential. You have keys for: ${list}. Move this app to a group bound to one of those providers (Apps tab), or add a ${req} key in Wallet.`;
-    }
-    return `This app requested ${req} but your wallet has no credentials. Add a key in the Wallet — you can use any provider; Byoky will route requests to it automatically.`;
-  }
-
-  function resolveCrossFamilyRoute(
-    group: Group | undefined,
-    requestedProviderId: string,
-    credentials: Credential[],
-  ): { cred: Credential; translation: SessionTranslation } | undefined {
-    if (!group) return undefined;
-    if (group.providerId === requestedProviderId) return undefined;
-    if (!group.model) return undefined;
-    if (!shouldTranslate(requestedProviderId, group.providerId)) return undefined;
-    const cred =
-      (group.credentialId
-        ? credentials.find((c) => c.id === group.credentialId)
-        : undefined) ?? credentials.find((c) => c.providerId === group.providerId);
-    if (!cred) return undefined;
-    return {
-      cred,
-      translation: {
-        srcProviderId: requestedProviderId,
-        dstProviderId: group.providerId,
-        dstModel: group.model,
-      },
-    };
-  }
-
-  /**
-   * Resolve a same-family swap decision for a single requested provider.
-   *
-   * Two providers in the same translation family (e.g. Groq and OpenAI, both
-   * in the openai family) speak identical wire protocols, so "routing"
-   * collapses to: swap credentials, rewrite the destination URL, and
-   * (optionally) override the body's model field. No translation layer.
-   *
-   * Conditions:
-   *  1. A group is resolved for this app
-   *  2. group.providerId != requestedProviderId
-   *  3. both providers live in the same family (per sameFamily())
-   *  4. a credential exists for group.providerId
-   *
-   * Notably, `group.model` is *not* required — a swap works even when the
-   * group has no model pinned. If present, it flows into SessionSwap.dstModel
-   * so the proxy handler can substitute it into the request body before
-   * forwarding. Pinned credential preferred; falls back to any credential
-   * for that provider.
-   */
-  function resolveSameFamilySwapRoute(
-    group: Group | undefined,
-    requestedProviderId: string,
-    credentials: Credential[],
-  ): { cred: Credential; swap: SessionSwap } | undefined {
-    if (!group) return undefined;
-    if (group.providerId === requestedProviderId) return undefined;
-    if (!sameFamily(requestedProviderId, group.providerId)) return undefined;
-    const cred =
-      (group.credentialId
-        ? credentials.find((c) => c.id === group.credentialId)
-        : undefined) ?? credentials.find((c) => c.providerId === group.providerId);
-    if (!cred) return undefined;
-    return {
-      cred,
-      swap: {
-        srcProviderId: requestedProviderId,
-        dstProviderId: group.providerId,
-        dstModel: group.model || undefined,
-      },
-    };
-  }
-
   async function decryptCredentialKey(
     credential: Credential,
   ): Promise<string> {
@@ -3454,6 +3340,7 @@ export default defineBackground(() => {
     };
     groups.push(group);
     await setGroups(groups);
+    void fireVaultGroupSave(group);
     return { group };
   }
 
@@ -3497,6 +3384,7 @@ export default defineBackground(() => {
     }
     groups[idx] = next;
     await setGroups(groups);
+    void fireVaultGroupSave(next);
     return { group: next };
   }
 
@@ -3507,14 +3395,18 @@ export default defineBackground(() => {
     await setGroups(groups.filter((g) => g.id !== id));
     // Reassign any apps that pointed at this group back to the default
     const appGroups = await getAppGroups();
-    let mutated = false;
+    const reassignedOrigins: string[] = [];
     for (const origin of Object.keys(appGroups)) {
       if (appGroups[origin] === id) {
         appGroups[origin] = DEFAULT_GROUP_ID;
-        mutated = true;
+        reassignedOrigins.push(origin);
       }
     }
-    if (mutated) await setAppGroups(appGroups);
+    if (reassignedOrigins.length > 0) await setAppGroups(appGroups);
+    void fireVaultGroupDelete(id);
+    for (const origin of reassignedOrigins) {
+      void fireVaultAppGroupSet(origin, DEFAULT_GROUP_ID);
+    }
     return { success: true };
   }
 
@@ -3524,6 +3416,7 @@ export default defineBackground(() => {
     const appGroups = await getAppGroups();
     appGroups[origin] = groupId;
     await setAppGroups(appGroups);
+    void fireVaultAppGroupSet(origin, groupId);
     return { success: true };
   }
 
@@ -4153,6 +4046,71 @@ export default defineBackground(() => {
       return;
     }
     enqueueVaultSync(() => syncRemoveFromVault(localId, state.token!));
+  }
+
+  // ─── Cloud Vault group sync ─────────────────────────────────────────
+  //
+  // Mirrors the user's group/app-group state to the vault so the vault can
+  // serve as an offline replacement for the extension. Eager: every
+  // mutation that lands in browser.storage.local also fires a vault sync.
+  // Gated on cloudVaultEnabled and a non-expired token; failures don't
+  // block the user (they get retried by syncPendingCredentials' sibling
+  // syncPendingGroups on next opportunity).
+
+  async function fireVaultGroupSave(group: Group): Promise<void> {
+    const state = await getCloudVaultState();
+    if (!state.enabled || !state.token || state.tokenExpired) return;
+    if (isVaultTokenExpired(state.tokenIssuedAt)) {
+      await handleVaultAuthError();
+      return;
+    }
+    // The vault keys credentialId by its own credential id (returned at
+    // sync time and stored in credentialMap). Translate the local pin
+    // before sending — a stale local pin maps to undefined which the
+    // vault treats as "no pin".
+    const vaultCredentialId = group.credentialId
+      ? state.credentialMap[group.credentialId]
+      : undefined;
+    enqueueVaultSync(async () => {
+      const result = await vaultFetch(`/groups/${encodeURIComponent(group.id)}`, 'PUT', {
+        name: group.name,
+        providerId: group.providerId,
+        credentialId: vaultCredentialId ?? null,
+        model: group.model ?? null,
+      }, state.token!);
+      if (result.status === 401) await handleVaultAuthError();
+    });
+  }
+
+  async function fireVaultGroupDelete(groupId: string): Promise<void> {
+    const state = await getCloudVaultState();
+    if (!state.enabled || !state.token || state.tokenExpired) return;
+    if (isVaultTokenExpired(state.tokenIssuedAt)) {
+      await handleVaultAuthError();
+      return;
+    }
+    enqueueVaultSync(async () => {
+      const result = await vaultFetch(`/groups/${encodeURIComponent(groupId)}`, 'DELETE', undefined, state.token!);
+      if (result.status === 401) await handleVaultAuthError();
+    });
+  }
+
+  async function fireVaultAppGroupSet(origin: string, groupId: string): Promise<void> {
+    const state = await getCloudVaultState();
+    if (!state.enabled || !state.token || state.tokenExpired) return;
+    if (isVaultTokenExpired(state.tokenIssuedAt)) {
+      await handleVaultAuthError();
+      return;
+    }
+    enqueueVaultSync(async () => {
+      const result = await vaultFetch(
+        `/groups/apps/${encodeURIComponent(origin)}`,
+        'PUT',
+        { groupId },
+        state.token!,
+      );
+      if (result.status === 401) await handleVaultAuthError();
+    });
   }
 
   // --- Cloud Vault gift relay ---
