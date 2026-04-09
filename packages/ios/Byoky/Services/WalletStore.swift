@@ -146,7 +146,10 @@ final class WalletStore: ObservableObject {
         try ensureDefaultGroup()
         try migrateCredentials(password: password)
         loadCloudVaultState()
-        Task { await syncPendingCredentials() }
+        Task {
+            await syncPendingCredentials()
+            await syncPendingGroups()
+        }
 
         AppGroupSync.shared.syncWalletState(
             isUnlocked: true,
@@ -599,6 +602,7 @@ final class WalletStore: ObservableObject {
         guard groups.contains(where: { $0.id == groupId }) else { throw GroupError.notFound }
         appGroups[origin] = groupId
         try saveAppGroups()
+        Task { await syncAppGroupToVault(origin: origin, groupId: groupId) }
     }
 
     enum GroupError: LocalizedError {
@@ -645,6 +649,7 @@ final class WalletStore: ObservableObject {
         )
         groups.append(group)
         try saveGroups()
+        Task { await syncGroupToVault(group) }
         return group
     }
 
@@ -689,6 +694,7 @@ final class WalletStore: ObservableObject {
 
         groups[idx] = next
         try saveGroups()
+        Task { await syncGroupToVault(next) }
         return next
     }
 
@@ -698,12 +704,18 @@ final class WalletStore: ObservableObject {
         groups.removeAll { $0.id == id }
         try saveGroups()
         // Reassign any apps that pointed at this group back to the default.
-        var mutated = false
+        var reassignedOrigins: [String] = []
         for (origin, gid) in appGroups where gid == id {
             appGroups[origin] = defaultGroupId
-            mutated = true
+            reassignedOrigins.append(origin)
         }
-        if mutated { try saveAppGroups() }
+        if !reassignedOrigins.isEmpty { try saveAppGroups() }
+        Task {
+            await syncGroupDeleteToVault(groupId: id)
+            for origin in reassignedOrigins {
+                await syncAppGroupToVault(origin: origin, groupId: defaultGroupId)
+            }
+        }
     }
 
     // MARK: - Gifts (Sender)
@@ -933,6 +945,7 @@ final class WalletStore: ObservableObject {
         saveCloudVaultConfig()
 
         await syncAllCredentialsToVault()
+        await syncPendingGroups()
     }
 
     func disableCloudVault() async {
@@ -963,6 +976,7 @@ final class WalletStore: ObservableObject {
         saveCloudVaultConfig()
 
         await syncPendingCredentials()
+        await syncPendingGroups()
     }
 
     private func syncAddToVault(localId: String, providerId: String, label: String, authMethod: String, plainKey: String) async {
@@ -1018,6 +1032,88 @@ final class WalletStore: ObservableObject {
         for credential in credentials {
             guard let plainKey = try? decryptKey(for: credential) else { continue }
             await syncAddToVault(localId: credential.id, providerId: credential.providerId, label: credential.label, authMethod: credential.authMethod.rawValue, plainKey: plainKey)
+        }
+    }
+
+    // MARK: - Vault group sync
+
+    /// Push a single group to the cloud vault. Called on every createGroup /
+    /// updateGroup so the offline vault's routing rules stay in lockstep with
+    /// the phone's local state. No-op when cloud vault is disabled.
+    ///
+    /// The vault keys credential pins by its own credential ids (returned at
+    /// sync time and stored in `vaultCredentialMap`). Translate the local
+    /// pin id to the vault id before sending — a stale local pin maps to
+    /// nil which the vault treats as "no pin".
+    private func syncGroupToVault(_ group: Group) async {
+        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
+        let vaultCredentialId: Any = group.credentialId.flatMap { vaultCredentialMap[$0] } ?? NSNull()
+        let result = await vaultRequest(
+            path: "/groups/\(group.id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? group.id)",
+            method: "PUT",
+            body: [
+                "name": group.name,
+                "providerId": group.providerId,
+                "credentialId": vaultCredentialId,
+                "model": group.model as Any? ?? NSNull(),
+            ],
+            token: token
+        )
+        if result.status == 401 {
+            cloudVaultTokenExpired = true
+            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
+        }
+    }
+
+    /// Remove a group from the cloud vault. Called on deleteGroup.
+    private func syncGroupDeleteToVault(groupId: String) async {
+        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
+        let encoded = groupId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? groupId
+        let result = await vaultRequest(path: "/groups/\(encoded)", method: "DELETE", token: token)
+        if result.status == 401 {
+            cloudVaultTokenExpired = true
+            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
+        }
+    }
+
+    /// Push an app→group binding to the vault. Called on setAppGroup and on
+    /// reassignment when a group is deleted.
+    private func syncAppGroupToVault(origin: String, groupId: String) async {
+        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
+        let encoded = origin.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? origin
+        let result = await vaultRequest(
+            path: "/groups/apps/\(encoded)",
+            method: "PUT",
+            body: ["groupId": groupId],
+            token: token
+        )
+        if result.status == 401 {
+            cloudVaultTokenExpired = true
+            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
+        }
+    }
+
+    /// Backfill all local groups + app→group bindings to the vault. Runs on
+    /// initial cloud-vault enable and on unlock when a vault session is
+    /// already configured. Idempotent — the vault endpoints are upserts.
+    ///
+    /// Sequencing: MUST run after syncPendingCredentials so that any
+    /// credential pins in local groups have a corresponding entry in
+    /// vaultCredentialMap. Callers enforce this ordering.
+    private func syncPendingGroups() async {
+        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
+        if let issued = vaultTokenIssuedAt, Date().timeIntervalSince(issued) > 6 * 24 * 3600 {
+            cloudVaultTokenExpired = true
+            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
+            return
+        }
+        _ = token // used via the sync helpers below
+
+        for group in groups {
+            await syncGroupToVault(group)
+        }
+        for (origin, groupId) in appGroups {
+            await syncAppGroupToVault(origin: origin, groupId: groupId)
         }
     }
 }
