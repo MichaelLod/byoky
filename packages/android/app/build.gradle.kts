@@ -59,6 +59,31 @@ android {
     }
 }
 
+// Sync the @byoky/core mobile bundle into assets before any build that
+// packages resources. The canonical bundle lives at
+// packages/core/dist/mobile.js (built by `pnpm --filter @byoky/core build`)
+// and the script in scripts/sync-mobile-bundle.sh copies it into both
+// mobile app trees. This task is a fail-fast guard so a build never
+// silently uses a stale or missing assets/mobile.js.
+tasks.register("verifyMobileBundle") {
+    description = "Verify the @byoky/core mobile.js bundle is present in assets."
+    group = "verification"
+    doLast {
+        val bundle = file("src/main/assets/mobile.js")
+        if (!bundle.exists()) {
+            throw GradleException(
+                "Missing src/main/assets/mobile.js. Run from the repo root:\n" +
+                "  pnpm --filter @byoky/core build && ./scripts/sync-mobile-bundle.sh"
+            )
+        }
+        logger.lifecycle("verifyMobileBundle: ${bundle.length()} bytes ok")
+    }
+}
+
+tasks.matching { it.name == "preBuild" }.configureEach {
+    dependsOn("verifyMobileBundle")
+}
+
 dependencies {
     // Compose BOM
     val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
@@ -81,6 +106,21 @@ dependencies {
 
     // Networking
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // JavaScript engine for the cross-family translation bridge.
+    // We embed the @byoky/core IIFE bundle (assets/mobile.js) and run it via
+    // Google's V8-backed sandbox so the translate layer is the same code on
+    // mobile and desktop. Out-of-process for security — even a JS-side bug
+    // can't reach credentials in the main process. Min API 26 (matches our
+    // minSdk). Available on devices with WebView 110+ (Android 12L+ in
+    // practice; gracefully degrades by throwing on older devices).
+    implementation("androidx.javascriptengine:javascriptengine:1.0.0")
+    implementation("androidx.webkit:webkit:1.12.1")
+    // kotlinx-coroutines-guava: lets us await ListenableFuture results from
+    // suspend functions. Pinned to the 1.7.3 line that's already pulled in
+    // transitively by androidx.lifecycle, to avoid two coroutines versions
+    // colliding on the classpath.
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.7.3")
 
     // CameraX (QR scanner)
     implementation("androidx.camera:camera-camera2:1.4.1")
