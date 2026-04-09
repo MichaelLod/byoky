@@ -9,6 +9,7 @@ import {
   capabilityGaps,
   capabilityLabel,
   getModel,
+  modelsForProvider,
 } from '@byoky/core';
 
 function timeAgo(timestamp: number): string {
@@ -460,6 +461,17 @@ function GroupForm({
   const [model, setModel] = useState(group?.model ?? '');
 
   const matchingCreds = credentials.filter((c) => c.providerId === providerId);
+  // Pull the @byoky/core registry's known models for the chosen provider.
+  // Empty list means the registry has no entries — the user can still type
+  // a custom model name. Mobile builds the same suggestion list via the JS
+  // bridge call `getModelsForProvider`; in the extension we can call the
+  // registry directly since both run in the same JS context.
+  const suggestedModels = modelsForProvider(providerId);
+  // Look up the chosen model id in the registry and produce a one-line
+  // capability summary for the footer beneath the field. Nil when the model
+  // isn't in the registry — that's fine, the field still accepts custom names.
+  const selectedModel = model ? getModel(model) : undefined;
+  const modelInfo = selectedModel ? buildModelInfo(selectedModel) : undefined;
 
   function handleSave() {
     onSave({
@@ -533,7 +545,19 @@ function GroupForm({
           value={model}
           onChange={(e) => setModel(e.target.value)}
           maxLength={200}
+          list={`group-models-${providerId}`}
         />
+        {/* Native datalist gives the input a typeahead dropdown over the
+            registry entries for the chosen provider, while still letting the
+            user type custom model ids the registry doesn't know about. */}
+        <datalist id={`group-models-${providerId}`}>
+          {suggestedModels.map((m) => (
+            <option key={m.id} value={m.id}>{m.displayName}</option>
+          ))}
+        </datalist>
+        <div className="card-subtitle" style={{ marginTop: '4px' }}>
+          {modelInfo ?? 'Leave empty to pass through whatever model the app requested. Set when you want to override — required for cross-family routing.'}
+        </div>
       </div>
       <div style={{ display: 'flex', gap: '8px' }}>
         <button className="btn btn-primary btn-sm" onClick={handleSave}>Save</button>
@@ -541,6 +565,23 @@ function GroupForm({
       </div>
     </div>
   );
+}
+
+/**
+ * Build a one-line capability summary for a known model id, e.g.
+ * "Claude Sonnet 4.5: 200K ctx · tools · vision · reasoning". Mirrors the
+ * mobile group editor's `updateModelInfo` so the extension and mobile show
+ * the same footer when a registry-known model is selected.
+ */
+function buildModelInfo(m: ReturnType<typeof getModel> & {}): string {
+  const bits: string[] = [];
+  if (m.capabilities.tools) bits.push('tools');
+  if (m.capabilities.vision) bits.push('vision');
+  if (m.capabilities.structuredOutput) bits.push('JSON schema');
+  if (m.capabilities.reasoning) bits.push('reasoning');
+  const ctx = m.contextWindow;
+  const ctxK = ctx >= 1000 ? `${Math.round(ctx / 1000)}K` : `${ctx}`;
+  return `${m.displayName}: ${ctxK} ctx · ${bits.join(' · ')}`;
 }
 
 function AllowanceForm({
