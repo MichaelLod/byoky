@@ -1,9 +1,12 @@
 package com.byoky.app.proxy
 
+import android.content.Context
 import com.byoky.app.data.AuthMethod
 import com.byoky.app.data.Credential
+import com.byoky.app.data.DEFAULT_GROUP_ID
 import com.byoky.app.data.GiftedCredential
 import com.byoky.app.data.Provider
+import com.byoky.app.data.RoutingTranslation
 import com.byoky.app.data.WalletStore
 import com.byoky.app.data.isGiftExpired
 import kotlinx.coroutines.channels.awaitClose
@@ -25,7 +28,19 @@ import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
-class ProxyService(private val wallet: WalletStore) {
+class ProxyService(
+    private val wallet: WalletStore,
+    private val appContext: Context? = null,
+) {
+    /**
+     * The translation engine. Lazy because constructing it requires an
+     * Android Context for JavaScriptSandbox; the existing call sites that
+     * only need findAvailablePort() can pass null and never touch it.
+     * The proxy paths that DO use it require a context to have been provided.
+     */
+    private val translationEngine: TranslationEngine? by lazy {
+        appContext?.let { TranslationEngine.get(it) }
+    }
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(120, TimeUnit.SECONDS)
@@ -71,6 +86,22 @@ class ProxyService(private val wallet: WalletStore) {
         }
 
         val own = source as CredentialSource.Own
+
+        // Cross-family routing check. Mobile uses the default group as a
+        // global routing rule (no per-app origin yet). If the group binds
+        // this provider to a different family AND a model is configured,
+        // hand off to the translation path. Otherwise pass through.
+        val routing = resolveRouting(providerId, body)
+        if (routing != null && routing.translation != null) {
+            return proxyRequestWithTranslation(
+                originalProviderId = providerId,
+                translation = routing.translation,
+                routedCredential = routing.credential,
+                method = method,
+                headers = headers,
+                body = body,
+            )
+        }
 
         val filteredHeaders = headers.filterKeys {
             it.lowercase() !in setOf("host", "authorization", "x-api-key")
@@ -199,56 +230,336 @@ class ProxyService(private val wallet: WalletStore) {
         } else {
             val own = credSource as CredentialSource.Own
 
-            val filteredHeaders = headers.filterKeys {
-                it.lowercase() !in setOf("host", "authorization", "x-api-key")
-            }.toMutableMap()
-
-            applyAuth(filteredHeaders, providerId, own.credential.authMethod, own.apiKey)
-
-            val injectedBody = injectStreamUsageOptions(providerId, body)
-            val finalBody = if (providerId == "anthropic" && own.credential.authMethod == AuthMethod.OAUTH && injectedBody != null) {
-                injectClaudeCodeSystemPrompt(injectedBody)
+            // Cross-family routing for streaming. If routing has translation,
+            // take the new path; otherwise fall through to existing pass-through.
+            val routing = resolveRouting(providerId, body)
+            if (routing != null && routing.translation != null) {
+                streamWithTranslation(
+                    originalProviderId = providerId,
+                    translation = routing.translation,
+                    routedCredential = routing.credential,
+                    method = method,
+                    headers = headers,
+                    body = body,
+                    onChunk = { trySend(it) },
+                    onError = { close(it) },
+                    onComplete = { close() },
+                )
             } else {
-                injectedBody
-            }
+                val filteredHeaders = headers.filterKeys {
+                    it.lowercase() !in setOf("host", "authorization", "x-api-key")
+                }.toMutableMap()
 
-            val requestBody = when {
-                finalBody != null && method.uppercase() in setOf("POST", "PUT", "PATCH") -> {
-                    val contentType = filteredHeaders["content-type"] ?: "application/json"
-                    finalBody.toRequestBody(contentType.toMediaTypeOrNull())
+                applyAuth(filteredHeaders, providerId, own.credential.authMethod, own.apiKey)
+
+                val injectedBody = injectStreamUsageOptions(providerId, body)
+                val finalBody = if (providerId == "anthropic" && own.credential.authMethod == AuthMethod.OAUTH && injectedBody != null) {
+                    injectClaudeCodeSystemPrompt(injectedBody)
+                } else {
+                    injectedBody
                 }
-                else -> null
+
+                val requestBody = when {
+                    finalBody != null && method.uppercase() in setOf("POST", "PUT", "PATCH") -> {
+                        val contentType = filteredHeaders["content-type"] ?: "application/json"
+                        finalBody.toRequestBody(contentType.toMediaTypeOrNull())
+                    }
+                    else -> null
+                }
+
+                val request = Request.Builder()
+                    .url(url)
+                    .method(method.uppercase(), requestBody)
+                    .headers(filteredHeaders.toHeaders())
+                    .build()
+
+                val response = client.newCall(request).execute()
+                val responseBody = response.body
+
+                try {
+                    if (responseBody != null) {
+                        val source = responseBody.source()
+                        val buffer = ByteArray(4096)
+                        while (!source.exhausted()) {
+                            val read = source.read(buffer)
+                            if (read > 0) {
+                                send(buffer.copyOf(read))
+                            }
+                        }
+                    }
+                    close()
+                } catch (e: Exception) {
+                    close(e)
+                } finally {
+                    responseBody?.close()
+                }
             }
+        }
 
-            val request = Request.Builder()
-                .url(url)
-                .method(method.uppercase(), requestBody)
-                .headers(filteredHeaders.toHeaders())
-                .build()
+        awaitClose { giftWs?.close(1000, null) }
+    }
 
+    /**
+     * Cross-family streaming path. Reads upstream SSE in 4 KB chunks, hands
+     * each chunk to the JS stream translator, and forwards the translated
+     * bytes back to the caller. Logs once at end with translation metadata.
+     */
+    private fun streamWithTranslation(
+        originalProviderId: String,
+        translation: RoutingTranslation,
+        routedCredential: Credential,
+        method: String,
+        headers: Map<String, String>,
+        body: ByteArray?,
+        onChunk: (ByteArray) -> Unit,
+        onError: (Throwable) -> Unit,
+        onComplete: () -> Unit,
+    ) {
+        val engine = translationEngine
+        if (engine == null) {
+            onError(IllegalStateException("TranslationEngine context not provided"))
+            return
+        }
+        val requestId = UUID.randomUUID().toString()
+
+        val ctxJson: String
+        val translatedBodyString: String
+        try {
+            val bodyString = body?.toString(Charsets.UTF_8) ?: ""
+            ctxJson = engine.buildTranslationContext(
+                srcProviderId = translation.srcProviderId,
+                dstProviderId = translation.dstProviderId,
+                srcModel = translation.srcModel,
+                dstModel = translation.dstModel,
+                isStreaming = true,
+                requestId = requestId,
+            )
+            translatedBodyString = engine.translateRequest(ctxJson, bodyString)
+        } catch (t: Throwable) {
+            onError(t)
+            return
+        }
+
+        val urlString = engine.rewriteProxyUrl(translation.dstProviderId, translation.dstModel, true)
+        if (urlString == null) {
+            onError(IllegalStateException("rewriteProxyUrl returned null for ${translation.dstProviderId}"))
+            return
+        }
+
+        val dstApiKey = wallet.decryptKey(routedCredential)
+
+        val translatedBytes = injectStreamUsageOptions(translation.dstProviderId, translatedBodyString.toByteArray(Charsets.UTF_8))
+            ?: translatedBodyString.toByteArray(Charsets.UTF_8)
+
+        val filteredHeaders = headers.filterKeys {
+            it.lowercase() !in setOf("host", "authorization", "x-api-key", "anthropic-version", "content-length")
+        }.toMutableMap()
+        applyAuth(filteredHeaders, translation.dstProviderId, routedCredential.authMethod, dstApiKey)
+
+        val requestBody = translatedBytes.toRequestBody("application/json".toMediaTypeOrNull())
+        val request = Request.Builder()
+            .url(urlString)
+            .method(method.uppercase(), requestBody)
+            .headers(filteredHeaders.toHeaders())
+            .build()
+
+        // Open the stream translator handle. Always release it via the
+        // finally block below to avoid leaking the JS-side entry.
+        val streamHandle = try {
+            engine.createStreamTranslator(ctxJson)
+        } catch (t: Throwable) {
+            onError(t)
+            return
+        }
+        var releasedExplicitly = false
+
+        try {
             val response = client.newCall(request).execute()
+            val statusCode = response.code
             val responseBody = response.body
 
-            try {
+            if (statusCode !in 200..299) {
+                // Pass error bodies through verbatim (translator can't handle non-source-shaped errors).
                 if (responseBody != null) {
                     val source = responseBody.source()
                     val buffer = ByteArray(4096)
                     while (!source.exhausted()) {
                         val read = source.read(buffer)
-                        if (read > 0) {
-                            send(buffer.copyOf(read))
+                        if (read > 0) onChunk(buffer.copyOf(read))
+                    }
+                }
+                wallet.logRequest(
+                    appOrigin = "bridge",
+                    providerId = originalProviderId,
+                    method = method,
+                    url = urlString,
+                    statusCode = statusCode,
+                    requestBody = body,
+                    responseBody = null,
+                    actualProviderId = translation.dstProviderId,
+                    actualModel = translation.dstModel,
+                    groupId = DEFAULT_GROUP_ID,
+                )
+                responseBody?.close()
+                onComplete()
+                return
+            }
+
+            // 2xx path: stream chunks through the translator. We use 4 KB
+            // raw byte reads — the JS translator buffers internally and is
+            // tolerant of partial events. UTF-8 boundary risk is small at
+            // 4 KB but not zero; the JS-side parser handles invalid bytes
+            // gracefully (skips and resumes).
+            if (responseBody != null) {
+                val source = responseBody.source()
+                val buffer = ByteArray(4096)
+                while (!source.exhausted()) {
+                    val read = source.read(buffer)
+                    if (read > 0) {
+                        val chunkString = String(buffer, 0, read, Charsets.UTF_8)
+                        val translated = engine.processStreamChunk(streamHandle, chunkString)
+                        if (translated.isNotEmpty()) {
+                            onChunk(translated.toByteArray(Charsets.UTF_8))
                         }
                     }
                 }
-                close()
-            } catch (e: Exception) {
-                close(e)
-            } finally {
-                responseBody?.close()
+                // Flush any buffered output and release the handle.
+                val trailing = engine.flushStreamTranslator(streamHandle)
+                releasedExplicitly = true
+                if (trailing.isNotEmpty()) {
+                    onChunk(trailing.toByteArray(Charsets.UTF_8))
+                }
+            }
+            responseBody?.close()
+
+            wallet.logRequest(
+                appOrigin = "bridge",
+                providerId = originalProviderId,
+                method = method,
+                url = urlString,
+                statusCode = statusCode,
+                requestBody = body,
+                responseBody = null,
+                actualProviderId = translation.dstProviderId,
+                actualModel = translation.dstModel,
+                groupId = DEFAULT_GROUP_ID,
+            )
+            onComplete()
+        } catch (t: Throwable) {
+            onError(t)
+        } finally {
+            if (!releasedExplicitly) {
+                engine.releaseStreamTranslator(streamHandle)
             }
         }
+    }
 
-        awaitClose { giftWs?.close(1000, null) }
+    /**
+     * Resolve cross-family routing. Returns null for pass-through cases (no
+     * group / same family / no model / no credential / no engine context).
+     * Caller has already resolved the credential source as `.own` — gifts
+     * skip routing entirely.
+     */
+    private fun resolveRouting(requestedProviderId: String, body: ByteArray?): com.byoky.app.data.RoutingDecision? {
+        val engine = translationEngine ?: return null
+        val group = wallet.groupForOrigin("bridge")
+        val srcModel = RoutingResolver.parseModel(body)
+        return RoutingResolver.resolve(
+            requestedProviderId = requestedProviderId,
+            requestedModel = srcModel,
+            group = group,
+            credentials = wallet.credentials.value,
+            engine = engine,
+        )
+    }
+
+    /**
+     * Cross-family translation path for non-streaming requests. Translates
+     * the request body src→dst, sends to the destination provider, and
+     * translates the response dst→src so the SDK sees its native dialect.
+     */
+    private fun proxyRequestWithTranslation(
+        originalProviderId: String,
+        translation: RoutingTranslation,
+        routedCredential: Credential,
+        method: String,
+        headers: Map<String, String>,
+        body: ByteArray?,
+    ): Response {
+        val engine = translationEngine
+            ?: throw IllegalStateException("TranslationEngine context not provided")
+        val requestId = UUID.randomUUID().toString()
+
+        // Build context + translate request body via the JS bridge.
+        val bodyString = body?.toString(Charsets.UTF_8) ?: ""
+        val ctxJson = engine.buildTranslationContext(
+            srcProviderId = translation.srcProviderId,
+            dstProviderId = translation.dstProviderId,
+            srcModel = translation.srcModel,
+            dstModel = translation.dstModel,
+            isStreaming = false,
+            requestId = requestId,
+        )
+        val translatedBodyString = engine.translateRequest(ctxJson, bodyString)
+
+        // Rewrite upstream URL to the destination provider's chat endpoint.
+        val urlString = engine.rewriteProxyUrl(translation.dstProviderId, translation.dstModel, false)
+            ?: throw IllegalStateException("rewriteProxyUrl returned null for ${translation.dstProviderId}")
+
+        // Decrypt destination credential.
+        val dstApiKey = wallet.decryptKey(routedCredential)
+
+        // Build OkHttp request with translated body and destination auth.
+        val translatedBytes = injectStreamUsageOptions(translation.dstProviderId, translatedBodyString.toByteArray(Charsets.UTF_8))
+        val finalBody = translatedBytes ?: translatedBodyString.toByteArray(Charsets.UTF_8)
+
+        val filteredHeaders = headers.filterKeys {
+            it.lowercase() !in setOf("host", "authorization", "x-api-key", "anthropic-version", "content-length")
+        }.toMutableMap()
+        applyAuth(filteredHeaders, translation.dstProviderId, routedCredential.authMethod, dstApiKey)
+
+        val requestBody = finalBody.toRequestBody("application/json".toMediaTypeOrNull())
+        val request = Request.Builder()
+            .url(urlString)
+            .method(method.uppercase(), requestBody)
+            .headers(filteredHeaders.toHeaders())
+            .build()
+
+        val upstream = client.newCall(request).execute()
+        val statusCode = upstream.code
+        val upstreamBody = upstream.body?.string() ?: ""
+
+        // Translate response dst → src so the app sees its dialect. Skip on
+        // non-2xx — error bodies are rarely in the source dialect's shape.
+        val translatedResponseString = if (statusCode in 200..299) {
+            engine.translateResponse(ctxJson, upstreamBody)
+        } else {
+            upstreamBody
+        }
+
+        wallet.logRequest(
+            appOrigin = "bridge",
+            providerId = originalProviderId,
+            method = method,
+            url = urlString,
+            statusCode = statusCode,
+            requestBody = body,
+            responseBody = translatedResponseString,
+            actualProviderId = translation.dstProviderId,
+            actualModel = translation.dstModel,
+            groupId = DEFAULT_GROUP_ID,
+        )
+
+        // Build a fresh Response with the translated body so the caller sees
+        // the source dialect. Preserve status + headers from the upstream.
+        return Response.Builder()
+            .request(request)
+            .protocol(upstream.protocol)
+            .code(statusCode)
+            .message(upstream.message)
+            .headers(upstream.headers)
+            .body(translatedResponseString.toResponseBody("application/json".toMediaTypeOrNull()))
+            .build()
     }
 
     private fun resolveCredentialSource(providerId: String): CredentialSource {

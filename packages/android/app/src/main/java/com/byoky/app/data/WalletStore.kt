@@ -423,6 +423,9 @@ class WalletStore(context: Context) {
         statusCode: Int,
         requestBody: ByteArray?,
         responseBody: String?,
+        actualProviderId: String? = null,
+        actualModel: String? = null,
+        groupId: String? = null,
     ) {
         var sanitizedUrl = url
         val queryIndex = url.indexOf('?')
@@ -433,7 +436,10 @@ class WalletStore(context: Context) {
         var outputTokens: Int? = null
 
         if (responseBody != null) {
-            val usage = UsageParser.parseUsage(providerId, responseBody)
+            // Use upstream provider for usage parsing if we routed cross-family —
+            // the response shape matches the destination, not the source.
+            val parseProviderId = actualProviderId ?: providerId
+            val usage = UsageParser.parseUsage(parseProviderId, responseBody)
             inputTokens = usage?.inputTokens
             outputTokens = usage?.outputTokens
         }
@@ -447,6 +453,9 @@ class WalletStore(context: Context) {
             model = model,
             inputTokens = inputTokens,
             outputTokens = outputTokens,
+            actualProviderId = actualProviderId,
+            actualModel = actualModel,
+            groupId = groupId,
         )
 
         val logs = listOf(entry) + _requestLogs.value
