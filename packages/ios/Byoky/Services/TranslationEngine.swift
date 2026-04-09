@@ -165,6 +165,72 @@ final class TranslationEngine {
         }
     }
 
+    // MARK: - Routing helpers
+    //
+    // Wrappers around bridge functions used by RoutingResolver. The native side
+    // intentionally does not duplicate the family→providers mapping — it lives
+    // in core. These thin wrappers are the only place mobile asks "is this
+    // pair translatable?" and "what's the destination URL?"
+
+    /// True iff a request from `srcProviderId` should be translated to
+    /// `dstProviderId`. False on errors / unknown providers — caller treats
+    /// false as "no translation, use direct credential lookup".
+    func shouldTranslate(srcProviderId: String, dstProviderId: String) -> Bool {
+        do {
+            return try queue.sync {
+                try ensureLoadedLocked()
+                guard let bridge = self.bridge else { return false }
+                guard let result = bridge.invokeMethod("shouldTranslate", withArguments: [srcProviderId, dstProviderId]) else {
+                    return false
+                }
+                if pendingException() != nil { return false }
+                return result.toBool()
+            }
+        } catch {
+            return false
+        }
+    }
+
+    /// Build a JSON-encoded TranslationContext for use with translateRequest /
+    /// translateResponse / createStreamTranslator. Throws if either provider
+    /// is outside a known family — caller is expected to gate on
+    /// shouldTranslate first.
+    func buildTranslationContext(
+        srcProviderId: String,
+        dstProviderId: String,
+        srcModel: String,
+        dstModel: String,
+        isStreaming: Bool,
+        requestId: String
+    ) throws -> String {
+        try invokeString(
+            "buildTranslationContext",
+            args: [srcProviderId, dstProviderId, srcModel, dstModel, isStreaming, requestId]
+        )
+    }
+
+    /// Rewrite an upstream URL when routing cross-family. The SDK built the
+    /// source URL against the source provider's base + path; we replace it
+    /// with the destination provider's canonical chat endpoint, which may
+    /// have a different shape (e.g. gemini puts the model in the path).
+    /// Returns nil when the destination has no adapter or can't build a URL.
+    func rewriteProxyUrl(dstProviderId: String, model: String, stream: Bool) -> String? {
+        do {
+            return try queue.sync {
+                try ensureLoadedLocked()
+                guard let bridge = self.bridge else { return nil }
+                guard let result = bridge.invokeMethod("rewriteProxyUrl", withArguments: [dstProviderId, model, stream]) else {
+                    return nil
+                }
+                if pendingException() != nil { return nil }
+                if result.isNull || result.isUndefined { return nil }
+                return result.toString()
+            }
+        } catch {
+            return nil
+        }
+    }
+
     // MARK: - Internals
 
     private func invokeString(_ method: String, args: [Any]) throws -> String {
