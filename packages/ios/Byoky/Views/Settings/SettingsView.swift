@@ -635,6 +635,8 @@ struct GroupEditorSheet: View {
     @State private var providerId: String = "anthropic"
     @State private var model: String = ""
     @State private var error: String?
+    @State private var suggestedModels: [(id: String, displayName: String)] = []
+    @State private var selectedModelInfo: String?
 
     var body: some View {
         NavigationStack {
@@ -645,13 +647,43 @@ struct GroupEditorSheet: View {
                             Text(provider.name).tag(provider.id)
                         }
                     }
+                    .onChange(of: providerId) { _, newValue in
+                        loadSuggestedModels(for: newValue)
+                    }
+
                     TextField("Destination model (e.g. gpt-4o)", text: $model)
                         .autocapitalization(.none)
                         .disableAutocorrection(true)
+                        .onChange(of: model) { _, newValue in
+                            updateModelInfo(for: newValue)
+                        }
+
+                    if !suggestedModels.isEmpty {
+                        ForEach(suggestedModels, id: \.id) { entry in
+                            Button {
+                                model = entry.id
+                                updateModelInfo(for: entry.id)
+                            } label: {
+                                HStack {
+                                    Text(entry.displayName)
+                                        .font(.callout)
+                                        .foregroundStyle(.primary)
+                                    Spacer()
+                                    Text(entry.id)
+                                        .font(.caption.monospaced())
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                        }
+                    }
                 } header: {
                     Text("Default group")
                 } footer: {
-                    Text("All requests from apps in a different provider family will be routed here. Same-family requests pass through unchanged. Leave model empty to disable routing.")
+                    if let info = selectedModelInfo {
+                        Text(info).font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Text("All requests from apps in a different provider family will be routed here. Same-family requests pass through unchanged. Leave model empty to disable routing.")
+                    }
                 }
 
                 if let error {
@@ -688,8 +720,49 @@ struct GroupEditorSheet: View {
                     providerId = group.providerId
                     model = group.model ?? ""
                 }
+                loadSuggestedModels(for: providerId)
+                if !model.isEmpty { updateModelInfo(for: model) }
             }
         }
+    }
+
+    /// Pull the @byoky/core registry's known models for this provider, via
+    /// the JS bridge. Empty list means the registry has no entries — the
+    /// user can still type a custom model name.
+    private func loadSuggestedModels(for provider: String) {
+        let json = TranslationEngine.shared.getModelsForProvider(provider)
+        guard let data = json.data(using: .utf8),
+              let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            suggestedModels = []
+            return
+        }
+        suggestedModels = arr.compactMap { entry in
+            guard let id = entry["id"] as? String,
+                  let displayName = entry["displayName"] as? String else { return nil }
+            return (id: id, displayName: displayName)
+        }
+    }
+
+    /// Look up the chosen model in the registry and produce a one-line
+    /// capability summary for the footer. Empty when the model isn't in
+    /// the registry — that's fine, the user can still type custom names.
+    private func updateModelInfo(for modelId: String) {
+        guard let json = TranslationEngine.shared.describeModel(modelId),
+              let data = json.data(using: .utf8),
+              let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let caps = parsed["capabilities"] as? [String: Any] else {
+            selectedModelInfo = nil
+            return
+        }
+        var bits: [String] = []
+        if caps["tools"] as? Bool == true { bits.append("tools") }
+        if caps["vision"] as? Bool == true { bits.append("vision") }
+        if caps["structuredOutput"] as? Bool == true { bits.append("JSON schema") }
+        if caps["reasoning"] as? Bool == true { bits.append("reasoning") }
+        let context = parsed["contextWindow"] as? Int ?? 0
+        let display = parsed["displayName"] as? String ?? modelId
+        let contextK = context >= 1000 ? "\(context / 1000)K" : "\(context)"
+        selectedModelInfo = "\(display): \(contextK) ctx · " + bits.joined(separator: " · ")
     }
 
     private func save() {

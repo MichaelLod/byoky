@@ -137,6 +137,9 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
   function getModel(id) {
     return MODELS.find((m) => m.id === id);
   }
+  function modelsForProvider(providerId) {
+    return MODELS.filter((m) => m.providerId === providerId);
+  }
 
   // src/translate/ir.ts
   function isIRError(x) {
@@ -3347,6 +3350,29 @@ data: [DONE]
     },
     rewriteProxyUrl(dstProviderId, model, stream) {
       return rewriteProxyUrl(dstProviderId, model, stream);
+    },
+    getModelsForProvider(providerId) {
+      const list = modelsForProvider(providerId).map((m) => ({
+        id: m.id,
+        displayName: m.displayName,
+        contextWindow: m.contextWindow,
+        maxOutput: m.maxOutput,
+        capabilities: m.capabilities
+      }));
+      return JSON.stringify(list);
+    },
+    describeModel(modelId) {
+      const m = getModel(modelId);
+      if (!m) return null;
+      return JSON.stringify({
+        id: m.id,
+        providerId: m.providerId,
+        family: m.family,
+        displayName: m.displayName,
+        contextWindow: m.contextWindow,
+        maxOutput: m.maxOutput,
+        capabilities: m.capabilities
+      });
     },
     version: "0.5.0"
   };

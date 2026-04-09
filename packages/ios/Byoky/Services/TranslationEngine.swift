@@ -209,6 +209,36 @@ final class TranslationEngine {
         )
     }
 
+    /// Return JSON-encoded list of model entries for a provider, or "[]"
+    /// if the registry has no entries. Used by the routing editor to suggest
+    /// destination models. Caller decodes the JSON.
+    func getModelsForProvider(_ providerId: String) -> String {
+        do {
+            return try invokeString("getModelsForProvider", args: [providerId])
+        } catch {
+            return "[]"
+        }
+    }
+
+    /// Return a JSON-encoded summary for a single model id, or nil if the
+    /// registry doesn't have it.
+    func describeModel(_ modelId: String) -> String? {
+        do {
+            return try queue.sync {
+                try ensureLoadedLocked()
+                guard let bridge = self.bridge else { return nil }
+                guard let result = bridge.invokeMethod("describeModel", withArguments: [modelId]) else {
+                    return nil
+                }
+                if pendingException() != nil { return nil }
+                if result.isNull || result.isUndefined { return nil }
+                return result.toString()
+            }
+        } catch {
+            return nil
+        }
+    }
+
     /// Rewrite an upstream URL when routing cross-family. The SDK built the
     /// source URL against the source provider's base + path; we replace it
     /// with the destination provider's canonical chat endpoint, which may
