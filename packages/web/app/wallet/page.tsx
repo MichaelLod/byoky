@@ -60,8 +60,83 @@ export default function WalletDashboard() {
             }}>
               <h1 style={{ fontSize: '24px', fontWeight: 700, marginBottom: '6px' }}>Your AI Wallet</h1>
               <p style={{ color: 'var(--text-secondary)', marginBottom: '24px', fontSize: '14px', lineHeight: 1.6 }}>
-                One balance. Every AI app. No API keys needed.
+                One balance. Every AI app. Choose how you want to manage it.
               </p>
+
+              {/* Three options */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '24px' }}>
+                <a
+                  href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon"
+                  target="_blank" rel="noopener noreferrer"
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '12px',
+                    padding: '14px 18px', borderRadius: '12px',
+                    background: 'var(--bg-surface)', border: '1px solid var(--border)',
+                    textDecoration: 'none', color: 'var(--text)',
+                    transition: 'border-color 0.2s',
+                  }}
+                >
+                  <svg width="24" height="24" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" style={{ flexShrink: 0 }}>
+                    <circle cx="24" cy="24" r="22" fill="#fff" stroke="#ddd" strokeWidth="1"/>
+                    <path d="M24 8a16 16 0 0 1 13.86 8H24v0z" fill="#EA4335"/>
+                    <path d="M37.86 16A16 16 0 0 1 24 40l6.93-12z" fill="#FBBC05"/>
+                    <path d="M24 40A16 16 0 0 1 10.14 16l6.93 12z" fill="#34A853"/>
+                    <path d="M10.14 16A16 16 0 0 1 24 8v8z" fill="#4285F4"/>
+                    <circle cx="24" cy="24" r="6" fill="#fff"/>
+                    <circle cx="24" cy="24" r="4" fill="#4285F4"/>
+                  </svg>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: '14px' }}>Chrome Extension</div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Full local encryption. Keys never leave your device.</div>
+                  </div>
+                </a>
+
+                <a
+                  href="https://addons.mozilla.org/en-US/firefox/addon/byoky/"
+                  target="_blank" rel="noopener noreferrer"
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '12px',
+                    padding: '14px 18px', borderRadius: '12px',
+                    background: 'var(--bg-surface)', border: '1px solid var(--border)',
+                    textDecoration: 'none', color: 'var(--text)',
+                    transition: 'border-color 0.2s',
+                  }}
+                >
+                  <svg width="24" height="24" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" style={{ flexShrink: 0 }}>
+                    <circle cx="24" cy="24" r="22" fill="#fff" stroke="#ddd" strokeWidth="1"/>
+                    <path d="M38 18c-1-4-4-7-8-9 2 2 3 5 3 7 0 3-2 6-5 7-4 1-7-1-7-1s1 5 6 6c4 1 8-1 10-4 1-1 1-3 1-6z" fill="#FF4F00"/>
+                    <path d="M14 30c-1-3 0-6 2-9 1-2 3-3 5-4-2 2-3 4-2 7 0 2 2 4 4 5 3 1 6 0 7-2-1 3-4 6-8 6-3 1-6-1-8-3z" fill="#FF9500"/>
+                  </svg>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: '14px' }}>Firefox Extension</div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Same security. Works on Firefox.</div>
+                  </div>
+                </a>
+
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: '12px',
+                  padding: '14px 18px', borderRadius: '12px',
+                  background: 'var(--bg-surface)', border: '2px solid var(--teal)',
+                  color: 'var(--text)',
+                }}>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M2 12h20"/>
+                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                  </svg>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600, fontSize: '14px' }}>Online Wallet <span style={{ fontSize: '11px', color: 'var(--teal)', fontWeight: 700, marginLeft: '6px' }}>No install</span></div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Works in any browser. No extension needed.</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Divider */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: '4px 0 20px' }}>
+                <div style={{ flex: 1, height: '1px', background: 'var(--border)' }} />
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>already have an account?</span>
+                <div style={{ flex: 1, height: '1px', background: 'var(--border)' }} />
+              </div>
 
               {error && <div style={{ color: '#ef4444', fontSize: '13px', marginBottom: '12px', padding: '8px 12px', background: 'rgba(239,68,68,0.06)', borderRadius: '8px' }}>{error}</div>}
 
@@ -70,30 +145,12 @@ export default function WalletDashboard() {
                 const ok = await login(username, password);
                 if (!ok) setError('Invalid credentials');
               }}>
-                <input type="text" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} style={inputStyle} />
-                <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} style={{ ...inputStyle, marginTop: '8px' }} />
-                <button type="submit" style={{ ...btnStyle, marginTop: '16px', width: '100%' }}>Sign In</button>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input type="text" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+                  <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+                </div>
+                <button type="submit" style={{ ...btnStyle, marginTop: '10px', width: '100%' }}>Sign In</button>
               </form>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: '16px 0' }}>
-                <div style={{ flex: 1, height: '1px', background: 'var(--border)' }} />
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>or</span>
-                <div style={{ flex: 1, height: '1px', background: 'var(--border)' }} />
-              </div>
-
-              <a href="/wallet/connect" style={{
-                display: 'block', textAlign: 'center',
-                padding: '10px 20px', borderRadius: '10px',
-                background: 'var(--bg-surface)', color: 'var(--text)',
-                border: '1px solid var(--border)',
-                textDecoration: 'none', fontSize: '14px', fontWeight: 600,
-              }}>
-                Create Wallet
-              </a>
-
-              <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '16px', textAlign: 'center' }}>
-                Free to create. Add a card later when you&apos;re ready.
-              </p>
             </div>
           </div>
 
