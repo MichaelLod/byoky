@@ -127,10 +127,9 @@ const val DEFAULT_GROUP_ID = "default"
  * group transparently — and, when the destination is in a different family
  * than what the app called, drives cross-family translation.
  *
- * Mirrors `Group` in `packages/core/src/types.ts`. Mobile groups today are
- * global routing rules (the proxy doesn't track per-app origin), so the
- * default group is the only one consulted in the proxy path. Multi-group
- * support is wired through CRUD for forward compat.
+ * Mirrors `Group` in `packages/core/src/types.ts`. Each app origin is bound
+ * to a group via the `appGroups` map (origin → groupId), set from the Apps
+ * screen. The default group catches anything not explicitly bound.
  */
 data class Group(
     val id: String,

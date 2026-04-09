@@ -255,6 +255,45 @@ class WalletStore(context: Context) {
 
     // MARK: - Sessions
 
+    /**
+     * Default expiry window for relay-paired sessions. The pair stays in the
+     * Apps screen for 30 days even if the WebSocket drops between requests —
+     * the user revokes explicitly when they're done. Lines up with how the
+     * extension treats sessions as durable trust records, not live sockets.
+     */
+    private val relaySessionTtlMs: Long = 30L * 24 * 60 * 60 * 1000
+
+    /**
+     * Upsert a session for `appOrigin`. Used by `RelayPairService` when a
+     * pair handshake completes — durable record so the app shows up in the
+     * Apps screen across reconnects. Re-pairing the same origin updates the
+     * providers list and resets the expiry, but keeps the existing session id.
+     */
+    fun upsertSession(appOrigin: String, providers: List<String>): Session {
+        val now = System.currentTimeMillis()
+        val expiresAt = now + relaySessionTtlMs
+
+        val existing = _sessions.value.firstOrNull { it.appOrigin == appOrigin }
+        if (existing != null) {
+            val updated = existing.copy(providers = providers, expiresAt = expiresAt)
+            _sessions.value = _sessions.value.map { if (it.id == existing.id) updated else it }
+            saveSessions()
+            return updated
+        }
+
+        val session = Session(
+            id = java.util.UUID.randomUUID().toString(),
+            appOrigin = appOrigin,
+            sessionKey = java.util.UUID.randomUUID().toString(),
+            providers = providers,
+            createdAt = now,
+            expiresAt = expiresAt,
+        )
+        _sessions.value = _sessions.value + session
+        saveSessions()
+        return session
+    }
+
     fun revokeSession(session: Session) {
         _sessions.value = _sessions.value.filter { it.id != session.id }
         saveSessions()
@@ -586,9 +625,10 @@ class WalletStore(context: Context) {
     }
 
     /**
-     * Returns the group that should route this origin's requests. Mobile
-     * today returns the default group for any origin. When per-app routing
-     * lands, this will look up appGroups[origin] and fall back to default.
+     * Returns the group that should route this origin's requests — the user's
+     * per-app binding from `appGroups`, falling back to the default group when
+     * no binding exists. Used by both `ProxyService` and `RelayPairService`
+     * before each upstream call.
      */
     fun groupForOrigin(origin: String): Group? {
         val bound = _appGroups.value[origin]
@@ -597,6 +637,18 @@ class WalletStore(context: Context) {
             if (match != null) return match
         }
         return _groups.value.firstOrNull { it.id == DEFAULT_GROUP_ID }
+    }
+
+    /**
+     * Bind an app origin to a group. Called from the Apps screen when the
+     * user assigns a connected app to a group (the per-app routing knob).
+     * `RoutingResolver` picks this up on the next request via
+     * `groupForOrigin()` — no other plumbing required.
+     */
+    fun setAppGroup(origin: String, groupId: String) {
+        if (_groups.value.none { it.id == groupId }) throw GroupError.NotFound()
+        _appGroups.value = _appGroups.value + (origin to groupId)
+        saveAppGroups()
     }
 
     sealed class GroupError(message: String) : RuntimeException(message) {

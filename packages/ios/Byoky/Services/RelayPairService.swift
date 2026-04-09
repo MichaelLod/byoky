@@ -152,6 +152,14 @@ final class RelayPairService: ObservableObject {
         case "relay:pair:ack":
             pairedOrigin = payload.appOrigin
             status = .paired(appOrigin: payload.appOrigin)
+            // Durable Session record so the app shows up in the Apps screen
+            // across reconnects. The user revokes explicitly when done.
+            // Providers list reflects what the wallet can currently serve;
+            // gifted credentials are advertised separately via sendPairHello.
+            if let wallet {
+                let providerIds = Array(Set(wallet.credentials.map { $0.providerId }))
+                _ = try? wallet.upsertSession(appOrigin: payload.appOrigin, providers: providerIds)
+            }
 
         case "relay:request":
             handleRelayRequest(json)
