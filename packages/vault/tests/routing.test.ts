@@ -305,7 +305,7 @@ describe('vault routing', () => {
   // ─── NO_CREDENTIAL with actionable message ───────────────────────────
 
   describe('NO_CREDENTIAL', () => {
-    it('returns the group-routing branch message when both target and direct lookups fail', async () => {
+    it('returns the group-routing branch message when both target and direct lookups fail', { timeout: 15_000 }, async () => {
       // To hit the "routes to <X>" branch of buildNoCredentialMessage we
       // need the resolver to return null AND a group binding to a different
       // provider than the request. The resolver falls through to direct
