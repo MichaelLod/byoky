@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react';
 import { Byoky, type ByokySession } from '@byoky/sdk';
 import { Playground } from './components/Playground';
-import { CodeExample } from './components/CodeExample';
 
 const byoky = new Byoky({ timeout: 120_000 });
 
@@ -194,10 +193,6 @@ export function DemoApp() {
           <Playground session={session} />
         )}
       </main>
-
-      <section className="code-section">
-        <CodeExample />
-      </section>
 
       <footer className="footer">
         <span>
