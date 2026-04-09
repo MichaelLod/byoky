@@ -19,6 +19,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.byoky.app.BuildConfig
+import com.byoky.app.data.DEFAULT_GROUP_ID
+import com.byoky.app.data.Provider
 import com.byoky.app.data.WalletStore
 import com.byoky.app.proxy.TranslationEngine
 import com.byoky.app.ui.theme.*
@@ -36,6 +38,9 @@ fun SettingsScreen(wallet: WalletStore) {
     val cloudVaultTokenExpired by wallet.cloudVaultTokenExpired.collectAsState()
     var showCloudVaultSetup by remember { mutableStateOf(false) }
     var showCloudVaultRelogin by remember { mutableStateOf(false) }
+    var showRoutingEditor by remember { mutableStateOf(false) }
+    val groups by wallet.groups.collectAsState()
+    val defaultGroup = groups.firstOrNull { it.id == DEFAULT_GROUP_ID }
 
     Scaffold(
         topBar = {
@@ -73,6 +78,44 @@ fun SettingsScreen(wallet: WalletStore) {
                         color = TextSecondary,
                         fontSize = 14.sp,
                     )
+                }
+            }
+
+            // Routing — cross-family translation destination
+            Card(
+                colors = CardDefaults.cardColors(containerColor = BgCard),
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Surface(
+                    onClick = { showRoutingEditor = true },
+                    color = BgCard,
+                    shape = RoundedCornerShape(16.dp),
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.AltRoute, null, tint = Accent, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(10.dp))
+                            Text("Cross-family routing", fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        if (defaultGroup != null) {
+                            val providerName = Provider.find(defaultGroup.providerId)?.name ?: defaultGroup.providerId
+                            val model = defaultGroup.model
+                            if (!model.isNullOrEmpty()) {
+                                Text("Routing to: $providerName · $model", color = TextSecondary, fontSize = 13.sp)
+                            } else {
+                                Text("Pass-through (no model configured)", color = TextSecondary, fontSize = 13.sp)
+                            }
+                        } else {
+                            Text("Tap to configure", color = TextSecondary, fontSize = 13.sp)
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "When apps request a different provider family, route them here. Same-family requests pass through unchanged.",
+                            color = TextMuted,
+                            fontSize = 12.sp,
+                        )
+                    }
                 }
             }
 
@@ -248,6 +291,13 @@ fun SettingsScreen(wallet: WalletStore) {
         CloudVaultSetupDialog(
             wallet = wallet,
             onDismiss = { showCloudVaultSetup = false },
+        )
+    }
+
+    if (showRoutingEditor) {
+        GroupEditorDialog(
+            wallet = wallet,
+            onDismiss = { showRoutingEditor = false },
         )
     }
 
@@ -539,6 +589,100 @@ private fun TranslationDebugCard() {
             }
         }
     }
+}
+
+/**
+ * Edit the default group's destination provider + model. Mobile uses the
+ * default group as a global routing rule (no per-app origin yet), so this
+ * dialog is the single point of control for cross-family translation.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun GroupEditorDialog(wallet: WalletStore, onDismiss: () -> Unit) {
+    val groups by wallet.groups.collectAsState()
+    val current = groups.firstOrNull { it.id == DEFAULT_GROUP_ID }
+    var providerId by remember { mutableStateOf(current?.providerId ?: "anthropic") }
+    var model by remember { mutableStateOf(current?.model ?: "") }
+    var error by remember { mutableStateOf<String?>(null) }
+    var providerExpanded by remember { mutableStateOf(false) }
+    val providerName = Provider.find(providerId)?.name ?: providerId
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = BgCard,
+        title = { Text("Cross-family routing", color = TextPrimary) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "When apps request a different provider family, route the call through this destination instead. Same-family requests pass through unchanged. Leave model empty to disable routing.",
+                    color = TextSecondary,
+                    fontSize = 13.sp,
+                )
+
+                ExposedDropdownMenuBox(
+                    expanded = providerExpanded,
+                    onExpandedChange = { providerExpanded = !providerExpanded },
+                ) {
+                    OutlinedTextField(
+                        value = providerName,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Destination provider") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = providerExpanded) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor(),
+                    )
+                    ExposedDropdownMenu(
+                        expanded = providerExpanded,
+                        onDismissRequest = { providerExpanded = false },
+                    ) {
+                        Provider.all.forEach { provider ->
+                            DropdownMenuItem(
+                                text = { Text(provider.name) },
+                                onClick = {
+                                    providerId = provider.id
+                                    providerExpanded = false
+                                },
+                            )
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = model,
+                    onValueChange = { model = it },
+                    label = { Text("Destination model (e.g. gpt-4o)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+
+                error?.let {
+                    Text(it, color = Danger, fontSize = 13.sp)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    try {
+                        wallet.updateGroup(
+                            id = DEFAULT_GROUP_ID,
+                            providerId = providerId,
+                            model = model.takeIf { it.isNotEmpty() },
+                            unsetModel = model.isEmpty(),
+                        )
+                        onDismiss()
+                    } catch (t: Throwable) {
+                        error = t.message ?: "Failed to update routing"
+                    }
+                },
+            ) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
 }
 
 @Composable
