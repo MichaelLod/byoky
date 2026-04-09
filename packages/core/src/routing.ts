@@ -75,12 +75,17 @@ export function resolveRoute(
     return { credential: swap.cred, swap: swap.swap };
   }
 
-  // 3. Direct credential. If the group has a credential pin and that pin is
-  //    for the requested provider, prefer it; otherwise fall back to the
-  //    most recently used credential for the provider.
+  // 3. Direct credential. Two sub-cases:
+  //    (a) Group binds the requested provider AND pins a specific credential
+  //        id → return that pin verbatim. If the pin id no longer exists,
+  //        return null. We deliberately do NOT silently fall back to a
+  //        different credential of the same provider — pins exist for cost
+  //        attribution and a silent swap masks the user's intent.
+  //    (b) No pin → use any credential of the provider, most-recently-used
+  //        first.
   if (group && group.providerId === requestedProviderId && group.credentialId) {
     const pinned = credentials.find((c) => c.id === group.credentialId);
-    if (pinned) return { credential: pinned };
+    return pinned ? { credential: pinned } : null;
   }
   const direct = credentials.find((c) => c.providerId === requestedProviderId);
   if (direct) return { credential: direct };
@@ -94,7 +99,9 @@ export function resolveRoute(
  *  2. group.providerId !== requestedProviderId
  *  3. group.model is set (translation can't pick a destination model on its own)
  *  4. The provider pair is translatable (both in known families with adapters)
- *  5. A credential exists for group.providerId (pinned id preferred)
+ *  5. A credential resolves for group.providerId — pin is enforced strictly
+ *     (no silent fallback to any-credential-of-provider when the pin id is
+ *     stale; that would mask cost-attribution intent)
  */
 export function resolveCrossFamilyRoute(
   group: Group | undefined,
@@ -106,10 +113,12 @@ export function resolveCrossFamilyRoute(
   if (!group.model) return undefined;
   if (!shouldTranslate(requestedProviderId, group.providerId)) return undefined;
 
-  const cred =
-    (group.credentialId
-      ? credentials.find((c) => c.id === group.credentialId)
-      : undefined) ?? credentials.find((c) => c.providerId === group.providerId);
+  // When a pin is set we honor it strictly: a stale pin returns undefined
+  // rather than silently swapping to a different credential of the same
+  // provider. The caller surfaces NO_CREDENTIAL so the user notices.
+  const cred = group.credentialId
+    ? credentials.find((c) => c.id === group.credentialId)
+    : credentials.find((c) => c.providerId === group.providerId);
   if (!cred) return undefined;
 
   return {
@@ -131,7 +140,8 @@ export function resolveCrossFamilyRoute(
  *  1. A group is set
  *  2. group.providerId !== requestedProviderId
  *  3. Both providers live in the same family (per sameFamily())
- *  4. A credential exists for group.providerId (pinned id preferred)
+ *  4. A credential resolves for group.providerId — pin is enforced strictly
+ *     (a stale pin returns undefined, no silent fallback)
  *
  * Notably, group.model is NOT required — a swap works even when the group
  * has no model pinned. If present, it flows into SessionSwap.dstModel so the
@@ -146,10 +156,10 @@ export function resolveSameFamilySwapRoute(
   if (group.providerId === requestedProviderId) return undefined;
   if (!sameFamily(requestedProviderId, group.providerId)) return undefined;
 
-  const cred =
-    (group.credentialId
-      ? credentials.find((c) => c.id === group.credentialId)
-      : undefined) ?? credentials.find((c) => c.providerId === group.providerId);
+  // Strict pin enforcement: stale pin → undefined, never silently swap.
+  const cred = group.credentialId
+    ? credentials.find((c) => c.id === group.credentialId)
+    : credentials.find((c) => c.providerId === group.providerId);
   if (!cred) return undefined;
 
   return {

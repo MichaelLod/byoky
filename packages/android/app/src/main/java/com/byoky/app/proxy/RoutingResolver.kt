@@ -77,9 +77,15 @@ object RoutingResolver {
         // Family compatibility check via the JS bridge — single source of truth.
         if (!engine.shouldTranslate(requestedProviderId, group.providerId)) return null
 
-        // Credential preference: pinned first, fallback to any credential for the destination provider.
-        val pinned = group.credentialId?.let { id -> credentials.firstOrNull { it.id == id } }
-        val cred = pinned ?: credentials.firstOrNull { it.providerId == group.providerId } ?: return null
+        // Pin enforcement: when a pin is set we honor it strictly. A stale
+        // pin returns null rather than silently swapping to a different
+        // credential of the destination provider — that would mask the
+        // user's cost-attribution intent.
+        val cred = if (group.credentialId != null) {
+            credentials.firstOrNull { it.id == group.credentialId } ?: return null
+        } else {
+            credentials.firstOrNull { it.providerId == group.providerId } ?: return null
+        }
 
         return RoutingDecision(
             credential = cred,
@@ -121,9 +127,13 @@ object RoutingResolver {
         // Must be same family AND not a no-op.
         if (!engine.sameFamily(requestedProviderId, group.providerId)) return null
 
-        // Credential preference: pinned first, then any credential for the destination provider.
-        val pinned = group.credentialId?.let { id -> credentials.firstOrNull { it.id == id } }
-        val cred = pinned ?: credentials.firstOrNull { it.providerId == group.providerId } ?: return null
+        // Strict pin enforcement: stale pin → null, no silent fallback to a
+        // different credential of the destination provider.
+        val cred = if (group.credentialId != null) {
+            credentials.firstOrNull { it.id == group.credentialId } ?: return null
+        } else {
+            credentials.firstOrNull { it.providerId == group.providerId } ?: return null
+        }
 
         return RoutingDecision(
             credential = cred,
