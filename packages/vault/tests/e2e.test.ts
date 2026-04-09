@@ -134,60 +134,100 @@ describe('vault e2e', () => {
     });
   });
 
-  // --- Connect (SDK handshake) ---
+  // --- Connect handshake (new app-session flow) ---
 
-  describe('connect', () => {
-    it('shows openai as available', async () => {
-      const res = await authApi('/connect');
+  describe('connect handshake', () => {
+    let appSessionToken: string;
+
+    it('rejects missing origin', async () => {
+      const res = await authApi('/connect', {
+        method: 'POST',
+        body: JSON.stringify({ providers: [{ id: 'openai' }] }),
+      });
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.code).toBe('MISSING_ORIGIN');
+    });
+
+    it('returns app session token and provider availability', async () => {
+      const res = await authApi('/connect', {
+        method: 'POST',
+        body: JSON.stringify({
+          appOrigin: 'https://e2e.example.com',
+          providers: [{ id: 'openai' }],
+        }),
+      });
       expect(res.status).toBe(200);
       const body = await res.json();
+      expect(body.appSessionToken).toBeDefined();
+      expect(body.origin).toBe('https://e2e.example.com');
+      expect(body.groupId).toBe('default');
       expect(body.providers.openai).toEqual({
         available: true,
         authMethod: 'api_key',
       });
+      appSessionToken = body.appSessionToken;
     });
 
-    it('does not show providers without credentials', async () => {
-      const res = await authApi('/connect');
+    it('reports providers without credentials as unavailable', async () => {
+      const res = await authApi('/connect', {
+        method: 'POST',
+        body: JSON.stringify({
+          appOrigin: 'https://e2e.example.com',
+          providers: [{ id: 'anthropic' }],
+        }),
+      });
       const body = await res.json();
-      expect(body.providers.anthropic).toBeUndefined();
-    });
-  });
-
-  // --- Proxy security ---
-
-  describe('proxy security', () => {
-    it('rejects URL not matching provider', async () => {
-      const res = await authApi('/proxy', {
-        method: 'POST',
-        body: JSON.stringify({
-          providerId: 'openai',
-          url: 'https://evil.com/v1/chat/completions',
-        }),
-      });
-      expect(res.status).toBe(403);
+      expect(body.providers.anthropic.available).toBe(false);
     });
 
-    it('rejects HTTP URLs', async () => {
-      const res = await authApi('/proxy', {
-        method: 'POST',
-        body: JSON.stringify({
-          providerId: 'openai',
-          url: 'http://api.openai.com/v1/chat/completions',
-        }),
-      });
-      expect(res.status).toBe(403);
-    });
+    // --- Proxy security (needs the app session token) ---
 
-    it('rejects provider with no credential', async () => {
-      const res = await authApi('/proxy', {
-        method: 'POST',
-        body: JSON.stringify({
-          providerId: 'anthropic',
-          url: 'https://api.anthropic.com/v1/messages',
-        }),
+    describe('proxy security', () => {
+      async function appAuthApi(path: string, init?: RequestInit) {
+        const headers = new Headers(init?.headers);
+        headers.set('authorization', `Bearer ${appSessionToken}`);
+        headers.set('content-type', 'application/json');
+        return fetch(`${VAULT_URL}${path}`, { ...init, headers });
+      }
+
+      it('rejects URL not matching provider', async () => {
+        const res = await appAuthApi('/proxy', {
+          method: 'POST',
+          body: JSON.stringify({
+            providerId: 'openai',
+            url: 'https://evil.com/v1/chat/completions',
+          }),
+        });
+        expect(res.status).toBe(403);
       });
-      expect(res.status).toBe(404);
+
+      it('rejects HTTP URLs', async () => {
+        const res = await appAuthApi('/proxy', {
+          method: 'POST',
+          body: JSON.stringify({
+            providerId: 'openai',
+            url: 'http://api.openai.com/v1/chat/completions',
+          }),
+        });
+        expect(res.status).toBe(403);
+      });
+
+      it('rejects provider with no credential', async () => {
+        const res = await appAuthApi('/proxy', {
+          method: 'POST',
+          body: JSON.stringify({
+            providerId: 'anthropic',
+            url: 'https://api.anthropic.com/v1/messages',
+          }),
+        });
+        expect(res.status).toBe(404);
+      });
+
+      it('rejects app session token on user-only routes', async () => {
+        const res = await appAuthApi('/credentials');
+        expect(res.status).toBe(401);
+      });
     });
   });
 
@@ -203,12 +243,6 @@ describe('vault e2e', () => {
       const listRes = await authApi('/credentials');
       const body = await listRes.json();
       expect(body.credentials).toHaveLength(0);
-    });
-
-    it('connect shows no providers after delete', async () => {
-      const res = await authApi('/connect');
-      const body = await res.json();
-      expect(Object.keys(body.providers)).toHaveLength(0);
     });
   });
 
@@ -233,7 +267,7 @@ describe('vault e2e', () => {
       const routes = [
         ['GET', '/credentials'],
         ['POST', '/credentials'],
-        ['GET', '/connect'],
+        ['POST', '/connect'],
         ['POST', '/proxy'],
         ['POST', '/auth/logout'],
       ];
