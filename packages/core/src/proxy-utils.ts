@@ -70,6 +70,10 @@ export function buildHeaders(
     headers['anthropic-version'] = headers['anthropic-version'] ?? '2023-06-01';
   } else if (providerId === 'azure_openai') {
     headers['api-key'] = apiKey;
+  } else if (providerId === 'gemini') {
+    // Google AI Studio accepts x-goog-api-key OR ?key= query param. The
+    // header is safer (query params get sanitized out of logs).
+    headers['x-goog-api-key'] = apiKey;
   } else {
     headers['authorization'] = `Bearer ${apiKey}`;
   }
@@ -227,6 +231,40 @@ export function parseUsage(
         return undefined;
       }
 
+      // Gemini streaming (?alt=sse): each frame is a full GenerateContentResponse.
+      // usageMetadata typically appears on the last frame.
+      if (providerId === 'gemini') {
+        for (let i = lines.length - 1; i >= 0; i--) {
+          try {
+            const parsed = JSON.parse(lines[i].replace('data: ', ''));
+            const usage = extractUsageFromParsed('gemini', parsed);
+            if (usage) return usage;
+          } catch {
+            continue;
+          }
+        }
+        return undefined;
+      }
+
+      // Cohere streaming: usage is on the final `message-end` frame under
+      // `delta.usage.tokens`.
+      if (providerId === 'cohere') {
+        for (let i = lines.length - 1; i >= 0; i--) {
+          try {
+            const parsed = JSON.parse(lines[i].replace('data: ', ''));
+            if (parsed.type === 'message-end') {
+              const tokens = parsed.delta?.usage?.tokens as
+                | { input_tokens?: number; output_tokens?: number }
+                | undefined;
+              if (tokens?.input_tokens != null && tokens.output_tokens != null) {
+                return sanitizeTokenCounts(tokens.input_tokens, tokens.output_tokens);
+              }
+            }
+          } catch { continue; }
+        }
+        return undefined;
+      }
+
       // OpenAI-compatible streaming: last chunk may include usage
       for (let i = lines.length - 1; i >= 0; i--) {
         const json = lines[i].replace('data: ', '');
@@ -277,7 +315,23 @@ export function extractUsageFromParsed(
   if (providerId === 'gemini') {
     const meta = parsed.usageMetadata as Record<string, number> | undefined;
     if (meta?.promptTokenCount != null) {
-      return sanitizeTokenCounts(meta.promptTokenCount, meta.candidatesTokenCount ?? 0);
+      // thoughtsTokenCount is charged separately on thinking-enabled models;
+      // roll it into output tokens so billing adds up.
+      const thoughts = meta.thoughtsTokenCount ?? 0;
+      return sanitizeTokenCounts(
+        meta.promptTokenCount,
+        (meta.candidatesTokenCount ?? 0) + thoughts,
+      );
+    }
+  }
+
+  // Cohere v2: { usage: { tokens: { input_tokens, output_tokens } } }
+  if (providerId === 'cohere') {
+    const usage = parsed.usage as
+      | { tokens?: { input_tokens?: number; output_tokens?: number } }
+      | undefined;
+    if (usage?.tokens?.input_tokens != null && usage.tokens.output_tokens != null) {
+      return sanitizeTokenCounts(usage.tokens.input_tokens, usage.tokens.output_tokens);
     }
   }
 

@@ -41,12 +41,9 @@ import {
   shouldTranslate,
   familyOf,
   rewriteProxyUrl,
-  anthropicToOpenAIRequest,
-  openAIToAnthropicRequest,
-  anthropicToOpenAIResponse,
-  openAIToAnthropicResponse,
-  createAnthropicToOpenAIStreamRewriter,
-  createOpenAIToAnthropicStreamRewriter,
+  translateRequest,
+  translateResponse,
+  createStreamTranslator,
   TranslationError,
 } from '@byoky/core';
 import type { Runtime } from 'wxt/browser';
@@ -509,7 +506,8 @@ export default defineBackground(() => {
             });
             return;
           }
-          const rewritten = rewriteProxyUrl(translation.dstProviderId);
+          const isStreaming = detectStreamingRequest(msg.body);
+          const rewritten = rewriteProxyUrl(translation.dstProviderId, translation.dstModel, isStreaming);
           if (!rewritten) {
             port.postMessage({
               type: 'BYOKY_PROXY_RESPONSE_ERROR',
@@ -2598,7 +2596,8 @@ export default defineBackground(() => {
           });
           return;
         }
-        const rewritten = rewriteProxyUrl(translation.dstProviderId);
+        const isStreaming = detectStreamingRequest(body);
+        const rewritten = rewriteProxyUrl(translation.dstProviderId, translation.dstModel, isStreaming);
         if (!rewritten) {
           bridgeProxyPort?.postMessage({
             type: 'proxy_http_error',
@@ -2830,7 +2829,6 @@ export default defineBackground(() => {
       dstModel: translation.dstModel,
       isStreaming: detectStreamingRequest(requestBody),
       requestId,
-      state: {},
     };
   }
 
@@ -2845,7 +2843,7 @@ export default defineBackground(() => {
   }
 
   /**
-   * Run the appropriate request body translator for a session translation.
+   * Run the request body through the canonical-IR translation pipeline.
    * Throws TranslationError on shapes the destination cannot represent.
    */
   function applyRequestTranslation(
@@ -2858,16 +2856,7 @@ export default defineBackground(() => {
     if (!ctx) {
       throw new TranslationError('TRANSLATION_FAILED', 'Cannot resolve translation families');
     }
-    if (ctx.srcFamily === 'anthropic' && ctx.dstFamily === 'openai') {
-      return anthropicToOpenAIRequest(ctx, body);
-    }
-    if (ctx.srcFamily === 'openai' && ctx.dstFamily === 'anthropic') {
-      return openAIToAnthropicRequest(ctx, body);
-    }
-    throw new TranslationError(
-      'TRANSLATION_NOT_SUPPORTED',
-      `No translator for ${ctx.srcFamily} → ${ctx.dstFamily}`,
-    );
+    return translateRequest(ctx, body);
   }
 
   /**
@@ -2884,18 +2873,7 @@ export default defineBackground(() => {
     if (!ctx) {
       throw new TranslationError('TRANSLATION_FAILED', 'Cannot resolve translation families');
     }
-    // ctx.srcFamily is the SDK's dialect — that's what the response needs
-    // to be returned in. ctx.dstFamily is what the upstream actually spoke.
-    if (ctx.srcFamily === 'anthropic' && ctx.dstFamily === 'openai') {
-      return openAIToAnthropicResponse(ctx, responseBody);
-    }
-    if (ctx.srcFamily === 'openai' && ctx.dstFamily === 'anthropic') {
-      return anthropicToOpenAIResponse(ctx, responseBody);
-    }
-    throw new TranslationError(
-      'TRANSLATION_NOT_SUPPORTED',
-      `No response translator for ${ctx.srcFamily} → ${ctx.dstFamily}`,
-    );
+    return translateResponse(ctx, responseBody);
   }
 
   /**
@@ -2908,13 +2886,7 @@ export default defineBackground(() => {
   ): { process(s: string): string; flush(): string } | undefined {
     const ctx = buildTranslationContext(translation, undefined, requestId);
     if (!ctx) return undefined;
-    if (ctx.srcFamily === 'anthropic' && ctx.dstFamily === 'openai') {
-      return createOpenAIToAnthropicStreamRewriter(ctx);
-    }
-    if (ctx.srcFamily === 'openai' && ctx.dstFamily === 'anthropic') {
-      return createAnthropicToOpenAIStreamRewriter(ctx);
-    }
-    return undefined;
+    return createStreamTranslator(ctx);
   }
 
   /**

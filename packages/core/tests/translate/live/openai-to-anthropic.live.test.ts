@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
-  openAIToAnthropicRequest,
-  anthropicToOpenAIResponse,
-  createAnthropicToOpenAIStreamRewriter,
+  translateRequest,
+  translateResponse,
+  createStreamTranslator,
 } from '../../../src/translate/index.js';
 import type { TranslationContext } from '../../../src/translate/types.js';
 import {
@@ -49,7 +49,6 @@ function ctx(overrides: Partial<TranslationContext> = {}): TranslationContext {
     dstModel: DST_MODEL,
     isStreaming: false,
     requestId: 'live-test',
-    state: {},
     ...overrides,
   };
 }
@@ -145,11 +144,11 @@ describe.skipIf(!ANTHROPIC_KEY)('live openai→anthropic — non-streaming chat'
       max_tokens: 10,
     };
 
-    const anthropicBody = openAIToAnthropicRequest(c, JSON.stringify(openAIRequest));
+    const anthropicBody = translateRequest(c, JSON.stringify(openAIRequest));
     const { status, body: anthropicText } = await callAnthropic(anthropicBody, false);
     expect(status).toBe(200);
 
-    const translated = anthropicToOpenAIResponse(c, anthropicText);
+    const translated = translateResponse(c, anthropicText);
     const parsed = JSON.parse(translated) as {
       object: string;
       model: string;
@@ -183,16 +182,16 @@ describe.skipIf(!ANTHROPIC_KEY)('live openai→anthropic — streaming chat', ()
       stream: true,
     };
 
-    const anthropicBody = openAIToAnthropicRequest(c, JSON.stringify(openAIRequest));
+    const anthropicBody = translateRequest(c, JSON.stringify(openAIRequest));
     const { status, headers, body: rawSSE } = await callAnthropic(anthropicBody, true);
     expect(status).toBe(200);
     expect(headers['content-type'] ?? '').toContain('text/event-stream');
 
-    // Feed the entire buffered SSE body through the rewriter in one shot
-    // (the rewriter handles arbitrary buffering boundaries internally).
-    const rewriter = createAnthropicToOpenAIStreamRewriter(c);
-    let translated = rewriter.process(rawSSE);
-    translated += rewriter.flush();
+    // Feed the entire buffered SSE body through the translator in one shot
+    // (the stream translator handles arbitrary buffering boundaries internally).
+    const streamer = createStreamTranslator(c);
+    let translated = streamer.process(rawSSE);
+    translated += streamer.flush();
 
     // Parse the OpenAI-style SSE output: each frame is `data: <json>\n\n` or `data: [DONE]`.
     const dataLines = translated.split('\n').filter((l) => l.startsWith('data: '));
@@ -254,11 +253,11 @@ describe.skipIf(!ANTHROPIC_KEY)('live openai→anthropic — tool use', () => {
       tool_choice: 'auto',
     };
 
-    const anthropicBody = openAIToAnthropicRequest(c, JSON.stringify(openAIRequest));
+    const anthropicBody = translateRequest(c, JSON.stringify(openAIRequest));
     const { status, body: anthropicText } = await callAnthropic(anthropicBody, false);
     expect(status).toBe(200);
 
-    const translated = anthropicToOpenAIResponse(c, anthropicText);
+    const translated = translateResponse(c, anthropicText);
     const parsed = JSON.parse(translated) as {
       object: string;
       choices: Array<{

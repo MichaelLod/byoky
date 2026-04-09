@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest';
+// Importing from the public surface (index.ts) ensures adapter registration
+// has run, which shouldTranslate / rewriteProxyUrl depend on.
 import {
   familyOf,
   shouldTranslate,
-  canonicalChatEndpoint,
   isChatCompletionsEndpoint,
   rewriteProxyUrl,
-} from '../../src/translate/families.js';
+} from '../../src/translate/index.js';
 
 describe('familyOf', () => {
   it('classifies anthropic in the anthropic family', () => {
@@ -18,9 +19,15 @@ describe('familyOf', () => {
     }
   });
 
-  it('returns null for providers outside known families', () => {
-    expect(familyOf('gemini')).toBeNull();
-    expect(familyOf('cohere')).toBeNull();
+  it('classifies gemini in the gemini family', () => {
+    expect(familyOf('gemini')).toBe('gemini');
+  });
+
+  it('classifies cohere in the cohere family', () => {
+    expect(familyOf('cohere')).toBe('cohere');
+  });
+
+  it('returns null for providers outside any known family', () => {
     expect(familyOf('not-a-real-provider')).toBeNull();
   });
 });
@@ -32,27 +39,19 @@ describe('shouldTranslate', () => {
     expect(shouldTranslate('openai', 'together')).toBe(false);
   });
 
-  it('is true for cross-family pairs in the supported set', () => {
+  it('is true for every cross-family pair among the registered families', () => {
+    // Ordering pairs: only runs the pairs whose both families have adapters.
+    // In this test file only anthropic + openai are imported by the core
+    // registration — gemini / cohere adapters are imported by their own tests.
     expect(shouldTranslate('anthropic', 'openai')).toBe(true);
     expect(shouldTranslate('openai', 'anthropic')).toBe(true);
     expect(shouldTranslate('anthropic', 'groq')).toBe(true);
     expect(shouldTranslate('deepseek', 'anthropic')).toBe(true);
   });
 
-  it('is false when either side is outside the supported families', () => {
-    expect(shouldTranslate('anthropic', 'gemini')).toBe(false);
-    expect(shouldTranslate('gemini', 'openai')).toBe(false);
-    expect(shouldTranslate('cohere', 'gemini')).toBe(false);
-  });
-});
-
-describe('canonicalChatEndpoint', () => {
-  it('returns the Anthropic Messages path', () => {
-    expect(canonicalChatEndpoint('anthropic')).toBe('/v1/messages');
-  });
-
-  it('returns the OpenAI Chat Completions path', () => {
-    expect(canonicalChatEndpoint('openai')).toBe('/v1/chat/completions');
+  it('is false for unknown providers', () => {
+    expect(shouldTranslate('not-real', 'openai')).toBe(false);
+    expect(shouldTranslate('openai', 'not-real')).toBe(false);
   });
 });
 
@@ -77,15 +76,13 @@ describe('isChatCompletionsEndpoint', () => {
 
 describe('rewriteProxyUrl', () => {
   it('produces the destination provider canonical chat URL', () => {
-    expect(rewriteProxyUrl('anthropic')).toBe('https://api.anthropic.com/v1/messages');
-    expect(rewriteProxyUrl('openai')).toBe('https://api.openai.com/v1/chat/completions');
+    expect(rewriteProxyUrl('anthropic', 'claude-sonnet-4-6', false))
+      .toBe('https://api.anthropic.com/v1/messages');
+    expect(rewriteProxyUrl('openai', 'gpt-5.4', false))
+      .toBe('https://api.openai.com/v1/chat/completions');
   });
 
   it('returns null for unknown providers', () => {
-    expect(rewriteProxyUrl('not-a-provider')).toBeNull();
-  });
-
-  it('returns null for providers outside known families', () => {
-    expect(rewriteProxyUrl('gemini')).toBeNull();
+    expect(rewriteProxyUrl('not-a-provider', 'any-model', false)).toBeNull();
   });
 });

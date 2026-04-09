@@ -4,9 +4,10 @@ import type { ModelFamily } from '../models.js';
  * Per-request translation context.
  *
  * Constructed once at the proxy entry when `shouldTranslate(src, dst)` returns
- * true, and threaded through every step of the request → response → stream
- * pipeline. The state object is per-direction scratch space owned by the
- * translator implementations — callers should treat it as opaque.
+ * true, then threaded through every step of the request → response → stream
+ * pipeline. The fields are read-only inputs to the adapters; each adapter
+ * maintains its own private state in the closures returned by
+ * createStreamParser / createStreamSerializer.
  */
 export interface TranslationContext {
   /** Family of the provider the SDK targeted. */
@@ -21,8 +22,6 @@ export interface TranslationContext {
   isStreaming: boolean;
   /** byoky's per-request id, used to synthesize ids in the destination dialect. */
   requestId: string;
-  /** Per-translator scratch space; mutated by createSSETranslator implementations. */
-  state: Record<string, unknown>;
 }
 
 /**

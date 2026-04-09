@@ -48,38 +48,18 @@ provider can't actually participate in cross-family routing.
 
 ## Translation layer — phase 2 follow-ups
 
-### Add Gemini family + translator
+_Shipped in 0.5.0 — canonical IR refactor + Gemini and Cohere adapters._
+See `packages/core/src/translate/ir.ts`, `adapter.ts`, and `adapters/*.ts`.
+Full 4-family cross-product (12 directed pairs) is now supported via a single
+`FamilyAdapter` interface; each new family is one file and one line in
+`index.ts` to register. Live tests cover openai↔anthropic (pre-existing),
+anthropic↔gemini (new), gemini→openai (new), and openai↔cohere (new, requires
+`COHERE_API_KEY`).
 
-- Google AI Studio / Generative Language API (`generateContent` /
-  `streamGenerateContent`) is the third major frontier provider with a stable
-  documented chat surface.
-- Different shape from OpenAI/Anthropic: `contents[].parts[]`, `model` role,
-  top-level `systemInstruction`, `tools[].functionDeclarations`,
-  `generationConfig`, `safetySettings`.
-- Different streaming format: chunked array of `GenerateContentResponse` JSON
-  objects, sometimes wrapped in SSE depending on endpoint.
-- Worth doing as part of the canonical-IR refactor (see below) so the third
-  family doesn't trigger an N² translator explosion.
-
-### Add Cohere v2 family + translator
-
-- Cohere `/v2/chat`. Closer to OpenAI shape than Gemini but still its own
-  thing: distinct streaming SSE event names (`message-start`, `content-delta`,
-  `tool-call-start`, etc.), `parameter_definitions` instead of `parameters` on
-  tools.
-- Smaller user base than Gemini but real, especially for enterprise.
-
-### Refactor pairwise translators to canonical IR
-
-- Current architecture has hand-written translators for each (src, dst) pair
-  (`anthropic-to-openai.ts`, `openai-to-anthropic.ts`, etc.). For 2 families
-  that's manageable; for ≥3 families it explodes (4 families = 12 directed
-  pairs, each with 4 surfaces = 48 functions).
-- Right move before adding Gemini/Cohere: introduce a normalized internal
-  request/response IR and rewrite each family as `family ↔ canonical`. With
-  N families that's N translators instead of N(N-1).
-- Existing live tests should stay green throughout the refactor as the
-  regression net.
+**Cohere tool schema trivia**: older docs and blog tutorials show v1's
+`parameter_definitions` shape. **Cohere v2 uses OpenAI-style `parameters`**
+(JSON Schema wrapped in `function: { parameters }`). Don't regress back to v1
+if you extend the cohere adapter.
 
 ---
 
