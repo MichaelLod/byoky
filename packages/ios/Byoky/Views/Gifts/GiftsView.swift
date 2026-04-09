@@ -25,7 +25,7 @@ struct GiftsView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
+            SwiftUI.Group {
                 if hasAnyItems {
                     List {
                         actionsSection

@@ -406,7 +406,7 @@ struct CloudVaultSetupView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
+            SwiftUI.Group {
                 if step == .warning {
                     warningView
                 } else {
@@ -486,7 +486,7 @@ struct CloudVaultSetupView: View {
                                 if isSignup { onUsernameChanged(value) }
                             }
                         if isSignup && username.count >= 3 {
-                            Group {
+                            SwiftUI.Group {
                                 switch usernameStatus {
                                 case .checking:
                                     Text("Checking availability...")

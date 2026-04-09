@@ -5,7 +5,7 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        Group {
+        SwiftUI.Group {
             switch wallet.status {
             case .uninitialized:
                 OnboardingView()
