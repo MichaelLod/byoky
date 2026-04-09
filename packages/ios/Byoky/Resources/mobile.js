@@ -12,6 +12,9 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
     }
     return adapter;
   }
+  function hasAdapter(family) {
+    return ADAPTERS.has(family);
+  }
 
   // src/translate/types.ts
   var TranslationError = class extends Error {
@@ -3133,6 +3136,128 @@ data: [DONE]
     }
   }
 
+  // src/providers.ts
+  var PROVIDERS = {
+    anthropic: {
+      id: "anthropic",
+      name: "Anthropic",
+      authMethods: ["api_key", "oauth"],
+      baseUrl: "https://api.anthropic.com"
+    },
+    openai: {
+      id: "openai",
+      name: "OpenAI",
+      authMethods: ["api_key"],
+      baseUrl: "https://api.openai.com"
+    },
+    gemini: {
+      id: "gemini",
+      name: "Google Gemini",
+      authMethods: ["api_key"],
+      baseUrl: "https://generativelanguage.googleapis.com"
+    },
+    mistral: {
+      id: "mistral",
+      name: "Mistral",
+      authMethods: ["api_key"],
+      baseUrl: "https://api.mistral.ai"
+    },
+    cohere: {
+      id: "cohere",
+      name: "Cohere",
+      authMethods: ["api_key"],
+      baseUrl: "https://api.cohere.com"
+    },
+    xai: {
+      id: "xai",
+      name: "xAI (Grok)",
+      authMethods: ["api_key"],
+      baseUrl: "https://api.x.ai"
+    },
+    deepseek: {
+      id: "deepseek",
+      name: "DeepSeek",
+      authMethods: ["api_key"],
+      baseUrl: "https://api.deepseek.com"
+    },
+    perplexity: {
+      id: "perplexity",
+      name: "Perplexity",
+      authMethods: ["api_key"],
+      baseUrl: "https://api.perplexity.ai"
+    },
+    groq: {
+      id: "groq",
+      name: "Groq",
+      authMethods: ["api_key"],
+      baseUrl: "https://api.groq.com"
+    },
+    together: {
+      id: "together",
+      name: "Together AI",
+      authMethods: ["api_key"],
+      baseUrl: "https://api.together.xyz"
+    },
+    fireworks: {
+      id: "fireworks",
+      name: "Fireworks AI",
+      authMethods: ["api_key"],
+      baseUrl: "https://api.fireworks.ai"
+    },
+    openrouter: {
+      id: "openrouter",
+      name: "OpenRouter",
+      authMethods: ["api_key"],
+      baseUrl: "https://openrouter.ai/api"
+    },
+    azure_openai: {
+      id: "azure_openai",
+      name: "Azure OpenAI",
+      authMethods: ["api_key"],
+      baseUrl: "https://YOUR_RESOURCE.openai.azure.com"
+    }
+  };
+
+  // src/translate/families.ts
+  var FAMILY_PROVIDERS = {
+    anthropic: /* @__PURE__ */ new Set(["anthropic"]),
+    openai: /* @__PURE__ */ new Set([
+      "openai",
+      "azure_openai",
+      "groq",
+      "together",
+      "deepseek",
+      "xai",
+      "perplexity",
+      "fireworks",
+      "openrouter",
+      "mistral"
+    ]),
+    gemini: /* @__PURE__ */ new Set(["gemini"]),
+    cohere: /* @__PURE__ */ new Set(["cohere"])
+  };
+  function familyOf(providerId) {
+    for (const family of Object.keys(FAMILY_PROVIDERS)) {
+      if (FAMILY_PROVIDERS[family].has(providerId)) return family;
+    }
+    return null;
+  }
+  function shouldTranslate(srcProviderId, dstProviderId) {
+    const src = familyOf(srcProviderId);
+    if (!src || !hasAdapter(src)) return false;
+    const dst = familyOf(dstProviderId);
+    if (!dst || !hasAdapter(dst)) return false;
+    return src !== dst;
+  }
+  function rewriteProxyUrl(dstProviderId, model, stream) {
+    const provider = PROVIDERS[dstProviderId];
+    if (!provider) return null;
+    const family = familyOf(dstProviderId);
+    if (!family || !hasAdapter(family)) return null;
+    const base = provider.baseUrl.replace(/\/$/, "");
+    return getAdapter(family).buildChatUrl(base, model, stream);
+  }
+
   // src/translate/index.ts
   registerAdapter(anthropicAdapter);
   registerAdapter(openaiAdapter);
@@ -3201,6 +3326,27 @@ data: [DONE]
     },
     releaseStreamTranslator(handle) {
       streams.delete(handle);
+    },
+    shouldTranslate(srcProviderId, dstProviderId) {
+      return shouldTranslate(srcProviderId, dstProviderId);
+    },
+    buildTranslationContext(srcProviderId, dstProviderId, srcModel, dstModel, isStreaming, requestId) {
+      const srcFamily = familyOf(srcProviderId);
+      const dstFamily = familyOf(dstProviderId);
+      if (!srcFamily) throw new Error(`byoky: unknown source family for provider "${srcProviderId}"`);
+      if (!dstFamily) throw new Error(`byoky: unknown destination family for provider "${dstProviderId}"`);
+      const ctx = {
+        srcFamily,
+        dstFamily,
+        srcModel,
+        dstModel,
+        isStreaming,
+        requestId
+      };
+      return JSON.stringify(ctx);
+    },
+    rewriteProxyUrl(dstProviderId, model, stream) {
+      return rewriteProxyUrl(dstProviderId, model, stream);
     },
     version: "0.5.0"
   };
