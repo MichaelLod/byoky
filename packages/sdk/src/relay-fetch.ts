@@ -91,9 +91,24 @@ export function createRelayFetch(
             break;
 
           case 'relay:response:error': {
+            // Forward the wallet's actual error code + message into the
+            // response body so app-level error handlers can render
+            // something useful (instead of "Relay proxy error 500").
+            // The wallet always sends `{ error: { code, message } }` —
+            // see RelayPairService on iOS / Android. We also pick a
+            // status code that matches the failure mode so SDKs that
+            // branch on response.status behave sensibly.
+            const errObj = (data.error && typeof data.error === 'object' && !Array.isArray(data.error))
+              ? data.error as { code?: string; message?: string }
+              : {};
+            const code = typeof errObj.code === 'string' ? errObj.code : 'RELAY_ERROR';
+            const message = typeof errObj.message === 'string' && errObj.message
+              ? errObj.message
+              : 'Relay proxy error';
+            const status = relayErrorCodeToHttpStatus(code);
             const errResponse = new Response(
-              JSON.stringify({ error: { message: 'Relay proxy error', code: 'RELAY_ERROR' } }),
-              { status: 500, headers: { 'content-type': 'application/json' } },
+              JSON.stringify({ error: { message, code, type: code } }),
+              { status, headers: { 'content-type': 'application/json' } },
             );
             if (!resolved) {
               resolved = true;
@@ -138,6 +153,32 @@ export function createRelayFetch(
       }));
     });
   };
+}
+
+/**
+ * Map a wallet-side error code to a sensible HTTP status. The wallet sends
+ * a small set of well-known codes via `relay:response:error`; we surface
+ * each as the status code an SDK would expect for that failure mode.
+ * Anything unknown defaults to 500.
+ */
+function relayErrorCodeToHttpStatus(code: string): number {
+  switch (code) {
+    case 'NO_CREDENTIAL':
+    case 'PROVIDER_UNAVAILABLE':
+      return 403;
+    case 'INVALID_URL':
+    case 'TRANSLATION_NOT_SUPPORTED':
+      return 400;
+    case 'QUOTA_EXCEEDED':
+      return 429;
+    case 'TRANSLATION_FAILED':
+    case 'SWAP_FAILED':
+    case 'INVALID_RESPONSE':
+    case 'PROXY_ERROR':
+      return 502;
+    default:
+      return 500;
+  }
 }
 
 function isTextContentType(contentType?: string): boolean {
