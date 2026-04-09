@@ -416,7 +416,10 @@ final class WalletStore: ObservableObject {
         url: String,
         statusCode: Int,
         requestBody: Data?,
-        responseBody: String?
+        responseBody: String?,
+        actualProviderId: String? = nil,
+        actualModel: String? = nil,
+        groupId: String? = nil
     ) {
         var sanitizedUrl = url
         if let comps = URLComponents(string: url) {
@@ -438,10 +441,18 @@ final class WalletStore: ObservableObject {
         entry.model = UsageParser.parseModel(from: requestBody)
 
         if let responseBody {
-            let usage = UsageParser.parseUsage(providerId: providerId, body: responseBody)
+            // Use the upstream provider for usage parsing if we routed
+            // cross-family — the response body shape matches the destination
+            // provider, not the source.
+            let parseProviderId = actualProviderId ?? providerId
+            let usage = UsageParser.parseUsage(providerId: parseProviderId, body: responseBody)
             entry.inputTokens = usage?.inputTokens
             entry.outputTokens = usage?.outputTokens
         }
+
+        entry.actualProviderId = actualProviderId
+        entry.actualModel = actualModel
+        entry.groupId = groupId
 
         requestLogs.insert(entry, at: 0)
         if requestLogs.count > 500 {
