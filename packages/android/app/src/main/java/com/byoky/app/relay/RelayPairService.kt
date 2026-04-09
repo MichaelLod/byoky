@@ -61,7 +61,7 @@ data class PairPayload(
     }
 }
 
-class RelayPairService {
+class RelayPairService(private val appContext: android.content.Context? = null) {
     private val _status = MutableStateFlow(PairStatus.IDLE)
     val status: StateFlow<PairStatus> = _status.asStateFlow()
 
@@ -73,6 +73,13 @@ class RelayPairService {
     private var pairedOrigin: String? = null
     private var lastPayload: PairPayload? = null
     private val scope = CoroutineScope(Dispatchers.IO)
+
+    /** Translation engine for cross-family routing on relay-routed requests.
+     *  Lazy because TranslationEngine.get(context) needs an Android context;
+     *  if construction was without one, translation is silently disabled. */
+    private val translationEngine: com.byoky.app.proxy.TranslationEngine? by lazy {
+        appContext?.let { com.byoky.app.proxy.TranslationEngine.get(it) }
+    }
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -266,6 +273,23 @@ class RelayPairService {
                     return@launch
                 }
 
+                // Cross-family routing check. The relay path carries the
+                // app's actual origin via pairedOrigin, so per-app routing
+                // works (vs the local TCP proxy which has no origin).
+                val routing = resolveRelayRouting(providerId, bodyString)
+                if (routing != null && routing.translation != null) {
+                    handleRelayRequestWithTranslation(
+                        requestId = requestId,
+                        originalProviderId = providerId,
+                        translation = routing.translation,
+                        routedCredential = routing.credential,
+                        method = method,
+                        headers = headers,
+                        bodyString = bodyString,
+                    )
+                    return@launch
+                }
+
                 val apiKey = wallet.decryptKey(ownCred)
 
                 val filteredHeaders = headers.filterKeys {
@@ -369,6 +393,221 @@ class RelayPairService {
             } catch (e: Exception) {
                 sendRelayError(requestId, "PROXY_ERROR", e.message ?: "Unknown error")
             }
+        }
+    }
+
+    /**
+     * Cross-family routing for relay-routed requests. Uses pairedOrigin (the
+     * desktop app's actual origin) for the group lookup, so per-app routing
+     * is fully functional via the relay path. Returns null when there's no
+     * translation engine, no group, same family, or no credential.
+     */
+    private fun resolveRelayRouting(
+        requestedProviderId: String,
+        bodyString: String?,
+    ): com.byoky.app.data.RoutingDecision? {
+        val engine = translationEngine ?: return null
+        val w = wallet ?: return null
+        val origin = pairedOrigin ?: return null
+        val group = w.groupForOrigin(origin) ?: return null
+        val srcModel = com.byoky.app.proxy.RoutingResolver.parseModel(bodyString?.toByteArray(Charsets.UTF_8))
+        return com.byoky.app.proxy.RoutingResolver.resolve(
+            requestedProviderId = requestedProviderId,
+            requestedModel = srcModel,
+            group = group,
+            credentials = w.credentials.value,
+            engine = engine,
+        )
+    }
+
+    /**
+     * Cross-family translation path for relay-routed requests. Mirrors the
+     * pass-through relay flow but inserts: translateRequest before send,
+     * destination URL via rewriteProxyUrl, destination credential auth, and
+     * translateResponse / stream translator on the response chunks.
+     */
+    private fun handleRelayRequestWithTranslation(
+        requestId: String,
+        originalProviderId: String,
+        translation: com.byoky.app.data.RoutingTranslation,
+        routedCredential: com.byoky.app.data.Credential,
+        method: String,
+        headers: Map<String, String>,
+        bodyString: String?,
+    ) {
+        val wallet = wallet ?: return
+        val engine = translationEngine ?: return
+        val isStreaming = com.byoky.app.proxy.RoutingResolver.isStreamingRequest(bodyString?.toByteArray(Charsets.UTF_8))
+
+        try {
+            val ctxJson = engine.buildTranslationContext(
+                srcProviderId = translation.srcProviderId,
+                dstProviderId = translation.dstProviderId,
+                srcModel = translation.srcModel,
+                dstModel = translation.dstModel,
+                isStreaming = isStreaming,
+                requestId = requestId,
+            )
+            val translatedBody = engine.translateRequest(ctxJson, bodyString ?: "")
+            val urlString = engine.rewriteProxyUrl(translation.dstProviderId, translation.dstModel, isStreaming)
+                ?: run {
+                    sendRelayError(requestId, "TRANSLATION_FAILED", "rewriteProxyUrl returned null")
+                    return
+                }
+
+            val dstApiKey = wallet.decryptKey(routedCredential)
+
+            val filteredHeaders = headers.filterKeys {
+                it.lowercase() !in setOf("host", "authorization", "x-api-key", "anthropic-version", "content-length")
+            }.toMutableMap()
+            applyAuth(filteredHeaders, translation.dstProviderId, routedCredential.authMethod, dstApiKey, translatedBody)
+
+            val injectedBody = injectStreamUsageOptions(translation.dstProviderId, translatedBody) ?: translatedBody
+            val requestBody = injectedBody.toByteArray(Charsets.UTF_8)
+                .toRequestBody((filteredHeaders["content-type"] ?: "application/json").toMediaTypeOrNull())
+
+            val request = Request.Builder()
+                .url(urlString)
+                .method(method.uppercase(), requestBody)
+                .apply { filteredHeaders.forEach { (k, v) -> addHeader(k, v) } }
+                .build()
+
+            val response = proxyClient.newCall(request).execute()
+            val responseHeaders = JSONObject()
+            response.headers.forEach { (name, value) ->
+                if (name.lowercase() !in ProxyService.SENSITIVE_RESPONSE_HEADERS) {
+                    responseHeaders.put(name.lowercase(), value)
+                }
+            }
+
+            sendJSON(JSONObject().apply {
+                put("type", "relay:response:meta")
+                put("requestId", requestId)
+                put("status", response.code)
+                put("statusText", response.message)
+                put("headers", responseHeaders)
+            })
+
+            val body = response.body
+            if (body == null) {
+                sendJSON(JSONObject().apply {
+                    put("type", "relay:response:done")
+                    put("requestId", requestId)
+                })
+                return
+            }
+
+            // Non-2xx: pass body through verbatim. Don't try to translate
+            // error bodies — they're rarely shaped like the source dialect.
+            if (response.code !in 200..299) {
+                val source = body.source()
+                val buffer = StringBuilder()
+                while (!source.exhausted()) {
+                    val byte = source.readByte()
+                    val char = byte.toInt().toChar()
+                    buffer.append(char)
+                    if (buffer.length >= 4096 || char == '\n') {
+                        sendJSON(JSONObject().apply {
+                            put("type", "relay:response:chunk")
+                            put("requestId", requestId)
+                            put("chunk", buffer.toString())
+                        })
+                        buffer.clear()
+                    }
+                }
+                if (buffer.isNotEmpty()) {
+                    sendJSON(JSONObject().apply {
+                        put("type", "relay:response:chunk")
+                        put("requestId", requestId)
+                        put("chunk", buffer.toString())
+                    })
+                }
+                body.close()
+                sendJSON(JSONObject().apply {
+                    put("type", "relay:response:done")
+                    put("requestId", requestId)
+                })
+                wallet.logRequest(
+                    appOrigin = pairedOrigin ?: "relay",
+                    providerId = originalProviderId,
+                    method = method,
+                    url = urlString,
+                    statusCode = response.code,
+                    requestBody = bodyString?.toByteArray(Charsets.UTF_8),
+                    responseBody = null,
+                    actualProviderId = translation.dstProviderId,
+                    actualModel = translation.dstModel,
+                    groupId = wallet.groupForOrigin(pairedOrigin ?: "relay")?.id,
+                )
+                return
+            }
+
+            // 2xx + streaming: feed each chunk through the stream translator,
+            // forward translated chunks via relay protocol.
+            // 2xx + non-streaming: accumulate full body, translateResponse,
+            // send as one chunk.
+            if (isStreaming) {
+                val streamHandle = engine.createStreamTranslator(ctxJson)
+                var releasedExplicitly = false
+                try {
+                    val source = body.source()
+                    val buffer = ByteArray(4096)
+                    while (!source.exhausted()) {
+                        val read = source.read(buffer)
+                        if (read > 0) {
+                            val chunkString = String(buffer, 0, read, Charsets.UTF_8)
+                            val translated = engine.processStreamChunk(streamHandle, chunkString)
+                            if (translated.isNotEmpty()) {
+                                sendJSON(JSONObject().apply {
+                                    put("type", "relay:response:chunk")
+                                    put("requestId", requestId)
+                                    put("chunk", translated)
+                                })
+                            }
+                        }
+                    }
+                    val trailing = engine.flushStreamTranslator(streamHandle)
+                    releasedExplicitly = true
+                    if (trailing.isNotEmpty()) {
+                        sendJSON(JSONObject().apply {
+                            put("type", "relay:response:chunk")
+                            put("requestId", requestId)
+                            put("chunk", trailing)
+                        })
+                    }
+                } finally {
+                    if (!releasedExplicitly) engine.releaseStreamTranslator(streamHandle)
+                    body.close()
+                }
+            } else {
+                val rawResponse = body.string()
+                val translated = engine.translateResponse(ctxJson, rawResponse)
+                sendJSON(JSONObject().apply {
+                    put("type", "relay:response:chunk")
+                    put("requestId", requestId)
+                    put("chunk", translated)
+                })
+            }
+
+            sendJSON(JSONObject().apply {
+                put("type", "relay:response:done")
+                put("requestId", requestId)
+            })
+
+            wallet.logRequest(
+                appOrigin = pairedOrigin ?: "relay",
+                providerId = originalProviderId,
+                method = method,
+                url = urlString,
+                statusCode = response.code,
+                requestBody = bodyString?.toByteArray(Charsets.UTF_8),
+                responseBody = null,
+                actualProviderId = translation.dstProviderId,
+                actualModel = translation.dstModel,
+                groupId = wallet.groupForOrigin(pairedOrigin ?: "relay")?.id,
+            )
+        } catch (t: Throwable) {
+            sendRelayError(requestId, "TRANSLATION_FAILED", t.message ?: "translation failed")
         }
     }
 

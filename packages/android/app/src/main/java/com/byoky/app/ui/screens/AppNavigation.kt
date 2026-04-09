@@ -31,7 +31,8 @@ fun AppNavigation(wallet: WalletStore) {
 private fun MainScreen(wallet: WalletStore) {
     val navController = rememberNavController()
     var selectedTab by remember { mutableIntStateOf(0) }
-    val pairService = remember { RelayPairService() }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val pairService = remember { RelayPairService(context.applicationContext) }
 
     val tabs = listOf(
         Triple("Wallet", Icons.Default.Wallet, "wallet"),
