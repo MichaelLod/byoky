@@ -87,15 +87,33 @@ class ProxyService(
 
         val own = source as CredentialSource.Own
 
-        // Cross-family routing check. Mobile uses the default group as a
-        // global routing rule (no per-app origin yet). If the group binds
-        // this provider to a different family AND a model is configured,
-        // hand off to the translation path. Otherwise pass through.
+        // Routing resolution. Mobile's local TCP proxy currently lacks a
+        // per-app origin tag (a single TCP listener serves every caller),
+        // so we resolve against the "bridge" origin → default group. The
+        // relay path (RelayPairService) carries the real paired origin and
+        // uses it for per-app routing; this branch will gain the same once
+        // the local proxy adds a pairing handshake. Three outcomes mirror
+        // the relay flow:
+        //   1. Cross-family translation (group binds a different family)
+        //   2. Same-family swap (group binds a different provider in the
+        //      same family — different credential, identical wire format)
+        //   3. Pass-through (no group, no model, or no usable rule)
         val routing = resolveRouting(providerId, body)
         if (routing != null && routing.translation != null) {
             return proxyRequestWithTranslation(
                 originalProviderId = providerId,
                 translation = routing.translation,
+                routedCredential = routing.credential,
+                method = method,
+                headers = headers,
+                body = body,
+            )
+        }
+        if (routing != null && routing.swapToProviderId != null) {
+            return proxyRequestWithSwap(
+                originalProviderId = providerId,
+                swapToProviderId = routing.swapToProviderId,
+                swapDstModel = routing.swapDstModel,
                 routedCredential = routing.credential,
                 method = method,
                 headers = headers,
@@ -230,13 +248,27 @@ class ProxyService(
         } else {
             val own = credSource as CredentialSource.Own
 
-            // Cross-family routing for streaming. If routing has translation,
-            // take the new path; otherwise fall through to existing pass-through.
+            // Routing resolution (mirrors the non-streaming path). Three
+            // outcomes: cross-family translation, same-family swap, or fall
+            // through to pass-through.
             val routing = resolveRouting(providerId, body)
             if (routing != null && routing.translation != null) {
                 streamWithTranslation(
                     originalProviderId = providerId,
                     translation = routing.translation,
+                    routedCredential = routing.credential,
+                    method = method,
+                    headers = headers,
+                    body = body,
+                    onChunk = { trySend(it) },
+                    onError = { close(it) },
+                    onComplete = { close() },
+                )
+            } else if (routing != null && routing.swapToProviderId != null) {
+                streamWithSwap(
+                    originalProviderId = providerId,
+                    swapToProviderId = routing.swapToProviderId,
+                    swapDstModel = routing.swapDstModel,
                     routedCredential = routing.credential,
                     method = method,
                     headers = headers,
@@ -560,6 +592,203 @@ class ProxyService(
             .headers(upstream.headers)
             .body(translatedResponseString.toResponseBody("application/json".toMediaTypeOrNull()))
             .build()
+    }
+
+    /**
+     * Same-family swap path for non-streaming requests. Two providers in the
+     * same family (e.g. Groq → OpenAI) speak identical wire formats, so we
+     * skip the JS translation bridge entirely and just rewrite the URL, swap
+     * the credential, and (optionally) override the body's `model` field.
+     * Mirrors `RelayPairService.handleRelayRequestWithSwap`.
+     */
+    private fun proxyRequestWithSwap(
+        originalProviderId: String,
+        swapToProviderId: String,
+        swapDstModel: String?,
+        routedCredential: Credential,
+        method: String,
+        headers: Map<String, String>,
+        body: ByteArray?,
+    ): Response {
+        val engine = translationEngine
+            ?: throw IllegalStateException("TranslationEngine context not provided")
+        val isStreaming = RoutingResolver.isStreamingRequest(body)
+        // Use the group's pinned destination model for URL building when set,
+        // otherwise fall back to whatever the SDK sent. Most openai-family
+        // providers ignore the model in the URL (it comes from the body),
+        // but rewriteProxyUrl needs a non-empty value to build a URL.
+        val modelForUrl = swapDstModel ?: RoutingResolver.parseModel(body) ?: ""
+
+        val urlString = engine.rewriteProxyUrl(swapToProviderId, modelForUrl, isStreaming)
+            ?: throw IllegalStateException("rewriteProxyUrl returned null for $swapToProviderId")
+
+        // Substitute the body's `model` field with the group's pinned dst
+        // model when set. Same-family providers all accept a JSON body with
+        // a top-level `model` string, so a surgical edit is safe and minimal.
+        val bodyString = body?.toString(Charsets.UTF_8)
+        val forwardedString = if (!swapDstModel.isNullOrEmpty()) {
+            rewriteModelInJsonBody(bodyString, swapDstModel)
+        } else {
+            bodyString
+        }
+        val injectedBytes = injectStreamUsageOptions(swapToProviderId, forwardedString?.toByteArray(Charsets.UTF_8))
+            ?: forwardedString?.toByteArray(Charsets.UTF_8)
+
+        val dstApiKey = wallet.decryptKey(routedCredential)
+
+        val filteredHeaders = headers.filterKeys {
+            it.lowercase() !in setOf("host", "authorization", "x-api-key", "anthropic-version", "content-length")
+        }.toMutableMap()
+        applyAuth(filteredHeaders, swapToProviderId, routedCredential.authMethod, dstApiKey)
+
+        val requestBody = if (injectedBytes != null && method.uppercase() in setOf("POST", "PUT", "PATCH")) {
+            val contentType = filteredHeaders["content-type"] ?: "application/json"
+            injectedBytes.toRequestBody(contentType.toMediaTypeOrNull())
+        } else null
+
+        val request = Request.Builder()
+            .url(urlString)
+            .method(method.uppercase(), requestBody)
+            .headers(filteredHeaders.toHeaders())
+            .build()
+
+        val upstream = client.newCall(request).execute()
+        val statusCode = upstream.code
+
+        // Forward the response verbatim — wire formats are identical on both
+        // sides of a same-family swap. Read the body once for logging then
+        // re-emit it on the synthesized Response so the caller still sees it.
+        val upstreamBytes = upstream.body?.bytes() ?: ByteArray(0)
+        wallet.logRequest(
+            appOrigin = "bridge",
+            providerId = originalProviderId,
+            method = method,
+            url = urlString,
+            statusCode = statusCode,
+            requestBody = body,
+            responseBody = upstreamBytes.toString(Charsets.UTF_8),
+            actualProviderId = swapToProviderId,
+            actualModel = swapDstModel,
+            groupId = DEFAULT_GROUP_ID,
+        )
+
+        return Response.Builder()
+            .request(request)
+            .protocol(upstream.protocol)
+            .code(statusCode)
+            .message(upstream.message)
+            .headers(upstream.headers)
+            .body(upstreamBytes.toResponseBody(upstream.body?.contentType()))
+            .build()
+    }
+
+    /**
+     * Same-family swap path for streaming requests. Mirrors the non-streaming
+     * version above but pipes upstream bytes straight through to the caller —
+     * no translation, just verbatim forwarding under the destination
+     * provider's credential.
+     */
+    private fun streamWithSwap(
+        originalProviderId: String,
+        swapToProviderId: String,
+        swapDstModel: String?,
+        routedCredential: Credential,
+        method: String,
+        headers: Map<String, String>,
+        body: ByteArray?,
+        onChunk: (ByteArray) -> Unit,
+        onError: (Throwable) -> Unit,
+        onComplete: () -> Unit,
+    ) {
+        val engine = translationEngine
+        if (engine == null) {
+            onError(IllegalStateException("TranslationEngine context not provided"))
+            return
+        }
+        val modelForUrl = swapDstModel ?: RoutingResolver.parseModel(body) ?: ""
+        val urlString = engine.rewriteProxyUrl(swapToProviderId, modelForUrl, true)
+        if (urlString == null) {
+            onError(IllegalStateException("rewriteProxyUrl returned null for $swapToProviderId"))
+            return
+        }
+
+        val bodyString = body?.toString(Charsets.UTF_8)
+        val forwardedString = if (!swapDstModel.isNullOrEmpty()) {
+            rewriteModelInJsonBody(bodyString, swapDstModel)
+        } else {
+            bodyString
+        }
+        val injectedBytes = injectStreamUsageOptions(swapToProviderId, forwardedString?.toByteArray(Charsets.UTF_8))
+            ?: forwardedString?.toByteArray(Charsets.UTF_8)
+
+        val dstApiKey = wallet.decryptKey(routedCredential)
+
+        val filteredHeaders = headers.filterKeys {
+            it.lowercase() !in setOf("host", "authorization", "x-api-key", "anthropic-version", "content-length")
+        }.toMutableMap()
+        applyAuth(filteredHeaders, swapToProviderId, routedCredential.authMethod, dstApiKey)
+
+        val requestBody = if (injectedBytes != null && method.uppercase() in setOf("POST", "PUT", "PATCH")) {
+            val contentType = filteredHeaders["content-type"] ?: "application/json"
+            injectedBytes.toRequestBody(contentType.toMediaTypeOrNull())
+        } else null
+
+        val request = Request.Builder()
+            .url(urlString)
+            .method(method.uppercase(), requestBody)
+            .headers(filteredHeaders.toHeaders())
+            .build()
+
+        try {
+            val response = client.newCall(request).execute()
+            val statusCode = response.code
+            val responseBody = response.body
+            try {
+                if (responseBody != null) {
+                    val source = responseBody.source()
+                    val buffer = ByteArray(4096)
+                    while (!source.exhausted()) {
+                        val read = source.read(buffer)
+                        if (read > 0) onChunk(buffer.copyOf(read))
+                    }
+                }
+                wallet.logRequest(
+                    appOrigin = "bridge",
+                    providerId = originalProviderId,
+                    method = method,
+                    url = urlString,
+                    statusCode = statusCode,
+                    requestBody = body,
+                    responseBody = null,
+                    actualProviderId = swapToProviderId,
+                    actualModel = swapDstModel,
+                    groupId = DEFAULT_GROUP_ID,
+                )
+                onComplete()
+            } finally {
+                responseBody?.close()
+            }
+        } catch (t: Throwable) {
+            onError(t)
+        }
+    }
+
+    /**
+     * Surgically rewrite the top-level `model` field of a JSON request body
+     * to [newModel]. Returns the original body unchanged if parsing fails —
+     * we'd rather pass through and let the destination return a real error
+     * than silently corrupt the request. Used by the same-family swap path
+     * when the group pins a destination model.
+     */
+    private fun rewriteModelInJsonBody(body: String?, newModel: String): String? {
+        if (body == null) return null
+        return try {
+            val parsed = JSONObject(body)
+            parsed.put("model", newModel)
+            parsed.toString()
+        } catch (_: Exception) {
+            body
+        }
     }
 
     private fun resolveCredentialSource(providerId: String): CredentialSource {

@@ -72,20 +72,39 @@ actor ProxyServer {
             throw ProxyError.noCredential(providerId)
         }
 
-        // Cross-family routing check. Mobile uses the default group as a
-        // global routing rule (no per-app origin yet). If the group binds
-        // this provider to a different family AND a model is configured,
-        // hand off to the translation path. Otherwise pass through.
-        if let routing = await resolveRouting(requestedProviderId: providerId, body: body),
-           let translation = routing.translation {
-            return try await proxyRequestWithTranslation(
-                originalProviderId: providerId,
-                translation: translation,
-                routedCredential: routing.credential,
-                method: method,
-                headers: headers,
-                body: body
-            )
+        // Routing resolution. Mobile's local TCP proxy currently lacks a
+        // per-app origin tag (a single TCP listener serves every caller), so
+        // we resolve against the "bridge" origin → default group. The relay
+        // path (RelayPairService) carries the real paired origin and uses
+        // it for per-app routing; this branch will gain the same once the
+        // local proxy adds a pairing handshake. Three outcomes mirror the
+        // relay flow:
+        //   1. Cross-family translation (group binds a different family)
+        //   2. Same-family swap (group binds a different provider in the
+        //      same family — different credential, identical wire format)
+        //   3. Pass-through (no group, no model, or no usable rule)
+        if let routing = await resolveRouting(requestedProviderId: providerId, body: body) {
+            if let translation = routing.translation {
+                return try await proxyRequestWithTranslation(
+                    originalProviderId: providerId,
+                    translation: translation,
+                    routedCredential: routing.credential,
+                    method: method,
+                    headers: headers,
+                    body: body
+                )
+            }
+            if let swapTo = routing.swapToProviderId {
+                return try await proxyRequestWithSwap(
+                    originalProviderId: providerId,
+                    swapToProviderId: swapTo,
+                    swapDstModel: routing.swapDstModel,
+                    routedCredential: routing.credential,
+                    method: method,
+                    headers: headers,
+                    body: body
+                )
+            }
         }
 
         var request = URLRequest(url: url)
@@ -302,19 +321,35 @@ actor ProxyServer {
                         throw ProxyError.noCredential(providerId)
                     }
 
-                    // Cross-family routing check (same as non-streaming path).
-                    if let routing = await self.resolveRouting(requestedProviderId: providerId, body: body),
-                       let translation = routing.translation {
-                        try await self.streamWithTranslation(
-                            originalProviderId: providerId,
-                            translation: translation,
-                            routedCredential: routing.credential,
-                            method: method,
-                            headers: headers,
-                            body: body,
-                            continuation: continuation
-                        )
-                        return
+                    // Routing resolution (mirrors the non-streaming path).
+                    // Three outcomes: cross-family translation, same-family
+                    // swap, or fall through to pass-through.
+                    if let routing = await self.resolveRouting(requestedProviderId: providerId, body: body) {
+                        if let translation = routing.translation {
+                            try await self.streamWithTranslation(
+                                originalProviderId: providerId,
+                                translation: translation,
+                                routedCredential: routing.credential,
+                                method: method,
+                                headers: headers,
+                                body: body,
+                                continuation: continuation
+                            )
+                            return
+                        }
+                        if let swapTo = routing.swapToProviderId {
+                            try await self.streamWithSwap(
+                                originalProviderId: providerId,
+                                swapToProviderId: swapTo,
+                                swapDstModel: routing.swapDstModel,
+                                routedCredential: routing.credential,
+                                method: method,
+                                headers: headers,
+                                body: body,
+                                continuation: continuation
+                            )
+                            return
+                        }
                     }
 
                     var request = URLRequest(url: url)
@@ -505,6 +540,183 @@ actor ProxyServer {
         }
 
         continuation.finish()
+    }
+
+    /// Same-family swap path for non-streaming requests. Two providers in
+    /// the same family (e.g. Groq → OpenAI) speak identical wire formats,
+    /// so we skip the JS translation bridge entirely and just rewrite the
+    /// URL, swap the credential, and (optionally) override the body's
+    /// `model` field. Mirrors `RelayPairService.handleRelayRequestWithSwap`.
+    private func proxyRequestWithSwap(
+        originalProviderId: String,
+        swapToProviderId: String,
+        swapDstModel: String?,
+        routedCredential: Credential,
+        method: String,
+        headers: [String: String],
+        body: Data?
+    ) async throws -> (Data, HTTPURLResponse) {
+        let engine = TranslationEngine.shared
+        let isStreaming = RoutingResolver.isStreamingRequest(body: body)
+        // Use the group's pinned destination model for URL building when set,
+        // otherwise fall back to whatever the SDK sent. Most openai-family
+        // providers ignore the model in the URL (it comes from the body),
+        // but rewriteProxyUrl needs a non-empty value to build a URL.
+        let modelForUrl = swapDstModel ?? RoutingResolver.parseModel(from: body) ?? ""
+
+        guard let urlString = engine.rewriteProxyUrl(
+            dstProviderId: swapToProviderId,
+            model: modelForUrl,
+            stream: isStreaming
+        ), let url = URL(string: urlString) else {
+            throw ProxyError.invalidUrl(swapToProviderId)
+        }
+
+        // Substitute the body's `model` field with the group's pinned dst
+        // model when set. Same-family providers all accept a JSON body with
+        // a top-level `model` string, so a surgical edit is safe and minimal.
+        let bodyString = body.flatMap { String(data: $0, encoding: .utf8) }
+        let forwardedString: String? = swapDstModel.flatMap { dst in
+            dst.isEmpty ? bodyString : Self.rewriteModelInJsonBody(bodyString, to: dst)
+        } ?? bodyString
+        let injectedString = injectStreamUsageOptions(providerId: swapToProviderId, body: forwardedString) ?? forwardedString
+        let forwardedBody = injectedString.flatMap { $0.data(using: .utf8) }
+
+        let dstApiKey = try await MainActor.run { try wallet.decryptKey(for: routedCredential) }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.httpBody = forwardedBody
+        request.timeoutInterval = 120
+        for (key, value) in headers {
+            let lower = key.lowercased()
+            if ["host", "authorization", "x-api-key", "anthropic-version", "content-length"].contains(lower) { continue }
+            request.setValue(value, forHTTPHeaderField: key)
+        }
+        Credential.applyAuth(
+            to: &request,
+            providerId: swapToProviderId,
+            authMethod: routedCredential.authMethod,
+            apiKey: dstApiKey
+        )
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw ProxyError.invalidResponse
+        }
+
+        // Forward the response body verbatim — wire formats are identical
+        // on both sides of a same-family swap.
+        let responseBody = String(data: data, encoding: .utf8)
+        await MainActor.run {
+            wallet.logRequest(
+                appOrigin: "bridge",
+                providerId: originalProviderId,
+                method: method,
+                url: url.absoluteString,
+                statusCode: httpResponse.statusCode,
+                requestBody: body,
+                responseBody: responseBody,
+                actualProviderId: swapToProviderId,
+                actualModel: swapDstModel,
+                groupId: defaultGroupId
+            )
+        }
+
+        return (data, httpResponse)
+    }
+
+    /// Same-family swap path for streaming requests. Mirrors the non-streaming
+    /// version above but pipes upstream bytes straight through to the SDK —
+    /// no translation, just verbatim forwarding under the destination
+    /// provider's credential.
+    private func streamWithSwap(
+        originalProviderId: String,
+        swapToProviderId: String,
+        swapDstModel: String?,
+        routedCredential: Credential,
+        method: String,
+        headers: [String: String],
+        body: Data?,
+        continuation: AsyncThrowingStream<Data, Error>.Continuation
+    ) async throws {
+        let engine = TranslationEngine.shared
+        let modelForUrl = swapDstModel ?? RoutingResolver.parseModel(from: body) ?? ""
+
+        guard let urlString = engine.rewriteProxyUrl(
+            dstProviderId: swapToProviderId,
+            model: modelForUrl,
+            stream: true
+        ), let url = URL(string: urlString) else {
+            throw ProxyError.invalidUrl(swapToProviderId)
+        }
+
+        let bodyString = body.flatMap { String(data: $0, encoding: .utf8) }
+        let forwardedString: String? = swapDstModel.flatMap { dst in
+            dst.isEmpty ? bodyString : Self.rewriteModelInJsonBody(bodyString, to: dst)
+        } ?? bodyString
+        let injectedString = injectStreamUsageOptions(providerId: swapToProviderId, body: forwardedString) ?? forwardedString
+        let forwardedBody = injectedString.flatMap { $0.data(using: .utf8) }
+
+        let dstApiKey = try await MainActor.run { try wallet.decryptKey(for: routedCredential) }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.httpBody = forwardedBody
+        request.timeoutInterval = 120
+        for (key, value) in headers {
+            let lower = key.lowercased()
+            if ["host", "authorization", "x-api-key", "anthropic-version", "content-length"].contains(lower) { continue }
+            request.setValue(value, forHTTPHeaderField: key)
+        }
+        Credential.applyAuth(
+            to: &request,
+            providerId: swapToProviderId,
+            authMethod: routedCredential.authMethod,
+            apiKey: dstApiKey
+        )
+
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        let httpResponse = response as? HTTPURLResponse
+        let statusCode = httpResponse?.statusCode ?? 0
+
+        for try await byte in bytes {
+            continuation.yield(Data([byte]))
+        }
+
+        await MainActor.run {
+            wallet.logRequest(
+                appOrigin: "bridge",
+                providerId: originalProviderId,
+                method: method,
+                url: url.absoluteString,
+                statusCode: statusCode,
+                requestBody: body,
+                responseBody: nil,
+                actualProviderId: swapToProviderId,
+                actualModel: swapDstModel,
+                groupId: defaultGroupId
+            )
+        }
+        continuation.finish()
+    }
+
+    /// Surgically rewrite the top-level `model` field of a JSON request body
+    /// to `newModel`. Returns the original body unchanged if parsing fails —
+    /// we'd rather pass through and let the destination return a real error
+    /// than silently corrupt the request. Used by the same-family swap path
+    /// when the group pins a destination model.
+    private static func rewriteModelInJsonBody(_ body: String?, to newModel: String) -> String? {
+        guard let body, let data = body.data(using: .utf8),
+              var json = try? JSONSerialization.jsonObject(with: data, options: [.mutableContainers]) as? [String: Any] else {
+            return body
+        }
+        json["model"] = newModel
+        guard let rewritten = try? JSONSerialization.data(withJSONObject: json),
+              let str = String(data: rewritten, encoding: .utf8) else {
+            return body
+        }
+        return str
     }
 
     private enum CredentialSource {
