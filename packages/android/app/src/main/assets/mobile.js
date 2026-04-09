@@ -3309,6 +3309,50 @@ data: [DONE]
     };
   }
 
+  // src/proxy-utils.ts
+  var MAX_BODY_PARSE_SIZE = 10485760;
+  function detectRequestCapabilities(body) {
+    const empty = {
+      tools: false,
+      vision: false,
+      structuredOutput: false,
+      reasoning: false
+    };
+    if (!body || body.length > MAX_BODY_PARSE_SIZE) return empty;
+    let parsed;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      return empty;
+    }
+    const out = { ...empty };
+    if (Array.isArray(parsed.tools) && parsed.tools.length > 0) {
+      out.tools = true;
+    }
+    const rf = parsed.response_format;
+    if (rf && typeof rf === "object" && rf.type === "json_schema") {
+      out.structuredOutput = true;
+    }
+    if (parsed.thinking != null) {
+      out.reasoning = true;
+    }
+    if (Array.isArray(parsed.messages)) {
+      outer: for (const msg of parsed.messages) {
+        const content = msg?.content;
+        if (!Array.isArray(content)) continue;
+        for (const block of content) {
+          if (!block || typeof block !== "object") continue;
+          const type = block.type;
+          if (type === "image" || type === "image_url") {
+            out.vision = true;
+            break outer;
+          }
+        }
+      }
+    }
+    return out;
+  }
+
   // src/translate/mobile-entry.ts
   var streams = /* @__PURE__ */ new Map();
   var nextHandle = 1;
@@ -3388,6 +3432,9 @@ data: [DONE]
         maxOutput: m.maxOutput,
         capabilities: m.capabilities
       });
+    },
+    detectRequestCapabilities(body) {
+      return JSON.stringify(detectRequestCapabilities(body));
     },
     version: "0.5.1"
   };

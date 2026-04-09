@@ -268,6 +268,23 @@ class TranslationEngine private constructor(private val appContext: Context) {
     }
 
     /**
+     * Inspect a request body and return the capability fingerprint it uses
+     * (tools / vision / structured output / extended reasoning) as a JSON
+     * string. The caller decodes it into a [CapabilitySet]. Native call sites
+     * use this from `WalletStore.logRequest` so each entry's `usedCapabilities`
+     * is populated at log time. Returns "{}" on any error — capability
+     * detection is best-effort, never fatal.
+     */
+    fun detectRequestCapabilities(body: String?): String {
+        if (body.isNullOrEmpty()) return "{}"
+        return try {
+            evalSync("BYOKY_TRANSLATE.detectRequestCapabilities(${jsLiteral(body)})")
+        } catch (_: Throwable) {
+            "{}"
+        }
+    }
+
+    /**
      * Rewrite an upstream URL when routing cross-family. Returns null when
      * the destination has no adapter or can't build a URL.
      */

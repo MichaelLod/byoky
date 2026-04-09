@@ -73,7 +73,79 @@ data class RequestLog(
     val actualModel: String? = null,
     /** Group that routed this request. Mobile uses the default group globally. */
     val groupId: String? = null,
+    /**
+     * Advanced capabilities the source request body used (tools, vision, etc.).
+     * Populated by `TranslationEngine.detectRequestCapabilities` at log time so
+     * the Apps screen can warn before moving an app to a group whose model
+     * lacks one of them. Null on log entries from before this field existed.
+     */
+    val usedCapabilities: CapabilitySet? = null,
 )
+
+/**
+ * Capability flags a single request used. Mirrors `CapabilitySet` in
+ * `packages/core/src/types.ts`. Walked across an app's recent request log by
+ * [detectAppCapabilities] to produce a per-app union, which the Apps screen
+ * diffs against a candidate destination model via [capabilityGaps].
+ */
+data class CapabilitySet(
+    val tools: Boolean = false,
+    val vision: Boolean = false,
+    val structuredOutput: Boolean = false,
+    val reasoning: Boolean = false,
+) {
+    companion object {
+        val EMPTY = CapabilitySet()
+    }
+}
+
+/**
+ * OR-merge an app's per-request capability fingerprints into a single union
+ * describing everything it has ever needed. Mirrors `detectAppCapabilities`
+ * in `packages/core/src/models.ts`.
+ */
+fun detectAppCapabilities(entries: List<RequestLog>): CapabilitySet {
+    var tools = false
+    var vision = false
+    var structuredOutput = false
+    var reasoning = false
+    for (e in entries) {
+        val used = e.usedCapabilities ?: continue
+        if (used.tools) tools = true
+        if (used.vision) vision = true
+        if (used.structuredOutput) structuredOutput = true
+        if (used.reasoning) reasoning = true
+    }
+    return CapabilitySet(tools, vision, structuredOutput, reasoning)
+}
+
+/**
+ * Diff a set of capabilities the app has used against a destination model's
+ * `capabilities` map (decoded from the JS bridge `describeModel` JSON).
+ * Returns the subset of keys the model lacks. Empty list means the model
+ * satisfies everything the app has needed so far. Mirrors `capabilityGaps`
+ * in `packages/core/src/models.ts`.
+ */
+fun capabilityGaps(used: CapabilitySet, modelCapabilities: Map<String, Boolean>): List<String> {
+    val gaps = mutableListOf<String>()
+    if (used.tools && modelCapabilities["tools"] != true) gaps.add("tools")
+    if (used.vision && modelCapabilities["vision"] != true) gaps.add("vision")
+    if (used.structuredOutput && modelCapabilities["structuredOutput"] != true) gaps.add("structuredOutput")
+    if (used.reasoning && modelCapabilities["reasoning"] != true) gaps.add("reasoning")
+    return gaps
+}
+
+/**
+ * Human label for a capability key. Used in warning messages. Mirrors
+ * `capabilityLabel` in `packages/core/src/models.ts`.
+ */
+fun capabilityLabel(key: String): String = when (key) {
+    "tools" -> "tool calling"
+    "vision" -> "image inputs"
+    "structuredOutput" -> "structured outputs"
+    "reasoning" -> "extended reasoning"
+    else -> key
+}
 
 data class TokenAllowance(
     val origin: String,
