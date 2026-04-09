@@ -599,6 +599,7 @@ private fun TranslationDebugCard() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun GroupEditorDialog(wallet: WalletStore, onDismiss: () -> Unit) {
+    val context = LocalContext.current
     val groups by wallet.groups.collectAsState()
     val current = groups.firstOrNull { it.id == DEFAULT_GROUP_ID }
     var providerId by remember { mutableStateOf(current?.providerId ?: "anthropic") }
@@ -606,6 +607,39 @@ private fun GroupEditorDialog(wallet: WalletStore, onDismiss: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var providerExpanded by remember { mutableStateOf(false) }
     val providerName = Provider.find(providerId)?.name ?: providerId
+
+    // Pull known models + capability summary from the @byoky/core registry
+    // via the JS bridge. Empty list / null summary means the registry has
+    // no entries — the user can still type a custom model name.
+    val engine = remember { TranslationEngine.get(context) }
+    val suggestedModels = remember(providerId, engine.isSupported) {
+        if (!engine.isSupported) return@remember emptyList<Pair<String, String>>()
+        try {
+            val json = org.json.JSONArray(engine.getModelsForProvider(providerId))
+            (0 until json.length()).map { i ->
+                val obj = json.getJSONObject(i)
+                obj.getString("id") to obj.getString("displayName")
+            }
+        } catch (_: Throwable) { emptyList() }
+    }
+    val modelInfo = remember(model, engine.isSupported) {
+        if (!engine.isSupported || model.isEmpty()) return@remember null as String?
+        try {
+            val raw = engine.describeModel(model) ?: return@remember null as String?
+            val parsed = org.json.JSONObject(raw)
+            val caps = parsed.getJSONObject("capabilities")
+            val bits = buildList {
+                if (caps.optBoolean("tools")) add("tools")
+                if (caps.optBoolean("vision")) add("vision")
+                if (caps.optBoolean("structuredOutput")) add("JSON schema")
+                if (caps.optBoolean("reasoning")) add("reasoning")
+            }
+            val display = parsed.optString("displayName", model)
+            val ctx = parsed.optInt("contextWindow", 0)
+            val ctxK = if (ctx >= 1000) "${ctx / 1000}K" else "$ctx"
+            "$display: $ctxK ctx · ${bits.joinToString(" · ")}"
+        } catch (_: Throwable) { null }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -656,6 +690,31 @@ private fun GroupEditorDialog(wallet: WalletStore, onDismiss: () -> Unit) {
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                 )
+
+                if (modelInfo != null) {
+                    Text(modelInfo, color = TextMuted, fontSize = 12.sp)
+                }
+
+                if (suggestedModels.isNotEmpty()) {
+                    Text("Suggested models", color = TextMuted, fontSize = 11.sp)
+                    suggestedModels.forEach { (id, name) ->
+                        Surface(
+                            onClick = { model = id },
+                            color = BgMain,
+                            shape = RoundedCornerShape(6.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(name, color = TextPrimary, fontSize = 12.sp)
+                                Text(id, color = TextMuted, fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
 
                 error?.let {
                     Text(it, color = Danger, fontSize = 13.sp)

@@ -225,6 +225,34 @@ class TranslationEngine private constructor(private val appContext: Context) {
     }
 
     /**
+     * Return JSON-encoded list of model entries for a provider, or "[]"
+     * if the registry has no entries. Used by the routing editor to suggest
+     * destination models.
+     */
+    fun getModelsForProvider(providerId: String): String {
+        return try {
+            evalSync("BYOKY_TRANSLATE.getModelsForProvider(${jsLiteral(providerId)})")
+        } catch (_: Throwable) {
+            "[]"
+        }
+    }
+
+    /**
+     * Return a JSON-encoded summary for a single model id, or null if the
+     * registry doesn't have it.
+     */
+    fun describeModel(modelId: String): String? {
+        return try {
+            val expr =
+                "(function(){var d=BYOKY_TRANSLATE.describeModel(${jsLiteral(modelId)});return d==null?'':String(d);})()"
+            val result = evalSync(expr)
+            result.ifEmpty { null }
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    /**
      * Rewrite an upstream URL when routing cross-family. Returns null when
      * the destination has no adapter or can't build a URL.
      */

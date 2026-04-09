@@ -24,6 +24,7 @@ import {
   createStreamTranslator as _createStreamTranslator,
 } from './index.js';
 import { familyOf, shouldTranslate as _shouldTranslate, rewriteProxyUrl as _rewriteProxyUrl } from './families.js';
+import { modelsForProvider, getModel } from '../models.js';
 import type { TranslationContext } from './types.js';
 
 interface StreamHandle {
@@ -89,6 +90,21 @@ interface MobileBridge {
    */
   rewriteProxyUrl(dstProviderId: string, model: string, stream: boolean): string | null;
 
+  /**
+   * Return JSON-encoded model entries for a provider, or "[]" if the
+   * registry has no entries for it. Used by the routing editor to suggest
+   * destination models. Each entry: `{id, displayName, contextWindow,
+   * maxOutput, capabilities}`.
+   */
+  getModelsForProvider(providerId: string): string;
+
+  /**
+   * Return a JSON-encoded summary for a single model id, or null if the
+   * model isn't in the registry. Used by the routing editor to show a
+   * capability footer beneath the destination model field.
+   */
+  describeModel(modelId: string): string | null;
+
   /** Bundle version, for native side to assert against expected core version. */
   readonly version: string;
 }
@@ -143,6 +159,29 @@ const bridge: MobileBridge = {
   },
   rewriteProxyUrl(dstProviderId, model, stream) {
     return _rewriteProxyUrl(dstProviderId, model, stream);
+  },
+  getModelsForProvider(providerId) {
+    const list = modelsForProvider(providerId).map((m) => ({
+      id: m.id,
+      displayName: m.displayName,
+      contextWindow: m.contextWindow,
+      maxOutput: m.maxOutput,
+      capabilities: m.capabilities,
+    }));
+    return JSON.stringify(list);
+  },
+  describeModel(modelId) {
+    const m = getModel(modelId);
+    if (!m) return null;
+    return JSON.stringify({
+      id: m.id,
+      providerId: m.providerId,
+      family: m.family,
+      displayName: m.displayName,
+      contextWindow: m.contextWindow,
+      maxOutput: m.maxOutput,
+      capabilities: m.capabilities,
+    });
   },
   version: '0.5.0',
 };
