@@ -30,6 +30,7 @@ import {
   rewriteProxyUrl as _rewriteProxyUrl,
 } from './families.js';
 import { modelsForProvider, getModel } from '../models.js';
+import { detectRequestCapabilities as _detectRequestCapabilities } from '../proxy-utils.js';
 import type { TranslationContext } from './types.js';
 
 interface StreamHandle {
@@ -117,6 +118,15 @@ interface MobileBridge {
    */
   describeModel(modelId: string): string | null;
 
+  /**
+   * Inspect a request body and return the JSON-encoded CapabilitySet it uses
+   * (tools / vision / structuredOutput / reasoning). Mobile call sites tag
+   * each logged request with this so the Apps screen can warn before moving
+   * an app to a group whose model lacks a capability the app has been using.
+   * Mirrors `detectRequestCapabilities` in proxy-utils.
+   */
+  detectRequestCapabilities(body: string): string;
+
   /** Bundle version, for native side to assert against expected core version. */
   readonly version: string;
 }
@@ -197,6 +207,9 @@ const bridge: MobileBridge = {
       maxOutput: m.maxOutput,
       capabilities: m.capabilities,
     });
+  },
+  detectRequestCapabilities(body) {
+    return JSON.stringify(_detectRequestCapabilities(body));
   },
   version: '0.5.1',
 };

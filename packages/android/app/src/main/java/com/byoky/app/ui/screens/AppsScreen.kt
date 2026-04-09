@@ -26,9 +26,13 @@ import androidx.compose.ui.unit.sp
 import com.byoky.app.data.DEFAULT_GROUP_ID
 import com.byoky.app.data.Group
 import com.byoky.app.data.Provider
+import com.byoky.app.data.RequestLog
 import com.byoky.app.data.Session
 import com.byoky.app.data.TokenAllowance
 import com.byoky.app.data.WalletStore
+import com.byoky.app.data.capabilityGaps
+import com.byoky.app.data.capabilityLabel
+import com.byoky.app.data.detectAppCapabilities
 import com.byoky.app.proxy.TranslationEngine
 import com.byoky.app.ui.theme.*
 
@@ -40,6 +44,21 @@ import com.byoky.app.ui.theme.*
  * gesture is long-press → "Move to group" sheet rather than drag-and-drop
  * since touch drag is awkward for small targets.
  */
+/**
+ * Pending capability-gap confirmation. Set when the user has tapped a target
+ * group whose model lacks features the app has been using; we surface a
+ * confirmation dialog before committing the move so a misroute doesn't
+ * silently start failing requests.
+ */
+private data class PendingCapabilityMove(
+    val origin: String,
+    val displayHost: String,
+    val groupId: String,
+    val groupName: String,
+    val model: String,
+    val gapLabels: List<String>,
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppsScreen(wallet: WalletStore) {
@@ -48,11 +67,15 @@ fun AppsScreen(wallet: WalletStore) {
     val appGroups by wallet.appGroups.collectAsState()
     val cloudVaultEnabled by wallet.cloudVaultEnabled.collectAsState()
     val allowances by wallet.tokenAllowances.collectAsState()
+    val requestLogs by wallet.requestLogs.collectAsState()
+    val context = LocalContext.current
+    val engine = remember { TranslationEngine.get(context) }
 
     var movingApp by remember { mutableStateOf<Session?>(null) }
     var editingAllowanceFor by remember { mutableStateOf<Session?>(null) }
     var editingGroup by remember { mutableStateOf<Group?>(null) }
     var creatingGroup by remember { mutableStateOf(false) }
+    var pendingMove by remember { mutableStateOf<PendingCapabilityMove?>(null) }
 
     val orderedGroups = remember(groups) {
         val def = groups.filter { it.id == DEFAULT_GROUP_ID }
@@ -162,10 +185,54 @@ fun AppsScreen(wallet: WalletStore) {
             groups = orderedGroups,
             currentGroupId = appGroups[session.appOrigin] ?: DEFAULT_GROUP_ID,
             onSelect = { groupId ->
-                try { wallet.setAppGroup(session.appOrigin, groupId) } catch (_: Throwable) {}
-                movingApp = null
+                val targetGroup = orderedGroups.firstOrNull { it.id == groupId }
+                val pending = targetGroup?.let {
+                    capabilityPendingMove(session, it, requestLogs, engine)
+                }
+                if (pending != null) {
+                    // Defer the move — show the warning dialog. Keep movingApp
+                    // null so the bottom sheet closes; the dialog takes over.
+                    pendingMove = pending
+                    movingApp = null
+                } else {
+                    try { wallet.setAppGroup(session.appOrigin, groupId) } catch (_: Throwable) {}
+                    movingApp = null
+                }
             },
             onDismiss = { movingApp = null },
+        )
+    }
+
+    pendingMove?.let { pending ->
+        AlertDialog(
+            onDismissRequest = { pendingMove = null },
+            containerColor = BgCard,
+            title = { Text("Capability mismatch", color = TextPrimary) },
+            text = {
+                val singular = pending.gapLabels.size == 1
+                Text(
+                    "${pending.displayHost} has used ${pending.gapLabels.joinToString(", ")} in past requests, " +
+                        "but ${pending.model} in ${pending.groupName} does not support " +
+                        (if (singular) "it" else "one or more of these") +
+                        ". Requests using " +
+                        (if (singular) "that feature" else "those features") +
+                        " will fail until you switch back.",
+                    color = TextSecondary,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    try { wallet.setAppGroup(pending.origin, pending.groupId) } catch (_: Throwable) {}
+                    pendingMove = null
+                }) {
+                    Text("Move anyway", color = Danger)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingMove = null }) {
+                    Text("Cancel", color = TextSecondary)
+                }
+            },
         )
     }
 
@@ -438,6 +505,48 @@ private fun AppSessionCard(
             }
         }
     }
+}
+
+/**
+ * Diff the app's used-capability union against a candidate group's destination
+ * model. Returns null when there is no gap (the move is safe to commit
+ * directly), or a [PendingCapabilityMove] describing the gap when we need to
+ * ask the user to confirm. Skipped entirely when the group has no pinned
+ * model — pass-through groups can't introduce a capability mismatch.
+ */
+private fun capabilityPendingMove(
+    session: Session,
+    target: Group,
+    requestLogs: List<RequestLog>,
+    engine: TranslationEngine,
+): PendingCapabilityMove? {
+    val model = target.model
+    if (model.isNullOrEmpty()) return null
+    if (!engine.isSupported) return null
+    val raw = try { engine.describeModel(model) } catch (_: Throwable) { null } ?: return null
+    val caps: Map<String, Boolean> = try {
+        val parsed = org.json.JSONObject(raw).getJSONObject("capabilities")
+        mapOf(
+            "tools" to parsed.optBoolean("tools"),
+            "vision" to parsed.optBoolean("vision"),
+            "structuredOutput" to parsed.optBoolean("structuredOutput"),
+            "reasoning" to parsed.optBoolean("reasoning"),
+        )
+    } catch (_: Throwable) { return null }
+    val appEntries = requestLogs.filter { it.appOrigin == session.appOrigin }
+    val used = detectAppCapabilities(appEntries)
+    val gaps = capabilityGaps(used, caps)
+    if (gaps.isEmpty()) return null
+    val displayHost = try { java.net.URL(session.appOrigin).host ?: session.appOrigin }
+        catch (_: Exception) { session.appOrigin }
+    return PendingCapabilityMove(
+        origin = session.appOrigin,
+        displayHost = displayHost,
+        groupId = target.id,
+        groupName = target.name,
+        model = model,
+        gapLabels = gaps.map(::capabilityLabel),
+    )
 }
 
 /**

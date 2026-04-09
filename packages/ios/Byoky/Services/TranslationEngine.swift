@@ -259,6 +259,32 @@ final class TranslationEngine {
         }
     }
 
+    /// Inspect a request body and return the capability fingerprint it uses
+    /// (tools / vision / structured output / extended reasoning). The native
+    /// side calls this from `WalletStore.logRequest` so each entry's
+    /// `usedCapabilities` is populated at log time. Returns the empty set on
+    /// any error — capability detection is best-effort, never fatal.
+    func detectRequestCapabilities(body: Data?) -> CapabilitySet {
+        guard let body, let bodyString = String(data: body, encoding: .utf8) else {
+            return .empty
+        }
+        do {
+            let json = try invokeString("detectRequestCapabilities", args: [bodyString])
+            guard let data = json.data(using: .utf8),
+                  let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return .empty
+            }
+            return CapabilitySet(
+                tools: parsed["tools"] as? Bool ?? false,
+                vision: parsed["vision"] as? Bool ?? false,
+                structuredOutput: parsed["structuredOutput"] as? Bool ?? false,
+                reasoning: parsed["reasoning"] as? Bool ?? false,
+            )
+        } catch {
+            return .empty
+        }
+    }
+
     /// Rewrite an upstream URL when routing cross-family. The SDK built the
     /// source URL against the source provider's base + path; we replace it
     /// with the destination provider's canonical chat endpoint, which may
