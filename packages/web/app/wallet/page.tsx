@@ -49,82 +49,85 @@ export default function WalletDashboard() {
 
   if (!isLoggedIn) {
     return (
-      <div style={{ maxWidth: '640px', margin: '0 auto', padding: '32px 24px' }}>
-        <h1 style={{ fontSize: '28px', fontWeight: 700, textAlign: 'center', marginBottom: '8px' }}>Your AI Wallet</h1>
-        <p style={{ color: 'var(--text-secondary)', textAlign: 'center', marginBottom: '32px' }}>
-          One balance. Every AI app. No API keys needed.
-        </p>
+      <div style={{ maxWidth: '860px', margin: '0 auto', padding: '48px 24px' }}>
+        <div style={{ display: 'flex', gap: '40px', alignItems: 'flex-start' }}>
+          {/* Left: login */}
+          <div style={{ flex: 1 }}>
+            <h1 style={{ fontSize: '28px', fontWeight: 700, marginBottom: '8px' }}>Your AI Wallet</h1>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: '32px', lineHeight: 1.6 }}>
+              One balance. Every AI app. No API keys needed.
+            </p>
 
-        {/* Mockup preview */}
-        <div style={{ maxWidth: '420px', margin: '0 auto 32px', pointerEvents: 'none', opacity: 0.85 }}>
-          {/* Balance card mockup */}
-          <div style={{
-            background: 'linear-gradient(135deg, var(--teal) 0%, #e91e90 100%)',
-            borderRadius: '16px', padding: '24px', color: '#fff', marginBottom: '12px',
-          }}>
-            <div style={{ fontSize: '12px', opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Balance</div>
-            <div style={{ fontSize: '36px', fontWeight: 700 }}>$12.50</div>
-            <div style={{ fontSize: '12px', opacity: 0.7, marginTop: '4px' }}>Auto top-up enabled</div>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: '16px', fontSize: '14px' }}>Sign in to access your wallet</p>
+            {error && <div style={{ color: '#ef4444', fontSize: '13px', marginBottom: '12px' }}>{error}</div>}
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              const ok = await login(username, password);
+              if (!ok) setError('Invalid credentials');
+            }} style={{ maxWidth: '320px' }}>
+              <input type="text" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} style={inputStyle} />
+              <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} style={{ ...inputStyle, marginTop: '8px' }} />
+              <button type="submit" style={{ ...btnStyle, marginTop: '12px', width: '100%' }}>Sign In</button>
+            </form>
+            <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '16px', maxWidth: '320px' }}>
+              Don&apos;t have an account? Click &ldquo;Pay with Byoky&rdquo; on any integrated app to create one.
+            </p>
           </div>
 
-          {/* Connected apps mockup */}
-          <div style={{ marginBottom: '12px' }}>
-            <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '6px' }}>Connected Apps</div>
+          {/* Right: mockup */}
+          <div style={{
+            width: '280px', flexShrink: 0,
+            background: 'var(--bg-surface)', border: '1px solid var(--border)',
+            borderRadius: '16px', padding: '16px',
+            pointerEvents: 'none', opacity: 0.9,
+            boxShadow: '0 4px 24px rgba(0,0,0,0.06)',
+          }}>
+            {/* Balance */}
+            <div style={{
+              background: 'linear-gradient(135deg, var(--teal) 0%, #e91e90 100%)',
+              borderRadius: '12px', padding: '16px', color: '#fff', marginBottom: '12px',
+            }}>
+              <div style={{ fontSize: '10px', opacity: 0.8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Balance</div>
+              <div style={{ fontSize: '24px', fontWeight: 700 }}>$12.50</div>
+              <div style={{ fontSize: '10px', opacity: 0.7, marginTop: '2px' }}>Auto top-up enabled</div>
+            </div>
+
+            {/* Apps */}
+            <div style={{ fontSize: '9px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '4px' }}>Connected Apps</div>
             {['DemoChat', 'CodeAssist', 'WriterAI'].map((app) => (
               <div key={app} style={{
-                background: 'var(--bg-surface)', border: '1px solid var(--border)',
-                borderRadius: '10px', padding: '10px 14px', marginBottom: '4px',
+                background: 'var(--bg-card)', border: '1px solid var(--border)',
+                borderRadius: '8px', padding: '8px 10px', marginBottom: '3px',
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <div style={{
-                    width: '28px', height: '28px', borderRadius: '8px',
+                    width: '22px', height: '22px', borderRadius: '6px',
                     background: 'var(--bg-elevated)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: '12px', fontWeight: 700, color: 'var(--teal)',
+                    fontSize: '10px', fontWeight: 700, color: 'var(--teal)',
                   }}>{app[0]}</div>
-                  <span style={{ fontSize: '13px', fontWeight: 500 }}>{app}</span>
+                  <span style={{ fontSize: '11px', fontWeight: 500 }}>{app}</span>
                 </div>
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>$0.03 today</span>
+                <span style={{ fontSize: '9px', color: 'var(--text-muted)' }}>$0.03</span>
               </div>
             ))}
-          </div>
 
-          {/* Recent transactions mockup */}
-          <div>
-            <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '6px' }}>Recent</div>
+            {/* Transactions */}
+            <div style={{ fontSize: '9px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: '10px', marginBottom: '4px' }}>Recent</div>
             {[
               { label: 'Gemini', amount: '-$0.01', color: 'var(--text)' },
               { label: 'Top up', amount: '+$5.00', color: 'var(--green)' },
-              { label: 'Anthropic', amount: '-$0.02', color: 'var(--text)' },
             ].map((txn, i) => (
               <div key={i} style={{
-                background: 'var(--bg-surface)', border: '1px solid var(--border)',
-                borderRadius: '10px', padding: '10px 14px', marginBottom: '4px',
+                background: 'var(--bg-card)', border: '1px solid var(--border)',
+                borderRadius: '8px', padding: '8px 10px', marginBottom: '3px',
                 display: 'flex', justifyContent: 'space-between',
               }}>
-                <span style={{ fontSize: '13px' }}>{txn.label}</span>
-                <span style={{ fontSize: '13px', fontWeight: 600, color: txn.color }}>{txn.amount}</span>
+                <span style={{ fontSize: '11px' }}>{txn.label}</span>
+                <span style={{ fontSize: '11px', fontWeight: 600, color: txn.color }}>{txn.amount}</span>
               </div>
             ))}
           </div>
-        </div>
-
-        {/* Login */}
-        <div style={{ maxWidth: '380px', margin: '0 auto' }}>
-          <p style={{ color: 'var(--text-secondary)', textAlign: 'center', marginBottom: '16px', fontSize: '14px' }}>Sign in to access your wallet</p>
-          {error && <div style={{ color: '#ef4444', fontSize: '13px', marginBottom: '12px', textAlign: 'center' }}>{error}</div>}
-          <form onSubmit={async (e) => {
-            e.preventDefault();
-            const ok = await login(username, password);
-            if (!ok) setError('Invalid credentials');
-          }}>
-            <input type="text" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} style={inputStyle} />
-            <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} style={{ ...inputStyle, marginTop: '8px' }} />
-            <button type="submit" style={{ ...btnStyle, marginTop: '12px', width: '100%' }}>Sign In</button>
-          </form>
-          <p style={{ fontSize: '12px', color: 'var(--text-muted)', textAlign: 'center', marginTop: '12px' }}>
-            Don&apos;t have an account? Click &ldquo;Pay with Byoky&rdquo; on any integrated app to create one.
-          </p>
         </div>
       </div>
     );
