@@ -22,6 +22,21 @@ android {
         targetSdk = 35
         versionCode = 10
         versionName = "1.0.9"
+
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Live-provider smoke tests pull API keys from environment variables at
+        // build time. Empty strings when not set — tests then call assumeTrue()
+        // to skip cleanly. Never commit real keys; export them in your shell
+        // before running ./gradlew connectedAndroidTest:
+        //   export BYOKY_TEST_ANTHROPIC_KEY=sk-ant-...
+        //   export BYOKY_TEST_OPENAI_KEY=sk-...
+        //   export BYOKY_TEST_GEMINI_KEY=AIza...
+        //   export BYOKY_TEST_COHERE_KEY=...
+        buildConfigField("String", "TEST_ANTHROPIC_KEY", "\"${System.getenv("BYOKY_TEST_ANTHROPIC_KEY") ?: ""}\"")
+        buildConfigField("String", "TEST_OPENAI_KEY", "\"${System.getenv("BYOKY_TEST_OPENAI_KEY") ?: ""}\"")
+        buildConfigField("String", "TEST_GEMINI_KEY", "\"${System.getenv("BYOKY_TEST_GEMINI_KEY") ?: ""}\"")
+        buildConfigField("String", "TEST_COHERE_KEY", "\"${System.getenv("BYOKY_TEST_COHERE_KEY") ?: ""}\"")
     }
 
     if (keystorePropsFile.exists()) {
@@ -56,6 +71,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -135,4 +151,14 @@ dependencies {
 
     // Debug
     debugImplementation("androidx.compose.ui:ui-tooling")
+
+    // Instrumented tests for the JS bridge. JavaScriptSandbox needs a real
+    // Android runtime + WebView, so these run via `./gradlew connectedAndroidTest`
+    // on a connected device or emulator (API ≥ 26 with WebView ≥ 110). Pure
+    // JVM unit tests can't exercise the bridge.
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:core-ktx:1.6.1")
+    androidTestImplementation("androidx.test:rules:1.6.1")
+    androidTestImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
 }

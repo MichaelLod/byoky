@@ -6,12 +6,17 @@ struct SettingsView: View {
     @State private var showCloudVault = false
     @State private var showCloudVaultRelogin = false
 
+    @State private var debugSelfTestReport: String?
+
     var body: some View {
         NavigationStack {
             List {
                 safariExtensionSection
                 cloudVaultSection
                 securitySection
+                #if DEBUG
+                translationDebugSection
+                #endif
                 aboutSection
             }
             .navigationTitle("Settings")
@@ -26,8 +31,67 @@ struct SettingsView: View {
                 CloudVaultReloginView()
                     .environmentObject(wallet)
             }
+            #if DEBUG
+            .sheet(isPresented: Binding(
+                get: { debugSelfTestReport != nil },
+                set: { if !$0 { debugSelfTestReport = nil } }
+            )) {
+                NavigationStack {
+                    ScrollView {
+                        Text(debugSelfTestReport ?? "")
+                            .font(.system(.caption, design: .monospaced))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding()
+                    }
+                    .navigationTitle("Self-test")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { debugSelfTestReport = nil }
+                        }
+                    }
+                }
+            }
+            #endif
         }
     }
+
+    #if DEBUG
+    private var translationDebugSection: some View {
+        Section {
+            Button {
+                Task {
+                    // Run on a background queue so the UI stays responsive on
+                    // first call (cold-start bundle eval is fast but nonzero).
+                    let report = await Task.detached(priority: .userInitiated) {
+                        TranslationEngine.shared.runSelfTest()
+                    }.value
+                    debugSelfTestReport = report
+                }
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "ant.circle")
+                        .font(.system(size: 20))
+                        .foregroundStyle(Theme.accent)
+                        .frame(width: 32)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Run TranslationEngine self-test")
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(.primary)
+                        Text("Verify the @byoky/core JS bundle round-trips a translation")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+                }
+            }
+        } header: {
+            Text("Translation Engine (debug)")
+        }
+    }
+    #endif
 
     private var safariExtensionSection: some View {
         Section {
