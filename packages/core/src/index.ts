@@ -8,4 +8,5 @@ export * from './password-strength.js';
 export * from './proxy-utils.js';
 export * from './gift.js';
 export * from './models.js';
+export * from './routing.js';
 export * from './translate/index.js';
