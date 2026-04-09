@@ -18,9 +18,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.byoky.app.BuildConfig
 import com.byoky.app.data.WalletStore
+import com.byoky.app.proxy.TranslationEngine
 import com.byoky.app.ui.theme.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -168,6 +172,11 @@ fun SettingsScreen(wallet: WalletStore) {
                     InfoRow("Key Derivation", "PBKDF2 (600K)")
                     InfoRow("Storage", "EncryptedSharedPreferences")
                 }
+            }
+
+            // Translation engine debug — only shown in debug builds.
+            if (BuildConfig.DEBUG) {
+                TranslationDebugCard()
             }
 
             // About
@@ -459,6 +468,77 @@ private fun CloudVaultReloginDialog(wallet: WalletStore, onDismiss: () -> Unit) 
             TextButton(onClick = onDismiss, enabled = !loading) { Text("Cancel") }
         },
     )
+}
+
+/**
+ * Debug-only card that runs the TranslationEngine self-test against the
+ * bundled mobile.js. Tap the button → engine warms up, runs the round-trip
+ * smoke test from TranslationEngine.runSelfTest(), shows the multi-line
+ * report inline. Useful for verifying the bundle loads on a fresh install
+ * before bothering with the full instrumented test run.
+ */
+@Composable
+private fun TranslationDebugCard() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var report by remember { mutableStateOf<String?>(null) }
+    var running by remember { mutableStateOf(false) }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = BgCard),
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.BugReport, null, tint = Accent, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(10.dp))
+                Text("Translation Engine (debug)", fontWeight = FontWeight.SemiBold, color = TextPrimary)
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Verify the @byoky/core JS bundle loads in JavaScriptSandbox and round-trips a real translation.",
+                color = TextSecondary,
+                fontSize = 13.sp,
+            )
+            Spacer(Modifier.height(12.dp))
+            Surface(
+                onClick = {
+                    if (running) return@Surface
+                    running = true
+                    report = "Running…"
+                    scope.launch {
+                        val result = withContext(Dispatchers.IO) {
+                            TranslationEngine.get(context).runSelfTest()
+                        }
+                        report = result
+                        running = false
+                    }
+                },
+                color = BgCard,
+                shape = RoundedCornerShape(8.dp),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Default.PlayArrow, null, tint = Accent, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text(if (running) "Running self-test…" else "Run self-test", color = TextPrimary)
+                }
+            }
+            report?.let {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    it,
+                    color = TextSecondary,
+                    fontSize = 12.sp,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                )
+            }
+        }
+    }
 }
 
 @Composable
