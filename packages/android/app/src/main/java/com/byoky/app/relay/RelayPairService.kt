@@ -227,9 +227,17 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
             return
         }
 
-        val providerHost = java.net.URL(provider.baseUrl).host
         val requestHost = try { java.net.URL(urlString).host } catch (_: Exception) { null }
-        if (requestHost != providerHost) {
+        // Azure OpenAI uses per-resource subdomains like
+        // `mycompany.openai.azure.com`. Strict equality against the placeholder
+        // baseUrl host would reject every real Azure URL. Mirrors the
+        // extension's wildcard `*.openai.azure.com/*` host pattern.
+        val hostOk = if (providerId == "azure_openai") {
+            requestHost?.endsWith(".openai.azure.com") == true
+        } else {
+            requestHost == java.net.URL(provider.baseUrl).host
+        }
+        if (!hostOk) {
             sendRelayError(requestId, "INVALID_URL", "URL doesn't match provider")
             return
         }
@@ -754,6 +762,18 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
         apiKey: String,
         bodyString: String?,
     ) {
+        // Azure OpenAI uses an `api-key` header (not Bearer). Mirrors the
+        // extension behavior in proxy-utils.ts:71. Without this special case
+        // mobile sends the wrong header and Azure returns 401.
+        if (providerId == "azure_openai") {
+            headers["api-key"] = apiKey
+            return
+        }
+        // Gemini uses `x-goog-api-key`.
+        if (providerId == "gemini") {
+            headers["x-goog-api-key"] = apiKey
+            return
+        }
         if (providerId == "anthropic" && authMethod == com.byoky.app.data.AuthMethod.OAUTH) {
             headers["Authorization"] = "Bearer $apiKey"
             headers["User-Agent"] = "claude-cli/2.1.76"
