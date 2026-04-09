@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.byoky.app.crypto.CryptoService
+import com.byoky.app.proxy.TranslationEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,6 +30,10 @@ sealed class UnlockResult {
 }
 
 class WalletStore(context: Context) {
+    /** App context, retained for lazy access to TranslationEngine when logging
+     *  requests (capability fingerprint detection runs through the JS bridge). */
+    private val appContext: Context = context.applicationContext
+
     private val masterKey = MasterKey.Builder(context)
         .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
         .build()
@@ -483,6 +488,25 @@ class WalletStore(context: Context) {
             outputTokens = usage?.outputTokens
         }
 
+        // Tag the entry with the capability fingerprint of the source request
+        // body (tools / vision / structured output / extended reasoning). The
+        // Apps screen aggregates these per-app to warn before moving an app
+        // to a group whose model lacks one of those features. Best-effort —
+        // skipped on devices without JavaScriptSandbox support.
+        val usedCapabilities: CapabilitySet? = try {
+            if (TranslationEngine.get(appContext).isSupported && requestBody != null) {
+                val bodyString = requestBody.toString(Charsets.UTF_8)
+                val json = TranslationEngine.get(appContext).detectRequestCapabilities(bodyString)
+                val parsed = JSONObject(json)
+                CapabilitySet(
+                    tools = parsed.optBoolean("tools"),
+                    vision = parsed.optBoolean("vision"),
+                    structuredOutput = parsed.optBoolean("structuredOutput"),
+                    reasoning = parsed.optBoolean("reasoning"),
+                )
+            } else null
+        } catch (_: Throwable) { null }
+
         val entry = RequestLog(
             appOrigin = appOrigin,
             providerId = providerId,
@@ -495,6 +519,7 @@ class WalletStore(context: Context) {
             actualProviderId = actualProviderId,
             actualModel = actualModel,
             groupId = groupId,
+            usedCapabilities = usedCapabilities,
         )
 
         val logs = listOf(entry) + _requestLogs.value
@@ -819,6 +844,13 @@ class WalletStore(context: Context) {
             val list = mutableListOf<RequestLog>()
             for (i in 0 until arr.length()) {
                 val obj = arr.getJSONObject(i)
+                val capsObj = obj.optJSONObject("usedCapabilities")
+                val caps = if (capsObj != null) CapabilitySet(
+                    tools = capsObj.optBoolean("tools"),
+                    vision = capsObj.optBoolean("vision"),
+                    structuredOutput = capsObj.optBoolean("structuredOutput"),
+                    reasoning = capsObj.optBoolean("reasoning"),
+                ) else null
                 list.add(
                     RequestLog(
                         id = obj.getString("id"),
@@ -831,6 +863,7 @@ class WalletStore(context: Context) {
                         inputTokens = if (obj.has("inputTokens")) obj.optInt("inputTokens") else null,
                         outputTokens = if (obj.has("outputTokens")) obj.optInt("outputTokens") else null,
                         model = obj.optString("model", "").takeIf { it.isNotEmpty() },
+                        usedCapabilities = caps,
                     )
                 )
             }
@@ -854,6 +887,14 @@ class WalletStore(context: Context) {
                 r.inputTokens?.let { put("inputTokens", it) }
                 r.outputTokens?.let { put("outputTokens", it) }
                 r.model?.let { put("model", it) }
+                r.usedCapabilities?.let { caps ->
+                    put("usedCapabilities", JSONObject().apply {
+                        put("tools", caps.tools)
+                        put("vision", caps.vision)
+                        put("structuredOutput", caps.structuredOutput)
+                        put("reasoning", caps.reasoning)
+                    })
+                }
             })
         }
         prefs.edit().putString("requestLogs", arr.toString()).apply()

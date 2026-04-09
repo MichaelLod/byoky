@@ -293,6 +293,20 @@ private struct MoveToGroupSheet: View {
     @Environment(\.dismiss) var dismiss
     let session: Session
 
+    /// Pending capability-gap confirmation. When set, the user has tapped a
+    /// group whose model lacks features the app has been using; we surface
+    /// a confirmation alert before committing the move so a misroute doesn't
+    /// silently start failing requests.
+    @State private var pendingMove: PendingMove?
+
+    private struct PendingMove: Identifiable {
+        let id = UUID()
+        let groupId: String
+        let groupName: String
+        let model: String
+        let gapLabels: [String]
+    }
+
     private var orderedGroups: [Group] {
         let def = wallet.groups.filter { $0.id == defaultGroupId }
         let rest = wallet.groups
@@ -310,6 +324,36 @@ private struct MoveToGroupSheet: View {
         return session.appOrigin
     }
 
+    /// Diff the app's used-capability union against the group's destination
+    /// model. Returns nil when there's no gap (the move is safe to commit
+    /// directly), or a PendingMove describing the gap when we need to ask
+    /// the user to confirm. Skipped entirely when the group has no pinned
+    /// model — pass-through groups can't introduce a capability mismatch.
+    private func gapsFor(group: Group) -> PendingMove? {
+        guard let model = group.model, !model.isEmpty else { return nil }
+        guard let json = TranslationEngine.shared.describeModel(model),
+              let data = json.data(using: .utf8),
+              let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let caps = parsed["capabilities"] as? [String: Bool] else {
+            return nil
+        }
+        let appEntries = wallet.requestLogs.filter { $0.appOrigin == session.appOrigin }
+        let used = detectAppCapabilities(appEntries)
+        let gaps = capabilityGaps(used: used, modelCapabilities: caps)
+        guard !gaps.isEmpty else { return nil }
+        return PendingMove(
+            groupId: group.id,
+            groupName: group.name,
+            model: model,
+            gapLabels: gaps.map(capabilityLabel),
+        )
+    }
+
+    private func commitMove(to groupId: String) {
+        try? wallet.setAppGroup(origin: session.appOrigin, groupId: groupId)
+        dismiss()
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -323,8 +367,15 @@ private struct MoveToGroupSheet: View {
                 Section {
                     ForEach(orderedGroups) { group in
                         Button {
-                            try? wallet.setAppGroup(origin: session.appOrigin, groupId: group.id)
-                            dismiss()
+                            if group.id == currentGroupId {
+                                dismiss()
+                                return
+                            }
+                            if let pending = gapsFor(group: group) {
+                                pendingMove = pending
+                            } else {
+                                commitMove(to: group.id)
+                            }
                         } label: {
                             HStack(spacing: 10) {
                                 VStack(alignment: .leading, spacing: 2) {
@@ -365,6 +416,22 @@ private struct MoveToGroupSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
+            }
+            .alert(item: $pendingMove) { pending in
+                Alert(
+                    title: Text("Capability mismatch"),
+                    message: Text(
+                        "\(displayHost) has used \(pending.gapLabels.joined(separator: ", ")) in past requests, but \(pending.model) in \(pending.groupName) does not support "
+                        + (pending.gapLabels.count == 1 ? "it" : "one or more of these")
+                        + ". Requests using "
+                        + (pending.gapLabels.count == 1 ? "that feature" : "those features")
+                        + " will fail until you switch back."
+                    ),
+                    primaryButton: .destructive(Text("Move anyway")) {
+                        commitMove(to: pending.groupId)
+                    },
+                    secondaryButton: .cancel()
+                )
             }
         }
     }

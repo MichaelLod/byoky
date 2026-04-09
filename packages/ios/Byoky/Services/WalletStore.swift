@@ -497,6 +497,12 @@ final class WalletStore: ObservableObject {
         entry.actualModel = actualModel
         entry.groupId = groupId
 
+        // Tag the entry with the capability fingerprint of the source request
+        // body (tools / vision / structured output / extended reasoning). The
+        // Apps screen aggregates these per-app to warn before moving an app
+        // to a group whose model lacks one of those features.
+        entry.usedCapabilities = TranslationEngine.shared.detectRequestCapabilities(body: requestBody)
+
         requestLogs.insert(entry, at: 0)
         if requestLogs.count > 500 {
             requestLogs = Array(requestLogs.prefix(500))
