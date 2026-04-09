@@ -1,7 +1,7 @@
 {
   "name": "@byoky/core",
   "description": "Shared types, crypto, and protocol for Byoky — the BYOK wallet for AI credentials",
-  "version": "0.4.19",
+  "version": "0.5.0",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
