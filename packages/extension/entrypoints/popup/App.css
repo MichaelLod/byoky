@@ -162,6 +162,41 @@ body {
   color: var(--text-muted);
 }
 
+/* Inline warning shown in the group editor when the chosen provider has
+   no credentials in the wallet. Permissive — saves still go through. */
+.form-group.group-warning {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px;
+  background: rgba(251, 146, 60, 0.08);
+  border: 1px solid rgba(251, 146, 60, 0.35);
+  border-radius: var(--radius-sm);
+}
+
+.group-warning-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.group-warning-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.group-warning-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+
+.group-warning-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
 .form-group textarea {
   font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
   font-size: 12px;

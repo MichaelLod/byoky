@@ -498,15 +498,33 @@ function GroupForm({
           ))}
         </select>
       </div>
-      <div className="form-group">
-        <label>Credential (optional)</label>
-        <select value={credentialId} onChange={(e) => setCredentialId(e.target.value)}>
-          <option value="">Any {PROVIDERS[providerId]?.name ?? providerId} credential</option>
-          {matchingCreds.map((c) => (
-            <option key={c.id} value={c.id}>{c.label}</option>
-          ))}
-        </select>
-      </div>
+      {matchingCreds.length > 0 ? (
+        <div className="form-group">
+          <label>Credential (optional)</label>
+          <select value={credentialId} onChange={(e) => setCredentialId(e.target.value)}>
+            <option value="">Any {PROVIDERS[providerId]?.name ?? providerId} credential</option>
+            {matchingCreds.map((c) => (
+              <option key={c.id} value={c.id}>{c.label}</option>
+            ))}
+          </select>
+        </div>
+      ) : (
+        // Inline warning when the chosen provider has no credentials in the
+        // wallet. The save still goes through (permissive mode) but the
+        // user is told up front that this group won't actually work until
+        // a credential is added — and is shown how to fix it.
+        <div className="form-group group-warning">
+          <div className="group-warning-icon" aria-hidden>⚠️</div>
+          <div className="group-warning-body">
+            <div className="group-warning-title">
+              No {PROVIDERS[providerId]?.name ?? providerId} credential
+            </div>
+            <div className="group-warning-text">
+              This group can be saved, but apps using it will fail until you add a {PROVIDERS[providerId]?.name ?? providerId} key in the Wallet.
+            </div>
+          </div>
+        </div>
+      )}
       <div className="form-group">
         <label>Default model (optional)</label>
         <input
