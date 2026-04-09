@@ -111,7 +111,7 @@
 }
 
 .demo-app .btn-primary:hover:not(:disabled) {
-  background: #38bdf8;
+  background: var(--teal-light);
   box-shadow: 0 2px 8px rgba(0,0,0,0.3), 0 0 30px rgba(255, 79, 0, 0.25);
   transform: translateY(-1px);
 }
@@ -1300,7 +1300,7 @@
 }
 
 .demo-app .code-tab-active:hover {
-  background: #38bdf8;
+  background: var(--teal-light);
   border-color: #38bdf8;
   color: white;
 }
