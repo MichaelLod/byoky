@@ -1098,7 +1098,10 @@ export default defineBackground(() => {
           processPendingAfterUnlock();
           await migrateGiftTokens(password);
           reconnectGiftRelays();
-          enqueueVaultSync(() => syncPendingCredentials());
+          enqueueVaultSync(async () => {
+            await syncPendingCredentials();
+            await syncPendingGroups();
+          });
         } else {
           unlockFailures++;
           if (unlockFailures >= 5) {
@@ -1788,7 +1791,10 @@ export default defineBackground(() => {
           tokenIssuedAt: Date.now(),
           tokenExpired: false,
         });
-        enqueueVaultSync(() => syncPendingCredentials());
+        enqueueVaultSync(async () => {
+          await syncPendingCredentials();
+          await syncPendingGroups();
+        });
         return { success: true };
       }
 
@@ -3988,6 +3994,72 @@ export default defineBackground(() => {
 
     delete state.credentialMap[localId];
     await saveCloudVaultState({ credentialMap: state.credentialMap });
+  }
+
+  /**
+   * Backfill local groups + app→group bindings to the cloud vault.
+   *
+   * Runs on two triggers: (1) initial cloud-vault enable, (2) wallet unlock
+   * when a vault session is already configured. Idempotent — the vault
+   * endpoints are upserts, so re-pushing existing rows is a no-op.
+   *
+   * Sequencing: credentials must sync BEFORE groups, because group rows
+   * may carry a credential pin that resolves via state.credentialMap
+   * (local id → vault id). Callers should await syncPendingCredentials()
+   * first. If they don't, pinned groups will be pushed with credentialId
+   * null and the user would need to re-save the group to fix it.
+   */
+  async function syncPendingGroups(): Promise<void> {
+    const state = await getCloudVaultState();
+    if (!state.enabled || !state.token || state.tokenExpired) return;
+    if (isVaultTokenExpired(state.tokenIssuedAt)) {
+      await handleVaultAuthError();
+      return;
+    }
+
+    const groups = await getGroups();
+    for (const group of groups) {
+      const vaultCredentialId = group.credentialId
+        ? state.credentialMap[group.credentialId]
+        : undefined;
+      try {
+        const result = await vaultFetch(
+          `/groups/${encodeURIComponent(group.id)}`,
+          'PUT',
+          {
+            name: group.name,
+            providerId: group.providerId,
+            credentialId: vaultCredentialId ?? null,
+            model: group.model ?? null,
+          },
+          state.token,
+        );
+        if (result.status === 401) {
+          await handleVaultAuthError();
+          return;
+        }
+      } catch {
+        // Non-blocking — will retry next enable/unlock
+      }
+    }
+
+    const appGroups = await getAppGroups();
+    for (const [origin, groupId] of Object.entries(appGroups)) {
+      try {
+        const result = await vaultFetch(
+          `/groups/apps/${encodeURIComponent(origin)}`,
+          'PUT',
+          { groupId },
+          state.token,
+        );
+        if (result.status === 401) {
+          await handleVaultAuthError();
+          return;
+        }
+      } catch {
+        // Non-blocking
+      }
+    }
   }
 
   async function syncPendingCredentials(): Promise<void> {

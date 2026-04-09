@@ -155,7 +155,10 @@ class WalletStore(context: Context) {
         loadGiftPreferences()
         loadTokenAllowances()
         loadCloudVaultState()
-        vaultScope.launch { syncPendingCredentials() }
+        vaultScope.launch {
+            syncPendingCredentials()
+            syncPendingGroups()
+        }
         return UnlockResult.Success
     }
 
@@ -674,6 +677,7 @@ class WalletStore(context: Context) {
         if (_groups.value.none { it.id == groupId }) throw GroupError.NotFound()
         _appGroups.value = _appGroups.value + (origin to groupId)
         saveAppGroups()
+        vaultScope.launch { syncAppGroupToVault(origin, groupId) }
     }
 
     sealed class GroupError(message: String) : RuntimeException(message) {
@@ -707,6 +711,7 @@ class WalletStore(context: Context) {
         )
         _groups.value = _groups.value + group
         saveGroups()
+        vaultScope.launch { syncGroupToVault(group) }
         return group
     }
 
@@ -763,6 +768,8 @@ class WalletStore(context: Context) {
         val updated = _groups.value.toMutableList().also { it[idx] = next }
         _groups.value = updated
         saveGroups()
+        val nextSnapshot = next
+        vaultScope.launch { syncGroupToVault(nextSnapshot) }
         return next
     }
 
@@ -772,17 +779,23 @@ class WalletStore(context: Context) {
         _groups.value = _groups.value.filterNot { it.id == id }
         saveGroups()
         // Reassign any apps that pointed at this group back to the default.
-        var mutated = false
+        val reassignedOrigins = mutableListOf<String>()
         val newAppGroups = _appGroups.value.toMutableMap()
         for ((origin, gid) in _appGroups.value) {
             if (gid == id) {
                 newAppGroups[origin] = DEFAULT_GROUP_ID
-                mutated = true
+                reassignedOrigins.add(origin)
             }
         }
-        if (mutated) {
+        if (reassignedOrigins.isNotEmpty()) {
             _appGroups.value = newAppGroups
             saveAppGroups()
+        }
+        vaultScope.launch {
+            syncGroupDeleteToVault(id)
+            for (origin in reassignedOrigins) {
+                syncAppGroupToVault(origin, DEFAULT_GROUP_ID)
+            }
         }
     }
 
@@ -1195,6 +1208,7 @@ class WalletStore(context: Context) {
         saveCloudVaultConfig()
 
         syncAllCredentialsToVault()
+        syncPendingGroups()
     }
 
     suspend fun disableCloudVault() {
@@ -1236,6 +1250,7 @@ class WalletStore(context: Context) {
         saveCloudVaultConfig()
 
         syncPendingCredentials()
+        syncPendingGroups()
     }
 
     private fun syncAddToVault(localId: String, providerId: String, label: String, authMethod: String, plainKey: String) {
@@ -1307,6 +1322,91 @@ class WalletStore(context: Context) {
                 )
                 syncAddToVault(cred.id, cred.providerId, cred.label, cred.authMethod.name.lowercase(), plainKey)
             } catch (_: Exception) {}
+        }
+    }
+
+    // ─── Vault group sync ────────────────────────────────────────────────
+
+    /**
+     * Push a single group to the cloud vault. Called on createGroup /
+     * updateGroup so the offline vault's routing rules stay in lockstep with
+     * the phone's local state. No-op when cloud vault is disabled.
+     *
+     * The vault keys credential pins by its own credential ids (returned at
+     * sync time and stored in vaultCredentialMap). Translate the local pin
+     * id to the vault id before sending — a stale local pin maps to null
+     * which the vault treats as "no pin".
+     */
+    private fun syncGroupToVault(group: Group) {
+        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
+        val token = vaultToken ?: return
+
+        val vaultCredentialId = group.credentialId?.let { vaultCredentialMap[it] }
+        val body = JSONObject()
+            .put("name", group.name)
+            .put("providerId", group.providerId)
+            .put("credentialId", vaultCredentialId ?: JSONObject.NULL)
+            .put("model", group.model ?: JSONObject.NULL)
+
+        val encoded = java.net.URLEncoder.encode(group.id, "UTF-8")
+        val (_, status, _) = vaultRequest("/groups/$encoded", "PUT", body, token)
+
+        if (status == 401) {
+            _cloudVaultTokenExpired.value = true
+            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
+        }
+    }
+
+    /** Remove a group from the cloud vault. Called on deleteGroup. */
+    private fun syncGroupDeleteToVault(groupId: String) {
+        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
+        val token = vaultToken ?: return
+        val encoded = java.net.URLEncoder.encode(groupId, "UTF-8")
+        val (_, status, _) = vaultRequest("/groups/$encoded", "DELETE", token = token)
+        if (status == 401) {
+            _cloudVaultTokenExpired.value = true
+            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
+        }
+    }
+
+    /**
+     * Push an app→group binding to the vault. Called on setAppGroup and on
+     * reassignment when a group is deleted.
+     */
+    private fun syncAppGroupToVault(origin: String, groupId: String) {
+        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
+        val token = vaultToken ?: return
+        val encoded = java.net.URLEncoder.encode(origin, "UTF-8")
+        val body = JSONObject().put("groupId", groupId)
+        val (_, status, _) = vaultRequest("/groups/apps/$encoded", "PUT", body, token)
+        if (status == 401) {
+            _cloudVaultTokenExpired.value = true
+            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
+        }
+    }
+
+    /**
+     * Backfill all local groups + app→group bindings to the vault. Runs on
+     * initial cloud-vault enable and on unlock when a vault session is
+     * already configured. Idempotent — the vault endpoints are upserts.
+     *
+     * Sequencing: MUST run after syncPendingCredentials so that any
+     * credential pins in local groups have a corresponding entry in
+     * vaultCredentialMap. Callers enforce this ordering.
+     */
+    private fun syncPendingGroups() {
+        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
+        if (vaultTokenIssuedAt > 0 && System.currentTimeMillis() - vaultTokenIssuedAt > SIX_DAYS_MS) {
+            _cloudVaultTokenExpired.value = true
+            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
+            return
+        }
+
+        for (group in _groups.value) {
+            syncGroupToVault(group)
+        }
+        for ((origin, groupId) in _appGroups.value) {
+            syncAppGroupToVault(origin, groupId)
         }
     }
 }
