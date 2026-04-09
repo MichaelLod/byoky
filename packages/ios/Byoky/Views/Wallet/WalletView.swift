@@ -8,7 +8,7 @@ struct WalletView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
+            SwiftUI.Group {
                 if wallet.credentials.isEmpty {
                     emptyState
                 } else {

@@ -97,6 +97,7 @@ IOS_PLISTS=(
   packages/ios/Byoky/App/Info.plist
   packages/ios/SafariExtension/Info.plist
   packages/ios/macOS/Info.plist
+  packages/ios/macOS/SafariExtension-macOS-Info.plist
 )
 
 for f in "${IOS_PLISTS[@]}"; do

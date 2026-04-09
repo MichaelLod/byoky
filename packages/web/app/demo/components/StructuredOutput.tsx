@@ -7,6 +7,14 @@ const sampleTexts = [
   'Invoice #4821 from CloudSync Inc. Total: $2,450.00. Due date: March 30, 2026. Contact: billing@cloudsync.io',
 ];
 
+// Static list of providers the structured-output tab knows how to call. The
+// dropdown shows all of them — even when the wallet has no credential — so
+// the user can exercise cross-family routing via the bound group.
+const dropdownProviders: string[] = [
+  'anthropic',
+  'openai', 'groq', 'deepseek', 'xai', 'mistral', 'together', 'fireworks', 'openrouter',
+];
+
 interface ExtractedData {
   [key: string]: unknown;
 }
@@ -21,10 +29,6 @@ export function StructuredOutput({ session }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const providers = Object.entries(session.providers)
-    .filter(([, v]) => v.available)
-    .map(([id]) => id);
-
   // All OpenAI-compatible providers support JSON mode
   const openaiCompat: Record<string, { url: string; model: string; name: string }> = {
     openai:     { url: 'https://api.openai.com/v1/chat/completions',       model: 'gpt-4o',                  name: 'OpenAI (GPT-4o)' },
@@ -37,12 +41,10 @@ export function StructuredOutput({ session }: Props) {
     openrouter: { url: 'https://openrouter.ai/api/v1/chat/completions',    model: 'anthropic/claude-sonnet-4', name: 'OpenRouter' },
   };
 
-  const supportedProviders = providers.filter(
-    (id) => id === 'anthropic' || id in openaiCompat,
-  );
-  const [selectedProvider, setSelectedProvider] = useState(
-    supportedProviders.includes('openai') ? 'openai' : supportedProviders[0] ?? '',
-  );
+  // Default to first directly-available provider; fall back to openai (so the
+  // user always sees something selected, even with no credentials yet).
+  const firstDirect = dropdownProviders.find(id => session.providers[id]?.available === true);
+  const [selectedProvider, setSelectedProvider] = useState(firstDirect ?? 'openai');
   const provider = selectedProvider;
 
   async function handleExtract() {
@@ -142,21 +144,22 @@ export function StructuredOutput({ session }: Props) {
     <div className="demo-panel">
       <div className="demo-header">
         <h3>Structured Output</h3>
-        {supportedProviders.length > 1 ? (
-          <select
-            className="demo-provider-select"
-            value={selectedProvider}
-            onChange={(e) => setSelectedProvider(e.target.value)}
-          >
-            {supportedProviders.map((id) => (
-              <option key={id} value={id}>
-                {id === 'anthropic' ? 'Anthropic (Claude)' : openaiCompat[id]?.name ?? id}{session.providers[id]?.gift ? ' (Gift)' : ''}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <span className="demo-provider">via {provider || 'no provider'}</span>
-        )}
+        <select
+          className="demo-provider-select"
+          value={selectedProvider}
+          onChange={(e) => setSelectedProvider(e.target.value)}
+        >
+          {dropdownProviders.map((id) => {
+            const meta = session.providers[id];
+            const direct = meta?.available === true;
+            const isGift = meta?.gift;
+            const suffix = isGift ? ' (Gift)' : direct ? '' : ' (via routing)';
+            const label = id === 'anthropic' ? 'Anthropic (Claude)' : openaiCompat[id]?.name ?? id;
+            return (
+              <option key={id} value={id}>{label}{suffix}</option>
+            );
+          })}
+        </select>
       </div>
       <p className="demo-desc">
         Extract typed data from unstructured text. Paste any text and get back clean JSON.

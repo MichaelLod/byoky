@@ -14,8 +14,6 @@
     "byoky-together",
     "byoky-fireworks",
     "byoky-openrouter",
-    "byoky-replicate",
-    "byoky-huggingface",
     "byoky-azure_openai"
   ],
   "configSchema": {

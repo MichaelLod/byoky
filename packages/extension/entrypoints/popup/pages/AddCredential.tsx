@@ -72,9 +72,7 @@ export function AddCredential() {
     groq: 'console.groq.com',
     together: 'api.together.ai',
     fireworks: 'fireworks.ai/account',
-    replicate: 'replicate.com/account',
     openrouter: 'openrouter.ai/keys',
-    huggingface: 'huggingface.co/settings/tokens',
     azure_openai: 'portal.azure.com',
   };
   const apiKeyHint = apiKeyHints[providerId] ?? 'your provider console';
@@ -154,8 +152,6 @@ export function AddCredential() {
               placeholder={
                 providerId === 'anthropic' ? 'sk-ant-api03-...'
                 : providerId === 'openai' ? 'sk-...'
-                : providerId === 'huggingface' ? 'hf_...'
-                : providerId === 'replicate' ? 'r8_...'
                 : 'Your API key'
               }
               rows={3}

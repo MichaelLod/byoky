@@ -1,4 +1,4 @@
-import type { RequestLogEntry, TokenAllowance } from './types.js';
+import type { RequestLogEntry, TokenAllowance, CapabilitySet } from './types.js';
 import { PROVIDERS } from './providers.js';
 
 /**
@@ -70,6 +70,10 @@ export function buildHeaders(
     headers['anthropic-version'] = headers['anthropic-version'] ?? '2023-06-01';
   } else if (providerId === 'azure_openai') {
     headers['api-key'] = apiKey;
+  } else if (providerId === 'gemini') {
+    // Google AI Studio accepts x-goog-api-key OR ?key= query param. The
+    // header is safer (query params get sanitized out of logs).
+    headers['x-goog-api-key'] = apiKey;
   } else {
     headers['authorization'] = `Bearer ${apiKey}`;
   }
@@ -81,6 +85,70 @@ export function buildHeaders(
  * Parse the model name from a request body (JSON).
  */
 const MAX_BODY_PARSE_SIZE = 10_485_760; // 10 MB
+
+/**
+ * Inspect a request body and return the set of advanced capabilities it uses.
+ *
+ * Used by the request logger to record per-request capability fingerprints,
+ * which the popup later aggregates by app to surface drag-time warnings when
+ * a user is about to route an app to a model that lacks one of those
+ * capabilities.
+ *
+ * Inspects the body shape generously: tries both Anthropic and OpenAI shapes
+ * since either dialect may be on the wire (the source-side body is what we
+ * inspect, before any translation).
+ */
+export function detectRequestCapabilities(body?: string): CapabilitySet {
+  const empty: CapabilitySet = {
+    tools: false,
+    vision: false,
+    structuredOutput: false,
+    reasoning: false,
+  };
+  if (!body || body.length > MAX_BODY_PARSE_SIZE) return empty;
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(body) as Record<string, unknown>;
+  } catch {
+    return empty;
+  }
+
+  const out: CapabilitySet = { ...empty };
+
+  // tools[] is the same key in both Anthropic and OpenAI dialects.
+  if (Array.isArray(parsed.tools) && parsed.tools.length > 0) {
+    out.tools = true;
+  }
+
+  // OpenAI structured output: response_format with json_schema (not just json_object).
+  const rf = parsed.response_format as { type?: string } | undefined;
+  if (rf && typeof rf === 'object' && rf.type === 'json_schema') {
+    out.structuredOutput = true;
+  }
+
+  // Anthropic extended thinking is opted-in via the `thinking` field.
+  if (parsed.thinking != null) {
+    out.reasoning = true;
+  }
+
+  // Vision: walk messages[] looking for image/image_url content blocks.
+  if (Array.isArray(parsed.messages)) {
+    outer: for (const msg of parsed.messages) {
+      const content = (msg as { content?: unknown })?.content;
+      if (!Array.isArray(content)) continue;
+      for (const block of content) {
+        if (!block || typeof block !== 'object') continue;
+        const type = (block as { type?: unknown }).type;
+        if (type === 'image' || type === 'image_url') {
+          out.vision = true;
+          break outer;
+        }
+      }
+    }
+  }
+
+  return out;
+}
 
 export function parseModel(body?: string): string | undefined {
   if (!body || body.length > MAX_BODY_PARSE_SIZE) return undefined;
@@ -163,6 +231,40 @@ export function parseUsage(
         return undefined;
       }
 
+      // Gemini streaming (?alt=sse): each frame is a full GenerateContentResponse.
+      // usageMetadata typically appears on the last frame.
+      if (providerId === 'gemini') {
+        for (let i = lines.length - 1; i >= 0; i--) {
+          try {
+            const parsed = JSON.parse(lines[i].replace('data: ', ''));
+            const usage = extractUsageFromParsed('gemini', parsed);
+            if (usage) return usage;
+          } catch {
+            continue;
+          }
+        }
+        return undefined;
+      }
+
+      // Cohere streaming: usage is on the final `message-end` frame under
+      // `delta.usage.tokens`.
+      if (providerId === 'cohere') {
+        for (let i = lines.length - 1; i >= 0; i--) {
+          try {
+            const parsed = JSON.parse(lines[i].replace('data: ', ''));
+            if (parsed.type === 'message-end') {
+              const tokens = parsed.delta?.usage?.tokens as
+                | { input_tokens?: number; output_tokens?: number }
+                | undefined;
+              if (tokens?.input_tokens != null && tokens.output_tokens != null) {
+                return sanitizeTokenCounts(tokens.input_tokens, tokens.output_tokens);
+              }
+            }
+          } catch { continue; }
+        }
+        return undefined;
+      }
+
       // OpenAI-compatible streaming: last chunk may include usage
       for (let i = lines.length - 1; i >= 0; i--) {
         const json = lines[i].replace('data: ', '');
@@ -213,7 +315,23 @@ export function extractUsageFromParsed(
   if (providerId === 'gemini') {
     const meta = parsed.usageMetadata as Record<string, number> | undefined;
     if (meta?.promptTokenCount != null) {
-      return sanitizeTokenCounts(meta.promptTokenCount, meta.candidatesTokenCount ?? 0);
+      // thoughtsTokenCount is charged separately on thinking-enabled models;
+      // roll it into output tokens so billing adds up.
+      const thoughts = meta.thoughtsTokenCount ?? 0;
+      return sanitizeTokenCounts(
+        meta.promptTokenCount,
+        (meta.candidatesTokenCount ?? 0) + thoughts,
+      );
+    }
+  }
+
+  // Cohere v2: { usage: { tokens: { input_tokens, output_tokens } } }
+  if (providerId === 'cohere') {
+    const usage = parsed.usage as
+      | { tokens?: { input_tokens?: number; output_tokens?: number } }
+      | undefined;
+    if (usage?.tokens?.input_tokens != null && usage.tokens.output_tokens != null) {
+      return sanitizeTokenCounts(usage.tokens.input_tokens, usage.tokens.output_tokens);
     }
   }
 
@@ -269,24 +387,329 @@ export function computeAllowanceCheck(
   return { allowed: true };
 }
 
+const CLAUDE_CODE_SYSTEM_PREFIX = "You are Claude Code, Anthropic's official CLI for Claude.";
+
 /**
  * Inject the Claude Code system prompt prefix into a JSON request body.
- * Only used for bridge/CLI sessions that go through the Claude Code OAuth path.
+ *
+ * Two modes based on `relocateExisting`:
+ *  - false (default, for Claude Code CLI): prepend the prefix to whatever system
+ *    field already exists (preserving the user's system content as a Claude Code
+ *    extension).
+ *  - true (for non-Claude-Code frameworks like OpenClaw): replace the system
+ *    field with ONLY the Claude Code prefix, and move the original system content
+ *    into the first user message wrapped in <system_context> tags. Anthropic's
+ *    third-party detection inspects the system field content; relocating it lets
+ *    arbitrary frameworks pass the check.
  */
-export function injectClaudeCodeSystemPrompt(body: string | undefined): string | undefined {
+export function injectClaudeCodeSystemPrompt(
+  body: string | undefined,
+  options?: { relocateExisting?: boolean },
+): string | undefined {
   if (!body) return body;
   try {
-    const parsed = JSON.parse(body);
-    const prefix = "You are Claude Code, Anthropic's official CLI for Claude.";
-    if (!parsed.system) {
-      parsed.system = prefix;
-    } else if (typeof parsed.system === 'string') {
-      parsed.system = `${prefix}\n\n${parsed.system}`;
-    } else if (Array.isArray(parsed.system)) {
-      parsed.system = [{ type: 'text', text: prefix }, ...parsed.system];
+    const parsed = JSON.parse(body) as Record<string, unknown>;
+    const relocate = options?.relocateExisting === true;
+
+    if (relocate) {
+      // Extract the original system text (if any)
+      const originalSystem = extractSystemText(parsed.system);
+      // Replace system with bare Claude Code prefix
+      parsed.system = CLAUDE_CODE_SYSTEM_PREFIX;
+      // Prepend original system content to the first user message as a context block
+      if (originalSystem && Array.isArray(parsed.messages) && parsed.messages.length > 0) {
+        parsed.messages = relocateSystemToFirstUserMessage(
+          parsed.messages,
+          originalSystem,
+        );
+      }
+    } else {
+      // Original behavior: prepend prefix to existing system
+      if (!parsed.system) {
+        parsed.system = CLAUDE_CODE_SYSTEM_PREFIX;
+      } else if (typeof parsed.system === 'string') {
+        parsed.system = `${CLAUDE_CODE_SYSTEM_PREFIX}\n\n${parsed.system}`;
+      } else if (Array.isArray(parsed.system)) {
+        parsed.system = [{ type: 'text', text: CLAUDE_CODE_SYSTEM_PREFIX }, ...parsed.system];
+      }
     }
     return JSON.stringify(parsed);
   } catch {
     return body;
   }
 }
+
+/**
+ * Concatenate any system field shape (string, text-block array, or undefined)
+ * into a single string for relocation. Non-text blocks are skipped.
+ */
+function extractSystemText(system: unknown): string {
+  if (!system) return '';
+  if (typeof system === 'string') return system;
+  if (Array.isArray(system)) {
+    return system
+      .map((block) => {
+        if (typeof block === 'string') return block;
+        if (block && typeof block === 'object' && (block as { type?: unknown }).type === 'text') {
+          return String((block as { text?: unknown }).text ?? '');
+        }
+        return '';
+      })
+      .filter((s) => s.length > 0)
+      .join('\n\n');
+  }
+  return '';
+}
+
+/**
+ * Prepend the original system content to the first user message in a messages
+ * array, wrapped in <system_context> tags. Returns a new messages array.
+ *
+ * The first message must be a user-role message (Anthropic API requires this).
+ * If the first message has structured content (array of blocks), the context is
+ * added as a new text block at the start. If it has plain string content, the
+ * context is concatenated.
+ */
+function relocateSystemToFirstUserMessage(
+  messages: unknown[],
+  systemText: string,
+): unknown[] {
+  const wrapped = `<system_context>\n${systemText}\n</system_context>\n\n`;
+  const out = [...messages];
+  const first = out[0] as { role?: unknown; content?: unknown } | undefined;
+  if (!first || first.role !== 'user') return out;
+
+  if (typeof first.content === 'string') {
+    out[0] = { ...first, content: `${wrapped}${first.content}` };
+  } else if (Array.isArray(first.content)) {
+    out[0] = {
+      ...first,
+      content: [{ type: 'text', text: wrapped }, ...first.content],
+    };
+  }
+  return out;
+}
+
+/**
+ * Rewrite tool names in an Anthropic /v1/messages request body so the request
+ * looks like it came from Claude Code (Anthropic's first-party CLI).
+ *
+ * Why: when an OAuth setup token is used to call /v1/messages, Anthropic
+ * classifies the request as "Claude Code" or "third-party" based partly on
+ * tool names. Tools whose names don't match the canonical Claude Code set
+ * (Read, Edit, Bash, ...) get rejected with a billing error even when the
+ * Claude Code system prompt is injected.
+ *
+ * This function:
+ *  1. Detects "non-Claude-Code" tool names (lowercase or snake_case)
+ *  2. Builds a bidirectional mapping (original ↔ PascalCase alias)
+ *  3. Rewrites the tools[] array, all past tool_use blocks in messages,
+ *     and all tool_result blocks (which reference tool_use_id, not name —
+ *     so those don't need rewriting)
+ *
+ * Returns { body, toolNameMap } where toolNameMap goes from CC-alias → original,
+ * so the caller can pass it to `rewriteToolUseInSSEChunk` to translate the
+ * streaming response back to names the framework expects.
+ *
+ * If no rewriting is needed (all names already PascalCase or no tools), returns
+ * the body unchanged with an empty map.
+ */
+export function rewriteToolNamesForClaudeCode(
+  body: string | undefined,
+): { body: string | undefined; toolNameMap: Record<string, string> } {
+  if (!body) return { body, toolNameMap: {} };
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return { body, toolNameMap: {} };
+  }
+
+  const tools = parsed.tools;
+  if (!Array.isArray(tools) || tools.length === 0) {
+    return { body, toolNameMap: {} };
+  }
+
+  // Detect: any tool with a non-PascalCase name needs the rewrite
+  const needsRewrite = tools.some((t) => {
+    const name = (t as { name?: unknown })?.name;
+    return typeof name === 'string' && !/^[A-Z][A-Za-z0-9]*$/.test(name);
+  });
+  if (!needsRewrite) return { body, toolNameMap: {} };
+
+  // Build forward (original → alias) and reverse (alias → original) maps
+  const forward: Record<string, string> = {};
+  const reverse: Record<string, string> = {};
+  for (const t of tools) {
+    const name = (t as { name?: unknown })?.name;
+    if (typeof name !== 'string') continue;
+    if (forward[name]) continue;
+    const alias = toClaudeCodeToolName(name, new Set(Object.values(forward)));
+    forward[name] = alias;
+    reverse[alias] = name;
+  }
+
+  // Rewrite the tools[] array
+  parsed.tools = tools.map((t) => {
+    const tt = t as { name?: unknown };
+    if (typeof tt.name === 'string' && forward[tt.name]) {
+      return { ...t, name: forward[tt.name] };
+    }
+    return t;
+  });
+
+  // Rewrite tool_use blocks in past assistant messages (so the conversation
+  // history stays consistent — Claude needs the names in past tool_use to
+  // match what's in tools[])
+  const messages = parsed.messages;
+  if (Array.isArray(messages)) {
+    for (const msg of messages) {
+      const content = (msg as { content?: unknown })?.content;
+      if (!Array.isArray(content)) continue;
+      for (const block of content) {
+        const b = block as { type?: unknown; name?: unknown };
+        if (b.type === 'tool_use' && typeof b.name === 'string' && forward[b.name]) {
+          (b as { name: string }).name = forward[b.name];
+        }
+      }
+    }
+  }
+
+  return { body: JSON.stringify(parsed), toolNameMap: reverse };
+}
+
+/**
+ * Convert a tool name to Claude-Code-style PascalCase. Handles snake_case,
+ * camelCase, and lowercase. Disambiguates collisions by appending a digit.
+ */
+function toClaudeCodeToolName(name: string, taken: Set<string>): string {
+  // snake_case or kebab-case → PascalCase
+  let pascal = name
+    .split(/[_\-]/)
+    .filter((p) => p.length > 0)
+    .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+    .join('');
+  // already-camelCase: just uppercase the first letter
+  if (pascal === name && name.length > 0) {
+    pascal = name.charAt(0).toUpperCase() + name.slice(1);
+  }
+  // collision: append a digit
+  let candidate = pascal;
+  let n = 2;
+  while (taken.has(candidate)) {
+    candidate = `${pascal}${n}`;
+    n++;
+  }
+  return candidate;
+}
+
+/**
+ * Rewrite tool_use block names in a non-streaming Anthropic Messages JSON
+ * response, translating Claude-Code-style aliases back to the upstream
+ * framework's original names.
+ *
+ * The SSE rewriter (createToolNameSSERewriter) only handles streaming
+ * responses where each `data: <json>\n\n` frame contains one event. When the
+ * caller requests `stream: false`, Anthropic returns the full Messages object
+ * as a single JSON body — no SSE framing. This helper is the JSON-body
+ * counterpart, used by the bridge when Content-Type is application/json.
+ *
+ * Walks the top-level `content[]` array and rewrites any `tool_use` block's
+ * `name` field via the alias→original map. Empty map → identity passthrough.
+ * Unparseable JSON → identity passthrough (the bridge would fail elsewhere).
+ */
+export function rewriteToolNamesInJSONBody(
+  body: string,
+  toolNameMap: Record<string, string>,
+): string {
+  if (Object.keys(toolNameMap).length === 0) return body;
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(body) as Record<string, unknown>;
+  } catch {
+    return body;
+  }
+  const content = parsed.content;
+  if (!Array.isArray(content)) return body;
+  let mutated = false;
+  for (const block of content) {
+    if (!block || typeof block !== 'object') continue;
+    const b = block as { type?: unknown; name?: unknown };
+    if (b.type === 'tool_use' && typeof b.name === 'string' && toolNameMap[b.name]) {
+      (b as { name: string }).name = toolNameMap[b.name];
+      mutated = true;
+    }
+  }
+  return mutated ? JSON.stringify(parsed) : body;
+}
+
+/**
+ * Stateful rewriter for an Anthropic SSE response stream that translates
+ * `tool_use` block names from Claude-Code-style aliases back to the upstream
+ * framework's original names.
+ *
+ * Use:
+ *   const r = createToolNameSSERewriter(map);
+ *   for each chunk: emit(r.process(chunk));
+ *   on stream end:  emit(r.flush());
+ *
+ * Empty map → identity passthrough (no buffering, no parsing).
+ */
+export function createToolNameSSERewriter(
+  toolNameMap: Record<string, string>,
+): { process: (chunk: string) => string; flush: () => string } {
+  if (Object.keys(toolNameMap).length === 0) {
+    return {
+      process: (chunk) => chunk,
+      flush: () => '',
+    };
+  }
+  let buffer = '';
+  return {
+    process: (chunk: string): string => {
+      buffer += chunk;
+      let out = '';
+      let idx: number;
+      // SSE frames are terminated by \n\n
+      while ((idx = buffer.indexOf('\n\n')) !== -1) {
+        const frame = buffer.slice(0, idx + 2);
+        buffer = buffer.slice(idx + 2);
+        out += rewriteSSEFrame(frame, toolNameMap);
+      }
+      return out;
+    },
+    flush: (): string => {
+      const leftover = buffer;
+      buffer = '';
+      return leftover;
+    },
+  };
+}
+
+/**
+ * Rewrite a single complete SSE frame. If the frame is a content_block_start
+ * with a tool_use block, rewrite its name using the alias→original map.
+ */
+function rewriteSSEFrame(frame: string, toolNameMap: Record<string, string>): string {
+  // Frame format: "event: <type>\ndata: <json>\n\n"
+  const dataMatch = /^data: (.+)$/m.exec(frame);
+  if (!dataMatch) return frame;
+  const dataLine = dataMatch[1];
+  try {
+    const data = JSON.parse(dataLine);
+    if (
+      data?.type === 'content_block_start' &&
+      data?.content_block?.type === 'tool_use' &&
+      typeof data.content_block.name === 'string' &&
+      toolNameMap[data.content_block.name]
+    ) {
+      data.content_block.name = toolNameMap[data.content_block.name];
+      const rewrittenData = JSON.stringify(data);
+      return frame.replace(dataLine, rewrittenData);
+    }
+  } catch {
+    // not JSON or unexpected shape — pass through
+  }
+  return frame;
+}
+

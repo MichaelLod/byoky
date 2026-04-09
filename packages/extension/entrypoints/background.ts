@@ -2,6 +2,8 @@ import {
   type AuthMethod,
   type Credential,
   type Session,
+  type SessionProvider,
+  type SessionTranslation,
   type RequestLogEntry,
   type PendingApproval,
   type TrustedSite,
@@ -14,6 +16,12 @@ import {
   type GiftedCredential,
   type GiftLink,
   type SerializedFormDataEntry,
+  type Group,
+  type AppGroups,
+  type ProviderId,
+  type TranslationContext,
+  type ModelFamily,
+  DEFAULT_GROUP_ID,
   decrypt,
   encrypt,
   verifyPassword,
@@ -21,13 +29,22 @@ import {
   buildHeaders,
   parseModel,
   parseUsage,
+  detectRequestCapabilities,
   injectStreamUsageOptions,
   computeAllowanceCheck,
   validateProxyUrl,
   injectClaudeCodeSystemPrompt,
+  rewriteToolNamesForClaudeCode,
   createGiftLink,
   decodeGiftLink,
   validateGiftLink,
+  shouldTranslate,
+  familyOf,
+  rewriteProxyUrl,
+  translateRequest,
+  translateResponse,
+  createStreamTranslator,
+  TranslationError,
 } from '@byoky/core';
 import type { Runtime } from 'wxt/browser';
 
@@ -424,12 +441,21 @@ export default defineBackground(() => {
         return;
       }
 
-      // Refresh OAuth token if expired or about to expire
+      // Cross-family translation context (set when the resolved group routes
+      // this app to a credential in a different provider family).
+      const translation = sessionProvider?.translation;
+      // The "effective" provider id is the one we actually call upstream:
+      // the destination if translation is on, otherwise the source.
+      const effectiveProviderId = translation?.dstProviderId ?? msg.providerId;
+
+      // Refresh OAuth token if expired or about to expire. Key off the
+      // credential's own providerId so cross-family routing still refreshes
+      // a destination-side OAuth token correctly.
       if (
         credential.authMethod === 'oauth' &&
         (credential as { expiresAt?: number }).expiresAt &&
         (credential as { expiresAt: number }).expiresAt < Date.now() + 60_000 &&
-        PROVIDERS[msg.providerId]?.oauthConfig
+        PROVIDERS[credential.providerId]?.oauthConfig
       ) {
         const refreshed = await refreshOAuthToken(credential);
         if (refreshed) {
@@ -440,6 +466,9 @@ export default defineBackground(() => {
       try {
         const apiKey = await decryptCredentialKey(credential);
 
+        // The URL the SDK sent must match the SOURCE provider's base URL.
+        // (After translation we issue against the destination's URL — see
+        // rewriteProxyUrl below.)
         if (!validateProxyUrl(msg.providerId, msg.url)) {
           port.postMessage({
             type: 'BYOKY_PROXY_RESPONSE_ERROR',
@@ -450,22 +479,83 @@ export default defineBackground(() => {
           return;
         }
 
-        const realHeaders = buildHeaders(msg.providerId, msg.headers, apiKey, credential.authMethod);
+        // Translate the request body up front, before any branch (the OAuth
+        // bridge path needs to see the translated body too).
+        let translatedBody: string | undefined = msg.body;
+        let translatedUrl = msg.url;
+        if (translation) {
+          if (msg.bodyEncoding) {
+            // Binary bodies cannot be translated — translation requires JSON.
+            port.postMessage({
+              type: 'BYOKY_PROXY_RESPONSE_ERROR',
+              requestId: msg.requestId,
+              status: 400,
+              error: { code: 'TRANSLATION_NOT_SUPPORTED', message: 'Cross-family routing does not support binary request bodies.' },
+            });
+            return;
+          }
+          try {
+            translatedBody = applyRequestTranslation(translation, msg.body, msg.requestId);
+          } catch (err) {
+            const code = err instanceof TranslationError ? err.code : 'TRANSLATION_FAILED';
+            port.postMessage({
+              type: 'BYOKY_PROXY_RESPONSE_ERROR',
+              requestId: msg.requestId,
+              status: 502,
+              error: { code, message: err instanceof Error ? err.message : 'Translation failed' },
+            });
+            return;
+          }
+          const isStreaming = detectStreamingRequest(msg.body);
+          const rewritten = rewriteProxyUrl(translation.dstProviderId, translation.dstModel, isStreaming);
+          if (!rewritten) {
+            port.postMessage({
+              type: 'BYOKY_PROXY_RESPONSE_ERROR',
+              requestId: msg.requestId,
+              status: 502,
+              error: { code: 'TRANSLATION_FAILED', message: `Cannot rewrite URL for destination provider ${translation.dstProviderId}` },
+            });
+            return;
+          }
+          translatedUrl = rewritten;
+        }
+
+        const realHeaders = buildHeaders(effectiveProviderId, msg.headers, apiKey, credential.authMethod);
 
         // OAuth tokens for Anthropic route through the bridge (Node.js) to bypass TLS fingerprint detection.
-        // Setup tokens require the Claude Code system prompt — inject it for OAuth requests.
-        if (credential.authMethod === 'oauth' && msg.providerId === 'anthropic') {
-          const body = injectClaudeCodeSystemPrompt(msg.body);
-          await proxyViaBridge(port, { ...msg, body }, realHeaders, session);
+        // Setup tokens require the Claude Code system prompt + Claude-Code-shaped tool names.
+        // When the tool name rewriter fires, also relocate the system prompt (third-party framework).
+        // After translation, the body is already in Anthropic shape — the
+        // Claude Code injection still applies because the bridge expects an
+        // Anthropic-shaped request.
+        if (credential.authMethod === 'oauth' && effectiveProviderId === 'anthropic') {
+          const { body: rewrittenBody, toolNameMap } = rewriteToolNamesForClaudeCode(translatedBody);
+          const isThirdParty = Object.keys(toolNameMap).length > 0;
+          const body = injectClaudeCodeSystemPrompt(rewrittenBody, {
+            relocateExisting: isThirdParty,
+          });
+          const sseRewriter = translation
+            ? buildResponseStreamRewriter(translation, msg.requestId)
+            : undefined;
+          await proxyViaBridge(
+            port,
+            { ...msg, body, url: translatedUrl, providerId: effectiveProviderId },
+            realHeaders,
+            session,
+            toolNameMap,
+            translation
+              ? { translation, sseRewriter, originalBody: msg.body }
+              : undefined,
+          );
           return;
         }
 
-        const proxyBody = msg.bodyEncoding ? msg.body : injectStreamUsageOptions(msg.providerId, msg.body);
+        const proxyBody = msg.bodyEncoding ? translatedBody : injectStreamUsageOptions(effectiveProviderId, translatedBody);
         const reconstructed = reconstructBody(proxyBody, msg.bodyEncoding);
         const fetchHeaders = { ...realHeaders };
         if (reconstructed.stripContentType) delete fetchHeaders['content-type'];
 
-        const response = await fetch(msg.url, {
+        const response = await fetch(translatedUrl, {
           method: msg.method,
           headers: fetchHeaders,
           body: reconstructed.body,
@@ -486,6 +576,14 @@ export default defineBackground(() => {
 
         const logEntryId = await logRequest(session, msg, response.status);
 
+        // Decide streaming vs single-shot from the response Content-Type.
+        // Translation activates a per-chunk SSE rewriter for streaming
+        // responses, or a one-shot JSON translator for non-streaming.
+        const isStreamingResponse = (respHeaders['content-type'] ?? '').includes('text/event-stream');
+        const sseRewriter = translation && isStreamingResponse
+          ? buildResponseStreamRewriter(translation, msg.requestId)
+          : undefined;
+
         const chunks: string[] = [];
         if (response.body) {
           const reader = response.body.getReader();
@@ -496,11 +594,55 @@ export default defineBackground(() => {
             if (done) break;
             const text = decoder.decode(value, { stream: true });
             chunks.push(text);
+            if (sseRewriter) {
+              const rewritten = sseRewriter.process(text);
+              if (rewritten) {
+                port.postMessage({
+                  type: 'BYOKY_PROXY_RESPONSE_CHUNK',
+                  requestId: msg.requestId,
+                  chunk: rewritten,
+                });
+              }
+            } else if (!translation) {
+              // Pass-through path: forward each chunk as-is.
+              port.postMessage({
+                type: 'BYOKY_PROXY_RESPONSE_CHUNK',
+                requestId: msg.requestId,
+                chunk: text,
+              });
+            }
+            // Non-streaming + translation: buffer everything in chunks[],
+            // emit one translated chunk after the loop.
+          }
+        }
+
+        if (sseRewriter) {
+          const tail = sseRewriter.flush();
+          if (tail) {
             port.postMessage({
               type: 'BYOKY_PROXY_RESPONSE_CHUNK',
               requestId: msg.requestId,
-              chunk: text,
+              chunk: tail,
             });
+          }
+        } else if (translation && !isStreamingResponse) {
+          // Non-streaming translation: translate the buffered JSON body
+          // and emit it as a single chunk.
+          try {
+            const translatedResponse = applyResponseTranslation(translation, msg.body, msg.requestId, chunks.join(''));
+            port.postMessage({
+              type: 'BYOKY_PROXY_RESPONSE_CHUNK',
+              requestId: msg.requestId,
+              chunk: translatedResponse,
+            });
+          } catch (err) {
+            port.postMessage({
+              type: 'BYOKY_PROXY_RESPONSE_ERROR',
+              requestId: msg.requestId,
+              status: 502,
+              error: { code: 'TRANSLATION_FAILED', message: err instanceof Error ? err.message : 'Response translation failed' },
+            });
+            return;
           }
         }
 
@@ -509,10 +651,12 @@ export default defineBackground(() => {
           requestId: msg.requestId,
         });
 
-        // Parse token usage from the buffered response
+        // Parse token usage from the buffered response. We always read from
+        // the *destination* format (effectiveProviderId), since chunks[]
+        // holds the untranslated upstream body.
         const fullBody = chunks.join('');
         const model = msg.bodyEncoding ? undefined : parseModel(msg.body);
-        const usage = parseUsage(msg.providerId, fullBody);
+        const usage = parseUsage(effectiveProviderId, fullBody);
         if (usage || model) {
           await updateLogEntry(logEntryId, {
             inputTokens: usage?.inputTokens,
@@ -802,12 +946,28 @@ export default defineBackground(() => {
     const sessionProviders: Session['providers'] = [];
 
     const giftPrefs = await getGiftPreferences();
+    // Resolve the group this app belongs to (auto-assigns to default if first contact)
+    const group = await getGroupForOrigin(origin);
 
     for (const req of request.providers ?? []) {
-      const cred = credentials.find((c) => c.providerId === req.id);
+      // If the group is bound to this provider with a specific credential pin,
+      // it overrides everything else for credential selection.
+      const groupPinnedCred =
+        group && group.providerId === req.id && group.credentialId
+          ? credentials.find((c) => c.id === group.credentialId)
+          : undefined;
+
+      // Cross-family routing: the group's bound provider differs from what
+      // the app asked for, but both providers are in known translation
+      // families. Route the credential lookup to the destination family and
+      // record translation metadata so the proxy handler knows to translate.
+      const crossRoute = resolveCrossFamilyRoute(group, req.id, credentials);
+
+      const cred = groupPinnedCred ?? crossRoute?.cred ?? credentials.find((c) => c.providerId === req.id);
       const gc = giftedCreds.find((g) => g.providerId === req.id && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens);
-      // Prefer gift if user explicitly chose it, otherwise prefer own key
-      const preferGift = gc && giftPrefs[req.id] === gc.giftId;
+      // Group pin wins over gift preference. Cross-family routing also wins
+      // over gifts. Otherwise prefer gift if user explicitly chose it, else prefer own key.
+      const preferGift = !groupPinnedCred && !crossRoute && gc && giftPrefs[req.id] === gc.giftId;
       const useGift = preferGift || (!cred && gc);
       providerMap[req.id] = {
         available: !!(cred || gc),
@@ -825,12 +985,14 @@ export default defineBackground(() => {
           giftAuthToken: gc.authToken,
         });
       } else if (cred) {
-        sessionProviders.push({
+        const sp: SessionProvider = {
           providerId: req.id,
           credentialId: cred.id,
           available: true,
           authMethod: cred.authMethod,
-        });
+        };
+        if (crossRoute) sp.translation = crossRoute.translation;
+        sessionProviders.push(sp);
       }
     }
 
@@ -932,6 +1094,7 @@ export default defineBackground(() => {
         const encValue = await encrypt(cleanValue, masterPassword);
         const data = await browser.storage.local.get('credentials');
         const creds = (data.credentials ?? []) as Array<Record<string, unknown>>;
+        const isFirstCredential = creds.length === 0;
         const newCred: Record<string, unknown> = {
           id: crypto.randomUUID(),
           providerId: cpId,
@@ -946,6 +1109,29 @@ export default defineBackground(() => {
         }
         creds.push(newCred);
         await browser.storage.local.set({ credentials: creds });
+
+        // First credential becomes the default group's pin. If the default
+        // group already exists with no pin, adopt this credential.
+        const groups = await getGroups();
+        const defIdx = groups.findIndex((g) => g.id === DEFAULT_GROUP_ID);
+        if (defIdx < 0) {
+          groups.unshift({
+            id: DEFAULT_GROUP_ID,
+            name: 'Default',
+            providerId: cpId,
+            credentialId: newCred.id as string,
+            createdAt: Date.now(),
+          });
+          await setGroups(groups);
+        } else if (isFirstCredential || !groups[defIdx].credentialId) {
+          groups[defIdx] = {
+            ...groups[defIdx],
+            providerId: cpId,
+            credentialId: newCred.id as string,
+          };
+          await setGroups(groups);
+        }
+
         refreshSessionProviders();
         fireVaultSync(newCred.id as string, cpId, cLabel, cAuth, cleanValue).catch(() => {});
         return { success: true };
@@ -958,6 +1144,16 @@ export default defineBackground(() => {
         await browser.storage.local.set({
           credentials: rmCreds.filter((c) => c.id !== rmId),
         });
+        // Clear any group pin pointing at the removed credential
+        const groups = await getGroups();
+        let mutated = false;
+        for (let i = 0; i < groups.length; i++) {
+          if (groups[i].credentialId === rmId) {
+            groups[i] = { ...groups[i], credentialId: undefined };
+            mutated = true;
+          }
+        }
+        if (mutated) await setGroups(groups);
         refreshSessionProviders();
         fireVaultRemove(rmId).catch(() => {});
         return { success: true };
@@ -1400,6 +1596,49 @@ export default defineBackground(() => {
           delete prefs[providerId];
         }
         await browser.storage.local.set({ giftPreferences: prefs });
+        refreshSessionProviders();
+        return { success: true };
+      }
+
+      // --- Groups (alias layer) ---
+
+      case 'getGroups': {
+        // Ensure a default group exists so the UI never has to synthesize one.
+        await ensureDefaultGroup();
+        return { groups: await getGroups(), appGroups: await getAppGroups() };
+      }
+
+      case 'createGroup': {
+        const result = await createGroup(message.payload as {
+          name: string; providerId: string; credentialId?: string; model?: string;
+        });
+        if (result.error) return { error: result.error };
+        return { group: result.group };
+      }
+
+      case 'updateGroup': {
+        const { id, patch } = message.payload as {
+          id: string;
+          patch: { name?: string; providerId?: string; credentialId?: string | null; model?: string | null };
+        };
+        const result = await updateGroup(id, patch);
+        if (result.error) return { error: result.error };
+        refreshSessionProviders();
+        return { group: result.group };
+      }
+
+      case 'deleteGroup': {
+        const { id } = message.payload as { id: string };
+        const result = await deleteGroup(id);
+        if (result.error) return { error: result.error };
+        refreshSessionProviders();
+        return { success: true };
+      }
+
+      case 'setAppGroup': {
+        const { origin, groupId } = message.payload as { origin: string; groupId: string };
+        const result = await setAppGroup(origin, groupId);
+        if (result.error) return { error: result.error };
         refreshSessionProviders();
         return { success: true };
       }
@@ -2004,11 +2243,26 @@ export default defineBackground(() => {
     }
   }
 
+  /**
+   * Optional cross-family translation context for proxyViaBridge. When set,
+   * the bridge has been called with an already-translated body, but the
+   * response chunks still need to be rewritten back to the source dialect on
+   * their way to the SDK.
+   */
+  interface BridgeTranslation {
+    translation: SessionTranslation;
+    sseRewriter?: { process(s: string): string; flush(): string };
+    /** The SDK's original (pre-translation) body, used by parseModel for logging. */
+    originalBody?: string;
+  }
+
   async function proxyViaBridge(
     responsePort: Runtime.Port,
     msg: ProxyRequest,
     headers: Record<string, string>,
     session: Session,
+    toolNameMap: Record<string, string> = {},
+    translationCtx?: BridgeTranslation,
   ): Promise<void> {
     const available = await checkBridgeAvailable();
     if (!available) {
@@ -2034,11 +2288,13 @@ export default defineBackground(() => {
         method: msg.method,
         headers,
         body: msg.body,
+        toolNameMap,
       });
 
       let bridgeResponded = false;
       let logEntryId: string | undefined;
       const chunks: string[] = [];
+      let isStreamingResponse = false;
 
       nativePort.onMessage.addListener(
         (raw: unknown) => {
@@ -2047,29 +2303,85 @@ export default defineBackground(() => {
 
           if (response.type === 'proxy_response_meta') {
             bridgeResponded = true;
+            const respHeaders = response.headers ?? {};
+            isStreamingResponse = (respHeaders['content-type'] ?? '').includes('text/event-stream');
             responsePort.postMessage({
               type: 'BYOKY_PROXY_RESPONSE_META',
               requestId: msg.requestId,
               status: response.status,
               statusText: response.status === 200 ? 'OK' : 'Error',
-              headers: response.headers ?? {},
+              headers: respHeaders,
             });
             logRequest(session, msg, response.status ?? 0).then((id) => { logEntryId = id; });
           } else if (response.type === 'proxy_response_chunk') {
             chunks.push(response.chunk ?? '');
-            responsePort.postMessage({
-              type: 'BYOKY_PROXY_RESPONSE_CHUNK',
-              requestId: msg.requestId,
-              chunk: response.chunk,
-            });
+            // Translation: route chunks through the SSE rewriter when
+            // streaming, otherwise buffer for one-shot translation at done.
+            if (translationCtx && isStreamingResponse && translationCtx.sseRewriter) {
+              const rewritten = translationCtx.sseRewriter.process(response.chunk ?? '');
+              if (rewritten) {
+                responsePort.postMessage({
+                  type: 'BYOKY_PROXY_RESPONSE_CHUNK',
+                  requestId: msg.requestId,
+                  chunk: rewritten,
+                });
+              }
+            } else if (!translationCtx) {
+              responsePort.postMessage({
+                type: 'BYOKY_PROXY_RESPONSE_CHUNK',
+                requestId: msg.requestId,
+                chunk: response.chunk,
+              });
+            }
+            // Non-streaming + translation: hold chunks until done.
           } else if (response.type === 'proxy_response_done') {
+            // Flush any trailing translated bytes / emit one-shot translation.
+            if (translationCtx) {
+              if (isStreamingResponse && translationCtx.sseRewriter) {
+                const tail = translationCtx.sseRewriter.flush();
+                if (tail) {
+                  responsePort.postMessage({
+                    type: 'BYOKY_PROXY_RESPONSE_CHUNK',
+                    requestId: msg.requestId,
+                    chunk: tail,
+                  });
+                }
+              } else {
+                try {
+                  const translated = applyResponseTranslation(
+                    translationCtx.translation,
+                    translationCtx.originalBody,
+                    msg.requestId,
+                    chunks.join(''),
+                  );
+                  responsePort.postMessage({
+                    type: 'BYOKY_PROXY_RESPONSE_CHUNK',
+                    requestId: msg.requestId,
+                    chunk: translated,
+                  });
+                } catch (err) {
+                  responsePort.postMessage({
+                    type: 'BYOKY_PROXY_RESPONSE_ERROR',
+                    requestId: msg.requestId,
+                    status: 502,
+                    error: { code: 'TRANSLATION_FAILED', message: err instanceof Error ? err.message : 'Response translation failed' },
+                  });
+                  nativePort.disconnect();
+                  return;
+                }
+              }
+            }
             responsePort.postMessage({
               type: 'BYOKY_PROXY_RESPONSE_DONE',
               requestId: msg.requestId,
             });
             nativePort.disconnect();
             const fullBody = chunks.join('');
-            const model = parseModel(msg.body);
+            // parseModel runs against the SDK's original body, even when
+            // the bridge saw the translated body. parseUsage runs against
+            // the destination format (msg.providerId here is already the
+            // effective/destination provider).
+            const model = parseModel(translationCtx?.originalBody ?? msg.body);
             const usage = parseUsage(msg.providerId, fullBody);
             if (logEntryId && (usage || model)) {
               updateLogEntry(logEntryId, {
@@ -2253,6 +2565,11 @@ export default defineBackground(() => {
       return;
     }
 
+    // Cross-family translation context (mirrors the popup port path).
+    const sessionProvider = session.providers.find((sp) => sp.providerId === providerId);
+    const translation = sessionProvider?.translation;
+    const effectiveProviderId = translation?.dstProviderId ?? providerId;
+
     if (!validateProxyUrl(providerId, url)) {
       bridgeProxyPort?.postMessage({
         type: 'proxy_http_error',
@@ -2264,21 +2581,76 @@ export default defineBackground(() => {
 
     try {
       const apiKey = await decryptCredentialKey(credential);
-      const realHeaders = buildHeaders(providerId, headers, apiKey, credential.authMethod);
+
+      // Translate the request body up front, before any branch.
+      let translatedBody: string | undefined = body;
+      let translatedUrl = url;
+      if (translation) {
+        try {
+          translatedBody = applyRequestTranslation(translation, body, requestId);
+        } catch (err) {
+          bridgeProxyPort?.postMessage({
+            type: 'proxy_http_error',
+            requestId,
+            error: err instanceof Error ? err.message : 'Translation failed',
+          });
+          return;
+        }
+        const isStreaming = detectStreamingRequest(body);
+        const rewritten = rewriteProxyUrl(translation.dstProviderId, translation.dstModel, isStreaming);
+        if (!rewritten) {
+          bridgeProxyPort?.postMessage({
+            type: 'proxy_http_error',
+            requestId,
+            error: `Cannot rewrite URL for destination provider ${translation.dstProviderId}`,
+          });
+          return;
+        }
+        translatedUrl = rewritten;
+      }
+
+      const realHeaders = buildHeaders(effectiveProviderId, headers, apiKey, credential.authMethod);
 
       // OAuth tokens for Anthropic must route through the native bridge (Node.js)
       // to bypass TLS fingerprint detection on api.anthropic.com.
       // Bridge does the fetch directly and streams response to proxy-server (no double hop).
-      if (credential.authMethod === 'oauth' && providerId === 'anthropic') {
+      if (credential.authMethod === 'oauth' && effectiveProviderId === 'anthropic') {
         if (!bridgeProxyPort) return;
+
+        // Translation + OAuth direct-fetch is unsupported in the bridge HTTP
+        // path: the bridge streams the response back to its own HTTP server
+        // without round-tripping through the extension, so we have no place
+        // to insert the SSE rewriter that would translate chunks back to the
+        // source dialect.
+        if (translation) {
+          bridgeProxyPort.postMessage({
+            type: 'proxy_http_error',
+            requestId,
+            error: 'Cross-family translation is not supported on the bridge OAuth path. Bind this app to an Anthropic credential or remove the OAuth requirement.',
+          });
+          return;
+        }
+
+        // Rewrite non-Claude-Code tool names (e.g. OpenClaw's `read`/`exec`) to
+        // PascalCase aliases so Anthropic's third-party detector accepts the
+        // request as Claude Code. When the rewriter fires, the request is from
+        // a third-party framework — also relocate its system prompt out of the
+        // system field (Anthropic also classifies on system content). The bridge
+        // reverses the tool name mapping on the streaming response.
+        const { body: rewrittenBody, toolNameMap } = rewriteToolNamesForClaudeCode(translatedBody);
+        const isThirdParty = Object.keys(toolNameMap).length > 0;
+        const finalBody = injectClaudeCodeSystemPrompt(rewrittenBody, {
+          relocateExisting: isThirdParty,
+        });
 
         bridgeProxyPort.postMessage({
           type: 'proxy_direct_fetch',
           requestId,
-          url,
+          url: translatedUrl,
           method,
           headers: realHeaders,
-          body: injectClaudeCodeSystemPrompt(body),
+          body: finalBody,
+          toolNameMap,
         });
         const model = parseModel(body);
         logRequest(session, { providerId, url, method } as ProxyRequest, 200).then((logId) => {
@@ -2287,8 +2659,8 @@ export default defineBackground(() => {
         return;
       }
 
-      const bridgeBody = injectStreamUsageOptions(providerId, body);
-      const response = await fetch(url, {
+      const bridgeBody = injectStreamUsageOptions(effectiveProviderId, translatedBody);
+      const response = await fetch(translatedUrl, {
         method,
         headers: realHeaders,
         body: bridgeBody || undefined,
@@ -2308,6 +2680,12 @@ export default defineBackground(() => {
 
       const logEntryId = await logRequest(session, { providerId, url, method } as ProxyRequest, response.status);
 
+      // Translation: stream rewriter for SSE responses, one-shot for JSON.
+      const isStreamingResponse = (responseHeaders['content-type'] ?? '').includes('text/event-stream');
+      const sseRewriter = translation && isStreamingResponse
+        ? buildResponseStreamRewriter(translation, requestId)
+        : undefined;
+
       const chunks: string[] = [];
       if (response.body) {
         const reader = response.body.getReader();
@@ -2317,11 +2695,49 @@ export default defineBackground(() => {
           if (done) break;
           const text = decoder.decode(value, { stream: true });
           chunks.push(text);
+          if (sseRewriter) {
+            const rewritten = sseRewriter.process(text);
+            if (rewritten) {
+              bridgeProxyPort?.postMessage({
+                type: 'proxy_http_response_chunk',
+                requestId,
+                chunk: rewritten,
+              });
+            }
+          } else if (!translation) {
+            bridgeProxyPort?.postMessage({
+              type: 'proxy_http_response_chunk',
+              requestId,
+              chunk: text,
+            });
+          }
+        }
+      }
+
+      if (sseRewriter) {
+        const tail = sseRewriter.flush();
+        if (tail) {
           bridgeProxyPort?.postMessage({
             type: 'proxy_http_response_chunk',
             requestId,
-            chunk: text,
+            chunk: tail,
           });
+        }
+      } else if (translation && !isStreamingResponse) {
+        try {
+          const translatedResponse = applyResponseTranslation(translation, body, requestId, chunks.join(''));
+          bridgeProxyPort?.postMessage({
+            type: 'proxy_http_response_chunk',
+            requestId,
+            chunk: translatedResponse,
+          });
+        } catch (err) {
+          bridgeProxyPort?.postMessage({
+            type: 'proxy_http_error',
+            requestId,
+            error: err instanceof Error ? err.message : 'Response translation failed',
+          });
+          return;
         }
       }
 
@@ -2332,7 +2748,7 @@ export default defineBackground(() => {
 
       const fullBody = chunks.join('');
       const model = parseModel(body);
-      const usage = parseUsage(providerId, fullBody);
+      const usage = parseUsage(effectiveProviderId, fullBody);
       if (usage || model) {
         await updateLogEntry(logEntryId, {
           inputTokens: usage?.inputTokens,
@@ -2391,6 +2807,129 @@ export default defineBackground(() => {
     return credentials.find((c) => c.id === sp.credentialId);
   }
 
+  // ─── Translation helpers ────────────────────────────────────────────────
+
+  /**
+   * Build a TranslationContext for a given session translation + request.
+   * Captures the model the SDK asked for so it can be echoed back in
+   * responses.
+   */
+  function buildTranslationContext(
+    translation: SessionTranslation,
+    requestBody: string | undefined,
+    requestId: string,
+  ): TranslationContext | null {
+    const srcFamily = familyOf(translation.srcProviderId);
+    const dstFamily = familyOf(translation.dstProviderId);
+    if (!srcFamily || !dstFamily) return null;
+    return {
+      srcFamily: srcFamily as ModelFamily,
+      dstFamily: dstFamily as ModelFamily,
+      srcModel: requestBody ? parseModel(requestBody) : undefined,
+      dstModel: translation.dstModel,
+      isStreaming: detectStreamingRequest(requestBody),
+      requestId,
+    };
+  }
+
+  function detectStreamingRequest(body: string | undefined): boolean {
+    if (!body) return false;
+    try {
+      const parsed = JSON.parse(body) as { stream?: boolean };
+      return parsed.stream === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Run the request body through the canonical-IR translation pipeline.
+   * Throws TranslationError on shapes the destination cannot represent.
+   */
+  function applyRequestTranslation(
+    translation: SessionTranslation,
+    body: string | undefined,
+    requestId: string,
+  ): string | undefined {
+    if (!body) return body;
+    const ctx = buildTranslationContext(translation, body, requestId);
+    if (!ctx) {
+      throw new TranslationError('TRANSLATION_FAILED', 'Cannot resolve translation families');
+    }
+    return translateRequest(ctx, body);
+  }
+
+  /**
+   * Translate a single non-streaming response body from the destination
+   * dialect back to the source dialect.
+   */
+  function applyResponseTranslation(
+    translation: SessionTranslation,
+    requestBody: string | undefined,
+    requestId: string,
+    responseBody: string,
+  ): string {
+    const ctx = buildTranslationContext(translation, requestBody, requestId);
+    if (!ctx) {
+      throw new TranslationError('TRANSLATION_FAILED', 'Cannot resolve translation families');
+    }
+    return translateResponse(ctx, responseBody);
+  }
+
+  /**
+   * Build the SSE stream rewriter that translates upstream chunks (in the
+   * destination dialect) back to the source dialect.
+   */
+  function buildResponseStreamRewriter(
+    translation: SessionTranslation,
+    requestId: string,
+  ): { process(s: string): string; flush(): string } | undefined {
+    const ctx = buildTranslationContext(translation, undefined, requestId);
+    if (!ctx) return undefined;
+    return createStreamTranslator(ctx);
+  }
+
+  /**
+   * Resolve a cross-family routing decision for a single requested provider.
+   *
+   * Returns a credential + translation context iff the resolved group binds
+   * the request's provider to a credential in a different translation family.
+   * Otherwise returns undefined and the caller falls back to same-family
+   * resolution (group pin or any-credential lookup).
+   *
+   * Conditions for cross-family routing:
+   *  1. A group is resolved for this app
+   *  2. group.providerId != requestedProviderId
+   *  3. shouldTranslate(requested, group.providerId) — both in known families
+   *  4. group.model is set (translation needs a destination model)
+   *  5. A credential exists for group.providerId
+   *
+   * Pinned credential preferred; falls back to any credential for that provider.
+   */
+  function resolveCrossFamilyRoute(
+    group: Group | undefined,
+    requestedProviderId: string,
+    credentials: Credential[],
+  ): { cred: Credential; translation: SessionTranslation } | undefined {
+    if (!group) return undefined;
+    if (group.providerId === requestedProviderId) return undefined;
+    if (!group.model) return undefined;
+    if (!shouldTranslate(requestedProviderId, group.providerId)) return undefined;
+    const cred =
+      (group.credentialId
+        ? credentials.find((c) => c.id === group.credentialId)
+        : undefined) ?? credentials.find((c) => c.providerId === group.providerId);
+    if (!cred) return undefined;
+    return {
+      cred,
+      translation: {
+        srcProviderId: requestedProviderId,
+        dstProviderId: group.providerId,
+        dstModel: group.model,
+      },
+    };
+  }
+
   async function decryptCredentialKey(
     credential: Credential,
   ): Promise<string> {
@@ -2422,6 +2961,11 @@ export default defineBackground(() => {
       sanitizedUrl = parsed.toString();
     } catch {}
 
+    // Pull cross-family routing info from the session provider so we can
+    // record what we actually called upstream (vs what the SDK requested).
+    const sp = session.providers.find((p) => p.providerId === req.providerId);
+    const translation = sp?.translation;
+
     const entry: RequestLogEntry = {
       id,
       sessionId: session.id,
@@ -2432,6 +2976,26 @@ export default defineBackground(() => {
       status,
       timestamp: Date.now(),
     };
+
+    if (translation) {
+      entry.actualProviderId = translation.dstProviderId;
+      entry.actualModel = translation.dstModel;
+    }
+
+    // Capture the group routing this request, if any (the resolver auto-
+    // assigns to the default group on first contact).
+    const group = await getGroupForOrigin(session.appOrigin);
+    if (group) entry.groupId = group.id;
+
+    // Capture the capability fingerprint of the request body for drag-time
+    // warnings — the popup aggregates these per app to detect when an app
+    // is about to be moved to a model that lacks a capability it uses.
+    if (req.body && !req.bodyEncoding) {
+      const caps = detectRequestCapabilities(req.body);
+      if (caps.tools || caps.vision || caps.structuredOutput || caps.reasoning) {
+        entry.usedCapabilities = caps;
+      }
+    }
 
     const data = await browser.storage.local.get('requestLog');
     const log = (data.requestLog as RequestLogEntry[]) ?? [];
@@ -2539,19 +3103,29 @@ export default defineBackground(() => {
         ...new Set([...credentials.map(c => c.providerId), ...giftedCreds.filter(g => g.expiresAt > Date.now() && g.usedTokens < g.maxTokens).map(g => g.providerId)]),
       ];
 
+      // Re-resolve group binding for this session's origin (may have changed)
+      const group = await getGroupForOrigin(session.appOrigin);
+
       const providerMap: ConnectResponse['providers'] = {};
       const newSessionProviders: Session['providers'] = [];
 
       for (const providerId of providerIds) {
-        const cred = credentials.find(c => c.providerId === providerId);
+        const groupPinnedCred =
+          group && group.providerId === providerId && group.credentialId
+            ? credentials.find(c => c.id === group.credentialId)
+            : undefined;
+        const crossRoute = resolveCrossFamilyRoute(group, providerId, credentials);
+        const cred = groupPinnedCred ?? crossRoute?.cred ?? credentials.find(c => c.providerId === providerId);
         const gc = giftedCreds.find(g => g.providerId === providerId && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens);
-        const preferGift = gc && giftPrefs[providerId] === gc.giftId;
+        const preferGift = !groupPinnedCred && !crossRoute && gc && giftPrefs[providerId] === gc.giftId;
         const useGift = preferGift || (!cred && gc);
         providerMap[providerId] = { available: !!(cred || gc), authMethod: useGift ? 'api_key' : (cred?.authMethod ?? 'api_key'), ...(useGift ? { gift: true } : {}) };
         if (useGift && gc) {
           newSessionProviders.push({ providerId, credentialId: gc.id, available: true, authMethod: 'api_key', giftId: gc.giftId, giftRelayUrl: gc.relayUrl, giftAuthToken: gc.authToken });
         } else if (cred) {
-          newSessionProviders.push({ providerId, credentialId: cred.id, available: true, authMethod: cred.authMethod });
+          const sp: SessionProvider = { providerId, credentialId: cred.id, available: true, authMethod: cred.authMethod };
+          if (crossRoute) sp.translation = crossRoute.translation;
+          newSessionProviders.push(sp);
         }
       }
 
@@ -2609,6 +3183,179 @@ export default defineBackground(() => {
     await browser.storage.local.set({
       tokenAllowances: allowances.filter((a) => a.origin !== origin),
     });
+  }
+
+  // --- Groups (alias layer) ---
+
+  async function getGroups(): Promise<Group[]> {
+    const data = await browser.storage.local.get('groups');
+    return (data.groups as Group[]) ?? [];
+  }
+
+  async function setGroups(groups: Group[]) {
+    await browser.storage.local.set({ groups });
+  }
+
+  async function getAppGroups(): Promise<AppGroups> {
+    const data = await browser.storage.local.get('appGroups');
+    return (data.appGroups as AppGroups) ?? {};
+  }
+
+  async function setAppGroups(appGroups: AppGroups) {
+    await browser.storage.local.set({ appGroups });
+  }
+
+  // Ensures the default group exists. Called on first credential add and
+  // before any group resolution. Returns the default group.
+  async function ensureDefaultGroup(): Promise<Group> {
+    const groups = await getGroups();
+    let def = groups.find((g) => g.id === DEFAULT_GROUP_ID);
+    if (def) return def;
+
+    // Pick a sensible default provider/credential: the first credential the
+    // user has added. If they have none yet, the default group is created
+    // lazily on first add and we use the freshly-added credential's provider.
+    const credentials = await getStoredCredentials();
+    const first = credentials[0];
+    def = {
+      id: DEFAULT_GROUP_ID,
+      name: 'Default',
+      providerId: first?.providerId ?? 'anthropic',
+      credentialId: first?.id,
+      createdAt: Date.now(),
+    };
+    groups.unshift(def);
+    await setGroups(groups);
+    return def;
+  }
+
+  // Returns the group an origin currently belongs to. Auto-assigns to the
+  // default group if no binding exists yet (and persists the assignment, so
+  // the next call is a pure lookup).
+  async function getGroupForOrigin(origin: string): Promise<Group | undefined> {
+    const appGroups = await getAppGroups();
+    let groupId = appGroups[origin];
+    const groups = await getGroups();
+
+    // No binding → assign to default
+    if (!groupId) {
+      const def = await ensureDefaultGroup();
+      appGroups[origin] = def.id;
+      await setAppGroups(appGroups);
+      return def;
+    }
+
+    let group = groups.find((g) => g.id === groupId);
+    // Stale binding (group was deleted) → fall back to default
+    if (!group) {
+      const def = await ensureDefaultGroup();
+      appGroups[origin] = def.id;
+      await setAppGroups(appGroups);
+      return def;
+    }
+    return group;
+  }
+
+  async function createGroup(input: {
+    name: string;
+    providerId: string;
+    credentialId?: string;
+    model?: string;
+  }): Promise<{ group?: Group; error?: string }> {
+    const name = input.name?.trim();
+    if (!name || name.length > 200) return { error: 'Group name must be 1-200 characters' };
+    if (!PROVIDERS[input.providerId]) return { error: 'Invalid provider' };
+    if (input.credentialId) {
+      const creds = await getStoredCredentials();
+      const cred = creds.find((c) => c.id === input.credentialId);
+      if (!cred) return { error: 'Credential not found' };
+      if (cred.providerId !== input.providerId) return { error: 'Credential does not match provider' };
+    }
+    const groups = await getGroups();
+    if (groups.some((g) => g.name.toLowerCase() === name.toLowerCase())) {
+      return { error: 'A group with this name already exists' };
+    }
+    const group: Group = {
+      id: crypto.randomUUID(),
+      name,
+      providerId: input.providerId,
+      credentialId: input.credentialId,
+      model: input.model?.trim() || undefined,
+      createdAt: Date.now(),
+    };
+    groups.push(group);
+    await setGroups(groups);
+    return { group };
+  }
+
+  async function updateGroup(
+    id: string,
+    patch: { name?: string; providerId?: string; credentialId?: string | null; model?: string | null },
+  ): Promise<{ group?: Group; error?: string }> {
+    const groups = await getGroups();
+    const idx = groups.findIndex((g) => g.id === id);
+    if (idx < 0) return { error: 'Group not found' };
+    const current = groups[idx];
+
+    const next: Group = { ...current };
+    if (patch.name !== undefined) {
+      const name = patch.name.trim();
+      if (!name || name.length > 200) return { error: 'Group name must be 1-200 characters' };
+      if (id !== DEFAULT_GROUP_ID && groups.some((g) => g.id !== id && g.name.toLowerCase() === name.toLowerCase())) {
+        return { error: 'A group with this name already exists' };
+      }
+      next.name = name;
+    }
+    if (patch.providerId !== undefined) {
+      if (!PROVIDERS[patch.providerId]) return { error: 'Invalid provider' };
+      next.providerId = patch.providerId;
+      // Provider change invalidates the credential pin unless explicitly set in this patch
+      if (patch.credentialId === undefined) next.credentialId = undefined;
+    }
+    if (patch.credentialId !== undefined) {
+      if (patch.credentialId === null) {
+        next.credentialId = undefined;
+      } else {
+        const creds = await getStoredCredentials();
+        const cred = creds.find((c) => c.id === patch.credentialId);
+        if (!cred) return { error: 'Credential not found' };
+        if (cred.providerId !== next.providerId) return { error: 'Credential does not match provider' };
+        next.credentialId = patch.credentialId;
+      }
+    }
+    if (patch.model !== undefined) {
+      next.model = patch.model === null ? undefined : (patch.model.trim() || undefined);
+    }
+    groups[idx] = next;
+    await setGroups(groups);
+    return { group: next };
+  }
+
+  async function deleteGroup(id: string): Promise<{ success?: boolean; error?: string }> {
+    if (id === DEFAULT_GROUP_ID) return { error: 'Cannot delete the default group' };
+    const groups = await getGroups();
+    if (!groups.some((g) => g.id === id)) return { error: 'Group not found' };
+    await setGroups(groups.filter((g) => g.id !== id));
+    // Reassign any apps that pointed at this group back to the default
+    const appGroups = await getAppGroups();
+    let mutated = false;
+    for (const origin of Object.keys(appGroups)) {
+      if (appGroups[origin] === id) {
+        appGroups[origin] = DEFAULT_GROUP_ID;
+        mutated = true;
+      }
+    }
+    if (mutated) await setAppGroups(appGroups);
+    return { success: true };
+  }
+
+  async function setAppGroup(origin: string, groupId: string): Promise<{ success?: boolean; error?: string }> {
+    const groups = await getGroups();
+    if (!groups.some((g) => g.id === groupId)) return { error: 'Group not found' };
+    const appGroups = await getAppGroups();
+    appGroups[origin] = groupId;
+    await setAppGroups(appGroups);
+    return { success: true };
   }
 
   async function checkAllowance(
@@ -2847,8 +3594,14 @@ export default defineBackground(() => {
           await new Promise<void>((resolve) => {
             const nativePort = browser.runtime.connectNative(BRIDGE_HOST);
             let body = injectStreamUsageOptions(gift.providerId, msg.body);
+            let toolNameMap: Record<string, string> = {};
             if (gift.providerId === 'anthropic') {
-              body = injectClaudeCodeSystemPrompt(body);
+              const rewritten = rewriteToolNamesForClaudeCode(body);
+              const isThirdParty = Object.keys(rewritten.toolNameMap).length > 0;
+              body = injectClaudeCodeSystemPrompt(rewritten.body, {
+                relocateExisting: isThirdParty,
+              });
+              toolNameMap = rewritten.toolNameMap;
             }
             nativePort.postMessage({
               type: 'proxy',
@@ -2857,6 +3610,7 @@ export default defineBackground(() => {
               method: msg.method,
               headers: realHeaders,
               body,
+              toolNameMap,
             });
 
             const chunks: string[] = [];

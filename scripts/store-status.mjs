@@ -8,34 +8,28 @@ const IOS_BUNDLE_ID = 'com.byoky.app'
 const MACOS_BUNDLE_ID = 'com.byoky.app' // same bundle ID, different platform
 
 async function chromeWebStoreStatus() {
-  const { CHROME_EXTENSION_ID, CHROME_CLIENT_ID, CHROME_CLIENT_SECRET, CHROME_REFRESH_TOKEN } = process.env
-  if (!CHROME_EXTENSION_ID || !CHROME_CLIENT_ID) {
+  const { CHROME_EXTENSION_ID } = process.env
+  if (!CHROME_EXTENSION_ID) {
     return { platform: 'Chrome', status: 'not configured' }
   }
 
   try {
-    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: CHROME_CLIENT_ID,
-        client_secret: CHROME_CLIENT_SECRET,
-        refresh_token: CHROME_REFRESH_TOKEN,
-        grant_type: 'refresh_token',
-      }),
-    })
-    const { access_token } = await tokenRes.json()
-
+    // Use the public CRX update check endpoint — no auth needed, returns the actual live published version.
+    // The Web Store API (projection=DRAFT) only exposes draft/pipeline state, not what's live on the store.
     const res = await fetch(
-      `https://www.googleapis.com/chromewebstore/v1.1/items/${CHROME_EXTENSION_ID}?projection=DRAFT`,
-      { headers: { Authorization: `Bearer ${access_token}` } }
+      `https://clients2.google.com/service/update2/crx?response=updatecheck&acceptformat=crx3&prodversion=130.0&x=id%3D${CHROME_EXTENSION_ID}%26v%3D0.0.0%26uc`
     )
-    const data = await res.json()
+    const xml = await res.text()
+    // Parse version and status from XML: <updatecheck status="ok" version="0.4.18" .../>
+    // Scope to <updatecheck to avoid matching the XML declaration (e.g. version="1.0")
+    const versionMatch = xml.match(/<updatecheck[^>]+version="([^"]+)"/)
+    const statusMatch = xml.match(/<updatecheck[^>]+status="([^"]+)"/)
+    const version = versionMatch?.[1]
+    const status = statusMatch?.[1] // 'ok' = extension is live and available
     return {
       platform: 'Chrome',
-      version: data.crxVersion,
-      status: data.status,
-      statusDetail: data.statusDetail,
+      version,
+      status: status || 'unknown',
     }
   } catch (e) {
     return { platform: 'Chrome', status: 'error', error: e.message }
@@ -108,7 +102,65 @@ async function googlePlayStatus() {
 }
 
 async function appStoreStatus() {
-  // iOS app (includes Safari extension for iOS)
+  // iOS app — use App Store Connect API if credentials are available,
+  // because the public iTunes lookup API only returns the live/published version
+  // and will NOT reflect versions that are pending review or in processing.
+  const { ASC_ISSUER_ID, ASC_KEY_ID, ASC_PRIVATE_KEY } = process.env
+
+  if (ASC_ISSUER_ID && ASC_KEY_ID && ASC_PRIVATE_KEY) {
+    try {
+      // Generate App Store Connect JWT
+      const { createSign } = await import('node:crypto')
+      const header = Buffer.from(JSON.stringify({ alg: 'ES256', kid: ASC_KEY_ID, typ: 'JWT' })).toString('base64url')
+      const now = Math.floor(Date.now() / 1000)
+      const payload = Buffer.from(JSON.stringify({
+        iss: ASC_ISSUER_ID,
+        iat: now,
+        exp: now + 1200,
+        aud: 'appstoreconnect-v1',
+      })).toString('base64url')
+      const sigInput = `${header}.${payload}`
+      const sign = createSign('SHA256')
+      sign.update(sigInput)
+      const privateKey = ASC_PRIVATE_KEY.replace(/\\n/g, '\n')
+      const sig = sign.sign({ key: privateKey, dsaEncoding: 'ieee-p1363' }, 'base64url')
+      const jwt = `${sigInput}.${sig}`
+
+      // Find app by bundle ID
+      const appRes = await fetch(
+        `https://api.appstoreconnect.apple.com/v1/apps?filter[bundleId]=${IOS_BUNDLE_ID}&fields[apps]=bundleId,name`,
+        { headers: { Authorization: `Bearer ${jwt}` } }
+      )
+      const appData = await appRes.json()
+      const appId = appData.data?.[0]?.id
+      if (!appId) return { platform: 'App Store (iOS)', status: 'not found in ASC' }
+
+      // Get latest app store versions (includes pending/in-review)
+      const versionsRes = await fetch(
+        `https://api.appstoreconnect.apple.com/v1/apps/${appId}/appStoreVersions?filter[platform]=IOS&limit=5`,
+        { headers: { Authorization: `Bearer ${jwt}` } }
+      )
+      const versionsData = await versionsRes.json()
+      const versions = versionsData.data || []
+      if (versions.length === 0) return { platform: 'App Store (iOS)', status: 'no versions' }
+
+      // Report all non-superseded versions to surface pending ones
+      const relevant = versions.filter(v => v.attributes.appStoreState !== 'REPLACED_WITH_NEW_VERSION').slice(0, 3)
+      const summary = relevant.map(v => `v${v.attributes.versionString} (${v.attributes.appStoreState})`).join(', ')
+      const latestState = relevant[0]?.attributes.appStoreState || 'unknown'
+      const latestVersion = relevant[0]?.attributes.versionString
+      return {
+        platform: 'App Store (iOS)',
+        version: latestVersion,
+        status: latestState,
+        statusDetail: relevant.length > 1 ? summary : undefined,
+      }
+    } catch (e) {
+      return { platform: 'App Store (iOS)', status: 'error', error: e.message }
+    }
+  }
+
+  // Fallback: public iTunes lookup — WARNING: only shows live versions, pending submissions are invisible
   try {
     const res = await fetch(
       `https://itunes.apple.com/lookup?bundleId=${IOS_BUNDLE_ID}&country=us`
@@ -121,7 +173,8 @@ async function appStoreStatus() {
     return {
       platform: 'App Store (iOS)',
       version: app.version,
-      status: 'published',
+      // Explicitly flag that this is the live version only — pending submissions won't appear here
+      status: 'published (live only — set ASC_ISSUER_ID/ASC_KEY_ID/ASC_PRIVATE_KEY to see pending)',
     }
   } catch (e) {
     return { platform: 'App Store (iOS)', status: 'error', error: e.message }
