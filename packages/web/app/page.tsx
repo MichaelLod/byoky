@@ -103,6 +103,7 @@ function Hero() {
           <div style={{ margin: '8px 0 24px', display: 'flex', justifyContent: 'center' }}>
             <a
               href="/demo/pay"
+              className="pay-btn-hover"
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: '10px',
                 padding: '18px 36px', borderRadius: '14px',
@@ -356,6 +357,7 @@ function ForDevelopers() {
           <div style={{ margin: '32px 0', display: 'flex', justifyContent: 'center' }}>
             <a
               href="/demo/pay"
+              className="pay-btn-hover"
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: '10px',
                 padding: '16px 32px', borderRadius: '14px',
@@ -363,7 +365,7 @@ function ForDevelopers() {
                 fontSize: '17px', fontWeight: 600,
                 boxShadow: '0 4px 16px var(--teal-glow)',
                 textDecoration: 'none',
-                transition: 'all 0.15s',
+                transition: 'all 0.2s',
               }}
             >
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

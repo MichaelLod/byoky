@@ -152,9 +152,17 @@ section {
 }
 
 .btn-primary:hover {
-  background: var(--teal-light);
-  box-shadow: 0 0 40px var(--teal-glow);
+  background: #a3e635;
+  color: #1a1a2e;
+  box-shadow: 0 0 40px rgba(163, 230, 53, 0.3);
   transform: translateY(-1px);
+}
+
+.pay-btn-hover:hover {
+  background: #a3e635 !important;
+  color: #1a1a2e !important;
+  box-shadow: 0 4px 24px rgba(163, 230, 53, 0.3) !important;
+  transform: translateY(-2px);
 }
 
 .btn-secondary {
