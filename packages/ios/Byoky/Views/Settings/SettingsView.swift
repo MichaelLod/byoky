@@ -7,11 +7,13 @@ struct SettingsView: View {
     @State private var showCloudVaultRelogin = false
 
     @State private var debugSelfTestReport: String?
+    @State private var showRoutingEditor = false
 
     var body: some View {
         NavigationStack {
             List {
                 safariExtensionSection
+                routingSection
                 cloudVaultSection
                 securitySection
                 #if DEBUG
@@ -20,6 +22,10 @@ struct SettingsView: View {
                 aboutSection
             }
             .navigationTitle("Settings")
+            .sheet(isPresented: $showRoutingEditor) {
+                GroupEditorSheet()
+                    .environmentObject(wallet)
+            }
             .sheet(isPresented: $showSafariGuide) {
                 SafariExtensionGuide()
             }
@@ -124,6 +130,52 @@ struct SettingsView: View {
             Text("Safari Extension")
         } footer: {
             Text("The Safari extension lets websites connect to your wallet. You need to enable it once in Safari settings.")
+        }
+    }
+
+    private var routingSection: some View {
+        Section {
+            Button {
+                showRoutingEditor = true
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(.system(size: 20))
+                        .foregroundStyle(Theme.accent)
+                        .frame(width: 32)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Cross-family routing")
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(.primary)
+                        if let group = wallet.groups.first(where: { $0.id == defaultGroupId }) {
+                            let provider = Provider.find(group.providerId)?.name ?? group.providerId
+                            if let model = group.model, !model.isEmpty {
+                                Text("Routing to: \(provider) · \(model)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Text("Pass-through (no model configured)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } else {
+                            Text("Tap to configure")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        } header: {
+            Text("Routing")
+        } footer: {
+            Text("When an app requests a different provider family, route the call through this destination instead. Same-family requests always pass through unchanged.")
         }
     }
 
@@ -567,6 +619,89 @@ struct CloudVaultReloginView: View {
                     Button("Cancel") { dismiss() }
                 }
             }
+        }
+    }
+}
+
+/// Edit the default group's destination provider + model. Mobile uses the
+/// default group as a global routing rule (no per-app origin yet), so this
+/// sheet is the single point of control for cross-family translation. The
+/// data model supports multi-group editing for forward compat, but only
+/// the default is exposed in the UI today.
+struct GroupEditorSheet: View {
+    @EnvironmentObject var wallet: WalletStore
+    @Environment(\.dismiss) var dismiss
+
+    @State private var providerId: String = "anthropic"
+    @State private var model: String = ""
+    @State private var error: String?
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Picker("Destination provider", selection: $providerId) {
+                        ForEach(Provider.all, id: \.id) { provider in
+                            Text(provider.name).tag(provider.id)
+                        }
+                    }
+                    TextField("Destination model (e.g. gpt-4o)", text: $model)
+                        .autocapitalization(.none)
+                        .disableAutocorrection(true)
+                } header: {
+                    Text("Default group")
+                } footer: {
+                    Text("All requests from apps in a different provider family will be routed here. Same-family requests pass through unchanged. Leave model empty to disable routing.")
+                }
+
+                if let error {
+                    Section {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
+
+                Section {
+                    Button("Save") {
+                        save()
+                    }
+                    .disabled(providerId.isEmpty)
+
+                    if !model.isEmpty {
+                        Button("Disable routing", role: .destructive) {
+                            model = ""
+                            save()
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Routing")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+            .onAppear {
+                if let group = wallet.groups.first(where: { $0.id == defaultGroupId }) {
+                    providerId = group.providerId
+                    model = group.model ?? ""
+                }
+            }
+        }
+    }
+
+    private func save() {
+        do {
+            try wallet.updateGroup(
+                id: defaultGroupId,
+                providerId: providerId,
+                model: .some(model.isEmpty ? nil : model)
+            )
+            dismiss()
+        } catch {
+            self.error = error.localizedDescription
         }
     }
 }
