@@ -357,7 +357,21 @@ final class RelayPairService: ObservableObject {
                 }
 
                 guard let credential = ownCred else {
-                    sendRelayError(requestId: requestId, code: "NO_CREDENTIAL", message: "No credential for \(providerId)")
+                    // No direct credential AND no routing rule fired. Build
+                    // an actionable message that tells the user exactly
+                    // what's wrong and what to do about it: which provider
+                    // the app asked for, what credentials they have (if
+                    // any), and which group is currently routing this app.
+                    let allCreds = await MainActor.run { wallet.credentials.map { $0.providerId } }
+                    let uniqueCreds = Array(Set(allCreds)).sorted()
+                    let originForLookup = await MainActor.run { self.pairedOrigin } ?? "relay"
+                    let group = await MainActor.run { wallet.groupForOrigin(originForLookup) }
+                    let message = Self.buildNoCredentialMessage(
+                        requestedProviderId: providerId,
+                        userCredentialProviderIds: uniqueCreds,
+                        group: group
+                    )
+                    sendRelayError(requestId: requestId, code: "NO_CREDENTIAL", message: message)
                     return
                 }
 
@@ -816,6 +830,41 @@ final class RelayPairService: ObservableObject {
             return body
         }
         return str
+    }
+
+    /// Compose a human-readable, actionable error message for the
+    /// `NO_CREDENTIAL` failure mode. Pulled into a static helper so it can
+    /// be unit-tested independently of the relay pipeline.
+    ///
+    /// Three branches by data shape:
+    ///   1. Group is bound to a provider != the requested one (i.e. user
+    ///      configured a routing rule but the destination has no key).
+    ///      "Bound to OpenAI but you have no OpenAI key. Add one or
+    ///      rebind the group."
+    ///   2. Group is bound to the requested provider (or no group at all)
+    ///      and the user has *some* credentials.
+    ///      "Add a Foo key, or move this app to a group that uses one of
+    ///      your existing keys (you have: Bar, Baz)."
+    ///   3. User has no credentials at all.
+    ///      "Add a Foo key in Wallet."
+    static func buildNoCredentialMessage(
+        requestedProviderId: String,
+        userCredentialProviderIds: [String],
+        group: Group?
+    ) -> String {
+        let req = requestedProviderId
+        let groupBinding = group?.providerId
+        // Case 1: a group is routing this app to a provider that has no credential.
+        if let groupBinding, groupBinding != req {
+            return "This app is bound to a group that routes to \(groupBinding), but you have no \(groupBinding) credential in your wallet. Add a \(groupBinding) credential, or rebind this group to a provider you do have a key for."
+        }
+        // Case 2: user has other credentials but not for the requested provider.
+        if !userCredentialProviderIds.isEmpty {
+            let list = userCredentialProviderIds.joined(separator: ", ")
+            return "This app requested \(req) but you have no \(req) credential. You have keys for: \(list). Move this app to a group bound to one of those providers (Apps tab), or add a \(req) key in Wallet."
+        }
+        // Case 3: user has no credentials at all.
+        return "This app requested \(req) but your wallet has no credentials. Add a key in the Wallet tab — you can use any provider; Byoky will route requests to it automatically."
     }
 
     private func sendRelayError(requestId: String, code: String, message: String) {

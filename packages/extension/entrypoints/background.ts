@@ -434,11 +434,18 @@ export default defineBackground(() => {
 
       let credential = await resolveCredential(session, msg.providerId);
       if (!credential) {
+        const allCreds = await getStoredCredentials();
+        const group = await getGroupForOrigin(session.appOrigin);
+        const message = buildNoCredentialMessage(
+          msg.providerId,
+          Array.from(new Set(allCreds.map((c) => c.providerId))).sort(),
+          group,
+        );
         port.postMessage({
           type: 'BYOKY_PROXY_RESPONSE_ERROR',
           requestId: msg.requestId,
           status: 403,
-          error: { code: 'PROVIDER_UNAVAILABLE', message: `No credential for ${msg.providerId}` },
+          error: { code: 'PROVIDER_UNAVAILABLE', message },
         });
         return;
       }
@@ -2594,10 +2601,17 @@ export default defineBackground(() => {
 
     const credential = await resolveCredential(session, providerId);
     if (!credential) {
+      const allCreds = await getStoredCredentials();
+      const group = await getGroupForOrigin(session.appOrigin);
+      const message = buildNoCredentialMessage(
+        providerId,
+        Array.from(new Set(allCreds.map((c) => c.providerId))).sort(),
+        group,
+      );
       bridgeProxyPort?.postMessage({
         type: 'proxy_http_error',
         requestId,
-        error: `No credential for provider "${providerId}"`,
+        error: message,
       });
       return;
     }
@@ -2978,6 +2992,37 @@ export default defineBackground(() => {
    *
    * Pinned credential preferred; falls back to any credential for that provider.
    */
+  /**
+   * Compose a human-readable, actionable error message for the
+   * `NO_CREDENTIAL` failure mode. Mirrors the iOS / Android implementations
+   * verbatim so the three platforms surface the same wording.
+   *
+   * Three branches by data shape:
+   *   1. Group binds to a provider != requested → user has a routing rule
+   *      but the destination has no key. Tell them to add the destination
+   *      key or rebind the group.
+   *   2. Group binds to the requested provider (or no group) and the user
+   *      has *some* credentials → tell them to move the app to a group
+   *      bound to one of their existing keys, or add a key.
+   *   3. Wallet is empty → tell them to add any key.
+   */
+  function buildNoCredentialMessage(
+    requestedProviderId: string,
+    userCredentialProviderIds: string[],
+    group: Group | undefined,
+  ): string {
+    const req = requestedProviderId;
+    const groupBinding = group?.providerId;
+    if (groupBinding && groupBinding !== req) {
+      return `This app is bound to a group that routes to ${groupBinding}, but you have no ${groupBinding} credential in your wallet. Add a ${groupBinding} credential, or rebind this group to a provider you do have a key for.`;
+    }
+    if (userCredentialProviderIds.length > 0) {
+      const list = userCredentialProviderIds.join(', ');
+      return `This app requested ${req} but you have no ${req} credential. You have keys for: ${list}. Move this app to a group bound to one of those providers (Apps tab), or add a ${req} key in Wallet.`;
+    }
+    return `This app requested ${req} but your wallet has no credentials. Add a key in the Wallet — you can use any provider; Byoky will route requests to it automatically.`;
+  }
+
   function resolveCrossFamilyRoute(
     group: Group | undefined,
     requestedProviderId: string,
