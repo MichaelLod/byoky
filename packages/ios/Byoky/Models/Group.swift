@@ -53,14 +53,39 @@ struct RoutingTranslation: Equatable {
     let dstModel: String
 }
 
-/// Result of running RoutingResolver on a request. `translation == nil` means
-/// pass-through (no translation needed); a non-nil value means rewrite the
-/// upstream URL, swap credentials, and call the JS bridge.
+/// Result of running RoutingResolver on a request. Three mutually exclusive
+/// shapes, collapsed into one struct for ergonomic call sites:
+///
+///   1. Pass-through:         translation == nil, swapToProviderId == nil
+///   2. Cross-family:         translation != nil
+///   3. Same-family swap:     swapToProviderId != nil
+///
+/// Same-family swaps skip the JS translation bridge entirely — only URL
+/// rewrite, credential swap, and (optionally) body model substitution are
+/// needed, because both providers speak the identical wire format.
 struct RoutingDecision {
     let credential: Credential
     let translation: RoutingTranslation?
+    let swapToProviderId: String?
+    /// When set, rewrite the outgoing body's `model` field to this value
+    /// before forwarding. Used by same-family swaps where the group binds a
+    /// specific destination model that should override the SDK's choice.
+    let swapDstModel: String?
+
+    init(
+        credential: Credential,
+        translation: RoutingTranslation? = nil,
+        swapToProviderId: String? = nil,
+        swapDstModel: String? = nil
+    ) {
+        self.credential = credential
+        self.translation = translation
+        self.swapToProviderId = swapToProviderId
+        self.swapDstModel = swapDstModel
+    }
 
     var needsTranslation: Bool { translation != nil }
+    var needsSwap: Bool { swapToProviderId != nil }
 }
 
 // MARK: - Small helpers

@@ -191,6 +191,26 @@ final class TranslationEngine {
         }
     }
 
+    /// True iff both providers live in the same known family — i.e. the
+    /// routing resolver can perform a *same-family swap* (different provider
+    /// id and credential, identical wire format). Distinct from
+    /// `shouldTranslate`, which is only true for *cross*-family pairs.
+    func sameFamily(srcProviderId: String, dstProviderId: String) -> Bool {
+        do {
+            return try queue.sync {
+                try ensureLoadedLocked()
+                guard let bridge = self.bridge else { return false }
+                guard let result = bridge.invokeMethod("sameFamily", withArguments: [srcProviderId, dstProviderId]) else {
+                    return false
+                }
+                if pendingException() != nil { return false }
+                return result.toBool()
+            }
+        } catch {
+            return false
+        }
+    }
+
     /// Build a JSON-encoded TranslationContext for use with translateRequest /
     /// translateResponse / createStreamTranslator. Throws if either provider
     /// is outside a known family — caller is expected to gate on

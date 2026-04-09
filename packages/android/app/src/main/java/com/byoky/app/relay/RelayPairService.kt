@@ -264,10 +264,56 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
         scope.launch {
             _requestCount.value++
             try {
-                // Resolve credential: prefer gift if explicitly preferred or no own key
+                // Resolve routing FIRST. The routing resolver inspects the
+                // group for this origin and decides between: cross-family
+                // translation, same-family swap, direct credential lookup,
+                // or no-match (returns null). Putting this before the gift /
+                // ownCred checks matches the extension's resolution order
+                // and lets routing rescue requests that would otherwise hit
+                // NO_CREDENTIAL (the app calls provider X but the user only
+                // has a credential for provider Y in the same family).
+                val routing = resolveRelayRouting(providerId, bodyString)
+
+                // 1. Cross-family translation path.
+                if (routing != null && routing.translation != null) {
+                    handleRelayRequestWithTranslation(
+                        requestId = requestId,
+                        originalProviderId = providerId,
+                        translation = routing.translation,
+                        routedCredential = routing.credential,
+                        method = method,
+                        headers = headers,
+                        bodyString = bodyString,
+                    )
+                    return@launch
+                }
+
+                // 2. Same-family swap path. Two providers in the same family
+                // (e.g. Groq → OpenAI) speak identical wire formats, so we
+                // skip translation entirely and just rewrite URL + swap key
+                // + (optionally) override the body's model field.
+                if (routing != null && routing.swapToProviderId != null) {
+                    handleRelayRequestWithSwap(
+                        requestId = requestId,
+                        originalProviderId = providerId,
+                        swapToProviderId = routing.swapToProviderId,
+                        swapDstModel = routing.swapDstModel,
+                        routedCredential = routing.credential,
+                        method = method,
+                        headers = headers,
+                        bodyString = bodyString,
+                    )
+                    return@launch
+                }
+
+                // 3. Pass-through. Either routing returned a direct-match
+                // credential (routing.credential.providerId == providerId),
+                // or routing returned null (no match). Gift preferences still
+                // apply here — a user can explicitly prefer a gift over
+                // their own key for a given provider.
                 val prefs = wallet.giftPreferences.value
                 val giftedCreds = wallet.giftedCredentials.value
-                val ownCred = wallet.credentials.value.firstOrNull { it.providerId == providerId }
+                val ownCred = routing?.credential
 
                 var useGift: GiftedCredential? = null
                 val preferredGiftId = prefs[providerId]
@@ -290,23 +336,6 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
 
                 if (ownCred == null) {
                     sendRelayError(requestId, "NO_CREDENTIAL", "No credential for $providerId")
-                    return@launch
-                }
-
-                // Cross-family routing check. The relay path carries the
-                // app's actual origin via pairedOrigin, so per-app routing
-                // works (vs the local TCP proxy which has no origin).
-                val routing = resolveRelayRouting(providerId, bodyString)
-                if (routing != null && routing.translation != null) {
-                    handleRelayRequestWithTranslation(
-                        requestId = requestId,
-                        originalProviderId = providerId,
-                        translation = routing.translation,
-                        routedCredential = routing.credential,
-                        method = method,
-                        headers = headers,
-                        bodyString = bodyString,
-                    )
                     return@launch
                 }
 
@@ -628,6 +657,166 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
             )
         } catch (t: Throwable) {
             sendRelayError(requestId, "TRANSLATION_FAILED", t.message ?: "translation failed")
+        }
+    }
+
+    /**
+     * Same-family swap path for relay-routed requests. Two providers in the
+     * same translation family (e.g. Groq → OpenAI) share an identical wire
+     * format, so we skip the JS translation bridge entirely and just:
+     *   - rewrite the upstream URL to the destination provider's chat endpoint
+     *   - (optionally) override the request body's `model` field when the
+     *     group pins a specific destination model
+     *   - swap in the destination credential for auth
+     *   - forward the response bytes unchanged
+     *
+     * Strictly simpler than [handleRelayRequestWithTranslation] — no
+     * translateRequest, no stream translator, no translateResponse.
+     */
+    private fun handleRelayRequestWithSwap(
+        requestId: String,
+        originalProviderId: String,
+        swapToProviderId: String,
+        swapDstModel: String?,
+        routedCredential: com.byoky.app.data.Credential,
+        method: String,
+        headers: Map<String, String>,
+        bodyString: String?,
+    ) {
+        val wallet = wallet ?: return
+        val engine = translationEngine ?: run {
+            sendRelayError(requestId, "SWAP_FAILED", "translation engine unavailable")
+            return
+        }
+        val isStreaming = com.byoky.app.proxy.RoutingResolver.isStreamingRequest(bodyString?.toByteArray(Charsets.UTF_8))
+        // Pass the group's pinned dst model to URL builder if present, else
+        // fall back to whatever the SDK sent. Same-family openai providers
+        // ignore the model in the URL (it rides on the body), but passing a
+        // real value keeps rewriteProxyUrl honest.
+        val modelForUrl = swapDstModel
+            ?: com.byoky.app.proxy.RoutingResolver.parseModel(bodyString?.toByteArray(Charsets.UTF_8))
+            ?: ""
+
+        try {
+            val urlString = engine.rewriteProxyUrl(swapToProviderId, modelForUrl, isStreaming)
+                ?: run {
+                    sendRelayError(requestId, "SWAP_FAILED", "rewriteProxyUrl returned null for $swapToProviderId")
+                    return
+                }
+
+            // Substitute the body's `model` field with the group's pinned
+            // destination model when set. Same-family providers all accept
+            // a JSON body with a top-level `model` string, so a surgical
+            // JSON edit is safe and minimal.
+            val forwardedBody = if (!swapDstModel.isNullOrEmpty()) {
+                rewriteModelInJsonBody(bodyString, swapDstModel)
+            } else {
+                bodyString
+            }
+            val injectedBody = injectStreamUsageOptions(swapToProviderId, forwardedBody) ?: forwardedBody
+
+            val dstApiKey = wallet.decryptKey(routedCredential)
+
+            val filteredHeaders = headers.filterKeys {
+                it.lowercase() !in setOf("host", "authorization", "x-api-key", "anthropic-version", "content-length")
+            }.toMutableMap()
+            applyAuth(filteredHeaders, swapToProviderId, routedCredential.authMethod, dstApiKey, injectedBody)
+
+            val requestBody = if (injectedBody != null && method.uppercase() in setOf("POST", "PUT", "PATCH")) {
+                val contentType = filteredHeaders["content-type"] ?: "application/json"
+                injectedBody.toByteArray(Charsets.UTF_8).toRequestBody(contentType.toMediaTypeOrNull())
+            } else null
+
+            val request = Request.Builder()
+                .url(urlString)
+                .method(method.uppercase(), requestBody)
+                .apply { filteredHeaders.forEach { (k, v) -> addHeader(k, v) } }
+                .build()
+
+            val response = proxyClient.newCall(request).execute()
+
+            val responseHeaders = JSONObject()
+            response.headers.forEach { (name, value) ->
+                if (name.lowercase() !in ProxyService.SENSITIVE_RESPONSE_HEADERS) {
+                    responseHeaders.put(name.lowercase(), value)
+                }
+            }
+            sendJSON(JSONObject().apply {
+                put("type", "relay:response:meta")
+                put("requestId", requestId)
+                put("status", response.code)
+                put("statusText", response.message)
+                put("headers", responseHeaders)
+            })
+
+            // Forward the response body verbatim (success or error — no
+            // translation). Wire formats are identical on both sides.
+            val body = response.body
+            val fullResponse = StringBuilder()
+            if (body != null) {
+                val source = body.source()
+                val buffer = StringBuilder()
+                while (!source.exhausted()) {
+                    val byte = source.readByte()
+                    val char = byte.toInt().toChar()
+                    buffer.append(char)
+                    fullResponse.append(char)
+                    if (buffer.length >= 4096 || char == '\n') {
+                        sendJSON(JSONObject().apply {
+                            put("type", "relay:response:chunk")
+                            put("requestId", requestId)
+                            put("chunk", buffer.toString())
+                        })
+                        buffer.clear()
+                    }
+                }
+                if (buffer.isNotEmpty()) {
+                    sendJSON(JSONObject().apply {
+                        put("type", "relay:response:chunk")
+                        put("requestId", requestId)
+                        put("chunk", buffer.toString())
+                    })
+                }
+                body.close()
+            }
+            sendJSON(JSONObject().apply {
+                put("type", "relay:response:done")
+                put("requestId", requestId)
+            })
+
+            val logOrigin = pairedOrigin ?: "relay"
+            wallet.logRequest(
+                appOrigin = logOrigin,
+                providerId = originalProviderId,
+                method = method,
+                url = urlString,
+                statusCode = response.code,
+                requestBody = bodyString?.toByteArray(Charsets.UTF_8),
+                responseBody = fullResponse.toString(),
+                actualProviderId = swapToProviderId,
+                actualModel = swapDstModel,
+                groupId = wallet.groupForOrigin(logOrigin)?.id,
+            )
+        } catch (t: Throwable) {
+            sendRelayError(requestId, "PROXY_ERROR", t.message ?: "Unknown error")
+        }
+    }
+
+    /**
+     * Surgically rewrite the top-level `model` field of a JSON request body
+     * to [newModel]. Returns the original body unchanged if parsing fails —
+     * we'd rather pass through and let the destination return a real error
+     * than silently corrupt the request. Used by the same-family swap path
+     * when the group pins a destination model.
+     */
+    private fun rewriteModelInJsonBody(body: String?, newModel: String): String? {
+        if (body == null) return null
+        return try {
+            val parsed = JSONObject(body)
+            parsed.put("model", newModel)
+            parsed.toString()
+        } catch (_: Exception) {
+            body
         }
     }
 

@@ -7,6 +7,14 @@ export interface ProviderConfig {
   name: string;
   authMethods: AuthMethod[];
   baseUrl: string;
+  /**
+   * Path appended to baseUrl for the chat-completions endpoint. Set only for
+   * openai-family providers whose chat path isn't the adapter default
+   * (`/v1/chat/completions`) — e.g. groq mounts the OpenAI-compatible surface
+   * under `/openai/v1/chat/completions`, fireworks under `/inference/v1/...`.
+   * When absent, the family adapter's buildChatUrl decides the path.
+   */
+  chatPath?: string;
   oauthConfig?: OAuthConfig;
 }
 
@@ -83,14 +91,42 @@ export interface SessionProvider {
    *
    * `providerId` (the field above) is the SOURCE — what the SDK targeted.
    * `credentialId` points at the DESTINATION's credential.
+   *
+   * Mutually exclusive with `swap`.
    */
   translation?: SessionTranslation;
+  /**
+   * Same-family swap routing. Set when the group binds the app's requested
+   * provider to a credential in a *different* provider *within the same
+   * family* (e.g. app calls Groq, group routes to OpenAI — both speak the
+   * openai wire format). The proxy handler skips translation entirely and
+   * instead: rewrites the URL to the destination provider's chat endpoint,
+   * optionally overrides the body's `model` field, and uses the
+   * destination credential for auth. Body and response stream flow through
+   * unchanged.
+   *
+   * Mutually exclusive with `translation`.
+   */
+  swap?: SessionSwap;
 }
 
 export interface SessionTranslation {
   srcProviderId: ProviderId;
   dstProviderId: ProviderId;
   dstModel: string;
+}
+
+export interface SessionSwap {
+  /** Provider the SDK asked for (same as SessionProvider.providerId). */
+  srcProviderId: ProviderId;
+  /** Provider to actually call upstream (same family, different endpoint). */
+  dstProviderId: ProviderId;
+  /**
+   * Optional destination model. When set, the proxy handler overrides the
+   * request body's top-level `model` field with this value before forwarding.
+   * When absent, the SDK's original model passes through unchanged.
+   */
+  dstModel?: string;
 }
 
 // --- Connect ---
