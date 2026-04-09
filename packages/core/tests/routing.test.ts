@@ -67,13 +67,16 @@ describe('resolveRoute', () => {
       expect(decision!.credential.id).toBe('c2');
     });
 
-    it('falls back to first matching credential when pin id is stale', () => {
+    it('returns null when pin id is stale (no silent fallback)', () => {
       const credentials = [cred('c1', 'anthropic')];
       const g = group('anthropic', { model: 'claude-sonnet-4-5', credentialId: 'missing' });
 
       const decision = resolveRoute('openai', g, credentials);
 
-      expect(decision!.credential.id).toBe('c1');
+      // A stale pin must NOT silently swap to a different credential of the
+      // same provider — that would mask cost-attribution intent. The caller
+      // surfaces NO_CREDENTIAL so the user notices the pin is gone.
+      expect(decision).toBeNull();
     });
   });
 
