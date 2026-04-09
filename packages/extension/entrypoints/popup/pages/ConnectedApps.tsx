@@ -3,7 +3,12 @@ import { useWalletStore } from '../store';
 import {
   PROVIDERS, isGiftExpired,
   type TokenAllowance, type Group, type Session, type CredentialMeta,
+  type CapabilitySet,
   DEFAULT_GROUP_ID,
+  detectAppCapabilities,
+  capabilityGaps,
+  capabilityLabel,
+  getModel,
 } from '@byoky/core';
 
 function timeAgo(timestamp: number): string {
@@ -48,6 +53,13 @@ export function ConnectedApps() {
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [dragOriginOver, setDragOriginOver] = useState<string | null>(null);
+  const [pendingMove, setPendingMove] = useState<{
+    origin: string;
+    targetGroupId: string;
+    gaps: (keyof CapabilitySet)[];
+    targetGroupName: string;
+    targetModel: string;
+  } | null>(null);
 
   function getOriginUsage(origin: string) {
     const entries = requestLog.filter((e) => e.appOrigin === origin && e.status < 400);
@@ -82,7 +94,37 @@ export function ConnectedApps() {
     setDragOriginOver(null);
     const currentGroupId = appGroups[origin] ?? DEFAULT_GROUP_ID;
     if (currentGroupId === targetGroupId) return;
+
+    // Drag-time capability check: if the target group's model lacks features
+    // the app has used in past requests, surface a warning before committing
+    // the move. The user can confirm to proceed or cancel.
+    const targetGroup = groups.find((g) => g.id === targetGroupId);
+    if (targetGroup && targetGroup.model) {
+      const model = getModel(targetGroup.model);
+      if (model) {
+        const appEntries = requestLog.filter((e) => e.appOrigin === origin);
+        const used = detectAppCapabilities(appEntries);
+        const gaps = capabilityGaps(used, model);
+        if (gaps.length > 0) {
+          setPendingMove({
+            origin,
+            targetGroupId,
+            gaps,
+            targetGroupName: targetGroup.name,
+            targetModel: targetGroup.model,
+          });
+          return;
+        }
+      }
+    }
+
     await setAppGroup(origin, targetGroupId);
+  }
+
+  async function confirmPendingMove() {
+    if (!pendingMove) return;
+    await setAppGroup(pendingMove.origin, pendingMove.targetGroupId);
+    setPendingMove(null);
   }
 
   return (
@@ -105,6 +147,25 @@ export function ConnectedApps() {
           <strong>Device must stay online.</strong> Connected apps can only make
           requests while your browser is running and this extension is active.
           Enable Cloud Vault in Settings for offline access.
+        </div>
+      )}
+
+      {pendingMove && (
+        <div className="warning-box" style={{ marginBottom: '12px' }}>
+          <strong>Capability mismatch.</strong> {formatOrigin(pendingMove.origin)} has
+          used {pendingMove.gaps.map(capabilityLabel).join(', ')} in past requests, but{' '}
+          <code>{pendingMove.targetModel}</code> in <strong>{pendingMove.targetGroupName}</strong>
+          {' '}does not support {pendingMove.gaps.length === 1 ? 'it' : 'one or more of these'}.
+          Requests using {pendingMove.gaps.length === 1 ? 'that feature' : 'those features'}
+          {' '}will fail until you switch back.
+          <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+            <button className="btn btn-sm btn-danger" onClick={confirmPendingMove}>
+              Move anyway
+            </button>
+            <button className="btn btn-sm btn-secondary" onClick={() => setPendingMove(null)}>
+              Cancel
+            </button>
+          </div>
         </div>
       )}
 
