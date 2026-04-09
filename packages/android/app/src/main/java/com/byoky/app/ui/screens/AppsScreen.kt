@@ -694,6 +694,39 @@ private fun GroupEditorDialog(
                             }
                         }
                     }
+                } else {
+                    // Inline warning when the chosen provider has no
+                    // credentials in the wallet. The save still goes
+                    // through (permissive mode) but the user is told up
+                    // front that this group won't actually work until a
+                    // credential is added.
+                    Surface(
+                        color = BgMain,
+                        shape = RoundedCornerShape(6.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            Text("⚠️", fontSize = 14.sp)
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    "No $providerName credential",
+                                    color = TextPrimary,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                )
+                                Text(
+                                    "This group can be saved, but apps using it will fail until you add a $providerName key in the Wallet tab.",
+                                    color = TextMuted,
+                                    fontSize = 11.sp,
+                                )
+                            }
+                        }
+                    }
                 }
 
                 OutlinedTextField(
