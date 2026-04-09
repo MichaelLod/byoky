@@ -23,6 +23,7 @@ import {
   translateResponse as _translateResponse,
   createStreamTranslator as _createStreamTranslator,
 } from './index.js';
+import { familyOf, shouldTranslate as _shouldTranslate, rewriteProxyUrl as _rewriteProxyUrl } from './families.js';
 import type { TranslationContext } from './types.js';
 
 interface StreamHandle {
@@ -46,6 +47,48 @@ interface MobileBridge {
   flushStreamTranslator(handle: number): string;
   /** Release a handle without flushing (e.g. on cancellation or error). */
   releaseStreamTranslator(handle: number): void;
+
+  // ── Routing helpers exposed for native ProxyService routing decisions ──
+  // These avoid duplicating the family→providers mapping in Swift + Kotlin.
+  // The mapping changes when a new family is added, and we want one place
+  // to update it (here in core), not three.
+
+  /**
+   * True iff a request from `srcProviderId` should be translated to
+   * `dstProviderId`. False for same-family pairs and unknown providers.
+   */
+  shouldTranslate(srcProviderId: string, dstProviderId: string): boolean;
+
+  /**
+   * Build a JSON-encoded TranslationContext for use with translateRequest /
+   * translateResponse / createStreamTranslator. Throws if either provider is
+   * outside a known family — caller is expected to gate on shouldTranslate
+   * first. This keeps the native side from having to know the context shape.
+   *
+   * `isStreaming` controls how the response/stream paths synthesize ids.
+   * `requestId` is byoky's per-request id used by adapters that need to
+   * generate destination-dialect ids (e.g. anthropic message ids).
+   */
+  buildTranslationContext(
+    srcProviderId: string,
+    dstProviderId: string,
+    srcModel: string,
+    dstModel: string,
+    isStreaming: boolean,
+    requestId: string,
+  ): string;
+
+  /**
+   * Rewrite the upstream URL when routing cross-family. The SDK built the
+   * source URL against the source provider's base + path; we replace it with
+   * the destination provider's canonical chat endpoint, which may have a
+   * different shape (e.g. gemini puts the model in the path).
+   *
+   * Returns the new URL string, or null when the destination provider isn't
+   * registered or has no adapter.
+   */
+  rewriteProxyUrl(dstProviderId: string, model: string, stream: boolean): string | null;
+
   /** Bundle version, for native side to assert against expected core version. */
   readonly version: string;
 }
@@ -79,6 +122,27 @@ const bridge: MobileBridge = {
   },
   releaseStreamTranslator(handle) {
     streams.delete(handle);
+  },
+  shouldTranslate(srcProviderId, dstProviderId) {
+    return _shouldTranslate(srcProviderId, dstProviderId);
+  },
+  buildTranslationContext(srcProviderId, dstProviderId, srcModel, dstModel, isStreaming, requestId) {
+    const srcFamily = familyOf(srcProviderId);
+    const dstFamily = familyOf(dstProviderId);
+    if (!srcFamily) throw new Error(`byoky: unknown source family for provider "${srcProviderId}"`);
+    if (!dstFamily) throw new Error(`byoky: unknown destination family for provider "${dstProviderId}"`);
+    const ctx: TranslationContext = {
+      srcFamily,
+      dstFamily,
+      srcModel,
+      dstModel,
+      isStreaming,
+      requestId,
+    };
+    return JSON.stringify(ctx);
+  },
+  rewriteProxyUrl(dstProviderId, model, stream) {
+    return _rewriteProxyUrl(dstProviderId, model, stream);
   },
   version: '0.5.0',
 };
