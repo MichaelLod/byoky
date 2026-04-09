@@ -448,6 +448,27 @@ struct GroupEditorSheet: View {
                                 Text(c.label).tag(c.id)
                             }
                         }
+                    } else {
+                        // Inline warning when the chosen provider has no
+                        // credentials in the wallet. The save still goes
+                        // through (permissive mode) but the user is told
+                        // up front that this group won't actually work
+                        // until a credential is added — and is shown how
+                        // to fix it.
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                                .imageScale(.medium)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("No \(Provider.find(providerId)?.name ?? providerId) credential")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                Text("This group can be saved, but apps using it will fail until you add a \(Provider.find(providerId)?.name ?? providerId) key in the Wallet tab.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 4)
                     }
                 } header: {
                     Text("Destination")
