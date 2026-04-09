@@ -16,10 +16,14 @@ import Foundation
 struct RoutingResolver {
     /// Resolve the routing decision for a request.
     ///
-    /// Returns `nil` (signaling "no credential available") if neither the
-    /// requested provider nor any cross-family destination has a credential.
-    /// Returns a decision with `translation == nil` for normal pass-through.
-    /// Returns a decision with `translation != nil` for cross-family routes.
+    /// Resolution order (matches the extension's background.ts):
+    ///   1. Cross-family translation (group binds to a different family)
+    ///   2. Same-family swap (group binds to a different openai-family
+    ///      provider with the same wire format)
+    ///   3. Direct credential for the provider the SDK called
+    ///
+    /// Returns `nil` (signaling "no credential available") only when none of
+    /// the above yields a usable credential.
     static func resolve(
         requestedProviderId: String,
         requestedModel: String?,
@@ -27,8 +31,7 @@ struct RoutingResolver {
         credentials: [Credential],
         engine: TranslationEngine = .shared
     ) -> RoutingDecision? {
-        // Try cross-family routing first — it wins over both gifts and direct
-        // credentials when applicable, matching the extension's resolution order.
+        // 1. Cross-family translation.
         if let cross = tryCrossFamily(
             requestedProviderId: requestedProviderId,
             requestedModel: requestedModel,
@@ -39,7 +42,17 @@ struct RoutingResolver {
             return cross
         }
 
-        // Direct match — credential for the provider the SDK called.
+        // 2. Same-family swap.
+        if let swap = trySameFamilySwap(
+            requestedProviderId: requestedProviderId,
+            group: group,
+            credentials: credentials,
+            engine: engine
+        ) {
+            return swap
+        }
+
+        // 3. Direct credential match.
         if let cred = credentials.first(where: { $0.providerId == requestedProviderId }) {
             return RoutingDecision(credential: cred, translation: nil)
         }
@@ -84,6 +97,52 @@ struct RoutingResolver {
                 srcModel: srcModel,
                 dstModel: dstModel
             )
+        )
+    }
+
+    /// Same-family swap resolution. Two providers in the same family (e.g.
+    /// Groq and OpenAI, both in the openai family) speak identical wire
+    /// protocols, so "routing" collapses to: swap credentials, rewrite the
+    /// destination URL, and optionally override the body's model field.
+    ///
+    /// Preconditions (all must hold):
+    ///   - a group exists
+    ///   - the group targets a *different* provider than what the SDK called
+    ///   - both providers are in the same family (per the JS bridge)
+    ///   - a credential is available for the destination
+    ///
+    /// Notably, `group.model` is *not* required here — a swap works even
+    /// when the group has no model pinned (we just forward the SDK's model).
+    /// If the group does pin a model, we pass it along as `swapDstModel`
+    /// so the caller can substitute it into the request body.
+    private static func trySameFamilySwap(
+        requestedProviderId: String,
+        group: Group?,
+        credentials: [Credential],
+        engine: TranslationEngine
+    ) -> RoutingDecision? {
+        guard let group else { return nil }
+        guard group.providerId != requestedProviderId else { return nil }
+
+        // Must be same family AND not a no-op (different provider id).
+        guard engine.sameFamily(srcProviderId: requestedProviderId, dstProviderId: group.providerId) else {
+            return nil
+        }
+
+        // Credential preference: pinned first, then any credential for the destination provider.
+        var resolved: Credential? = nil
+        if let pinnedId = group.credentialId {
+            resolved = credentials.first(where: { $0.id == pinnedId })
+        }
+        if resolved == nil {
+            resolved = credentials.first(where: { $0.providerId == group.providerId })
+        }
+        guard let cred = resolved else { return nil }
+
+        return RoutingDecision(
+            credential: cred,
+            swapToProviderId: group.providerId,
+            swapDstModel: group.model?.nilIfEmpty
         )
     }
 

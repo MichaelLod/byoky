@@ -231,9 +231,62 @@ final class RelayPairService: ObservableObject {
             await MainActor.run { requestCount += 1 }
 
             do {
+                // Resolve routing FIRST. The routing resolver inspects the
+                // group for this origin and decides between: cross-family
+                // translation, same-family swap, direct credential lookup,
+                // or no-match (returns nil). Putting this before the gift /
+                // ownCred checks matches the extension's resolution order
+                // and lets routing rescue requests that would otherwise hit
+                // NO_CREDENTIAL (the app calls provider X but the user only
+                // has a credential for provider Y in the same family).
+                let routing = await self.resolveRelayRouting(
+                    requestedProviderId: providerId,
+                    bodyString: bodyString,
+                    wallet: wallet
+                )
+
+                // 1. Cross-family translation path.
+                if let routing, let translation = routing.translation {
+                    await self.handleRelayRequestWithTranslation(
+                        requestId: requestId,
+                        originalProviderId: providerId,
+                        translation: translation,
+                        routedCredential: routing.credential,
+                        method: method,
+                        headers: headers,
+                        bodyString: bodyString,
+                        wallet: wallet
+                    )
+                    return
+                }
+
+                // 2. Same-family swap path. Two providers in the same family
+                // (e.g. Groq → OpenAI) speak identical wire formats, so we
+                // skip translation entirely and just rewrite URL + swap key
+                // + (optionally) override the body's model field.
+                if let routing, let swapTo = routing.swapToProviderId {
+                    await self.handleRelayRequestWithSwap(
+                        requestId: requestId,
+                        originalProviderId: providerId,
+                        swapToProviderId: swapTo,
+                        swapDstModel: routing.swapDstModel,
+                        routedCredential: routing.credential,
+                        method: method,
+                        headers: headers,
+                        bodyString: bodyString,
+                        wallet: wallet
+                    )
+                    return
+                }
+
+                // 3. Pass-through. Either routing returned a direct-match
+                // credential (routing.credential.providerId == providerId),
+                // or routing returned nil (no match). Gift preferences still
+                // apply here — a user can explicitly prefer a gift over
+                // their own key for a given provider.
                 let prefs = await MainActor.run { wallet.giftPreferences }
                 let giftedCreds = await MainActor.run { wallet.giftedCredentials }
-                let ownCred = await MainActor.run { wallet.credentials.first { $0.providerId == providerId } }
+                let ownCred = routing?.credential
 
                 var useGift: GiftedCredential?
                 if let preferredGiftId = prefs[providerId],
@@ -305,27 +358,6 @@ final class RelayPairService: ObservableObject {
 
                 guard let credential = ownCred else {
                     sendRelayError(requestId: requestId, code: "NO_CREDENTIAL", message: "No credential for \(providerId)")
-                    return
-                }
-
-                // Cross-family routing check. The relay path carries the
-                // app's actual origin via pairedOrigin, so per-app routing
-                // works (vs the local TCP proxy which has no origin).
-                if let routing = await self.resolveRelayRouting(
-                    requestedProviderId: providerId,
-                    bodyString: bodyString,
-                    wallet: wallet
-                ), let translation = routing.translation {
-                    await self.handleRelayRequestWithTranslation(
-                        requestId: requestId,
-                        originalProviderId: providerId,
-                        translation: translation,
-                        routedCredential: routing.credential,
-                        method: method,
-                        headers: headers,
-                        bodyString: bodyString,
-                        wallet: wallet
-                    )
                     return
                 }
 
@@ -606,6 +638,159 @@ final class RelayPairService: ObservableObject {
         } catch {
             sendRelayError(requestId: requestId, code: "TRANSLATION_FAILED", message: error.localizedDescription)
         }
+    }
+
+    /// Same-family swap path for relay-routed requests. Two providers in the
+    /// same translation family (e.g. Groq → OpenAI) share an identical wire
+    /// format, so we skip the JS translation bridge entirely and just:
+    ///   - rewrite the upstream URL to the destination provider's chat endpoint
+    ///   - (optionally) override the request body's `model` field when the
+    ///     group pins a specific destination model
+    ///   - swap in the destination credential for auth
+    ///   - forward the response bytes unchanged
+    ///
+    /// This is strictly simpler than handleRelayRequestWithTranslation — no
+    /// translateRequest, no stream translator, no translateResponse.
+    private func handleRelayRequestWithSwap(
+        requestId: String,
+        originalProviderId: String,
+        swapToProviderId: String,
+        swapDstModel: String?,
+        routedCredential: Credential,
+        method: String,
+        headers: [String: String],
+        bodyString: String?,
+        wallet: WalletStore
+    ) async {
+        let engine = TranslationEngine.shared
+        let bodyData = bodyString?.data(using: .utf8)
+        let isStreaming = RoutingResolver.isStreamingRequest(body: bodyData)
+        // Use the group's destination model for URL building when present,
+        // otherwise fall back to whatever the SDK sent. Most openai-family
+        // providers ignore the model in the URL (it comes from the body),
+        // but Gemini-shaped URLs use it — harmless here since this path
+        // only runs for openai-family → openai-family swaps, but we pass
+        // the real model anyway to keep rewriteProxyUrl honest.
+        let modelForUrl = swapDstModel ?? RoutingResolver.parseModel(from: bodyData) ?? ""
+
+        do {
+            guard let rewrittenUrlString = engine.rewriteProxyUrl(
+                dstProviderId: swapToProviderId,
+                model: modelForUrl,
+                stream: isStreaming
+            ), let url = URL(string: rewrittenUrlString) else {
+                sendRelayError(requestId: requestId, code: "SWAP_FAILED", message: "rewriteProxyUrl returned null for \(swapToProviderId)")
+                return
+            }
+
+            // Substitute the body's `model` field with the group's pinned
+            // destination model when set. Same-family providers all accept
+            // a JSON body with a top-level `model` string, so a surgical
+            // JSON edit is safe and minimal.
+            var forwardedBody = bodyString
+            if let dstModel = swapDstModel, !dstModel.isEmpty {
+                forwardedBody = rewriteModelInJsonBody(bodyString, to: dstModel)
+            }
+            // Inject stream_options for openai-family providers that need it.
+            let injectedBody = injectStreamUsageOptions(providerId: swapToProviderId, body: forwardedBody) ?? forwardedBody
+
+            let dstApiKey = try await MainActor.run { try wallet.decryptKey(for: routedCredential) }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = method
+            request.timeoutInterval = 120
+            if let injectedBody {
+                request.httpBody = injectedBody.data(using: .utf8)
+            }
+
+            for (key, value) in headers {
+                let lower = key.lowercased()
+                if ["host", "authorization", "x-api-key", "anthropic-version", "content-length"].contains(lower) { continue }
+                request.setValue(value, forHTTPHeaderField: key)
+            }
+            Credential.applyAuth(
+                to: &request,
+                providerId: swapToProviderId,
+                authMethod: routedCredential.authMethod,
+                apiKey: dstApiKey
+            )
+
+            let (bytes, response) = try await URLSession.shared.bytes(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                sendRelayError(requestId: requestId, code: "INVALID_RESPONSE", message: "Invalid response")
+                return
+            }
+
+            var responseHeaders: [String: String] = [:]
+            for (key, value) in httpResponse.allHeaderFields {
+                let lower = String(describing: key).lowercased()
+                if sensitiveResponseHeaders.contains(lower) { continue }
+                responseHeaders[lower] = String(describing: value)
+            }
+            sendJSON([
+                "type": "relay:response:meta",
+                "requestId": requestId,
+                "status": httpResponse.statusCode,
+                "statusText": HTTPURLResponse.localizedString(forStatusCode: httpResponse.statusCode),
+                "headers": responseHeaders,
+            ])
+
+            // Forward the response body verbatim (success or error — no
+            // translation). The wire format is identical on both sides.
+            var buffer = Data()
+            var fullResponseData = Data()
+            for try await byte in bytes {
+                buffer.append(byte)
+                fullResponseData.append(byte)
+                if buffer.count >= 4096 || byte == 0x0A {
+                    if let chunk = String(data: buffer, encoding: .utf8) {
+                        sendJSON(["type": "relay:response:chunk", "requestId": requestId, "chunk": chunk])
+                    }
+                    buffer.removeAll()
+                }
+            }
+            if !buffer.isEmpty, let chunk = String(data: buffer, encoding: .utf8) {
+                sendJSON(["type": "relay:response:chunk", "requestId": requestId, "chunk": chunk])
+            }
+            sendJSON(["type": "relay:response:done", "requestId": requestId])
+
+            let logOrigin = await MainActor.run { self.pairedOrigin } ?? "relay"
+            let responseBody = String(data: fullResponseData, encoding: .utf8)
+            await MainActor.run {
+                wallet.logRequest(
+                    appOrigin: logOrigin,
+                    providerId: originalProviderId,
+                    method: method,
+                    url: rewrittenUrlString,
+                    statusCode: httpResponse.statusCode,
+                    requestBody: bodyData,
+                    responseBody: responseBody,
+                    actualProviderId: swapToProviderId,
+                    actualModel: swapDstModel,
+                    groupId: wallet.groupForOrigin(logOrigin)?.id
+                )
+            }
+        } catch {
+            sendRelayError(requestId: requestId, code: "PROXY_ERROR", message: error.localizedDescription)
+        }
+    }
+
+    /// Surgically rewrite the top-level `model` field of a JSON request body
+    /// to `newModel`. Returns the original body unchanged if parsing fails
+    /// (we'd rather pass through and let the destination return a real error
+    /// than silently corrupt the request). Used by the same-family swap path
+    /// when the group pins a destination model.
+    private func rewriteModelInJsonBody(_ body: String?, to newModel: String) -> String? {
+        guard let body, let data = body.data(using: .utf8),
+              var json = try? JSONSerialization.jsonObject(with: data, options: [.mutableContainers]) as? [String: Any] else {
+            return body
+        }
+        json["model"] = newModel
+        guard let rewritten = try? JSONSerialization.data(withJSONObject: json),
+              let str = String(data: rewritten, encoding: .utf8) else {
+            return body
+        }
+        return str
     }
 
     private func sendRelayError(requestId: String, code: String, message: String) {

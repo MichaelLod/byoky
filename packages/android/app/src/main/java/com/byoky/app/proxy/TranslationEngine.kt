@@ -200,6 +200,21 @@ class TranslationEngine private constructor(private val appContext: Context) {
     }
 
     /**
+     * True iff both providers belong to the same known family — i.e. the
+     * routing resolver can perform a *same-family swap* (different provider
+     * id and credential, identical wire format). Distinct from
+     * [shouldTranslate], which is only true for *cross*-family pairs.
+     */
+    fun sameFamily(srcProviderId: String, dstProviderId: String): Boolean {
+        return try {
+            val expr = "BYOKY_TRANSLATE.sameFamily(${jsLiteral(srcProviderId)}, ${jsLiteral(dstProviderId)}) ? '1' : '0'"
+            evalSync(expr) == "1"
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    /**
      * Build a JSON-encoded TranslationContext for use with translateRequest /
      * translateResponse / createStreamTranslator. Throws if either provider
      * is outside a known family — caller is expected to gate on
