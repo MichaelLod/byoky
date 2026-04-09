@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { Byoky, type ByokySession } from '@byoky/sdk';
+import { HighlightedCode } from '../../components/SyntaxHighlight';
 
 const VAULT_URL = process.env.NEXT_PUBLIC_VAULT_URL || 'http://localhost:3100';
 const WALLET_URL = process.env.NEXT_PUBLIC_WALLET_URL || 'http://localhost:3001';
@@ -18,7 +19,6 @@ export function PayDemo() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [connecting, setConnecting] = useState(false);
-  const [showCode, setShowCode] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const byokyRef = useRef<Byoky | null>(null);
@@ -127,23 +127,12 @@ export function PayDemo() {
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)', color: 'var(--text)', fontFamily: 'var(--font-sora), -apple-system, sans-serif' }}>
-      {/* Header */}
-      <div style={{
-        borderBottom: '1px solid var(--border)',
-        padding: '12px 24px',
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <span style={{ fontWeight: 700, fontSize: '16px' }}>DemoChat</span>
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)', background: 'var(--bg-elevated)', padding: '2px 8px', borderRadius: '4px' }}>
-            Powered by Byoky
-          </span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: '12px' }}>
-            <a href="/demo" style={{ fontSize: '12px', color: 'var(--text-muted)', padding: '4px 10px', borderRadius: '6px', textDecoration: 'none', border: '1px solid var(--border)' }}>BYOK Demo</a>
-            <span style={{ fontSize: '12px', color: 'var(--text-secondary)', padding: '4px 10px', borderRadius: '6px', background: 'var(--bg-elevated)', fontWeight: 600 }}>Pay Button</span>
-          </div>
-        </div>
-        {connected && (
+      {/* Balance bar — only when connected */}
+      {connected && (
+        <div style={{
+          padding: '8px 24px',
+          display: 'flex', justifyContent: 'flex-end', alignItems: 'center',
+        }}>
           <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
               <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e' }} />
@@ -155,14 +144,18 @@ export function PayDemo() {
               </span>
             )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       <div style={{ maxWidth: '720px', margin: '0 auto', padding: '24px', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 53px)' }}>
         {/* Not connected — show paywall */}
         {!connected && (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
             <div style={{ textAlign: 'center', maxWidth: '400px' }}>
+              <a href="/demo" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: 'var(--text-muted)', textDecoration: 'none', fontSize: '13px', marginBottom: '16px' }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
+                Back to Demo
+              </a>
               <h1 style={{ fontSize: '28px', fontWeight: 700, marginBottom: '8px' }}>DemoChat</h1>
               <p style={{ color: 'var(--text-secondary)', marginBottom: '32px', lineHeight: 1.6 }}>
                 An AI chat app that costs the developer $0. Users pay from their Byoky wallet.
@@ -218,27 +211,27 @@ export function PayDemo() {
                 One wallet, every AI app. No API keys needed.
               </p>
 
-              {/* Developer code snippet */}
-              <button
-                onClick={() => setShowCode(!showCode)}
-                style={{
-                  marginTop: '32px', background: 'none', border: 'none',
-                  color: 'var(--teal)', fontSize: '13px', cursor: 'pointer',
-                  textDecoration: 'underline', textUnderlineOffset: '3px',
-                }}
-              >
-                {showCode ? 'Hide' : 'See'} developer code
-              </button>
-
-              {showCode && (
-                <pre style={{
-                  marginTop: '12px', textAlign: 'left',
-                  background: 'var(--bg-elevated)', border: '1px solid var(--border)',
-                  borderRadius: '10px', padding: '16px', fontSize: '12px',
-                  fontFamily: 'var(--font-mono), monospace', lineHeight: 1.7,
-                  overflow: 'auto',
+              {/* Developer code snippet — always visible */}
+              <div style={{ marginTop: '32px', textAlign: 'left' }}>
+                <div style={{
+                  borderRadius: '12px', overflow: 'hidden',
+                  border: '1px solid var(--border)',
                 }}>
-                  <code>{`import { Byoky, PayButton } from '@byoky/sdk';
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: '6px',
+                    padding: '10px 16px', background: 'rgba(0,0,0,0.2)',
+                  }}>
+                    <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#ff5f57' }} />
+                    <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#febc2e' }} />
+                    <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#28c840' }} />
+                    <span style={{ marginLeft: '8px', fontSize: '11px', color: '#7a7a9c', fontFamily: 'var(--font-mono, monospace)' }}>app.ts</span>
+                  </div>
+                  <pre style={{
+                    background: '#1a1a2e', padding: '16px', margin: 0,
+                    fontSize: '12px', fontFamily: 'var(--font-mono, monospace)',
+                    lineHeight: 1.7, overflow: 'auto', color: '#e2e2ec',
+                  }}>
+                    <HighlightedCode code={`import { Byoky, PayButton } from '@byoky/sdk';
 
 const byoky = new Byoky({
   appId: 'app_your_id_here'
@@ -252,9 +245,10 @@ PayButton.mount('#paywall', {
     // Every API call is paid by the user's wallet
     // Developer pays $0 for inference
   }
-});`}</code>
-                </pre>
-              )}
+});`} />
+                  </pre>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -262,6 +256,13 @@ PayButton.mount('#paywall', {
         {/* Connected — show chat */}
         {connected && (
           <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <a href="/demo" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: 'var(--text-muted)', textDecoration: 'none', fontSize: '13px' }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
+                Back to Demo
+              </a>
+              <span style={{ fontSize: '13px', fontWeight: 600 }}>DemoChat</span>
+            </div>
             <div style={{ flex: 1, overflowY: 'auto', marginBottom: '16px' }}>
               {messages.length === 0 && (
                 <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: '80px' }}>

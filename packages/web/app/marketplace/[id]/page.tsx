@@ -8,7 +8,7 @@ export default function AppDetail() {
 
   return (
     <div>
-      <a href="/marketplace" style={{ color: '#71717a', textDecoration: 'none', fontSize: '14px' }}>
+      <a href="/marketplace" style={{ color: 'var(--text-secondary)', textDecoration: 'none', fontSize: '14px' }}>
         &larr; Back to Marketplace
       </a>
 
@@ -17,7 +17,7 @@ export default function AppDetail() {
         <div style={{ display: 'flex', gap: '16px', alignItems: 'center', marginBottom: '16px' }}>
           <div style={{
             width: '56px', height: '56px', borderRadius: '14px',
-            background: 'linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%)',
+            background: 'linear-gradient(135deg, var(--teal) 0%, #e91e90 100%)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontSize: '24px', fontWeight: 700, color: '#fff',
           }}>
@@ -25,8 +25,8 @@ export default function AppDetail() {
           </div>
           <div>
             <h1 style={{ fontSize: '24px', fontWeight: 700, marginBottom: '2px' }}>App Name</h1>
-            <p style={{ color: '#71717a', fontSize: '14px' }}>
-              <code style={{ background: 'rgba(255,255,255,0.06)', padding: '2px 8px', borderRadius: '4px', fontSize: '12px' }}>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>
+              <code style={{ background: 'var(--bg-elevated)', padding: '2px 8px', borderRadius: '4px', fontSize: '12px' }}>
                 {appId}
               </code>
             </p>
@@ -43,14 +43,14 @@ export default function AppDetail() {
             <div
               key={stat.label}
               style={{
-                background: 'rgba(255,255,255,0.04)',
-                border: '1px solid rgba(255,255,255,0.08)',
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--border)',
                 borderRadius: '10px',
                 padding: '16px',
                 textAlign: 'center',
               }}
             >
-              <div style={{ fontSize: '11px', color: '#71717a', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>
+              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>
                 {stat.label}
               </div>
               <div style={{ fontSize: '20px', fontWeight: 700 }}>{stat.value}</div>
@@ -60,8 +60,8 @@ export default function AppDetail() {
 
         {/* Description */}
         <div style={{
-          background: 'rgba(255,255,255,0.04)',
-          border: '1px solid rgba(255,255,255,0.08)',
+          background: 'var(--bg-surface)',
+          border: '1px solid var(--border)',
           borderRadius: '12px',
           padding: '20px',
         }}>
