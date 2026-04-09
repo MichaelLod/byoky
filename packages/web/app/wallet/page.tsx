@@ -53,25 +53,48 @@ export default function WalletDashboard() {
         <div style={{ display: 'flex', gap: '40px', alignItems: 'flex-start' }}>
           {/* Left: login */}
           <div style={{ flex: 1 }}>
-            <h1 style={{ fontSize: '28px', fontWeight: 700, marginBottom: '8px' }}>Your AI Wallet</h1>
-            <p style={{ color: 'var(--text-secondary)', marginBottom: '32px', lineHeight: 1.6 }}>
-              One balance. Every AI app. No API keys needed.
-            </p>
+            <div style={{
+              background: 'var(--bg-card)', border: '1px solid var(--border)',
+              borderRadius: '20px', padding: '36px',
+              boxShadow: '0 4px 24px rgba(0,0,0,0.06)',
+            }}>
+              <h1 style={{ fontSize: '24px', fontWeight: 700, marginBottom: '6px' }}>Your AI Wallet</h1>
+              <p style={{ color: 'var(--text-secondary)', marginBottom: '24px', fontSize: '14px', lineHeight: 1.6 }}>
+                One balance. Every AI app. No API keys needed.
+              </p>
 
-            <p style={{ color: 'var(--text-secondary)', marginBottom: '16px', fontSize: '14px' }}>Sign in to access your wallet</p>
-            {error && <div style={{ color: '#ef4444', fontSize: '13px', marginBottom: '12px' }}>{error}</div>}
-            <form onSubmit={async (e) => {
-              e.preventDefault();
-              const ok = await login(username, password);
-              if (!ok) setError('Invalid credentials');
-            }} style={{ maxWidth: '320px' }}>
-              <input type="text" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} style={inputStyle} />
-              <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} style={{ ...inputStyle, marginTop: '8px' }} />
-              <button type="submit" style={{ ...btnStyle, marginTop: '12px', width: '100%' }}>Sign In</button>
-            </form>
-            <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '16px', maxWidth: '320px' }}>
-              Don&apos;t have an account? Click &ldquo;Pay with Byoky&rdquo; on any integrated app to create one.
-            </p>
+              {error && <div style={{ color: '#ef4444', fontSize: '13px', marginBottom: '12px', padding: '8px 12px', background: 'rgba(239,68,68,0.06)', borderRadius: '8px' }}>{error}</div>}
+
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                const ok = await login(username, password);
+                if (!ok) setError('Invalid credentials');
+              }}>
+                <input type="text" placeholder="Username" value={username} onChange={e => setUsername(e.target.value)} style={inputStyle} />
+                <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} style={{ ...inputStyle, marginTop: '8px' }} />
+                <button type="submit" style={{ ...btnStyle, marginTop: '16px', width: '100%' }}>Sign In</button>
+              </form>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: '16px 0' }}>
+                <div style={{ flex: 1, height: '1px', background: 'var(--border)' }} />
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>or</span>
+                <div style={{ flex: 1, height: '1px', background: 'var(--border)' }} />
+              </div>
+
+              <a href="/wallet/connect" style={{
+                display: 'block', textAlign: 'center',
+                padding: '10px 20px', borderRadius: '10px',
+                background: 'var(--bg-surface)', color: 'var(--text)',
+                border: '1px solid var(--border)',
+                textDecoration: 'none', fontSize: '14px', fontWeight: 600,
+              }}>
+                Create Wallet
+              </a>
+
+              <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '16px', textAlign: 'center' }}>
+                Free to create. Add a card later when you&apos;re ready.
+              </p>
+            </div>
           </div>
 
           {/* Right: mockup */}
