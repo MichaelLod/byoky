@@ -858,11 +858,6 @@ section {
   color: #20b7ab;
 }
 
-.provider-logo-huggingface {
-  background: rgba(255, 208, 55, 0.15);
-  color: #ffd037;
-}
-
 .provider-logo-openrouter {
   background: rgba(111, 66, 193, 0.15);
   color: #6f42c1;
@@ -876,11 +871,6 @@ section {
 .provider-logo-fireworks {
   background: rgba(255, 87, 34, 0.15);
   color: #ff5722;
-}
-
-.provider-logo-replicate {
-  background: rgba(255, 255, 255, 0.08);
-  color: #e4e4ec;
 }
 
 .provider-logo-azure {

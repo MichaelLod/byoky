@@ -1,6 +1,6 @@
 {
   "name": "@byoky/openclaw-plugin",
-  "version": "0.4.18",
+  "version": "0.5.0",
   "description": "Byoky wallet provider plugin for OpenClaw — manage AI API keys from your browser wallet",
   "type": "module",
   "main": "dist/index.js",

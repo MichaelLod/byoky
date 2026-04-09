@@ -31,14 +31,15 @@ fun AppNavigation(wallet: WalletStore) {
 private fun MainScreen(wallet: WalletStore) {
     val navController = rememberNavController()
     var selectedTab by remember { mutableIntStateOf(0) }
-    val pairService = remember { RelayPairService() }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val pairService = remember { RelayPairService(context.applicationContext) }
 
     val tabs = listOf(
         Triple("Wallet", Icons.Default.Wallet, "wallet"),
         Triple("Gifts", Icons.Default.CardGiftcard, "gifts"),
         Triple("Connect", Icons.Default.CellTower, "connect"),
         Triple("Usage", Icons.Default.BarChart, "usage"),
-        Triple("Sessions", Icons.Default.Link, "sessions"),
+        Triple("Apps", Icons.Default.Apps, "apps"),
     )
 
     Scaffold(
@@ -101,7 +102,7 @@ private fun MainScreen(wallet: WalletStore) {
             }
             composable("connect") { ConnectScreen(wallet, pairService) }
             composable("usage") { UsageScreen(wallet) }
-            composable("sessions") { SessionsScreen(wallet) }
+            composable("apps") { AppsScreen(wallet) }
             composable("settings") { SettingsScreen(wallet) }
         }
     }

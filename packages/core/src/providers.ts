@@ -67,23 +67,11 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     authMethods: ['api_key'],
     baseUrl: 'https://api.fireworks.ai',
   },
-  replicate: {
-    id: 'replicate',
-    name: 'Replicate',
-    authMethods: ['api_key'],
-    baseUrl: 'https://api.replicate.com',
-  },
   openrouter: {
     id: 'openrouter',
     name: 'OpenRouter',
     authMethods: ['api_key'],
     baseUrl: 'https://openrouter.ai/api',
-  },
-  huggingface: {
-    id: 'huggingface',
-    name: 'Hugging Face',
-    authMethods: ['api_key'],
-    baseUrl: 'https://api-inference.huggingface.co',
   },
   azure_openai: {
     id: 'azure_openai',

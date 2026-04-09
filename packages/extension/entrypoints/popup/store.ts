@@ -9,6 +9,8 @@ import {
   type TokenAllowance,
   type Gift,
   type GiftedCredential,
+  type Group,
+  type AppGroups,
   hashPassword,
 } from '@byoky/core';
 
@@ -38,6 +40,8 @@ interface WalletState {
   gifts: Gift[];
   giftedCredentials: GiftedCredential[];
   giftPreferences: Record<string, string>;
+  groups: Group[];
+  appGroups: AppGroups;
   cloudVaultEnabled: boolean;
   cloudVaultUsername: string | null;
   cloudVaultTokenExpired: boolean;
@@ -66,6 +70,10 @@ interface WalletState {
   redeemGift: (giftLinkEncoded: string) => Promise<void>;
   removeGiftedCredential: (id: string) => Promise<void>;
   setGiftPreference: (providerId: string, giftId: string | null) => Promise<void>;
+  createGroup: (input: { name: string; providerId: string; credentialId?: string; model?: string }) => Promise<string | null>;
+  updateGroup: (id: string, patch: { name?: string; providerId?: string; credentialId?: string | null; model?: string | null }) => Promise<boolean>;
+  deleteGroup: (id: string) => Promise<boolean>;
+  setAppGroup: (origin: string, groupId: string) => Promise<boolean>;
   enableCloudVault: (username: string, password: string, isSignup: boolean) => Promise<void>;
   disableCloudVault: () => Promise<void>;
   reloginCloudVault: (password: string) => Promise<void>;
@@ -94,6 +102,8 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   gifts: [],
   giftedCredentials: [],
   giftPreferences: {},
+  groups: [],
+  appGroups: {},
   cloudVaultEnabled: false,
   cloudVaultUsername: null,
   cloudVaultTokenExpired: false,
@@ -158,6 +168,8 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       gifts: [],
       giftedCredentials: [],
       giftPreferences: {},
+      groups: [],
+      appGroups: {},
       currentPage: 'unlock',
     });
   },
@@ -296,6 +308,50 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     set({ giftPreferences: (result.preferences as Record<string, string>) ?? {} });
   },
 
+  createGroup: async (input) => {
+    set({ error: null });
+    const result = await sendInternal('createGroup', input);
+    if (result.error) {
+      set({ error: result.error as string });
+      return null;
+    }
+    await get().refreshData();
+    return (result.group as Group).id;
+  },
+
+  updateGroup: async (id, patch) => {
+    set({ error: null });
+    const result = await sendInternal('updateGroup', { id, patch });
+    if (result.error) {
+      set({ error: result.error as string });
+      return false;
+    }
+    await get().refreshData();
+    return true;
+  },
+
+  deleteGroup: async (id) => {
+    set({ error: null });
+    const result = await sendInternal('deleteGroup', { id });
+    if (result.error) {
+      set({ error: result.error as string });
+      return false;
+    }
+    await get().refreshData();
+    return true;
+  },
+
+  setAppGroup: async (origin, groupId) => {
+    set({ error: null });
+    const result = await sendInternal('setAppGroup', { origin, groupId });
+    if (result.error) {
+      set({ error: result.error as string });
+      return false;
+    }
+    await get().refreshData();
+    return true;
+  },
+
   enableCloudVault: async (username: string, password: string, isSignup: boolean) => {
     set({ loading: true, error: null });
     try {
@@ -339,6 +395,8 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       tokenAllowances: [],
       gifts: [],
       giftedCredentials: [],
+      groups: [],
+      appGroups: {},
       cloudVaultEnabled: false,
       cloudVaultUsername: null,
       cloudVaultTokenExpired: false,
@@ -349,7 +407,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   },
 
   refreshData: async () => {
-    const [credResult, sessionResult, logResult, approvalResult, trustedResult, allowanceResult, giftResult, giftedResult, giftPrefResult, vaultResult] = await Promise.all([
+    const [credResult, sessionResult, logResult, approvalResult, trustedResult, allowanceResult, giftResult, giftedResult, giftPrefResult, groupsResult, vaultResult] = await Promise.all([
       sendInternal('getCredentials'),
       sendInternal('getSessions'),
       sendInternal('getRequestLog'),
@@ -359,6 +417,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       sendInternal('getGifts'),
       sendInternal('getGiftedCredentials'),
       sendInternal('getGiftPreferences'),
+      sendInternal('getGroups'),
       sendInternal('cloudVaultStatus'),
     ]);
 
@@ -384,6 +443,8 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       gifts: (giftResult.gifts ?? []) as Gift[],
       giftedCredentials: (giftedResult.giftedCredentials ?? []) as GiftedCredential[],
       giftPreferences: (giftPrefResult.preferences as Record<string, string>) ?? {},
+      groups: (groupsResult.groups ?? []) as Group[],
+      appGroups: (groupsResult.appGroups ?? {}) as AppGroups,
       cloudVaultEnabled: vaultResult.enabled as boolean ?? false,
       cloudVaultUsername: vaultResult.username as string ?? null,
       cloudVaultTokenExpired: vaultResult.tokenExpired as boolean ?? false,

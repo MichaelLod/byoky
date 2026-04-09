@@ -16,6 +16,8 @@ export default function Home() {
       <div className="divider" />
       <Providers />
       <div className="divider" />
+      <CrossProviderRouting />
+      <div className="divider" />
       <MobileWallet />
       <div className="divider" />
       <OpenClawIntegration />
@@ -171,6 +173,24 @@ function Hero() {
               Firefox Extension
             </a>
             <a
+              href="https://apps.apple.com/app/byoky/id6760779919"
+              className="btn btn-primary"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <AppleIcon />
+              iOS App
+            </a>
+            <a
+              href="https://play.google.com/store/apps/details?id=com.byoky.app"
+              className="btn btn-primary"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <AndroidIcon />
+              Android App
+            </a>
+            <a
               href="/demo"
               className="btn btn-secondary"
             >
@@ -209,8 +229,9 @@ function HowItWorks() {
               </div>
               <h3>Install the wallet</h3>
               <p>
-                Add the Byoky extension to Chrome, Firefox, or Safari. Set a
-                master password to encrypt your vault.
+                Add the Byoky extension to Chrome, Firefox, or Safari — or
+                grab the iOS or Android app. Set a master password to
+                encrypt your vault.
               </p>
             </div>
           </FadeIn>
@@ -554,8 +575,6 @@ function Providers() {
     { name: 'Together AI', type: 'API Key', cls: 'together', letter: 'T' },
     { name: 'Fireworks AI', type: 'API Key', cls: 'fireworks', letter: 'F' },
     { name: 'OpenRouter', type: 'API Key', cls: 'openrouter', letter: 'O' },
-    { name: 'Hugging Face', type: 'API Key + OAuth', cls: 'huggingface', letter: 'H' },
-    { name: 'Replicate', type: 'API Key', cls: 'replicate', letter: 'R' },
     { name: 'Azure OpenAI', type: 'API Key', cls: 'azure', letter: 'A' },
   ];
 
@@ -599,6 +618,66 @@ function Providers() {
   );
 }
 
+/* ─── Cross-Provider Routing ───────────────────── */
+
+function CrossProviderRouting() {
+  return (
+    <section className="openclaw-section">
+      <div className="container">
+        <FadeIn>
+          <div className="openclaw-card">
+            <div className="openclaw-badge">New</div>
+            <div className="openclaw-content">
+              <div className="openclaw-header">
+                <div className="openclaw-logo openclaw-logo-cloud">
+                  <ShuffleIcon />
+                </div>
+                <div>
+                  <h3>One App. Any Provider.</h3>
+                  <p className="openclaw-tagline">
+                    Drag an app between groups to swap which model it talks to —
+                    even across providers.
+                  </p>
+                </div>
+              </div>
+              <p className="openclaw-desc">
+                Bucket your connected apps into groups and pin each group to a
+                credential. Move an app from a Claude group into a GPT group
+                and the wallet transparently translates the request — Anthropic
+                ↔ OpenAI ↔ Gemini ↔ Cohere. Request bodies, response bodies,
+                and SSE streams are rewritten on the fly. Apps keep calling
+                their preferred SDK; the wallet picks the upstream.
+              </p>
+              <div className="openclaw-flow">
+                <div className="openclaw-flow-step">
+                  <span className="openclaw-flow-label">Your App</span>
+                  <span className="openclaw-flow-sub">Anthropic SDK</span>
+                </div>
+                <span className="openclaw-flow-arrow">&rarr;</span>
+                <div className="openclaw-flow-step openclaw-flow-highlight">
+                  <span className="openclaw-flow-label">Wallet</span>
+                  <span className="openclaw-flow-sub">Translates on the fly</span>
+                </div>
+                <span className="openclaw-flow-arrow">&rarr;</span>
+                <div className="openclaw-flow-step">
+                  <span className="openclaw-flow-label">GPT-4o</span>
+                  <span className="openclaw-flow-sub">OpenAI API</span>
+                </div>
+              </div>
+              <p className="openclaw-desc">
+                <strong>No code changes.</strong> Live sessions reroute the next
+                request automatically. Run the same agent on Claude one day and
+                GPT the next without touching a line of code. Try a new model
+                without rewriting your prompts.
+              </p>
+            </div>
+          </div>
+        </FadeIn>
+      </div>
+    </section>
+  );
+}
+
 /* ─── Mobile Wallet ────────────────────────────── */
 
 function MobileWallet() {
@@ -622,9 +701,9 @@ function MobileWallet() {
               </div>
               <p className="openclaw-desc">
                 No browser extension needed. The web app shows a pairing code,
-                you scan it with the Byoky iOS app, and your keys proxy through
-                your phone. Works on any browser, any computer. Keep the app
-                open while using the web app.
+                you scan it with the Byoky iOS or Android app, and your keys
+                proxy through your phone. Works on any browser, any computer.
+                Keep the app open while using the web app.
               </p>
               <div className="openclaw-flow">
                 <div className="openclaw-flow-step">
@@ -993,6 +1072,34 @@ function GaugeIcon() {
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z" />
       <path d="M12 6v6l4 2" />
+    </svg>
+  );
+}
+
+function AppleIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M17.05 12.04c-.03-2.93 2.39-4.34 2.5-4.41-1.36-1.99-3.48-2.27-4.24-2.3-1.81-.18-3.53 1.06-4.45 1.06-.92 0-2.34-1.04-3.85-1.01-1.98.03-3.81 1.15-4.83 2.92-2.06 3.57-.53 8.85 1.48 11.75.98 1.42 2.15 3.01 3.69 2.95 1.48-.06 2.04-.96 3.83-.96 1.79 0 2.29.96 3.86.93 1.59-.03 2.6-1.45 3.58-2.87 1.13-1.65 1.59-3.24 1.62-3.32-.04-.02-3.11-1.19-3.14-4.74zM14.13 3.71c.81-.99 1.36-2.36 1.21-3.71-1.17.05-2.59.78-3.43 1.76-.75.87-1.41 2.27-1.23 3.59 1.31.1 2.64-.66 3.45-1.64z" />
+    </svg>
+  );
+}
+
+function AndroidIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M17.523 15.341c-.5523 0-1-.4477-1-1s.4477-1 1-1 1 .4477 1 1-.4477 1-1 1m-11.046 0c-.5523 0-1-.4477-1-1s.4477-1 1-1 1 .4477 1 1-.4477 1-1 1m11.405-6.02 1.997-3.46a.416.416 0 0 0-.152-.567.416.416 0 0 0-.567.152l-2.022 3.503A12.595 12.595 0 0 0 12 7.812c-1.85 0-3.595.397-5.138 1.137L4.84 5.446a.416.416 0 0 0-.567-.152.416.416 0 0 0-.152.567l1.997 3.46C2.69 11.187.5 14.456 0 18.32h24c-.5-3.864-2.69-7.133-6.118-8.999" />
+    </svg>
+  );
+}
+
+function ShuffleIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M16 3h5v5" />
+      <path d="M4 20 21 3" />
+      <path d="M21 16v5h-5" />
+      <path d="m15 15 6 6" />
+      <path d="M4 4l5 5" />
     </svg>
   );
 }

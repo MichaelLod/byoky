@@ -27,7 +27,7 @@ struct CreateGiftView: View {
     }
 
     var body: some View {
-        Group {
+        SwiftUI.Group {
             if let gift = createdGift {
                 giftCreatedView(gift: gift)
             } else {

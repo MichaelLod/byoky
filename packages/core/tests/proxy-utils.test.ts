@@ -7,6 +7,8 @@ import {
   injectStreamUsageOptions,
   computeAllowanceCheck,
   validateProxyUrl,
+  detectRequestCapabilities,
+  rewriteToolNamesInJSONBody,
 } from '../src/proxy-utils.js';
 
 // ── validateProxyUrl ────────────────────────────────────
@@ -108,15 +110,15 @@ describe('buildHeaders', () => {
     expect(headers['x-api-key']).toBeUndefined();
   });
 
-  it('sets Bearer token for Gemini', () => {
+  it('sets x-goog-api-key for Gemini (not Bearer — Google AI Studio rejects Authorization)', () => {
     const headers = buildHeaders('gemini', {}, 'AIza-key');
-    expect(headers['authorization']).toBe('Bearer AIza-key');
+    expect(headers['x-goog-api-key']).toBe('AIza-key');
+    expect(headers['authorization']).toBeUndefined();
   });
 
   const bearerProviders = [
-    'openai', 'gemini', 'mistral', 'cohere', 'xai', 'deepseek',
-    'perplexity', 'groq', 'together', 'fireworks', 'replicate',
-    'openrouter', 'huggingface',
+    'openai', 'mistral', 'cohere', 'xai', 'deepseek',
+    'perplexity', 'groq', 'together', 'fireworks', 'openrouter',
   ];
 
   for (const provider of bearerProviders) {
@@ -639,5 +641,127 @@ describe('computeAllowanceCheck', () => {
     // Total for anthropic: 110 >= 100
     const result = computeAllowanceCheck(allowance, entries, 'anthropic');
     expect(result.allowed).toBe(false);
+  });
+});
+
+// ── detectRequestCapabilities ────────────────────────────
+
+describe('detectRequestCapabilities', () => {
+  it('returns all-false for an empty body', () => {
+    expect(detectRequestCapabilities()).toEqual({ tools: false, vision: false, structuredOutput: false, reasoning: false });
+    expect(detectRequestCapabilities(undefined)).toEqual({ tools: false, vision: false, structuredOutput: false, reasoning: false });
+  });
+
+  it('returns all-false for non-JSON bodies', () => {
+    expect(detectRequestCapabilities('not json')).toEqual({ tools: false, vision: false, structuredOutput: false, reasoning: false });
+  });
+
+  it('flags tools when the body has a non-empty tools[]', () => {
+    const body = JSON.stringify({
+      model: 'x',
+      messages: [{ role: 'user', content: 'hi' }],
+      tools: [{ name: 'get_weather', input_schema: {} }],
+    });
+    expect(detectRequestCapabilities(body).tools).toBe(true);
+  });
+
+  it('does not flag tools when tools[] is empty', () => {
+    expect(detectRequestCapabilities(JSON.stringify({ tools: [] })).tools).toBe(false);
+  });
+
+  it('flags structuredOutput on response_format json_schema (not json_object)', () => {
+    expect(detectRequestCapabilities(JSON.stringify({
+      response_format: { type: 'json_schema' },
+    })).structuredOutput).toBe(true);
+    expect(detectRequestCapabilities(JSON.stringify({
+      response_format: { type: 'json_object' },
+    })).structuredOutput).toBe(false);
+  });
+
+  it('flags reasoning when the body has a thinking field', () => {
+    expect(detectRequestCapabilities(JSON.stringify({ thinking: { type: 'enabled' } })).reasoning).toBe(true);
+  });
+
+  it('flags vision on Anthropic image content blocks', () => {
+    const body = JSON.stringify({
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'whats this' },
+            { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'X' } },
+          ],
+        },
+      ],
+    });
+    expect(detectRequestCapabilities(body).vision).toBe(true);
+  });
+
+  it('flags vision on OpenAI image_url content parts', () => {
+    const body = JSON.stringify({
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'whats this' },
+            { type: 'image_url', image_url: { url: 'https://x' } },
+          ],
+        },
+      ],
+    });
+    expect(detectRequestCapabilities(body).vision).toBe(true);
+  });
+});
+
+// ── rewriteToolNamesInJSONBody ───────────────────────────
+
+describe('rewriteToolNamesInJSONBody', () => {
+  it('returns the body unchanged when the map is empty', () => {
+    const body = JSON.stringify({ content: [{ type: 'tool_use', name: 'GetWeather' }] });
+    expect(rewriteToolNamesInJSONBody(body, {})).toBe(body);
+  });
+
+  it('rewrites tool_use block names according to the map', () => {
+    const body = JSON.stringify({
+      type: 'message',
+      content: [
+        { type: 'text', text: 'checking' },
+        { type: 'tool_use', id: 't1', name: 'GetWeather', input: { city: 'Tokyo' } },
+        { type: 'tool_use', id: 't2', name: 'ConvertTemperature', input: {} },
+      ],
+    });
+    const out = rewriteToolNamesInJSONBody(body, {
+      GetWeather: 'get_weather',
+      ConvertTemperature: 'convert_temperature',
+    });
+    const parsed = JSON.parse(out);
+    expect(parsed.content[1].name).toBe('get_weather');
+    expect(parsed.content[2].name).toBe('convert_temperature');
+  });
+
+  it('leaves other content blocks untouched', () => {
+    const body = JSON.stringify({
+      content: [
+        { type: 'text', text: 'hello' },
+        { type: 'tool_use', name: 'GetWeather', input: {} },
+      ],
+    });
+    const out = rewriteToolNamesInJSONBody(body, { GetWeather: 'get_weather' });
+    const parsed = JSON.parse(out);
+    expect(parsed.content[0]).toEqual({ type: 'text', text: 'hello' });
+  });
+
+  it('returns the input unchanged when no tool_use names match the map', () => {
+    const body = JSON.stringify({ content: [{ type: 'tool_use', name: 'Untouched' }] });
+    expect(rewriteToolNamesInJSONBody(body, { GetWeather: 'get_weather' })).toBe(body);
+  });
+
+  it('returns the input unchanged on unparseable JSON', () => {
+    expect(rewriteToolNamesInJSONBody('not json', { X: 'y' })).toBe('not json');
+  });
+
+  it('returns the input unchanged when content is not an array', () => {
+    const body = JSON.stringify({ content: 'string content' });
+    expect(rewriteToolNamesInJSONBody(body, { X: 'y' })).toBe(body);
   });
 });

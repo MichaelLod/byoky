@@ -152,6 +152,14 @@ final class RelayPairService: ObservableObject {
         case "relay:pair:ack":
             pairedOrigin = payload.appOrigin
             status = .paired(appOrigin: payload.appOrigin)
+            // Durable Session record so the app shows up in the Apps screen
+            // across reconnects. The user revokes explicitly when done.
+            // Providers list reflects what the wallet can currently serve;
+            // gifted credentials are advertised separately via sendPairHello.
+            if let wallet {
+                let providerIds = Array(Set(wallet.credentials.map { $0.providerId }))
+                _ = try? wallet.upsertSession(appOrigin: payload.appOrigin, providers: providerIds)
+            }
 
         case "relay:request":
             handleRelayRequest(json)
@@ -300,6 +308,27 @@ final class RelayPairService: ObservableObject {
                     return
                 }
 
+                // Cross-family routing check. The relay path carries the
+                // app's actual origin via pairedOrigin, so per-app routing
+                // works (vs the local TCP proxy which has no origin).
+                if let routing = await self.resolveRelayRouting(
+                    requestedProviderId: providerId,
+                    bodyString: bodyString,
+                    wallet: wallet
+                ), let translation = routing.translation {
+                    await self.handleRelayRequestWithTranslation(
+                        requestId: requestId,
+                        originalProviderId: providerId,
+                        translation: translation,
+                        routedCredential: routing.credential,
+                        method: method,
+                        headers: headers,
+                        bodyString: bodyString,
+                        wallet: wallet
+                    )
+                    return
+                }
+
                 let apiKey = try await MainActor.run {
                     try wallet.decryptKey(for: credential)
                 }
@@ -390,6 +419,192 @@ final class RelayPairService: ObservableObject {
             } catch {
                 sendRelayError(requestId: requestId, code: "PROXY_ERROR", message: error.localizedDescription)
             }
+        }
+    }
+
+    /// Cross-family routing for relay-routed requests. Uses pairedOrigin
+    /// (the desktop app's actual origin) for the group lookup, so per-app
+    /// routing is fully functional via the relay path.
+    private func resolveRelayRouting(
+        requestedProviderId: String,
+        bodyString: String?,
+        wallet: WalletStore
+    ) async -> RoutingDecision? {
+        let origin = await MainActor.run { self.pairedOrigin } ?? "relay"
+        let group = await MainActor.run { wallet.groupForOrigin(origin) }
+        let allCreds = await MainActor.run { wallet.credentials }
+        let srcModel = RoutingResolver.parseModel(from: bodyString?.data(using: .utf8))
+        return RoutingResolver.resolve(
+            requestedProviderId: requestedProviderId,
+            requestedModel: srcModel,
+            group: group,
+            credentials: allCreds
+        )
+    }
+
+    /// Cross-family translation path for relay-routed requests. Mirrors the
+    /// existing pass-through relay flow but inserts: translateRequest before
+    /// send, destination URL via rewriteProxyUrl, destination credential
+    /// auth, and translateResponse / stream translator on the response.
+    private func handleRelayRequestWithTranslation(
+        requestId: String,
+        originalProviderId: String,
+        translation: RoutingTranslation,
+        routedCredential: Credential,
+        method: String,
+        headers: [String: String],
+        bodyString: String?,
+        wallet: WalletStore
+    ) async {
+        let engine = TranslationEngine.shared
+        let isStreaming = RoutingResolver.isStreamingRequest(body: bodyString?.data(using: .utf8))
+
+        do {
+            let ctxJson = try engine.buildTranslationContext(
+                srcProviderId: translation.srcProviderId,
+                dstProviderId: translation.dstProviderId,
+                srcModel: translation.srcModel,
+                dstModel: translation.dstModel,
+                isStreaming: isStreaming,
+                requestId: requestId
+            )
+            let translatedBody = try engine.translateRequest(contextJson: ctxJson, body: bodyString ?? "")
+
+            guard let urlString = engine.rewriteProxyUrl(
+                dstProviderId: translation.dstProviderId,
+                model: translation.dstModel,
+                stream: isStreaming
+            ), let url = URL(string: urlString) else {
+                sendRelayError(requestId: requestId, code: "TRANSLATION_FAILED", message: "rewriteProxyUrl returned null")
+                return
+            }
+
+            let dstApiKey = try await MainActor.run { try wallet.decryptKey(for: routedCredential) }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = method
+            request.timeoutInterval = 120
+            // Inject stream_options for openai-family providers that need it.
+            let injected = injectStreamUsageOptions(providerId: translation.dstProviderId, body: translatedBody) ?? translatedBody
+            request.httpBody = injected.data(using: .utf8)
+
+            for (key, value) in headers {
+                let lower = key.lowercased()
+                if ["host", "authorization", "x-api-key", "anthropic-version", "content-length"].contains(lower) { continue }
+                request.setValue(value, forHTTPHeaderField: key)
+            }
+            Credential.applyAuth(
+                to: &request,
+                providerId: translation.dstProviderId,
+                authMethod: routedCredential.authMethod,
+                apiKey: dstApiKey
+            )
+
+            let (bytes, response) = try await URLSession.shared.bytes(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                sendRelayError(requestId: requestId, code: "INVALID_RESPONSE", message: "Invalid response")
+                return
+            }
+
+            var responseHeaders: [String: String] = [:]
+            for (key, value) in httpResponse.allHeaderFields {
+                let lower = String(describing: key).lowercased()
+                if sensitiveResponseHeaders.contains(lower) { continue }
+                responseHeaders[lower] = String(describing: value)
+            }
+            sendJSON([
+                "type": "relay:response:meta",
+                "requestId": requestId,
+                "status": httpResponse.statusCode,
+                "statusText": HTTPURLResponse.localizedString(forStatusCode: httpResponse.statusCode),
+                "headers": responseHeaders,
+            ])
+
+            // Non-2xx: pass body through verbatim, no translation.
+            if !(200..<300).contains(httpResponse.statusCode) {
+                var buffer = Data()
+                for try await byte in bytes {
+                    buffer.append(byte)
+                    if buffer.count >= 4096 || byte == 0x0A {
+                        if let chunk = String(data: buffer, encoding: .utf8) {
+                            sendJSON(["type": "relay:response:chunk", "requestId": requestId, "chunk": chunk])
+                        }
+                        buffer.removeAll()
+                    }
+                }
+                if !buffer.isEmpty, let chunk = String(data: buffer, encoding: .utf8) {
+                    sendJSON(["type": "relay:response:chunk", "requestId": requestId, "chunk": chunk])
+                }
+                sendJSON(["type": "relay:response:done", "requestId": requestId])
+                let origin = await MainActor.run { self.pairedOrigin } ?? "relay"
+                await MainActor.run {
+                    wallet.logRequest(
+                        appOrigin: origin,
+                        providerId: originalProviderId,
+                        method: method,
+                        url: urlString,
+                        statusCode: httpResponse.statusCode,
+                        requestBody: bodyString?.data(using: .utf8),
+                        responseBody: nil,
+                        actualProviderId: translation.dstProviderId,
+                        actualModel: translation.dstModel,
+                        groupId: wallet.groupForOrigin(origin)?.id
+                    )
+                }
+                return
+            }
+
+            // 2xx + streaming: per-line stream translator. .lines is UTF-8-safe.
+            // 2xx + non-streaming: accumulate full body, translateResponse once.
+            if isStreaming {
+                let streamHandle = try engine.createStreamTranslator(contextJson: ctxJson)
+                var releasedExplicitly = false
+                defer {
+                    if !releasedExplicitly {
+                        engine.releaseStreamTranslator(handle: streamHandle)
+                    }
+                }
+                for try await line in bytes.lines {
+                    let chunk = line + "\n"
+                    let translated = try engine.processStreamChunk(handle: streamHandle, chunk: chunk)
+                    if !translated.isEmpty {
+                        sendJSON(["type": "relay:response:chunk", "requestId": requestId, "chunk": translated])
+                    }
+                }
+                let trailing = try engine.flushStreamTranslator(handle: streamHandle)
+                releasedExplicitly = true
+                if !trailing.isEmpty {
+                    sendJSON(["type": "relay:response:chunk", "requestId": requestId, "chunk": trailing])
+                }
+            } else {
+                var accumulated = Data()
+                for try await byte in bytes {
+                    accumulated.append(byte)
+                }
+                let upstreamBody = String(data: accumulated, encoding: .utf8) ?? ""
+                let translated = try engine.translateResponse(contextJson: ctxJson, body: upstreamBody)
+                sendJSON(["type": "relay:response:chunk", "requestId": requestId, "chunk": translated])
+            }
+
+            sendJSON(["type": "relay:response:done", "requestId": requestId])
+
+            let logOrigin = await MainActor.run { self.pairedOrigin } ?? "relay"
+            await MainActor.run {
+                wallet.logRequest(
+                    appOrigin: logOrigin,
+                    providerId: originalProviderId,
+                    method: method,
+                    url: urlString,
+                    statusCode: httpResponse.statusCode,
+                    requestBody: bodyString?.data(using: .utf8),
+                    responseBody: nil,
+                    actualProviderId: translation.dstProviderId,
+                    actualModel: translation.dstModel,
+                    groupId: wallet.groupForOrigin(logOrigin)?.id
+                )
+            }
+        } catch {
+            sendRelayError(requestId: requestId, code: "TRANSLATION_FAILED", message: error.localizedDescription)
         }
     }
 

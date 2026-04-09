@@ -24,6 +24,15 @@ struct RequestLog: Identifiable, Codable {
     var inputTokens: Int?
     var outputTokens: Int?
     var model: String?
+    /// When cross-family routing translated this request, the upstream provider
+    /// it was actually sent to (differs from `providerId`, which is the family
+    /// the app called). Nil for pass-through requests.
+    var actualProviderId: String?
+    /// The destination model used after translation. Nil for pass-through.
+    var actualModel: String?
+    /// The routing group that resolved this request. Nil for pass-through or
+    /// when the app wasn't bound to a group.
+    var groupId: String?
 }
 
 struct TokenAllowance: Codable {

@@ -74,6 +74,23 @@ export interface SessionProvider {
   giftId?: string;
   giftRelayUrl?: string;
   giftAuthToken?: string;
+  /**
+   * Cross-family translation routing. Set when the resolved group binds the
+   * app's requested provider to a credential in a different provider family
+   * (e.g. app calls Anthropic, group routes to OpenAI). The proxy handler
+   * reads this to translate the request body, rewrite the URL, and wrap the
+   * SSE chunk loop with the matching stream translator.
+   *
+   * `providerId` (the field above) is the SOURCE — what the SDK targeted.
+   * `credentialId` points at the DESTINATION's credential.
+   */
+  translation?: SessionTranslation;
+}
+
+export interface SessionTranslation {
+  srcProviderId: ProviderId;
+  dstProviderId: ProviderId;
+  dstModel: string;
 }
 
 // --- Connect ---
@@ -203,6 +220,7 @@ export interface RequestLogEntry {
   id: string;
   sessionId: string;
   appOrigin: string;
+  /** Provider the SDK targeted (the source of the request as the app sees it). */
   providerId: ProviderId;
   url: string;
   method: string;
@@ -211,7 +229,33 @@ export interface RequestLogEntry {
   error?: string;
   inputTokens?: number;
   outputTokens?: number;
+  /** Model the SDK requested (extracted from the original request body). */
   model?: string;
+  /**
+   * The provider we actually called upstream. Set only when cross-family
+   * translation rerouted the request to a different provider family.
+   * Absent for normal pass-through requests.
+   */
+  actualProviderId?: ProviderId;
+  /** The model we actually called upstream. Set only when translation is on. */
+  actualModel?: string;
+  /** The group that routed this request. Absent for default-group requests. */
+  groupId?: string;
+  /** Capabilities the request body used (tools, vision, etc.). For drag-time warnings. */
+  usedCapabilities?: CapabilitySet;
+}
+
+/**
+ * Capabilities a single request used. Mirrors the CapabilitySet type in
+ * models.ts but redeclared here to avoid a circular import. Extending this
+ * requires updating both detectRequestCapabilities (in proxy-utils) and the
+ * popup's drag-time warning logic.
+ */
+export interface CapabilitySet {
+  tools: boolean;
+  vision: boolean;
+  structuredOutput: boolean;
+  reasoning: boolean;
 }
 
 // --- Pending approval ---
@@ -239,3 +283,27 @@ export interface TokenAllowance {
   totalLimit?: number;
   providerLimits?: Record<string, number>;
 }
+
+// --- Groups (alias layer) ---
+//
+// A Group is a logical bucket that apps can be assigned to. The group binds
+// a (provider, credential, model) tuple. Reassigning a group's binding
+// transparently reroutes every app in that group on the next session.
+//
+// The 'default' group always exists and is where new apps land before the
+// user has chosen otherwise. Apps with no explicit binding in `appGroups`
+// are treated as belonging to the default group.
+
+export const DEFAULT_GROUP_ID = 'default';
+
+export interface Group {
+  id: string;            // stable id; DEFAULT_GROUP_ID is reserved for the default group
+  name: string;          // user-facing label
+  providerId: ProviderId;
+  credentialId?: string; // optional pin to a specific credential; if absent, any credential for this provider
+  model?: string;        // optional default model; phase 1 informational, phase 2 substituted into requests
+  createdAt: number;
+}
+
+// origin → group id; absence means the app belongs to DEFAULT_GROUP_ID
+export type AppGroups = Record<string, string>;

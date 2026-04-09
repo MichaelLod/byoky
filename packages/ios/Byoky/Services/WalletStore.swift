@@ -14,6 +14,8 @@ final class WalletStore: ObservableObject {
     @Published var giftedCredentials: [GiftedCredential] = []
     @Published var giftPreferences: [String: String] = [:]  // providerId -> giftId
     @Published var tokenAllowances: [TokenAllowance] = []
+    @Published var groups: [Group] = []
+    @Published var appGroups: AppGroups = [:]
     @Published var bridgeStatus: BridgeStatus = .inactive
     @Published var lockoutEndTime: Date?
     @Published var cloudVaultEnabled = false
@@ -33,6 +35,8 @@ final class WalletStore: ObservableObject {
     private let giftedCredentialsKey = "giftedCredentials"
     private let giftPreferencesKey = "giftPreferences"
     private let tokenAllowancesKey = "tokenAllowances"
+    private let groupsKey = "groups"
+    private let appGroupsKey = "appGroups"
 
     private static let vaultURL = "https://vault.byoky.com"
     private var vaultToken: String?
@@ -130,12 +134,16 @@ final class WalletStore: ObservableObject {
 
         status = .unlocked
         try loadCredentials()
+        try pruneRemovedProviders()
         try loadSessions()
         loadRequestLogs()
         loadGifts()
         loadGiftedCredentials()
         loadGiftPreferences()
         loadTokenAllowances()
+        loadGroups()
+        loadAppGroups()
+        try ensureDefaultGroup()
         try migrateCredentials(password: password)
         loadCloudVaultState()
         Task { await syncPendingCredentials() }
@@ -155,6 +163,8 @@ final class WalletStore: ObservableObject {
         giftedCredentials = []
         giftPreferences = [:]
         tokenAllowances = []
+        groups = []
+        appGroups = [:]
         status = .locked
         backgroundTime = nil
         AppGroupSync.shared.syncWalletState(isUnlocked: false, providers: [])
@@ -185,6 +195,8 @@ final class WalletStore: ObservableObject {
         try? keychain.delete(key: giftsKey)
         try? keychain.delete(key: giftedCredentialsKey)
         try? keychain.delete(key: tokenAllowancesKey)
+        try? keychain.delete(key: groupsKey)
+        try? keychain.delete(key: appGroupsKey)
         clearCloudVaultState()
 
         // Clear in-memory state
@@ -194,6 +206,8 @@ final class WalletStore: ObservableObject {
         gifts = []
         giftedCredentials = []
         tokenAllowances = []
+        groups = []
+        appGroups = [:]
         bridgeStatus = .inactive
 
         // Reset brute-force state
@@ -294,6 +308,19 @@ final class WalletStore: ObservableObject {
 
     // MARK: - Migration
 
+    /// Drop any stored credentials that reference providers we've removed from
+    /// the registry (e.g. replicate, huggingface, the legacy "azure-openai" id).
+    /// Runs once per unlock; cheap if there's nothing to do.
+    private func pruneRemovedProviders() throws {
+        let stale = credentials.filter { Provider.removedProviderIds.contains($0.providerId) }
+        guard !stale.isEmpty else { return }
+        for credential in stale {
+            try? keychain.delete(key: "key_\(credential.id)")
+        }
+        credentials.removeAll { Provider.removedProviderIds.contains($0.providerId) }
+        try saveCredentials()
+    }
+
     private func migrateCredentials(password: String) throws {
         guard let key = masterKey else { return }
 
@@ -314,6 +341,49 @@ final class WalletStore: ObservableObject {
     }
 
     // MARK: - Sessions
+
+    /// Default expiry window for relay-paired sessions. The pair stays in the
+    /// Apps screen for 30 days even if the WebSocket drops between requests —
+    /// the user revokes explicitly when they're done. Lines up with how the
+    /// extension treats sessions as durable trust records, not live sockets.
+    private static let relaySessionTTL: TimeInterval = 30 * 24 * 60 * 60
+
+    /// Upsert a session for `appOrigin`. Used by `RelayPairService` when a
+    /// pair handshake completes — durable record so the app shows up in the
+    /// Apps screen across reconnects. Re-pairing the same origin updates the
+    /// providers list and resets the expiry, but keeps the existing session id.
+    @discardableResult
+    func upsertSession(appOrigin: String, providers: [String]) throws -> Session {
+        let now = Date()
+        let expiresAt = now.addingTimeInterval(Self.relaySessionTTL)
+
+        if let idx = sessions.firstIndex(where: { $0.appOrigin == appOrigin }) {
+            let existing = sessions[idx]
+            let updated = Session(
+                id: existing.id,
+                appOrigin: appOrigin,
+                sessionKey: existing.sessionKey,
+                providers: providers,
+                createdAt: existing.createdAt,
+                expiresAt: expiresAt
+            )
+            sessions[idx] = updated
+            try saveSessions()
+            return updated
+        }
+
+        let session = Session(
+            id: UUID().uuidString,
+            appOrigin: appOrigin,
+            sessionKey: UUID().uuidString,
+            providers: providers,
+            createdAt: now,
+            expiresAt: expiresAt
+        )
+        sessions.append(session)
+        try saveSessions()
+        return session
+    }
 
     func revokeSession(_ session: Session) throws {
         sessions.removeAll { $0.id == session.id }
@@ -389,7 +459,10 @@ final class WalletStore: ObservableObject {
         url: String,
         statusCode: Int,
         requestBody: Data?,
-        responseBody: String?
+        responseBody: String?,
+        actualProviderId: String? = nil,
+        actualModel: String? = nil,
+        groupId: String? = nil
     ) {
         var sanitizedUrl = url
         if let comps = URLComponents(string: url) {
@@ -411,10 +484,18 @@ final class WalletStore: ObservableObject {
         entry.model = UsageParser.parseModel(from: requestBody)
 
         if let responseBody {
-            let usage = UsageParser.parseUsage(providerId: providerId, body: responseBody)
+            // Use the upstream provider for usage parsing if we routed
+            // cross-family — the response body shape matches the destination
+            // provider, not the source.
+            let parseProviderId = actualProviderId ?? providerId
+            let usage = UsageParser.parseUsage(providerId: parseProviderId, body: responseBody)
             entry.inputTokens = usage?.inputTokens
             entry.outputTokens = usage?.outputTokens
         }
+
+        entry.actualProviderId = actualProviderId
+        entry.actualModel = actualModel
+        entry.groupId = groupId
 
         requestLogs.insert(entry, at: 0)
         if requestLogs.count > 500 {
@@ -445,6 +526,178 @@ final class WalletStore: ObservableObject {
 
     private func saveTokenAllowances() {
         try? keychain.saveCodable(key: tokenAllowancesKey, value: tokenAllowances)
+    }
+
+    // MARK: - Groups
+    //
+    // Groups are routing rules. Each app origin is bound to a group via
+    // `appGroups` (origin → groupId), set from the Apps screen. The default
+    // group catches anything not explicitly bound. RoutingResolver looks up
+    // `groupForOrigin(_:)` on every request to decide credentials + (when
+    // cross-family) translation destination.
+
+    private func loadGroups() {
+        do {
+            groups = try keychain.loadCodable(key: groupsKey, as: [Group].self)
+        } catch {
+            groups = []
+        }
+    }
+
+    private func saveGroups() throws {
+        try keychain.saveCodable(key: groupsKey, value: groups)
+    }
+
+    private func loadAppGroups() {
+        do {
+            appGroups = try keychain.loadCodable(key: appGroupsKey, as: AppGroups.self)
+        } catch {
+            appGroups = [:]
+        }
+    }
+
+    private func saveAppGroups() throws {
+        try keychain.saveCodable(key: appGroupsKey, value: appGroups)
+    }
+
+    /// Make sure the default group exists. Called once per unlock. If no
+    /// default exists yet, pick a sensible default provider from the user's
+    /// first credential (or fall back to anthropic).
+    private func ensureDefaultGroup() throws {
+        if groups.contains(where: { $0.id == defaultGroupId }) { return }
+        let first = credentials.first
+        let def = Group.makeDefault(
+            providerId: first?.providerId ?? "anthropic",
+            credentialId: first?.id
+        )
+        groups.insert(def, at: 0)
+        try saveGroups()
+    }
+
+    /// Returns the group that should route this origin's requests — the user's
+    /// per-app binding from `appGroups`, falling back to the default group when
+    /// no binding exists. Used by both `ProxyService` and `RelayPairService`
+    /// before each upstream call.
+    func groupForOrigin(_ origin: String) -> Group? {
+        if let bound = appGroups[origin], let group = groups.first(where: { $0.id == bound }) {
+            return group
+        }
+        return groups.first(where: { $0.id == defaultGroupId })
+    }
+
+    /// Bind an app origin to a group. Called from the Apps screen when the
+    /// user assigns a connected app to a group (the per-app routing knob).
+    /// `RoutingResolver` picks this up on the next request via
+    /// `groupForOrigin(_:)` — no other plumbing required.
+    func setAppGroup(origin: String, groupId: String) throws {
+        guard groups.contains(where: { $0.id == groupId }) else { throw GroupError.notFound }
+        appGroups[origin] = groupId
+        try saveAppGroups()
+    }
+
+    enum GroupError: LocalizedError {
+        case nameInvalid
+        case nameDuplicate
+        case providerInvalid
+        case credentialNotFound
+        case credentialMismatch
+        case notFound
+        case cannotDeleteDefault
+
+        var errorDescription: String? {
+            switch self {
+            case .nameInvalid: return "Group name must be 1–200 characters"
+            case .nameDuplicate: return "A group with this name already exists"
+            case .providerInvalid: return "Invalid provider"
+            case .credentialNotFound: return "Credential not found"
+            case .credentialMismatch: return "Credential does not match provider"
+            case .notFound: return "Group not found"
+            case .cannotDeleteDefault: return "Cannot delete the default group"
+            }
+        }
+    }
+
+    @discardableResult
+    func createGroup(name: String, providerId: String, credentialId: String? = nil, model: String? = nil) throws -> Group {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, trimmed.count <= 200 else { throw GroupError.nameInvalid }
+        guard Provider.find(providerId) != nil else { throw GroupError.providerInvalid }
+        if let credentialId {
+            guard let cred = credentials.first(where: { $0.id == credentialId }) else { throw GroupError.credentialNotFound }
+            guard cred.providerId == providerId else { throw GroupError.credentialMismatch }
+        }
+        if groups.contains(where: { $0.name.lowercased() == trimmed.lowercased() }) {
+            throw GroupError.nameDuplicate
+        }
+        let group = Group(
+            id: UUID().uuidString,
+            name: trimmed,
+            providerId: providerId,
+            credentialId: credentialId,
+            model: model?.trimmingCharacters(in: .whitespaces).nilIfEmpty,
+            createdAt: Date()
+        )
+        groups.append(group)
+        try saveGroups()
+        return group
+    }
+
+    @discardableResult
+    func updateGroup(
+        id: String,
+        name: String? = nil,
+        providerId: String? = nil,
+        credentialId: String?? = nil, // double optional: nil = no change, .some(nil) = unset
+        model: String?? = nil
+    ) throws -> Group {
+        guard let idx = groups.firstIndex(where: { $0.id == id }) else { throw GroupError.notFound }
+        var next = groups[idx]
+
+        if let name {
+            let trimmed = name.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty, trimmed.count <= 200 else { throw GroupError.nameInvalid }
+            if id != defaultGroupId,
+               groups.contains(where: { $0.id != id && $0.name.lowercased() == trimmed.lowercased() }) {
+                throw GroupError.nameDuplicate
+            }
+            next.name = trimmed
+        }
+        if let providerId {
+            guard Provider.find(providerId) != nil else { throw GroupError.providerInvalid }
+            next.providerId = providerId
+            // Provider change invalidates credential pin unless this same patch sets it.
+            if credentialId == nil { next.credentialId = nil }
+        }
+        if case .some(let value) = credentialId {
+            if let value {
+                guard let cred = credentials.first(where: { $0.id == value }) else { throw GroupError.credentialNotFound }
+                guard cred.providerId == next.providerId else { throw GroupError.credentialMismatch }
+                next.credentialId = value
+            } else {
+                next.credentialId = nil
+            }
+        }
+        if case .some(let value) = model {
+            next.model = value?.trimmingCharacters(in: .whitespaces).nilIfEmpty
+        }
+
+        groups[idx] = next
+        try saveGroups()
+        return next
+    }
+
+    func deleteGroup(id: String) throws {
+        guard id != defaultGroupId else { throw GroupError.cannotDeleteDefault }
+        guard groups.contains(where: { $0.id == id }) else { throw GroupError.notFound }
+        groups.removeAll { $0.id == id }
+        try saveGroups()
+        // Reassign any apps that pointed at this group back to the default.
+        var mutated = false
+        for (origin, gid) in appGroups where gid == id {
+            appGroups[origin] = defaultGroupId
+            mutated = true
+        }
+        if mutated { try saveAppGroups() }
     }
 
     // MARK: - Gifts (Sender)

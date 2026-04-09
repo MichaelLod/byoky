@@ -37,6 +37,8 @@
 
 - **For users** — One wallet for all your AI credentials. Add keys, approve apps, revoke access, export encrypted backups. Full visibility into every request.
 - **For developers** — Two lines of code. Use your favorite provider SDK. Keys never touch your app.
+- **Groups** — Bucket connected apps by purpose (e.g. "Personal", "Work"). Pin each group to a specific credential, then drag apps between groups to switch which key they use. Live sessions reroute automatically — no code changes in any app.
+- **Cross-provider routing** — Drag an app from a Claude group into a GPT group and the wallet transparently translates the request. Anthropic ↔ OpenAI ↔ Gemini ↔ Cohere — request body, response body, and SSE streams are rewritten on the fly. Apps keep calling their preferred SDK; the wallet picks the upstream.
 - **Token gifts** — Share token access with friends or teammates without sharing your API key. Set budgets and expiration. All requests relay through your wallet.
 
 <p align="center">
@@ -57,9 +59,9 @@
 |----------|--------|------|
 | Chrome | Available | [Chrome Web Store](https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon) |
 | Firefox | Available | [Mozilla Add-ons](https://addons.mozilla.org/en-US/firefox/addon/byoky/) |
-| Safari (iOS) | Available | [App Store](https://apps.apple.com/app/byoky/id6760779919) |
+| iOS (wallet + Safari extension) | Available | [App Store](https://apps.apple.com/app/byoky/id6760779919) |
+| Android (wallet) | Available | [Google Play](https://play.google.com/store/apps/details?id=com.byoky.app) |
 | Safari (macOS) | Coming soon | — |
-| Android | Coming soon | — |
 | npm `@byoky/sdk` | Available | [npmjs.com](https://www.npmjs.com/package/@byoky/sdk) |
 | npm `@byoky/core` | Available | [npmjs.com](https://www.npmjs.com/package/@byoky/core) |
 | npm `@byoky/bridge` | Available | [npmjs.com](https://www.npmjs.com/package/@byoky/bridge) |
@@ -75,7 +77,9 @@
 
 **Firefox:** [Install from Mozilla Add-ons](https://addons.mozilla.org/en-US/firefox/addon/byoky/)
 
-**iOS (Safari):** [Install from App Store](https://apps.apple.com/app/byoky/id6760779919)
+**iOS:** [Install from App Store](https://apps.apple.com/app/byoky/id6760779919) — wallet + Safari extension in one app
+
+**Android:** [Install from Google Play](https://play.google.com/store/apps/details?id=com.byoky.app) — standalone wallet (Chrome Android has no extension support; pair via QR or relay)
 
 ### For Developers
 
@@ -123,13 +127,13 @@ const message = await client.messages.create({
 
 ### Mobile Wallet (No Extension Needed)
 
-No browser extension? Users can connect with the Byoky iOS app instead. The SDK connects via relay — showing a pairing code that the user scans with their phone.
+No browser extension? Users can connect with the Byoky iOS or Android app instead. The SDK connects via relay — showing a pairing code that the user scans with their phone.
 
 ```
 Web App ←WebSocket→ Relay Server ←WebSocket→ Phone Wallet → LLM API
 ```
 
-With `modal: true`, the connect modal automatically detects whether the extension is installed. If not, it falls back to relay mode and shows a built-in QR code for mobile pairing — no custom UI needed.
+With `modal: true`, the connect modal automatically detects whether the extension is installed. If not, it falls back to relay mode and shows a built-in QR code for mobile pairing — no custom UI needed. Both iOS and Android apps run the same translation engine, so cross-provider routing works on mobile too.
 
 ```typescript
 // Works with both extension and mobile — modal handles detection and QR code
@@ -220,6 +224,8 @@ OpenClaw → HTTP → Bridge (localhost) → Native Messaging → Extension → 
 
 All 15 providers are available through the plugin. Install the bridge, connect your wallet, and OpenClaw uses your Byoky credentials transparently. See the [OpenClaw plugin](packages/openclaw-plugin) for setup instructions.
 
+**Setup tokens too.** Since v0.4.19, OpenClaw (and any other third-party agent framework) can use a Claude.ai setup token as the byoky-anthropic credential — not just a `sk-ant-api03-...` API key. The bridge transparently rewrites tool names and relocates the framework's system prompt out of the system field on the way out, then reverses tool names on the streaming response, so Anthropic's first-party detection accepts the request without breaking the agent's behavior.
+
 #### Remote OpenClaw (Cloud Deployment)
 
 Run OpenClaw on a remote server (Railway, Fly.io, etc.) and keep your API keys on your device. The relay bridges the gap — your cloud instance never sees your credentials.
@@ -258,13 +264,11 @@ No environment variables. No secrets management. No leaked `.env` files. Your ke
 | Groq | ✓ | — | Available |
 | Together AI | ✓ | — | Available |
 | Fireworks AI | ✓ | — | Available |
-| Replicate | ✓ | — | Available |
 | OpenRouter | ✓ | — | Available |
-| Hugging Face | ✓ | HF OAuth | Available |
 | Azure OpenAI | ✓ | — | Available |
 | *Custom* | ✓ | — | Extensible |
 
-> **OAuth**: Sign in with your Google or Hugging Face account — no API key needed. **Setup Token**: Use your Claude Pro/Max subscription via `claude setup-token`. API keys use pay-per-use billing from the provider console.
+> **Setup Token**: Use your Claude Pro/Max subscription via `claude setup-token`. API keys use pay-per-use billing from the provider console.
 
 ## Architecture
 
@@ -339,9 +343,13 @@ pnpm --filter @byoky/extension build:all     # Chrome + Firefox + Safari
 - [x] Token gifts (relay-backed, zero key exposure)
 - [x] Mobile wallet relay connect (no extension needed, pair via QR code)
 - [x] iOS app (wallet + Safari extension + relay pairing)
+- [x] Android app (standalone wallet + relay pairing)
 - [x] Developer Hub + create-byoky-app CLI scaffolder
 - [x] MiniApps marketplace (byoky.com/apps)
-- [ ] Remote OpenClaw via relay (cloud deployment, zero key exposure)
+- [x] Alias groups — drag apps between groups to swap which credential they use
+- [x] Setup token compatibility for third-party agents (OpenClaw etc.) — transparent tool name + system prompt rewriting
+- [x] Cross-provider translation — drag an app from a Claude group to a GPT group and have requests transparently rewrite (request body, response body, SSE streams)
+- [x] Remote OpenClaw via relay (cloud deployment, zero key exposure)
 - [ ] Password change (re-encrypt vault with new master password)
 
 ## MiniApps

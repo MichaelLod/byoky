@@ -68,6 +68,12 @@ class WalletStore(context: Context) {
     private val _tokenAllowances = MutableStateFlow<List<TokenAllowance>>(emptyList())
     val tokenAllowances: StateFlow<List<TokenAllowance>> = _tokenAllowances.asStateFlow()
 
+    private val _groups = MutableStateFlow<List<Group>>(emptyList())
+    val groups: StateFlow<List<Group>> = _groups.asStateFlow()
+
+    private val _appGroups = MutableStateFlow<Map<String, String>>(emptyMap())
+    val appGroups: StateFlow<Map<String, String>> = _appGroups.asStateFlow()
+
     private val _bridgeStatus = MutableStateFlow(BridgeStatus.INACTIVE)
     val bridgeStatus: StateFlow<BridgeStatus> = _bridgeStatus.asStateFlow()
 
@@ -133,6 +139,10 @@ class WalletStore(context: Context) {
         masterPassword = password
         _status.value = WalletStatus.UNLOCKED
         loadCredentials()
+        pruneRemovedProviders()
+        loadGroups()
+        loadAppGroups()
+        ensureDefaultGroup()
         loadSessions()
         loadRequestLogs()
         loadGifts()
@@ -153,6 +163,8 @@ class WalletStore(context: Context) {
         _giftedCredentials.value = emptyList()
         _giftPreferences.value = emptyMap()
         _tokenAllowances.value = emptyList()
+        _groups.value = emptyList()
+        _appGroups.value = emptyMap()
         _status.value = WalletStatus.LOCKED
         backgroundTime = null
     }
@@ -242,6 +254,45 @@ class WalletStore(context: Context) {
     }
 
     // MARK: - Sessions
+
+    /**
+     * Default expiry window for relay-paired sessions. The pair stays in the
+     * Apps screen for 30 days even if the WebSocket drops between requests —
+     * the user revokes explicitly when they're done. Lines up with how the
+     * extension treats sessions as durable trust records, not live sockets.
+     */
+    private val relaySessionTtlMs: Long = 30L * 24 * 60 * 60 * 1000
+
+    /**
+     * Upsert a session for `appOrigin`. Used by `RelayPairService` when a
+     * pair handshake completes — durable record so the app shows up in the
+     * Apps screen across reconnects. Re-pairing the same origin updates the
+     * providers list and resets the expiry, but keeps the existing session id.
+     */
+    fun upsertSession(appOrigin: String, providers: List<String>): Session {
+        val now = System.currentTimeMillis()
+        val expiresAt = now + relaySessionTtlMs
+
+        val existing = _sessions.value.firstOrNull { it.appOrigin == appOrigin }
+        if (existing != null) {
+            val updated = existing.copy(providers = providers, expiresAt = expiresAt)
+            _sessions.value = _sessions.value.map { if (it.id == existing.id) updated else it }
+            saveSessions()
+            return updated
+        }
+
+        val session = Session(
+            id = java.util.UUID.randomUUID().toString(),
+            appOrigin = appOrigin,
+            sessionKey = java.util.UUID.randomUUID().toString(),
+            providers = providers,
+            createdAt = now,
+            expiresAt = expiresAt,
+        )
+        _sessions.value = _sessions.value + session
+        saveSessions()
+        return session
+    }
 
     fun revokeSession(session: Session) {
         _sessions.value = _sessions.value.filter { it.id != session.id }
@@ -411,6 +462,9 @@ class WalletStore(context: Context) {
         statusCode: Int,
         requestBody: ByteArray?,
         responseBody: String?,
+        actualProviderId: String? = null,
+        actualModel: String? = null,
+        groupId: String? = null,
     ) {
         var sanitizedUrl = url
         val queryIndex = url.indexOf('?')
@@ -421,7 +475,10 @@ class WalletStore(context: Context) {
         var outputTokens: Int? = null
 
         if (responseBody != null) {
-            val usage = UsageParser.parseUsage(providerId, responseBody)
+            // Use upstream provider for usage parsing if we routed cross-family —
+            // the response shape matches the destination, not the source.
+            val parseProviderId = actualProviderId ?: providerId
+            val usage = UsageParser.parseUsage(parseProviderId, responseBody)
             inputTokens = usage?.inputTokens
             outputTokens = usage?.outputTokens
         }
@@ -435,6 +492,9 @@ class WalletStore(context: Context) {
             model = model,
             inputTokens = inputTokens,
             outputTokens = outputTokens,
+            actualProviderId = actualProviderId,
+            actualModel = actualModel,
+            groupId = groupId,
         )
 
         val logs = listOf(entry) + _requestLogs.value
@@ -461,6 +521,244 @@ class WalletStore(context: Context) {
             )
         }
         _credentials.value = list
+    }
+
+    /**
+     * Drop any stored credentials that reference providers we've removed from
+     * the registry (replicate, huggingface, the legacy "azure-openai" id).
+     * Runs once per unlock; cheap if there's nothing to do.
+     */
+    private fun pruneRemovedProviders() {
+        val stale = _credentials.value.filter { it.providerId in Provider.removedProviderIds }
+        if (stale.isEmpty()) return
+        val editor = prefs.edit()
+        stale.forEach { editor.remove("key_${it.id}") }
+        editor.apply()
+        _credentials.value = _credentials.value.filterNot { it.providerId in Provider.removedProviderIds }
+        saveCredentials()
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Groups
+    //
+    // Mobile uses the default group as a global routing rule because the SDK
+    // protocol doesn't yet carry per-app origin. Multi-group CRUD is wired
+    // through for parity with the extension and forward compat.
+    // ──────────────────────────────────────────────────────────────────────
+
+    private fun loadGroups() {
+        val json = prefs.getString("groups", null) ?: run {
+            _groups.value = emptyList()
+            return
+        }
+        try {
+            val arr = JSONArray(json)
+            val list = mutableListOf<Group>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                list.add(
+                    Group(
+                        id = obj.getString("id"),
+                        name = obj.getString("name"),
+                        providerId = obj.getString("providerId"),
+                        credentialId = if (obj.has("credentialId") && !obj.isNull("credentialId")) obj.getString("credentialId") else null,
+                        model = if (obj.has("model") && !obj.isNull("model")) obj.getString("model") else null,
+                        createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
+                    )
+                )
+            }
+            _groups.value = list
+        } catch (_: Exception) {
+            _groups.value = emptyList()
+        }
+    }
+
+    private fun saveGroups() {
+        val arr = JSONArray()
+        _groups.value.forEach { g ->
+            arr.put(JSONObject().apply {
+                put("id", g.id)
+                put("name", g.name)
+                put("providerId", g.providerId)
+                if (g.credentialId != null) put("credentialId", g.credentialId)
+                if (g.model != null) put("model", g.model)
+                put("createdAt", g.createdAt)
+            })
+        }
+        prefs.edit().putString("groups", arr.toString()).apply()
+    }
+
+    private fun loadAppGroups() {
+        val json = prefs.getString("appGroups", null) ?: run {
+            _appGroups.value = emptyMap()
+            return
+        }
+        try {
+            val obj = JSONObject(json)
+            val map = mutableMapOf<String, String>()
+            obj.keys().forEach { key -> map[key] = obj.getString(key) }
+            _appGroups.value = map
+        } catch (_: Exception) {
+            _appGroups.value = emptyMap()
+        }
+    }
+
+    private fun saveAppGroups() {
+        val obj = JSONObject()
+        _appGroups.value.forEach { (k, v) -> obj.put(k, v) }
+        prefs.edit().putString("appGroups", obj.toString()).apply()
+    }
+
+    /**
+     * Make sure the default group exists. Called once per unlock. Picks a
+     * sensible provider (first credential's, falling back to anthropic).
+     */
+    private fun ensureDefaultGroup() {
+        if (_groups.value.any { it.id == DEFAULT_GROUP_ID }) return
+        val first = _credentials.value.firstOrNull()
+        val def = Group.makeDefault(
+            providerId = first?.providerId ?: "anthropic",
+            credentialId = first?.id,
+        )
+        _groups.value = listOf(def) + _groups.value
+        saveGroups()
+    }
+
+    /**
+     * Returns the group that should route this origin's requests — the user's
+     * per-app binding from `appGroups`, falling back to the default group when
+     * no binding exists. Used by both `ProxyService` and `RelayPairService`
+     * before each upstream call.
+     */
+    fun groupForOrigin(origin: String): Group? {
+        val bound = _appGroups.value[origin]
+        if (bound != null) {
+            val match = _groups.value.firstOrNull { it.id == bound }
+            if (match != null) return match
+        }
+        return _groups.value.firstOrNull { it.id == DEFAULT_GROUP_ID }
+    }
+
+    /**
+     * Bind an app origin to a group. Called from the Apps screen when the
+     * user assigns a connected app to a group (the per-app routing knob).
+     * `RoutingResolver` picks this up on the next request via
+     * `groupForOrigin()` — no other plumbing required.
+     */
+    fun setAppGroup(origin: String, groupId: String) {
+        if (_groups.value.none { it.id == groupId }) throw GroupError.NotFound()
+        _appGroups.value = _appGroups.value + (origin to groupId)
+        saveAppGroups()
+    }
+
+    sealed class GroupError(message: String) : RuntimeException(message) {
+        class NameInvalid : GroupError("Group name must be 1–200 characters")
+        class NameDuplicate : GroupError("A group with this name already exists")
+        class ProviderInvalid : GroupError("Invalid provider")
+        class CredentialNotFound : GroupError("Credential not found")
+        class CredentialMismatch : GroupError("Credential does not match provider")
+        class NotFound : GroupError("Group not found")
+        class CannotDeleteDefault : GroupError("Cannot delete the default group")
+    }
+
+    fun createGroup(name: String, providerId: String, credentialId: String? = null, model: String? = null): Group {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty() || trimmed.length > 200) throw GroupError.NameInvalid()
+        if (Provider.find(providerId) == null) throw GroupError.ProviderInvalid()
+        if (credentialId != null) {
+            val cred = _credentials.value.firstOrNull { it.id == credentialId }
+                ?: throw GroupError.CredentialNotFound()
+            if (cred.providerId != providerId) throw GroupError.CredentialMismatch()
+        }
+        if (_groups.value.any { it.name.equals(trimmed, ignoreCase = true) }) {
+            throw GroupError.NameDuplicate()
+        }
+        val group = Group(
+            id = java.util.UUID.randomUUID().toString(),
+            name = trimmed,
+            providerId = providerId,
+            credentialId = credentialId,
+            model = model?.trim()?.takeIf { it.isNotEmpty() },
+        )
+        _groups.value = _groups.value + group
+        saveGroups()
+        return group
+    }
+
+    /**
+     * Update a group. Pass nulls for fields you don't want to change. To
+     * explicitly UNSET credentialId or model, pass the sentinel string ""
+     * (empty string) — translated to null in the patch.
+     *
+     * Why a sentinel rather than a triple-state Optional<Optional<String>>:
+     * Kotlin doesn't have a clean way to express "missing vs. nullable" for
+     * single-string params, and adding a sealed-class wrapper for two fields
+     * is overkill at the call sites we have.
+     */
+    fun updateGroup(
+        id: String,
+        name: String? = null,
+        providerId: String? = null,
+        credentialId: String? = null,
+        model: String? = null,
+        unsetCredentialId: Boolean = false,
+        unsetModel: Boolean = false,
+    ): Group {
+        val idx = _groups.value.indexOfFirst { it.id == id }
+        if (idx < 0) throw GroupError.NotFound()
+        var next = _groups.value[idx]
+
+        if (name != null) {
+            val trimmed = name.trim()
+            if (trimmed.isEmpty() || trimmed.length > 200) throw GroupError.NameInvalid()
+            if (id != DEFAULT_GROUP_ID &&
+                _groups.value.any { it.id != id && it.name.equals(trimmed, ignoreCase = true) }
+            ) throw GroupError.NameDuplicate()
+            next = next.copy(name = trimmed)
+        }
+        if (providerId != null) {
+            if (Provider.find(providerId) == null) throw GroupError.ProviderInvalid()
+            // Provider change invalidates credential pin unless this same patch sets it.
+            next = next.copy(providerId = providerId, credentialId = if (credentialId != null || unsetCredentialId) next.credentialId else null)
+        }
+        if (unsetCredentialId) {
+            next = next.copy(credentialId = null)
+        } else if (credentialId != null) {
+            val cred = _credentials.value.firstOrNull { it.id == credentialId }
+                ?: throw GroupError.CredentialNotFound()
+            if (cred.providerId != next.providerId) throw GroupError.CredentialMismatch()
+            next = next.copy(credentialId = credentialId)
+        }
+        if (unsetModel) {
+            next = next.copy(model = null)
+        } else if (model != null) {
+            next = next.copy(model = model.trim().takeIf { it.isNotEmpty() })
+        }
+
+        val updated = _groups.value.toMutableList().also { it[idx] = next }
+        _groups.value = updated
+        saveGroups()
+        return next
+    }
+
+    fun deleteGroup(id: String) {
+        if (id == DEFAULT_GROUP_ID) throw GroupError.CannotDeleteDefault()
+        if (_groups.value.none { it.id == id }) throw GroupError.NotFound()
+        _groups.value = _groups.value.filterNot { it.id == id }
+        saveGroups()
+        // Reassign any apps that pointed at this group back to the default.
+        var mutated = false
+        val newAppGroups = _appGroups.value.toMutableMap()
+        for ((origin, gid) in _appGroups.value) {
+            if (gid == id) {
+                newAppGroups[origin] = DEFAULT_GROUP_ID
+                mutated = true
+            }
+        }
+        if (mutated) {
+            _appGroups.value = newAppGroups
+            saveAppGroups()
+        }
     }
 
     private fun saveCredentials() {

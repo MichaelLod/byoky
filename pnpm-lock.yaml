@@ -37,6 +37,10 @@ importers:
         version: 10.0.0(body-parser@2.2.2)(express@5.2.1)(jiti@2.6.1)(safe-compare@1.1.4)
 
   packages/bridge:
+    dependencies:
+      '@byoky/core':
+        specifier: workspace:*
+        version: link:../core
     devDependencies:
       '@types/node':
         specifier: 25.5.0
