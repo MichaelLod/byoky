@@ -12,6 +12,19 @@ export interface VaultConnectOptions {
   username?: string;
   password?: string;
   token?: string;
+  /**
+   * Providers the app needs. Required so the vault can compute per-app
+   * routing decisions and surface availability for each requested provider.
+   * If omitted, the vault will return an empty providers map.
+   */
+  providers?: { id: string; required?: boolean }[];
+  /**
+   * App origin used for per-app routing on the vault side. The vault keys
+   * its app→group bindings by this. In a browser, defaults to
+   * `window.location.origin`. In Node, you must pass it explicitly so the
+   * vault can identify your app.
+   */
+  appOrigin?: string;
 }
 
 export interface ByokySession extends ConnectResponse {
@@ -146,16 +159,28 @@ export class Byoky {
   /**
    * Connect via a Byoky Vault server. Works in both browser and Node.js.
    * The vault stores encrypted credentials and proxies API calls server-side.
+   *
+   * Two-step handshake:
+   *   1. Authenticate with the user's vault credentials → user-session JWT
+   *   2. POST /connect with the requested providers + app origin → app-session JWT
+   *
+   * The app-session JWT is what subsequent /proxy calls use; it's scoped
+   * to (user, origin) so the vault can apply per-app routing rules
+   * (groups, cross-family translation, same-family swap).
+   *
+   * In the browser, the app origin defaults to window.location.origin. In
+   * Node, callers must pass `appOrigin` explicitly.
    */
   async connectViaVault(options: VaultConnectOptions): Promise<ByokySession> {
     const { vaultUrl } = options;
-    let token = options.token;
+    const baseUrl = vaultUrl.replace(/\/$/, '');
+    let userToken = options.token;
 
-    if (!token) {
+    if (!userToken) {
       if (!options.username || !options.password) {
         throw new ByokyError(ByokyErrorCode.UNKNOWN, 'Either token or username+password required for vault connection');
       }
-      const loginResp = await fetch(`${vaultUrl.replace(/\/$/, '')}/auth/login`, {
+      const loginResp = await fetch(`${baseUrl}/auth/login`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ username: options.username, password: options.password }),
@@ -166,27 +191,54 @@ export class Byoky {
         throw new ByokyError(ByokyErrorCode.UNKNOWN, errObj?.message ?? 'Vault login failed');
       }
       const loginData = await loginResp.json() as { token: string };
-      token = loginData.token;
+      userToken = loginData.token;
     }
 
-    const connectResp = await fetch(`${vaultUrl.replace(/\/$/, '')}/connect`, {
-      headers: { 'authorization': `Bearer ${token}` },
-    });
-    if (!connectResp.ok) {
-      throw new ByokyError(ByokyErrorCode.UNKNOWN, 'Failed to get vault providers');
+    const appOrigin =
+      options.appOrigin ??
+      (typeof window !== 'undefined' ? window.location.origin : undefined);
+
+    if (!appOrigin) {
+      throw new ByokyError(
+        ByokyErrorCode.UNKNOWN,
+        'appOrigin is required when connecting from Node. Pass it via options.appOrigin.',
+      );
     }
-    const connectData = await connectResp.json() as {
+
+    const handshakeResp = await fetch(`${baseUrl}/connect`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'authorization': `Bearer ${userToken}`,
+      },
+      body: JSON.stringify({
+        appOrigin,
+        providers: options.providers ?? [],
+      }),
+    });
+    if (!handshakeResp.ok) {
+      const err = await handshakeResp.json().catch(() => ({})) as Record<string, unknown>;
+      const errObj = err.error as Record<string, string> | undefined;
+      throw new ByokyError(
+        ByokyErrorCode.UNKNOWN,
+        errObj?.message ?? 'Failed to establish vault app session',
+      );
+    }
+    const handshakeData = await handshakeResp.json() as {
+      appSessionToken: string;
+      origin: string;
+      groupId: string;
       providers: Record<string, { available: boolean; authMethod: AuthMethod }>;
     };
 
-    const sessionKey = `vault_${token.slice(-8)}`;
-    const vaultToken = token;
+    const appSessionToken = handshakeData.appSessionToken;
+    const sessionKey = `vault_${appSessionToken.slice(-8)}`;
 
     return {
       sessionKey,
-      proxyUrl: `${vaultUrl.replace(/\/$/, '')}/proxy`,
-      providers: connectData.providers,
-      createFetch: (providerId: string) => createVaultFetch(vaultUrl, vaultToken, providerId),
+      proxyUrl: `${baseUrl}/proxy`,
+      providers: handshakeData.providers,
+      createFetch: (providerId: string) => createVaultFetch(vaultUrl, appSessionToken, providerId),
       createRelay: () => { throw new Error('Relay not supported in vault mode'); },
       disconnect: () => {},
       isConnected: async () => true,
