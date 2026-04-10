@@ -74,7 +74,7 @@ describe('TokenAllowance enforcement logic', () => {
     return { allowed: true };
   }
 
-  const origin = 'https://demo.byoky.com';
+  const origin = 'https://byoky.com';
 
   it('allows when no allowance configured', () => {
     expect(checkAllowance(undefined, [], 'openai')).toEqual({ allowed: true });
