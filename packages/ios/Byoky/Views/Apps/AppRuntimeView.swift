@@ -7,7 +7,7 @@ struct AppRuntimeView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
+            SwiftUI.Group {
                 if let url = URL(string: app.url), url.scheme == "https" {
                     AppWebView(url: url, allowedHost: url.host ?? "")
                         .ignoresSafeArea(edges: .bottom)
