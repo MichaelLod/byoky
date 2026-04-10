@@ -80,7 +80,7 @@ function copyTemplateDir(srcDir: string, destDir: string, projectName: string): 
   }
 }
 
-const MARKETPLACE_URL = 'https://marketplace.byoky.com';
+const MARKETPLACE_URL = 'https://byoky.com/api/marketplace';
 
 interface AppManifest {
   name: string;

@@ -18,7 +18,7 @@
   Your keys never leave your device.
   <br />
   <br />
-  <a href="https://byoky.com">Website</a> · <a href="https://byoky.com/docs">Docs</a> · <a href="https://marketplace.byoky.com">Marketplace</a> · <a href="https://demo.byoky.com">Demo</a> · <a href="#quick-start">Quick Start</a> · <a href="https://discord.gg/gRs8S9fxcT">Discord</a> · <a href="https://github.com/MichaelLod/byoky/issues">Issues</a>
+  <a href="https://byoky.com">Website</a> · <a href="https://byoky.com/docs">Docs</a> · <a href="https://byoky.com/marketplace">Marketplace</a> · <a href="https://demo.byoky.com">Demo</a> · <a href="#quick-start">Quick Start</a> · <a href="https://discord.gg/gRs8S9fxcT">Discord</a> · <a href="https://github.com/MichaelLod/byoky/issues">Issues</a>
   <br />
   <br />
   <a href="https://github.com/MichaelLod/byoky/blob/main/LICENSE"><img src="https://img.shields.io/github/license/MichaelLod/byoky?style=flat&color=0ea5e9" alt="License" /></a>
@@ -294,7 +294,6 @@ byoky/
 │   ├── ios/           # iOS app (wallet + Safari extension)
 │   ├── openclaw-plugin/ # OpenClaw provider plugin
 │   ├── create-byoky-app/ # CLI scaffolder — npx create-byoky-app
-│   ├── marketplace/   # App marketplace (marketplace.byoky.com)
 │   ├── vault/         # Encrypted cloud vault backup server
 │   └── web/           # Landing page (byoky.com) + MiniApps + Developer Hub
 ```
@@ -351,7 +350,7 @@ pnpm --filter @byoky/extension build:all     # Chrome + Firefox + Safari
 
 ## App Ecosystem
 
-**[marketplace.byoky.com](https://marketplace.byoky.com)** — A curated marketplace of apps that run on your own API keys. Install apps directly into your wallet (extension or mobile), and they run inside a sandboxed iframe/WebView — your keys never leave the wallet.
+**[byoky.com/marketplace](https://byoky.com/marketplace)** — A curated marketplace of apps that run on your own API keys. Install apps directly into your wallet (extension or mobile), and they run inside a sandboxed iframe/WebView — your keys never leave the wallet.
 
 **How it works:**
 1. Browse the App Store from the **Apps** tab in your wallet
@@ -367,7 +366,7 @@ npx create-byoky-app init      # create a byoky.app.json manifest
 npx create-byoky-app submit    # submit to the marketplace
 ```
 
-Or submit via the web form at [marketplace.byoky.com/submit](https://marketplace.byoky.com/submit).
+Or submit via the web form at [byoky.com/marketplace/submit](https://byoky.com/marketplace/submit).
 
 **Security model:**
 - Apps run in a sandboxed iframe (`allow-scripts allow-forms`) or WKWebView/WebView
