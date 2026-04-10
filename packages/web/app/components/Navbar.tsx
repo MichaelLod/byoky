@@ -56,6 +56,7 @@ export function Navbar() {
         </a>
         <div className="navbar-links">
           <a href="/docs">Docs</a>
+          <a href="/demo">Demo</a>
           <a href="/apps">Apps</a>
           <a href="/marketplace">Marketplace</a>
         </div>
