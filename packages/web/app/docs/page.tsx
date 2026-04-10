@@ -686,7 +686,7 @@ const docsStyles = `
   display: flex;
   max-width: 1100px;
   margin: 0 auto;
-  padding: 80px 20px 80px;
+  padding: 120px 20px 80px;
   gap: 48px;
 }
 
@@ -976,7 +976,7 @@ const docsStyles = `
   .docs-layout {
     flex-direction: column;
     gap: 24px;
-    padding-top: 80px;
+    padding-top: 120px;
   }
   .docs-nav {
     position: static;
