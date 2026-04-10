@@ -12,22 +12,22 @@ interface Props {
   session: ByokySession;
 }
 
-const openaiCompatible: Record<string, { url: string; model: string; name: string }> = {
-  openai:       { url: 'https://api.openai.com/v1/chat/completions',       model: 'gpt-4o',                        name: 'OpenAI (GPT-4o)' },
-  groq:         { url: 'https://api.groq.com/openai/v1/chat/completions',  model: 'llama-3.3-70b-versatile',       name: 'Groq (Llama 3.3)' },
-  deepseek:     { url: 'https://api.deepseek.com/chat/completions',        model: 'deepseek-chat',                 name: 'DeepSeek' },
-  xai:          { url: 'https://api.x.ai/v1/chat/completions',             model: 'grok-3-mini',                   name: 'xAI (Grok)' },
-  mistral:      { url: 'https://api.mistral.ai/v1/chat/completions',       model: 'mistral-large-latest',          name: 'Mistral' },
-  together:     { url: 'https://api.together.xyz/v1/chat/completions',     model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', name: 'Together AI' },
-  fireworks:    { url: 'https://api.fireworks.ai/inference/v1/chat/completions', model: 'accounts/fireworks/models/llama-v3p3-70b-instruct', name: 'Fireworks AI' },
-  perplexity:   { url: 'https://api.perplexity.ai/chat/completions',       model: 'sonar',                         name: 'Perplexity' },
-  openrouter:   { url: 'https://openrouter.ai/api/v1/chat/completions',    model: 'anthropic/claude-sonnet-4',     name: 'OpenRouter' },
-  cohere:       { url: 'https://api.cohere.com/v2/chat',                   model: 'command-r-plus',                name: 'Cohere' },
+const providers: Record<string, { url: string; model: string; name: string }> = {
+  anthropic:    { url: 'https://api.anthropic.com/v1/messages',                                    model: 'claude-sonnet-4-20250514',       name: 'Anthropic (Claude)' },
+  openai:       { url: 'https://api.openai.com/v1/chat/completions',                               model: 'gpt-4o',                         name: 'OpenAI (GPT-4o)' },
+  gemini:       { url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent', model: 'gemini-2.0-flash', name: 'Google (Gemini)' },
+  groq:         { url: 'https://api.groq.com/openai/v1/chat/completions',                          model: 'llama-3.3-70b-versatile',        name: 'Groq (Llama 3.3)' },
+  deepseek:     { url: 'https://api.deepseek.com/chat/completions',                                model: 'deepseek-chat',                  name: 'DeepSeek' },
+  xai:          { url: 'https://api.x.ai/v1/chat/completions',                                    model: 'grok-3-mini',                    name: 'xAI (Grok)' },
+  mistral:      { url: 'https://api.mistral.ai/v1/chat/completions',                               model: 'mistral-large-latest',           name: 'Mistral' },
+  together:     { url: 'https://api.together.xyz/v1/chat/completions',                              model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', name: 'Together AI' },
+  fireworks:    { url: 'https://api.fireworks.ai/inference/v1/chat/completions',                    model: 'accounts/fireworks/models/llama-v3p3-70b-instruct', name: 'Fireworks AI' },
+  perplexity:   { url: 'https://api.perplexity.ai/chat/completions',                               model: 'sonar',                          name: 'Perplexity' },
+  openrouter:   { url: 'https://openrouter.ai/api/v1/chat/completions',                            model: 'anthropic/claude-sonnet-4',      name: 'OpenRouter' },
+  cohere:       { url: 'https://api.cohere.com/v2/chat',                                           model: 'command-r-plus',                 name: 'Cohere' },
 };
 
 const visionProviders = new Set(['anthropic', 'openai', 'gemini']);
-
-const dropdownProviders: string[] = ['anthropic', 'gemini', ...Object.keys(openaiCompatible)];
 
 const suggestedPrompts = [
   'Which model are you?',
@@ -37,10 +37,10 @@ const suggestedPrompts = [
   'Create a haiku about open-source software',
 ];
 
+const providerIds = Object.keys(providers);
+
 function getProviderLabel(id: string): string {
-  if (id === 'anthropic') return 'Anthropic (Claude)';
-  if (id === 'gemini') return 'Google (Gemini)';
-  return openaiCompatible[id]?.name ?? id;
+  return providers[id]?.name ?? id;
 }
 
 /* ─── SSE Stream Parser ────────────────────── */
@@ -178,8 +178,8 @@ export function Chat({ session }: Props) {
     // Prefer a directly-available provider as the default; fall back to the
     // first in the list (so the dropdown is still populated even with zero
     // credentials, and the user can pair the wallet first then send).
-    const firstDirect = dropdownProviders.find(id => session.providers[id]?.available === true);
-    setSelectedProvider(firstDirect ?? dropdownProviders[0]);
+    const firstDirect = providerIds.find(id => session.providers[id]?.available === true);
+    setSelectedProvider(firstDirect ?? providerIds[0]);
   }, [session.providers, selectedProvider]);
 
 
@@ -242,10 +242,10 @@ export function Chat({ session }: Props) {
           );
         apiMessages.push({ role: 'user', content });
 
-        const response = await proxyFetch('https://api.anthropic.com/v1/messages', {
+        const response = await proxyFetch(providers.anthropic.url, {
           method: 'POST',
           headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' },
-          body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1024, ...(useStream && { stream: true }), messages: apiMessages }),
+          body: JSON.stringify({ model: providers.anthropic.model, max_tokens: 1024, ...(useStream && { stream: true }), messages: apiMessages }),
         });
 
         if (!response.ok) {
@@ -286,7 +286,7 @@ export function Chat({ session }: Props) {
         apiContents.push({ role: 'user', parts });
 
         const response = await proxyFetch(
-          'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
+          providers.gemini.url,
           { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ contents: apiContents }) },
         );
         if (!response.ok) {
@@ -310,7 +310,7 @@ export function Chat({ session }: Props) {
           );
         apiMessages.push({ role: 'user', content });
 
-        const config = openaiCompatible.openai;
+        const config = providers.openai;
         const response = await proxyFetch(config.url, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -331,9 +331,9 @@ export function Chat({ session }: Props) {
           appendToken(data.choices?.[0]?.message?.content || 'No response.');
         }
 
-      } else if (selectedProvider in openaiCompatible) {
+      } else if (selectedProvider in providers) {
         const allMessages = [...prevMessages, userMessage].map(m => ({ role: m.role, content: m.content }));
-        const config = openaiCompatible[selectedProvider];
+        const config = providers[selectedProvider];
         const response = await proxyFetch(config.url, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -388,7 +388,7 @@ export function Chat({ session }: Props) {
         <div className="provider-select">
           <label>Provider:</label>
           <select value={selectedProvider} onChange={e => setSelectedProvider(e.target.value)}>
-            {dropdownProviders.map(id => (
+            {providerIds.map(id => (
               <option key={id} value={id}>
                 {getProviderLabel(id)}
               </option>
