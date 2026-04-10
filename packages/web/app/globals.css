@@ -482,6 +482,21 @@ section {
   height: auto;
 }
 
+/* ── Section Demo (reusable) ── */
+
+.section-demo {
+  margin-top: 28px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.section-demo video {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 /* ── Version Status ── */
 
 .version-status {
