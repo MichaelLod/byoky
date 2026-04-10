@@ -8,25 +8,22 @@ export default function Home() {
       <div className="divider" />
       <ZeroCost />
       <div className="divider" />
+      <WhyByoky />
+      <div className="divider" />
+      <Providers />
+      <div className="divider" />
       <ForDevelopers />
       <div className="divider" />
       <HowItWorks />
       <div className="divider" />
       <Security />
       <div className="divider" />
-      <Providers />
-      <div className="divider" />
       <CrossProviderRouting />
       <div className="divider" />
       <MobileWallet />
       <div className="divider" />
-      <OpenClawIntegration />
-      <div className="divider" />
-      <AppEcosystem />
-      <div className="divider" />
-      <TokenMarketplace />
-      <div className="divider" />
       <OpenSource />
+      <ClosingCTA />
       <Footer />
     </>
   );
@@ -152,8 +149,8 @@ function Hero() {
         </FadeIn>
         <FadeIn delay={0.2}>
           <p>
-            A browser wallet that keeps your AI API keys encrypted and local.
-            Apps get proxied access — never the keys themselves.
+            15 providers. 2 lines to integrate. Cross-provider translation.
+            Your keys stay encrypted on your device — apps never see them.
           </p>
         </FadeIn>
         <FadeIn delay={0.3}>
@@ -260,18 +257,6 @@ function HowItWorks() {
               <p>
                 Visit any Byoky-enabled app. Approve access in one click. Your
                 keys stay in the vault — always.
-              </p>
-            </div>
-          </FadeIn>
-          <FadeIn delay={0.4}>
-            <div className="step">
-              <div className="step-number">
-                <GiftIcon />
-              </div>
-              <h3>Gift tokens</h3>
-              <p>
-                Share token access without sharing your API key. Set a budget,
-                generate a gift link, and revoke anytime. Relay-backed — zero key exposure.
               </p>
             </div>
           </FadeIn>
@@ -561,6 +546,70 @@ function Security() {
   );
 }
 
+/* ─── Why Byoky ───────────────────────────────── */
+
+function WhyByoky() {
+  const features = [
+    { label: 'User chooses model', byoky: true, paste: false, gateway: 'partial', vendor: false },
+    { label: 'Keys stay on device', byoky: true, paste: false, gateway: false, vendor: false },
+    { label: 'Cross-provider translation', byoky: true, paste: false, gateway: false, vendor: false },
+    { label: 'Local + cloud models', byoky: true, paste: false, gateway: 'partial', vendor: 'partial' },
+    { label: 'Mobile wallet + QR', byoky: true, paste: false, gateway: false, vendor: false },
+    { label: 'Token gifting', byoky: true, paste: false, gateway: false, vendor: false },
+    { label: 'Backend relay', byoky: true, paste: false, gateway: true, vendor: false },
+    { label: 'Full audit log', byoky: true, paste: false, gateway: true, vendor: false },
+    { label: 'Zero server cost', byoky: true, paste: false, gateway: false, vendor: false },
+    { label: 'Integration effort', byoky: '2 lines', paste: '~40 lines', gateway: '~30 lines', vendor: '~15 lines' },
+    { label: 'Open source', byoky: true, paste: 'varies', gateway: 'some', vendor: 'some' },
+  ];
+
+  function CellValue({ value }: { value: boolean | string }) {
+    if (value === true) return <span className="compare-yes"><TableCheckIcon /></span>;
+    if (value === false) return <span className="compare-no"><TableXIcon /></span>;
+    return <span className="compare-partial">{value}</span>;
+  }
+
+  return (
+    <section className="compare-section">
+      <div className="container">
+        <FadeIn>
+          <h2>Why Byoky?</h2>
+          <p className="subtitle">
+            Stop pasting API keys into apps. Stop paying for AI gateways.
+            Let your users bring their own keys.
+          </p>
+        </FadeIn>
+        <FadeIn delay={0.1}>
+          <div className="compare-table-wrap">
+            <table className="compare-table">
+              <thead>
+                <tr>
+                  <th></th>
+                  <th className="compare-highlight">Byoky</th>
+                  <th>Paste API Key</th>
+                  <th>AI Gateways</th>
+                  <th>Vendor SDKs</th>
+                </tr>
+              </thead>
+              <tbody>
+                {features.map((f) => (
+                  <tr key={f.label}>
+                    <td className="compare-feature">{f.label}</td>
+                    <td className="compare-highlight"><CellValue value={f.byoky} /></td>
+                    <td><CellValue value={f.paste} /></td>
+                    <td><CellValue value={f.gateway} /></td>
+                    <td><CellValue value={f.vendor} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </FadeIn>
+      </div>
+    </section>
+  );
+}
+
 /* ─── Providers ────────────────────────────────── */
 
 function Providers() {
@@ -753,236 +802,6 @@ function MobileWallet() {
   );
 }
 
-/* ─── OpenClaw Integration ─────────────────────── */
-
-function OpenClawIntegration() {
-  return (
-    <section className="openclaw-section">
-      <div className="container">
-        <FadeIn>
-          <div className="openclaw-card">
-            <div className="openclaw-badge">Integration</div>
-            <div className="openclaw-content">
-              <div className="openclaw-header">
-                <div className="openclaw-logo">
-                  <TerminalIcon />
-                </div>
-                <div>
-                  <h3>Works with OpenClaw</h3>
-                  <p className="openclaw-tagline">
-                    Use your Byoky wallet as the key provider for OpenClaw.
-                  </p>
-                </div>
-              </div>
-              <p className="openclaw-desc">
-                The OpenClaw plugin connects through the Byoky Bridge — a local
-                HTTP proxy that routes every API call through your extension. Your
-                keys never leave the wallet, even when OpenClaw makes requests
-                from the CLI.
-              </p>
-              <div className="openclaw-flow">
-                <div className="openclaw-flow-step">
-                  <span className="openclaw-flow-label">OpenClaw</span>
-                </div>
-                <span className="openclaw-flow-arrow">&rarr;</span>
-                <div className="openclaw-flow-step">
-                  <span className="openclaw-flow-label">Bridge</span>
-                </div>
-                <span className="openclaw-flow-arrow">&rarr;</span>
-                <div className="openclaw-flow-step openclaw-flow-highlight">
-                  <span className="openclaw-flow-label">Extension</span>
-                </div>
-                <span className="openclaw-flow-arrow">&rarr;</span>
-                <div className="openclaw-flow-step">
-                  <span className="openclaw-flow-label">LLM API</span>
-                </div>
-              </div>
-              <div className="openclaw-actions">
-                <a
-                  href="https://github.com/MichaelLod/byoky/tree/main/packages/openclaw-plugin"
-                  className="btn btn-secondary btn-sm"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  View Plugin
-                </a>
-                <a
-                  href="https://github.com/MichaelLod/byoky/tree/main/packages/bridge"
-                  className="btn btn-secondary btn-sm"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Bridge Docs
-                </a>
-              </div>
-            </div>
-          </div>
-        </FadeIn>
-        <FadeIn delay={0.15}>
-          <div className="openclaw-card openclaw-card-remote">
-            <div className="openclaw-badge">Cloud</div>
-            <div className="openclaw-content">
-              <div className="openclaw-header">
-                <div className="openclaw-logo openclaw-logo-cloud">
-                  <CloudIcon />
-                </div>
-                <div>
-                  <h3>Remote OpenClaw</h3>
-                  <p className="openclaw-tagline">
-                    Run OpenClaw in the cloud. Keys stay on your device.
-                  </p>
-                </div>
-              </div>
-              <p className="openclaw-desc">
-                Deploy OpenClaw on Railway, Fly.io, or any cloud provider and
-                connect it to your Byoky wallet via the relay. Your server never
-                sees your API keys — no environment variables, no secrets
-                management, no leaked <code>.env</code> files.
-              </p>
-              <div className="openclaw-flow">
-                <div className="openclaw-flow-step">
-                  <span className="openclaw-flow-label">OpenClaw</span>
-                  <span className="openclaw-flow-sub">Railway</span>
-                </div>
-                <span className="openclaw-flow-arrow">&harr;</span>
-                <div className="openclaw-flow-step">
-                  <span className="openclaw-flow-label">Relay</span>
-                  <span className="openclaw-flow-sub">WebSocket</span>
-                </div>
-                <span className="openclaw-flow-arrow">&harr;</span>
-                <div className="openclaw-flow-step openclaw-flow-highlight">
-                  <span className="openclaw-flow-label">Your Wallet</span>
-                  <span className="openclaw-flow-sub">Keys stay here</span>
-                </div>
-                <span className="openclaw-flow-arrow">&rarr;</span>
-                <div className="openclaw-flow-step">
-                  <span className="openclaw-flow-label">LLM API</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </FadeIn>
-      </div>
-    </section>
-  );
-}
-
-/* ─── App Ecosystem ────────────────────────────── */
-
-function AppEcosystem() {
-  return (
-    <section className="routing-section">
-      <div className="container">
-        <FadeIn>
-          <h2>App Ecosystem.</h2>
-          <p className="subtitle">
-            Install apps directly into your wallet. They run sandboxed inside
-            the extension or mobile app — your keys never leave the vault.
-          </p>
-        </FadeIn>
-
-        <div className="security-grid" style={{ marginTop: 48 }}>
-          <FadeIn delay={0.05}>
-            <div className="security-card">
-              <DownloadIcon />
-              <h3>Curated Marketplace</h3>
-              <p>Browse and install reviewed apps from the App Store — right inside your wallet.</p>
-            </div>
-          </FadeIn>
-          <FadeIn delay={0.1}>
-            <div className="security-card">
-              <ShieldIcon />
-              <h3>Sandboxed Runtime</h3>
-              <p>Apps run in isolated iframes and WebViews. No access to your keys, storage, or wallet internals.</p>
-            </div>
-          </FadeIn>
-          <FadeIn delay={0.15}>
-            <div className="security-card">
-              <LinkIcon />
-              <h3>SDK Integration</h3>
-              <p>Apps use @byoky/sdk to request provider access. You control which providers each app can use.</p>
-            </div>
-          </FadeIn>
-          <FadeIn delay={0.2}>
-            <div className="security-card">
-              <TerminalIcon />
-              <h3>Build & Submit</h3>
-              <p>Scaffold with create-byoky-app, submit your manifest, and reach every Byoky user.</p>
-            </div>
-          </FadeIn>
-        </div>
-
-        <FadeIn delay={0.25}>
-          <div style={{ textAlign: 'center', marginTop: 40 }}>
-            <a
-              href="/apps"
-              className="btn btn-primary"
-            >
-              Browse Marketplace
-            </a>
-          </div>
-        </FadeIn>
-      </div>
-    </section>
-  );
-}
-
-/* ─── Token Marketplace ────────────────────────── */
-
-function TokenMarketplace() {
-  return (
-    <section className="routing-section">
-      <div className="container">
-        <FadeIn>
-          <h2>Token Marketplace.</h2>
-          <p className="subtitle">
-            A community board for free token gifts. Share your unused tokens
-            with others, or grab some for yourself.
-          </p>
-        </FadeIn>
-
-        <div className="security-grid" style={{ marginTop: 48 }}>
-          <FadeIn delay={0.05}>
-            <div className="security-card">
-              <GiftIcon />
-              <h3>Share Tokens</h3>
-              <p>List a gift from your wallet with one toggle. Set a budget, choose a provider, and share with the community.</p>
-            </div>
-          </FadeIn>
-          <FadeIn delay={0.1}>
-            <div className="security-card">
-              <GaugeIcon />
-              <h3>Live Status</h3>
-              <p>See which gifts are online, how many tokens remain, and when they expire — all in real time.</p>
-            </div>
-          </FadeIn>
-          <FadeIn delay={0.15}>
-            <div className="security-card">
-              <ShieldIcon />
-              <h3>Zero Risk</h3>
-              <p>Gifts relay through the sender&apos;s wallet. Keys never leave. Budget enforced. Revocable anytime.</p>
-            </div>
-          </FadeIn>
-          <FadeIn delay={0.2}>
-            <div className="security-card">
-              <KeyIcon />
-              <h3>Instant Redeem</h3>
-              <p>Grab a gift link and paste it into your Byoky wallet. Start making API calls in seconds.</p>
-            </div>
-          </FadeIn>
-        </div>
-
-        <FadeIn delay={0.25}>
-          <div style={{ textAlign: 'center', marginTop: 40 }}>
-            <a href="/marketplace" className="btn btn-primary">
-              Browse Marketplace
-            </a>
-          </div>
-        </FadeIn>
-      </div>
-    </section>
-  );
-}
 
 /* ─── Open Source ───────────────────────────────── */
 
@@ -1012,6 +831,41 @@ function OpenSource() {
   );
 }
 
+/* ─── Closing CTA ─────────────────────────────── */
+
+function ClosingCTA() {
+  return (
+    <section className="cta-section">
+      <div className="cta-glow" aria-hidden />
+      <div className="container">
+        <FadeIn>
+          <h2>Ready to own your AI keys?</h2>
+          <p className="subtitle">
+            Install in 30 seconds. No account required.
+          </p>
+          <div className="cta-actions">
+            <a
+              href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon"
+              className="btn btn-primary"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <DownloadIcon />
+              Install for Chrome
+            </a>
+            <a
+              href="/docs"
+              className="btn btn-secondary"
+            >
+              Read the Docs
+            </a>
+          </div>
+        </FadeIn>
+      </div>
+    </section>
+  );
+}
+
 /* ─── Footer ───────────────────────────────────── */
 
 function Footer() {
@@ -1031,11 +885,21 @@ function Footer() {
             <a href="/docs">
               Docs
             </a>
+            <a href="/apps">
+              App Store
+            </a>
             <a href="/marketplace">
-              Marketplace
+              Token Marketplace
             </a>
             <a href="/demo">
               Demo
+            </a>
+            <a
+              href="https://github.com/MichaelLod/byoky/tree/main/packages/openclaw-plugin"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              OpenClaw Plugin
             </a>
             <a
               href="https://github.com/MichaelLod/byoky/blob/main/LICENSE"
@@ -1148,14 +1012,6 @@ function PhoneIcon() {
   );
 }
 
-function CloudIcon() {
-  return (
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />
-    </svg>
-  );
-}
-
 function CloudOffIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -1173,11 +1029,19 @@ function CheckIcon() {
   );
 }
 
-function TerminalIcon() {
+function TableCheckIcon() {
   return (
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="4 17 10 11 4 5" />
-      <line x1="12" y1="19" x2="20" y2="19" />
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--green)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+
+function TableXIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
     </svg>
   );
 }
