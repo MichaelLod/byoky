@@ -96,8 +96,8 @@ const response = await fetch('${p.url}', {
 });`;
 }
 
-function highlightCode(code: string): JSX.Element[] {
-  const tokens: JSX.Element[] = [];
+function highlightCode(code: string): React.ReactElement[] {
+  const tokens: React.ReactElement[] = [];
   const re = /(\/\/[^\n]*)|('(?:[^'\\]|\\.)*')|(`(?:[^`\\]|\\.)*`)|(true|false|null|undefined)|(\b(?:const|let|var|await|new|return|if|else|function|async|import|from|export)\b)|(\b\d+\b)|([\w$.]+)|([^\w\s])|(\s+)/g;
   let match;
   let i = 0;
