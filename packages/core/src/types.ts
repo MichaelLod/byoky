@@ -343,3 +343,46 @@ export interface Group {
 
 // origin → group id; absence means the app belongs to DEFAULT_GROUP_ID
 export type AppGroups = Record<string, string>;
+
+// --- Marketplace Apps ---
+
+export type AppCategory = 'chat' | 'coding' | 'trading' | 'productivity' | 'research' | 'creative' | 'other';
+
+export type AppStatus = 'pending' | 'approved' | 'rejected' | 'suspended';
+
+export interface MarketplaceApp {
+  id: string;
+  name: string;
+  slug: string;
+  url: string;
+  icon: string;
+  description: string;
+  category: AppCategory;
+  providers: ProviderId[];
+  author: {
+    name: string;
+    website?: string;
+  };
+  status: AppStatus;
+  verified: boolean;
+  featured: boolean;
+  createdAt: number;
+}
+
+export interface InstalledApp {
+  id: string;
+  slug: string;
+  name: string;
+  url: string;
+  icon: string;
+  description: string;
+  category: AppCategory;
+  providers: ProviderId[];
+  author: {
+    name: string;
+    website?: string;
+  };
+  verified: boolean;
+  installedAt: number;
+  enabled: boolean;
+}

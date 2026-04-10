@@ -22,6 +22,8 @@ export default function Home() {
       <div className="divider" />
       <OpenClawIntegration />
       <div className="divider" />
+      <AppEcosystem />
+      <div className="divider" />
       <OpenSource />
       <Footer />
     </>
@@ -856,6 +858,68 @@ function OpenClawIntegration() {
                 </div>
               </div>
             </div>
+          </div>
+        </FadeIn>
+      </div>
+    </section>
+  );
+}
+
+/* ─── App Ecosystem ────────────────────────────── */
+
+function AppEcosystem() {
+  return (
+    <section className="routing-section">
+      <div className="container">
+        <FadeIn>
+          <h2>App Ecosystem.</h2>
+          <p className="subtitle">
+            Install apps directly into your wallet. They run sandboxed inside
+            the extension or mobile app — your keys never leave the vault.
+          </p>
+        </FadeIn>
+
+        <div className="security-grid" style={{ marginTop: 48 }}>
+          <FadeIn delay={0.05}>
+            <div className="security-card">
+              <DownloadIcon />
+              <h3>Curated Marketplace</h3>
+              <p>Browse and install reviewed apps from the App Store — right inside your wallet.</p>
+            </div>
+          </FadeIn>
+          <FadeIn delay={0.1}>
+            <div className="security-card">
+              <ShieldIcon />
+              <h3>Sandboxed Runtime</h3>
+              <p>Apps run in isolated iframes and WebViews. No access to your keys, storage, or wallet internals.</p>
+            </div>
+          </FadeIn>
+          <FadeIn delay={0.15}>
+            <div className="security-card">
+              <LinkIcon />
+              <h3>SDK Integration</h3>
+              <p>Apps use @byoky/sdk to request provider access. You control which providers each app can use.</p>
+            </div>
+          </FadeIn>
+          <FadeIn delay={0.2}>
+            <div className="security-card">
+              <TerminalIcon />
+              <h3>Build & Submit</h3>
+              <p>Scaffold with create-byoky-app, submit your manifest, and reach every Byoky user.</p>
+            </div>
+          </FadeIn>
+        </div>
+
+        <FadeIn delay={0.25}>
+          <div style={{ textAlign: 'center', marginTop: 40 }}>
+            <a
+              href="https://marketplace.byoky.com"
+              className="btn btn-primary"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Browse Marketplace
+            </a>
           </div>
         </FadeIn>
       </div>

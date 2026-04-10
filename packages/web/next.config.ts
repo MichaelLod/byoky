@@ -2,11 +2,6 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   transpilePackages: ['@byoky/sdk', '@byoky/core'],
-  async redirects() {
-    return [
-      { source: '/app', destination: '/apps', permanent: true },
-    ];
-  },
   async headers() {
     // Dev mode needs 'unsafe-eval' for React Refresh / HMR. Skip the strict
     // CSP entirely in dev — production keeps the full lockdown.

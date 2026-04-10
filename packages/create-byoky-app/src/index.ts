@@ -80,7 +80,110 @@ function copyTemplateDir(srcDir: string, destDir: string, projectName: string): 
   }
 }
 
+const MARKETPLACE_URL = 'https://marketplace.byoky.com';
+
+interface AppManifest {
+  name: string;
+  slug: string;
+  url: string;
+  icon: string;
+  description: string;
+  category: string;
+  providers: string[];
+  author: {
+    name: string;
+    email: string;
+    website?: string;
+  };
+}
+
+async function initManifest(rl: readline.Interface): Promise<void> {
+  const manifestPath = path.resolve(process.cwd(), 'byoky.app.json');
+
+  if (fs.existsSync(manifestPath)) {
+    console.log('  byoky.app.json already exists.\n');
+    return;
+  }
+
+  console.log('  Create a byoky.app.json manifest for marketplace submission.\n');
+
+  const name = await ask(rl, '  App name: ');
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const url = await ask(rl, '  App URL (https://...): ');
+  const description = await ask(rl, '  Description: ');
+  const category = await ask(rl, '  Category (chat/coding/trading/productivity/research/creative/other): ') || 'other';
+  const providersRaw = await ask(rl, '  Providers (comma-separated, e.g. anthropic,openai): ');
+  const providers = providersRaw.split(',').map((p) => p.trim()).filter(Boolean);
+  const authorName = await ask(rl, '  Author name: ');
+  const authorEmail = await ask(rl, '  Author email: ');
+  const authorWebsite = await ask(rl, '  Author website (optional): ');
+
+  const manifest: AppManifest = {
+    name,
+    slug,
+    url,
+    icon: '/icon.png',
+    description,
+    category,
+    providers,
+    author: {
+      name: authorName,
+      email: authorEmail,
+      ...(authorWebsite ? { website: authorWebsite } : {}),
+    },
+  };
+
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
+  console.log(`\n  \u2713 Created byoky.app.json\n`);
+}
+
+async function submitApp(): Promise<void> {
+  const manifestPath = path.resolve(process.cwd(), 'byoky.app.json');
+
+  if (!fs.existsSync(manifestPath)) {
+    console.error('\n  Error: byoky.app.json not found. Run `create-byoky-app init` first.\n');
+    process.exit(1);
+  }
+
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as AppManifest;
+
+  console.log(`\n  Submitting "${manifest.name}" to Byoky Marketplace...\n`);
+
+  try {
+    const res = await fetch(`${MARKETPLACE_URL}/api/submit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(manifest),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error((body as { error?: string }).error || `HTTP ${res.status}`);
+    }
+
+    console.log('  \u2713 Submitted for review! You will be notified when approved.\n');
+  } catch (err) {
+    console.error(`\n  Error: ${(err as Error).message}\n`);
+    process.exit(1);
+  }
+}
+
 async function main(): Promise<void> {
+  const command = process.argv[2];
+
+  // Handle subcommands
+  if (command === 'init' || command === 'submit') {
+    printBanner();
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    try {
+      if (command === 'init') await initManifest(rl);
+      else await submitApp();
+    } finally {
+      rl.close();
+    }
+    return;
+  }
+
   printBanner();
 
   const rl = readline.createInterface({
@@ -89,7 +192,7 @@ async function main(): Promise<void> {
   });
 
   try {
-    let projectName = process.argv[2];
+    let projectName = command;
 
     if (!projectName) {
       projectName = await ask(rl, '  Project name: ');
@@ -150,12 +253,33 @@ async function main(): Promise<void> {
       throw err;
     }
 
+    // Generate a starter byoky.app.json manifest
+    const manifest: AppManifest = {
+      name: projectName,
+      slug: projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+      url: `https://${projectName}.example.com`,
+      icon: '/icon.png',
+      description: `${projectName} — a Byoky-powered app`,
+      category: 'other',
+      providers: ['anthropic', 'openai'],
+      author: { name: '', email: '' },
+    };
+    fs.writeFileSync(
+      path.join(targetDir, 'byoky.app.json'),
+      JSON.stringify(manifest, null, 2) + '\n',
+      'utf-8',
+    );
+
     console.log(`  \u2713 Created ${projectName}!`);
     console.log();
     console.log('  Next steps:');
     console.log(`    cd ${projectName}`);
     console.log('    npm install');
     console.log('    npm run dev');
+    console.log();
+    console.log('  When ready to publish:');
+    console.log(`    npx create-byoky-app init    # fill in your manifest`);
+    console.log(`    npx create-byoky-app submit   # submit to marketplace`);
     console.log();
     console.log('  Docs: https://byoky.com/dev');
     console.log();

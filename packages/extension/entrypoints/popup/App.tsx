@@ -12,6 +12,9 @@ import { Settings } from './pages/Settings';
 import { Gifts } from './pages/Gifts';
 import { CreateGift } from './pages/CreateGift';
 import { RedeemGift } from './pages/RedeemGift';
+import { Apps } from './pages/Apps';
+import { AppStore } from './pages/AppStore';
+import { AppView } from './pages/AppView';
 
 export default function App() {
   const { currentPage, sessions, pendingApprovals, loading, init } = useWalletStore();
@@ -84,15 +87,25 @@ export default function App() {
               </svg>
             </button>
             <button
-              className={currentPage === 'connected-apps' ? 'active' : ''}
-              onClick={() => useWalletStore.getState().navigate('connected-apps')}
+              className={currentPage === 'apps' || currentPage === 'app-store' || currentPage === 'app-view' ? 'active' : ''}
+              onClick={() => useWalletStore.getState().navigate('apps')}
               title="Apps"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="2" y="2" width="9" height="9" rx="1" />
-                <rect x="13" y="2" width="9" height="9" rx="1" />
-                <rect x="2" y="13" width="9" height="9" rx="1" />
-                <rect x="13" y="13" width="9" height="9" rx="1" />
+                <rect x="2" y="2" width="9" height="9" rx="2" />
+                <rect x="13" y="2" width="9" height="9" rx="2" />
+                <rect x="2" y="13" width="9" height="9" rx="2" />
+                <rect x="13" y="13" width="9" height="9" rx="2" />
+              </svg>
+            </button>
+            <button
+              className={currentPage === 'connected-apps' ? 'active' : ''}
+              onClick={() => useWalletStore.getState().navigate('connected-apps')}
+              title="Sessions"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
               </svg>
               {sessions.length > 0 && (
                 <span className="nav-badge">{sessions.length}</span>
@@ -146,6 +159,9 @@ export default function App() {
           {currentPage === 'gifts' && <Gifts />}
           {currentPage === 'create-gift' && <CreateGift />}
           {currentPage === 'redeem-gift' && <RedeemGift />}
+          {currentPage === 'apps' && <Apps />}
+          {currentPage === 'app-store' && <AppStore />}
+          {currentPage === 'app-view' && <AppView />}
         </div>
       </main>
       {(currentPage === 'setup' || currentPage === 'unlock') && (
