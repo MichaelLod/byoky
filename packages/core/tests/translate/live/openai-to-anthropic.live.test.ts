@@ -228,6 +228,53 @@ describe.skipIf(!ANTHROPIC_KEY)('live openai→anthropic — streaming chat', ()
   }, 30_000);
 });
 
+/** Tiny 1×1 red PNG as base64 — minimal image payload for vision tests. */
+const TINY_PNG_B64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAIAAAD/gAIDAAABFUlEQVR4nO3OUQkAIABEsetfWiv4Nx4IC7Cd7XvkByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIReeLesrH9s1agAAAABJRU5ErkJggg==';
+
+describe.skipIf(!ANTHROPIC_KEY)('live openai→anthropic — vision (image)', () => {
+  it('translates an image request end-to-end', async (t) => {
+    if (await skipIfOAuthBridgeMissing(t)) return;
+    const c = ctx();
+    const openAIRequest = {
+      model: SRC_MODEL,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'What color is this single-pixel image? Reply with one word.' },
+            { type: 'image_url', image_url: { url: `data:image/png;base64,${TINY_PNG_B64}` } },
+          ],
+        },
+      ],
+      max_tokens: 20,
+    };
+
+    const anthropicBody = translateRequest(c, JSON.stringify(openAIRequest));
+    // The translated body must contain the base64 data (image survived translation).
+    expect(anthropicBody).toContain(TINY_PNG_B64);
+
+    const { status, body: anthropicText } = await callAnthropic(anthropicBody, false);
+    expect(status).toBe(200);
+
+    const translated = translateResponse(c, anthropicText);
+    const parsed = JSON.parse(translated) as {
+      object: string;
+      model: string;
+      choices: Array<{
+        message: { role: string; content: string | null };
+        finish_reason: string;
+      }>;
+    };
+
+    expect(parsed.object).toBe('chat.completion');
+    expect(parsed.model).toBe(SRC_MODEL);
+    expect(parsed.choices).toHaveLength(1);
+    expect(parsed.choices[0].message.role).toBe('assistant');
+    expect((parsed.choices[0].message.content ?? '').length).toBeGreaterThan(0);
+  }, 30_000);
+});
+
 describe.skipIf(!ANTHROPIC_KEY)('live openai→anthropic — tool use', () => {
   it('translates a tool-use round trip', async (t) => {
     if (await skipIfOAuthBridgeMissing(t)) return;

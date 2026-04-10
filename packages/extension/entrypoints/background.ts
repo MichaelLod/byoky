@@ -81,7 +81,7 @@ function reconstructBody(
         formData.append(entry.name, entry.value);
       } else {
         const binary = base64ToUint8(entry.value);
-        const blob = new Blob([binary.buffer.slice(binary.byteOffset, binary.byteOffset + binary.byteLength)], { type: entry.contentType || 'application/octet-stream' });
+        const blob = new Blob([new Uint8Array(binary)], { type: entry.contentType || 'application/octet-stream' });
         formData.append(entry.name, blob, entry.filename);
       }
     }
