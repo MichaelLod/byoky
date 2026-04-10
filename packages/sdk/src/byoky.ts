@@ -496,6 +496,11 @@ export class Byoky {
       try {
         const msg = JSON.parse(event.data);
 
+        if (msg.type === 'relay:vault:offer:failed') {
+          console.warn('[byoky] vault fallback unavailable:', msg.reason);
+          return;
+        }
+
         if (msg.type === 'relay:vault:offer') {
           if (typeof msg.vaultUrl === 'string' && typeof msg.appSessionToken === 'string') {
             vaultFallback = { vaultUrl: msg.vaultUrl, appSessionToken: msg.appSessionToken };

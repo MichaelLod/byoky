@@ -86,8 +86,7 @@ struct PairView: View {
     private var connectingSection: some View {
         Section {
             VStack(spacing: 16) {
-                ProgressView()
-                    .scaleEffect(1.5)
+                CountdownRing(duration: 30)
                 Text("Connecting to web app...")
                     .foregroundStyle(.secondary)
             }
@@ -186,6 +185,46 @@ struct PairView: View {
             return
         }
         pairService.connect(payload: payload, wallet: wallet)
+    }
+}
+
+// MARK: - Countdown Ring
+
+private struct CountdownRing: View {
+    let duration: Double
+    @State private var start = Date.now
+
+    private var timer: some Publisher {
+        Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()
+    }
+
+    @State private var progress: Double = 1.0
+    @State private var seconds: Int
+
+    init(duration: Double) {
+        self.duration = duration
+        self._seconds = State(initialValue: Int(duration))
+    }
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.gray.opacity(0.2), lineWidth: 4)
+            Circle()
+                .trim(from: 0, to: progress)
+                .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            Text("\(seconds)")
+                .font(.title3.monospacedDigit())
+                .foregroundStyle(.secondary)
+        }
+        .frame(width: 56, height: 56)
+        .onReceive(Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()) { _ in
+            let elapsed = Date.now.timeIntervalSince(start)
+            let remaining = max(0, duration - elapsed)
+            progress = remaining / duration
+            seconds = Int(ceil(remaining))
+        }
     }
 }
 
