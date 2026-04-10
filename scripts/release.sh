@@ -396,6 +396,13 @@ fi
 RELEASE_NOTES=$(node scripts/release-notes.mjs "$PREV_TAG" "v${NEW_VERSION}" "$NEW_VERSION" "$NEW_NATIVE_VERSION" "$NEW_VERSION_CODE")
 echo "$RELEASE_NOTES"
 
+# Store-formatted notes (plain text, max 500 chars) for App Store + Google Play
+STORE_NOTES_FILE="$BUILD_DIR/store-notes.txt"
+node scripts/release-notes.mjs --store "$PREV_TAG" "v${NEW_VERSION}" > "$STORE_NOTES_FILE"
+echo ""
+echo "  Store notes:"
+cat "$STORE_NOTES_FILE" | sed 's/^/    /'
+
 # ============================================================
 # 6. Publish to npm
 # ============================================================
@@ -481,6 +488,56 @@ if [ "$SKIP_IOS" = false ] && [ -n "${ASC_KEY_ID:-}" ] && [ -n "${ASC_ISSUER_ID:
   else
     echo "  Skipping macOS upload (no pkg found)"
   fi
+
+  # Set "What's New" text on App Store Connect versions
+  echo "  Setting App Store release notes..."
+  node -e "
+    const { createSign } = require('node:crypto');
+    const fs = require('node:fs');
+    const notes = fs.readFileSync('$STORE_NOTES_FILE', 'utf8').slice(0, 4000);
+    const kid = '$ASC_KEY_ID', iss = '$ASC_ISSUER_ID';
+    const pk = '$ASC_PRIVATE_KEY'.replace(/\\\\n/g, '\n');
+    const header = Buffer.from(JSON.stringify({alg:'ES256',kid,typ:'JWT'})).toString('base64url');
+    const now = Math.floor(Date.now()/1000);
+    const payload = Buffer.from(JSON.stringify({iss,iat:now,exp:now+1200,aud:'appstoreconnect-v1'})).toString('base64url');
+    const sign = createSign('SHA256');
+    sign.update(header+'.'+payload);
+    const sig = sign.sign({key:pk,dsaEncoding:'ieee-p1363'},'base64url');
+    const jwt = header+'.'+payload+'.'+sig;
+    const h = {Authorization:'Bearer '+jwt,'Content-Type':'application/json'};
+
+    (async () => {
+      // Find app
+      const appRes = await fetch('https://api.appstoreconnect.apple.com/v1/apps?filter[bundleId]=com.byoky.app&fields[apps]=bundleId', {headers:h});
+      const appData = await appRes.json();
+      const appId = appData.data?.[0]?.id;
+      if (!appId) { console.log('    App not found in ASC'); return; }
+
+      // Find versions in editable states
+      for (const platform of ['IOS','MAC_OS']) {
+        const vRes = await fetch('https://api.appstoreconnect.apple.com/v1/apps/'+appId+'/appStoreVersions?filter[platform]='+platform+'&limit=3', {headers:h});
+        const vData = await vRes.json();
+        const editable = (vData.data||[]).find(v =>
+          ['PREPARE_FOR_SUBMISSION','WAITING_FOR_REVIEW','IN_REVIEW','DEVELOPER_REJECTED'].includes(v.attributes.appStoreState)
+        );
+        if (!editable) { console.log('    No editable '+platform+' version'); continue; }
+
+        // Get localizations
+        const locRes = await fetch('https://api.appstoreconnect.apple.com/v1/appStoreVersions/'+editable.id+'/appStoreVersionLocalizations', {headers:h});
+        const locData = await locRes.json();
+        const enLoc = (locData.data||[]).find(l => l.attributes.locale.startsWith('en'));
+        if (!enLoc) { console.log('    No en localization for '+platform); continue; }
+
+        // Update whatsNew
+        const patchRes = await fetch('https://api.appstoreconnect.apple.com/v1/appStoreVersionLocalizations/'+enLoc.id, {
+          method:'PATCH', headers:h,
+          body: JSON.stringify({data:{type:'appStoreVersionLocalizations',id:enLoc.id,attributes:{whatsNew:notes}}})
+        });
+        if (patchRes.ok) console.log('    '+platform+': release notes set');
+        else console.log('    '+platform+': failed ('+patchRes.status+')');
+      }
+    })();
+  " 2>&1 || echo "  WARN: Failed to set App Store release notes"
 else
   echo "  Skipping App Store uploads (${SKIP_IOS:+mobile builds skipped}${ASC_KEY_ID:+}${ASC_KEY_ID:-credentials not configured})"
 fi
@@ -491,7 +548,7 @@ fi
 step "Upload to Google Play"
 
 if [ "$SKIP_ANDROID" = false ] && [ -n "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ]; then
-  node scripts/upload-google-play.mjs "dist/byoky-android-v${NEW_VERSION}.aab" production
+  node scripts/upload-google-play.mjs "dist/byoky-android-v${NEW_VERSION}.aab" production "$STORE_NOTES_FILE"
 else
   echo "  Skipping Google Play (${SKIP_ANDROID:+android build skipped}${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:+}${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-credentials not configured})"
 fi

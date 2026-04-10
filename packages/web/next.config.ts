@@ -10,9 +10,25 @@ const nextConfig: NextConfig = {
     }
     return [
       {
-        source: '/api/marketplace/(.*)',
+        source: '/api/apps/apps/:path*',
         headers: [
           { key: 'Access-Control-Allow-Origin', value: '*' },
+          { key: 'Access-Control-Allow-Methods', value: 'GET, OPTIONS' },
+          { key: 'Access-Control-Allow-Headers', value: 'Content-Type' },
+        ],
+      },
+      {
+        source: '/api/apps/submit',
+        headers: [
+          { key: 'Access-Control-Allow-Origin', value: 'https://byoky.com' },
+          { key: 'Access-Control-Allow-Methods', value: 'POST, OPTIONS' },
+          { key: 'Access-Control-Allow-Headers', value: 'Content-Type' },
+        ],
+      },
+      {
+        source: '/api/apps/admin/:path*',
+        headers: [
+          { key: 'Access-Control-Allow-Origin', value: 'https://byoky.com' },
           { key: 'Access-Control-Allow-Methods', value: 'GET, POST, OPTIONS' },
           { key: 'Access-Control-Allow-Headers', value: 'Content-Type, Authorization' },
         ],
