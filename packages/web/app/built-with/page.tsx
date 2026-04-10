@@ -138,7 +138,6 @@ function Footer() {
             >
               GitHub
             </a>
-            <a href="/dev">Developers</a>
             <a href="/demo">Demo</a>
             <a href="/built-with">Built with Byoky</a>
           </div>
