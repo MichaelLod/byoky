@@ -1,6 +1,6 @@
 {
   "name": "@byoky/vault",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "description": "Server-side vault for Byoky — store encrypted credentials and proxy LLM API calls",
   "type": "module",

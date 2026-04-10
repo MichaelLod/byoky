@@ -211,6 +211,60 @@ describe.skipIf(!GEMINI_KEY)('live anthropic→gemini — tool use', () => {
   }, 30_000);
 });
 
+/** Tiny 1×1 red PNG as base64 — minimal image payload for vision tests. */
+const TINY_PNG_B64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAIAAAD/gAIDAAABFUlEQVR4nO3OUQkAIABEsetfWiv4Nx4IC7Cd7XvkByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIReeLesrH9s1agAAAABJRU5ErkJggg==';
+
+describe.skipIf(!GEMINI_KEY)('live anthropic→gemini — vision (image)', () => {
+  it('translates an image request end-to-end', async () => {
+    const c = anthropicToGeminiCtx(false);
+    const anthropicRequest = {
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 16384,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'What color is this single-pixel image? Reply with one word.' },
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: 'image/png', data: TINY_PNG_B64 },
+            },
+          ],
+        },
+      ],
+    };
+
+    const geminiBody = translateRequest(c, JSON.stringify(anthropicRequest));
+    // The translated body must contain the base64 data (image survived translation).
+    expect(geminiBody).toContain(TINY_PNG_B64);
+
+    const url = `${GEMINI_BASE}/v1beta/models/${GEMINI_DST_MODEL}:generateContent`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: GEMINI_HEADERS,
+      body: geminiBody,
+    });
+    expect(response.status).toBe(200);
+
+    const geminiText = await response.text();
+    const translated = translateResponse(c, geminiText);
+    const parsed = JSON.parse(translated) as {
+      type: string;
+      role: string;
+      content: Array<{ type: string; text?: string }>;
+      stop_reason: string;
+    };
+
+    expect(parsed.type).toBe('message');
+    expect(parsed.role).toBe('assistant');
+    expect(parsed.content.length).toBeGreaterThan(0);
+    const text = parsed.content.find((b) => b.type === 'text');
+    expect(text).toBeDefined();
+    expect((text!.text ?? '').length).toBeGreaterThan(0);
+  }, 30_000);
+});
+
 describe.skipIf(!GEMINI_KEY || !OPENAI_KEY)('live gemini→openai — non-streaming chat', () => {
   it('translates a gemini-shaped request into openai and back', async () => {
     const c = geminiToOpenAICtx();

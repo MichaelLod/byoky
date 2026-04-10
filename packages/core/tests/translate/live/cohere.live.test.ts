@@ -127,6 +127,38 @@ describe.skipIf(!COHERE_KEY)('live openai→cohere — streaming chat', () => {
   }, 30_000);
 });
 
+/** Tiny 1×1 red PNG as base64 — minimal image payload for vision tests. */
+const TINY_PNG_B64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAIAAAD/gAIDAAABFUlEQVR4nO3OUQkAIABEsetfWiv4Nx4IC7Cd7XvkByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIReeLesrH9s1agAAAABJRU5ErkJggg==';
+
+describe.skipIf(!COHERE_KEY)('live openai→cohere — vision (image)', () => {
+  // command-a-03-2025 does not support image inputs (vision: false in our
+  // model registry). This test verifies the translation is structurally
+  // correct but cannot hit the live API until Cohere ships a vision model.
+  it('translates image content correctly (translation-only, no API call)', () => {
+    const c = ctx(false);
+    const openaiRequest = {
+      model: 'gpt-5.4-nano',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'What color is this single-pixel image? Reply with one word.' },
+            { type: 'image_url', image_url: { url: `data:image/png;base64,${TINY_PNG_B64}` } },
+          ],
+        },
+      ],
+      max_tokens: 20,
+    };
+
+    const cohereBody = translateRequest(c, JSON.stringify(openaiRequest));
+    expect(cohereBody).toContain(TINY_PNG_B64);
+    expect(cohereBody).toContain('What color');
+    const parsed = JSON.parse(cohereBody) as Record<string, unknown>;
+    expect(parsed.model).toBe(COHERE_DST_MODEL);
+  });
+});
+
 describe.skipIf(!COHERE_KEY)('live openai→cohere — tool use', () => {
   it('translates a tool-use round trip', async () => {
     const c = ctx(false);
