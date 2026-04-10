@@ -96,6 +96,30 @@ const response = await fetch('${p.url}', {
 });`;
 }
 
+function highlightCode(code: string): JSX.Element[] {
+  const tokens: JSX.Element[] = [];
+  const re = /(\/\/[^\n]*)|('(?:[^'\\]|\\.)*')|(`(?:[^`\\]|\\.)*`)|(true|false|null|undefined)|(\b(?:const|let|var|await|new|return|if|else|function|async|import|from|export)\b)|(\b\d+\b)|([\w$.]+)|([^\w\s])|(\s+)/g;
+  let match;
+  let i = 0;
+  while ((match = re.exec(code)) !== null) {
+    const [, comment, str, tmpl, bool, keyword, num, ident, punct, ws] = match;
+    let cls = '';
+    if (comment) cls = 'tk-comment';
+    else if (str || tmpl) cls = 'tk-string';
+    else if (bool) cls = 'tk-bool';
+    else if (keyword) cls = 'tk-keyword';
+    else if (num) cls = 'tk-number';
+    else if (ident) {
+      if (ident === 'JSON' || ident === 'session' || ident === 'response') cls = 'tk-builtin';
+      else if (ident.includes('.')) cls = '';
+      else cls = 'tk-ident';
+    } else if (punct) cls = 'tk-punct';
+
+    tokens.push(<span key={i++} className={cls}>{match[0]}</span>);
+  }
+  return tokens;
+}
+
 /* ─── SSE Stream Parser ────────────────────── */
 
 async function* parseSSE(response: Response) {
@@ -469,7 +493,7 @@ export function Chat({ session }: Props) {
           {showCode ? 'Hide code' : 'Show code'}
         </button>
         {showCode && (
-          <pre className="chat-code-snippet"><code>{buildCodeSnippet(selectedProvider, lastPrompt)}</code></pre>
+          <pre className="chat-code-snippet"><code>{highlightCode(buildCodeSnippet(selectedProvider, lastPrompt))}</code></pre>
         )}
       </div>
 
