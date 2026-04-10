@@ -25,6 +25,7 @@ describe('Byoky', () => {
 
   afterEach(() => {
     delete (window as Record<string, unknown>).__byoky__;
+    sessionStorage.clear();
     vi.restoreAllMocks();
   });
 
@@ -419,6 +420,273 @@ describe('Byoky', () => {
     const response = await fetchPromise;
     expect(response.status).toBe(401);
     expect(disconnectCb).toHaveBeenCalledTimes(1);
+  });
+
+  describe('session persistence', () => {
+    it('persists session to sessionStorage on connect', async () => {
+      const byoky = new Byoky();
+      const connectPromise = byoky.connect();
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      const msg = postedMessages[0].data;
+      simulateResponse({
+        type: 'BYOKY_CONNECT_RESPONSE',
+        requestId: msg.requestId,
+        payload: {
+          sessionKey: 'byk_persist_test',
+          proxyUrl: 'extension-proxy',
+          providers: { anthropic: { available: true, authMethod: 'api_key' as const } },
+        },
+      });
+
+      await connectPromise;
+
+      const stored = sessionStorage.getItem('byoky:session');
+      expect(stored).not.toBeNull();
+      const parsed = JSON.parse(stored!);
+      expect(parsed.sessionKey).toBe('byk_persist_test');
+    });
+
+    it('clears sessionStorage on disconnect', async () => {
+      const byoky = new Byoky();
+      const connectPromise = byoky.connect();
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      const msg = postedMessages[0].data;
+      simulateResponse({
+        type: 'BYOKY_CONNECT_RESPONSE',
+        requestId: msg.requestId,
+        payload: {
+          sessionKey: 'byk_clear_test',
+          proxyUrl: 'extension-proxy',
+          providers: {},
+        },
+      });
+
+      const session = await connectPromise;
+      expect(sessionStorage.getItem('byoky:session')).not.toBeNull();
+
+      session.disconnect();
+      expect(sessionStorage.getItem('byoky:session')).toBeNull();
+    });
+
+    it('clears sessionStorage on session revocation', async () => {
+      const byoky = new Byoky();
+      const connectPromise = byoky.connect();
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      const msg = postedMessages[0].data;
+      simulateResponse({
+        type: 'BYOKY_CONNECT_RESPONSE',
+        requestId: msg.requestId,
+        payload: {
+          sessionKey: 'byk_revoke_persist',
+          proxyUrl: 'extension-proxy',
+          providers: {},
+        },
+      });
+
+      await connectPromise;
+      expect(sessionStorage.getItem('byoky:session')).not.toBeNull();
+
+      simulateNotification({
+        type: 'BYOKY_SESSION_REVOKED',
+        payload: { sessionKey: 'byk_revoke_persist' },
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+      expect(sessionStorage.getItem('byoky:session')).toBeNull();
+    });
+
+    it('tryReconnect returns null when no session exists', async () => {
+      const byoky = new Byoky({ timeout: 100 });
+      const reconnectPromise = byoky.tryReconnect();
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Respond to the reconnectOnly request with NO_SESSION
+      const msg = postedMessages.find(
+        (m) => m.data.type === 'BYOKY_CONNECT_REQUEST',
+      );
+      if (msg) {
+        msg.port!.postMessage({
+          type: 'BYOKY_ERROR',
+          requestId: msg.data.requestId,
+          payload: { code: 'NO_SESSION', message: 'No active session' },
+        });
+      }
+
+      const result = await reconnectPromise;
+      expect(result).toBeNull();
+    });
+
+    it('tryReconnect restores from extension reconnectOnly', async () => {
+      const byoky = new Byoky();
+      const reconnectPromise = byoky.tryReconnect();
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      const msg = postedMessages.find(
+        (m) => m.data.type === 'BYOKY_CONNECT_REQUEST',
+      );
+      expect(msg).toBeDefined();
+      expect((msg!.data.payload as Record<string, unknown>).reconnectOnly).toBe(true);
+
+      msg!.port!.postMessage({
+        type: 'BYOKY_CONNECT_RESPONSE',
+        requestId: msg!.data.requestId,
+        payload: {
+          sessionKey: 'byk_reconnected',
+          proxyUrl: 'extension-proxy',
+          providers: { openai: { available: true, authMethod: 'api_key' as const } },
+        },
+      });
+
+      const session = await reconnectPromise;
+      expect(session).not.toBeNull();
+      expect(session!.sessionKey).toBe('byk_reconnected');
+      expect(sessionStorage.getItem('byoky:session')).not.toBeNull();
+    });
+
+    it('tryReconnect restores persisted vault session', async () => {
+      // Create a non-expired JWT (exp far in the future)
+      const header = btoa(JSON.stringify({ alg: 'HS256' }));
+      const payload = btoa(JSON.stringify({ sub: 'user1', exp: Math.floor(Date.now() / 1000) + 3600 }));
+      const fakeJwt = `${header}.${payload}.sig`;
+
+      sessionStorage.setItem('byoky:vault-session', JSON.stringify({
+        appSessionToken: fakeJwt,
+        vaultUrl: 'https://vault.byoky.com',
+        sessionKey: 'vault_test123',
+        proxyUrl: 'https://vault.byoky.com/proxy',
+        providers: { anthropic: { available: true, authMethod: 'api_key' as const } },
+        expiresAt: Math.floor(Date.now() / 1000) + 3600,
+      }));
+
+      const byoky = new Byoky();
+      const session = await byoky.tryReconnect();
+
+      expect(session).not.toBeNull();
+      expect(session!.sessionKey).toBe('vault_test123');
+      expect(typeof session!.createFetch).toBe('function');
+    });
+
+    it('tryReconnect skips expired vault session', async () => {
+      sessionStorage.setItem('byoky:vault-session', JSON.stringify({
+        appSessionToken: 'expired.token.sig',
+        vaultUrl: 'https://vault.byoky.com',
+        sessionKey: 'vault_expired',
+        proxyUrl: 'https://vault.byoky.com/proxy',
+        providers: {},
+        expiresAt: Math.floor(Date.now() / 1000) - 100,
+      }));
+
+      const byoky = new Byoky({ timeout: 100 });
+
+      // tryReconnect should skip the expired vault session and try extension
+      const reconnectPromise = byoky.tryReconnect();
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Extension reconnectOnly should fail
+      const msg = postedMessages.find(
+        (m) => m.data.type === 'BYOKY_CONNECT_REQUEST',
+      );
+      if (msg) {
+        msg.port!.postMessage({
+          type: 'BYOKY_ERROR',
+          requestId: msg.data.requestId,
+          payload: { code: 'NO_SESSION', message: 'No active session' },
+        });
+      }
+
+      const result = await reconnectPromise;
+      expect(result).toBeNull();
+    });
+
+    it('updates sessionStorage on auto-reconnect', async () => {
+      const byoky = new Byoky();
+      const connectPromise = byoky.connect();
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      const connectMsg = postedMessages[0].data;
+      simulateResponse({
+        type: 'BYOKY_CONNECT_RESPONSE',
+        requestId: connectMsg.requestId,
+        payload: {
+          sessionKey: 'byk_old_key',
+          proxyUrl: 'extension-proxy',
+          providers: { anthropic: { available: true, authMethod: 'api_key' as const } },
+        },
+      });
+
+      const session = await connectPromise;
+      const anthropicFetch = session.createFetch('anthropic');
+
+      // Make a request that gets SESSION_EXPIRED
+      const fetchPromise = anthropicFetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        body: '{"model":"claude-sonnet-4-20250514"}',
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      const proxyMsg = postedMessages.find((m) => m.data.type === 'BYOKY_PROXY_REQUEST');
+      proxyMsg!.port!.postMessage({
+        type: 'BYOKY_PROXY_RESPONSE_ERROR',
+        requestId: proxyMsg!.data.requestId,
+        status: 401,
+        error: { code: 'SESSION_EXPIRED', message: 'Invalid or expired session' },
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Respond to reconnect with new session
+      const reconnectMsg = postedMessages.find(
+        (m) => m.data.type === 'BYOKY_CONNECT_REQUEST' && m.data !== connectMsg,
+      );
+      reconnectMsg!.port!.postMessage({
+        type: 'BYOKY_CONNECT_RESPONSE',
+        requestId: reconnectMsg!.data.requestId,
+        payload: {
+          sessionKey: 'byk_new_key',
+          proxyUrl: 'extension-proxy',
+          providers: { anthropic: { available: true, authMethod: 'api_key' as const } },
+        },
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Complete the retried request
+      const retryMsg = postedMessages.find(
+        (m) => m.data.type === 'BYOKY_PROXY_REQUEST' && m.data.sessionKey === 'byk_new_key',
+      );
+      retryMsg!.port!.postMessage({
+        type: 'BYOKY_PROXY_RESPONSE_META',
+        requestId: retryMsg!.data.requestId,
+        status: 200,
+        statusText: 'OK',
+        headers: { 'content-type': 'application/json' },
+      });
+      retryMsg!.port!.postMessage({
+        type: 'BYOKY_PROXY_RESPONSE_CHUNK',
+        requestId: retryMsg!.data.requestId,
+        chunk: '{"ok":true}',
+      });
+      retryMsg!.port!.postMessage({
+        type: 'BYOKY_PROXY_RESPONSE_DONE',
+        requestId: retryMsg!.data.requestId,
+      });
+
+      await fetchPromise;
+
+      // sessionStorage should now have the new key
+      const stored = JSON.parse(sessionStorage.getItem('byoky:session')!);
+      expect(stored.sessionKey).toBe('byk_new_key');
+    });
   });
 
   function simulateResponse(data: Record<string, unknown>) {

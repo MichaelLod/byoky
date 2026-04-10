@@ -1178,6 +1178,28 @@ class WalletStore(context: Context) {
         }
     }
 
+    fun createVaultAppSession(appOrigin: String, providerIds: List<String>): Pair<String, String>? {
+        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return null
+        val token = vaultToken ?: return null
+        val providers = JSONArray()
+        for (id in providerIds) {
+            providers.put(JSONObject().put("id", id))
+        }
+        val body = JSONObject()
+            .put("appOrigin", appOrigin)
+            .put("providers", providers)
+        val (ok, status, data) = vaultRequest("/connect", "POST", body, token)
+        if (status == 401) {
+            _cloudVaultTokenExpired.value = true
+            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
+            return null
+        }
+        if (!ok) return null
+        val ast = data.optString("appSessionToken", "")
+        if (ast.isEmpty()) return null
+        return Pair(VAULT_URL, ast)
+    }
+
     fun checkUsernameAvailability(username: String): Pair<Boolean, String?> {
         val encoded = java.net.URLEncoder.encode(username, "UTF-8")
         val (ok, _, data) = vaultRequest("/auth/check-username/$encoded", "GET")

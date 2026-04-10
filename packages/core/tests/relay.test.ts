@@ -77,6 +77,38 @@ describe('relay protocol', () => {
       expect(parseRelayMessage({ type: 'relay:pong' })).toBeNull();
     });
 
+    it('parses a valid relay:vault:offer', () => {
+      const msg = parseRelayMessage({
+        type: 'relay:vault:offer',
+        vaultUrl: 'https://vault.byoky.com',
+        appSessionToken: 'eyJhbGciOiJIUzI1NiJ9.test.sig',
+      });
+      expect(msg).not.toBeNull();
+      expect(msg!.type).toBe('relay:vault:offer');
+    });
+
+    it('rejects relay:vault:offer missing vaultUrl', () => {
+      expect(parseRelayMessage({
+        type: 'relay:vault:offer',
+        appSessionToken: 'eyJ...',
+      })).toBeNull();
+    });
+
+    it('rejects relay:vault:offer missing appSessionToken', () => {
+      expect(parseRelayMessage({
+        type: 'relay:vault:offer',
+        vaultUrl: 'https://vault.byoky.com',
+      })).toBeNull();
+    });
+
+    it('rejects relay:vault:offer with non-string fields', () => {
+      expect(parseRelayMessage({
+        type: 'relay:vault:offer',
+        vaultUrl: 123,
+        appSessionToken: 'eyJ...',
+      })).toBeNull();
+    });
+
     it('rejects unknown relay subtypes', () => {
       expect(parseRelayMessage({ type: 'relay:unknown', foo: 'bar' })).toBeNull();
     });
