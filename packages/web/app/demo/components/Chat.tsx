@@ -532,7 +532,7 @@ export function Chat({ session }: Props) {
         )}
         {messages.map((msg, i) => (
           <div key={i} className={`message message-${msg.role}${msg.streaming ? ' message-streaming' : ''}`}>
-            <div className="message-avatar">{msg.role === 'user' ? 'You' : msg.provider ? getProviderLabel(msg.provider).split(' ')[0] : 'AI'}</div>
+            <div className="message-avatar">{msg.role === 'user' ? 'You' : 'AI'}</div>
             <div className="message-content">
               {msg.image && (
                 <img
