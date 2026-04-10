@@ -1375,6 +1375,7 @@ export default defineBackground(() => {
       }
 
       case 'addTrustedSite': {
+        if (!masterPassword) return { error: 'Wallet is locked' };
         const { origin, allowedProviders } = message.payload as { origin: string; allowedProviders: string[] };
         await addTrustedSite(origin, allowedProviders);
         return { success: true };
@@ -1742,6 +1743,7 @@ export default defineBackground(() => {
       }
 
       case 'setInstalledApps': {
+        if (!masterPassword) return { error: 'Wallet is locked' };
         const { apps } = message.payload as { apps: unknown[] };
         await browser.storage.local.set({ installedApps: apps });
         return { success: true };

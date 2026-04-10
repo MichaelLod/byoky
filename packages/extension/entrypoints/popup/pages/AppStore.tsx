@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useWalletStore } from '../store';
 import type { MarketplaceApp } from '@byoky/core';
 
-const MARKETPLACE_URL = 'https://marketplace.byoky.com';
+const MARKETPLACE_URL = 'https://byoky.com/api/marketplace';
 
 export function AppStore() {
   const { navigate, installedApps, installApp } = useWalletStore();

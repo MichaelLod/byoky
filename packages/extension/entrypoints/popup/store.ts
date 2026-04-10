@@ -191,6 +191,8 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       giftPreferences: {},
       groups: [],
       appGroups: {},
+      installedApps: [],
+      activeApp: null,
       currentPage: 'unlock',
     });
   },
@@ -374,6 +376,25 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   },
 
   installApp: async (app: MarketplaceApp) => {
+    // Validate URL scheme before installing
+    try {
+      const parsed = new URL(app.url);
+      if (parsed.protocol !== 'https:') {
+        set({ error: 'App URL must use HTTPS' });
+        return;
+      }
+    } catch {
+      set({ error: 'Invalid app URL' });
+      return;
+    }
+
+    // Confirm provider access with the user before granting trust
+    const providerList = app.providers.join(', ');
+    const confirmed = confirm(
+      `Install "${app.name}"?\n\nThis app will be trusted to access: ${providerList}`,
+    );
+    if (!confirmed) return;
+
     const installed: InstalledApp = {
       id: app.id,
       slug: app.slug,
@@ -391,7 +412,6 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     const apps = [...get().installedApps, installed];
     set({ installedApps: apps });
     await sendInternal('setInstalledApps', { apps });
-    // Auto-trust the app's origin for its declared providers
     const origin = new URL(app.url).origin;
     await sendInternal('addTrustedSite', { origin, allowedProviders: app.providers });
     await get().refreshData();
@@ -470,6 +490,8 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       cloudVaultUsername: null,
       cloudVaultTokenExpired: false,
       cloudVaultPendingCount: 0,
+      installedApps: [],
+      activeApp: null,
       currentPage: 'setup',
       error: null,
     });

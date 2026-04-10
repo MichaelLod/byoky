@@ -7,7 +7,20 @@ interface ReviewRequest {
   action: 'approve' | 'reject';
 }
 
+function checkAdminAuth(request: Request): NextResponse | null {
+  const secret = process.env.ADMIN_SECRET;
+  if (!secret) return NextResponse.json({ error: 'Admin access not configured' }, { status: 503 });
+  const auth = request.headers.get('Authorization');
+  if (auth !== `Bearer ${secret}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  return null;
+}
+
 export async function POST(request: Request) {
+  const authError = checkAdminAuth(request);
+  if (authError) return authError;
+
   const { slug, action } = (await request.json()) as ReviewRequest;
 
   if (!slug || !['approve', 'reject'].includes(action)) {
