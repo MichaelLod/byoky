@@ -8,6 +8,8 @@ const sections = [
   { id: 'session', label: 'Session API' },
   { id: 'app-ecosystem', label: 'App Ecosystem' },
   { id: 'manifest', label: 'App Manifest' },
+  { id: 'token-gifts', label: 'Token Gifts' },
+  { id: 'token-marketplace', label: 'Token Marketplace' },
   { id: 'backend-relay', label: 'Backend Relay' },
   { id: 'bridge', label: 'Bridge (CLI)' },
   { id: 'providers', label: 'Providers' },
@@ -38,6 +40,8 @@ export default function Docs() {
         <SessionApi />
         <AppEcosystem />
         <AppManifest />
+        <TokenGifts />
+        <TokenMarketplaceSection />
         <BackendRelay />
         <Bridge />
         <ProvidersSection />
@@ -344,6 +348,90 @@ function AppManifest() {
         <li>No obfuscated JavaScript</li>
         <li>Privacy policy exists</li>
       </ul>
+    </Section>
+  );
+}
+
+function TokenGifts() {
+  return (
+    <Section id="token-gifts" title="Token Gifts">
+      <p>
+        Share token access without sharing your API key. The sender&apos;s wallet proxies all
+        requests &mdash; the key never leaves the extension.
+      </p>
+
+      <Code lang="text">{`Sender's Extension ←WebSocket→ Relay Server ←WebSocket→ Recipient's Extension`}</Code>
+
+      <h3>Create a gift</h3>
+      <ol>
+        <li>Open the wallet &rarr; select a credential &rarr; click &quot;Gift&quot;</li>
+        <li>Set a token budget and expiry</li>
+        <li>Share the generated gift link</li>
+      </ol>
+
+      <h3>Redeem a gift</h3>
+      <ol>
+        <li>Open the wallet &rarr; click &quot;Redeem Gift&quot;</li>
+        <li>Paste the gift link &rarr; accept</li>
+      </ol>
+
+      <h3>Self-host the relay</h3>
+      <Code lang="bash">{`npm install -g @byoky/relay
+byoky-relay  # default port 8787`}</Code>
+
+      <p>
+        The recipient never receives your API key. Every request is relayed through the
+        sender&apos;s running extension, which enforces the token budget and can revoke access
+        at any time.
+      </p>
+    </Section>
+  );
+}
+
+function TokenMarketplaceSection() {
+  return (
+    <Section id="token-marketplace" title="Token Marketplace">
+      <p>
+        The{' '}
+        <a href="/marketplace" style={{ color: 'var(--teal-light)' }}>
+          Token Marketplace
+        </a>{' '}
+        is a public board where users share free token gifts with the community.
+      </p>
+
+      <h3>How it works</h3>
+      <ol>
+        <li>Create a gift in your wallet (extension or mobile)</li>
+        <li>Check &quot;List on Token Marketplace&quot;</li>
+        <li>Add a display name (or stay anonymous)</li>
+        <li>Your gift appears on the marketplace for anyone to redeem</li>
+      </ol>
+
+      <h3>What users see</h3>
+      <ul>
+        <li><strong>Online/offline status</strong> &mdash; green dot if the gifter&apos;s wallet is online (gift is usable), red if offline</li>
+        <li><strong>Tokens remaining</strong> &mdash; progress bar showing how much budget is left</li>
+        <li><strong>Expiry countdown</strong> &mdash; time until the gift expires</li>
+        <li><strong>Provider</strong> &mdash; which LLM provider the tokens are for</li>
+      </ul>
+
+      <h3>API endpoints</h3>
+      <p>
+        The marketplace runs at <code>marketplace.byoky.com</code> with these endpoints:
+      </p>
+      <Code lang="text">{`GET    /gifts              — list active + expired gifts
+GET    /gifts/:id/redeem   — get gift link for redemption
+POST   /gifts              — list a gift publicly (called by wallet)
+DELETE /gifts/:id          — unlist a gift
+PATCH  /gifts/:id/usage    — update token usage
+POST   /gifts/:id/heartbeat — online status ping`}</Code>
+
+      <h3>Wallet integration</h3>
+      <p>
+        When a user checks &quot;List on Token Marketplace&quot; during gift creation, the wallet
+        automatically <code>POST</code>s the gift metadata to the marketplace API. No extra steps
+        needed &mdash; the gift is listed the moment it&apos;s created.
+      </p>
     </Section>
   );
 }
