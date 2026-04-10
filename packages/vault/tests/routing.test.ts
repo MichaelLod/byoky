@@ -369,7 +369,7 @@ describe.skipIf(!DATABASE_URL)('vault routing', () => {
       expect(res.status).toBe(404);
       const bodyJson = await res.json();
       expect(bodyJson.error.code).toBe('NO_CREDENTIAL');
-      expect(bodyJson.error.message).toContain('routes to anthropic');
+      expect(bodyJson.error.message).toContain('No anthropic API key found');
 
       // Cleanup the second user
       const db = getDb();
