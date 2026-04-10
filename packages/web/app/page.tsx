@@ -9,8 +9,6 @@ export default function Home() {
       <div className="divider" />
       <ZeroCost />
       <div className="divider" />
-      <WhyByoky />
-      <div className="divider" />
       <Providers />
       <div className="divider" />
       <ForDevelopers />
@@ -563,70 +561,6 @@ function Security() {
   );
 }
 
-/* ─── Why Byoky ───────────────────────────────── */
-
-function WhyByoky() {
-  const features = [
-    { label: 'User chooses model', byoky: true, paste: false, gateway: 'partial', vendor: false },
-    { label: 'Keys stay on device', byoky: true, paste: false, gateway: false, vendor: false },
-    { label: 'Cross-provider translation', byoky: true, paste: false, gateway: false, vendor: false },
-    { label: 'Local + cloud models', byoky: true, paste: false, gateway: 'partial', vendor: 'partial' },
-    { label: 'Mobile wallet + QR', byoky: true, paste: false, gateway: false, vendor: false },
-    { label: 'Token gifting', byoky: true, paste: false, gateway: false, vendor: false },
-    { label: 'Backend relay', byoky: true, paste: false, gateway: true, vendor: false },
-    { label: 'Full audit log', byoky: true, paste: false, gateway: true, vendor: false },
-    { label: 'Zero server cost', byoky: true, paste: false, gateway: false, vendor: false },
-    { label: 'Integration effort', byoky: '2 lines', paste: '~40 lines', gateway: '~30 lines', vendor: '~15 lines' },
-    { label: 'Open source', byoky: true, paste: 'varies', gateway: 'some', vendor: 'some' },
-  ];
-
-  function CellValue({ value }: { value: boolean | string }) {
-    if (value === true) return <span className="compare-yes"><TableCheckIcon /></span>;
-    if (value === false) return <span className="compare-no"><TableXIcon /></span>;
-    return <span className="compare-partial">{value}</span>;
-  }
-
-  return (
-    <section className="compare-section">
-      <div className="container">
-        <FadeIn>
-          <h2>Why Byoky?</h2>
-          <p className="subtitle">
-            Stop pasting API keys into apps. Stop paying for AI gateways.
-            Let your users bring their own keys.
-          </p>
-        </FadeIn>
-        <FadeIn delay={0.1}>
-          <div className="compare-table-wrap">
-            <table className="compare-table">
-              <thead>
-                <tr>
-                  <th></th>
-                  <th className="compare-highlight">Byoky</th>
-                  <th>Paste API Key</th>
-                  <th>AI Gateways</th>
-                  <th>Vendor SDKs</th>
-                </tr>
-              </thead>
-              <tbody>
-                {features.map((f) => (
-                  <tr key={f.label}>
-                    <td className="compare-feature">{f.label}</td>
-                    <td className="compare-highlight"><CellValue value={f.byoky} /></td>
-                    <td><CellValue value={f.paste} /></td>
-                    <td><CellValue value={f.gateway} /></td>
-                    <td><CellValue value={f.vendor} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </FadeIn>
-      </div>
-    </section>
-  );
-}
-
 /* ─── Providers ────────────────────────────────── */
 
 function Providers() {
@@ -1053,23 +987,6 @@ function CheckIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="20 6 9 17 4 12" />
-    </svg>
-  );
-}
-
-function TableCheckIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--green)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
-  );
-}
-
-function TableXIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="18" y1="6" x2="6" y2="18" />
-      <line x1="6" y1="6" x2="18" y2="18" />
     </svg>
   );
 }
