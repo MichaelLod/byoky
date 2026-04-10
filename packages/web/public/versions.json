@@ -1,34 +1,35 @@
 {
-  "local": "0.5.3",
-  "native": "1.0.13",
+  "local": "0.5.4",
+  "native": "1.0.14",
   "platforms": [
     {
       "platform": "Chrome",
       "version": "0.4.18",
       "status": "live",
-      "pending": "0.5.3"
+      "pending": "0.5.4"
     },
     {
       "platform": "Firefox",
-      "version": "0.5.3",
+      "version": "0.5.4",
       "status": "live"
     },
     {
       "platform": "iOS",
       "version": "1.0.12",
       "status": "live",
-      "pending": "1.0.13"
+      "pending": "1.0.14"
     },
     {
       "platform": "Android",
       "version": "1.0.13",
-      "status": "live"
+      "status": "live",
+      "pending": "1.0.14"
     },
     {
       "platform": "npm",
-      "version": "0.5.3",
+      "version": "0.5.4",
       "status": "live"
     }
   ],
-  "generatedAt": "2026-04-10T12:55:01.185Z"
+  "generatedAt": "2026-04-10T13:47:40.376Z"
 }
