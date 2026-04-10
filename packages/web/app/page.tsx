@@ -9,6 +9,8 @@ export default function Home() {
       <div className="divider" />
       <ZeroCost />
       <div className="divider" />
+      <Showcase />
+      <div className="divider" />
       <Providers />
       <div className="divider" />
       <ForDevelopers />
@@ -208,19 +210,6 @@ function Hero() {
           </div>
         </FadeIn>
         <FadeIn delay={0.4}>
-          <div className="hero-demo">
-            <video
-              autoPlay
-              loop
-              muted
-              playsInline
-              poster="/demos/hero-demo.gif"
-            >
-              <source src="/demos/hero-demo.mp4" type="video/mp4" />
-            </video>
-          </div>
-        </FadeIn>
-        <FadeIn delay={0.5}>
           <VersionStatus />
         </FadeIn>
       </div>
@@ -561,6 +550,52 @@ function Security() {
   );
 }
 
+/* ─── Showcase ────────────────────────────────── */
+
+const showcaseItems = [
+  {
+    label: 'Connect & Chat',
+    desc: 'One click to connect. Stream AI responses through your wallet.',
+    mp4: '/demos/hero-demo.mp4',
+    gif: '/demos/hero-demo.gif',
+  },
+  {
+    label: 'Cross-Provider Routing',
+    desc: 'Drag an app between groups — the wallet translates on the fly.',
+    mp4: '/demos/cross-provider.mp4',
+    gif: '/demos/cross-provider.gif',
+  },
+];
+
+function Showcase() {
+  return (
+    <section className="showcase-section">
+      <div className="container">
+        <FadeIn>
+          <h2>See it in action.</h2>
+        </FadeIn>
+        <div className="showcase-grid">
+          {showcaseItems.map((item, i) => (
+            <FadeIn key={item.label} delay={0.1 * i}>
+              <div className="showcase-cell">
+                <div className="showcase-video">
+                  <video autoPlay loop muted playsInline poster={item.gif}>
+                    <source src={item.mp4} type="video/mp4" />
+                  </video>
+                </div>
+                <div className="showcase-info">
+                  <h3>{item.label}</h3>
+                  <p>{item.desc}</p>
+                </div>
+              </div>
+            </FadeIn>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /* ─── Providers ────────────────────────────────── */
 
 function Providers() {
@@ -674,17 +709,6 @@ function CrossProviderRouting() {
                 GPT the next without touching a line of code. Try a new model
                 without rewriting your prompts.
               </p>
-              <div className="section-demo">
-                <video
-                  autoPlay
-                  loop
-                  muted
-                  playsInline
-                  poster="/demos/cross-provider.gif"
-                >
-                  <source src="/demos/cross-provider.mp4" type="video/mp4" />
-                </video>
-              </div>
             </div>
           </div>
         </FadeIn>

@@ -996,6 +996,69 @@ section {
 }
 
 /* =============================================
+   Showcase Grid
+   ============================================= */
+
+.showcase-section {
+  text-align: center;
+}
+
+.showcase-section h2 {
+  font-size: 44px;
+  margin-bottom: 40px;
+}
+
+.showcase-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+
+.showcase-cell {
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: linear-gradient(
+    145deg,
+    rgba(13, 13, 26, 0.8),
+    rgba(9, 9, 20, 0.6)
+  );
+  overflow: hidden;
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+
+.showcase-cell:hover {
+  border-color: var(--teal);
+  box-shadow: 0 0 40px rgba(14, 165, 233, 0.08);
+}
+
+.showcase-video {
+  border-bottom: 1px solid var(--border);
+}
+
+.showcase-video video {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.showcase-info {
+  padding: 20px 24px;
+  text-align: left;
+}
+
+.showcase-info h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.showcase-info p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* =============================================
    Providers Section
    ============================================= */
 
@@ -1755,6 +1818,14 @@ section {
 
   .security-grid {
     grid-template-columns: 1fr;
+  }
+
+  .showcase-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .showcase-section h2 {
+    font-size: 32px;
   }
 
   .zero-cost-heading {
