@@ -165,6 +165,7 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
             "relay:auth:result" -> {
                 if (json.optBoolean("success")) {
                     sendPairHello()
+                    sendVaultOffer(payload.appOrigin)
                     pairAckTimeout?.cancel()
                     pairAckTimeout = scope.launch {
                         kotlinx.coroutines.delay(30_000)
@@ -195,7 +196,6 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
                         // Best-effort: pairing still succeeds even if persistence fails
                     }
                 }
-                sendVaultOffer(payload.appOrigin)
             }
             "relay:request" -> handleRelayRequest(json)
             "relay:peer:status" -> {
@@ -1046,7 +1046,18 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
         val w = wallet ?: return
         val providerIds = w.credentials.value.map { it.providerId }.distinct()
         scope.launch {
-            val result = w.createVaultAppSession(appOrigin, providerIds) ?: return@launch
+            val result = w.createVaultAppSession(appOrigin, providerIds)
+            if (result == null) {
+                sendJSON(JSONObject().apply {
+                    put("type", "relay:vault:offer:failed")
+                    put("reason", when {
+                        !w.cloudVaultEnabled.value -> "vault_disabled"
+                        w.cloudVaultTokenExpired.value -> "token_expired"
+                        else -> "session_create_failed"
+                    })
+                })
+                return@launch
+            }
             sendJSON(JSONObject().apply {
                 put("type", "relay:vault:offer")
                 put("vaultUrl", result.first)
