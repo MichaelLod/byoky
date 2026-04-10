@@ -18,7 +18,7 @@
   Your keys stay encrypted on your device. Apps never see them.
   <br />
   <br />
-  <a href="https://byoky.com">Website</a> · <a href="https://byoky.com/docs">Docs</a> · <a href="https://byoky.com/apps">Apps</a> · <a href="https://byoky.com/marketplace">Marketplace</a> · <a href="https://demo.byoky.com">Demo</a> · <a href="#quick-start">Quick Start</a> · <a href="https://discord.gg/gRs8S9fxcT">Discord</a> · <a href="https://github.com/MichaelLod/byoky/issues">Issues</a>
+  <a href="https://byoky.com">Website</a> · <a href="https://byoky.com/docs">Docs</a> · <a href="https://byoky.com/apps">Apps</a> · <a href="https://byoky.com/marketplace">Marketplace</a> · <a href="https://byoky.com/demo">Demo</a> · <a href="#quick-start">Quick Start</a> · <a href="https://discord.gg/gRs8S9fxcT">Discord</a> · <a href="https://github.com/MichaelLod/byoky/issues">Issues</a>
   <br />
   <br />
   <a href="https://github.com/MichaelLod/byoky/blob/main/LICENSE"><img src="https://img.shields.io/github/license/MichaelLod/byoky?style=flat&color=0ea5e9" alt="License" /></a>
