@@ -43,6 +43,59 @@ function getProviderLabel(id: string): string {
   return providers[id]?.name ?? id;
 }
 
+function buildCodeSnippet(providerId: string, prompt: string): string {
+  const p = providers[providerId];
+  if (!p) return '';
+  const msg = prompt || 'Hello!';
+
+  if (providerId === 'anthropic') {
+    return `const fetch = session.createFetch('anthropic');
+
+const response = await fetch('${p.url}', {
+  method: 'POST',
+  headers: {
+    'content-type': 'application/json',
+    'anthropic-version': '2023-06-01',
+  },
+  body: JSON.stringify({
+    model: '${p.model}',
+    max_tokens: 1024,
+    stream: true,
+    messages: [{ role: 'user', content: '${msg}' }],
+  }),
+});`;
+  }
+
+  if (providerId === 'gemini') {
+    return `const fetch = session.createFetch('gemini');
+
+const response = await fetch(
+  '${p.url}',
+  {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts: [{ text: '${msg}' }] }],
+    }),
+  },
+);`;
+  }
+
+  // OpenAI-compatible providers
+  return `const fetch = session.createFetch('${providerId}');
+
+const response = await fetch('${p.url}', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({
+    model: '${p.model}',
+    messages: [{ role: 'user', content: '${msg}' }],
+    max_tokens: 1024,
+    stream: true,
+  }),
+});`;
+}
+
 /* ─── SSE Stream Parser ────────────────────── */
 
 async function* parseSSE(response: Response) {
@@ -169,6 +222,8 @@ export function Chat({ session }: Props) {
   const [loading, setLoading] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<string>('');
   const [attachedImage, setAttachedImage] = useState<{ file: File; preview: string } | null>(null);
+  const [showCode, setShowCode] = useState(true);
+  const [lastPrompt, setLastPrompt] = useState('Hello!');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const supportsVision = visionProviders.has(selectedProvider);
@@ -221,6 +276,7 @@ export function Chat({ session }: Props) {
     const prevMessages = [...messages];
     setMessages(prev => [...prev, userMessage, { role: 'assistant', content: '', streaming: true }]);
     setInput('');
+    setLastPrompt(userMessage.content);
     removeAttachment();
     setLoading(true);
 
@@ -403,6 +459,18 @@ export function Chat({ session }: Props) {
             Session: <code>{session.sessionKey.slice(0, 12)}...</code>
           </div>
         </div>
+      </div>
+
+      <div className="chat-code-panel">
+        <button className="chat-code-toggle" onClick={() => setShowCode(!showCode)}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" />
+          </svg>
+          {showCode ? 'Hide code' : 'Show code'}
+        </button>
+        {showCode && (
+          <pre className="chat-code-snippet"><code>{buildCodeSnippet(selectedProvider, lastPrompt)}</code></pre>
+        )}
       </div>
 
       <div className="chat-messages">
