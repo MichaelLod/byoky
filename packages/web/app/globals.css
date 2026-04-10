@@ -740,6 +740,112 @@ section {
 }
 
 /* =============================================
+   Comparison Table
+   ============================================= */
+
+.compare-section {
+  text-align: center;
+}
+
+.compare-section h2 {
+  font-size: 44px;
+  margin-bottom: 14px;
+}
+
+.compare-section .subtitle {
+  font-size: 17px;
+  color: var(--text-secondary);
+  max-width: 520px;
+  margin: 0 auto 48px;
+  line-height: 1.7;
+}
+
+.compare-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: linear-gradient(
+    145deg,
+    rgba(13, 13, 26, 0.8),
+    rgba(9, 9, 20, 0.6)
+  );
+}
+
+.compare-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: center;
+  font-size: 14px;
+}
+
+.compare-table th {
+  padding: 16px 20px;
+  font-weight: 600;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.compare-table td {
+  padding: 14px 20px;
+  border-bottom: 1px solid rgba(26, 26, 52, 0.5);
+  color: var(--text-secondary);
+  vertical-align: middle;
+}
+
+.compare-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.compare-table tbody tr:hover {
+  background: rgba(14, 165, 233, 0.03);
+}
+
+.compare-feature {
+  text-align: left;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.compare-highlight {
+  background: rgba(14, 165, 233, 0.06);
+  position: relative;
+}
+
+.compare-table thead th.compare-highlight {
+  color: var(--teal-light);
+  font-size: 14px;
+}
+
+.compare-yes {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.compare-no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.5;
+}
+
+.compare-partial {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.compare-highlight .compare-partial {
+  color: var(--teal-light);
+  font-weight: 600;
+}
+
+/* =============================================
    Providers Section
    ============================================= */
 
@@ -1136,6 +1242,50 @@ section {
 }
 
 /* =============================================
+   Closing CTA
+   ============================================= */
+
+.cta-section {
+  position: relative;
+  text-align: center;
+  padding: 100px 0;
+  overflow: hidden;
+}
+
+.cta-glow {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 600px;
+  height: 400px;
+  background: radial-gradient(circle, var(--teal-glow), transparent 70%);
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+.cta-section h2 {
+  font-size: 44px;
+  margin-bottom: 14px;
+  position: relative;
+}
+
+.cta-section .subtitle {
+  font-size: 17px;
+  color: var(--text-secondary);
+  margin: 0 auto 40px;
+  position: relative;
+}
+
+.cta-actions {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  flex-wrap: wrap;
+  position: relative;
+}
+
+/* =============================================
    Footer
    ============================================= */
 
@@ -1472,11 +1622,19 @@ section {
   .steps-section h2,
   .dev-section h2,
   .security-section h2,
+  .compare-section h2,
   .providers-section h2,
   .openclaw-section h2,
   .oss-section h2,
+  .cta-section h2,
   .built-with-cta-section h2 {
     font-size: 32px;
+  }
+
+  .compare-table th,
+  .compare-table td {
+    padding: 12px 14px;
+    font-size: 13px;
   }
 
   .built-with-hero h1 {
