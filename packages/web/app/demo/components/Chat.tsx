@@ -90,7 +90,7 @@ const response = await fetch('${p.url}', {
   body: JSON.stringify({
     model: '${p.model}',
     messages: [{ role: 'user', content: '${msg}' }],
-    max_tokens: 1024,
+    max_completion_tokens: 1024,
     stream: true,
   }),
 });`;
@@ -394,7 +394,7 @@ export function Chat({ session }: Props) {
         const response = await proxyFetch(config.url, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ model: config.model, messages: apiMessages, max_tokens: 1024, ...(useStream && { stream: true }) }),
+          body: JSON.stringify({ model: config.model, messages: apiMessages, max_completion_tokens: 1024, ...(useStream && { stream: true }) }),
         });
         if (!response.ok) {
           const err = (await response.json()).error;
@@ -417,7 +417,7 @@ export function Chat({ session }: Props) {
         const response = await proxyFetch(config.url, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ model: config.model, messages: allMessages, max_tokens: 1024, ...(useStream && { stream: true }) }),
+          body: JSON.stringify({ model: config.model, messages: allMessages, max_completion_tokens: 1024, ...(useStream && { stream: true }) }),
         });
         if (!response.ok) {
           const err = (await response.json()).error;
