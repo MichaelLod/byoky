@@ -181,6 +181,9 @@ importers:
       postgres:
         specifier: ^3.4.0
         version: 3.4.8
+      undici:
+        specifier: ^8.0.2
+        version: 8.0.2
       ws:
         specifier: ^8.16.0
         version: 8.20.0
@@ -200,9 +203,6 @@ importers:
       typescript:
         specifier: ^5.4.0
         version: 5.9.3
-      undici:
-        specifier: ^8.0.2
-        version: 8.0.2
 
   packages/web:
     dependencies:
