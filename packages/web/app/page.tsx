@@ -24,6 +24,8 @@ export default function Home() {
       <div className="divider" />
       <AppEcosystem />
       <div className="divider" />
+      <TokenMarketplace />
+      <div className="divider" />
       <OpenSource />
       <Footer />
     </>
@@ -925,6 +927,63 @@ function AppEcosystem() {
   );
 }
 
+/* ─── Token Marketplace ────────────────────────── */
+
+function TokenMarketplace() {
+  return (
+    <section className="routing-section">
+      <div className="container">
+        <FadeIn>
+          <h2>Token Marketplace.</h2>
+          <p className="subtitle">
+            A community board for free token gifts. Share your unused tokens
+            with others, or grab some for yourself.
+          </p>
+        </FadeIn>
+
+        <div className="security-grid" style={{ marginTop: 48 }}>
+          <FadeIn delay={0.05}>
+            <div className="security-card">
+              <GiftIcon />
+              <h3>Share Tokens</h3>
+              <p>List a gift from your wallet with one toggle. Set a budget, choose a provider, and share with the community.</p>
+            </div>
+          </FadeIn>
+          <FadeIn delay={0.1}>
+            <div className="security-card">
+              <GaugeIcon />
+              <h3>Live Status</h3>
+              <p>See which gifts are online, how many tokens remain, and when they expire — all in real time.</p>
+            </div>
+          </FadeIn>
+          <FadeIn delay={0.15}>
+            <div className="security-card">
+              <ShieldIcon />
+              <h3>Zero Risk</h3>
+              <p>Gifts relay through the sender&apos;s wallet. Keys never leave. Budget enforced. Revocable anytime.</p>
+            </div>
+          </FadeIn>
+          <FadeIn delay={0.2}>
+            <div className="security-card">
+              <KeyIcon />
+              <h3>Instant Redeem</h3>
+              <p>Grab a gift link and paste it into your Byoky wallet. Start making API calls in seconds.</p>
+            </div>
+          </FadeIn>
+        </div>
+
+        <FadeIn delay={0.25}>
+          <div style={{ textAlign: 'center', marginTop: 40 }}>
+            <a href="/marketplace" className="btn btn-primary">
+              Browse Marketplace
+            </a>
+          </div>
+        </FadeIn>
+      </div>
+    </section>
+  );
+}
+
 /* ─── Open Source ───────────────────────────────── */
 
 function OpenSource() {
@@ -971,6 +1030,9 @@ function Footer() {
             </a>
             <a href="/docs">
               Docs
+            </a>
+            <a href="/marketplace">
+              Marketplace
             </a>
             <a href="/demo">
               Demo
