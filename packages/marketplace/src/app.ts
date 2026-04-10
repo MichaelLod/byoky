@@ -8,16 +8,16 @@ app.use('/gifts/*', cors());
 app.use('/gifts', cors());
 
 // List all public gifts
-app.get('/gifts', (c) => {
-  const gifts = listGifts();
+app.get('/gifts', async (c) => {
+  const gifts = await listGifts();
   const now = Date.now();
-  const ONLINE_THRESHOLD = 5 * 60 * 1000; // 5 minutes
+  const ONLINE_THRESHOLD = 5 * 60 * 1000;
 
   const active = gifts
     .filter((g) => g.expiresAt > now && g.tokensUsed < g.tokenBudget)
     .map((g) => ({
       ...g,
-      giftLink: undefined, // don't expose in list view
+      giftLink: undefined,
       online: now - g.lastSeenAt < ONLINE_THRESHOLD,
       tokensRemaining: g.tokenBudget - g.tokensUsed,
     }));
@@ -36,8 +36,8 @@ app.get('/gifts', (c) => {
 });
 
 // Get gift link for redemption
-app.get('/gifts/:id/redeem', (c) => {
-  const gifts = listGifts();
+app.get('/gifts/:id/redeem', async (c) => {
+  const gifts = await listGifts();
   const gift = gifts.find((g) => g.id === c.req.param('id'));
   if (!gift) return c.json({ error: 'Gift not found' }, 404);
   if (gift.expiresAt <= Date.now()) return c.json({ error: 'Gift expired' }, 410);
@@ -66,7 +66,7 @@ app.post('/gifts', async (c) => {
   }
 
   try {
-    addGift({
+    await addGift({
       id: body.id,
       providerId: body.providerId,
       gifterName: body.gifterName?.trim() || 'Anonymous',
@@ -82,24 +82,24 @@ app.post('/gifts', async (c) => {
 });
 
 // Unlist a gift
-app.delete('/gifts/:id', (c) => {
-  const removed = removeGift(c.req.param('id'));
+app.delete('/gifts/:id', async (c) => {
+  const removed = await removeGift(c.req.param('id'));
   if (!removed) return c.json({ error: 'Gift not found' }, 404);
   return c.json({ success: true });
 });
 
-// Update usage (called by wallet after proxying requests)
+// Update usage
 app.patch('/gifts/:id/usage', async (c) => {
   const body = await c.req.json<{ tokensUsed: number }>();
   if (typeof body.tokensUsed !== 'number') return c.json({ error: 'Invalid tokensUsed' }, 400);
-  const updated = updateGiftUsage(c.req.param('id'), body.tokensUsed);
+  const updated = await updateGiftUsage(c.req.param('id'), body.tokensUsed);
   if (!updated) return c.json({ error: 'Gift not found' }, 404);
   return c.json({ success: true });
 });
 
-// Heartbeat (wallet pings periodically to show online status)
-app.post('/gifts/:id/heartbeat', (c) => {
-  const ok = heartbeat(c.req.param('id'));
+// Heartbeat
+app.post('/gifts/:id/heartbeat', async (c) => {
+  const ok = await heartbeat(c.req.param('id'));
   if (!ok) return c.json({ error: 'Gift not found' }, 404);
   return c.json({ success: true });
 });
