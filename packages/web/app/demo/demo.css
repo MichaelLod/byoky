@@ -44,7 +44,7 @@
   backdrop-filter: blur(20px) saturate(1.2);
   -webkit-backdrop-filter: blur(20px) saturate(1.2);
   position: sticky;
-  top: 0;
+  top: 60px;
   z-index: 10;
 }
 

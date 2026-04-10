@@ -3,13 +3,12 @@ import { NextRequest, NextResponse } from 'next/server';
 export function middleware(request: NextRequest) {
   const hostname = request.headers.get('host') ?? '';
 
-  // demo.byoky.com → serve the /demo page at /
+  // Redirect demo.byoky.com to byoky.com/demo
   if (hostname.startsWith('demo.')) {
     const url = request.nextUrl.clone();
-    if (url.pathname === '/') {
-      url.pathname = '/demo';
-      return NextResponse.rewrite(url);
-    }
+    url.host = hostname.replace('demo.', '');
+    url.pathname = '/demo';
+    return NextResponse.redirect(url, 301);
   }
 
   return NextResponse.next();
