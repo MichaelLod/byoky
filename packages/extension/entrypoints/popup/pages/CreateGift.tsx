@@ -17,6 +17,8 @@ export function CreateGift() {
   const [maxTokens, setMaxTokens] = useState(100_000);
   const [expiryMs, setExpiryMs] = useState(EXPIRY_OPTIONS[1].ms);
   const [relayUrl, setRelayUrl] = useState('wss://relay.byoky.com');
+  const [listPublicly, setListPublicly] = useState(false);
+  const [gifterName, setGifterName] = useState('');
   const [giftLink, setGiftLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -43,7 +45,27 @@ export function CreateGift() {
     );
     setSubmitting(false);
     if (encoded) {
-      setGiftLink(giftLinkToUrl(encoded));
+      const link = giftLinkToUrl(encoded);
+      setGiftLink(link);
+      if (listPublicly) {
+        try {
+          await fetch('https://marketplace.byoky.com/gifts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: encoded.split(':')[0] || crypto.randomUUID(),
+              providerId: selectedCred.providerId,
+              gifterName: gifterName.trim() || 'Anonymous',
+              giftLink: link,
+              relayUrl,
+              tokenBudget: maxTokens,
+              expiresAt: Date.now() + expiryMs,
+            }),
+          });
+        } catch {
+          // Marketplace listing failed silently — gift still works
+        }
+      }
     }
   }
 
@@ -220,6 +242,30 @@ export function CreateGift() {
               WebSocket relay that connects sender and recipient.
               Self-host or use the default.
             </p>
+          </div>
+
+          <div className="form-group">
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={listPublicly}
+                onChange={(e) => setListPublicly(e.target.checked)}
+                style={{ width: 16, height: 16, accentColor: 'var(--accent)' }}
+              />
+              List on Token Marketplace
+            </label>
+            <p className="form-hint">
+              Make this gift public so anyone can redeem it from byoky.com/marketplace.
+            </p>
+            {listPublicly && (
+              <input
+                type="text"
+                placeholder="Display name (optional)"
+                value={gifterName}
+                onChange={(e) => setGifterName(e.target.value)}
+                style={{ marginTop: 8 }}
+              />
+            )}
           </div>
 
           <div className="gift-security-note">
