@@ -6,7 +6,6 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/marketplace/package.json packages/marketplace/
 RUN pnpm install --frozen-lockfile
-COPY tsconfig.base.json ./
 COPY packages/marketplace/ packages/marketplace/
 RUN pnpm --filter @byoky/marketplace build
 
