@@ -70,19 +70,16 @@
 
 ## Install
 
-| Platform | Status | Link |
-|----------|--------|------|
-| Chrome | Available | [Chrome Web Store](https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon) |
-| Firefox | Available | [Mozilla Add-ons](https://addons.mozilla.org/en-US/firefox/addon/byoky/) |
-| iOS (wallet + Safari extension) | Available | [App Store](https://apps.apple.com/app/byoky/id6760779919) |
-| Android (wallet) | Available | [Google Play](https://play.google.com/store/apps/details?id=com.byoky.app) |
+| Platform | Version | Link |
+|----------|---------|------|
+| Chrome | ![Chrome version](https://img.shields.io/chrome-web-store/v/igjohldpldlahcjmefdhlnbcpldlgmon?style=flat&color=0ea5e9&label=) | [Chrome Web Store](https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon) · [Install from source](INSTALL.md#chrome-install-from-source) |
+| Firefox | ![Firefox version](https://img.shields.io/amo/v/byoky?style=flat&color=0ea5e9&label=) | [Mozilla Add-ons](https://addons.mozilla.org/en-US/firefox/addon/byoky/) |
+| iOS | ![npm version](https://img.shields.io/npm/v/@byoky/sdk?style=flat&color=0ea5e9&label=) | [App Store](https://apps.apple.com/app/byoky/id6760779919) |
+| Android | ![npm version](https://img.shields.io/npm/v/@byoky/sdk?style=flat&color=0ea5e9&label=) | [Google Play](https://play.google.com/store/apps/details?id=com.byoky.app) |
 | Safari (macOS) | Coming soon | — |
-| npm `@byoky/sdk` | Available | [npmjs.com](https://www.npmjs.com/package/@byoky/sdk) |
-| npm `@byoky/core` | Available | [npmjs.com](https://www.npmjs.com/package/@byoky/core) |
-| npm `@byoky/bridge` | Available | [npmjs.com](https://www.npmjs.com/package/@byoky/bridge) |
-| npm `@byoky/relay` | Available | [npmjs.com](https://www.npmjs.com/package/@byoky/relay) |
-| npm `@byoky/openclaw-plugin` | Available | [npmjs.com](https://www.npmjs.com/package/@byoky/openclaw-plugin) |
-| npm `create-byoky-app` | Available | [npmjs.com](https://www.npmjs.com/package/create-byoky-app) |
+| npm | ![npm version](https://img.shields.io/npm/v/@byoky/sdk?style=flat&color=0ea5e9&label=) | [`@byoky/sdk`](https://www.npmjs.com/package/@byoky/sdk) · [`@byoky/core`](https://www.npmjs.com/package/@byoky/core) · [`@byoky/bridge`](https://www.npmjs.com/package/@byoky/bridge) · [`@byoky/relay`](https://www.npmjs.com/package/@byoky/relay) |
+
+> Store reviews can take a few days. Check [byoky.com](https://byoky.com) for live version status across all platforms.
 
 ## Quick Start
 
