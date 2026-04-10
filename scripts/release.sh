@@ -239,11 +239,13 @@ if [ ${#ERRORS[@]} -gt 0 ]; then
   exit 1
 fi
 
-for w in "${WARNINGS[@]}"; do echo "  WARN: $w"; done
+if [ ${#WARNINGS[@]} -gt 0 ]; then
+  for w in "${WARNINGS[@]}"; do echo "  WARN: $w"; done
+fi
 
 echo ""
 echo "  Stores configured: ${STORES_CONFIGURED[*]:-none}"
-[ ${#STORES_SKIPPED[@]} -gt 0 ] && echo "  Stores skipped:    ${STORES_SKIPPED[*]}"
+if [ ${#STORES_SKIPPED[@]} -gt 0 ]; then echo "  Stores skipped:    ${STORES_SKIPPED[*]}"; fi
 echo ""
 
 # --- Derive native versions ---
