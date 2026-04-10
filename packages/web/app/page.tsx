@@ -565,6 +565,12 @@ const showcaseItems = [
     mp4: '/demos/cross-provider.mp4',
     gif: '/demos/cross-provider.gif',
   },
+  {
+    label: 'Mobile QR Pairing',
+    desc: 'No extension? Scan a QR code with the Byoky app. Keys proxy through your phone.',
+    mp4: '/demos/mobile-qr.mp4',
+    gif: '/demos/mobile-qr.gif',
+  },
 ];
 
 function Showcase() {
