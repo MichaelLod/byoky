@@ -14,7 +14,7 @@ export default function GiftPage() {
     <div
       className="container"
       style={{
-        paddingTop: '80px',
+        paddingTop: '120px',
         paddingBottom: '80px',
         maxWidth: '560px',
         textAlign: 'center',

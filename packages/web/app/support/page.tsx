@@ -11,7 +11,7 @@ export const metadata: Metadata = {
 
 export default function Support() {
   return (
-    <div className="container" style={{ paddingTop: '80px', paddingBottom: '80px', maxWidth: '680px' }}>
+    <div className="container" style={{ paddingTop: '120px', paddingBottom: '80px', maxWidth: '680px' }}>
       <h1 style={{ fontSize: '32px', marginBottom: '8px' }}>Support</h1>
       <p style={{ color: 'var(--text-muted)', marginBottom: '40px', fontSize: '14px' }}>
         We&apos;re here to help you get the most out of Byoky.
