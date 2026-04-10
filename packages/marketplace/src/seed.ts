@@ -1,4 +1,4 @@
-import { initDb, migrate, getDb } from './db.js';
+import { initDb, migrate, getDb, hashToken } from './db.js';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 if (!DATABASE_URL) {
@@ -29,10 +29,12 @@ const seeds = [
   { id: 'gift-expired-6', provider_id: 'xai', gifter_name: 'Grok Guru', gift_link: 'https://byoky.com/gift#expired6', relay_url: 'wss://relay.byoky.com', token_budget: 100_000, tokens_used: 72_400, expires_at: now - 6 * DAY, listed_at: now - 20 * DAY, last_seen_at: now - 7 * DAY },
 ];
 
+const seedMgmtHash = hashToken('seed-management-token');
+
 for (const g of seeds) {
   await sql`
-    INSERT INTO marketplace_gifts (id, provider_id, gifter_name, gift_link, relay_url, token_budget, tokens_used, expires_at, listed_at, last_seen_at)
-    VALUES (${g.id}, ${g.provider_id}, ${g.gifter_name}, ${g.gift_link}, ${g.relay_url}, ${g.token_budget}, ${g.tokens_used}, ${g.expires_at}, ${g.listed_at}, ${g.last_seen_at})
+    INSERT INTO marketplace_gifts (id, provider_id, gifter_name, gift_link, relay_url, token_budget, tokens_used, expires_at, listed_at, last_seen_at, mgmt_token_hash)
+    VALUES (${g.id}, ${g.provider_id}, ${g.gifter_name}, ${g.gift_link}, ${g.relay_url}, ${g.token_budget}, ${g.tokens_used}, ${g.expires_at}, ${g.listed_at}, ${g.last_seen_at}, ${seedMgmtHash})
     ON CONFLICT (id) DO UPDATE SET
       tokens_used = ${g.tokens_used},
       expires_at = ${g.expires_at},
