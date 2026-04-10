@@ -675,6 +675,14 @@ function Prop({ name, type, children }: { name: string; type: string; children: 
 
 const docsStyles = `
 .docs-layout {
+  --docs-bg: #0e0e1a;
+  --docs-bg-card: #161626;
+  --docs-bg-elevated: #1c1c30;
+  --docs-border: #252540;
+  --docs-text: #ededf4;
+  --docs-text-secondary: #9494b0;
+  --docs-text-muted: #5a5a78;
+
   display: flex;
   max-width: 1100px;
   margin: 0 auto;
@@ -703,7 +711,7 @@ const docsStyles = `
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: var(--text-muted);
+  color: var(--docs-text-muted);
   margin-bottom: 8px;
   padding-left: 2px;
 }
@@ -712,7 +720,7 @@ const docsStyles = `
   display: block;
   padding: 5px 0 5px 2px;
   font-size: 14px;
-  color: var(--text-secondary);
+  color: var(--docs-text-secondary);
   text-decoration: none;
   transition: color 0.15s;
   border-left: 2px solid transparent;
@@ -721,7 +729,7 @@ const docsStyles = `
 }
 
 .docs-nav-link:hover {
-  color: var(--text);
+  color: var(--docs-text);
 }
 
 .docs-nav-link.active {
@@ -741,7 +749,7 @@ const docsStyles = `
 .docs-hero {
   margin-bottom: 48px;
   padding-bottom: 40px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--docs-border);
 }
 
 .docs-hero-label {
@@ -763,7 +771,7 @@ const docsStyles = `
 
 .docs-hero p {
   font-size: 17px;
-  color: var(--text-secondary);
+  color: var(--docs-text-secondary);
   line-height: 1.6;
   max-width: 560px;
 }
@@ -773,7 +781,7 @@ const docsStyles = `
 .docs-cards-area {
   margin-bottom: 56px;
   padding-bottom: 48px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--docs-border);
 }
 
 .docs-cards-area > div + div {
@@ -784,7 +792,7 @@ const docsStyles = `
   font-size: 15px;
   font-weight: 600;
   margin-bottom: 12px;
-  color: var(--text-secondary);
+  color: var(--docs-text);
 }
 
 .docs-cards-grid {
@@ -797,9 +805,9 @@ const docsStyles = `
   display: block;
   padding: 16px 20px;
   border-radius: 10px;
-  border: 1px solid var(--border);
-  background: var(--bg-card);
-  color: var(--text);
+  border: 1px solid var(--docs-border);
+  background: var(--docs-bg-card);
+  color: var(--docs-text);
   font-size: 14px;
   font-weight: 500;
   text-decoration: none;
@@ -807,8 +815,8 @@ const docsStyles = `
 }
 
 .docs-card:hover {
-  border-color: var(--border-hover);
-  background: var(--bg-elevated);
+  border-color: var(--teal);
+  background: var(--docs-bg-elevated);
   transform: translateY(-1px);
 }
 
@@ -823,7 +831,7 @@ const docsStyles = `
   font-size: 26px;
   font-weight: 700;
   margin-bottom: 16px;
-  color: var(--text);
+  color: var(--docs-text);
 }
 
 .docs-section h3 {
@@ -831,11 +839,11 @@ const docsStyles = `
   font-weight: 600;
   margin-top: 28px;
   margin-bottom: 10px;
-  color: var(--text);
+  color: var(--docs-text);
 }
 
 .docs-section-body {
-  color: var(--text-secondary);
+  color: var(--docs-text-secondary);
   font-size: 15px;
   line-height: 1.7;
 }
@@ -845,7 +853,7 @@ const docsStyles = `
 }
 
 .docs-section-body code {
-  background: var(--bg-elevated);
+  background: var(--docs-bg-elevated);
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 13px;
@@ -866,8 +874,8 @@ const docsStyles = `
 
 .docs-code {
   position: relative;
-  background: #07070f;
-  border: 1px solid var(--border);
+  background: var(--docs-bg-card);
+  border: 1px solid var(--docs-border);
   border-radius: 10px;
   margin: 14px 0 20px;
   overflow-x: auto;
@@ -878,7 +886,7 @@ const docsStyles = `
   top: 8px;
   right: 12px;
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--docs-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -889,7 +897,7 @@ const docsStyles = `
   font-family: 'Fira Code', 'Consolas', 'SF Mono', monospace;
   font-size: 13px;
   line-height: 1.7;
-  color: var(--text);
+  color: var(--docs-text);
 }
 
 .docs-code code {
@@ -902,7 +910,7 @@ const docsStyles = `
 /* ── Props ── */
 
 .docs-prop {
-  border-left: 2px solid var(--border);
+  border-left: 2px solid var(--docs-border);
   padding: 8px 0 8px 14px;
   margin: 8px 0;
 }
@@ -921,13 +929,13 @@ const docsStyles = `
 
 .docs-prop-type {
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--docs-text-muted);
   font-family: 'Fira Code', monospace;
 }
 
 .docs-prop-desc {
   font-size: 14px;
-  color: var(--text-secondary);
+  color: var(--docs-text-secondary);
   line-height: 1.5;
 }
 
@@ -945,7 +953,7 @@ const docsStyles = `
   align-items: center;
   gap: 10px;
   padding: 8px 12px;
-  background: var(--bg-card);
+  background: var(--docs-bg-card);
   border-radius: 8px;
   font-size: 14px;
 }
@@ -953,13 +961,13 @@ const docsStyles = `
 .docs-provider-row code {
   font-size: 12px;
   color: var(--teal-light);
-  background: var(--bg-elevated);
+  background: var(--docs-bg-elevated);
   padding: 2px 6px;
   border-radius: 4px;
 }
 
 .docs-provider-row span {
-  color: var(--text-secondary);
+  color: var(--docs-text-secondary);
 }
 
 /* ── Responsive ── */
