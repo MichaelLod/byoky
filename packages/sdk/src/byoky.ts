@@ -7,6 +7,76 @@ import { createRelayClient, type RelayConnection } from './relay-client.js';
 import { ConnectModal, type ModalOptions } from './modal/connect-modal.js';
 import { createVaultFetch } from './vault-fetch.js';
 
+// --- Session persistence helpers ---
+
+const EXT_SESSION_KEY = 'byoky:session';
+const VAULT_SESSION_KEY = 'byoky:vault-session';
+
+interface VaultSessionData {
+  appSessionToken: string;
+  vaultUrl: string;
+  sessionKey: string;
+  proxyUrl: string;
+  providers: ConnectResponse['providers'];
+  expiresAt: number;
+}
+
+function hasSessionStorage(): boolean {
+  try { return typeof sessionStorage !== 'undefined'; } catch { return false; }
+}
+
+function saveExtSession(response: ConnectResponse): void {
+  if (!hasSessionStorage()) return;
+  try { sessionStorage.setItem(EXT_SESSION_KEY, JSON.stringify(response)); } catch {}
+}
+
+function loadExtSession(): ConnectResponse | null {
+  if (!hasSessionStorage()) return null;
+  try {
+    const raw = sessionStorage.getItem(EXT_SESSION_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as ConnectResponse;
+    if (!data.sessionKey || !data.providers) return null;
+    return data;
+  } catch { return null; }
+}
+
+function clearExtSession(): void {
+  if (!hasSessionStorage()) return;
+  try { sessionStorage.removeItem(EXT_SESSION_KEY); } catch {}
+}
+
+function decodeJwtExp(token: string): number {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return 0;
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return typeof payload.exp === 'number' ? payload.exp : 0;
+  } catch { return 0; }
+}
+
+function saveVaultSession(data: VaultSessionData): void {
+  if (!hasSessionStorage()) return;
+  try { sessionStorage.setItem(VAULT_SESSION_KEY, JSON.stringify(data)); } catch {}
+}
+
+function loadVaultSession(): VaultSessionData | null {
+  if (!hasSessionStorage()) return null;
+  try {
+    const raw = sessionStorage.getItem(VAULT_SESSION_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as VaultSessionData;
+    if (!data.appSessionToken || !data.vaultUrl) return null;
+    if (data.expiresAt > 0 && data.expiresAt <= Math.floor(Date.now() / 1000)) return null;
+    return data;
+  } catch { return null; }
+}
+
+function clearVaultSession(): void {
+  if (!hasSessionStorage()) return;
+  try { sessionStorage.removeItem(VAULT_SESSION_KEY); } catch {}
+}
+
 export interface VaultConnectOptions {
   vaultUrl: string;
   username?: string;
@@ -128,18 +198,40 @@ export class Byoky {
 
   /**
    * Silently reconnect to an existing session for the current origin.
-   * Returns null if no active session exists in the wallet.
+   * Checks (in order): persisted vault session, extension live session,
+   * persisted extension session. Returns null if nothing is restorable.
    */
   async tryReconnect(): Promise<ByokySession | null> {
     if (typeof window === 'undefined') return null;
+
+    // 1. Try restoring a vault session (no extension needed)
+    const vaultData = loadVaultSession();
+    if (vaultData) {
+      return this.buildVaultSession(vaultData);
+    }
+
     if (!isExtensionInstalled()) return null;
 
+    // 2. Try extension's live session (covers SW still running)
     try {
       const response = await this.sendConnectRequest({ reconnectOnly: true });
+      saveExtSession(response);
       return this.buildSession(response);
     } catch {
-      return null;
+      // No live session — fall through
     }
+
+    // 3. Try persisted extension session (covers SW restart + page reload)
+    const saved = loadExtSession();
+    if (saved) {
+      try {
+        const connected = await this.querySessionStatus(saved.sessionKey);
+        if (connected) return this.buildSession(saved);
+      } catch {}
+      clearExtSession();
+    }
+
+    return null;
   }
 
   /**
@@ -234,14 +326,42 @@ export class Byoky {
     const appSessionToken = handshakeData.appSessionToken;
     const sessionKey = `vault_${appSessionToken.slice(-8)}`;
 
-    return {
+    saveVaultSession({
+      appSessionToken,
+      vaultUrl,
       sessionKey,
       proxyUrl: `${baseUrl}/proxy`,
       providers: handshakeData.providers,
-      createFetch: (providerId: string) => createVaultFetch(vaultUrl, appSessionToken, providerId),
+      expiresAt: decodeJwtExp(appSessionToken),
+    });
+
+    return this.buildVaultSession({
+      appSessionToken,
+      vaultUrl,
+      sessionKey,
+      proxyUrl: `${baseUrl}/proxy`,
+      providers: handshakeData.providers,
+    });
+  }
+
+  private buildVaultSession(data: {
+    appSessionToken: string;
+    vaultUrl: string;
+    sessionKey: string;
+    proxyUrl: string;
+    providers: ConnectResponse['providers'];
+  }): ByokySession {
+    return {
+      sessionKey: data.sessionKey,
+      proxyUrl: data.proxyUrl,
+      providers: data.providers,
+      createFetch: (providerId: string) => createVaultFetch(data.vaultUrl, data.appSessionToken, providerId),
       createRelay: () => { throw new Error('Relay not supported in vault mode'); },
-      disconnect: () => {},
-      isConnected: async () => true,
+      disconnect: () => { clearVaultSession(); },
+      isConnected: async () => {
+        const exp = decodeJwtExp(data.appSessionToken);
+        return exp === 0 || exp > Math.floor(Date.now() / 1000);
+      },
       getUsage: async () => ({ requests: 0, inputTokens: 0, outputTokens: 0, byProvider: {} }),
       onDisconnect: () => () => {},
       onProvidersUpdated: () => () => {},
@@ -352,6 +472,9 @@ export class Byoky {
     const sessionKey = `relay_${roomId}`;
     const disconnectCallbacks = new Set<() => void>();
 
+    let vaultFallback: { vaultUrl: string; appSessionToken: string } | null = null;
+    let activeFetchMode: 'relay' | 'vault' = 'relay';
+
     // Keepalive
     const pingInterval = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
@@ -361,19 +484,46 @@ export class Byoky {
 
     ws.addEventListener('close', () => {
       clearInterval(pingInterval);
-      for (const cb of disconnectCallbacks) cb();
-      disconnectCallbacks.clear();
+      if (vaultFallback) {
+        activeFetchMode = 'vault';
+      } else {
+        for (const cb of disconnectCallbacks) cb();
+        disconnectCallbacks.clear();
+      }
     });
 
-    // Listen for phone going offline (app backgrounded/closed)
     ws.addEventListener('message', (event) => {
       try {
         const msg = JSON.parse(event.data);
-        if (msg.type === 'relay:peer:status' && msg.online === false) {
-          for (const cb of disconnectCallbacks) cb();
-          disconnectCallbacks.clear();
-          clearInterval(pingInterval);
-          ws.close(1000, 'Phone disconnected');
+
+        if (msg.type === 'relay:vault:offer') {
+          if (typeof msg.vaultUrl === 'string' && typeof msg.appSessionToken === 'string') {
+            vaultFallback = { vaultUrl: msg.vaultUrl, appSessionToken: msg.appSessionToken };
+            saveVaultSession({
+              appSessionToken: msg.appSessionToken,
+              vaultUrl: msg.vaultUrl,
+              sessionKey: `relay_vault_${roomId}`,
+              proxyUrl: `${msg.vaultUrl.replace(/\/$/, '')}/proxy`,
+              providers,
+              expiresAt: decodeJwtExp(msg.appSessionToken),
+            });
+          }
+          return;
+        }
+
+        if (msg.type === 'relay:peer:status') {
+          if (msg.online === false) {
+            if (vaultFallback) {
+              activeFetchMode = 'vault';
+            } else {
+              for (const cb of disconnectCallbacks) cb();
+              disconnectCallbacks.clear();
+              clearInterval(pingInterval);
+              ws.close(1000, 'Phone disconnected');
+            }
+          } else if (msg.online === true) {
+            activeFetchMode = 'relay';
+          }
         }
       } catch {}
     });
@@ -382,13 +532,28 @@ export class Byoky {
       sessionKey,
       proxyUrl: '',
       providers,
-      createFetch: (providerId: string) => createRelayFetch(ws, providerId),
+      createFetch: (providerId: string) => {
+        const relayFetch = createRelayFetch(ws, providerId);
+        return (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+          if (activeFetchMode === 'vault' && vaultFallback) {
+            return createVaultFetch(vaultFallback.vaultUrl, vaultFallback.appSessionToken, providerId)(input, init);
+          }
+          return relayFetch(input, init);
+        };
+      },
       createRelay: () => { throw new Error('Relay-in-relay not supported'); },
       disconnect: () => {
         clearInterval(pingInterval);
+        clearVaultSession();
         ws.close(1000, 'Client disconnected');
       },
-      isConnected: async () => ws.readyState === WebSocket.OPEN,
+      isConnected: async () => {
+        if (activeFetchMode === 'vault' && vaultFallback) {
+          const exp = decodeJwtExp(vaultFallback.appSessionToken);
+          return exp === 0 || exp > Math.floor(Date.now() / 1000);
+        }
+        return ws.readyState === WebSocket.OPEN;
+      },
       getUsage: async () => ({ requests: 0, inputTokens: 0, outputTokens: 0, byProvider: {} }),
       onDisconnect: (callback: () => void) => {
         disconnectCallbacks.add(callback);
@@ -414,11 +579,13 @@ export class Byoky {
           sessionKeyRef.current = newResponse.sessionKey;
           session.sessionKey = newResponse.sessionKey;
           session.providers = newResponse.providers;
+          saveExtSession(newResponse);
           for (const cb of providersUpdatedCallbacks) cb(newResponse.providers);
           reconnectPromise = null;
           return true;
         },
         () => {
+          clearExtSession();
           for (const cb of disconnectCallbacks) cb();
           disconnectCallbacks.clear();
           reconnectPromise = null;
@@ -457,6 +624,7 @@ export class Byoky {
       createRelay: (wsUrl: string) =>
         createRelayClient(wsUrl, sessionKeyRef.current, session.providers),
       disconnect: () => {
+        clearExtSession();
         notifyChannel.port1.close();
         this.sendDisconnect(sessionKeyRef.current);
       },
@@ -478,6 +646,7 @@ export class Byoky {
     notifyChannel.port1.onmessage = (event: MessageEvent) => {
       const msg = event.data;
       if (msg?.type === 'BYOKY_SESSION_REVOKED' && msg.payload?.sessionKey === sessionKeyRef.current) {
+        clearExtSession();
         for (const cb of disconnectCallbacks) cb();
         disconnectCallbacks.clear();
         notifyChannel.port1.close();
@@ -493,6 +662,7 @@ export class Byoky {
       [notifyChannel.port2],
     );
 
+    saveExtSession(response);
     return session;
   }
 
