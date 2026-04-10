@@ -24,11 +24,11 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   metadataBase: new URL('https://byoky.com'),
   title: {
-    default: 'Byoky — Bring Your Own Key',
+    default: 'Byoky — Secure vault for your AI API keys',
     template: '%s — Byoky',
   },
   description:
-    'Open-source AI wallet — 15 providers, 2 lines to integrate, cross-provider translation. Your keys stay encrypted on your device. Browser extension + iOS + Android.',
+    'Your AI API keys are stored in plaintext by every Chrome extension. Byoky encrypts them with AES-256-GCM and proxies every request. Keys never leave your device. Open source.',
   keywords: [
     'AI API key wallet',
     'LLM API key manager',
@@ -36,14 +36,14 @@ export const metadata: Metadata = {
     'BYOK',
     'browser extension',
     'API key security',
+    'Chrome extension security',
+    'API key theft protection',
+    'secure API key storage',
+    'AI key encryption',
+    'protect OpenAI keys',
     'OpenAI key wallet',
     'Anthropic key wallet',
-    'AI wallet',
-    'BYOK AI',
     'AI developer tools',
-    'AI app generator',
-    'BYOK app builder',
-    'create AI app',
   ],
   alternates: {
     canonical: '/',
@@ -59,9 +59,9 @@ export const metadata: Metadata = {
     apple: '/apple-touch-icon.png',
   },
   openGraph: {
-    title: 'Byoky — Bring Your Own Key',
+    title: 'Byoky — Secure vault for your AI API keys',
     description:
-      'A secure browser wallet for your LLM API keys. Install once, connect everywhere. Your keys never leave the extension.',
+      'Byoky encrypts your AI API keys with AES-256-GCM and proxies every request. Keys never leave your device. Open source and free forever.',
     url: 'https://byoky.com',
     siteName: 'Byoky',
     type: 'website',
@@ -70,15 +70,15 @@ export const metadata: Metadata = {
         url: '/og-image.png',
         width: 1200,
         height: 630,
-        alt: 'Byoky — Bring Your Own Key',
+        alt: 'Byoky — Secure vault for your AI API keys',
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Byoky — Bring Your Own Key',
+    title: 'Byoky — Secure vault for your AI API keys',
     description:
-      'A secure browser wallet for your LLM API keys. Your keys never leave the extension.',
+      'Your AI API keys are stored in plaintext by every extension. Byoky encrypts them locally and proxies every request. Open source.',
     images: ['/og-image.png'],
   },
 };
@@ -101,7 +101,7 @@ export default function RootLayout({
               applicationCategory: 'BrowserApplication',
               operatingSystem: 'Chrome, Firefox, Safari',
               description:
-                'A secure browser wallet for your LLM API keys and setup tokens. Connect to any app — your keys never leave the extension.',
+                'Byoky encrypts your AI API keys with AES-256-GCM and proxies every request. Keys never leave your device. 15 providers, open source, free forever.',
               url: 'https://byoky.com',
               offers: {
                 '@type': 'Offer',

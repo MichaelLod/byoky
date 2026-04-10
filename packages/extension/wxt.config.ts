@@ -18,7 +18,7 @@ export default defineConfig({
   },
   manifest: {
     name: 'Byoky',
-    description: 'Bring Your Own Key — Secure wallet for your AI credentials',
+    description: 'Encrypt your AI API keys locally. Never trust another extension with your OpenAI, Anthropic, or Gemini keys.',
     permissions: ['storage', 'sidePanel', 'identity', 'nativeMessaging'],
     content_security_policy: {
       extension_pages: "script-src 'self'; object-src 'self'",
