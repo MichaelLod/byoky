@@ -27,7 +27,7 @@ export const metadata: Metadata = {
     template: '%s — Byoky',
   },
   description:
-    'A secure browser wallet for your LLM API keys and setup tokens. Connect to any app — your keys never leave the extension.',
+    'Open-source AI wallet — 15 providers, 2 lines to integrate, cross-provider translation. Your keys stay encrypted on your device. Browser extension + iOS + Android.',
   keywords: [
     'AI API key wallet',
     'LLM API key manager',
@@ -37,6 +37,8 @@ export const metadata: Metadata = {
     'API key security',
     'OpenAI key wallet',
     'Anthropic key wallet',
+    'AI wallet',
+    'BYOK AI',
     'AI developer tools',
     'AI app generator',
     'BYOK app builder',
