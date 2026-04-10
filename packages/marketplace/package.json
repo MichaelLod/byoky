@@ -1,0 +1,27 @@
+{
+  "name": "@byoky/marketplace",
+  "version": "0.5.1",
+  "private": true,
+  "description": "Public gift marketplace for Byoky — browse and redeem community token gifts",
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "tsx src/server.ts",
+    "seed": "tsx src/seed.ts",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "hono": "^4.0.0",
+    "@hono/node-server": "^1.19.0",
+    "better-sqlite3": "^11.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/better-sqlite3": "^7.6.0",
+    "typescript": "^5.4.0",
+    "tsx": "^4.7.0"
+  }
+}
