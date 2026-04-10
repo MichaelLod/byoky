@@ -3,6 +3,29 @@
 // Check store status for all platforms
 // Usage: node scripts/store-status.mjs
 
+import { readFileSync, existsSync } from 'node:fs'
+import { resolve, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+// Load .env and .env.local
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+for (const f of ['.env', '.env.local']) {
+  const p = resolve(root, f)
+  if (!existsSync(p)) continue
+  for (const line of readFileSync(p, 'utf8').split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+    const eq = trimmed.indexOf('=')
+    if (eq < 0) continue
+    const key = trimmed.slice(0, eq)
+    let val = trimmed.slice(eq + 1)
+    // Strip surrounding quotes
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'")))
+      val = val.slice(1, -1)
+    if (!process.env[key]) process.env[key] = val
+  }
+}
+
 const ANDROID_PACKAGE = 'com.byoky.app'
 const IOS_BUNDLE_ID = 'com.byoky.app'
 const MACOS_BUNDLE_ID = 'com.byoky.app' // same bundle ID, different platform
