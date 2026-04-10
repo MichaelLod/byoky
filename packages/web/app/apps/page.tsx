@@ -4,7 +4,7 @@ export default function Apps() {
   const approved = apps.filter((app) => app.status === 'approved');
 
   return (
-    <main style={{ maxWidth: 800, margin: '0 auto', padding: '80px 20px', fontFamily: 'system-ui' }}>
+    <main style={{ maxWidth: 800, margin: '0 auto', padding: '120px 20px 80px', fontFamily: 'system-ui' }}>
       <h1 style={{ fontSize: 32, marginBottom: 8 }}>Apps</h1>
       <p style={{ color: 'var(--text-secondary)', marginBottom: 32 }}>Apps that run on your own API keys</p>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 16 }}>

@@ -89,7 +89,7 @@ export default function Marketplace() {
   }
 
   return (
-    <div className="container" style={{ paddingTop: 80, paddingBottom: 80, maxWidth: 800 }}>
+    <div className="container" style={{ paddingTop: 120, paddingBottom: 80, maxWidth: 800 }}>
       <h1 style={{ fontSize: 32, marginBottom: 8 }}>Token Marketplace</h1>
       <p style={{ color: 'var(--text-secondary)', marginBottom: 32, fontSize: 15 }}>
         Free community token gifts. Redeem and use them with your Byoky wallet.

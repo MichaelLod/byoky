@@ -1,5 +1,6 @@
 import { FadeIn } from './components/FadeIn';
 import { AnimatedCounter } from './components/AnimatedCounter';
+import { VersionStatus } from './components/VersionStatus';
 
 export default function Home() {
   return (
@@ -207,6 +208,9 @@ function Hero() {
               GitHub
             </a>
           </div>
+        </FadeIn>
+        <FadeIn delay={0.4}>
+          <VersionStatus />
         </FadeIn>
       </div>
     </section>

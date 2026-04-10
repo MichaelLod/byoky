@@ -1,3 +1,7 @@
+'use client';
+
+import { useState, useRef, useEffect } from 'react';
+
 function GitHubIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
@@ -6,7 +10,27 @@ function GitHubIcon() {
   );
 }
 
+const installOptions = [
+  { label: 'Chrome', href: 'https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon' },
+  { label: 'Firefox', href: 'https://addons.mozilla.org/en-US/firefox/addon/byoky/' },
+  { label: 'iOS', href: 'https://apps.apple.com/app/byoky/id6760779919' },
+  { label: 'Android', href: 'https://play.google.com/store/apps/details?id=com.byoky.app' },
+];
+
 export function Navbar() {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    if (open) document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [open]);
+
   return (
     <nav className="navbar">
       <div className="container navbar-inner">
@@ -45,14 +69,32 @@ export function Navbar() {
           >
             <GitHubIcon />
           </a>
-          <a
-            href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon"
-            className="btn btn-primary btn-sm"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Install Extension
-          </a>
+          <div ref={menuRef} className="install-dropdown">
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={() => setOpen(!open)}
+            >
+              Install
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" style={{ marginLeft: 4 }}>
+                <path d={open ? 'M3 8l3-3 3 3' : 'M3 4l3 3 3-3'} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+              </svg>
+            </button>
+            {open && (
+              <div className="install-dropdown-menu">
+                {installOptions.map((opt) => (
+                  <a
+                    key={opt.label}
+                    href={opt.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="install-dropdown-item"
+                  >
+                    {opt.label}
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </nav>
