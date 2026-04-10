@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { Sora, JetBrains_Mono, Outfit } from 'next/font/google';
+import { Navbar } from './components/Navbar';
 import './globals.css';
 
 const sora = Sora({
@@ -112,6 +113,7 @@ export default function RootLayout({
             }),
           }}
         />
+        <Navbar />
         {children}
       </body>
     </html>
