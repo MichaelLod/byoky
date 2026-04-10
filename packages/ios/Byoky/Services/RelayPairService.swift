@@ -41,6 +41,7 @@ final class RelayPairService: ObservableObject {
 
     private var wsTask: URLSessionWebSocketTask?
     private var pingTimer: Timer?
+    private var pairAckTimer: Timer?
     private var wallet: WalletStore?
     private var pairedOrigin: String?
     private var lastPayload: PairPayload?
@@ -91,6 +92,8 @@ final class RelayPairService: ObservableObject {
     func disconnect() {
         pingTimer?.invalidate()
         pingTimer = nil
+        pairAckTimer?.invalidate()
+        pairAckTimer = nil
         wsTask?.cancel(with: .normalClosure, reason: nil)
         wsTask = nil
         pairedOrigin = nil
@@ -144,12 +147,22 @@ final class RelayPairService: ObservableObject {
         case "relay:auth:result":
             if json["success"] as? Bool == true {
                 sendPairHello()
+                pairAckTimer?.invalidate()
+                pairAckTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: false) { [weak self] _ in
+                    Task { @MainActor in
+                        guard let self, case .connecting = self.status else { return }
+                        self.disconnect()
+                        self.status = .error("Web app not responding — scan the QR code again")
+                    }
+                }
             } else {
                 let error = json["error"] as? String ?? "Auth failed"
                 status = .error(error)
             }
 
         case "relay:pair:ack":
+            pairAckTimer?.invalidate()
+            pairAckTimer = nil
             pairedOrigin = payload.appOrigin
             status = .paired(appOrigin: payload.appOrigin)
             // Durable Session record so the app shows up in the Apps screen

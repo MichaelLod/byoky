@@ -72,6 +72,7 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
     private var wallet: WalletStore? = null
     private var pairedOrigin: String? = null
     private var lastPayload: PairPayload? = null
+    private var pairAckTimeout: kotlinx.coroutines.Job? = null
     private val scope = CoroutineScope(Dispatchers.IO)
 
     /** Translation engine for cross-family routing on relay-routed requests.
@@ -139,6 +140,8 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
     }
 
     fun disconnect() {
+        pairAckTimeout?.cancel()
+        pairAckTimeout = null
         webSocket?.close(1000, null)
         webSocket = null
         pairedOrigin = null
@@ -162,12 +165,22 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
             "relay:auth:result" -> {
                 if (json.optBoolean("success")) {
                     sendPairHello()
+                    pairAckTimeout?.cancel()
+                    pairAckTimeout = scope.launch {
+                        kotlinx.coroutines.delay(30_000)
+                        if (_status.value == PairStatus.CONNECTING) {
+                            disconnect()
+                            _status.value = PairStatus.ERROR.also { it.errorMessage = "Web app not responding — scan the QR code again" }
+                        }
+                    }
                 } else {
                     val error = json.optString("error", "Auth failed")
                     _status.value = PairStatus.ERROR.also { it.errorMessage = error }
                 }
             }
             "relay:pair:ack" -> {
+                pairAckTimeout?.cancel()
+                pairAckTimeout = null
                 pairedOrigin = payload.appOrigin
                 _status.value = PairStatus.PAIRED.also { it.appOrigin = payload.appOrigin }
                 // Durable Session record so the app shows up in the Apps screen
