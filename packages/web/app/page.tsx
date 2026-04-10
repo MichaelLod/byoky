@@ -971,6 +971,9 @@ function Footer() {
             >
               GitHub
             </a>
+            <a href="/docs">
+              Docs
+            </a>
             <a href="/demo">
               Demo
             </a>
