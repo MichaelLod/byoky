@@ -16,7 +16,7 @@ struct AppStoreView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
+            SwiftUI.Group {
                 if loading {
                     ProgressView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
