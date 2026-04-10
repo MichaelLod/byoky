@@ -571,6 +571,12 @@ const showcaseItems = [
     mp4: '/demos/mobile-qr.mp4',
     gif: '/demos/mobile-qr.gif',
   },
+  {
+    label: 'Token Gifts',
+    desc: 'Share AI access without sharing your key. Set a budget, generate a link, revoke anytime.',
+    mp4: '/demos/token-gift.mp4',
+    gif: '/demos/token-gift.gif',
+  },
 ];
 
 function Showcase() {
