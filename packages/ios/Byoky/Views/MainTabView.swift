@@ -23,9 +23,9 @@ struct MainTabView: View {
                     Label("Usage", systemImage: "chart.bar")
                 }
 
-            AppsView()
+            MarketplaceTabView()
                 .tabItem {
-                    Label("Apps", systemImage: "square.stack.3d.up")
+                    Label("Apps", systemImage: "square.grid.2x2")
                 }
         }
         .tint(Theme.accent)

@@ -102,7 +102,7 @@ private fun MainScreen(wallet: WalletStore) {
             }
             composable("connect") { ConnectScreen(wallet, pairService) }
             composable("usage") { UsageScreen(wallet) }
-            composable("apps") { AppsScreen(wallet) }
+            composable("apps") { MarketplaceTabScreen(wallet) }
             composable("settings") { SettingsScreen(wallet) }
         }
     }

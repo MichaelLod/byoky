@@ -18,7 +18,7 @@
   Your keys never leave your device.
   <br />
   <br />
-  <a href="https://byoky.com">Website</a> · <a href="https://byoky.com/apps">MiniApps</a> · <a href="https://byoky.com/dev">Developer Hub</a> · <a href="https://demo.byoky.com">Demo</a> · <a href="#quick-start">Quick Start</a> · <a href="https://discord.gg/gRs8S9fxcT">Discord</a> · <a href="https://github.com/MichaelLod/byoky/issues">Issues</a>
+  <a href="https://byoky.com">Website</a> · <a href="https://marketplace.byoky.com">Marketplace</a> · <a href="https://byoky.com/dev">Developer Hub</a> · <a href="https://demo.byoky.com">Demo</a> · <a href="#quick-start">Quick Start</a> · <a href="https://discord.gg/gRs8S9fxcT">Discord</a> · <a href="https://github.com/MichaelLod/byoky/issues">Issues</a>
   <br />
   <br />
   <a href="https://github.com/MichaelLod/byoky/blob/main/LICENSE"><img src="https://img.shields.io/github/license/MichaelLod/byoky?style=flat&color=0ea5e9" alt="License" /></a>
@@ -298,8 +298,9 @@ byoky/
 │   ├── ios/           # iOS app (wallet + Safari extension)
 │   ├── openclaw-plugin/ # OpenClaw provider plugin
 │   ├── create-byoky-app/ # CLI scaffolder — npx create-byoky-app
+│   ├── marketplace/   # App marketplace (marketplace.byoky.com)
 │   ├── vault/         # Encrypted cloud vault backup server
-│   └── web/           # Landing page (byoky.com) + MiniApps marketplace + Developer Hub
+│   └── web/           # Landing page (byoky.com) + MiniApps + Developer Hub
 ```
 
 ## Development
@@ -345,26 +346,39 @@ pnpm --filter @byoky/extension build:all     # Chrome + Firefox + Safari
 - [x] iOS app (wallet + Safari extension + relay pairing)
 - [x] Android app (standalone wallet + relay pairing)
 - [x] Developer Hub + create-byoky-app CLI scaffolder
-- [x] MiniApps marketplace (byoky.com/apps)
 - [x] Alias groups — drag apps between groups to swap which credential they use
 - [x] Setup token compatibility for third-party agents (OpenClaw etc.) — transparent tool name + system prompt rewriting
 - [x] Cross-provider translation — drag an app from a Claude group to a GPT group and have requests transparently rewrite (request body, response body, SSE streams)
 - [x] Remote OpenClaw via relay (cloud deployment, zero key exposure)
+- [x] App Ecosystem — curated marketplace, in-wallet app runtime (sandboxed iframe/WebView), developer submission flow
 - [ ] Password change (re-encrypt vault with new master password)
 
-## MiniApps
+## App Ecosystem
 
-**[byoky.com/apps](https://byoky.com/apps)** — A marketplace of single-HTML AI tools that run on your own API keys. Connect your wallet, pick an app, and it works instantly. No accounts, no costs.
+**[marketplace.byoky.com](https://marketplace.byoky.com)** — A curated marketplace of apps that run on your own API keys. Install apps directly into your wallet (extension or mobile), and they run inside a sandboxed iframe/WebView — your keys never leave the wallet.
 
-**Included apps:** AI Chat, Code Explainer, Email Writer, Translator, Study Cards, Roast My Code.
+**How it works:**
+1. Browse the App Store from the **Apps** tab in your wallet
+2. Install an app — it appears as an icon on your app grid (iPhone-style)
+3. Tap to launch — the app runs inside the wallet in a sandboxed environment
+4. The app uses `@byoky/sdk` to request provider access — you approve which providers it can use
+5. All API calls are proxied through the wallet — keys never touch the app
 
-**Build your own:** The [App Generator](https://byoky.com/dev) creates miniapp HTML alongside full projects. Publish to GitHub Gist and submit to the registry.
+**For developers:**
+```bash
+npx create-byoky-app my-app    # scaffold a new app
+npx create-byoky-app init      # create a byoky.app.json manifest
+npx create-byoky-app submit    # submit to the marketplace
+```
 
-**How miniapps work:**
-- Each miniapp is a self-contained HTML file (inline CSS + JS)
-- Runs in a sandboxed iframe on byoky.com
-- API calls are proxied through the parent page via postMessage → the Byoky extension handles key injection
-- Supports streaming responses (SSE) for real-time output
+Or submit via the web form at [marketplace.byoky.com/submit](https://marketplace.byoky.com/submit).
+
+**Security model:**
+- Apps run in a sandboxed iframe (`allow-scripts allow-forms`) or WKWebView/WebView
+- Cross-origin isolation prevents access to wallet storage, DOM, or keys
+- Apps can only communicate via the SDK's `postMessage` bridge
+- Users can disable or uninstall apps at any time
+- Per-app usage tracking and provider access controls
 
 ## Built with Byoky
 
