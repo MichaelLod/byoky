@@ -160,6 +160,7 @@ final class RelayPairService: ObservableObject {
                 let providerIds = Array(Set(wallet.credentials.map { $0.providerId }))
                 _ = try? wallet.upsertSession(appOrigin: payload.appOrigin, providers: providerIds)
             }
+            sendVaultOffer(appOrigin: payload.appOrigin)
 
         case "relay:request":
             handleRelayRequest(json)
@@ -877,6 +878,24 @@ final class RelayPairService: ObservableObject {
 
     private func sendPing() {
         sendJSON(["type": "relay:ping", "ts": Int(Date().timeIntervalSince1970 * 1000)])
+    }
+
+    private func sendVaultOffer(appOrigin: String) {
+        guard let wallet else { return }
+        let providerIds = Array(Set(wallet.credentials.map { $0.providerId }))
+        Task {
+            guard let result = await wallet.createVaultAppSession(
+                appOrigin: appOrigin,
+                providerIds: providerIds
+            ) else { return }
+            await MainActor.run {
+                self.sendJSON([
+                    "type": "relay:vault:offer",
+                    "vaultUrl": result.vaultUrl,
+                    "appSessionToken": result.appSessionToken,
+                ])
+            }
+        }
     }
 
     private func sendJSON(_ obj: [String: Any]) {

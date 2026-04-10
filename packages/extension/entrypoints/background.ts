@@ -160,6 +160,35 @@ export default defineBackground(() => {
     } catch {}
   }
 
+  async function persistSessions() {
+    if (!hasSessionStorage) return;
+    try {
+      await browser.storage.session.set({ _sessions: Array.from(sessions.entries()) });
+    } catch {}
+  }
+
+  async function restoreSessions() {
+    if (!hasSessionStorage) return;
+    try {
+      const data = await browser.storage.session.get('_sessions');
+      if (Array.isArray(data._sessions)) {
+        const now = Date.now();
+        for (const [key, session] of data._sessions as [string, Session][]) {
+          if (session.expiresAt > now) {
+            sessions.set(key, session);
+          }
+        }
+      }
+    } catch {}
+  }
+
+  async function clearPersistedSessions() {
+    if (!hasSessionStorage) return;
+    try {
+      await browser.storage.session.remove('_sessions');
+    } catch {}
+  }
+
   // Auto-lock after 20 minutes of inactivity
   const IDLE_TIMEOUT_MS = 20 * 60 * 1000;
   let lastActivityAt = 0;
@@ -177,6 +206,7 @@ export default defineBackground(() => {
     if (!masterPassword) return;
     masterPassword = null;
     sessions.clear();
+    clearPersistedSessions();
     authorizedBridgeSessionKey = null;
     disconnectAllGiftRelays();
     clearSessionStorage();
@@ -235,6 +265,7 @@ export default defineBackground(() => {
 
   // Restore session after MV3 service worker restart
   restoreSession();
+  restoreSessions();
 
   // --- Open side panel on icon click (Chrome) / sidebar (Firefox) ---
 
@@ -302,6 +333,7 @@ export default defineBackground(() => {
             const disconnectOrigin = resolveOrigin(sender);
             if (disconnectOrigin === session.appOrigin) {
               sessions.delete(sessionKey);
+              persistSessions();
               if (authorizedBridgeSessionKey === sessionKey) {
                 authorizedBridgeSessionKey = null;
               }
@@ -384,6 +416,7 @@ export default defineBackground(() => {
       // Check session expiry
       if (session.expiresAt < Date.now()) {
         sessions.delete(msg.sessionKey);
+        persistSessions();
         port.postMessage({
           type: 'BYOKY_PROXY_RESPONSE_ERROR',
           requestId: msg.requestId,
@@ -1063,6 +1096,7 @@ export default defineBackground(() => {
     };
 
     sessions.set(sessionKey, session);
+    persistSessions();
 
     return {
       type: 'BYOKY_CONNECT_RESPONSE',
@@ -1116,6 +1150,7 @@ export default defineBackground(() => {
       case 'lock':
         masterPassword = null;
         sessions.clear();
+        clearPersistedSessions();
         authorizedBridgeSessionKey = null;
         disconnectAllGiftRelays();
         clearSessionStorage();
@@ -1220,6 +1255,7 @@ export default defineBackground(() => {
       case 'resetWallet': {
         masterPassword = null;
         sessions.clear();
+        clearPersistedSessions();
         authorizedBridgeSessionKey = null;
         disconnectAllGiftRelays();
         clearSessionStorage();
@@ -1248,6 +1284,7 @@ export default defineBackground(() => {
         for (const [key, s] of sessions) {
           if (s.id === sessionId) {
             sessions.delete(key);
+            persistSessions();
             if (authorizedBridgeSessionKey === key) {
               authorizedBridgeSessionKey = null;
             }
@@ -2588,6 +2625,7 @@ export default defineBackground(() => {
 
     if (session.expiresAt < Date.now()) {
       sessions.delete(sessionKey);
+      persistSessions();
       bridgeProxyPort?.postMessage({
         type: 'proxy_http_error',
         requestId,
@@ -3191,6 +3229,7 @@ export default defineBackground(() => {
       }
 
       session.providers = newSessionProviders;
+      persistSessions();
 
       const msg = { type: 'BYOKY_PROVIDERS_UPDATED', payload: { sessionKey, providers: providerMap } };
       for (const port of notifyPorts) {
