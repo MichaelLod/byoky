@@ -471,7 +471,7 @@ section {
   box-shadow:
     0 0 60px rgba(14, 165, 233, 0.08),
     0 20px 60px rgba(0, 0, 0, 0.4);
-  max-width: 800px;
+  max-width: 960px;
   margin-left: auto;
   margin-right: auto;
 }
