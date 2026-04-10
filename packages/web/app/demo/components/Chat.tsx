@@ -392,17 +392,11 @@ export function Chat({ session }: Props) {
         <div className="provider-select">
           <label>Provider:</label>
           <select value={selectedProvider} onChange={e => setSelectedProvider(e.target.value)}>
-            {dropdownProviders.map(id => {
-              const meta = session.providers[id];
-              const direct = meta?.available === true;
-              const isGift = meta?.gift;
-              const suffix = isGift ? ' (Gift)' : direct ? '' : ' (via routing)';
-              return (
-                <option key={id} value={id}>
-                  {getProviderLabel(id)}{suffix}
-                </option>
-              );
-            })}
+            {dropdownProviders.map(id => (
+              <option key={id} value={id}>
+                {getProviderLabel(id)}
+              </option>
+            ))}
           </select>
         </div>
         <div className="chat-header-actions">
