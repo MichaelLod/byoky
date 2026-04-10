@@ -192,18 +192,17 @@ describe('buildNoCredentialMessage', () => {
   it('points at the missing destination provider when group binds elsewhere', () => {
     const g = group('anthropic');
     const msg = buildNoCredentialMessage('openai', ['openai'], g);
-    expect(msg).toContain('routes to anthropic');
-    expect(msg).toContain('Add a anthropic credential');
+    expect(msg).toContain('No anthropic API key found');
   });
 
   it('lists existing credentials when wallet has some but not the requested one', () => {
     const msg = buildNoCredentialMessage('anthropic', ['openai', 'gemini'], undefined);
     expect(msg).toContain('You have keys for: openai, gemini');
-    expect(msg).toContain('add a anthropic key');
+    expect(msg).toContain('Add a anthropic key');
   });
 
   it('tells the user the wallet is empty when there are no credentials', () => {
     const msg = buildNoCredentialMessage('openai', [], undefined);
-    expect(msg).toContain('your wallet has no credentials');
+    expect(msg).toContain('No API keys in your wallet');
   });
 });
