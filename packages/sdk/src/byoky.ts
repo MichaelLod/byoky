@@ -513,6 +513,13 @@ export class Byoky {
 
         if (msg.type === 'relay:peer:status') {
           if (msg.online === false) {
+            // Try loading a saved vault session if the offer never arrived
+            if (!vaultFallback) {
+              const saved = loadVaultSession();
+              if (saved) {
+                vaultFallback = { vaultUrl: saved.vaultUrl, appSessionToken: saved.appSessionToken };
+              }
+            }
             if (vaultFallback) {
               activeFetchMode = 'vault';
             } else {
