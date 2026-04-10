@@ -6,6 +6,7 @@ interface Message {
   content: string;
   image?: { base64: string; mediaType: string; name: string };
   streaming?: boolean;
+  provider?: string;
 }
 
 interface Props {
@@ -304,7 +305,7 @@ export function Chat({ session }: Props) {
 
     const userMessage: Message = { role: 'user', content: text.trim() || (image ? 'What is in this image?' : ''), image };
     const prevMessages = [...messages];
-    setMessages(prev => [...prev, userMessage, { role: 'assistant', content: '', streaming: true }]);
+    setMessages(prev => [...prev, userMessage, { role: 'assistant', content: '', streaming: true, provider: selectedProvider }]);
     setInput('');
     setLastPrompt(userMessage.content);
     removeAttachment();
@@ -531,7 +532,7 @@ export function Chat({ session }: Props) {
         )}
         {messages.map((msg, i) => (
           <div key={i} className={`message message-${msg.role}${msg.streaming ? ' message-streaming' : ''}`}>
-            <div className="message-avatar">{msg.role === 'user' ? 'You' : 'AI'}</div>
+            <div className="message-avatar">{msg.role === 'user' ? 'You' : msg.provider ? getProviderLabel(msg.provider).split(' ')[0] : 'AI'}</div>
             <div className="message-content">
               {msg.image && (
                 <img
