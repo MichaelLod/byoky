@@ -18,7 +18,7 @@
   Your keys never leave your device.
   <br />
   <br />
-  <a href="https://byoky.com">Website</a> · <a href="https://byoky.com/docs">Docs</a> · <a href="https://byoky.com/apps">Apps</a> · <a href="https://demo.byoky.com">Demo</a> · <a href="#quick-start">Quick Start</a> · <a href="https://discord.gg/gRs8S9fxcT">Discord</a> · <a href="https://github.com/MichaelLod/byoky/issues">Issues</a>
+  <a href="https://byoky.com">Website</a> · <a href="https://byoky.com/docs">Docs</a> · <a href="https://byoky.com/apps">Apps</a> · <a href="https://byoky.com/marketplace">Marketplace</a> · <a href="https://demo.byoky.com">Demo</a> · <a href="#quick-start">Quick Start</a> · <a href="https://discord.gg/gRs8S9fxcT">Discord</a> · <a href="https://github.com/MichaelLod/byoky/issues">Issues</a>
   <br />
   <br />
   <a href="https://github.com/MichaelLod/byoky/blob/main/LICENSE"><img src="https://img.shields.io/github/license/MichaelLod/byoky?style=flat&color=0ea5e9" alt="License" /></a>
@@ -210,6 +210,18 @@ byoky-relay  # default port 8787
 
 > **Privacy guarantee:** The recipient never receives your API key. Every request is relayed through the sender's running extension, which enforces the token budget and can revoke access at any time.
 
+### Token Marketplace
+
+**[byoky.com/marketplace](https://byoky.com/marketplace)** — A public board where users share free token gifts with the community. Browse available gifts, see which are online, check remaining tokens and expiry, and redeem directly into your wallet.
+
+**How to list a gift:**
+1. Create a gift in your wallet (extension or mobile)
+2. Check "List on Token Marketplace"
+3. Add a display name (or stay anonymous)
+4. Your gift appears on the marketplace for anyone to redeem
+
+The marketplace shows live online/offline status (green/red dot), remaining token budget, and expiration countdown. Expired and depleted gifts appear in a grayed-out section.
+
 ### OpenClaw Integration
 
 Use your Byoky wallet as the key provider for [OpenClaw](https://openclaw.dev). The plugin connects through the bridge — your keys never leave the extension, even from the CLI.
@@ -346,6 +358,7 @@ pnpm --filter @byoky/extension build:all     # Chrome + Firefox + Safari
 - [x] Cross-provider translation — drag an app from a Claude group to a GPT group and have requests transparently rewrite (request body, response body, SSE streams)
 - [x] Remote OpenClaw via relay (cloud deployment, zero key exposure)
 - [x] App Ecosystem — curated marketplace, in-wallet app runtime (sandboxed iframe/WebView), developer submission flow
+- [x] Token Marketplace — public gift board where users share free tokens with the community
 - [ ] Password change (re-encrypt vault with new master password)
 
 ## App Ecosystem
