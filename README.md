@@ -45,21 +45,6 @@
   <img src="https://github.com/MichaelLod/byoky/raw/main/.github/screenshots/screenshot-1.png?v=2" alt="Byoky Wallet" width="400" height="1051" />&nbsp;&nbsp;<img src="https://github.com/MichaelLod/byoky/raw/main/.github/screenshots/screenshot-2.png?v=2" alt="Byoky Unlock" width="400" height="1051" />
 </p>
 
-### Why Byoky?
-
-|  | **Byoky** | Paste API Key | AI Gateways | Vendor SDKs |
-|---|:---:|:---:|:---:|:---:|
-| User chooses model | **Yes** | No | Depends | No |
-| Keys stay on device | **Yes** | No | No | No |
-| Cross-provider translation | **Yes** | No | No | No |
-| Mobile wallet + QR | **Yes** | No | No | No |
-| Token gifting | **Yes** | No | No | No |
-| Backend relay | **Yes** | No | Yes | No |
-| Full audit log | **Yes** | No | Yes | No |
-| Zero server cost | **Yes** | No | No | No |
-| Integration effort | **2 lines** | ~40 lines | ~30 lines | ~15 lines |
-| Open source | **Yes** | Varies | Some | Some |
-
 ### How it works
 
 ```
