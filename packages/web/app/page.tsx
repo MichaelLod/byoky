@@ -7,10 +7,6 @@ export default function Home() {
     <>
       <Hero />
       <div className="divider" />
-      <ThreatContext />
-      <div className="divider" />
-      <Security />
-      <div className="divider" />
       <ZeroCost />
       <div className="divider" />
       <Showcase />
@@ -20,6 +16,10 @@ export default function Home() {
       <HowItWorks />
       <div className="divider" />
       <Providers />
+      <div className="divider" />
+      <ThreatContext />
+      <div className="divider" />
+      <Security />
       <div className="divider" />
       <CrossProviderRouting />
       <div className="divider" />
@@ -43,39 +43,39 @@ function Hero() {
       <div className="container">
         <FadeIn>
           <div className="hero-badge">
-            <span className="hero-badge-dot hero-badge-dot-warning" />
-            260,000+ users had their AI API keys stolen by Chrome extensions in 2025
+            <span className="hero-badge-dot" />
+            Open-source &middot; 15 providers &middot; 2 lines to integrate
           </div>
         </FadeIn>
         <FadeIn delay={0.1}>
           <h1>
             <span className="hero-eyebrow">Bring Your Own Key.</span>
-            <span className="hero-gradient">Your AI keys deserve a vault.</span>
+            <span className="hero-gradient">Build AI apps. Pay nothing for AI.</span>
           </h1>
         </FadeIn>
         <FadeIn delay={0.2}>
           <p>
-            Byoky encrypts your API keys locally with AES-256-GCM.
-            Apps get proxied access — keys never leave your device.
-            Open source and free forever.
+            Your users connect their own API keys through Byoky.
+            You get Claude, GPT-4, Gemini, and 12 more providers —
+            without spending a cent on infrastructure.
           </p>
         </FadeIn>
         <FadeIn delay={0.3}>
           <div className="hero-actions">
             <a
-              href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon"
+              href="/docs"
               className="btn btn-primary"
+            >
+              Start Building
+            </a>
+            <a
+              href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon"
+              className="btn btn-secondary"
               target="_blank"
               rel="noopener noreferrer"
             >
               <DownloadIcon />
-              Add to Chrome
-            </a>
-            <a
-              href="/demo"
-              className="btn btn-secondary"
-            >
-              Try the Demo
+              Install Wallet
             </a>
           </div>
           <div className="hero-also">
@@ -92,20 +92,20 @@ function Hero() {
         <FadeIn delay={0.35}>
           <div className="hero-trust-bar">
             <div className="hero-trust-item">
+              <LinkIcon />
+              <span>15 Providers</span>
+            </div>
+            <div className="hero-trust-item">
+              <CheckIcon />
+              <span>2 Lines to Integrate</span>
+            </div>
+            <div className="hero-trust-item">
               <LockIcon />
-              <span>AES-256-GCM</span>
+              <span>AES-256-GCM Encrypted</span>
             </div>
             <div className="hero-trust-item">
               <ShieldIcon />
               <span>MIT Licensed</span>
-            </div>
-            <div className="hero-trust-item">
-              <EyeIcon />
-              <span>Full Audit Log</span>
-            </div>
-            <div className="hero-trust-item">
-              <LinkIcon />
-              <span>15 Providers</span>
             </div>
           </div>
         </FadeIn>
@@ -177,17 +177,17 @@ function ThreatContext() {
     <section className="threat-section">
       <div className="container">
         <FadeIn>
-          <h2>Your API keys are under attack.</h2>
+          <h2>Why users trust Byoky with their keys.</h2>
           <p className="subtitle">
-            Every Chrome extension you install can read your API keys in plaintext.
-            In 2025 alone, the damage was massive.
+            Chrome extensions that handle API keys have a track record of abuse.
+            Byoky was built to be the exception.
           </p>
         </FadeIn>
         <div className="threat-grid">
           <FadeIn delay={0.05}>
             <div className="threat-card">
-              <span className="threat-stat">10,000</span>
-              <span className="threat-label">OpenAI API keys stolen by a single fake extension</span>
+              <span className="threat-stat">10,000+</span>
+              <span className="threat-label">users exposed by a fake ChatGPT Chrome extension</span>
             </div>
           </FadeIn>
           <FadeIn delay={0.1}>
@@ -211,8 +211,9 @@ function ThreatContext() {
         </div>
         <FadeIn delay={0.25}>
           <p className="threat-cta">
-            Byoky is the only tool that encrypts your keys locally and proxies every request.
-            Your keys never leave the extension process.
+            Byoky encrypts keys locally with AES-256-GCM, proxies every request,
+            and gives users full visibility into what apps access. Your users
+            install it once and trust every app you build.
           </p>
         </FadeIn>
       </div>
