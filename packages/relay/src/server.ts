@@ -43,7 +43,7 @@ function cleanupIdleRooms(): void {
 
 const cleanupInterval = setInterval(cleanupIdleRooms, 60_000);
 
-const wss = new WebSocketServer({ port: PORT, maxPayload: 1 * 1024 * 1024 }, () => {
+const wss = new WebSocketServer({ port: PORT, maxPayload: 20 * 1024 * 1024 }, () => {
   console.log(`relay listening on port ${PORT}`);
 });
 
@@ -177,7 +177,8 @@ wss.on("connection", (ws) => {
         msg.type === "relay:response:done" ||
         msg.type === "relay:response:error" ||
         msg.type === "relay:usage" ||
-        msg.type === "relay:pair:hello"
+        msg.type === "relay:pair:hello" ||
+        msg.type === "relay:vault:offer"
       ) {
         if (room.recipient && room.recipient.readyState === WebSocket.OPEN) {
           room.recipient.send(String(raw));

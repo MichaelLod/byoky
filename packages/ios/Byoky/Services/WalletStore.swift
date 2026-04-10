@@ -915,6 +915,19 @@ final class WalletStore: ObservableObject {
         }
     }
 
+    func createVaultAppSession(appOrigin: String, providerIds: [String]) async -> (vaultUrl: String, appSessionToken: String)? {
+        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return nil }
+        let providers = providerIds.map { ["id": $0] }
+        let body: [String: Any] = ["appOrigin": appOrigin, "providers": providers]
+        let result = await vaultRequest(path: "/connect", method: "POST", body: body, token: token)
+        if result.status == 401 {
+            await MainActor.run { cloudVaultTokenExpired = true }
+            return nil
+        }
+        guard result.ok, let ast = result.data["appSessionToken"] as? String else { return nil }
+        return (Self.vaultURL, ast)
+    }
+
     func checkUsernameAvailability(_ username: String) async -> (available: Bool, reason: String?) {
         let result = await vaultRequest(path: "/auth/check-username/\(username.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? username)", method: "GET")
         if !result.ok { return (false, nil) }

@@ -80,6 +80,12 @@ export interface RelayPairAck {
   type: 'relay:pair:ack';
 }
 
+export interface RelayVaultOffer {
+  type: 'relay:vault:offer';
+  vaultUrl: string;
+  appSessionToken: string;
+}
+
 export type RelayMessage =
   | RelayHello
   | RelayRequest
@@ -90,7 +96,8 @@ export type RelayMessage =
   | RelayPing
   | RelayPong
   | RelayPairHello
-  | RelayPairAck;
+  | RelayPairAck
+  | RelayVaultOffer;
 
 const MAX_RELAY_MESSAGE_SIZE = 1_048_576; // 1 MB
 
@@ -132,6 +139,9 @@ export function parseRelayMessage(data: unknown): RelayMessage | null {
         if (!raw.providers || typeof raw.providers !== 'object') return null;
         break;
       case 'relay:pair:ack':
+        break;
+      case 'relay:vault:offer':
+        if (typeof raw.vaultUrl !== 'string' || typeof raw.appSessionToken !== 'string') return null;
         break;
       default:
         return null;

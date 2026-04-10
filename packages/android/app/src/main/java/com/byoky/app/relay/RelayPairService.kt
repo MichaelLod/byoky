@@ -182,6 +182,7 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
                         // Best-effort: pairing still succeeds even if persistence fails
                     }
                 }
+                sendVaultOffer(payload.appOrigin)
             }
             "relay:request" -> handleRelayRequest(json)
             "relay:peer:status" -> {
@@ -1026,6 +1027,19 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
                 put("message", message)
             })
         })
+    }
+
+    private fun sendVaultOffer(appOrigin: String) {
+        val w = wallet ?: return
+        val providerIds = w.credentials.value.map { it.providerId }.distinct()
+        scope.launch {
+            val result = w.createVaultAppSession(appOrigin, providerIds) ?: return@launch
+            sendJSON(JSONObject().apply {
+                put("type", "relay:vault:offer")
+                put("vaultUrl", result.first)
+                put("appSessionToken", result.second)
+            })
+        }
     }
 
     private fun sendJSON(obj: JSONObject) {
