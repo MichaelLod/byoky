@@ -210,6 +210,19 @@ function Hero() {
           </div>
         </FadeIn>
         <FadeIn delay={0.4}>
+          <div className="hero-demo">
+            <video
+              autoPlay
+              loop
+              muted
+              playsInline
+              poster="/demos/hero-demo.gif"
+            >
+              <source src="/demos/hero-demo.mp4" type="video/mp4" />
+            </video>
+          </div>
+        </FadeIn>
+        <FadeIn delay={0.5}>
           <VersionStatus />
         </FadeIn>
       </div>
