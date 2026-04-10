@@ -21,6 +21,109 @@ if [ "${1:-}" = "status" ]; then
   exit 0
 fi
 
+# ============================================================
+# Retry mode — re-publish only stores that are behind
+# ============================================================
+if [ "${1:-}" = "retry" ]; then
+  CURRENT=$(node -p "require('./package.json').version")
+
+  # Derive native version from Android gradle
+  ANDROID_GRADLE="$ROOT/packages/android/app/build.gradle.kts"
+  NATIVE_VERSION=$(grep 'versionName = ' "$ANDROID_GRADLE" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+  VERSION_CODE=$(grep 'versionCode = ' "$ANDROID_GRADLE" | head -1 | sed 's/[^0-9]//g')
+
+  echo "Retrying failed uploads for v${CURRENT} (native ${NATIVE_VERSION}/${VERSION_CODE})..."
+  echo ""
+
+  # Generate store notes if not cached
+  BUILD_DIR="$ROOT/build"
+  mkdir -p "$BUILD_DIR"
+  STORE_NOTES_FILE="$BUILD_DIR/store-notes.txt"
+  PREV_TAG=$(git tag --list 'v*' --sort=-version:refname | sed -n '2p')
+  [ -n "$PREV_TAG" ] && node scripts/release-notes.mjs --store "$PREV_TAG" "v${CURRENT}" > "$STORE_NOTES_FILE"
+
+  RETRIED=0
+
+  # Chrome Web Store
+  if [ -n "${CHROME_EXTENSION_ID:-}" ] && [ -n "${CHROME_CLIENT_ID:-}" ]; then
+    CHROME_LIVE=$(node -e "
+      fetch('https://clients2.google.com/service/update2/crx?response=updatecheck&acceptformat=crx3&prodversion=130.0&x=id%3D${CHROME_EXTENSION_ID}%26v%3D0.0.0%26uc')
+        .then(r=>r.text()).then(t=>{const m=t.match(/<updatecheck[^>]+version=\"([^\"]+)\"/);console.log(m?.[1]||'unknown')})
+    " 2>/dev/null)
+    if [ "$CHROME_LIVE" != "$CURRENT" ] && [ -f "dist/byoky-chrome-v${CURRENT}.zip" ]; then
+      echo "Chrome: v${CHROME_LIVE} → v${CURRENT}"
+      npx chrome-webstore-upload upload \
+        --source "dist/byoky-chrome-v${CURRENT}.zip" \
+        --extension-id "$CHROME_EXTENSION_ID" \
+        --client-id "$CHROME_CLIENT_ID" \
+        --client-secret "$CHROME_CLIENT_SECRET" \
+        --refresh-token "$CHROME_REFRESH_TOKEN" \
+        --auto-publish 2>&1 || echo "  WARN: Chrome upload failed"
+      RETRIED=$((RETRIED + 1))
+    else
+      echo "Chrome: v${CHROME_LIVE} — up to date"
+    fi
+  fi
+
+  # Firefox AMO
+  if [ -n "${AMO_API_KEY:-}" ] && [ -n "${AMO_API_SECRET:-}" ]; then
+    AMO_LIVE=$(node -e "
+      const { createHmac } = require('node:crypto');
+      const h = Buffer.from(JSON.stringify({alg:'HS256',typ:'JWT'})).toString('base64url');
+      const now = Math.floor(Date.now()/1000);
+      const p = Buffer.from(JSON.stringify({iss:'${AMO_API_KEY}',jti:Math.random().toString(36),iat:now,exp:now+60})).toString('base64url');
+      const s = createHmac('sha256','${AMO_API_SECRET}').update(h+'.'+p).digest('base64url');
+      fetch('https://addons.mozilla.org/api/v5/addons/addon/byoky%40byoky.com/versions/?page_size=1',{headers:{Authorization:'JWT '+h+'.'+p+'.'+s}})
+        .then(r=>r.json()).then(d=>console.log(d.results?.[0]?.version||'unknown'))
+    " 2>/dev/null)
+    if [ "$AMO_LIVE" != "$CURRENT" ] && [ -d "packages/extension/.output/firefox-mv2" ]; then
+      echo "Firefox: v${AMO_LIVE} → v${CURRENT}"
+      npx web-ext sign \
+        --source-dir packages/extension/.output/firefox-mv2 \
+        --api-key "$AMO_API_KEY" \
+        --api-secret "$AMO_API_SECRET" \
+        --channel listed \
+        --upload-source-code "dist/byoky-source-v${CURRENT}.zip" 2>&1 || echo "  WARN: Firefox upload failed"
+      RETRIED=$((RETRIED + 1))
+    else
+      echo "Firefox: v${AMO_LIVE} — up to date"
+    fi
+  fi
+
+  # App Store (iOS)
+  if [ -n "${ASC_KEY_ID:-}" ] && [ -n "${ASC_ISSUER_ID:-}" ]; then
+    echo "App Store: checking..."
+    node scripts/submit-appstore.mjs "$NATIVE_VERSION" IOS "$STORE_NOTES_FILE" 2>&1 || true
+    node scripts/submit-appstore.mjs "$NATIVE_VERSION" MAC_OS "$STORE_NOTES_FILE" 2>&1 || true
+    RETRIED=$((RETRIED + 1))
+  fi
+
+  # Google Play
+  if [ -n "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ] && [ -f "dist/byoky-android-v${CURRENT}.aab" ]; then
+    GP_LIVE=$(node -e "
+      fetch('https://play.google.com/store/apps/details?id=com.byoky.app&hl=en',{headers:{'User-Agent':'Mozilla/5.0'}})
+        .then(r=>r.text()).then(h=>{const m=h.match(/\[\[\[\"(\d+\.\d+\.\d+)\"\]\]/)||h.match(/Current Version.*?>([\d.]+)</);console.log(m?.[1]||'unknown')})
+    " 2>/dev/null)
+    if [ "$GP_LIVE" != "$NATIVE_VERSION" ]; then
+      echo "Google Play: v${GP_LIVE} → v${NATIVE_VERSION}"
+      node scripts/upload-google-play.mjs "dist/byoky-android-v${CURRENT}.aab" production "$STORE_NOTES_FILE" 2>&1 || echo "  WARN: Google Play upload failed"
+      RETRIED=$((RETRIED + 1))
+    else
+      echo "Google Play: v${GP_LIVE} — up to date"
+    fi
+  fi
+
+  # Discord (skip on retry — already posted)
+
+  echo ""
+  if [ "$RETRIED" -eq 0 ]; then
+    echo "All stores up to date."
+  else
+    echo "Retried $RETRIED store(s). Run 'pnpm release:status' to verify."
+  fi
+  exit 0
+fi
+
 # --- Parse args ---
 DRY_RUN=false
 SKIP_MOBILE=false
