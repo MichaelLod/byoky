@@ -53,28 +53,17 @@ export function DemoApp() {
 
   return (
     <div className="demo-app">
-      <header className="header">
-        <div className="header-left">
-          <h1 className="logo">Byoky <span className="logo-sub">demo</span></h1>
-          <p className="header-desc">Example app showing Byoky wallet integration</p>
-        </div>
-        <div className="header-right">
-          {session ? (
-            <div className="connected">
-              <span className="connected-dot" />
-              <span className="connected-text">Connected</span>
-              <button className="btn btn-ghost" onClick={handleDisconnect}>
-                Disconnect
-              </button>
-            </div>
-          ) : (
-            <button className="btn btn-primary" onClick={handleConnect}>
-              <WalletIcon />
-              Connect Byoky
+      {session && (
+        <div className="demo-status-bar">
+          <div className="connected">
+            <span className="connected-dot" />
+            <span className="connected-text">Connected</span>
+            <button className="btn btn-ghost" onClick={handleDisconnect}>
+              Disconnect
             </button>
-          )}
+          </div>
         </div>
-      </header>
+      )}
 
       {error && (
         <div className="error-banner">
