@@ -61,7 +61,7 @@ struct AppStoreView: View {
 
     private func fetchApps() async {
         do {
-            var components = URLComponents(string: "\(marketplaceURL)/api/apps")!
+            var components = URLComponents(string: marketplaceURL)!
             if !search.isEmpty {
                 components.queryItems = [URLQueryItem(name: "search", value: search)]
             }
