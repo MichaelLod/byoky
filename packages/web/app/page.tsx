@@ -7,21 +7,23 @@ export default function Home() {
     <>
       <Hero />
       <div className="divider" />
-      <ZeroCost />
+      <ThreatContext />
+      <div className="divider" />
+      <Security />
       <div className="divider" />
       <Showcase />
       <div className="divider" />
-      <Providers />
+      <HowItWorks />
       <div className="divider" />
       <ForDevelopers />
       <div className="divider" />
-      <HowItWorks />
-      <div className="divider" />
-      <Security />
+      <Providers />
       <div className="divider" />
       <CrossProviderRouting />
       <div className="divider" />
       <MobileWallet />
+      <div className="divider" />
+      <ZeroCost />
       <div className="divider" />
       <OpenSource />
       <ClosingCTA />
@@ -41,117 +43,21 @@ function Hero() {
       <div className="container">
         <FadeIn>
           <div className="hero-badge">
-            <span className="hero-badge-dot" />
-            Open-source wallet for AI keys
+            <span className="hero-badge-dot hero-badge-dot-warning" />
+            260,000+ users had their AI API keys stolen by Chrome extensions in 2025
           </div>
         </FadeIn>
         <FadeIn delay={0.1}>
-          <div className="hero-mascot">
-            <svg width="96" height="96" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <polygon points="40,5 64,3 88,5 64,14" fill="#0ea5e9"/>
-              <polygon points="40,5 22,12 44,18" fill="#0284c7"/>
-              <polygon points="88,5 106,12 84,18" fill="#0284c7"/>
-              <polygon points="40,5 44,18 64,14" fill="#0369a1"/>
-              <polygon points="88,5 84,18 64,14" fill="#0369a1"/>
-              <polygon points="22,12 12,26 36,26" fill="#075985"/>
-              <polygon points="22,12 36,26 44,18" fill="#0369a1"/>
-              <polygon points="106,12 116,26 92,26" fill="#075985"/>
-              <polygon points="106,12 92,26 84,18" fill="#0369a1"/>
-              <polygon points="44,18 36,26 56,30" fill="#0c4a6e"/>
-              <polygon points="84,18 92,26 72,30" fill="#0c4a6e"/>
-              <polygon points="44,18 56,30 64,14" fill="#075985"/>
-              <polygon points="84,18 72,30 64,14" fill="#075985"/>
-              <polygon points="64,14 56,30 64,28" fill="#0c4a6e"/>
-              <polygon points="64,14 72,30 64,28" fill="#0c4a6e"/>
-              <polygon points="12,26 6,42 30,40" fill="#082f49"/>
-              <polygon points="12,26 30,40 36,26" fill="#082f49"/>
-              <polygon points="116,26 122,42 98,40" fill="#082f49"/>
-              <polygon points="116,26 98,40 92,26" fill="#082f49"/>
-              <polygon points="36,26 30,40 48,38" fill="#1e0a4a"/>
-              <polygon points="36,26 48,38 56,30" fill="#251055"/>
-              <polygon points="92,26 98,40 80,38" fill="#1e0a4a"/>
-              <polygon points="92,26 80,38 72,30" fill="#251055"/>
-              <polygon points="56,30 64,28 60,44" fill="#9494a6"/>
-              <polygon points="72,30 64,28 68,44" fill="#8a8a9c"/>
-              <polygon points="60,44 64,28 68,44" fill="#7a7a8c"/>
-              <polygon points="56,30 60,44 46,42" fill="#7a7a8c"/>
-              <polygon points="72,30 68,44 82,42" fill="#6b6b7d"/>
-              <polygon points="46,42 60,44 52,56" fill="#5e5e6e"/>
-              <polygon points="82,42 68,44 76,56" fill="#52525e"/>
-              <polygon points="60,44 68,44 64,60" fill="#6b6b7d"/>
-              <polygon points="52,56 60,44 64,60" fill="#52525e"/>
-              <polygon points="76,56 68,44 64,60" fill="#4a4a56"/>
-              <polygon points="52,56 64,60 64,88" fill="#3f3f4a"/>
-              <polygon points="76,56 64,60 64,88" fill="#353540"/>
-              <polygon points="30,40 6,42 8,58" fill="#1e0a4a"/>
-              <polygon points="30,40 8,58 32,54" fill="#1a0840"/>
-              <polygon points="48,38 30,40 32,54" fill="#1e0a4a"/>
-              <polygon points="48,38 32,54 46,42" fill="#251055"/>
-              <polygon points="98,40 122,42 120,58" fill="#1e0a4a"/>
-              <polygon points="98,40 120,58 96,54" fill="#1a0840"/>
-              <polygon points="80,38 98,40 96,54" fill="#1e0a4a"/>
-              <polygon points="80,38 96,54 82,42" fill="#251055"/>
-              <polygon points="8,58 4,72 26,66" fill="#1a0840"/>
-              <polygon points="8,58 26,66 32,54" fill="#1e0a4a"/>
-              <polygon points="120,58 124,72 102,66" fill="#1a0840"/>
-              <polygon points="120,58 102,66 96,54" fill="#1e0a4a"/>
-              <polygon points="32,54 26,66 42,68" fill="#150835"/>
-              <polygon points="32,54 42,68 46,42" fill="#1e0a4a"/>
-              <polygon points="96,54 102,66 86,68" fill="#150835"/>
-              <polygon points="96,54 86,68 82,42" fill="#1e0a4a"/>
-              <polygon points="46,42 42,68 52,56" fill="#1e0a4a"/>
-              <polygon points="82,42 86,68 76,56" fill="#1e0a4a"/>
-              <polygon points="52,56 42,68 54,78" fill="#150835"/>
-              <polygon points="76,56 86,68 74,78" fill="#150835"/>
-              <polygon points="52,56 64,88 54,78" fill="#1a0840"/>
-              <polygon points="76,56 64,88 74,78" fill="#1a0840"/>
-              <polygon points="26,66 4,72 14,86" fill="#150835"/>
-              <polygon points="26,66 14,86 36,80" fill="#110730"/>
-              <polygon points="42,68 26,66 36,80" fill="#150835"/>
-              <polygon points="42,68 36,80 48,82" fill="#110730"/>
-              <polygon points="102,66 124,72 114,86" fill="#150835"/>
-              <polygon points="102,66 114,86 92,80" fill="#110730"/>
-              <polygon points="86,68 102,66 92,80" fill="#150835"/>
-              <polygon points="86,68 92,80 80,82" fill="#110730"/>
-              <polygon points="54,78 42,68 48,82" fill="#110730"/>
-              <polygon points="74,78 86,68 80,82" fill="#110730"/>
-              <polygon points="54,78 48,82 58,88" fill="#0d0525"/>
-              <polygon points="74,78 80,82 70,88" fill="#0d0525"/>
-              <polygon points="54,78 64,88 58,88" fill="#150835"/>
-              <polygon points="74,78 64,88 70,88" fill="#150835"/>
-              <polygon points="4,72 14,86 0,90" fill="#110730"/>
-              <polygon points="124,72 114,86 128,90" fill="#110730"/>
-              <polygon points="0,90 14,86 4,108" fill="#0d0525"/>
-              <polygon points="128,90 114,86 124,108" fill="#0d0525"/>
-              <polygon points="14,86 36,80 22,102" fill="#0d0525"/>
-              <polygon points="14,86 22,102 6,106" fill="#0a0420"/>
-              <polygon points="114,86 92,80 106,102" fill="#0d0525"/>
-              <polygon points="114,86 106,102 122,106" fill="#0a0420"/>
-              <polygon points="36,80 48,82 38,104" fill="#0d0525"/>
-              <polygon points="36,80 38,104 24,108" fill="#0a0420"/>
-              <polygon points="92,80 80,82 90,104" fill="#0d0525"/>
-              <polygon points="92,80 90,104 104,108" fill="#0a0420"/>
-              <polygon points="48,82 58,88 48,110" fill="#0a0420"/>
-              <polygon points="48,82 48,110 36,112" fill="#0d0525"/>
-              <polygon points="80,82 70,88 80,110" fill="#0a0420"/>
-              <polygon points="80,82 80,110 92,112" fill="#0d0525"/>
-              <polygon points="58,88 64,88 60,114" fill="#0a0420"/>
-              <polygon points="70,88 64,88 68,114" fill="#0a0420"/>
-              <circle cx="24" cy="46" r="4.5" fill="#7dd3fc"/>
-              <circle cx="24" cy="46" r="2.2" fill="#e0d4ff"/>
-              <circle cx="104" cy="46" r="4.5" fill="#7dd3fc"/>
-              <circle cx="104" cy="46" r="2.2" fill="#e0d4ff"/>
-            </svg>
-          </div>
           <h1>
             <span className="hero-eyebrow">Bring Your Own Key.</span>
-            <span className="hero-gradient">MetaMask for AI API Keys.</span>
+            <span className="hero-gradient">Your AI keys deserve a vault.</span>
           </h1>
         </FadeIn>
         <FadeIn delay={0.2}>
           <p>
-            15 providers. 2 lines to integrate. Cross-provider translation.
-            Your keys stay encrypted on your device — apps never see them.
+            Byoky encrypts your API keys locally with AES-256-GCM.
+            Apps get proxied access — keys never leave your device.
+            Open source and free forever.
           </p>
         </FadeIn>
         <FadeIn delay={0.3}>
@@ -163,35 +69,44 @@ function Hero() {
               rel="noopener noreferrer"
             >
               <DownloadIcon />
-              Chrome Extension
+              Add to Chrome
             </a>
             <a
-              href="https://addons.mozilla.org/en-US/firefox/addon/byoky/"
-              className="btn btn-primary"
-              target="_blank"
-              rel="noopener noreferrer"
+              href="/demo"
+              className="btn btn-secondary"
             >
-              <DownloadIcon />
-              Firefox Extension
+              Try the Demo
             </a>
-            <a
-              href="https://apps.apple.com/app/byoky/id6760779919"
-              className="btn btn-primary"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <AppleIcon />
-              iOS App
-            </a>
-            <a
-              href="https://play.google.com/store/apps/details?id=com.byoky.app"
-              className="btn btn-primary"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <AndroidIcon />
-              Android App
-            </a>
+          </div>
+          <div className="hero-also">
+            Also on{' '}
+            <a href="https://addons.mozilla.org/en-US/firefox/addon/byoky/" target="_blank" rel="noopener noreferrer">Firefox</a>
+            {' · '}
+            <a href="https://apps.apple.com/app/byoky/id6760779919" target="_blank" rel="noopener noreferrer">iOS</a>
+            {' · '}
+            <a href="https://play.google.com/store/apps/details?id=com.byoky.app" target="_blank" rel="noopener noreferrer">Android</a>
+            {' · '}
+            <a href="https://github.com/MichaelLod/byoky" target="_blank" rel="noopener noreferrer">GitHub</a>
+          </div>
+        </FadeIn>
+        <FadeIn delay={0.35}>
+          <div className="hero-trust-bar">
+            <div className="hero-trust-item">
+              <LockIcon />
+              <span>AES-256-GCM</span>
+            </div>
+            <div className="hero-trust-item">
+              <ShieldIcon />
+              <span>MIT Licensed</span>
+            </div>
+            <div className="hero-trust-item">
+              <CloudOffIcon />
+              <span>Zero Cloud</span>
+            </div>
+            <div className="hero-trust-item">
+              <LinkIcon />
+              <span>15 Providers</span>
+            </div>
           </div>
         </FadeIn>
         <FadeIn delay={0.4}>
@@ -250,6 +165,56 @@ function HowItWorks() {
             </div>
           </FadeIn>
         </div>
+      </div>
+    </section>
+  );
+}
+
+/* ─── Threat Context ──────────────────────────── */
+
+function ThreatContext() {
+  return (
+    <section className="threat-section">
+      <div className="container">
+        <FadeIn>
+          <h2>Your API keys are under attack.</h2>
+          <p className="subtitle">
+            Every Chrome extension you install can read your API keys in plaintext.
+            In 2025 alone, the damage was massive.
+          </p>
+        </FadeIn>
+        <div className="threat-grid">
+          <FadeIn delay={0.05}>
+            <div className="threat-card">
+              <span className="threat-stat">10,000</span>
+              <span className="threat-label">OpenAI API keys stolen by a single fake extension</span>
+            </div>
+          </FadeIn>
+          <FadeIn delay={0.1}>
+            <div className="threat-card">
+              <span className="threat-stat">900K</span>
+              <span className="threat-label">users compromised by extensions stealing AI conversations</span>
+            </div>
+          </FadeIn>
+          <FadeIn delay={0.15}>
+            <div className="threat-card">
+              <span className="threat-stat">$8.5M</span>
+              <span className="threat-label">in crypto stolen through a Chrome extension compromise</span>
+            </div>
+          </FadeIn>
+          <FadeIn delay={0.2}>
+            <div className="threat-card">
+              <span className="threat-stat">30+</span>
+              <span className="threat-label">malicious AI extensions caught in 2025&ndash;2026</span>
+            </div>
+          </FadeIn>
+        </div>
+        <FadeIn delay={0.25}>
+          <p className="threat-cta">
+            Byoky is the only tool that encrypts your keys locally and proxies every request.
+            Your keys never leave the extension process.
+          </p>
+        </FadeIn>
       </div>
     </section>
   );
