@@ -740,6 +740,17 @@ function CrossProviderRouting() {
                 GPT the next without touching a line of code. Try a new model
                 without rewriting your prompts.
               </p>
+              <div className="section-demo">
+                <video
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  poster="/demos/cross-provider.gif"
+                >
+                  <source src="/demos/cross-provider.mp4" type="video/mp4" />
+                </video>
+              </div>
             </div>
           </div>
         </FadeIn>
