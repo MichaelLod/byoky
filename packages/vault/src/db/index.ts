@@ -1,6 +1,6 @@
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import { eq, and, lt, lte, desc, sql } from 'drizzle-orm';
+import { eq, and, lt, gt, lte, desc, sql } from 'drizzle-orm';
 import crypto from 'node:crypto';
 import {
   users,
@@ -94,6 +94,7 @@ export async function getEncryptedKeyForUser(userId: string): Promise<string | n
     .where(and(
       eq(userSessions.userId, userId),
       sql`${userSessions.encryptedKey} IS NOT NULL`,
+      gt(userSessions.expiresAt, Date.now()),
     ))
     .limit(1);
   return row?.encryptedKey ?? null;
