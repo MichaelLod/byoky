@@ -741,6 +741,45 @@
   gap: 12px;
 }
 
+/* ── Code Panel ── */
+
+.demo-app .chat-code-panel {
+  border-bottom: 1px solid var(--border);
+  padding: 8px 0;
+}
+
+.demo-app .chat-code-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 0;
+  transition: color 0.15s;
+}
+
+.demo-app .chat-code-toggle:hover {
+  color: var(--text-secondary);
+}
+
+.demo-app .chat-code-snippet {
+  margin: 8px 0 4px;
+  padding: 14px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  overflow-x: auto;
+  white-space: pre;
+}
+
 /* ── Chat Input ── */
 
 .demo-app .chat-input {
