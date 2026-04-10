@@ -18,7 +18,7 @@
   Your keys never leave your device.
   <br />
   <br />
-  <a href="https://byoky.com">Website</a> · <a href="https://byoky.com/docs">Docs</a> · <a href="https://byoky.com/marketplace">Marketplace</a> · <a href="https://demo.byoky.com">Demo</a> · <a href="#quick-start">Quick Start</a> · <a href="https://discord.gg/gRs8S9fxcT">Discord</a> · <a href="https://github.com/MichaelLod/byoky/issues">Issues</a>
+  <a href="https://byoky.com">Website</a> · <a href="https://byoky.com/docs">Docs</a> · <a href="https://byoky.com/apps">Apps</a> · <a href="https://demo.byoky.com">Demo</a> · <a href="#quick-start">Quick Start</a> · <a href="https://discord.gg/gRs8S9fxcT">Discord</a> · <a href="https://github.com/MichaelLod/byoky/issues">Issues</a>
   <br />
   <br />
   <a href="https://github.com/MichaelLod/byoky/blob/main/LICENSE"><img src="https://img.shields.io/github/license/MichaelLod/byoky?style=flat&color=0ea5e9" alt="License" /></a>
@@ -350,7 +350,7 @@ pnpm --filter @byoky/extension build:all     # Chrome + Firefox + Safari
 
 ## App Ecosystem
 
-**[byoky.com/marketplace](https://byoky.com/marketplace)** — A curated marketplace of apps that run on your own API keys. Install apps directly into your wallet (extension or mobile), and they run inside a sandboxed iframe/WebView — your keys never leave the wallet.
+**[byoky.com/apps](https://byoky.com/apps)** — A curated marketplace of apps that run on your own API keys. Install apps directly into your wallet (extension or mobile), and they run inside a sandboxed iframe/WebView — your keys never leave the wallet.
 
 **How it works:**
 1. Browse the App Store from the **Apps** tab in your wallet
@@ -366,7 +366,7 @@ npx create-byoky-app init      # create a byoky.app.json manifest
 npx create-byoky-app submit    # submit to the marketplace
 ```
 
-Or submit via the web form at [byoky.com/marketplace/submit](https://byoky.com/marketplace/submit).
+Or submit via the web form at [byoky.com/apps/submit](https://byoky.com/apps/submit).
 
 **Security model:**
 - Apps run in a sandboxed iframe (`allow-scripts allow-forms`) or WKWebView/WebView
