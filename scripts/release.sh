@@ -489,55 +489,19 @@ if [ "$SKIP_IOS" = false ] && [ -n "${ASC_KEY_ID:-}" ] && [ -n "${ASC_ISSUER_ID:
     echo "  Skipping macOS upload (no pkg found)"
   fi
 
-  # Set "What's New" text on App Store Connect versions
-  echo "  Setting App Store release notes..."
-  node -e "
-    const { createSign } = require('node:crypto');
-    const fs = require('node:fs');
-    const notes = fs.readFileSync('$STORE_NOTES_FILE', 'utf8').slice(0, 4000);
-    const kid = '$ASC_KEY_ID', iss = '$ASC_ISSUER_ID';
-    const pk = '$ASC_PRIVATE_KEY'.replace(/\\\\n/g, '\n');
-    const header = Buffer.from(JSON.stringify({alg:'ES256',kid,typ:'JWT'})).toString('base64url');
-    const now = Math.floor(Date.now()/1000);
-    const payload = Buffer.from(JSON.stringify({iss,iat:now,exp:now+1200,aud:'appstoreconnect-v1'})).toString('base64url');
-    const sign = createSign('SHA256');
-    sign.update(header+'.'+payload);
-    const sig = sign.sign({key:pk,dsaEncoding:'ieee-p1363'},'base64url');
-    const jwt = header+'.'+payload+'.'+sig;
-    const h = {Authorization:'Bearer '+jwt,'Content-Type':'application/json'};
+  # Wait for builds to process before submitting
+  echo "  Waiting 30s for builds to process..."
+  sleep 30
 
-    (async () => {
-      // Find app
-      const appRes = await fetch('https://api.appstoreconnect.apple.com/v1/apps?filter[bundleId]=com.byoky.app&fields[apps]=bundleId', {headers:h});
-      const appData = await appRes.json();
-      const appId = appData.data?.[0]?.id;
-      if (!appId) { console.log('    App not found in ASC'); return; }
+  # Submit iOS for review (creates version, sets release notes, selects build, submits)
+  echo "  Submitting iOS for App Store review..."
+  node scripts/submit-appstore.mjs "$NEW_NATIVE_VERSION" IOS "$STORE_NOTES_FILE" \
+    2>&1 || echo "  WARN: iOS auto-submit failed — submit manually in App Store Connect"
 
-      // Find versions in editable states
-      for (const platform of ['IOS','MAC_OS']) {
-        const vRes = await fetch('https://api.appstoreconnect.apple.com/v1/apps/'+appId+'/appStoreVersions?filter[platform]='+platform+'&limit=3', {headers:h});
-        const vData = await vRes.json();
-        const editable = (vData.data||[]).find(v =>
-          ['PREPARE_FOR_SUBMISSION','WAITING_FOR_REVIEW','IN_REVIEW','DEVELOPER_REJECTED'].includes(v.attributes.appStoreState)
-        );
-        if (!editable) { console.log('    No editable '+platform+' version'); continue; }
-
-        // Get localizations
-        const locRes = await fetch('https://api.appstoreconnect.apple.com/v1/appStoreVersions/'+editable.id+'/appStoreVersionLocalizations', {headers:h});
-        const locData = await locRes.json();
-        const enLoc = (locData.data||[]).find(l => l.attributes.locale.startsWith('en'));
-        if (!enLoc) { console.log('    No en localization for '+platform); continue; }
-
-        // Update whatsNew
-        const patchRes = await fetch('https://api.appstoreconnect.apple.com/v1/appStoreVersionLocalizations/'+enLoc.id, {
-          method:'PATCH', headers:h,
-          body: JSON.stringify({data:{type:'appStoreVersionLocalizations',id:enLoc.id,attributes:{whatsNew:notes}}})
-        });
-        if (patchRes.ok) console.log('    '+platform+': release notes set');
-        else console.log('    '+platform+': failed ('+patchRes.status+')');
-      }
-    })();
-  " 2>&1 || echo "  WARN: Failed to set App Store release notes"
+  # Submit macOS for review
+  echo "  Submitting macOS for App Store review..."
+  node scripts/submit-appstore.mjs "$NEW_NATIVE_VERSION" MAC_OS "$STORE_NOTES_FILE" \
+    2>&1 || echo "  WARN: macOS auto-submit failed — submit manually in App Store Connect"
 else
   echo "  Skipping App Store uploads (${SKIP_IOS:+mobile builds skipped}${ASC_KEY_ID:+}${ASC_KEY_ID:-credentials not configured})"
 fi
@@ -628,7 +592,7 @@ echo ""
 echo "  Stores:"
 [ -n "${CHROME_EXTENSION_ID:-}" ] && echo "    Chrome Web Store: uploaded + auto-published"
 [ -n "${AMO_API_KEY:-}" ] && echo "    Firefox AMO: submitted for review"
-[ "$SKIP_IOS" = false ] && [ -n "${ASC_KEY_ID:-}" ] && echo "    App Store (iOS + macOS): uploaded to App Store Connect"
+[ "$SKIP_IOS" = false ] && [ -n "${ASC_KEY_ID:-}" ] && echo "    App Store (iOS + macOS): uploaded + submitted for review"
 [ "$SKIP_ANDROID" = false ] && [ -n "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ] && echo "    Google Play: uploaded to production track"
 [ -n "${DISCORD_WEBHOOK_URL:-}" ] && echo "    Discord: release announcement posted"
 echo ""
