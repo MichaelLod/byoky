@@ -168,6 +168,95 @@ section {
   background: var(--bg-card);
 }
 
+.btn-sm {
+  padding: 10px 20px;
+  font-size: 13px;
+  border-radius: 8px;
+}
+
+/* =============================================
+   Navbar
+   ============================================= */
+
+.navbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  padding: 0 24px;
+  background: rgba(4, 4, 10, 0.8);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(26, 26, 52, 0.6);
+}
+
+.navbar-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 60px;
+}
+
+.navbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  font-size: 18px;
+  color: var(--text);
+  text-decoration: none;
+  letter-spacing: -0.01em;
+}
+
+.navbar-brand svg {
+  flex-shrink: 0;
+}
+
+.navbar-links {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+}
+
+.navbar-links a {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  transition: color 0.2s;
+}
+
+.navbar-links a:hover {
+  color: var(--text);
+}
+
+.navbar-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.navbar-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  transition: color 0.2s, background 0.2s;
+}
+
+.navbar-icon:hover {
+  color: var(--text);
+  background: var(--bg-elevated);
+}
+
+.navbar-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
 /* =============================================
    Hero Section
    ============================================= */
@@ -1635,6 +1724,10 @@ section {
   .compare-table td {
     padding: 12px 14px;
     font-size: 13px;
+  }
+
+  .navbar-links {
+    display: none;
   }
 
   .built-with-hero h1 {
