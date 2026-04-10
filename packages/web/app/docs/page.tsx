@@ -2,49 +2,94 @@
 
 import { useState } from 'react';
 
-const sections = [
-  { id: 'getting-started', label: 'Getting Started' },
-  { id: 'sdk', label: 'SDK Reference' },
-  { id: 'session', label: 'Session API' },
-  { id: 'app-ecosystem', label: 'App Ecosystem' },
-  { id: 'manifest', label: 'App Manifest' },
-  { id: 'token-gifts', label: 'Token Gifts' },
-  { id: 'token-marketplace', label: 'Token Marketplace' },
-  { id: 'backend-relay', label: 'Backend Relay' },
-  { id: 'bridge', label: 'Bridge (CLI)' },
-  { id: 'providers', label: 'Providers' },
-] as const;
+/* ─── Navigation structure ────────────────────── */
+
+const categories = [
+  {
+    label: 'Getting Started',
+    items: [
+      { id: 'overview', label: 'Overview' },
+      { id: 'installation', label: 'Installation' },
+      { id: 'quickstart', label: 'Quickstart' },
+    ],
+  },
+  {
+    label: 'SDK Reference',
+    items: [
+      { id: 'sdk', label: 'Byoky Client' },
+      { id: 'session', label: 'Session API' },
+      { id: 'providers', label: 'Providers' },
+    ],
+  },
+  {
+    label: 'Guides',
+    items: [
+      { id: 'backend-relay', label: 'Backend Relay' },
+      { id: 'bridge', label: 'Bridge (CLI)' },
+      { id: 'token-gifts', label: 'Token Gifts' },
+      { id: 'token-marketplace', label: 'Token Marketplace' },
+      { id: 'cross-provider', label: 'Cross-Provider Routing' },
+    ],
+  },
+  {
+    label: 'App Ecosystem',
+    items: [
+      { id: 'app-ecosystem', label: 'Overview' },
+      { id: 'manifest', label: 'App Manifest' },
+    ],
+  },
+];
+
+/* ─── Page ────────────────────────────────────── */
 
 export default function Docs() {
-  const [active, setActive] = useState('getting-started');
+  const [active, setActive] = useState('overview');
 
   return (
     <div className="docs-layout">
       <nav className="docs-nav">
-        <div className="docs-nav-title">Docs</div>
-        {sections.map((s) => (
-          <a
-            key={s.id}
-            href={`#${s.id}`}
-            className={`docs-nav-link ${active === s.id ? 'active' : ''}`}
-            onClick={() => setActive(s.id)}
-          >
-            {s.label}
-          </a>
+        {categories.map((cat) => (
+          <div key={cat.label} className="docs-nav-group">
+            <div className="docs-nav-category">{cat.label}</div>
+            {cat.items.map((item) => (
+              <a
+                key={item.id}
+                href={`#${item.id}`}
+                className={`docs-nav-link ${active === item.id ? 'active' : ''}`}
+                onClick={() => setActive(item.id)}
+              >
+                {item.label}
+              </a>
+            ))}
+          </div>
         ))}
       </nav>
 
       <main className="docs-content">
-        <GettingStarted />
+        <div className="docs-hero">
+          <span className="docs-hero-label">Documentation</span>
+          <h1>Byoky Docs</h1>
+          <p>
+            Everything you need to integrate Byoky into your app &mdash; from
+            quickstart to API reference.
+          </p>
+        </div>
+
+        <DocsCards />
+
+        <Overview />
+        <Installation />
+        <Quickstart />
         <SdkReference />
         <SessionApi />
-        <AppEcosystem />
-        <AppManifest />
-        <TokenGifts />
-        <TokenMarketplaceSection />
+        <ProvidersSection />
         <BackendRelay />
         <Bridge />
-        <ProvidersSection />
+        <TokenGifts />
+        <TokenMarketplaceSection />
+        <CrossProviderRouting />
+        <AppEcosystem />
+        <AppManifest />
       </main>
 
       <style>{docsStyles}</style>
@@ -52,20 +97,80 @@ export default function Docs() {
   );
 }
 
+/* ─── Cards grid ──────────────────────────────── */
+
+function DocsCards() {
+  return (
+    <div className="docs-cards-area">
+      {categories.map((cat) => (
+        <div key={cat.label}>
+          <h3 className="docs-cards-heading">{cat.label}</h3>
+          <div className="docs-cards-grid">
+            {cat.items.map((item) => (
+              <a key={item.id} href={`#${item.id}`} className="docs-card">
+                {item.label}
+              </a>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /* ─── Sections ─────────────────────────────────── */
 
-function GettingStarted() {
+function Overview() {
   return (
-    <Section id="getting-started" title="Getting Started">
+    <Section id="overview" title="Overview">
       <p>
         Byoky lets users store their AI API keys in an encrypted wallet. Your app never sees the keys
         &mdash; it gets a proxied session that routes requests through the wallet.
       </p>
 
+      <h3>How it works</h3>
+      <Code lang="text">{`Your App → SDK (createFetch) → Content Script → Extension → LLM API
+                                                    ↑
+                                          Keys stay here. Always.`}</Code>
+
+      <p>
+        Two lines changed. Full API compatibility. Streaming, file uploads, and vision all work.
+        Sessions auto-reconnect if the extension restarts.
+      </p>
+    </Section>
+  );
+}
+
+function Installation() {
+  return (
+    <Section id="installation" title="Installation">
       <h3>Install the SDK</h3>
       <Code lang="bash">{`npm install @byoky/sdk`}</Code>
 
-      <h3>Connect and make requests</h3>
+      <h3>Scaffold a new project</h3>
+      <Code lang="bash">{`npx create-byoky-app my-app
+
+# Choose a template:
+#   1. AI Chat (Next.js)
+#   2. Multi-Provider (Vite)
+#   3. Backend Relay (Express)`}</Code>
+
+      <h3>User wallets</h3>
+      <p>Your users need one of these installed:</p>
+      <ul>
+        <li><a href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon" style={{ color: 'var(--teal-light)' }}>Chrome Extension</a></li>
+        <li><a href="https://addons.mozilla.org/en-US/firefox/addon/byoky/" style={{ color: 'var(--teal-light)' }}>Firefox Extension</a></li>
+        <li><a href="https://apps.apple.com/app/byoky/id6760779919" style={{ color: 'var(--teal-light)' }}>iOS App</a> (wallet + Safari extension)</li>
+        <li><a href="https://play.google.com/store/apps/details?id=com.byoky.app" style={{ color: 'var(--teal-light)' }}>Android App</a> (pair via QR or relay)</li>
+      </ul>
+    </Section>
+  );
+}
+
+function Quickstart() {
+  return (
+    <Section id="quickstart" title="Quickstart">
+      <p>Connect and make your first request in under a minute:</p>
       <Code lang="typescript">{`import Anthropic from '@anthropic-ai/sdk';
 import { Byoky } from '@byoky/sdk';
 
@@ -88,21 +193,16 @@ const message = await client.messages.create({
 });`}</Code>
 
       <p>
-        Two lines changed. Full API compatibility. Streaming, file uploads, and vision all work.
-        Sessions auto-reconnect if the extension restarts.
+        That&apos;s it. Full API compatibility &mdash; streaming, file uploads, and vision all work
+        unchanged.
       </p>
-
-      <h3>How it works</h3>
-      <Code lang="text">{`Your App → SDK (createFetch) → Content Script → Extension → LLM API
-                                                    ↑
-                                          Keys stay here. Always.`}</Code>
     </Section>
   );
 }
 
 function SdkReference() {
   return (
-    <Section id="sdk" title="SDK Reference">
+    <Section id="sdk" title="Byoky Client">
       <h3>Constructor</h3>
       <Code lang="typescript">{`import { Byoky } from '@byoky/sdk';
 
@@ -247,107 +347,103 @@ session.providers   // Record<string, { available, authMethod, gift? }>`}</Code>
   );
 }
 
-function AppEcosystem() {
+function ProvidersSection() {
   return (
-    <Section id="app-ecosystem" title="App Ecosystem">
-      <p>
-        Build apps that users install directly into their Byoky wallet. Your app runs inside a
-        sandboxed iframe (extension) or WebView (mobile) &mdash; full isolation from the wallet&apos;s
-        keys and storage.
-      </p>
-
-      <h3>How marketplace apps work</h3>
-      <ol>
-        <li>You build a web app that uses <code>@byoky/sdk</code></li>
-        <li>You host it on your own infrastructure (HTTPS required)</li>
-        <li>You submit it to the marketplace for review</li>
-        <li>Once approved, users can install it from the App Store inside their wallet</li>
-        <li>Your app runs in a sandboxed environment &mdash; keys never touch your code</li>
-      </ol>
-
-      <h3>Scaffold a new app</h3>
-      <Code lang="bash">{`npx create-byoky-app my-app
-
-# Choose a template:
-#   1. AI Chat (Next.js)
-#   2. Multi-Provider (Vite)
-#   3. Backend Relay (Express)`}</Code>
-
-      <h3>Submit to the marketplace</h3>
-      <Code lang="bash">{`# Generate a byoky.app.json manifest
-npx create-byoky-app init
-
-# Submit for review
-npx create-byoky-app submit`}</Code>
-      <p>
-        Or submit via the web form at{' '}
-        <a href="https://byoky.com/apps/submit" style={{ color: 'var(--teal-light)' }}>
-          byoky.com/apps/submit
-        </a>.
-      </p>
-
-      <h3>Security model</h3>
-      <ul>
-        <li>Apps run in sandboxed iframes (<code>allow-scripts allow-forms</code>) or native WebViews</li>
-        <li>Cross-origin isolation prevents access to wallet storage, DOM, or keys</li>
-        <li>All communication happens via the SDK&apos;s <code>postMessage</code> bridge</li>
-        <li>Installing an app auto-trusts its origin for the declared providers</li>
-        <li>Users can disable or uninstall apps at any time</li>
-      </ul>
+    <Section id="providers" title="Providers">
+      <p>All providers work with <code>createFetch(providerId)</code>:</p>
+      <div className="docs-providers-grid">
+        {[
+          ['anthropic', 'Anthropic (Claude)'],
+          ['openai', 'OpenAI (GPT)'],
+          ['gemini', 'Google Gemini'],
+          ['mistral', 'Mistral'],
+          ['cohere', 'Cohere'],
+          ['xai', 'xAI (Grok)'],
+          ['deepseek', 'DeepSeek'],
+          ['perplexity', 'Perplexity'],
+          ['groq', 'Groq'],
+          ['together', 'Together AI'],
+          ['fireworks', 'Fireworks AI'],
+          ['openrouter', 'OpenRouter'],
+          ['azure_openai', 'Azure OpenAI'],
+        ].map(([id, name]) => (
+          <div key={id} className="docs-provider-row">
+            <code>{id}</code>
+            <span>{name}</span>
+          </div>
+        ))}
+      </div>
     </Section>
   );
 }
 
-function AppManifest() {
+function BackendRelay() {
   return (
-    <Section id="manifest" title="App Manifest">
+    <Section id="backend-relay" title="Backend Relay">
       <p>
-        Every marketplace app needs a <code>byoky.app.json</code> manifest in the project root.
-        Run <code>npx create-byoky-app init</code> to generate one interactively.
+        Need LLM calls from your server? The user&apos;s browser relays requests through the
+        extension &mdash; your backend never sees the API key.
       </p>
 
-      <Code lang="json">{`{
-  "name": "TradeBot Pro",
-  "slug": "tradebot-pro",
-  "url": "https://tradebot.acme-ai.com",
-  "icon": "/icon.png",
-  "description": "AI-powered trading signals using your own API keys",
-  "category": "trading",
-  "providers": ["anthropic", "openai"],
-  "author": {
-    "name": "Acme AI",
-    "email": "dev@acme-ai.com",
-    "website": "https://acme-ai.com"
-  }
-}`}</Code>
+      <Code lang="text">{`Backend ←WebSocket→ User's Frontend ←Extension→ LLM API`}</Code>
 
-      <h3>Fields</h3>
-      <Prop name="name" type="string">Display name shown in the App Store and icon grid.</Prop>
-      <Prop name="slug" type="string">URL-safe identifier. Must be unique across the marketplace.</Prop>
-      <Prop name="url" type="string">HTTPS URL where your app is hosted. This is what loads in the sandboxed iframe.</Prop>
-      <Prop name="icon" type="string">URL to your app icon. Displayed as a rounded square in the app grid.</Prop>
-      <Prop name="description" type="string">Short description shown in the store listing.</Prop>
-      <Prop name="category" type="string">
-        One of: <code>chat</code>, <code>coding</code>, <code>trading</code>,{' '}
-        <code>productivity</code>, <code>research</code>, <code>creative</code>, <code>other</code>.
-      </Prop>
-      <Prop name="providers" type="string[]">
-        Provider IDs your app needs (e.g. <code>[&quot;anthropic&quot;, &quot;openai&quot;]</code>).
-        Users approve which providers to grant on install.
-      </Prop>
-      <Prop name="author" type="object">
-        Author info: <code>name</code> (required), <code>email</code> (required),{' '}
-        <code>website</code> (optional).
-      </Prop>
+      <h3>Frontend</h3>
+      <Code lang="typescript">{`import { Byoky } from '@byoky/sdk';
 
-      <h3>Review criteria</h3>
-      <ul>
-        <li>App loads over HTTPS</li>
-        <li>Uses <code>@byoky/sdk</code> for all LLM access</li>
-        <li>Only requests providers it actually uses</li>
-        <li>No obfuscated JavaScript</li>
-        <li>Privacy policy exists</li>
-      </ul>
+const session = await new Byoky().connect({
+  providers: [{ id: 'anthropic' }],
+  modal: true,
+});
+
+// Open relay so your backend can make calls through this session
+const relay = session.createRelay('wss://your-app.com/ws/relay');`}</Code>
+
+      <h3>Backend (Node.js)</h3>
+      <Code lang="typescript">{`import { ByokyServer } from '@byoky/sdk/server';
+
+const byoky = new ByokyServer();
+
+wss.on('connection', async (ws) => {
+  const client = await byoky.handleConnection(ws);
+  const fetch = client.createFetch('anthropic');
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1024,
+      messages: [{ role: 'user', content: 'Hello!' }],
+    }),
+  });
+});`}</Code>
+    </Section>
+  );
+}
+
+function Bridge() {
+  return (
+    <Section id="bridge" title="Bridge (CLI / Desktop)">
+      <p>
+        CLI tools and desktop apps route API calls through the bridge &mdash; a local HTTP proxy
+        that relays requests to the extension via native messaging.
+      </p>
+
+      <Code lang="text">{`CLI App → HTTP → Bridge (localhost:19280) → Native Messaging → Extension → LLM API`}</Code>
+
+      <h3>Setup</h3>
+      <Code lang="bash">{`npm install -g @byoky/bridge
+byoky-bridge install   # register native messaging host`}</Code>
+
+      <h3>Usage</h3>
+      <p>
+        Once installed, the bridge starts automatically when the extension needs it. CLI tools
+        (like OpenClaw) make HTTP requests to <code>http://127.0.0.1:19280/&#123;provider&#125;/</code>,
+        which the bridge forwards to the extension.
+      </p>
     </Section>
   );
 }
@@ -425,122 +521,120 @@ POST   /gifts              — list a gift publicly (called by wallet)
 DELETE /gifts/:id          — unlist a gift
 PATCH  /gifts/:id/usage    — update token usage
 POST   /gifts/:id/heartbeat — online status ping`}</Code>
-
-      <h3>Wallet integration</h3>
-      <p>
-        When a user checks &quot;List on Token Marketplace&quot; during gift creation, the wallet
-        automatically <code>POST</code>s the gift metadata to the marketplace API. No extra steps
-        needed &mdash; the gift is listed the moment it&apos;s created.
-      </p>
     </Section>
   );
 }
 
-function BackendRelay() {
+function CrossProviderRouting() {
   return (
-    <Section id="backend-relay" title="Backend Relay">
-      <p>
-        Need LLM calls from your server? The user&apos;s browser relays requests through the
-        extension &mdash; your backend never sees the API key.
-      </p>
-
-      <Code lang="text">{`Backend ←WebSocket→ User's Frontend ←Extension→ LLM API`}</Code>
-
-      <h3>Frontend</h3>
-      <Code lang="typescript">{`import { Byoky } from '@byoky/sdk';
-
-const session = await new Byoky().connect({
-  providers: [{ id: 'anthropic' }],
-  modal: true,
-});
-
-// Open relay so your backend can make calls through this session
-const relay = session.createRelay('wss://your-app.com/ws/relay');`}</Code>
-
-      <h3>Backend (Node.js)</h3>
-      <Code lang="typescript">{`import { ByokyServer } from '@byoky/sdk/server';
-
-const byoky = new ByokyServer();
-
-wss.on('connection', async (ws) => {
-  const client = await byoky.handleConnection(ws);
-  const fetch = client.createFetch('anthropic');
-
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
-      messages: [{ role: 'user', content: 'Hello!' }],
-    }),
-  });
-});`}</Code>
-    </Section>
-  );
-}
-
-function Bridge() {
-  return (
-    <Section id="bridge" title="Bridge (CLI / Desktop)">
-      <p>
-        CLI tools and desktop apps route API calls through the bridge &mdash; a local HTTP proxy
-        that relays requests to the extension via native messaging.
-      </p>
-
-      <Code lang="text">{`CLI App → HTTP → Bridge (localhost:19280) → Native Messaging → Extension → LLM API`}</Code>
-
-      <h3>Setup</h3>
-      <Code lang="bash">{`npm install -g @byoky/bridge
-byoky-bridge install   # register native messaging host`}</Code>
-
-      <h3>Usage</h3>
-      <p>
-        Once installed, the bridge starts automatically when the extension needs it. CLI tools
-        (like OpenClaw) make HTTP requests to <code>http://127.0.0.1:19280/&#123;provider&#125;/</code>,
-        which the bridge forwards to the extension.
-      </p>
-    </Section>
-  );
-}
-
-function ProvidersSection() {
-  return (
-    <Section id="providers" title="Supported Providers">
-      <p>All providers work with <code>createFetch(providerId)</code>:</p>
-      <div className="docs-providers-grid">
-        {[
-          ['anthropic', 'Anthropic (Claude)'],
-          ['openai', 'OpenAI (GPT)'],
-          ['gemini', 'Google Gemini'],
-          ['mistral', 'Mistral'],
-          ['cohere', 'Cohere'],
-          ['xai', 'xAI (Grok)'],
-          ['deepseek', 'DeepSeek'],
-          ['perplexity', 'Perplexity'],
-          ['groq', 'Groq'],
-          ['together', 'Together AI'],
-          ['fireworks', 'Fireworks AI'],
-          ['openrouter', 'OpenRouter'],
-          ['azure_openai', 'Azure OpenAI'],
-        ].map(([id, name]) => (
-          <div key={id} className="docs-provider-row">
-            <code>{id}</code>
-            <span>{name}</span>
-          </div>
-        ))}
-      </div>
-
-      <h3>Cross-provider routing</h3>
+    <Section id="cross-provider" title="Cross-Provider Routing">
       <p>
         Users can route your app&apos;s requests through a different provider than what your code
-        targets. For example, your app calls <code>anthropic</code> but the user routes it through
+        targets. For example, your app calls <code>anthropic</code> but the user routes it through{' '}
         <code>openai</code> &mdash; the wallet transparently translates request/response bodies and
-        SSE streams. Your code doesn&apos;t need to change.
+        SSE streams.
       </p>
+
+      <Code lang="text">{`Your App (Anthropic SDK) → Wallet (translates) → OpenAI API
+                                  ↕
+              Anthropic ↔ OpenAI ↔ Gemini ↔ Cohere`}</Code>
+
+      <h3>How it works</h3>
+      <ol>
+        <li>User creates groups in their wallet (e.g. &quot;Claude&quot;, &quot;GPT&quot;)</li>
+        <li>Each group is pinned to a specific credential and provider</li>
+        <li>Dragging an app between groups reroutes its traffic</li>
+        <li>Request bodies, response bodies, and SSE streams are translated on the fly</li>
+      </ol>
+
+      <p>
+        <strong>No code changes required.</strong> Your app keeps calling its preferred SDK; the
+        wallet handles the translation. Live sessions reroute automatically.
+      </p>
+    </Section>
+  );
+}
+
+function AppEcosystem() {
+  return (
+    <Section id="app-ecosystem" title="App Ecosystem">
+      <p>
+        Build apps that users install directly into their Byoky wallet. Your app runs inside a
+        sandboxed iframe (extension) or WebView (mobile) &mdash; full isolation from the wallet&apos;s
+        keys and storage.
+      </p>
+
+      <h3>How marketplace apps work</h3>
+      <ol>
+        <li>You build a web app that uses <code>@byoky/sdk</code></li>
+        <li>You host it on your own infrastructure (HTTPS required)</li>
+        <li>You submit it to the marketplace for review</li>
+        <li>Once approved, users can install it from the App Store inside their wallet</li>
+        <li>Your app runs in a sandboxed environment &mdash; keys never touch your code</li>
+      </ol>
+
+      <h3>Security model</h3>
+      <ul>
+        <li>Apps run in sandboxed iframes (<code>allow-scripts allow-forms</code>) or native WebViews</li>
+        <li>Cross-origin isolation prevents access to wallet storage, DOM, or keys</li>
+        <li>All communication happens via the SDK&apos;s <code>postMessage</code> bridge</li>
+        <li>Installing an app auto-trusts its origin for the declared providers</li>
+        <li>Users can disable or uninstall apps at any time</li>
+      </ul>
+    </Section>
+  );
+}
+
+function AppManifest() {
+  return (
+    <Section id="manifest" title="App Manifest">
+      <p>
+        Every marketplace app needs a <code>byoky.app.json</code> manifest in the project root.
+        Run <code>npx create-byoky-app init</code> to generate one interactively.
+      </p>
+
+      <Code lang="json">{`{
+  "name": "TradeBot Pro",
+  "slug": "tradebot-pro",
+  "url": "https://tradebot.acme-ai.com",
+  "icon": "/icon.png",
+  "description": "AI-powered trading signals using your own API keys",
+  "category": "trading",
+  "providers": ["anthropic", "openai"],
+  "author": {
+    "name": "Acme AI",
+    "email": "dev@acme-ai.com",
+    "website": "https://acme-ai.com"
+  }
+}`}</Code>
+
+      <h3>Fields</h3>
+      <Prop name="name" type="string">Display name shown in the App Store and icon grid.</Prop>
+      <Prop name="slug" type="string">URL-safe identifier. Must be unique across the marketplace.</Prop>
+      <Prop name="url" type="string">HTTPS URL where your app is hosted. This is what loads in the sandboxed iframe.</Prop>
+      <Prop name="icon" type="string">URL to your app icon. Displayed as a rounded square in the app grid.</Prop>
+      <Prop name="description" type="string">Short description shown in the store listing.</Prop>
+      <Prop name="category" type="string">
+        One of: <code>chat</code>, <code>coding</code>, <code>trading</code>,{' '}
+        <code>productivity</code>, <code>research</code>, <code>creative</code>, <code>other</code>.
+      </Prop>
+      <Prop name="providers" type="string[]">
+        Provider IDs your app needs (e.g. <code>[&quot;anthropic&quot;, &quot;openai&quot;]</code>).
+        Users approve which providers to grant on install.
+      </Prop>
+      <Prop name="author" type="object">
+        Author info: <code>name</code> (required), <code>email</code> (required),{' '}
+        <code>website</code> (optional).
+      </Prop>
+
+      <h3>Review criteria</h3>
+      <ul>
+        <li>App loads over HTTPS</li>
+        <li>Uses <code>@byoky/sdk</code> for all LLM access</li>
+        <li>Only requests providers it actually uses</li>
+        <li>No obfuscated JavaScript</li>
+        <li>Privacy policy exists</li>
+      </ul>
     </Section>
   );
 }
@@ -584,43 +678,146 @@ const docsStyles = `
   display: flex;
   max-width: 1100px;
   margin: 0 auto;
-  padding: 60px 20px 80px;
+  padding: 80px 20px 80px;
   gap: 48px;
 }
+
+/* ── Sidebar ── */
 
 .docs-nav {
   position: sticky;
   top: 80px;
-  width: 180px;
+  width: 200px;
   flex-shrink: 0;
   align-self: flex-start;
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
 }
 
-.docs-nav-title {
-  font-size: 20px;
-  font-weight: 700;
-  margin-bottom: 16px;
-  color: var(--text);
+.docs-nav-group {
+  margin-bottom: 24px;
+}
+
+.docs-nav-category {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  padding-left: 2px;
 }
 
 .docs-nav-link {
   display: block;
-  padding: 6px 0;
+  padding: 5px 0 5px 2px;
   font-size: 14px;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   text-decoration: none;
   transition: color 0.15s;
+  border-left: 2px solid transparent;
+  padding-left: 12px;
+  margin-left: -2px;
 }
 
-.docs-nav-link:hover,
+.docs-nav-link:hover {
+  color: var(--text);
+}
+
 .docs-nav-link.active {
   color: var(--teal-light);
+  border-left-color: var(--teal);
 }
+
+/* ── Content ── */
 
 .docs-content {
   flex: 1;
   min-width: 0;
 }
+
+/* ── Hero ── */
+
+.docs-hero {
+  margin-bottom: 48px;
+  padding-bottom: 40px;
+  border-bottom: 1px solid var(--border);
+}
+
+.docs-hero-label {
+  display: inline-block;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--teal);
+  margin-bottom: 12px;
+}
+
+.docs-hero h1 {
+  font-size: 40px;
+  font-weight: 700;
+  margin-bottom: 12px;
+  letter-spacing: -0.02em;
+}
+
+.docs-hero p {
+  font-size: 17px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  max-width: 560px;
+}
+
+/* ── Cards ── */
+
+.docs-cards-area {
+  margin-bottom: 56px;
+  padding-bottom: 48px;
+  border-bottom: 1px solid var(--border);
+}
+
+.docs-cards-heading {
+  font-size: 17px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  margin-top: 28px;
+  color: var(--text);
+}
+
+.docs-cards-heading:first-child {
+  margin-top: 0;
+}
+
+.docs-cards-area > div:first-child .docs-cards-heading {
+  margin-top: 0;
+}
+
+.docs-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.docs-card {
+  display: block;
+  padding: 16px 20px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: border-color 0.2s, background 0.2s, transform 0.2s;
+}
+
+.docs-card:hover {
+  border-color: var(--border-hover);
+  background: var(--bg-elevated);
+  transform: translateY(-1px);
+}
+
+/* ── Sections ── */
 
 .docs-section {
   margin-bottom: 56px;
@@ -670,6 +867,8 @@ const docsStyles = `
   margin-bottom: 6px;
 }
 
+/* ── Code blocks ── */
+
 .docs-code {
   position: relative;
   background: #07070f;
@@ -705,6 +904,8 @@ const docsStyles = `
   font-size: inherit;
 }
 
+/* ── Props ── */
+
 .docs-prop {
   border-left: 2px solid var(--border);
   padding: 8px 0 8px 14px;
@@ -735,6 +936,8 @@ const docsStyles = `
   line-height: 1.5;
 }
 
+/* ── Providers grid ── */
+
 .docs-providers-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
@@ -764,20 +967,35 @@ const docsStyles = `
   color: var(--text-secondary);
 }
 
+/* ── Responsive ── */
+
 @media (max-width: 768px) {
   .docs-layout {
     flex-direction: column;
     gap: 24px;
+    padding-top: 80px;
   }
   .docs-nav {
     position: static;
     width: 100%;
     display: flex;
     flex-wrap: wrap;
-    gap: 4px 12px;
+    gap: 4px 16px;
+    max-height: none;
   }
-  .docs-nav-title {
-    width: 100%;
+  .docs-nav-group {
+    margin-bottom: 12px;
+  }
+  .docs-nav-link {
+    border-left: none;
+    padding-left: 0;
+    margin-left: 0;
+  }
+  .docs-hero h1 {
+    font-size: 30px;
+  }
+  .docs-cards-grid {
+    grid-template-columns: 1fr;
   }
 }
 `;
