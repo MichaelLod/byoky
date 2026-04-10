@@ -24,11 +24,11 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   metadataBase: new URL('https://byoky.com'),
   title: {
-    default: 'Byoky — Secure vault for your AI API keys',
+    default: 'Byoky — Build AI apps. Your users bring the keys.',
     template: '%s — Byoky',
   },
   description:
-    'Your AI API keys are stored in plaintext by every Chrome extension. Byoky encrypts them with AES-256-GCM and proxies every request. Keys never leave your device. Open source.',
+    'Build AI apps with zero API costs. Your users connect their own keys through Byoky — encrypted locally, proxied securely. 15 providers, 2 lines to integrate. Open source.',
   keywords: [
     'AI API key wallet',
     'LLM API key manager',
@@ -59,9 +59,9 @@ export const metadata: Metadata = {
     apple: '/apple-touch-icon.png',
   },
   openGraph: {
-    title: 'Byoky — Secure vault for your AI API keys',
+    title: 'Byoky — Build AI apps. Your users bring the keys.',
     description:
-      'Byoky encrypts your AI API keys with AES-256-GCM and proxies every request. Keys never leave your device. Open source and free forever.',
+      'Build AI apps with zero API costs. Your users bring their own keys — encrypted locally, proxied securely. 15 providers, 2 lines to integrate.',
     url: 'https://byoky.com',
     siteName: 'Byoky',
     type: 'website',
@@ -70,15 +70,15 @@ export const metadata: Metadata = {
         url: '/og-image.png',
         width: 1200,
         height: 630,
-        alt: 'Byoky — Secure vault for your AI API keys',
+        alt: 'Byoky — Build AI apps with zero API costs',
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Byoky — Secure vault for your AI API keys',
+    title: 'Byoky — Build AI apps. Your users bring the keys.',
     description:
-      'Your AI API keys are stored in plaintext by every extension. Byoky encrypts them locally and proxies every request. Open source.',
+      'Build AI apps with zero API costs. 15 providers, 2 lines to integrate. Your users bring their own keys — encrypted and proxied securely.',
     images: ['/og-image.png'],
   },
 };
@@ -101,7 +101,7 @@ export default function RootLayout({
               applicationCategory: 'BrowserApplication',
               operatingSystem: 'Chrome, Firefox, Safari',
               description:
-                'Byoky encrypts your AI API keys with AES-256-GCM and proxies every request. Keys never leave your device. 15 providers, open source, free forever.',
+                'Build AI apps with zero API costs. Your users bring their own keys — encrypted locally with AES-256-GCM, proxied securely. 15 providers, open source.',
               url: 'https://byoky.com',
               offers: {
                 '@type': 'Offer',
