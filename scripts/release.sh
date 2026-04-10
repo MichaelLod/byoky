@@ -120,6 +120,7 @@ if [ "${1:-}" = "retry" ]; then
     echo "All stores up to date."
   else
     echo "Retried $RETRIED store(s). Run 'pnpm release:status' to verify."
+    node scripts/generate-versions.mjs 2>&1 || true
   fi
   exit 0
 fi
@@ -672,6 +673,13 @@ $(echo "$RELEASE_NOTES" | sed -n '/^### Features/,/^### [^F]/{ /^### [^F]/!p; }'
 else
   echo "  Skipping Discord (DISCORD_WEBHOOK_URL not configured)"
 fi
+
+# ============================================================
+# 13. Update versions.json for landing page
+# ============================================================
+step "Update landing page versions"
+
+node scripts/generate-versions.mjs 2>&1 || echo "  WARN: Failed to generate versions.json"
 
 # ============================================================
 # Summary
