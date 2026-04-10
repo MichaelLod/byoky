@@ -5,7 +5,6 @@ import { initDb, getDb } from '../src/db/index.js';
 import { startIdleSweep, stopIdleSweep, evictAll } from '../src/session-keys.js';
 
 const DATABASE_URL = process.env.DATABASE_URL;
-if (!DATABASE_URL) throw new Error('DATABASE_URL required for routing tests');
 
 const TEST_PREFIX = `routing_${Date.now()}_`;
 const testUsername = `${TEST_PREFIX}user`;
@@ -60,64 +59,64 @@ async function bindAppToGroup(origin: string, groupId: string) {
   expect(res.status).toBe(200);
 }
 
-beforeAll(async () => {
-  process.env.JWT_SECRET = 'integration-test-secret-that-is-at-least-32-characters-long';
-  initDb(DATABASE_URL);
-  startIdleSweep();
+describe.skipIf(!DATABASE_URL)('vault routing', () => {
+  beforeAll(async () => {
+    process.env.JWT_SECRET = 'integration-test-secret-that-is-at-least-32-characters-long';
+    initDb(DATABASE_URL!);
+    startIdleSweep();
 
-  // Sign up the test user.
-  const signup = await app.request('/auth/signup', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ username: testUsername, password: testPassword }),
+    // Sign up the test user.
+    const signup = await app.request('/auth/signup', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: testUsername, password: testPassword }),
+    });
+    expect(signup.status).toBe(201);
+    userToken = (await signup.json()).token;
+
+    // Add an OpenAI credential and an Anthropic credential. Different
+    // routing branches need different combinations of these.
+    const openaiRes = await userAuthReq('/credentials', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        providerId: 'openai',
+        apiKey: 'sk-openai-test-1234567890',
+        label: 'openai',
+      }),
+    });
+    openaiCredId = (await openaiRes.json()).credential.id;
+
+    const anthropicRes = await userAuthReq('/credentials', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        providerId: 'anthropic',
+        apiKey: 'sk-ant-test-1234567890',
+        label: 'anthropic',
+      }),
+    });
+    anthropicCredId = (await anthropicRes.json()).credential.id;
   });
-  expect(signup.status).toBe(201);
-  userToken = (await signup.json()).token;
 
-  // Add an OpenAI credential and an Anthropic credential. Different
-  // routing branches need different combinations of these.
-  const openaiRes = await userAuthReq('/credentials', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      providerId: 'openai',
-      apiKey: 'sk-openai-test-1234567890',
-      label: 'openai',
-    }),
+  afterAll(async () => {
+    stopIdleSweep();
+    evictAll();
+    globalThis.fetch = realFetch;
+    const db = getDb();
+    await db.execute(sql`DELETE FROM request_log WHERE user_id IN (SELECT id FROM users WHERE username = ${testUsername})`);
+    await db.execute(sql`DELETE FROM app_sessions WHERE user_id IN (SELECT id FROM users WHERE username = ${testUsername})`);
+    await db.execute(sql`DELETE FROM app_groups WHERE user_id IN (SELECT id FROM users WHERE username = ${testUsername})`);
+    await db.execute(sql`DELETE FROM groups WHERE user_id IN (SELECT id FROM users WHERE username = ${testUsername})`);
+    await db.execute(sql`DELETE FROM credentials WHERE user_id IN (SELECT id FROM users WHERE username = ${testUsername})`);
+    await db.execute(sql`DELETE FROM user_sessions WHERE user_id IN (SELECT id FROM users WHERE username = ${testUsername})`);
+    await db.execute(sql`DELETE FROM users WHERE username = ${testUsername}`);
   });
-  openaiCredId = (await openaiRes.json()).credential.id;
 
-  const anthropicRes = await userAuthReq('/credentials', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      providerId: 'anthropic',
-      apiKey: 'sk-ant-test-1234567890',
-      label: 'anthropic',
-    }),
+  afterEach(() => {
+    globalThis.fetch = realFetch;
   });
-  anthropicCredId = (await anthropicRes.json()).credential.id;
-});
 
-afterAll(async () => {
-  stopIdleSweep();
-  evictAll();
-  globalThis.fetch = realFetch;
-  const db = getDb();
-  await db.execute(sql`DELETE FROM request_log WHERE user_id IN (SELECT id FROM users WHERE username = ${testUsername})`);
-  await db.execute(sql`DELETE FROM app_sessions WHERE user_id IN (SELECT id FROM users WHERE username = ${testUsername})`);
-  await db.execute(sql`DELETE FROM app_groups WHERE user_id IN (SELECT id FROM users WHERE username = ${testUsername})`);
-  await db.execute(sql`DELETE FROM groups WHERE user_id IN (SELECT id FROM users WHERE username = ${testUsername})`);
-  await db.execute(sql`DELETE FROM credentials WHERE user_id IN (SELECT id FROM users WHERE username = ${testUsername})`);
-  await db.execute(sql`DELETE FROM user_sessions WHERE user_id IN (SELECT id FROM users WHERE username = ${testUsername})`);
-  await db.execute(sql`DELETE FROM users WHERE username = ${testUsername}`);
-});
-
-afterEach(() => {
-  globalThis.fetch = realFetch;
-});
-
-describe('vault routing', () => {
   // ─── Direct credential pass-through ──────────────────────────────────
 
   describe('direct credential', () => {
