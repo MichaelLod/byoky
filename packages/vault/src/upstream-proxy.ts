@@ -1,5 +1,6 @@
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import nodeFetch from 'node-fetch';
+import { Readable } from 'node:stream';
 
 let agent: HttpsProxyAgent<string> | undefined;
 
@@ -20,15 +21,49 @@ export function initUpstreamProxy(): void {
 /**
  * Fetch through the residential proxy when configured, otherwise use
  * the global fetch directly.
+ *
+ * node-fetch returns its own Response type whose body is a Node.js
+ * Readable, not a Web ReadableStream.  The vault's streaming code
+ * (Hono stream()) calls response.body.getReader(), which only exists
+ * on Web ReadableStream.  We bridge the two by converting the
+ * node-fetch body into a Web ReadableStream so the rest of the vault
+ * code works identically regardless of proxy on/off.
  */
 export async function upstreamFetch(
   url: string,
   init: RequestInit,
 ): Promise<Response> {
-  if (agent) {
-    const res = await nodeFetch(url, { ...init, agent } as Parameters<typeof nodeFetch>[1]);
-    // node-fetch Response is compatible but not the same type — bridge it
-    return res as unknown as Response;
+  if (!agent) {
+    return fetch(url, init);
   }
-  return fetch(url, init);
+
+  const res = await nodeFetch(url, { ...init, agent } as Parameters<typeof nodeFetch>[1]);
+
+  // Convert node-fetch body (Node.js Readable) → Web ReadableStream
+  let webBody: ReadableStream<Uint8Array> | null = null;
+  if (res.body) {
+    const nodeStream = res.body as unknown as Readable;
+    webBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        nodeStream.on('data', (chunk: Buffer) => {
+          controller.enqueue(new Uint8Array(chunk));
+        });
+        nodeStream.on('end', () => controller.close());
+        nodeStream.on('error', (err) => controller.error(err));
+      },
+      cancel() {
+        nodeStream.destroy();
+      },
+    });
+  }
+
+  // Build a standard Web Response with the converted body
+  const headers: Record<string, string> = {};
+  res.headers.forEach((value, key) => { headers[key] = value; });
+
+  return new Response(webBody, {
+    status: res.status,
+    statusText: res.statusText,
+    headers,
+  });
 }
