@@ -1,4 +1,4 @@
-import { ProxyAgent } from 'undici';
+import { ProxyAgent, fetch as undiciFetch } from 'undici';
 
 let agent: ProxyAgent | undefined;
 
@@ -17,9 +17,17 @@ export function initUpstreamProxy(): void {
 }
 
 /**
- * Returns fetch options that route through the residential proxy.
- * When no proxy is configured, returns an empty object.
+ * Fetch through the residential proxy when configured, otherwise use
+ * the global fetch directly.
  */
-export function proxyDispatcher(): { dispatcher?: ProxyAgent } {
-  return agent ? { dispatcher: agent } : {};
+export function upstreamFetch(
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
+  if (agent) {
+    // undici's RequestInit and global RequestInit have minor type mismatches
+    // (Blob stream signatures) — the runtime shapes are compatible.
+    return undiciFetch(url, { ...(init as Record<string, unknown>), dispatcher: agent } as Parameters<typeof undiciFetch>[1]) as unknown as Promise<Response>;
+  }
+  return fetch(url, init);
 }
