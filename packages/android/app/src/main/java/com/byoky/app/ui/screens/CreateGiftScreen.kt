@@ -20,6 +20,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.byoky.app.data.*
 import com.byoky.app.ui.theme.*
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 
 private data class TokenPreset(val label: String, val value: Int)
 private data class ExpiryPreset(val label: String, val millis: Long)
@@ -51,6 +53,8 @@ fun CreateGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
     var customTokens by remember { mutableStateOf("") }
     var selectedExpiryIndex by remember { mutableIntStateOf(1) }
     var relayUrl by remember { mutableStateOf("wss://relay.byoky.com") }
+    var listPublicly by remember { mutableStateOf(false) }
+    var gifterName by remember { mutableStateOf("") }
     var createdGift by remember { mutableStateOf<Gift?>(null) }
     var dropdownExpanded by remember { mutableStateOf(false) }
 
@@ -236,7 +240,35 @@ fun CreateGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
                     }
                 }
 
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(12.dp))
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("List on Token Marketplace", fontWeight = FontWeight.Medium)
+                        Text(
+                            "Make public at byoky.com/marketplace",
+                            fontSize = 12.sp,
+                            color = TextMuted,
+                        )
+                    }
+                    Switch(checked = listPublicly, onCheckedChange = { listPublicly = it })
+                }
+
+                if (listPublicly) {
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = gifterName,
+                        onValueChange = { gifterName = it },
+                        label = { Text("Display name (optional)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+                }
+
+                Spacer(Modifier.height(12.dp))
 
                 Button(
                     onClick = {
@@ -250,6 +282,28 @@ fun CreateGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
                             relayUrl = relayUrl,
                         )
                         createdGift = gift
+                        if (listPublicly && gift != null) {
+                            val (encoded, _) = createGiftLink(gift)
+                            val link = giftLinkToUrl(encoded)
+                            Thread {
+                                try {
+                                    val body = org.json.JSONObject().apply {
+                                        put("id", gift.id)
+                                        put("providerId", gift.providerId)
+                                        put("gifterName", gifterName.ifBlank { "Anonymous" })
+                                        put("giftLink", link)
+                                        put("relayUrl", relayUrl)
+                                        put("tokenBudget", gift.maxTokens)
+                                        put("expiresAt", gift.expiresAt)
+                                    }
+                                    val req = okhttp3.Request.Builder()
+                                        .url("https://marketplace.byoky.com/gifts")
+                                        .post(body.toString().toRequestBody("application/json".toMediaType()))
+                                        .build()
+                                    okhttp3.OkHttpClient().newCall(req).execute().close()
+                                } catch (_: Exception) {}
+                            }.start()
+                        }
                     },
                     enabled = isValid,
                     modifier = Modifier
