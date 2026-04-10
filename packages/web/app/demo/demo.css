@@ -780,6 +780,15 @@
   white-space: pre;
 }
 
+.demo-app .tk-keyword { color: #c084fc; }
+.demo-app .tk-string { color: #86efac; }
+.demo-app .tk-number { color: #fbbf24; }
+.demo-app .tk-bool { color: #fbbf24; }
+.demo-app .tk-comment { color: #505070; font-style: italic; }
+.demo-app .tk-builtin { color: #7dd3fc; }
+.demo-app .tk-punct { color: #6b7280; }
+.demo-app .tk-ident { color: #e2e8f0; }
+
 /* ── Chat Input ── */
 
 .demo-app .chat-input {
