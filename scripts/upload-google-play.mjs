@@ -7,16 +7,17 @@
 //     (must have "Release manager" or "Admin" role in Google Play Console)
 //
 // Usage:
-//   node scripts/upload-google-play.mjs <path-to-aab> [track]
+//   node scripts/upload-google-play.mjs <path-to-aab> [track] [release-notes-file]
 //
 //   track: "internal" (default), "alpha", "beta", or "production"
+//   release-notes-file: optional path to a text file with release notes
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { createSign } from 'node:crypto'
 
 const PACKAGE_NAME = 'com.byoky.app'
 
-const [aabPath, track = 'production'] = process.argv.slice(2)
+const [aabPath, track = 'production', notesFile] = process.argv.slice(2)
 if (!aabPath) {
   console.error('Usage: upload-google-play.mjs <aab-path> [track]')
   process.exit(1)
@@ -86,17 +87,22 @@ async function main() {
   const bundle = await uploadRes.json()
   console.log(`  Bundle uploaded: versionCode ${bundle.versionCode}`)
 
-  // 3. Assign to track
+  // 3. Assign to track (with release notes if provided)
+  const release = {
+    versionCodes: [bundle.versionCode],
+    status: 'completed',
+  }
+
+  if (notesFile && existsSync(notesFile)) {
+    const notes = readFileSync(notesFile, 'utf8').slice(0, 500)
+    release.releaseNotes = [{ language: 'en-US', text: notes }]
+    console.log(`  Release notes attached (${notes.length} chars)`)
+  }
+
   const trackRes = await fetch(`${API}/edits/${editId}/tracks/${track}`, {
     method: 'PUT',
     headers: { ...headers, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      track,
-      releases: [{
-        versionCodes: [bundle.versionCode],
-        status: 'completed',
-      }],
-    }),
+    body: JSON.stringify({ track, releases: [release] }),
   })
   if (!trackRes.ok) throw new Error(`Track assign failed: ${trackRes.status} ${await trackRes.text()}`)
   console.log(`  Assigned to ${track} track`)

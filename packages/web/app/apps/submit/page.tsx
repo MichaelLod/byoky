@@ -28,7 +28,7 @@ export default function SubmitPage() {
     setError('');
 
     try {
-      const res = await fetch('/api/marketplace/submit', {
+      const res = await fetch('/api/apps/submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -25,7 +25,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 
-private const val MARKETPLACE_URL = "https://byoky.com/api/marketplace"
+private const val MARKETPLACE_URL = "https://byoky.com/api/apps"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
