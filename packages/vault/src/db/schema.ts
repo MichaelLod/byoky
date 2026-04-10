@@ -33,6 +33,7 @@ export const userSessions = pgTable('user_sessions', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   tokenHash: text('token_hash').unique().notNull(),
+  encryptedKey: text('encrypted_key'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
   lastActivityAt: bigint('last_activity_at', { mode: 'number' }).notNull(),

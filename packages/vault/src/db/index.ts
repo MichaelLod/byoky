@@ -66,11 +66,11 @@ export async function getUserById(id: string) {
 
 // ─── User sessions ────────────────────────────────────────────────────────
 
-export async function createUserSession(userId: string, tokenHash: string, expiresAt: number, id?: string) {
+export async function createUserSession(userId: string, tokenHash: string, expiresAt: number, id?: string, encryptedKey?: string) {
   id = id ?? crypto.randomUUID();
   const now = Date.now();
   const [row] = await getDb().insert(userSessions).values({
-    id, userId, tokenHash, createdAt: now, expiresAt, lastActivityAt: now,
+    id, userId, tokenHash, encryptedKey: encryptedKey ?? null, createdAt: now, expiresAt, lastActivityAt: now,
   }).returning();
   return row;
 }
@@ -86,6 +86,17 @@ export async function updateUserSessionActivity(sessionId: string) {
 
 export async function deleteUserSession(sessionId: string) {
   await getDb().delete(userSessions).where(eq(userSessions.id, sessionId));
+}
+
+export async function getEncryptedKeyForUser(userId: string): Promise<string | null> {
+  const [row] = await getDb().select({ encryptedKey: userSessions.encryptedKey })
+    .from(userSessions)
+    .where(and(
+      eq(userSessions.userId, userId),
+      sql`${userSessions.encryptedKey} IS NOT NULL`,
+    ))
+    .limit(1);
+  return row?.encryptedKey ?? null;
 }
 
 export async function deleteExpiredUserSessions() {

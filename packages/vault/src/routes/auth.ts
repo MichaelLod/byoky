@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import { hashPassword, verifyPassword, deriveKey, checkPasswordStrength } from '@byoky/core';
 import { createUser, getUserByUsername, createUserSession, deleteUserSession } from '../db/index.js';
 import { signJwt, hashToken } from '../jwt.js';
-import { cacheKey, evictKey } from '../session-keys.js';
+import { cacheKey, evictKey, wrapKey } from '../session-keys.js';
 import { authMiddleware } from '../middleware/auth.js';
 
 const SALT_LENGTH = 16;
@@ -49,11 +49,12 @@ auth.post('/signup', async (c) => {
 
   // Derive encryption key and cache it
   const saltBytes = Buffer.from(encryptionSalt, 'base64');
-  const encryptionKey = await deriveKey(password, new Uint8Array(saltBytes));
+  const encryptionKey = await deriveKey(password, new Uint8Array(saltBytes), true);
 
+  const wrappedKey = await wrapKey(encryptionKey);
   const sessionId = crypto.randomUUID();
   const token = signJwt(user.id, sessionId, SESSION_DURATION_MS);
-  await createUserSession(user.id, hashToken(token), Date.now() + SESSION_DURATION_MS, sessionId);
+  await createUserSession(user.id, hashToken(token), Date.now() + SESSION_DURATION_MS, sessionId, wrappedKey);
 
   cacheKey(user.id, encryptionKey);
 
@@ -85,11 +86,12 @@ auth.post('/login', async (c) => {
 
   // Derive encryption key and cache it
   const saltBytes = Buffer.from(user.encryptionSalt, 'base64');
-  const encryptionKey = await deriveKey(password, new Uint8Array(saltBytes));
+  const encryptionKey = await deriveKey(password, new Uint8Array(saltBytes), true);
 
+  const wrappedKey = await wrapKey(encryptionKey);
   const sessionId = crypto.randomUUID();
   const token = signJwt(user.id, sessionId, SESSION_DURATION_MS);
-  await createUserSession(user.id, hashToken(token), Date.now() + SESSION_DURATION_MS, sessionId);
+  await createUserSession(user.id, hashToken(token), Date.now() + SESSION_DURATION_MS, sessionId, wrappedKey);
 
   cacheKey(user.id, encryptionKey);
 
