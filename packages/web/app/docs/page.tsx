@@ -776,20 +776,15 @@ const docsStyles = `
   border-bottom: 1px solid var(--border);
 }
 
+.docs-cards-area > div + div {
+  margin-top: 32px;
+}
+
 .docs-cards-heading {
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 600;
   margin-bottom: 12px;
-  margin-top: 28px;
-  color: var(--text);
-}
-
-.docs-cards-heading:first-child {
-  margin-top: 0;
-}
-
-.docs-cards-area > div:first-child .docs-cards-heading {
-  margin-top: 0;
+  color: var(--text-secondary);
 }
 
 .docs-cards-grid {
