@@ -28,7 +28,7 @@ import {
   updateCredentialLastUsed,
   logRequest,
 } from '../db/index.js';
-import { getCachedKey } from '../session-keys.js';
+import { getCachedKey, recoverCachedKey } from '../session-keys.js';
 import { decryptWithKey } from '../crypto.js';
 import { appAuthMiddleware } from '../middleware/app-auth.js';
 
@@ -110,7 +110,7 @@ proxy.post('/', async (c) => {
   // The credential row from the resolver is keyed back to the DB row by id.
   const dbCredential = credentialRows.find((r) => r.id === decision.credential.id)!;
 
-  const cryptoKey = getCachedKey(userId);
+  const cryptoKey = getCachedKey(userId) ?? await recoverCachedKey(userId);
   if (!cryptoKey) {
     return c.json({ error: { code: 'SESSION_KEY_EXPIRED', message: 'Encryption key expired. Please log in again.' } }, 401);
   }

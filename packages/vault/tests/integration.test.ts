@@ -32,10 +32,11 @@ function appAuthReq(path: string, init?: RequestInit) {
 }
 
 describe.skipIf(!DATABASE_URL)('vault integration', () => {
-  beforeAll(() => {
+  beforeAll(async () => {
     process.env.JWT_SECRET = 'integration-test-secret-that-is-at-least-32-characters-long';
     initDb(DATABASE_URL!);
     startIdleSweep();
+    await getDb().execute(sql`ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS encrypted_key TEXT`);
   });
 
   afterAll(async () => {

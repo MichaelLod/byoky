@@ -6,6 +6,7 @@ const ITERATIONS = 600_000;
 export async function deriveKey(
   password: string,
   salt: Uint8Array,
+  extractable = false,
 ): Promise<CryptoKey> {
   const keyMaterial = await crypto.subtle.importKey(
     'raw',
@@ -19,7 +20,7 @@ export async function deriveKey(
     { name: 'PBKDF2', salt: salt as BufferSource, iterations: ITERATIONS, hash: 'SHA-256' },
     keyMaterial,
     { name: 'AES-GCM', length: KEY_LENGTH },
-    false,
+    extractable,
     ['encrypt', 'decrypt'],
   );
 }

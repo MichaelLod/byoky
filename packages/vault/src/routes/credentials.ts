@@ -6,7 +6,7 @@ import {
   getCredentialById,
   deleteCredential,
 } from '../db/index.js';
-import { getCachedKey } from '../session-keys.js';
+import { getCachedKey, recoverCachedKey } from '../session-keys.js';
 import { encryptWithKey, decryptWithKey } from '../crypto.js';
 import { authMiddleware } from '../middleware/auth.js';
 
@@ -17,7 +17,7 @@ credentials.use('/*', authMiddleware);
 credentials.get('/', async (c) => {
   const userId = c.get('userId');
   const rows = await getCredentialsByUser(userId);
-  const cryptoKey = getCachedKey(userId);
+  const cryptoKey = getCachedKey(userId) ?? await recoverCachedKey(userId);
 
   const result = await Promise.all(rows.map(async (row) => {
     let maskedKey: string | undefined;
@@ -69,7 +69,7 @@ credentials.post('/', async (c) => {
     return c.json({ error: { code: 'INVALID_AUTH_METHOD', message: `Provider ${providerId} does not support auth method: ${method}` } }, 400);
   }
 
-  const cryptoKey = getCachedKey(userId);
+  const cryptoKey = getCachedKey(userId) ?? await recoverCachedKey(userId);
   if (!cryptoKey) {
     return c.json({ error: { code: 'SESSION_KEY_EXPIRED', message: 'Encryption key expired. Please log in again.' } }, 401);
   }
