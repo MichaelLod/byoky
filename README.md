@@ -18,7 +18,7 @@
   Your keys never leave your device.
   <br />
   <br />
-  <a href="https://byoky.com">Website</a> · <a href="https://marketplace.byoky.com">Marketplace</a> · <a href="https://byoky.com/dev">Developer Hub</a> · <a href="https://demo.byoky.com">Demo</a> · <a href="#quick-start">Quick Start</a> · <a href="https://discord.gg/gRs8S9fxcT">Discord</a> · <a href="https://github.com/MichaelLod/byoky/issues">Issues</a>
+  <a href="https://byoky.com">Website</a> · <a href="https://marketplace.byoky.com">Marketplace</a> · <a href="https://demo.byoky.com">Demo</a> · <a href="#quick-start">Quick Start</a> · <a href="https://discord.gg/gRs8S9fxcT">Discord</a> · <a href="https://github.com/MichaelLod/byoky/issues">Issues</a>
   <br />
   <br />
   <a href="https://github.com/MichaelLod/byoky/blob/main/LICENSE"><img src="https://img.shields.io/github/license/MichaelLod/byoky?style=flat&color=0ea5e9" alt="License" /></a>
@@ -83,11 +83,7 @@
 
 ### For Developers
 
-**Generate a full app from a description — powered by your own keys:**
-
-> **[byoky.com/dev](https://byoky.com/dev)** — Connect your wallet, describe your app, and we generate it with AI. Push to GitHub in one click. Zero cost — your keys power everything.
-
-**Or scaffold locally:**
+**Scaffold a new app:**
 
 ```bash
 npx create-byoky-app
@@ -345,7 +341,7 @@ pnpm --filter @byoky/extension build:all     # Chrome + Firefox + Safari
 - [x] Mobile wallet relay connect (no extension needed, pair via QR code)
 - [x] iOS app (wallet + Safari extension + relay pairing)
 - [x] Android app (standalone wallet + relay pairing)
-- [x] Developer Hub + create-byoky-app CLI scaffolder
+- [x] create-byoky-app CLI scaffolder
 - [x] Alias groups — drag apps between groups to swap which credential they use
 - [x] Setup token compatibility for third-party agents (OpenClaw etc.) — transparent tool name + system prompt rewriting
 - [x] Cross-provider translation — drag an app from a Claude group to a GPT group and have requests transparently rewrite (request body, response body, SSE streams)
