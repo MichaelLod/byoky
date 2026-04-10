@@ -100,8 +100,8 @@ function Hero() {
               <span>MIT Licensed</span>
             </div>
             <div className="hero-trust-item">
-              <CloudOffIcon />
-              <span>Zero Cloud</span>
+              <EyeIcon />
+              <span>Full Audit Log</span>
             </div>
             <div className="hero-trust-item">
               <LinkIcon />
