@@ -125,6 +125,10 @@ STORES_SKIPPED=()
   && STORES_CONFIGURED+=("Google Play") \
   || STORES_SKIPPED+=("Google Play (GOOGLE_PLAY_SERVICE_ACCOUNT_JSON)")
 
+[ -n "${DISCORD_WEBHOOK_URL:-}" ] \
+  && STORES_CONFIGURED+=("Discord") \
+  || STORES_SKIPPED+=("Discord (DISCORD_WEBHOOK_URL)")
+
 # Report
 if [ ${#ERRORS[@]} -gt 0 ]; then
   for e in "${ERRORS[@]}"; do echo "  ERROR: $e"; done
@@ -509,6 +513,43 @@ gh release create "v${NEW_VERSION}" \
   --notes "$RELEASE_NOTES"
 
 # ============================================================
+# 12. Discord notification
+# ============================================================
+step "Discord notification"
+
+if [ -n "${DISCORD_WEBHOOK_URL:-}" ]; then
+  # Build a concise Discord message (markdown supported)
+  DISCORD_MSG="**byoky v${NEW_VERSION}** released
+
+**npm:** \`${NEW_VERSION}\` | **Native:** \`${NEW_NATIVE_VERSION}\` (${NEW_VERSION_CODE})
+
+$(echo "$RELEASE_NOTES" | sed -n '/^### Features/,/^### [^F]/{ /^### [^F]/!p; }' | head -15)
+
+**Links:**
+- [GitHub Release](https://github.com/MichaelLod/byoky/releases/tag/v${NEW_VERSION})
+- [npm](https://www.npmjs.com/package/@byoky/sdk/v/${NEW_VERSION})"
+
+  # Discord webhook expects JSON with "content" field (max 2000 chars)
+  DISCORD_PAYLOAD=$(node -e "
+    const msg = process.argv[1].slice(0, 2000);
+    console.log(JSON.stringify({ content: msg }));
+  " "$DISCORD_MSG")
+
+  DISCORD_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+    -H "Content-Type: application/json" \
+    -d "$DISCORD_PAYLOAD" \
+    "$DISCORD_WEBHOOK_URL")
+
+  if [ "$DISCORD_STATUS" = "204" ] || [ "$DISCORD_STATUS" = "200" ]; then
+    echo "  Posted to Discord"
+  else
+    echo "  WARN: Discord webhook returned HTTP $DISCORD_STATUS"
+  fi
+else
+  echo "  Skipping Discord (DISCORD_WEBHOOK_URL not configured)"
+fi
+
+# ============================================================
 # Summary
 # ============================================================
 echo ""
@@ -532,6 +573,7 @@ echo "  Stores:"
 [ -n "${AMO_API_KEY:-}" ] && echo "    Firefox AMO: submitted for review"
 [ "$SKIP_IOS" = false ] && [ -n "${ASC_KEY_ID:-}" ] && echo "    App Store (iOS + macOS): uploaded to App Store Connect"
 [ "$SKIP_ANDROID" = false ] && [ -n "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ] && echo "    Google Play: uploaded to production track"
+[ -n "${DISCORD_WEBHOOK_URL:-}" ] && echo "    Discord: release announcement posted"
 echo ""
 echo "  GitHub: https://github.com/MichaelLod/byoky/releases/tag/v${NEW_VERSION}"
 echo ""

@@ -160,6 +160,91 @@ describe('cross-family dispatch — simple response round trip', () => {
   }
 });
 
+/**
+ * A tiny 1×1 red PNG (68 bytes) encoded as base64 — used as a minimal image
+ * payload for cross-family vision translation tests.
+ */
+const TINY_PNG_B64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAIAAAD/gAIDAAABFUlEQVR4nO3OUQkAIABEsetfWiv4Nx4IC7Cd7XvkByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIReeLesrH9s1agAAAABJRU5ErkJggg==';
+
+/**
+ * Image-bearing request bodies per source family — a user message with a text
+ * prompt + an inline base64 image, expressed in each family's native shape.
+ */
+const IMAGE_REQUESTS: Record<ModelFamily, string> = {
+  anthropic: JSON.stringify({
+    model: 'src-model',
+    max_tokens: 128,
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Describe this image.' },
+          {
+            type: 'image',
+            source: { type: 'base64', media_type: 'image/png', data: TINY_PNG_B64 },
+          },
+        ],
+      },
+    ],
+  }),
+  openai: JSON.stringify({
+    model: 'src-model',
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Describe this image.' },
+          { type: 'image_url', image_url: { url: `data:image/png;base64,${TINY_PNG_B64}` } },
+        ],
+      },
+    ],
+    max_tokens: 128,
+  }),
+  gemini: JSON.stringify({
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          { text: 'Describe this image.' },
+          { inlineData: { mimeType: 'image/png', data: TINY_PNG_B64 } },
+        ],
+      },
+    ],
+    generationConfig: { maxOutputTokens: 128 },
+  }),
+  cohere: JSON.stringify({
+    model: 'src-model',
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Describe this image.' },
+          { type: 'image_url', image_url: { url: `data:image/png;base64,${TINY_PNG_B64}` } },
+        ],
+      },
+    ],
+    max_tokens: 128,
+  }),
+};
+
+describe('cross-family dispatch — image request round trip', () => {
+  for (const src of FAMILIES) {
+    for (const dst of FAMILIES) {
+      if (src === dst) continue;
+      it(`${src} → ${dst} with image`, () => {
+        const c = ctx(src, dst);
+        const out = translateRequest(c, IMAGE_REQUESTS[src]);
+        expect(() => JSON.parse(out)).not.toThrow();
+        // The base64 image data must survive translation.
+        expect(out).toContain(TINY_PNG_B64);
+        // The text prompt must survive too.
+        expect(out).toContain('Describe');
+      });
+    }
+  }
+});
+
 describe('cross-family dispatch — tool use request', () => {
   // Anthropic-shaped tool request — translates into every other family.
   const anthropicToolReq = JSON.stringify({
