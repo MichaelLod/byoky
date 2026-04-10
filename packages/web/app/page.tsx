@@ -11,19 +11,19 @@ export default function Home() {
       <div className="divider" />
       <Security />
       <div className="divider" />
+      <ZeroCost />
+      <div className="divider" />
       <Showcase />
       <div className="divider" />
-      <HowItWorks />
-      <div className="divider" />
       <ForDevelopers />
+      <div className="divider" />
+      <HowItWorks />
       <div className="divider" />
       <Providers />
       <div className="divider" />
       <CrossProviderRouting />
       <div className="divider" />
       <MobileWallet />
-      <div className="divider" />
-      <ZeroCost />
       <div className="divider" />
       <OpenSource />
       <ClosingCTA />
@@ -100,8 +100,8 @@ function Hero() {
               <span>MIT Licensed</span>
             </div>
             <div className="hero-trust-item">
-              <CloudOffIcon />
-              <span>Zero Cloud</span>
+              <EyeIcon />
+              <span>Full Audit Log</span>
             </div>
             <div className="hero-trust-item">
               <LinkIcon />
@@ -134,7 +134,7 @@ function HowItWorks() {
               </div>
               <h3>Install the wallet</h3>
               <p>
-                Add the Byoky extension to Chrome, Firefox, or Safari — or
+                Add the Byoky extension to Chrome or Firefox — or
                 grab the iOS or Android app. Set a master password to
                 encrypt your vault.
               </p>
