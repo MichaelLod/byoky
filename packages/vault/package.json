@@ -22,6 +22,7 @@
     "drizzle-orm": "^0.45.2",
     "hono": "^4.0.0",
     "postgres": "^3.4.0",
+    "undici": "^8.0.2",
     "ws": "^8.16.0"
   },
   "devDependencies": {
@@ -29,7 +30,6 @@
     "@types/ws": "^8.5.10",
     "drizzle-kit": "^0.30.0",
     "tsx": "^4.7.0",
-    "typescript": "^5.4.0",
-    "undici": "^8.0.2"
+    "typescript": "^5.4.0"
   }
 }
