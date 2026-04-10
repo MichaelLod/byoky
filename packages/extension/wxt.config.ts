@@ -50,7 +50,7 @@ export default defineConfig({
           required: ['none'],
           optional: [],
         },
-      },
+      } as Record<string, unknown>,
     },
   },
 });

@@ -148,6 +148,61 @@ describe.skipIf(!OPENAI_KEY)('live anthropic→openai — streaming chat', () =>
   }, 30_000);
 });
 
+/** Tiny 1×1 red PNG as base64 — minimal image payload for vision tests. */
+const TINY_PNG_B64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAIAAAD/gAIDAAABFUlEQVR4nO3OUQkAIABEsetfWiv4Nx4IC7Cd7XvkByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIReeLesrH9s1agAAAABJRU5ErkJggg==';
+
+describe.skipIf(!OPENAI_KEY)('live anthropic→openai — vision (image)', () => {
+  it('translates an image request end-to-end', async () => {
+    const c = ctx();
+    const anthropicRequest = {
+      model: SRC_MODEL,
+      max_tokens: 20,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'What color is this single-pixel image? Reply with one word.' },
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: 'image/png', data: TINY_PNG_B64 },
+            },
+          ],
+        },
+      ],
+    };
+
+    const openAIBody = translateRequest(c, JSON.stringify(anthropicRequest));
+    // The translated body must contain the base64 data (image survived translation).
+    expect(openAIBody).toContain(TINY_PNG_B64);
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: OPENAI_HEADERS,
+      body: openAIBody,
+    });
+    expect(response.status).toBe(200);
+
+    const openAIText = await response.text();
+    const translated = translateResponse(c, openAIText);
+    const parsed = JSON.parse(translated) as {
+      type: string;
+      role: string;
+      model: string;
+      content: Array<{ type: string; text?: string }>;
+      stop_reason: string;
+    };
+
+    expect(parsed.type).toBe('message');
+    expect(parsed.role).toBe('assistant');
+    expect(parsed.model).toBe(SRC_MODEL);
+    expect(parsed.content.length).toBeGreaterThan(0);
+    const text = parsed.content.find((b) => b.type === 'text');
+    expect(text).toBeDefined();
+    expect((text!.text ?? '').length).toBeGreaterThan(0);
+  }, 30_000);
+});
+
 describe.skipIf(!OPENAI_KEY)('live anthropic→openai — tool use', () => {
   it('translates a tool-use round trip', async () => {
     const c = ctx();
