@@ -27,12 +27,7 @@ const openaiCompatible: Record<string, { url: string; model: string; name: strin
 
 const visionProviders = new Set(['anthropic', 'openai', 'gemini']);
 
-// Static list of providers the chat tab knows how to call. The dropdown shows
-// all of them — even when the wallet has no credential for a given provider —
-// so the user can exercise cross-family routing (e.g. select OpenAI when only
-// an Anthropic credential is in the wallet, and let the wallet translate the
-// request via the bound group's destination).
-const dropdownProviders: string[] = ['anthropic', 'gemini', ...Object.keys(openaiCompatible)];
+const dropdownProviders: string[] = ['anthropic', 'openai', 'gemini'];
 
 const suggestedPrompts = [
   'Explain how API keys work in 3 sentences',

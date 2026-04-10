@@ -342,7 +342,7 @@ const res = await fetch('https://api.anthropic.com/v1/messages', {
       <h3>Session properties</h3>
       <Code lang="typescript">{`session.sessionKey  // string — use as apiKey in provider SDKs
 session.proxyUrl    // string — the proxy endpoint URL
-session.providers   // Record<string, { available, authMethod, gift? }>`}</Code>
+session.providers   // Record<string, { available, authMethod }>`}</Code>
     </Section>
   );
 }
