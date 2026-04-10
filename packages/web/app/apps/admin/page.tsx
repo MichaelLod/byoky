@@ -29,7 +29,7 @@ export default function AdminPage() {
     try {
       const [subRes, appRes] = await Promise.all([
         fetch('/api/apps/admin/submissions', { headers: authHeaders }),
-        fetch('/api/apps/apps'),
+        fetch('/api/apps'),
       ]);
       if (subRes.status === 401) { setAuthed(false); return; }
       if (subRes.ok) {

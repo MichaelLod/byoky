@@ -43,8 +43,8 @@ fun AppStoreScreen(wallet: WalletStore, onBack: () -> Unit) {
         try {
             val url = if (search.isNotBlank()) {
                 val encoded = java.net.URLEncoder.encode(search, "UTF-8")
-                "$MARKETPLACE_URL/apps?search=$encoded"
-            } else "$MARKETPLACE_URL/apps"
+                "$MARKETPLACE_URL?search=$encoded"
+            } else MARKETPLACE_URL
             apps = fetchMarketplaceApps(url)
             error = null
         } catch (e: Exception) {
