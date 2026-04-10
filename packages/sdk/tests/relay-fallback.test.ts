@@ -187,6 +187,41 @@ describe('relay vault fallback', () => {
     expect(disconnectCb).toHaveBeenCalledTimes(1);
   });
 
+  it('recovers vault fallback from sessionStorage when offer never arrived', async () => {
+    // Simulate a previously saved vault session (from an earlier connection)
+    const header = btoa(JSON.stringify({ alg: 'HS256' }));
+    const payload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 }));
+    const fakeToken = `${header}.${payload}.sig`;
+
+    sessionStorage.setItem('byoky:vault-session', JSON.stringify({
+      appSessionToken: fakeToken,
+      vaultUrl: 'https://vault.byoky.com',
+      sessionKey: 'relay_vault_saved',
+      proxyUrl: 'https://vault.byoky.com/proxy',
+      providers: { anthropic: { available: true, authMethod: 'api_key' } },
+      expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    }));
+
+    const byoky = new Byoky();
+    const session = await pairViaRelay(byoky);
+
+    const disconnectCb = vi.fn();
+    session.onDisconnect(disconnectCb);
+
+    // Phone goes offline — NO vault offer was sent via WebSocket
+    mockWs._receive({ type: 'relay:peer:status', online: false });
+
+    await new Promise(r => setTimeout(r, 10));
+
+    // Session should NOT disconnect — it recovered from sessionStorage
+    expect(disconnectCb).not.toHaveBeenCalled();
+
+    const connected = await session.isConnected();
+    expect(connected).toBe(true);
+
+    session.disconnect();
+  });
+
   it('switches back to relay when phone comes back online', async () => {
     const byoky = new Byoky();
     const session = await pairViaRelay(byoky);
