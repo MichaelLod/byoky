@@ -257,6 +257,53 @@ section {
   height: 20px;
 }
 
+.install-dropdown {
+  position: relative;
+}
+
+.install-dropdown .btn {
+  display: flex;
+  align-items: center;
+}
+
+.install-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 160px;
+  background: rgba(12, 12, 24, 0.95);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(26, 26, 52, 0.8);
+  border-radius: 10px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  z-index: 200;
+  animation: dropdown-fade 0.15s ease;
+}
+
+@keyframes dropdown-fade {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.install-dropdown-item {
+  display: block;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  border-radius: 6px;
+  text-decoration: none;
+  transition: background 0.1s, color 0.1s;
+}
+
+.install-dropdown-item:hover {
+  background: rgba(14, 165, 233, 0.1);
+  color: var(--text);
+}
+
 /* =============================================
    Hero Section
    ============================================= */
@@ -412,6 +459,90 @@ section {
   gap: 14px;
   justify-content: center;
   flex-wrap: wrap;
+}
+
+/* ── Version Status ── */
+
+.version-status {
+  margin-top: 40px;
+  text-align: center;
+}
+
+.version-status-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+.version-status-grid {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.version-status-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  min-width: 100px;
+}
+
+.version-status-platform {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.version-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.version-status-dot.live {
+  background: #22c55e;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.4);
+}
+
+.version-status-dot.pending {
+  background: #f59e0b;
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.4);
+}
+
+.version-status-version {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  font-family: var(--font-code);
+}
+
+.version-status-pending {
+  color: #f59e0b;
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.version-status-source {
+  font-size: 10px;
+  color: var(--teal);
+  text-decoration: none;
+  margin-top: 2px;
+}
+
+.version-status-source:hover {
+  text-decoration: underline;
 }
 
 /* =============================================
