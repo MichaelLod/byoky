@@ -58,7 +58,7 @@ export default function AdminPage() {
 
   if (!authed) {
     return (
-      <main style={{ maxWidth: 400, margin: '0 auto', padding: '80px 20px', fontFamily: 'system-ui' }}>
+      <main style={{ maxWidth: 400, margin: '0 auto', padding: '120px 20px 80px', fontFamily: 'system-ui' }}>
         <h1>Admin Login</h1>
         <form onSubmit={(e) => { e.preventDefault(); setAuthed(true); }} style={{ marginTop: 24 }}>
           <input
