@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { StatusCode } from 'hono/utils/http-status';
 import { stream } from 'hono/streaming';
 import crypto from 'node:crypto';
+import { proxyDispatcher } from '../upstream-proxy.js';
 import {
   validateProxyUrl,
   buildHeaders,
@@ -202,7 +203,8 @@ proxy.post('/', async (c) => {
       method: method ?? 'POST',
       headers: upstreamHeaders,
       body: effectiveBody,
-    });
+      ...proxyDispatcher(),
+    } as RequestInit);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Upstream request failed';
     await logRequest({

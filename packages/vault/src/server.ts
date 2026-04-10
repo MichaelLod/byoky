@@ -5,6 +5,7 @@ import { startIdleSweep } from './session-keys.js';
 import { startRateLimitCleanup } from './middleware/rate-limit.js';
 import { deleteExpiredUserSessions, deleteExpiredAppSessions } from './db/index.js';
 import { startGiftRelay } from './gift-relay.js';
+import { initUpstreamProxy } from './upstream-proxy.js';
 
 const PORT = parseInt(process.env.PORT ?? '3100', 10);
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -15,6 +16,7 @@ if (!DATABASE_URL) {
 }
 
 initDb(DATABASE_URL);
+initUpstreamProxy();
 startIdleSweep();
 startRateLimitCleanup();
 
