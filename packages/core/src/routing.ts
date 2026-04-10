@@ -192,11 +192,11 @@ export function buildNoCredentialMessage(
   const req = requestedProviderId;
   const groupBinding = group?.providerId;
   if (groupBinding && groupBinding !== req) {
-    return `This app is bound to a group that routes to ${groupBinding}, but you have no ${groupBinding} credential in your wallet. Add a ${groupBinding} credential, or rebind this group to a provider you do have a key for.`;
+    return `No ${groupBinding} API key found. Add a ${groupBinding} key to your wallet, or assign this app to a provider you already have a key for.`;
   }
   if (userCredentialProviderIds.length > 0) {
     const list = userCredentialProviderIds.join(', ');
-    return `This app requested ${req} but you have no ${req} credential. You have keys for: ${list}. Move this app to a group bound to one of those providers, or add a ${req} key.`;
+    return `No ${req} API key found. You have keys for: ${list}. Add a ${req} key, or assign this app to one of those providers.`;
   }
-  return `This app requested ${req} but your wallet has no credentials. Add a key — you can use any provider; routing will direct requests to it automatically.`;
+  return `No API keys in your wallet. Add a key for any provider to get started.`;
 }

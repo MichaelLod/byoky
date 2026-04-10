@@ -872,15 +872,15 @@ final class RelayPairService: ObservableObject {
         let groupBinding = group?.providerId
         // Case 1: a group is routing this app to a provider that has no credential.
         if let groupBinding, groupBinding != req {
-            return "This app is bound to a group that routes to \(groupBinding), but you have no \(groupBinding) credential in your wallet. Add a \(groupBinding) credential, or rebind this group to a provider you do have a key for."
+            return "No \(groupBinding) API key found. Add a \(groupBinding) key to your wallet, or assign this app to a provider you already have a key for."
         }
         // Case 2: user has other credentials but not for the requested provider.
         if !userCredentialProviderIds.isEmpty {
             let list = userCredentialProviderIds.joined(separator: ", ")
-            return "This app requested \(req) but you have no \(req) credential. You have keys for: \(list). Move this app to a group bound to one of those providers (Apps tab), or add a \(req) key in Wallet."
+            return "No \(req) API key found. You have keys for: \(list). Add a \(req) key, or assign this app to one of those providers."
         }
         // Case 3: user has no credentials at all.
-        return "This app requested \(req) but your wallet has no credentials. Add a key in the Wallet tab — you can use any provider; Byoky will route requests to it automatically."
+        return "No API keys in your wallet. Add a key for any provider to get started."
     }
 
     private func sendRelayError(requestId: String, code: String, message: String) {
