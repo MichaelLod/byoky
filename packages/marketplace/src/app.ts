@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { timingSafeEqual } from 'node:crypto';
 import {
   listGifts, addGift, removeGift, updateGiftUsage, heartbeat,
   getGiftById, getGiftMgmtHash, generateManagementToken, hashToken,
@@ -15,18 +16,16 @@ const ALLOWED_ORIGINS = [
   /^safari-web-extension:\/\//,
 ];
 
+function isAllowedOrigin(origin: string): boolean {
+  return ALLOWED_ORIGINS.some((o) => (typeof o === 'string' ? o === origin : o.test(origin)));
+}
+
 app.use('/gifts', cors({
-  origin: (origin) => {
-    // GET is open to all
-    return origin;
-  },
+  origin: (origin) => isAllowedOrigin(origin) ? origin : 'https://byoky.com',
 }));
 
 app.use('/gifts/*', cors({
-  origin: (origin) => {
-    // Allow reads from anywhere, writes check in handler
-    return origin;
-  },
+  origin: (origin) => isAllowedOrigin(origin) ? origin : 'https://byoky.com',
 }));
 
 // --- Rate limiting (in-memory, per-IP) ---
@@ -85,7 +84,9 @@ async function verifyMgmtToken(id: string, c: { req: { header: (name: string) =>
   if (!token) return false;
   const storedHash = await getGiftMgmtHash(id);
   if (!storedHash) return false;
-  return hashToken(token) === storedHash;
+  const a = Buffer.from(hashToken(token));
+  const b = Buffer.from(storedHash);
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 // --- Routes ---
