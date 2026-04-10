@@ -27,9 +27,10 @@ const openaiCompatible: Record<string, { url: string; model: string; name: strin
 
 const visionProviders = new Set(['anthropic', 'openai', 'gemini']);
 
-const dropdownProviders: string[] = ['anthropic', 'openai', 'gemini'];
+const dropdownProviders: string[] = ['anthropic', 'gemini', ...Object.keys(openaiCompatible)];
 
 const suggestedPrompts = [
+  'Which model are you?',
   'Explain how API keys work in 3 sentences',
   'Write a TypeScript function that reverses a string',
   'What are the main differences between REST and GraphQL?',
