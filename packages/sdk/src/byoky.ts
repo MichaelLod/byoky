@@ -497,7 +497,6 @@ export class Byoky {
         const msg = JSON.parse(event.data);
 
         if (msg.type === 'relay:vault:offer') {
-          console.log('[byoky] vault offer received', msg.vaultUrl ? 'with URL' : 'missing URL');
           if (typeof msg.vaultUrl === 'string' && typeof msg.appSessionToken === 'string') {
             vaultFallback = { vaultUrl: msg.vaultUrl, appSessionToken: msg.appSessionToken };
             saveVaultSession({
@@ -508,19 +507,15 @@ export class Byoky {
               providers,
               expiresAt: decodeJwtExp(msg.appSessionToken),
             });
-            console.log('[byoky] vault fallback stored');
           }
           return;
         }
 
         if (msg.type === 'relay:peer:status') {
-          console.log('[byoky] peer status:', msg.online, 'vaultFallback:', !!vaultFallback);
           if (msg.online === false) {
             if (vaultFallback) {
               activeFetchMode = 'vault';
-              console.log('[byoky] switched to vault mode');
             } else {
-              console.log('[byoky] no vault fallback, disconnecting');
               for (const cb of disconnectCallbacks) cb();
               disconnectCallbacks.clear();
               clearInterval(pingInterval);
