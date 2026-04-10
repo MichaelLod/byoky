@@ -177,6 +177,7 @@ class WalletStore(context: Context) {
         _tokenAllowances.value = emptyList()
         _groups.value = emptyList()
         _appGroups.value = emptyMap()
+        _installedApps.value = emptyList()
         _status.value = WalletStatus.LOCKED
         backgroundTime = null
     }
@@ -445,6 +446,8 @@ class WalletStore(context: Context) {
         _gifts.value = emptyList()
         _giftedCredentials.value = emptyList()
         _tokenAllowances.value = emptyList()
+        _installedApps.value = emptyList()
+        plainPrefs.edit().remove("installed_apps").apply()
         _bridgeStatus.value = BridgeStatus.INACTIVE
 
         // Reset brute-force state
@@ -517,6 +520,9 @@ class WalletStore(context: Context) {
     }
 
     fun installApp(app: MarketplaceApp) {
+        val uri = android.net.Uri.parse(app.url)
+        if (uri.scheme != "https") return
+
         val installed = InstalledApp(
             id = app.id,
             slug = app.slug,

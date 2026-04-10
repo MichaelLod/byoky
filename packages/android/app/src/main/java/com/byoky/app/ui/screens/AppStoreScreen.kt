@@ -25,7 +25,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 
-private const val MARKETPLACE_URL = "https://marketplace.byoky.com"
+private const val MARKETPLACE_URL = "https://byoky.com/api/marketplace"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -41,8 +41,10 @@ fun AppStoreScreen(wallet: WalletStore, onBack: () -> Unit) {
     LaunchedEffect(search) {
         loading = true
         try {
-            val url = if (search.isNotBlank()) "$MARKETPLACE_URL/api/apps?search=$search"
-            else "$MARKETPLACE_URL/api/apps"
+            val url = if (search.isNotBlank()) {
+                val encoded = java.net.URLEncoder.encode(search, "UTF-8")
+                "$MARKETPLACE_URL/api/apps?search=$encoded"
+            } else "$MARKETPLACE_URL/api/apps"
             apps = fetchMarketplaceApps(url)
             error = null
         } catch (e: Exception) {

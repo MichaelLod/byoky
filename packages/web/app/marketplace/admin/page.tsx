@@ -20,13 +20,18 @@ interface AppEntry {
 export default function AdminPage() {
   const [submissions, setSubmissions] = useState<AppEntry[]>([]);
   const [apps, setApps] = useState<AppEntry[]>([]);
+  const [token, setToken] = useState('');
+  const [authed, setAuthed] = useState(false);
+
+  const authHeaders = { Authorization: `Bearer ${token}` };
 
   const load = useCallback(async () => {
     try {
       const [subRes, appRes] = await Promise.all([
-        fetch('/api/admin/submissions'),
-        fetch('/api/apps'),
+        fetch('/api/marketplace/admin/submissions', { headers: authHeaders }),
+        fetch('/api/marketplace/apps'),
       ]);
+      if (subRes.status === 401) { setAuthed(false); return; }
       if (subRes.ok) {
         const data = await subRes.json();
         setSubmissions(data.submissions ?? []);
@@ -38,17 +43,40 @@ export default function AdminPage() {
     } catch {
       // ignore
     }
-  }, []);
+  }, [token]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (authed) load(); }, [load, authed]);
 
   async function handleAction(slug: string, action: 'approve' | 'reject') {
-    await fetch('/api/admin/review', {
+    await fetch('/api/marketplace/admin/review', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify({ slug, action }),
     });
     load();
+  }
+
+  if (!authed) {
+    return (
+      <main style={{ maxWidth: 400, margin: '0 auto', padding: '80px 20px', fontFamily: 'system-ui' }}>
+        <h1>Admin Login</h1>
+        <form onSubmit={(e) => { e.preventDefault(); setAuthed(true); }} style={{ marginTop: 24 }}>
+          <input
+            type="password"
+            placeholder="Admin secret"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            style={{ width: '100%', padding: '8px 12px', fontSize: 16, borderRadius: 6, border: '1px solid #ccc' }}
+          />
+          <button
+            type="submit"
+            style={{ marginTop: 12, padding: '8px 24px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer' }}
+          >
+            Login
+          </button>
+        </form>
+      </main>
+    );
   }
 
   const pending = submissions.filter((s) => s.status === 'pending');

@@ -8,6 +8,20 @@ export function AppView() {
     return null;
   }
 
+  // Block non-HTTPS URLs from loading in the iframe
+  let safeUrl: string;
+  try {
+    const parsed = new URL(activeApp.url);
+    if (parsed.protocol !== 'https:') {
+      navigate('apps');
+      return null;
+    }
+    safeUrl = parsed.href;
+  } catch {
+    navigate('apps');
+    return null;
+  }
+
   return (
     <div className="app-view">
       <div className="app-view-header">
@@ -19,9 +33,9 @@ export function AppView() {
         </button>
       </div>
       <iframe
-        src={activeApp.url}
+        src={safeUrl}
         className="app-view-iframe"
-        sandbox="allow-scripts allow-forms allow-popups allow-same-origin"
+        sandbox="allow-scripts allow-forms allow-popups"
         referrerPolicy="no-referrer"
         title={activeApp.name}
       />
