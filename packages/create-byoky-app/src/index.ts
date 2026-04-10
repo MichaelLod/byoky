@@ -281,7 +281,7 @@ async function main(): Promise<void> {
     console.log(`    npx create-byoky-app init    # fill in your manifest`);
     console.log(`    npx create-byoky-app submit   # submit to marketplace`);
     console.log();
-    console.log('  Docs: https://byoky.com/dev');
+    console.log('  Docs: https://byoky.com/docs');
     console.log();
   } catch (err) {
     if (err instanceof Error) {
