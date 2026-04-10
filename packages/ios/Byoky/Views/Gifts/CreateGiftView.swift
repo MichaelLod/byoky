@@ -10,6 +10,8 @@ struct CreateGiftView: View {
     @State private var useCustomTokens = false
     @State private var expiryOption: ExpiryOption = .days7
     @State private var relayUrl = "wss://relay.byoky.com"
+    @State private var listPublicly = false
+    @State private var gifterName = ""
     @State private var createdGift: Gift?
     @State private var error: String?
 
@@ -142,6 +144,19 @@ struct CreateGiftView: View {
                 Text("The WebSocket relay that proxies gift requests.")
             }
 
+            Section {
+                Toggle("List on Token Marketplace", isOn: $listPublicly)
+                    .tint(Theme.accent)
+                if listPublicly {
+                    TextField("Display name", text: $gifterName)
+                        .textContentType(.name)
+                }
+            } header: {
+                Text("Marketplace")
+            } footer: {
+                Text("Make this gift public so anyone can redeem it from byoky.com/marketplace.")
+            }
+
             if let error {
                 Section {
                     Label(error, systemImage: "exclamationmark.triangle")
@@ -258,6 +273,27 @@ struct CreateGiftView: View {
         )
         createdGift = gift
         error = nil
+
+        if listPublicly, let gift = createdGift {
+            let (encoded, _) = createGiftLink(from: gift)
+            let link = giftLinkToUrl(encoded)
+            Task {
+                var request = URLRequest(url: URL(string: "https://marketplace.byoky.com/gifts")!)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                let body: [String: Any] = [
+                    "id": gift.id,
+                    "providerId": gift.providerId,
+                    "gifterName": gifterName.isEmpty ? "Anonymous" : gifterName,
+                    "giftLink": link,
+                    "relayUrl": relayUrl,
+                    "tokenBudget": gift.maxTokens,
+                    "expiresAt": Int(gift.expiresAt.timeIntervalSince1970 * 1000),
+                ]
+                request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+                _ = try? await URLSession.shared.data(for: request)
+            }
+        }
     }
 
     private func formatPreset(_ n: Int) -> String {
