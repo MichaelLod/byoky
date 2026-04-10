@@ -1,11 +1,11 @@
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'App Marketplace — Byoky',
+  title: 'Apps — Byoky',
   description: 'Discover and install apps that run on your own API keys.',
-  alternates: { canonical: '/marketplace' },
+  alternates: { canonical: '/apps' },
 };
 
-export default function MarketplaceLayout({ children }: { children: React.ReactNode }) {
+export default function AppsLayout({ children }: { children: React.ReactNode }) {
   return children;
 }

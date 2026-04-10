@@ -28,8 +28,8 @@ export default function AdminPage() {
   const load = useCallback(async () => {
     try {
       const [subRes, appRes] = await Promise.all([
-        fetch('/api/marketplace/admin/submissions', { headers: authHeaders }),
-        fetch('/api/marketplace/apps'),
+        fetch('/api/apps/admin/submissions', { headers: authHeaders }),
+        fetch('/api/apps/apps'),
       ]);
       if (subRes.status === 401) { setAuthed(false); return; }
       if (subRes.ok) {
@@ -48,7 +48,7 @@ export default function AdminPage() {
   useEffect(() => { if (authed) load(); }, [load, authed]);
 
   async function handleAction(slug: string, action: 'approve' | 'reject') {
-    await fetch('/api/marketplace/admin/review', {
+    await fetch('/api/apps/admin/review', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders },
       body: JSON.stringify({ slug, action }),

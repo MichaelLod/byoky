@@ -4,14 +4,19 @@
 //
 // Usage:
 //   node scripts/release-notes.mjs <from-ref> <to-ref> <new-version> <native-version> <native-code>
+//   node scripts/release-notes.mjs --store <from-ref> <to-ref>
 //
-// Output: Markdown release notes to stdout.
+// --store: Plain-text "What's New" for App Store / Google Play (max 500 chars, no markdown)
+// Default: Markdown release notes for GitHub.
 
 import { execFileSync } from 'node:child_process'
 
-const [fromRef, toRef, version, nativeVersion, nativeCode] = process.argv.slice(2)
-if (!fromRef || !toRef || !version) {
-  console.error('Usage: release-notes.mjs <from-ref> <to-ref> <version> [native-version] [native-code]')
+const storeMode = process.argv[2] === '--store'
+const args = storeMode ? process.argv.slice(3) : process.argv.slice(2)
+const [fromRef, toRef, version, nativeVersion, nativeCode] = args
+
+if (!fromRef || !toRef || (!storeMode && !version)) {
+  console.error('Usage: release-notes.mjs [--store] <from-ref> <to-ref> [version] [native-version] [native-code]')
   process.exit(1)
 }
 
@@ -49,6 +54,21 @@ for (const line of lines) {
   } else {
     categories.other.items.push(line)
   }
+}
+
+// --- Store mode: plain-text "What's New" (max 500 chars) ---
+if (storeMode) {
+  const feats = categories.feat.items.map(i => i.replace(/\*\*([^*]+)\*\*:\s*/g, ''))
+  const fixes = categories.fix.items.map(i => i.replace(/\*\*([^*]+)\*\*:\s*/g, ''))
+  const lines = []
+  if (feats.length) lines.push(...feats.map(f => `- ${f}`))
+  if (fixes.length) lines.push(...fixes.map(f => `- Fixed: ${f}`))
+  if (!lines.length) lines.push('Bug fixes and improvements.')
+  // Trim to 500 chars (App Store limit)
+  let text = lines.join('\n')
+  if (text.length > 500) text = text.slice(0, 497) + '...'
+  console.log(text)
+  process.exit(0)
 }
 
 // Build markdown
