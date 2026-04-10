@@ -147,6 +147,9 @@ final class RelayPairService: ObservableObject {
         case "relay:auth:result":
             if json["success"] as? Bool == true {
                 sendPairHello()
+                // Start vault offer early — the async HTTP call needs time,
+                // and we want it to arrive before the user closes the app.
+                sendVaultOffer(appOrigin: payload.appOrigin)
                 pairAckTimer?.invalidate()
                 pairAckTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: false) { [weak self] _ in
                     Task { @MainActor in
@@ -173,7 +176,6 @@ final class RelayPairService: ObservableObject {
                 let providerIds = Array(Set(wallet.credentials.map { $0.providerId }))
                 _ = try? wallet.upsertSession(appOrigin: payload.appOrigin, providers: providerIds)
             }
-            sendVaultOffer(appOrigin: payload.appOrigin)
 
         case "relay:request":
             handleRelayRequest(json)
@@ -900,7 +902,17 @@ final class RelayPairService: ObservableObject {
             guard let result = await wallet.createVaultAppSession(
                 appOrigin: appOrigin,
                 providerIds: providerIds
-            ) else { return }
+            ) else {
+                await MainActor.run {
+                    self.sendJSON([
+                        "type": "relay:vault:offer:failed",
+                        "reason": wallet.cloudVaultTokenExpired ? "token_expired"
+                            : !wallet.cloudVaultEnabled ? "vault_disabled"
+                            : "session_create_failed",
+                    ])
+                }
+                return
+            }
             await MainActor.run {
                 self.sendJSON([
                     "type": "relay:vault:offer",

@@ -178,7 +178,8 @@ wss.on("connection", (ws) => {
         msg.type === "relay:response:error" ||
         msg.type === "relay:usage" ||
         msg.type === "relay:pair:hello" ||
-        msg.type === "relay:vault:offer"
+        msg.type === "relay:vault:offer" ||
+        msg.type === "relay:vault:offer:failed"
       ) {
         if (room.recipient && room.recipient.readyState === WebSocket.OPEN) {
           room.recipient.send(String(raw));
