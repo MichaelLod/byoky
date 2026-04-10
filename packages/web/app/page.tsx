@@ -192,21 +192,6 @@ function Hero() {
               <AndroidIcon />
               Android App
             </a>
-            <a
-              href="/demo"
-              className="btn btn-secondary"
-            >
-              Try the Demo
-            </a>
-            <a
-              href="https://github.com/MichaelLod/byoky"
-              className="btn btn-secondary"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <GitHubIcon />
-              GitHub
-            </a>
           </div>
         </FadeIn>
         <FadeIn delay={0.4}>
