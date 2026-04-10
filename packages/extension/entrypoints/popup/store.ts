@@ -11,6 +11,8 @@ import {
   type GiftedCredential,
   type Group,
   type AppGroups,
+  type InstalledApp,
+  type MarketplaceApp,
   hashPassword,
 } from '@byoky/core';
 
@@ -26,7 +28,10 @@ type Page =
   | 'settings'
   | 'gifts'
   | 'create-gift'
-  | 'redeem-gift';
+  | 'redeem-gift'
+  | 'apps'
+  | 'app-store'
+  | 'app-view';
 
 interface WalletState {
   isInitialized: boolean;
@@ -46,6 +51,8 @@ interface WalletState {
   cloudVaultUsername: string | null;
   cloudVaultTokenExpired: boolean;
   cloudVaultPendingCount: number;
+  installedApps: InstalledApp[];
+  activeApp: InstalledApp | null;
   currentPage: Page;
   loading: boolean;
   error: string | null;
@@ -74,6 +81,10 @@ interface WalletState {
   updateGroup: (id: string, patch: { name?: string; providerId?: string; credentialId?: string | null; model?: string | null }) => Promise<boolean>;
   deleteGroup: (id: string) => Promise<boolean>;
   setAppGroup: (origin: string, groupId: string) => Promise<boolean>;
+  installApp: (app: MarketplaceApp) => void;
+  uninstallApp: (id: string) => void;
+  toggleApp: (id: string) => void;
+  setActiveApp: (app: InstalledApp) => void;
   enableCloudVault: (username: string, password: string, isSignup: boolean) => Promise<void>;
   disableCloudVault: () => Promise<void>;
   reloginCloudVault: (password: string) => Promise<void>;
@@ -108,6 +119,8 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   cloudVaultUsername: null,
   cloudVaultTokenExpired: false,
   cloudVaultPendingCount: 0,
+  installedApps: [],
+  activeApp: null,
   currentPage: 'unlock',
   loading: true,
   error: null,
@@ -126,6 +139,10 @@ export const useWalletStore = create<WalletState>((set, get) => ({
 
     if (unlocked) {
       await get().refreshData();
+      const appsResult = await sendInternal('getInstalledApps');
+      if (appsResult.apps) {
+        set({ installedApps: appsResult.apps as InstalledApp[] });
+      }
       if (get().pendingApprovals.length > 0) {
         set({ currentPage: 'approval' });
       }
@@ -152,6 +169,10 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     if (unlockResult.success) {
       set({ isUnlocked: true, currentPage: 'dashboard', loading: false });
       await get().refreshData();
+      const appsResult = await sendInternal('getInstalledApps');
+      if (appsResult.apps) {
+        set({ installedApps: appsResult.apps as InstalledApp[] });
+      }
       return true;
     }
     set({ error: 'Incorrect password', loading: false });
@@ -350,6 +371,54 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     }
     await get().refreshData();
     return true;
+  },
+
+  installApp: async (app: MarketplaceApp) => {
+    const installed: InstalledApp = {
+      id: app.id,
+      slug: app.slug,
+      name: app.name,
+      url: app.url,
+      icon: app.icon,
+      description: app.description,
+      category: app.category,
+      providers: app.providers,
+      author: app.author,
+      verified: app.verified,
+      installedAt: Date.now(),
+      enabled: true,
+    };
+    const apps = [...get().installedApps, installed];
+    set({ installedApps: apps });
+    await sendInternal('setInstalledApps', { apps });
+    // Auto-trust the app's origin for its declared providers
+    const origin = new URL(app.url).origin;
+    await sendInternal('addTrustedSite', { origin, allowedProviders: app.providers });
+    await get().refreshData();
+  },
+
+  uninstallApp: async (id: string) => {
+    const app = get().installedApps.find((a) => a.id === id);
+    const apps = get().installedApps.filter((a) => a.id !== id);
+    set({ installedApps: apps });
+    await sendInternal('setInstalledApps', { apps });
+    if (app) {
+      const origin = new URL(app.url).origin;
+      await sendInternal('removeTrustedSite', { origin });
+      await get().refreshData();
+    }
+  },
+
+  toggleApp: (id: string) => {
+    const apps = get().installedApps.map((a) =>
+      a.id === id ? { ...a, enabled: !a.enabled } : a,
+    );
+    set({ installedApps: apps });
+    sendInternal('setInstalledApps', { apps });
+  },
+
+  setActiveApp: (app: InstalledApp) => {
+    set({ activeApp: app });
   },
 
   enableCloudVault: async (username: string, password: string, isSignup: boolean) => {

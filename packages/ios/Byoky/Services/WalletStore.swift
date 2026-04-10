@@ -18,6 +18,7 @@ final class WalletStore: ObservableObject {
     @Published var appGroups: AppGroups = [:]
     @Published var bridgeStatus: BridgeStatus = .inactive
     @Published var lockoutEndTime: Date?
+    @Published var installedApps: [InstalledApp] = []
     @Published var cloudVaultEnabled = false
     @Published var cloudVaultUsername: String?
     @Published var cloudVaultTokenExpired = false
@@ -37,6 +38,7 @@ final class WalletStore: ObservableObject {
     private let tokenAllowancesKey = "tokenAllowances"
     private let groupsKey = "groups"
     private let appGroupsKey = "appGroups"
+    private let installedAppsKey = "installedApps"
 
     private static let vaultURL = "https://vault.byoky.com"
     private var vaultToken: String?
@@ -55,6 +57,7 @@ final class WalletStore: ObservableObject {
     private init() {
         checkInitialized()
         restoreLockoutState()
+        loadInstalledApps()
     }
 
     // MARK: - Initialization
@@ -212,6 +215,8 @@ final class WalletStore: ObservableObject {
         groups = []
         appGroups = [:]
         bridgeStatus = .inactive
+        installedApps = []
+        UserDefaults.standard.removeObject(forKey: installedAppsKey)
 
         // Reset brute-force state
         failedAttempts = 0
@@ -220,6 +225,52 @@ final class WalletStore: ObservableObject {
 
         AppGroupSync.shared.syncWalletState(isUnlocked: false, providers: [])
         status = .uninitialized
+    }
+
+    // MARK: - Marketplace Apps
+
+    func loadInstalledApps() {
+        guard let data = UserDefaults.standard.data(forKey: installedAppsKey),
+              let apps = try? JSONDecoder().decode([InstalledApp].self, from: data) else { return }
+        installedApps = apps
+    }
+
+    private func saveInstalledApps() {
+        if let data = try? JSONEncoder().encode(installedApps) {
+            UserDefaults.standard.set(data, forKey: installedAppsKey)
+        }
+    }
+
+    func installApp(_ app: MarketplaceApp) {
+        let installed = InstalledApp(
+            id: app.id,
+            slug: app.slug,
+            name: app.name,
+            url: app.url,
+            icon: app.icon,
+            description: app.description,
+            category: app.category,
+            providers: app.providers,
+            authorName: app.author.name,
+            authorWebsite: app.author.website,
+            verified: app.verified,
+            installedAt: Date(),
+            enabled: true
+        )
+        installedApps.append(installed)
+        saveInstalledApps()
+    }
+
+    func uninstallApp(_ id: String) {
+        installedApps.removeAll { $0.id == id }
+        saveInstalledApps()
+    }
+
+    func toggleApp(_ id: String) {
+        if let idx = installedApps.firstIndex(where: { $0.id == id }) {
+            installedApps[idx].enabled.toggle()
+            saveInstalledApps()
+        }
     }
 
     // MARK: - Brute-Force Protection

@@ -262,3 +262,38 @@ data class RoutingDecision(
     val needsTranslation: Boolean get() = translation != null
     val needsSwap: Boolean get() = swapToProviderId != null
 }
+
+// --- Marketplace Apps ---
+
+data class InstalledApp(
+    val id: String,
+    val slug: String,
+    val name: String,
+    val url: String,
+    val icon: String,
+    val description: String,
+    val category: String,
+    val providers: List<String>,
+    val authorName: String,
+    val authorWebsite: String? = null,
+    val verified: Boolean = false,
+    val installedAt: Long = System.currentTimeMillis(),
+    val enabled: Boolean = true,
+)
+
+data class MarketplaceApp(
+    val id: String,
+    val name: String,
+    val slug: String,
+    val url: String,
+    val icon: String,
+    val description: String,
+    val category: String,
+    val providers: List<String>,
+    val authorName: String,
+    val authorWebsite: String? = null,
+    val status: String = "approved",
+    val verified: Boolean = false,
+    val featured: Boolean = false,
+    val createdAt: Long = 0,
+)
