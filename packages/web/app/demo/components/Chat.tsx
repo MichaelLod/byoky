@@ -249,12 +249,13 @@ export function Chat({ session }: Props) {
   const [showCode, setShowCode] = useState(true);
   const [lastPrompt, setLastPrompt] = useState('Hello!');
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatMessagesRef = useRef<HTMLDivElement>(null);
 
   const supportsVision = visionProviders.has(selectedProvider);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = chatMessagesRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
   useEffect(() => {
@@ -502,7 +503,7 @@ export function Chat({ session }: Props) {
         )}
       </div>
 
-      <div className="chat-messages">
+      <div className="chat-messages" ref={chatMessagesRef}>
         {messages.length === 0 && (
           <div className="chat-empty">
             <div className="chat-empty-icon">
@@ -543,7 +544,6 @@ export function Chat({ session }: Props) {
             </div>
           </div>
         ))}
-        <div ref={messagesEndRef} />
       </div>
 
       {attachedImage && (
