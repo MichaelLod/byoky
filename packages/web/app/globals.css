@@ -461,6 +461,27 @@ section {
   flex-wrap: wrap;
 }
 
+/* ── Hero Demo ── */
+
+.hero-demo {
+  margin-top: 48px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  box-shadow:
+    0 0 60px rgba(14, 165, 233, 0.08),
+    0 20px 60px rgba(0, 0, 0, 0.4);
+  max-width: 800px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.hero-demo video {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 /* ── Version Status ── */
 
 .version-status {
