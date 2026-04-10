@@ -249,8 +249,13 @@ export function Chat({ session }: Props) {
   const [showCode, setShowCode] = useState(true);
   const [lastPrompt, setLastPrompt] = useState('Hello!');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const supportsVision = visionProviders.has(selectedProvider);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
   useEffect(() => {
     if (selectedProvider) return;
@@ -538,6 +543,7 @@ export function Chat({ session }: Props) {
             </div>
           </div>
         ))}
+        <div ref={messagesEndRef} />
       </div>
 
       {attachedImage && (
