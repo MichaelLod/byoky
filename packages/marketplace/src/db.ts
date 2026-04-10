@@ -1,32 +1,31 @@
-import Database from 'better-sqlite3';
-import path from 'node:path';
+import postgres from 'postgres';
 
-const DB_PATH = process.env.DB_PATH ?? path.join(process.cwd(), 'marketplace.db');
+let sql: postgres.Sql;
 
-let db: Database.Database;
+export function initDb(databaseUrl: string) {
+  sql = postgres(databaseUrl);
+}
 
-export function getDb(): Database.Database {
-  if (!db) {
-    db = new Database(DB_PATH);
-    db.pragma('journal_mode = WAL');
-    db.pragma('foreign_keys = ON');
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS gifts (
-        id TEXT PRIMARY KEY,
-        provider_id TEXT NOT NULL,
-        gifter_name TEXT NOT NULL DEFAULT 'Anonymous',
-        gift_link TEXT NOT NULL,
-        relay_url TEXT NOT NULL,
-        token_budget INTEGER NOT NULL,
-        tokens_used INTEGER NOT NULL DEFAULT 0,
-        expires_at INTEGER NOT NULL,
-        listed_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-        last_seen_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
-        unlisted INTEGER NOT NULL DEFAULT 0
-      )
-    `);
-  }
-  return db;
+export function getDb() {
+  return sql;
+}
+
+export async function migrate() {
+  await sql`
+    CREATE TABLE IF NOT EXISTS marketplace_gifts (
+      id TEXT PRIMARY KEY,
+      provider_id TEXT NOT NULL,
+      gifter_name TEXT NOT NULL DEFAULT 'Anonymous',
+      gift_link TEXT NOT NULL,
+      relay_url TEXT NOT NULL,
+      token_budget INTEGER NOT NULL,
+      tokens_used INTEGER NOT NULL DEFAULT 0,
+      expires_at BIGINT NOT NULL,
+      listed_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT,
+      last_seen_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT,
+      unlisted BOOLEAN NOT NULL DEFAULT FALSE
+    )
+  `;
 }
 
 export interface PublicGift {
@@ -42,19 +41,18 @@ export interface PublicGift {
   lastSeenAt: number;
 }
 
-export function listGifts(): PublicGift[] {
-  const rows = getDb().prepare(`
+export async function listGifts(): Promise<PublicGift[]> {
+  const rows = await sql`
     SELECT id, provider_id, gifter_name, gift_link, relay_url,
            token_budget, tokens_used, expires_at, listed_at, last_seen_at
-    FROM gifts
-    WHERE unlisted = 0
+    FROM marketplace_gifts
+    WHERE unlisted = FALSE
     ORDER BY listed_at DESC
-  `).all() as Array<Record<string, unknown>>;
-
+  `;
   return rows.map(toPublicGift);
 }
 
-export function addGift(gift: {
+export async function addGift(gift: {
   id: string;
   providerId: string;
   gifterName: string;
@@ -62,26 +60,27 @@ export function addGift(gift: {
   relayUrl: string;
   tokenBudget: number;
   expiresAt: number;
-}): void {
-  getDb().prepare(`
-    INSERT INTO gifts (id, provider_id, gifter_name, gift_link, relay_url, token_budget, expires_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(gift.id, gift.providerId, gift.gifterName, gift.giftLink, gift.relayUrl, gift.tokenBudget, gift.expiresAt);
+}): Promise<void> {
+  await sql`
+    INSERT INTO marketplace_gifts (id, provider_id, gifter_name, gift_link, relay_url, token_budget, expires_at)
+    VALUES (${gift.id}, ${gift.providerId}, ${gift.gifterName}, ${gift.giftLink}, ${gift.relayUrl}, ${gift.tokenBudget}, ${gift.expiresAt})
+  `;
 }
 
-export function removeGift(id: string): boolean {
-  const result = getDb().prepare('UPDATE gifts SET unlisted = 1 WHERE id = ?').run(id);
-  return result.changes > 0;
+export async function removeGift(id: string): Promise<boolean> {
+  const result = await sql`UPDATE marketplace_gifts SET unlisted = TRUE WHERE id = ${id}`;
+  return result.count > 0;
 }
 
-export function updateGiftUsage(id: string, tokensUsed: number): boolean {
-  const result = getDb().prepare('UPDATE gifts SET tokens_used = ? WHERE id = ?').run(tokensUsed, id);
-  return result.changes > 0;
+export async function updateGiftUsage(id: string, tokensUsed: number): Promise<boolean> {
+  const result = await sql`UPDATE marketplace_gifts SET tokens_used = ${tokensUsed} WHERE id = ${id}`;
+  return result.count > 0;
 }
 
-export function heartbeat(id: string): boolean {
-  const result = getDb().prepare('UPDATE gifts SET last_seen_at = ? WHERE id = ?').run(Date.now(), id);
-  return result.changes > 0;
+export async function heartbeat(id: string): Promise<boolean> {
+  const now = Date.now();
+  const result = await sql`UPDATE marketplace_gifts SET last_seen_at = ${now} WHERE id = ${id}`;
+  return result.count > 0;
 }
 
 function toPublicGift(row: Record<string, unknown>): PublicGift {
@@ -91,10 +90,10 @@ function toPublicGift(row: Record<string, unknown>): PublicGift {
     gifterName: row.gifter_name as string,
     giftLink: row.gift_link as string,
     relayUrl: row.relay_url as string,
-    tokenBudget: row.token_budget as number,
-    tokensUsed: row.tokens_used as number,
-    expiresAt: row.expires_at as number,
-    listedAt: row.listed_at as number,
-    lastSeenAt: row.last_seen_at as number,
+    tokenBudget: Number(row.token_budget),
+    tokensUsed: Number(row.tokens_used),
+    expiresAt: Number(row.expires_at),
+    listedAt: Number(row.listed_at),
+    lastSeenAt: Number(row.last_seen_at),
   };
 }
