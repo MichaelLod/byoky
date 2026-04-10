@@ -16,7 +16,7 @@ export function AppStore() {
       try {
         const params = new URLSearchParams();
         if (search) params.set('search', search);
-        const res = await fetch(`${MARKETPLACE_URL}/api/apps?${params}`);
+        const res = await fetch(`${MARKETPLACE_URL}?${params}`);
         if (!res.ok) throw new Error('Failed to load apps');
         const data = await res.json();
         setApps(data.apps);
