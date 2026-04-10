@@ -2577,9 +2577,13 @@ data: [DONE]
     if (ir.toolChoice) {
       switch (ir.toolChoice.type) {
         case "any":
-        case "tool":
           out.tool_choice = "REQUIRED";
           break;
+        case "tool":
+          throw new TranslationError(
+            "UNSUPPORTED_FEATURE",
+            "Cohere does not support forcing a specific tool by name."
+          );
         case "none":
           out.tool_choice = "NONE";
           break;
