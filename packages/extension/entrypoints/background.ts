@@ -81,7 +81,7 @@ function reconstructBody(
         formData.append(entry.name, entry.value);
       } else {
         const binary = base64ToUint8(entry.value);
-        const blob = new Blob([binary], { type: entry.contentType || 'application/octet-stream' });
+        const blob = new Blob([binary.buffer.slice(binary.byteOffset, binary.byteOffset + binary.byteLength)], { type: entry.contentType || 'application/octet-stream' });
         formData.append(entry.name, blob, entry.filename);
       }
     }
@@ -1374,6 +1374,12 @@ export default defineBackground(() => {
         return { success: true };
       }
 
+      case 'addTrustedSite': {
+        const { origin, allowedProviders } = message.payload as { origin: string; allowedProviders: string[] };
+        await addTrustedSite(origin, allowedProviders);
+        return { success: true };
+      }
+
       case 'exportVault': {
         if (!masterPassword) return { error: 'Wallet is locked' };
         const { exportPassword } = message.payload as { exportPassword: string };
@@ -1725,6 +1731,19 @@ export default defineBackground(() => {
         const result = await setAppGroup(origin, groupId);
         if (result.error) return { error: result.error };
         refreshSessionProviders();
+        return { success: true };
+      }
+
+      // --- Installed Apps ---
+
+      case 'getInstalledApps': {
+        const stored = await browser.storage.local.get('installedApps');
+        return { apps: (stored.installedApps ?? []) as unknown[] };
+      }
+
+      case 'setInstalledApps': {
+        const { apps } = message.payload as { apps: unknown[] };
+        await browser.storage.local.set({ installedApps: apps });
         return { success: true };
       }
 

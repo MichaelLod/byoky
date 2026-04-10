@@ -94,6 +94,9 @@ class WalletStore(context: Context) {
     private val _cloudVaultTokenExpired = MutableStateFlow(false)
     val cloudVaultTokenExpired: StateFlow<Boolean> = _cloudVaultTokenExpired.asStateFlow()
 
+    private val _installedApps = MutableStateFlow<List<InstalledApp>>(emptyList())
+    val installedApps: StateFlow<List<InstalledApp>> = _installedApps.asStateFlow()
+
     private var masterPassword: String? = null
     private var backgroundTime: Long? = null
     private var vaultToken: String? = null
@@ -114,6 +117,7 @@ class WalletStore(context: Context) {
     init {
         _status.value = if (prefs.contains("password_hash")) WalletStatus.LOCKED else WalletStatus.UNINITIALIZED
         restoreLockoutState()
+        loadInstalledApps()
     }
 
     val isUnlocked: Boolean get() = _status.value == WalletStatus.UNLOCKED
@@ -458,6 +462,88 @@ class WalletStore(context: Context) {
 
     fun setBridgeStatus(status: BridgeStatus) {
         _bridgeStatus.value = status
+    }
+
+    // MARK: - Marketplace Apps
+
+    private fun loadInstalledApps() {
+        val json = plainPrefs.getString("installed_apps", null) ?: return
+        val arr = JSONArray(json)
+        val apps = mutableListOf<InstalledApp>()
+        for (i in 0 until arr.length()) {
+            val o = arr.getJSONObject(i)
+            val providers = mutableListOf<String>()
+            val pArr = o.optJSONArray("providers")
+            if (pArr != null) for (j in 0 until pArr.length()) providers.add(pArr.getString(j))
+            apps.add(InstalledApp(
+                id = o.getString("id"),
+                slug = o.getString("slug"),
+                name = o.getString("name"),
+                url = o.getString("url"),
+                icon = o.optString("icon", ""),
+                description = o.optString("description", ""),
+                category = o.optString("category", "other"),
+                providers = providers,
+                authorName = o.optString("authorName", ""),
+                authorWebsite = o.optString("authorWebsite", null),
+                verified = o.optBoolean("verified", false),
+                installedAt = o.optLong("installedAt", 0),
+                enabled = o.optBoolean("enabled", true),
+            ))
+        }
+        _installedApps.value = apps
+    }
+
+    private fun saveInstalledApps() {
+        val arr = JSONArray()
+        for (app in _installedApps.value) {
+            val o = JSONObject()
+            o.put("id", app.id)
+            o.put("slug", app.slug)
+            o.put("name", app.name)
+            o.put("url", app.url)
+            o.put("icon", app.icon)
+            o.put("description", app.description)
+            o.put("category", app.category)
+            o.put("providers", JSONArray(app.providers))
+            o.put("authorName", app.authorName)
+            if (app.authorWebsite != null) o.put("authorWebsite", app.authorWebsite)
+            o.put("verified", app.verified)
+            o.put("installedAt", app.installedAt)
+            o.put("enabled", app.enabled)
+            arr.put(o)
+        }
+        plainPrefs.edit().putString("installed_apps", arr.toString()).apply()
+    }
+
+    fun installApp(app: MarketplaceApp) {
+        val installed = InstalledApp(
+            id = app.id,
+            slug = app.slug,
+            name = app.name,
+            url = app.url,
+            icon = app.icon,
+            description = app.description,
+            category = app.category,
+            providers = app.providers,
+            authorName = app.authorName,
+            authorWebsite = app.authorWebsite,
+            verified = app.verified,
+        )
+        _installedApps.value = _installedApps.value + installed
+        saveInstalledApps()
+    }
+
+    fun uninstallApp(id: String) {
+        _installedApps.value = _installedApps.value.filter { it.id != id }
+        saveInstalledApps()
+    }
+
+    fun toggleApp(id: String) {
+        _installedApps.value = _installedApps.value.map {
+            if (it.id == id) it.copy(enabled = !it.enabled) else it
+        }
+        saveInstalledApps()
     }
 
     // MARK: - Request Logging
