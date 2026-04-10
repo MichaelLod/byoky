@@ -5,7 +5,6 @@ import { initDb, getDb } from '../src/db/index.js';
 import { startIdleSweep, stopIdleSweep, evictAll } from '../src/session-keys.js';
 
 const DATABASE_URL = process.env.DATABASE_URL;
-if (!DATABASE_URL) throw new Error('DATABASE_URL required for integration tests');
 
 const TEST_PREFIX = `test_${Date.now()}_`;
 const testUsername = `${TEST_PREFIX}user`;
@@ -32,26 +31,26 @@ function appAuthReq(path: string, init?: RequestInit) {
   return app.request(path, { ...init, headers });
 }
 
-beforeAll(() => {
-  process.env.JWT_SECRET = 'integration-test-secret-that-is-at-least-32-characters-long';
-  initDb(DATABASE_URL);
-  startIdleSweep();
-});
+describe.skipIf(!DATABASE_URL)('vault integration', () => {
+  beforeAll(() => {
+    process.env.JWT_SECRET = 'integration-test-secret-that-is-at-least-32-characters-long';
+    initDb(DATABASE_URL!);
+    startIdleSweep();
+  });
 
-afterAll(async () => {
-  stopIdleSweep();
-  evictAll();
-  const db = getDb();
-  await db.execute(sql`DELETE FROM request_log WHERE user_id IN (SELECT id FROM users WHERE username = ${testUsername})`);
-  await db.execute(sql`DELETE FROM app_sessions WHERE user_id IN (SELECT id FROM users WHERE username = ${testUsername})`);
-  await db.execute(sql`DELETE FROM app_groups WHERE user_id IN (SELECT id FROM users WHERE username = ${testUsername})`);
-  await db.execute(sql`DELETE FROM groups WHERE user_id IN (SELECT id FROM users WHERE username = ${testUsername})`);
-  await db.execute(sql`DELETE FROM credentials WHERE user_id IN (SELECT id FROM users WHERE username = ${testUsername})`);
-  await db.execute(sql`DELETE FROM user_sessions WHERE user_id IN (SELECT id FROM users WHERE username = ${testUsername})`);
-  await db.execute(sql`DELETE FROM users WHERE username = ${testUsername}`);
-});
+  afterAll(async () => {
+    stopIdleSweep();
+    evictAll();
+    const db = getDb();
+    await db.execute(sql`DELETE FROM request_log WHERE user_id IN (SELECT id FROM users WHERE username = ${testUsername})`);
+    await db.execute(sql`DELETE FROM app_sessions WHERE user_id IN (SELECT id FROM users WHERE username = ${testUsername})`);
+    await db.execute(sql`DELETE FROM app_groups WHERE user_id IN (SELECT id FROM users WHERE username = ${testUsername})`);
+    await db.execute(sql`DELETE FROM groups WHERE user_id IN (SELECT id FROM users WHERE username = ${testUsername})`);
+    await db.execute(sql`DELETE FROM credentials WHERE user_id IN (SELECT id FROM users WHERE username = ${testUsername})`);
+    await db.execute(sql`DELETE FROM user_sessions WHERE user_id IN (SELECT id FROM users WHERE username = ${testUsername})`);
+    await db.execute(sql`DELETE FROM users WHERE username = ${testUsername}`);
+  });
 
-describe('vault integration', () => {
   // ─── Auth ────────────────────────────────────────────────────────────
 
   describe('POST /auth/signup', () => {
