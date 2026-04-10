@@ -78,8 +78,11 @@ fun InstalledAppsGrid(wallet: WalletStore) {
         ) {
             items(enabledApps, key = { it.id }) { app ->
                 AppIconItem(app = app, wallet = wallet) {
-                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(app.url))
-                    context.startActivity(intent)
+                    val uri = Uri.parse(app.url)
+                    if (uri.scheme == "https") {
+                        val intent = Intent(Intent.ACTION_VIEW, uri)
+                        context.startActivity(intent)
+                    }
                 }
             }
 

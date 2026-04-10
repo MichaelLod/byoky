@@ -1,6 +1,6 @@
 import SwiftUI
 
-private let marketplaceURL = "https://marketplace.byoky.com"
+private let marketplaceURL = "https://byoky.com/api/marketplace"
 
 struct AppStoreView: View {
     @EnvironmentObject var wallet: WalletStore

@@ -277,8 +277,8 @@ npx create-byoky-app init
 npx create-byoky-app submit`}</Code>
       <p>
         Or submit via the web form at{' '}
-        <a href="https://marketplace.byoky.com/submit" style={{ color: 'var(--teal-light)' }}>
-          marketplace.byoky.com/submit
+        <a href="https://byoky.com/marketplace/submit" style={{ color: 'var(--teal-light)' }}>
+          byoky.com/marketplace/submit
         </a>.
       </p>
 

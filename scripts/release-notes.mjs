@@ -7,7 +7,7 @@
 //
 // Output: Markdown release notes to stdout.
 
-import { execSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 
 const [fromRef, toRef, version, nativeVersion, nativeCode] = process.argv.slice(2)
 if (!fromRef || !toRef || !version) {
@@ -15,7 +15,7 @@ if (!fromRef || !toRef || !version) {
   process.exit(1)
 }
 
-const log = execSync(`git log ${fromRef}..${toRef} --pretty=format:"%s" --no-merges`, {
+const log = execFileSync('git', ['log', `${fromRef}..${toRef}`, '--pretty=format:%s', '--no-merges'], {
   encoding: 'utf8',
 }).trim()
 

@@ -913,10 +913,8 @@ function AppEcosystem() {
         <FadeIn delay={0.25}>
           <div style={{ textAlign: 'center', marginTop: 40 }}>
             <a
-              href="https://marketplace.byoky.com"
+              href="/marketplace"
               className="btn btn-primary"
-              target="_blank"
-              rel="noopener noreferrer"
             >
               Browse Marketplace
             </a>

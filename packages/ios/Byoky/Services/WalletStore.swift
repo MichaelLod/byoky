@@ -171,6 +171,7 @@ final class WalletStore: ObservableObject {
         tokenAllowances = []
         groups = []
         appGroups = [:]
+        installedApps = []
         status = .locked
         backgroundTime = nil
         AppGroupSync.shared.syncWalletState(isUnlocked: false, providers: [])
@@ -242,11 +243,13 @@ final class WalletStore: ObservableObject {
     }
 
     func installApp(_ app: MarketplaceApp) {
+        guard let url = URL(string: app.url), url.scheme == "https" else { return }
+
         let installed = InstalledApp(
             id: app.id,
             slug: app.slug,
             name: app.name,
-            url: app.url,
+            url: url.absoluteString,
             icon: app.icon,
             description: app.description,
             category: app.category,
