@@ -85,9 +85,15 @@ importers:
 
   packages/core:
     devDependencies:
+      '@types/ws':
+        specifier: ^8.5.10
+        version: 8.18.1
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
+      ws:
+        specifier: ^8.16.0
+        version: 8.20.0
 
   packages/create-byoky-app:
     devDependencies:
