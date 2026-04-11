@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react';
 import { Byoky, type ByokySession } from '@byoky/sdk';
 import { Playground } from './components/Playground';
-import { CodeExample } from './components/CodeExample';
 
 const byoky = new Byoky({ timeout: 120_000 });
 
@@ -35,15 +34,6 @@ export function DemoApp() {
           { id: 'anthropic', required: false },
           { id: 'openai', required: false },
           { id: 'gemini', required: false },
-          { id: 'groq', required: false },
-          { id: 'deepseek', required: false },
-          { id: 'xai', required: false },
-          { id: 'mistral', required: false },
-          { id: 'together', required: false },
-          { id: 'fireworks', required: false },
-          { id: 'perplexity', required: false },
-          { id: 'openrouter', required: false },
-          { id: 'cohere', required: false },
         ],
         modal: true,
       });
@@ -63,15 +53,20 @@ export function DemoApp() {
   return (
     <div className="demo-app">
       {session && (
-        <div className="demo-status-bar">
-          <div className="connected">
-            <span className="connected-dot" />
-            <span className="connected-text">Connected</span>
-            <button className="btn btn-ghost" onClick={handleDisconnect}>
-              Disconnect
-            </button>
+        <header className="header">
+          <div className="header-left">
+            <h1 className="logo">Byoky <span className="logo-sub">demo</span></h1>
           </div>
-        </div>
+          <div className="header-right">
+            <div className="connected">
+              <span className="connected-dot" />
+              <span className="connected-text">Connected</span>
+              <button className="btn btn-ghost" onClick={handleDisconnect}>
+                Disconnect
+              </button>
+            </div>
+          </div>
+        </header>
       )}
 
       {error && (
@@ -122,10 +117,12 @@ export function DemoApp() {
                 This demo uses your own API keys to chat with Claude, GPT-4o, Gemini,
                 and 12 more providers. Your keys never leave your device.
               </p>
-              <button className="btn btn-primary btn-lg" onClick={handleConnect}>
-                <WalletIcon />
-                Connect Wallet
-              </button>
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                <button className="btn btn-primary btn-lg" onClick={handleConnect}>
+                  <WalletIcon />
+                  Connect Wallet
+                </button>
+              </div>
               <div className="connect-features">
                 <div className="connect-feature">
                   <span className="feature-check">&#10003;</span>
@@ -188,10 +185,6 @@ export function DemoApp() {
           <Playground session={session} />
         )}
       </main>
-
-      <section className="code-section">
-        <CodeExample />
-      </section>
 
       <footer className="footer">
         <span>
