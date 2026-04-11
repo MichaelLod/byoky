@@ -1,12 +1,12 @@
 export const postStyles = `
 .blog-post-layout {
-  --blog-bg: var(--bg);
-  --blog-bg-card: var(--bg-card);
-  --blog-bg-elevated: var(--bg-elevated);
-  --blog-border: var(--border);
-  --blog-text: var(--text);
-  --blog-text-secondary: var(--text-secondary);
-  --blog-text-muted: var(--text-muted);
+  --blog-bg: #0e0e1a;
+  --blog-bg-card: #161626;
+  --blog-bg-elevated: #1c1c30;
+  --blog-border: #252540;
+  --blog-text: #ededf4;
+  --blog-text-secondary: #c4c4d6;
+  --blog-text-muted: #5a5a78;
 
   max-width: 760px;
   margin: 0 auto;
@@ -23,7 +23,7 @@ export const postStyles = `
 }
 
 .blog-post-back:hover {
-  color: var(--teal);
+  color: var(--teal-light);
 }
 
 .blog-post-header {
@@ -44,8 +44,8 @@ export const postStyles = `
   font-family: var(--font-code);
   padding: 3px 8px;
   border-radius: 999px;
-  background: rgba(255, 79, 0, 0.1);
-  color: var(--teal);
+  background: rgba(14, 165, 233, 0.1);
+  color: var(--teal-light);
   letter-spacing: 0.02em;
 }
 
@@ -77,8 +77,8 @@ export const postStyles = `
   border-radius: 14px;
   overflow: hidden;
   border: 1px solid var(--blog-border);
-  background: var(--bg-surface);
-  box-shadow: 0 20px 60px -30px rgba(255, 79, 0, 0.35);
+  background: #0a0a14;
+  box-shadow: 0 20px 60px -30px rgba(14, 165, 233, 0.35);
 }
 
 .blog-post-hero img {
@@ -90,7 +90,7 @@ export const postStyles = `
 .blog-post-body {
   font-size: 16px;
   line-height: 1.75;
-  color: var(--blog-text);
+  color: var(--blog-text-secondary);
 }
 
 .blog-post-body p {
@@ -115,7 +115,7 @@ export const postStyles = `
 }
 
 .blog-post-body a {
-  color: var(--teal);
+  color: var(--teal-light);
   text-decoration: underline;
   text-underline-offset: 3px;
   text-decoration-color: rgba(125, 211, 252, 0.4);
@@ -123,20 +123,20 @@ export const postStyles = `
 }
 
 .blog-post-body a:hover {
-  text-decoration-color: var(--teal);
+  text-decoration-color: var(--teal-light);
 }
 
 .blog-post-body code {
-  background: #1a1a2e;
-  padding: 2px 7px;
-  border-radius: 5px;
+  background: var(--blog-bg-elevated);
+  padding: 2px 6px;
+  border-radius: 4px;
   font-size: 13px;
-  color: #e2e2ec;
+  color: var(--teal-light);
   font-family: var(--font-code);
 }
 
 .blog-post-body pre {
-  background: #1a1a2e;
+  background: var(--blog-bg-card);
   border: 1px solid var(--blog-border);
   border-radius: 10px;
   padding: 18px 22px;
@@ -149,48 +149,8 @@ export const postStyles = `
 .blog-post-body pre code {
   background: none;
   padding: 0;
-  color: #e2e2ec;
+  color: var(--blog-text);
   font-size: inherit;
-}
-
-.blog-post-table-wrap {
-  background: #1a1a2e;
-  border-radius: 10px;
-  overflow: hidden;
-  margin: 20px 0;
-  border: none;
-}
-
-.blog-post-body table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-  border: none;
-}
-
-.blog-post-body th {
-  text-align: left;
-  padding: 10px 16px;
-  color: #a1a1b5;
-  font-weight: 600;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  background: #121220;
-  border: none;
-}
-
-.blog-post-body td {
-  padding: 8px 16px;
-  color: #e2e2ec;
-  border-top: 1px solid rgba(255,255,255,0.05);
-  border-left: none;
-  border-right: none;
-  border-bottom: none;
-}
-
-.blog-post-body tr:first-child td {
-  border-top: none;
 }
 
 .blog-post-body ol,
@@ -256,7 +216,7 @@ export const postStyles = `
   border-radius: 14px;
   border: 1px solid var(--teal-dark);
   background:
-    linear-gradient(140deg, rgba(255, 79, 0, 0.10), rgba(255, 79, 0, 0.02) 60%),
+    linear-gradient(140deg, rgba(14, 165, 233, 0.10), rgba(14, 165, 233, 0.02) 60%),
     var(--blog-bg-card);
   position: relative;
   overflow: hidden;
@@ -280,7 +240,7 @@ export const postStyles = `
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: var(--teal);
+  color: var(--teal-light);
   margin-bottom: 10px;
   font-family: var(--font-code);
 }
@@ -307,7 +267,7 @@ export const postStyles = `
   padding: 11px 20px;
   border-radius: 8px;
   background: var(--teal);
-  color: #fff !important;
+  color: #04040a !important;
   font-size: 14px;
   font-weight: 600;
   text-decoration: none !important;
@@ -315,7 +275,7 @@ export const postStyles = `
 }
 
 .blog-cta-button:hover {
-  background: var(--teal);
+  background: var(--teal-light);
   transform: translateY(-1px);
 }
 

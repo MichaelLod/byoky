@@ -51,7 +51,7 @@ export default function Post() {
           </div>
           <h1>{post.title}</h1>
           <div className="blog-post-meta">
-            <a href="https://lodzik.at/" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--teal)', textDecoration: 'none' }}>{post.author}</a>
+            <span>{post.author}</span>
             <span className="blog-post-dot">·</span>
             <time dateTime={post.date}>{formatDate(post.date)}</time>
             <span className="blog-post-dot">·</span>
@@ -140,28 +140,28 @@ anthropic-dangerous-direct-browser-access: true`}</code>
                   <td>
                     Remove <code>output_config</code>
                   </td>
-                  <td><span style={{ color: '#ef4444', fontWeight: 600 }}>Still 400</span></td>
+                  <td>Still 400</td>
                 </tr>
                 <tr>
                   <td>
                     Remove <code>thinking</code>
                   </td>
-                  <td><span style={{ color: '#ef4444', fontWeight: 600 }}>Still 400</span></td>
+                  <td>Still 400</td>
                 </tr>
                 <tr>
                   <td>Drop conversation history (1 message instead of 57)</td>
-                  <td><span style={{ color: '#ef4444', fontWeight: 600 }}>Still 400</span></td>
+                  <td>Still 400</td>
                 </tr>
                 <tr>
                   <td>Drop tools (0 tools instead of 21)</td>
                   <td>
-                    <span style={{ color: '#22c55e', fontWeight: 600 }}>200 OK</span>
+                    <strong>200 OK</strong>
                   </td>
                 </tr>
                 <tr>
                   <td>Drop system prompt entirely</td>
                   <td>
-                    <span style={{ color: '#22c55e', fontWeight: 600 }}>200 OK</span>
+                    <strong>200 OK</strong>
                   </td>
                 </tr>
               </tbody>
@@ -226,20 +226,20 @@ anthropic-dangerous-direct-browser-access: true`}</code>
                 </tr>
               </thead>
               <tbody>
-                <tr><td>43,000 chars</td><td><span style={{ color: '#22c55e', fontWeight: 600 }}>200 OK</span></td></tr>
-                <tr><td>43,500 chars</td><td><span style={{ color: '#22c55e', fontWeight: 600 }}>200 OK</span></td></tr>
-                <tr><td>43,750 chars</td><td><span style={{ color: '#22c55e', fontWeight: 600 }}>200 OK</span></td></tr>
-                <tr><td>43,759 chars</td><td><span style={{ color: '#22c55e', fontWeight: 600 }}>200 OK</span></td></tr>
+                <tr><td>43,000 chars</td><td>200 OK</td></tr>
+                <tr><td>43,500 chars</td><td>200 OK</td></tr>
+                <tr><td>43,750 chars</td><td>200 OK</td></tr>
+                <tr><td>43,759 chars</td><td>200 OK</td></tr>
                 <tr>
                   <td>
                     <strong>43,760 chars</strong>
                   </td>
                   <td>
-                    <span style={{ color: '#ef4444', fontWeight: 600 }}>400</span>
+                    <strong>400</strong>
                   </td>
                 </tr>
-                <tr><td>43,800 chars</td><td><span style={{ color: '#ef4444', fontWeight: 600 }}>400</span></td></tr>
-                <tr><td>44,804 chars (full)</td><td><span style={{ color: '#ef4444', fontWeight: 600 }}>400</span></td></tr>
+                <tr><td>43,800 chars</td><td>400</td></tr>
+                <tr><td>44,804 chars (full)</td><td>400</td></tr>
               </tbody>
             </table>
           </div>

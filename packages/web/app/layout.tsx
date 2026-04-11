@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { Sora, JetBrains_Mono, Outfit } from 'next/font/google';
+import { Navbar } from './components/Navbar';
 import './globals.css';
-import { NavBar } from './components/Navbar';
 
 const sora = Sora({
   subsets: ['latin'],
@@ -54,6 +54,7 @@ export const metadata: Metadata = {
       { url: '/favicon-16x16.png', sizes: '16x16', type: 'image/png' },
       { url: '/icon-192.png', sizes: '192x192', type: 'image/png' },
       { url: '/icon-512.png', sizes: '512x512', type: 'image/png' },
+      { url: '/icon.svg', type: 'image/svg+xml' },
     ],
     apple: '/apple-touch-icon.png',
   },
@@ -112,7 +113,7 @@ export default function RootLayout({
             }),
           }}
         />
-        <NavBar />
+        <Navbar />
         {children}
       </body>
     </html>
