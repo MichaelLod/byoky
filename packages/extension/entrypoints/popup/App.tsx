@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useWalletStore } from './store';
+import { Logo3D } from './components/Logo3D';
 import { Setup } from './pages/Setup';
 import { Unlock } from './pages/Unlock';
 import { Dashboard } from './pages/Dashboard';
@@ -145,6 +146,7 @@ export default function App() {
           </nav>
         )}
       </header>
+      <Logo3D height={showNav ? 100 : 160} />
       <main className="content">
         <div key={currentPage} className="page-enter">
           {currentPage === 'setup' && <Setup />}
@@ -164,11 +166,6 @@ export default function App() {
           {currentPage === 'app-view' && <AppView />}
         </div>
       </main>
-      {(currentPage === 'setup' || currentPage === 'unlock') && (
-        <div className="mascot-peek">
-          <img src="/mascot.svg" alt="" />
-        </div>
-      )}
     </div>
   );
 }

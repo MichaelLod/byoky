@@ -61,7 +61,7 @@ export function Dashboard() {
               style={{ width: 'auto' }}
               onClick={() => navigate('add-credential')}
             >
-              Add credential
+              Add API Key
             </button>
             <button
               className="btn btn-secondary"
@@ -177,7 +177,7 @@ export function Dashboard() {
               style={{ flex: 1 }}
               onClick={() => navigate('add-credential')}
             >
-              Add credential
+              Add API Key
             </button>
             <button
               className="btn btn-secondary"
