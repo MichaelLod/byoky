@@ -46,6 +46,7 @@ import {
   createStreamTranslator,
   TranslationError,
   resolveCrossFamilyRoute,
+  resolveCrossFamilyGiftRoute,
   resolveSameFamilySwapRoute,
   buildNoCredentialMessage,
 } from '@byoky/core';
@@ -459,60 +460,68 @@ export default defineBackground(() => {
         return;
       }
 
-      // Check if this is a gifted credential — route through relay
+      // Identify the session provider and whether this request will route
+      // through a gift relay. Gift handling is deferred until AFTER request
+      // translation so cross-family-via-gift can translate the request body
+      // up-front and hand the translated body/URL to proxyViaGiftRelay.
       const sessionProvider = session.providers.find((sp) => sp.providerId === msg.providerId);
-      if (sessionProvider?.giftId && sessionProvider.giftRelayUrl && sessionProvider.giftAuthToken) {
-        await proxyViaGiftRelay(port, msg, sessionProvider, session);
-        return;
-      }
-
-      let credential = await resolveCredential(session, msg.providerId);
-      if (!credential) {
-        const allCreds = await getStoredCredentials();
-        const group = await getGroupForOrigin(session.appOrigin);
-        const message = buildNoCredentialMessage(
-          msg.providerId,
-          Array.from(new Set(allCreds.map((c) => c.providerId))).sort(),
-          group,
-        );
-        port.postMessage({
-          type: 'BYOKY_PROXY_RESPONSE_ERROR',
-          requestId: msg.requestId,
-          status: 403,
-          error: { code: 'PROVIDER_UNAVAILABLE', message },
-        });
-        return;
-      }
+      const isGift = !!(sessionProvider?.giftId && sessionProvider.giftRelayUrl && sessionProvider.giftAuthToken);
 
       // Cross-family translation context (set when the resolved group routes
-      // this app to a credential in a different provider family).
+      // this app to a credential — owned or gifted — in a different provider family).
       const translation = sessionProvider?.translation;
       // Same-family swap context (set when the resolved group routes this
       // app to a different provider in the same translation family — no
       // translation needed, just URL rewrite + credential swap + optional
-      // body.model override).
+      // body.model override). Not applicable to gifts today.
       const swap = sessionProvider?.swap;
       // The "effective" provider id is the one we actually call upstream:
       // the destination if translation or swap is on, otherwise the source.
       const effectiveProviderId = translation?.dstProviderId ?? swap?.dstProviderId ?? msg.providerId;
 
-      // Refresh OAuth token if expired or about to expire. Key off the
-      // credential's own providerId so cross-family routing still refreshes
-      // a destination-side OAuth token correctly.
-      if (
-        credential.authMethod === 'oauth' &&
-        (credential as { expiresAt?: number }).expiresAt &&
-        (credential as { expiresAt: number }).expiresAt < Date.now() + 60_000 &&
-        PROVIDERS[credential.providerId]?.oauthConfig
-      ) {
-        const refreshed = await refreshOAuthToken(credential);
-        if (refreshed) {
-          credential = (await resolveCredential(session, msg.providerId))!;
+      // Gift path skips owned-credential resolution entirely — the gift
+      // carries its own auth via the relay. For own-key requests we look
+      // up and refresh the credential before entering the try/catch below.
+      let credential: Credential | undefined;
+      if (!isGift) {
+        credential = await resolveCredential(session, msg.providerId);
+        if (!credential) {
+          const allCreds = await getStoredCredentials();
+          const group = await getGroupForOrigin(session.appOrigin);
+          const message = buildNoCredentialMessage(
+            msg.providerId,
+            Array.from(new Set(allCreds.map((c) => c.providerId))).sort(),
+            group,
+          );
+          port.postMessage({
+            type: 'BYOKY_PROXY_RESPONSE_ERROR',
+            requestId: msg.requestId,
+            status: 403,
+            error: { code: 'PROVIDER_UNAVAILABLE', message },
+          });
+          return;
+        }
+
+        // Refresh OAuth token if expired or about to expire. Key off the
+        // credential's own providerId so cross-family routing still refreshes
+        // a destination-side OAuth token correctly.
+        if (
+          credential.authMethod === 'oauth' &&
+          (credential as { expiresAt?: number }).expiresAt &&
+          (credential as { expiresAt: number }).expiresAt < Date.now() + 60_000 &&
+          PROVIDERS[credential.providerId]?.oauthConfig
+        ) {
+          const refreshed = await refreshOAuthToken(credential);
+          if (refreshed) {
+            credential = (await resolveCredential(session, msg.providerId))!;
+          }
         }
       }
 
       try {
-        const apiKey = await decryptCredentialKey(credential);
+        // Gift requests don't need a decrypted key — the sender holds the
+        // key and applies it on their side of the relay.
+        const apiKey = isGift ? '' : await decryptCredentialKey(credential!);
 
         // The URL the SDK sent must match the SOURCE provider's base URL.
         // (After translation we issue against the destination's URL — see
@@ -587,7 +596,22 @@ export default defineBackground(() => {
           }
         }
 
-        const realHeaders = buildHeaders(effectiveProviderId, msg.headers, apiKey, credential.authMethod);
+        // Gift path: hand the translated body/URL to the gift relay, along
+        // with the translation context so proxyViaGiftRelay can translate
+        // response chunks back to the source dialect before returning to
+        // the caller. Bypasses OAuth bridge and direct fetch entirely.
+        if (isGift) {
+          await proxyViaGiftRelay(
+            port,
+            { ...msg, body: translatedBody, url: translatedUrl },
+            sessionProvider!,
+            session,
+            translation ? { translation, originalBody: msg.body } : undefined,
+          );
+          return;
+        }
+
+        const realHeaders = buildHeaders(effectiveProviderId, msg.headers, apiKey, credential!.authMethod);
 
         // OAuth tokens for Anthropic route through the bridge (Node.js) to bypass TLS fingerprint detection.
         // Setup tokens require the Claude Code system prompt + Claude-Code-shaped tool names.
@@ -595,7 +619,7 @@ export default defineBackground(() => {
         // After translation, the body is already in Anthropic shape — the
         // Claude Code injection still applies because the bridge expects an
         // Anthropic-shaped request.
-        if (credential.authMethod === 'oauth' && effectiveProviderId === 'anthropic') {
+        if (credential!.authMethod === 'oauth' && effectiveProviderId === 'anthropic') {
           const { body: rewrittenBody, toolNameMap } = rewriteToolNamesForClaudeCode(translatedBody);
           const isThirdParty = Object.keys(toolNameMap).length > 0;
           const body = injectClaudeCodeSystemPrompt(rewrittenBody, {
@@ -1032,28 +1056,36 @@ export default defineBackground(() => {
           ? giftedCreds.find((g) => g.giftId === group.giftId && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens)
           : undefined;
 
-      // Cross-family routing: the group's bound provider differs from what
-      // the app asked for, but both providers are in known translation
-      // families. Route the credential lookup to the destination family and
-      // record translation metadata so the proxy handler knows to translate.
-      const crossRoute = groupPinnedGift ? undefined : resolveCrossFamilyRoute(group, req.id, credentials);
+      // Cross-family routing via gift: group pins a gift whose provider
+      // differs from the app's request, and the provider pair is
+      // translatable with a destination model set. Recipient translates
+      // request/response; sender sees a native dst-provider request.
+      const crossGiftRoute = groupPinnedGift ? undefined : resolveCrossFamilyGiftRoute(group, req.id, giftedCreds);
+
+      // Cross-family routing via owned credential: the group's bound
+      // provider differs from what the app asked for, both providers are
+      // in known translation families, and a credential resolves for the
+      // destination. Record translation metadata so the proxy handler
+      // knows to translate.
+      const crossRoute = groupPinnedGift || crossGiftRoute ? undefined : resolveCrossFamilyRoute(group, req.id, credentials);
 
       // Same-family swap: the group's bound provider differs from what the
       // app asked for, and both providers are in the SAME family (identical
       // wire format). No translation needed — just URL rewrite + credential
       // swap + optional model override. Only consulted when cross-family
-      // routing doesn't apply, so the two are mutually exclusive.
-      const swapRoute = !crossRoute && !groupPinnedGift
+      // routing doesn't apply, so the branches are mutually exclusive.
+      const swapRoute = !crossRoute && !groupPinnedGift && !crossGiftRoute
         ? resolveSameFamilySwapRoute(group, req.id, credentials)
         : undefined;
 
       const cred = groupPinnedCred ?? crossRoute?.cred ?? swapRoute?.cred ?? credentials.find((c) => c.providerId === req.id);
-      const gc = groupPinnedGift ?? giftedCreds.find((g) => g.providerId === req.id && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens);
-      // Group gift pin wins over everything. Otherwise group credential pin
-      // wins over gift preference. Cross-family routing and same-family
-      // swap also win over gifts. Otherwise prefer gift if user explicitly
-      // chose it, else prefer own key.
-      const preferGift = !!groupPinnedGift || (!groupPinnedCred && !crossRoute && !swapRoute && gc && giftPrefs[req.id] === gc.giftId);
+      const gc = groupPinnedGift ?? crossGiftRoute?.gc ?? giftedCreds.find((g) => g.providerId === req.id && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens);
+      // Group gift pin wins over everything. Cross-family gift route is
+      // next. Otherwise group credential pin wins over gift preference.
+      // Cross-family routing and same-family swap beat own-key direct
+      // lookup. Otherwise prefer gift if user explicitly chose it, else
+      // prefer own key.
+      const preferGift = !!groupPinnedGift || !!crossGiftRoute || (!groupPinnedCred && !crossRoute && !swapRoute && gc && giftPrefs[req.id] === gc.giftId);
       const useGift = preferGift || (!cred && gc);
       providerMap[req.id] = {
         available: !!(cred || gc),
@@ -1061,7 +1093,7 @@ export default defineBackground(() => {
         ...(useGift ? { gift: true } : {}),
       };
       if (useGift && gc) {
-        sessionProviders.push({
+        const sp: SessionProvider = {
           providerId: req.id,
           credentialId: gc.id,
           available: true,
@@ -1069,7 +1101,11 @@ export default defineBackground(() => {
           giftId: gc.giftId,
           giftRelayUrl: gc.relayUrl,
           giftAuthToken: gc.authToken,
-        });
+        };
+        // Cross-family gift carries translation context alongside the
+        // relay fields so the proxy handler translates request/response.
+        if (crossGiftRoute) sp.translation = crossGiftRoute.translation;
+        sessionProviders.push(sp);
       } else if (cred) {
         const sp: SessionProvider = {
           providerId: req.id,
@@ -2191,6 +2227,7 @@ export default defineBackground(() => {
     msg: ProxyRequest,
     sp: { giftId?: string; giftRelayUrl?: string; giftAuthToken?: string },
     session: Session,
+    translateCtx?: { translation: SessionTranslation; originalBody: string | undefined },
   ): Promise<void> {
     if (!sp.giftRelayUrl || !sp.giftAuthToken || !sp.giftId) {
       responsePort.postMessage({
@@ -2233,6 +2270,18 @@ export default defineBackground(() => {
       let activeTimeout: ReturnType<typeof setTimeout> | null = null;
       let logEntryId: string | undefined;
       const chunks: string[] = [];
+      // Translation state: when the group routes this request cross-family
+      // through a gift, the request body has already been translated
+      // src→dst before we got here. We now also need to translate the
+      // response back dst→src before emitting it to the caller. For
+      // streaming responses that means an SSE rewriter; for non-streaming
+      // we buffer the whole body and translate once at DONE time.
+      let isStreamingResponse = false;
+      let sseRewriter: { process(s: string): string; flush(): string } | undefined;
+      // Gate the pass-through chunk emission: when translation is on we
+      // don't forward raw chunks to the caller (the caller is expecting
+      // src-dialect bytes, not dst-dialect).
+      const passThrough = !translateCtx;
 
       function setPhaseTimeout(ms: number, code: string, message: string, status: number) {
         if (activeTimeout) clearTimeout(activeTimeout);
@@ -2321,6 +2370,14 @@ export default defineBackground(() => {
             for (const h of ['server', 'x-request-id', 'x-cloud-trace-context', 'set-cookie', 'set-cookie2', 'alt-svc', 'via']) {
               delete relayHeaders[h];
             }
+            // Decide streaming vs single-shot from Content-Type. When
+            // translation is on, build the SSE rewriter now so the first
+            // chunk can be processed without a race.
+            const contentType = (relayHeaders['content-type'] ?? relayHeaders['Content-Type'] ?? '') as string;
+            isStreamingResponse = contentType.includes('text/event-stream');
+            if (translateCtx && isStreamingResponse) {
+              sseRewriter = buildResponseStreamRewriter(translateCtx.translation, msg.requestId);
+            }
             responsePort.postMessage({
               type: 'BYOKY_PROXY_RESPONSE_META',
               requestId: msg.requestId,
@@ -2332,16 +2389,66 @@ export default defineBackground(() => {
           }
 
           if (data.type === 'relay:response:chunk' && data.requestId === msg.requestId) {
-            chunks.push(data.chunk ?? '');
-            responsePort.postMessage({
-              type: 'BYOKY_PROXY_RESPONSE_CHUNK',
-              requestId: msg.requestId,
-              chunk: data.chunk,
-            });
+            const chunk = data.chunk ?? '';
+            chunks.push(chunk);
+            if (sseRewriter) {
+              // Streaming + translation: rewrite each chunk before
+              // forwarding so the caller sees src-dialect SSE.
+              const rewritten = sseRewriter.process(chunk);
+              if (rewritten) {
+                responsePort.postMessage({
+                  type: 'BYOKY_PROXY_RESPONSE_CHUNK',
+                  requestId: msg.requestId,
+                  chunk: rewritten,
+                });
+              }
+            } else if (passThrough) {
+              responsePort.postMessage({
+                type: 'BYOKY_PROXY_RESPONSE_CHUNK',
+                requestId: msg.requestId,
+                chunk,
+              });
+            }
+            // Non-streaming + translation: buffer until DONE, translate once.
           }
 
           if (data.type === 'relay:response:done' && data.requestId === msg.requestId) {
             clearActiveTimeout();
+            if (sseRewriter) {
+              const tail = sseRewriter.flush();
+              if (tail) {
+                responsePort.postMessage({
+                  type: 'BYOKY_PROXY_RESPONSE_CHUNK',
+                  requestId: msg.requestId,
+                  chunk: tail,
+                });
+              }
+            } else if (translateCtx && !isStreamingResponse) {
+              // Non-streaming + translation: translate the buffered body
+              // once, emit as a single chunk to the caller.
+              try {
+                const translated = applyResponseTranslation(
+                  translateCtx.translation,
+                  translateCtx.originalBody,
+                  msg.requestId,
+                  chunks.join(''),
+                );
+                responsePort.postMessage({
+                  type: 'BYOKY_PROXY_RESPONSE_CHUNK',
+                  requestId: msg.requestId,
+                  chunk: translated,
+                });
+              } catch (err) {
+                responsePort.postMessage({
+                  type: 'BYOKY_PROXY_RESPONSE_ERROR',
+                  requestId: msg.requestId,
+                  status: 502,
+                  error: { code: 'TRANSLATION_FAILED', message: err instanceof Error ? err.message : 'Response translation failed' },
+                });
+                ws.close();
+                return;
+              }
+            }
             responsePort.postMessage({
               type: 'BYOKY_PROXY_RESPONSE_DONE',
               requestId: msg.requestId,
@@ -2349,8 +2456,13 @@ export default defineBackground(() => {
             // Delay close to allow relay:usage message to arrive from sender
             setTimeout(() => ws.close(), 2000);
             const fullBody = chunks.join('');
+            // Parse usage/model from the upstream (dst) body when
+            // translation is on — chunks[] holds the untranslated bytes.
+            // effectiveProviderId for parseUsage is translateCtx's dst, or
+            // the original msg.providerId otherwise.
+            const effectiveProvider = translateCtx?.translation.dstProviderId ?? msg.providerId;
             const model = parseModel(msg.body);
-            const usage = parseUsage(msg.providerId, fullBody);
+            const usage = parseUsage(effectiveProvider, fullBody);
             if (logEntryId && (usage || model)) {
               updateLogEntry(logEntryId, {
                 inputTokens: usage?.inputTokens,
@@ -3336,17 +3448,20 @@ export default defineBackground(() => {
           group && group.providerId === providerId && group.giftId
             ? giftedCreds.find(g => g.giftId === group.giftId && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens)
             : undefined;
-        const crossRoute = groupPinnedGift ? undefined : resolveCrossFamilyRoute(group, providerId, credentials);
-        const swapRoute = !crossRoute && !groupPinnedGift
+        const crossGiftRoute = groupPinnedGift ? undefined : resolveCrossFamilyGiftRoute(group, providerId, giftedCreds);
+        const crossRoute = groupPinnedGift || crossGiftRoute ? undefined : resolveCrossFamilyRoute(group, providerId, credentials);
+        const swapRoute = !crossRoute && !groupPinnedGift && !crossGiftRoute
           ? resolveSameFamilySwapRoute(group, providerId, credentials)
           : undefined;
         const cred = groupPinnedCred ?? crossRoute?.cred ?? swapRoute?.cred ?? credentials.find(c => c.providerId === providerId);
-        const gc = groupPinnedGift ?? giftedCreds.find(g => g.providerId === providerId && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens);
-        const preferGift = !!groupPinnedGift || (!groupPinnedCred && !crossRoute && !swapRoute && gc && giftPrefs[providerId] === gc.giftId);
+        const gc = groupPinnedGift ?? crossGiftRoute?.gc ?? giftedCreds.find(g => g.providerId === providerId && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens);
+        const preferGift = !!groupPinnedGift || !!crossGiftRoute || (!groupPinnedCred && !crossRoute && !swapRoute && gc && giftPrefs[providerId] === gc.giftId);
         const useGift = preferGift || (!cred && gc);
         providerMap[providerId] = { available: !!(cred || gc), authMethod: useGift ? 'api_key' : (cred?.authMethod ?? 'api_key'), ...(useGift ? { gift: true } : {}) };
         if (useGift && gc) {
-          newSessionProviders.push({ providerId, credentialId: gc.id, available: true, authMethod: 'api_key', giftId: gc.giftId, giftRelayUrl: gc.relayUrl, giftAuthToken: gc.authToken });
+          const sp: SessionProvider = { providerId, credentialId: gc.id, available: true, authMethod: 'api_key', giftId: gc.giftId, giftRelayUrl: gc.relayUrl, giftAuthToken: gc.authToken };
+          if (crossGiftRoute) sp.translation = crossGiftRoute.translation;
+          newSessionProviders.push(sp);
         } else if (cred) {
           const sp: SessionProvider = { providerId, credentialId: cred.id, available: true, authMethod: cred.authMethod };
           if (crossRoute) sp.translation = crossRoute.translation;

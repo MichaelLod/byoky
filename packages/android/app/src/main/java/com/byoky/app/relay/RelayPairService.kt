@@ -292,6 +292,47 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
                         }
                     } else null
 
+                // 0b. Cross-family gift route. The group pins a gift whose
+                // provider differs from what the app requested, a model is
+                // set, and the pair is translatable. Recipient translates
+                // request+response, gift relay carries the translated call.
+                val engineForProbe = translationEngine
+                val srcModelForGift = com.byoky.app.proxy.RoutingResolver.parseModel(bodyString?.toByteArray(Charsets.UTF_8))
+                val crossFamilyGift: Pair<GiftedCredential, com.byoky.app.data.RoutingTranslation>? = run {
+                    if (pinnedGift != null) return@run null
+                    if (groupForRouting == null) return@run null
+                    if (groupForRouting.providerId == providerId) return@run null
+                    val gid = groupForRouting.giftId ?: return@run null
+                    val model = groupForRouting.model
+                    if (model.isNullOrEmpty()) return@run null
+                    if (srcModelForGift.isNullOrEmpty()) return@run null
+                    if (engineForProbe == null) return@run null
+                    if (!engineForProbe.shouldTranslate(providerId, groupForRouting.providerId)) return@run null
+                    val gc = wallet.giftedCredentials.value.firstOrNull {
+                        it.giftId == gid && !isGiftExpired(it.expiresAt) && it.usedTokens < it.maxTokens
+                    } ?: return@run null
+                    gc to com.byoky.app.data.RoutingTranslation(
+                        srcProviderId = providerId,
+                        dstProviderId = groupForRouting.providerId,
+                        srcModel = srcModelForGift,
+                        dstModel = model,
+                    )
+                }
+
+                if (crossFamilyGift != null) {
+                    val (gc, translation) = crossFamilyGift
+                    proxyRelayRequestViaGiftWithTranslation(
+                        gc = gc,
+                        translation = translation,
+                        requestId = requestId,
+                        originalProviderId = providerId,
+                        method = method,
+                        headers = headers,
+                        bodyString = bodyString,
+                    )
+                    return@launch
+                }
+
                 // Resolve routing FIRST. The routing resolver inspects the
                 // group for this origin and decides between: cross-family
                 // translation, same-family swap, direct credential lookup,
@@ -985,6 +1026,259 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
 
             override fun onFailure(ws: WebSocket, t: Throwable, resp: Response?) {
                 sendRelayError(requestId, "GIFT_RELAY_ERROR", "Gift relay failed: ${t.message}")
+            }
+        })
+    }
+
+    /**
+     * Cross-family translation via a gift relay. Mirrors
+     * [proxyRelayRequestViaGift] but translates the request body src → dst
+     * before sending and wraps response chunks with the JS-bridge stream
+     * translator (streaming) or buffers and translates at done-time
+     * (non-streaming). Non-2xx bodies pass through verbatim.
+     */
+    private fun proxyRelayRequestViaGiftWithTranslation(
+        gc: GiftedCredential,
+        translation: com.byoky.app.data.RoutingTranslation,
+        requestId: String,
+        originalProviderId: String,
+        method: String,
+        headers: Map<String, String>,
+        bodyString: String?,
+    ) {
+        val wallet = wallet ?: return
+        val engine = translationEngine ?: run {
+            sendRelayError(requestId, "TRANSLATION_FAILED", "translation engine unavailable")
+            return
+        }
+        val isStreaming = com.byoky.app.proxy.RoutingResolver.isStreamingRequest(bodyString?.toByteArray(Charsets.UTF_8))
+
+        val ctxJson: String
+        val translatedBody: String
+        val urlString: String
+        try {
+            ctxJson = engine.buildTranslationContext(
+                srcProviderId = translation.srcProviderId,
+                dstProviderId = translation.dstProviderId,
+                srcModel = translation.srcModel,
+                dstModel = translation.dstModel,
+                isStreaming = isStreaming,
+                requestId = requestId,
+            )
+            translatedBody = engine.translateRequest(ctxJson, bodyString ?: "")
+            urlString = engine.rewriteProxyUrl(translation.dstProviderId, translation.dstModel, isStreaming)
+                ?: run {
+                    sendRelayError(requestId, "TRANSLATION_FAILED", "rewriteProxyUrl returned null")
+                    return
+                }
+        } catch (t: Throwable) {
+            sendRelayError(requestId, "TRANSLATION_FAILED", t.message ?: "translation failed")
+            return
+        }
+
+        // Inject stream_options for openai-family providers that need it
+        // so the sender's upstream call emits usage data.
+        val finalBody = injectStreamUsageOptions(translation.dstProviderId, translatedBody) ?: translatedBody
+
+        val filteredHeaders = headers.filterKeys {
+            it.lowercase() !in setOf("host", "authorization", "x-api-key", "anthropic-version", "content-length")
+        }
+
+        val wsReq = Request.Builder().url(gc.relayUrl).build()
+        proxyClient.newWebSocket(wsReq, object : WebSocketListener() {
+            var authenticated = false
+            var reqSent = false
+            var isUpstreamError = false
+            var receivedStatus = 0
+            var streamHandle: Int? = null
+            var handleReleased = false
+            val accumulated = StringBuilder()
+
+            fun releaseHandle() {
+                streamHandle?.let {
+                    if (!handleReleased) {
+                        try { engine.releaseStreamTranslator(it) } catch (_: Throwable) {}
+                        handleReleased = true
+                    }
+                }
+            }
+
+            override fun onOpen(ws: WebSocket, resp: Response) {
+                ws.send(JSONObject().apply {
+                    put("type", "relay:auth")
+                    put("roomId", gc.giftId)
+                    put("authToken", gc.authToken)
+                    put("role", "recipient")
+                }.toString())
+            }
+
+            fun sendReq(ws: WebSocket) {
+                if (reqSent) return
+                reqSent = true
+                ws.send(JSONObject().apply {
+                    put("type", "relay:request")
+                    put("requestId", requestId)
+                    put("providerId", translation.dstProviderId)
+                    put("url", urlString)
+                    put("method", method)
+                    put("headers", JSONObject(filteredHeaders))
+                    put("body", finalBody)
+                }.toString())
+            }
+
+            override fun onMessage(ws: WebSocket, text: String) {
+                try {
+                    val json = JSONObject(text)
+                    when (json.optString("type")) {
+                        "relay:auth:result" -> {
+                            if (json.optBoolean("success")) {
+                                authenticated = true
+                                if (json.optBoolean("peerOnline", false)) sendReq(ws)
+                            } else {
+                                sendRelayError(requestId, "GIFT_AUTH_FAILED", "Gift auth failed")
+                                ws.close(1000, null)
+                            }
+                        }
+                        "relay:peer:status" -> {
+                            if (json.optBoolean("online") && authenticated && !reqSent) sendReq(ws)
+                        }
+                        "relay:response:meta" -> {
+                            if (json.optString("requestId") == requestId) {
+                                receivedStatus = json.optInt("status")
+                                isUpstreamError = receivedStatus !in 200..299
+                                val hdrs = json.optJSONObject("headers")
+                                val filteredHdrs = JSONObject()
+                                hdrs?.keys()?.forEach { k ->
+                                    if (k.lowercase() !in ProxyService.SENSITIVE_RESPONSE_HEADERS) {
+                                        filteredHdrs.put(k.lowercase(), hdrs.getString(k))
+                                    }
+                                }
+                                sendJSON(JSONObject().apply {
+                                    put("type", "relay:response:meta")
+                                    put("requestId", requestId)
+                                    put("status", receivedStatus)
+                                    put("statusText", json.optString("statusText", ""))
+                                    put("headers", filteredHdrs)
+                                })
+                                if (!isUpstreamError && isStreaming) {
+                                    try {
+                                        streamHandle = engine.createStreamTranslator(ctxJson)
+                                    } catch (t: Throwable) {
+                                        sendRelayError(requestId, "TRANSLATION_FAILED", t.message ?: "stream translator init failed")
+                                        ws.close(1000, null)
+                                    }
+                                }
+                            }
+                        }
+                        "relay:response:chunk" -> {
+                            if (json.optString("requestId") == requestId) {
+                                val chunk = json.optString("chunk", "")
+                                val handle = streamHandle
+                                if (isUpstreamError) {
+                                    sendJSON(JSONObject().apply {
+                                        put("type", "relay:response:chunk")
+                                        put("requestId", requestId)
+                                        put("chunk", chunk)
+                                    })
+                                } else if (handle != null) {
+                                    try {
+                                        val translated = engine.processStreamChunk(handle, chunk)
+                                        if (translated.isNotEmpty()) {
+                                            sendJSON(JSONObject().apply {
+                                                put("type", "relay:response:chunk")
+                                                put("requestId", requestId)
+                                                put("chunk", translated)
+                                            })
+                                        }
+                                    } catch (t: Throwable) {
+                                        sendRelayError(requestId, "TRANSLATION_FAILED", t.message ?: "stream chunk translation failed")
+                                        releaseHandle()
+                                        ws.close(1000, null)
+                                    }
+                                } else {
+                                    // Non-streaming: buffer until done.
+                                    accumulated.append(chunk)
+                                }
+                            }
+                        }
+                        "relay:response:done" -> {
+                            if (json.optString("requestId") == requestId) {
+                                val handle = streamHandle
+                                try {
+                                    if (handle != null) {
+                                        val trailing = engine.flushStreamTranslator(handle)
+                                        if (trailing.isNotEmpty()) {
+                                            sendJSON(JSONObject().apply {
+                                                put("type", "relay:response:chunk")
+                                                put("requestId", requestId)
+                                                put("chunk", trailing)
+                                            })
+                                        }
+                                    } else if (!isUpstreamError && !isStreaming) {
+                                        val translated = engine.translateResponse(ctxJson, accumulated.toString())
+                                        sendJSON(JSONObject().apply {
+                                            put("type", "relay:response:chunk")
+                                            put("requestId", requestId)
+                                            put("chunk", translated)
+                                        })
+                                    }
+                                } catch (t: Throwable) {
+                                    sendRelayError(requestId, "TRANSLATION_FAILED", t.message ?: "response translation failed")
+                                    releaseHandle()
+                                    ws.close(1000, null)
+                                    return
+                                } finally {
+                                    releaseHandle()
+                                }
+                                sendJSON(JSONObject().apply {
+                                    put("type", "relay:response:done")
+                                    put("requestId", requestId)
+                                })
+                                wallet.logRequest(
+                                    appOrigin = pairedOrigin ?: "relay",
+                                    providerId = originalProviderId,
+                                    method = method,
+                                    url = urlString,
+                                    statusCode = receivedStatus,
+                                    requestBody = bodyString?.toByteArray(Charsets.UTF_8),
+                                    responseBody = null,
+                                    actualProviderId = translation.dstProviderId,
+                                    actualModel = translation.dstModel,
+                                    groupId = wallet.groupForOrigin(pairedOrigin ?: "relay")?.id,
+                                )
+                                Thread { Thread.sleep(2000); ws.close(1000, null) }.start()
+                            }
+                        }
+                        "relay:response:error" -> {
+                            if (json.optString("requestId") == requestId) {
+                                sendJSON(JSONObject().apply {
+                                    put("type", "relay:response:error")
+                                    put("requestId", requestId)
+                                    put("error", json.optJSONObject("error") ?: JSONObject().apply {
+                                        put("code", "GIFT_ERROR")
+                                        put("message", "Gift relay error")
+                                    })
+                                })
+                                releaseHandle()
+                                ws.close(1000, null)
+                            }
+                        }
+                        "relay:usage" -> {
+                            if (json.optString("giftId") == gc.giftId) {
+                                wallet.updateGiftedCredentialUsage(gc.giftId, json.optInt("usedTokens"))
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+
+            override fun onFailure(ws: WebSocket, t: Throwable, resp: Response?) {
+                releaseHandle()
+                sendRelayError(requestId, "GIFT_RELAY_ERROR", "Gift relay failed: ${t.message}")
+            }
+
+            override fun onClosed(ws: WebSocket, code: Int, reason: String) {
+                releaseHandle()
             }
         })
     }
