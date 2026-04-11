@@ -6,6 +6,10 @@ export interface BlogPostMeta {
   readTime: string;
   tags: string[];
   author: string;
+  image: string;
+  imageAlt: string;
+  ogTitle?: string;
+  ogDescription?: string;
 }
 
 export const posts: BlogPostMeta[] = [
@@ -18,6 +22,11 @@ export const posts: BlogPostMeta[] = [
     readTime: '6 min read',
     tags: ['claude-code', 'anthropic', 'openclaw', 'reverse-engineering'],
     author: 'Michael Lodzik',
+    image: '/openclaw-og.png',
+    imageAlt: 'OpenClaw — your personal AI assistant, running on your own devices',
+    ogTitle: "Anthropic fingerprints OpenClaw. Here's how to stay on your Pro/Max plan.",
+    ogDescription:
+      "A byte-by-byte bisect of Anthropic's third-party detection — three layers deep — and the 5-minute Byoky setup that makes OpenClaw look first-party again. No fork. No extra credits. Your existing Claude subscription.",
   },
 ];
 

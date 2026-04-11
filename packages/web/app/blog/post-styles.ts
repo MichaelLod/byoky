@@ -72,6 +72,21 @@ export const postStyles = `
   opacity: 0.5;
 }
 
+.blog-post-hero {
+  margin: 0 0 40px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--blog-border);
+  background: #0a0a14;
+  box-shadow: 0 20px 60px -30px rgba(14, 165, 233, 0.35);
+}
+
+.blog-post-hero img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
 .blog-post-body {
   font-size: 16px;
   line-height: 1.75;
