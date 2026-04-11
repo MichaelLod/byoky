@@ -260,6 +260,48 @@ final class RelayPairService: ObservableObject {
                 }
             }
 
+            // 0b. Cross-family gift route. The group pins a gift whose
+            // provider differs from what the app requested, a model is
+            // set, and the pair is translatable. Recipient translates
+            // request+response, gift relay carries the translated call.
+            let engineForProbe = TranslationEngine.shared
+            let srcModelForGift = RoutingResolver.parseModel(from: bodyString?.data(using: .utf8))
+            let crossFamilyGift: (GiftedCredential, RoutingTranslation)? = await MainActor.run {
+                guard let g = groupForRouting,
+                      g.providerId != providerId,
+                      let gid = g.giftId,
+                      let model = g.model, !model.isEmpty,
+                      let srcModel = srcModelForGift,
+                      engineForProbe.shouldTranslate(srcProviderId: providerId, dstProviderId: g.providerId),
+                      let gc = wallet.giftedCredentials.first(where: {
+                          $0.giftId == gid && !isGiftedCredentialExpired($0) && $0.usedTokens < $0.maxTokens
+                      })
+                else { return nil }
+                return (gc, RoutingTranslation(
+                    srcProviderId: providerId,
+                    dstProviderId: g.providerId,
+                    srcModel: srcModel,
+                    dstModel: model
+                ))
+            }
+
+            // If a cross-family gift route is active, handle it and return.
+            // This must be checked BEFORE the regular routing resolver so a
+            // cross-family gift wins over all other resolution paths.
+            if let (gc, translation) = crossFamilyGift {
+                await self.handleRelayRequestWithGiftTranslation(
+                    requestId: requestId,
+                    originalProviderId: providerId,
+                    translation: translation,
+                    gc: gc,
+                    method: method,
+                    headers: headers,
+                    bodyString: bodyString,
+                    wallet: wallet
+                )
+                return
+            }
+
             do {
                 // Resolve routing FIRST. The routing resolver inspects the
                 // group for this origin and decides between: cross-family
@@ -702,6 +744,152 @@ final class RelayPairService: ObservableObject {
                     method: method,
                     url: urlString,
                     statusCode: httpResponse.statusCode,
+                    requestBody: bodyString?.data(using: .utf8),
+                    responseBody: nil,
+                    actualProviderId: translation.dstProviderId,
+                    actualModel: translation.dstModel,
+                    groupId: wallet.groupForOrigin(logOrigin)?.id
+                )
+            }
+        } catch {
+            sendRelayError(requestId: requestId, code: "TRANSLATION_FAILED", message: error.localizedDescription)
+        }
+    }
+
+    /// Cross-family translation via a gift relay. Mirrors
+    /// `handleRelayRequestWithTranslation` but routes the upstream call
+    /// through the gift relay instead of URLSession — the sender holds the
+    /// destination API key and the recipient only handles translation.
+    ///
+    /// Pipeline:
+    ///   1. Translate request body src → dst
+    ///   2. Rewrite URL to the destination provider's endpoint
+    ///   3. Send translated body + dst URL through the gift relay
+    ///   4. On response: stream-translate each chunk (streaming) or buffer
+    ///      then translate once (non-streaming), dst → src
+    ///   5. Non-2xx from upstream passes through verbatim (no translation)
+    private func handleRelayRequestWithGiftTranslation(
+        requestId: String,
+        originalProviderId: String,
+        translation: RoutingTranslation,
+        gc: GiftedCredential,
+        method: String,
+        headers: [String: String],
+        bodyString: String?,
+        wallet: WalletStore
+    ) async {
+        let engine = TranslationEngine.shared
+        let isStreaming = RoutingResolver.isStreamingRequest(body: bodyString?.data(using: .utf8))
+
+        do {
+            let ctxJson = try engine.buildTranslationContext(
+                srcProviderId: translation.srcProviderId,
+                dstProviderId: translation.dstProviderId,
+                srcModel: translation.srcModel,
+                dstModel: translation.dstModel,
+                isStreaming: isStreaming,
+                requestId: requestId
+            )
+            let translatedBody = try engine.translateRequest(contextJson: ctxJson, body: bodyString ?? "")
+
+            guard let urlString = engine.rewriteProxyUrl(
+                dstProviderId: translation.dstProviderId,
+                model: translation.dstModel,
+                stream: isStreaming
+            ) else {
+                sendRelayError(requestId: requestId, code: "TRANSLATION_FAILED", message: "rewriteProxyUrl returned null")
+                return
+            }
+
+            let filteredHeaders = headers.filter {
+                let lower = $0.key.lowercased()
+                return !["host", "authorization", "x-api-key", "anthropic-version", "content-length"].contains(lower)
+            }
+
+            // Inject stream_options for openai-family providers that need it.
+            let finalBody = injectStreamUsageOptions(providerId: translation.dstProviderId, body: translatedBody) ?? translatedBody
+
+            // Stream translator is created lazily once we know we have a 2xx
+            // streaming response. Non-streaming buffers into accumulatedBody.
+            var streamHandle: Int?
+            var isUpstreamError = false
+            var accumulatedBody = Data()
+            var receivedStatus = 0
+            var handleReleased = false
+
+            defer {
+                if let handle = streamHandle, !handleReleased {
+                    engine.releaseStreamTranslator(handle: handle)
+                }
+            }
+
+            for try await event in proxyViaGiftRelay(
+                giftedCredential: gc,
+                requestId: requestId,
+                providerId: translation.dstProviderId,
+                url: urlString,
+                method: method,
+                headers: filteredHeaders,
+                body: finalBody
+            ) {
+                switch event {
+                case .meta(let status, let statusText, let hdrs):
+                    receivedStatus = status
+                    isUpstreamError = !(200..<300).contains(status)
+                    var filtered = hdrs
+                    for h in sensitiveResponseHeaders { filtered.removeValue(forKey: h) }
+                    self.sendJSON([
+                        "type": "relay:response:meta",
+                        "requestId": requestId,
+                        "status": status,
+                        "statusText": statusText,
+                        "headers": filtered,
+                    ])
+                    if !isUpstreamError && isStreaming {
+                        streamHandle = try engine.createStreamTranslator(contextJson: ctxJson)
+                    }
+                case .chunk(let chunk):
+                    if isUpstreamError {
+                        // Pass error bodies through verbatim — they're not
+                        // in the src dialect but translating them would
+                        // swallow the provider's real error message.
+                        self.sendJSON(["type": "relay:response:chunk", "requestId": requestId, "chunk": chunk])
+                    } else if let handle = streamHandle {
+                        let translated = try engine.processStreamChunk(handle: handle, chunk: chunk)
+                        if !translated.isEmpty {
+                            self.sendJSON(["type": "relay:response:chunk", "requestId": requestId, "chunk": translated])
+                        }
+                    } else if let data = chunk.data(using: .utf8) {
+                        // Non-streaming path: accumulate for one-shot translation.
+                        accumulatedBody.append(data)
+                    }
+                case .done:
+                    if let handle = streamHandle {
+                        let trailing = try engine.flushStreamTranslator(handle: handle)
+                        engine.releaseStreamTranslator(handle: handle)
+                        handleReleased = true
+                        if !trailing.isEmpty {
+                            self.sendJSON(["type": "relay:response:chunk", "requestId": requestId, "chunk": trailing])
+                        }
+                    } else if !isUpstreamError && !isStreaming {
+                        let upstreamBody = String(data: accumulatedBody, encoding: .utf8) ?? ""
+                        let translated = try engine.translateResponse(contextJson: ctxJson, body: upstreamBody)
+                        self.sendJSON(["type": "relay:response:chunk", "requestId": requestId, "chunk": translated])
+                    }
+                    self.sendJSON(["type": "relay:response:done", "requestId": requestId])
+                case .usage(let giftId, let usedTokens):
+                    await MainActor.run { wallet.updateGiftedCredentialUsage(giftId: giftId, usedTokens: usedTokens) }
+                }
+            }
+
+            let logOrigin = await MainActor.run { self.pairedOrigin } ?? "relay"
+            await MainActor.run {
+                wallet.logRequest(
+                    appOrigin: logOrigin,
+                    providerId: originalProviderId,
+                    method: method,
+                    url: urlString,
+                    statusCode: receivedStatus,
                     requestBody: bodyString?.data(using: .utf8),
                     responseBody: nil,
                     actualProviderId: translation.dstProviderId,
