@@ -19,6 +19,11 @@ struct Group: Identifiable, Codable, Equatable {
     var name: String
     var providerId: String
     var credentialId: String?
+    /// Optional pin to a received gift (matches `GiftedCredential.giftId`).
+    /// Mutually exclusive with `credentialId` — setting one clears the other.
+    /// When set, the routing resolver short-circuits to the gift and sends
+    /// the request through that gift's relay instead of using an owned key.
+    var giftId: String?
     var model: String?
     let createdAt: Date
 
@@ -28,6 +33,7 @@ struct Group: Identifiable, Codable, Equatable {
             name: "Default",
             providerId: providerId,
             credentialId: credentialId,
+            giftId: nil,
             model: nil,
             createdAt: Date()
         )

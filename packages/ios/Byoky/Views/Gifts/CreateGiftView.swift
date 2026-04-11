@@ -38,6 +38,14 @@ struct CreateGiftView: View {
         }
         .navigationTitle("Create Gift")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            // Default to the first credential so the Create button isn't
+            // silently disabled. Without this the user sees an empty list
+            // with no checkmark and wonders why Create is greyed out.
+            if selectedCredential == nil {
+                selectedCredential = wallet.credentials.first
+            }
+        }
     }
 
     private var formView: some View {

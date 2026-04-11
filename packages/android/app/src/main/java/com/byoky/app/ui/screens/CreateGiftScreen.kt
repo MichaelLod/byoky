@@ -58,6 +58,16 @@ fun CreateGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
     var createdGift by remember { mutableStateOf<Gift?>(null) }
     var dropdownExpanded by remember { mutableStateOf(false) }
 
+    // Keep the selection in sync with the credentials list: fall back to
+    // the first credential whenever the current pick is nil or no longer
+    // valid. Without this, the user lands on a blank dropdown and the
+    // Create button is mysteriously disabled.
+    LaunchedEffect(credentials) {
+        if (credentials.isNotEmpty() && credentials.none { it.id == selectedCredential?.id }) {
+            selectedCredential = credentials.first()
+        }
+    }
+
     val tokenBudget = if (selectedTokenPreset >= 0) {
         tokenPresets[selectedTokenPreset].value
     } else {
