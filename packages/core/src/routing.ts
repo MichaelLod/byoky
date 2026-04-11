@@ -31,6 +31,8 @@ import type {
   SessionTranslation,
   SessionSwap,
 } from './types.js';
+import type { GiftedCredential } from './gift.js';
+import { isGiftExpired } from './gift.js';
 // Import from the translate barrel (not families.js directly) so the side
 // effects in translate/index.ts run — they register the family adapters that
 // shouldTranslate / sameFamily consult. Without this, every consumer would
@@ -123,6 +125,51 @@ export function resolveCrossFamilyRoute(
 
   return {
     cred,
+    translation: {
+      srcProviderId: requestedProviderId,
+      dstProviderId: group.providerId,
+      dstModel: group.model,
+    },
+  };
+}
+
+/**
+ * Cross-family routing via a gifted credential. Mirrors
+ * `resolveCrossFamilyRoute` but returns a gift as the destination instead
+ * of an owned credential. Fires when:
+ *  1. A group is set
+ *  2. group.providerId !== requestedProviderId
+ *  3. group.giftId is explicitly pinned (no implicit gift selection — we
+ *     only reroute through a gift when the user asked for it by pinning
+ *     it in the group)
+ *  4. group.model is set (translation can't pick a destination model)
+ *  5. The provider pair is translatable (both in known families)
+ *  6. The pinned gift still exists, is not expired, and has budget left
+ *
+ * The recipient applies request-body translation src→dst before sending
+ * the translated request through the gift relay; the sender sees it as a
+ * native dst-provider call against its own dst-provider key. Response
+ * chunks/body are translated dst→src on the recipient side before
+ * returning to the caller.
+ */
+export function resolveCrossFamilyGiftRoute(
+  group: Group | undefined,
+  requestedProviderId: ProviderId,
+  giftedCredentials: GiftedCredential[],
+): { gc: GiftedCredential; translation: SessionTranslation } | undefined {
+  if (!group) return undefined;
+  if (group.providerId === requestedProviderId) return undefined;
+  if (!group.giftId) return undefined;
+  if (!group.model) return undefined;
+  if (!shouldTranslate(requestedProviderId, group.providerId)) return undefined;
+
+  const gc = giftedCredentials.find(
+    (g) => g.giftId === group.giftId && !isGiftExpired(g) && g.usedTokens < g.maxTokens,
+  );
+  if (!gc) return undefined;
+
+  return {
+    gc,
     translation: {
       srcProviderId: requestedProviderId,
       dstProviderId: group.providerId,
