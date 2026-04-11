@@ -59,7 +59,6 @@ export function Navbar() {
           <a href="/openclaw">OpenClaw</a>
           <a href="/blog">Blog</a>
           <a href="/demo">Demo</a>
-          <a href="/apps">Apps</a>
           <a href="/marketplace">Marketplace</a>
         </div>
         <div className="navbar-right">
