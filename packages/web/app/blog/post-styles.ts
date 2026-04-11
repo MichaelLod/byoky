@@ -195,6 +195,75 @@ export const postStyles = `
   border-bottom: none;
 }
 
+.blog-cta {
+  margin: 32px 0;
+  padding: 28px 30px;
+  border-radius: 14px;
+  border: 1px solid var(--teal-dark);
+  background:
+    linear-gradient(140deg, rgba(14, 165, 233, 0.10), rgba(14, 165, 233, 0.02) 60%),
+    var(--blog-bg-card);
+  position: relative;
+  overflow: hidden;
+}
+
+.blog-cta::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 0% 0%, rgba(125, 211, 252, 0.15), transparent 55%);
+  pointer-events: none;
+}
+
+.blog-cta > * {
+  position: relative;
+}
+
+.blog-cta-label {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--teal-light);
+  margin-bottom: 10px;
+  font-family: var(--font-code);
+}
+
+.blog-cta h3 {
+  font-size: 22px;
+  font-weight: 700;
+  margin: 0 0 10px;
+  color: var(--blog-text);
+  letter-spacing: -0.01em;
+}
+
+.blog-cta p {
+  font-size: 15px;
+  color: var(--blog-text-secondary);
+  line-height: 1.6;
+  margin: 0 0 18px;
+}
+
+.blog-cta-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 11px 20px;
+  border-radius: 8px;
+  background: var(--teal);
+  color: #04040a !important;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none !important;
+  transition: background 0.15s, transform 0.15s;
+}
+
+.blog-cta-button:hover {
+  background: var(--teal-light);
+  transform: translateY(-1px);
+}
+
 @media (max-width: 768px) {
   .blog-post-header h1 {
     font-size: 28px;
