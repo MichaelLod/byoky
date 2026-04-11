@@ -2,7 +2,6 @@ package com.byoky.app.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -10,7 +9,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -20,7 +18,7 @@ import com.byoky.app.data.WalletStore
 import com.byoky.app.ui.components.MascotView
 import com.byoky.app.ui.theme.*
 
-private data class PasswordQualityResult(
+internal data class PasswordQualityResult(
     val icon: androidx.compose.ui.graphics.vector.ImageVector,
     val message: String,
     val color: androidx.compose.ui.graphics.Color,
@@ -42,9 +40,11 @@ private data class PasswordQualityResult(
     }
 }
 
+private enum class OnboardingStep { WELCOME, VAULT_AUTH, OFFLINE_SETUP }
+
 @Composable
 fun OnboardingScreen(wallet: WalletStore) {
-    var step by remember { mutableIntStateOf(0) }
+    var step by remember { mutableStateOf(OnboardingStep.WELCOME) }
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
@@ -58,11 +58,8 @@ fun OnboardingScreen(wallet: WalletStore) {
     ) {
         Spacer(Modifier.weight(1f))
 
-        if (step == 0) {
-            // Welcome step
-            MascotView(
-                modifier = Modifier.size(140.dp),
-            )
+        if (step == OnboardingStep.WELCOME) {
+            MascotView(modifier = Modifier.size(140.dp))
 
             Spacer(Modifier.height(24.dp))
 
@@ -76,25 +73,16 @@ fun OnboardingScreen(wallet: WalletStore) {
             Spacer(Modifier.height(12.dp))
 
             Text(
-                "Your AI API keys, encrypted and always with you. Apps connect through the wallet — keys never leave your device.",
+                "Your encrypted wallet for AI API keys. Sync across devices, end-to-end encrypted.",
                 color = TextSecondary,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(horizontal = 16.dp),
             )
 
-            Spacer(Modifier.height(24.dp))
-
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                FeatureRow(Icons.Default.Shield, "AES-256-GCM encryption with Keystore")
-                FeatureRow(Icons.Default.VisibilityOff, "Keys never exposed to apps")
-                FeatureRow(Icons.Default.CellTower, "Bridge proxy for OAuth and remote tools")
-                FeatureRow(Icons.Default.Share, "Relay for remote OpenClaw")
-            }
-
             Spacer(Modifier.height(32.dp))
 
             Button(
-                onClick = { step = 1 },
+                onClick = { step = OnboardingStep.VAULT_AUTH },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),
@@ -103,6 +91,17 @@ fun OnboardingScreen(wallet: WalletStore) {
             ) {
                 Text("Get Started", fontWeight = FontWeight.SemiBold)
             }
+
+            Spacer(Modifier.height(8.dp))
+
+            TextButton(onClick = { step = OnboardingStep.OFFLINE_SETUP }) {
+                Text("Continue in offline mode", color = TextMuted, fontSize = 12.sp)
+            }
+        } else if (step == OnboardingStep.VAULT_AUTH) {
+            VaultAuthContent(
+                wallet = wallet,
+                onBack = { step = OnboardingStep.WELCOME },
+            )
         } else {
             // Password step
             MascotView(
@@ -208,40 +207,12 @@ fun OnboardingScreen(wallet: WalletStore) {
 
             Spacer(Modifier.height(12.dp))
 
-            TextButton(onClick = { step = 0 }) {
+            TextButton(onClick = { step = OnboardingStep.WELCOME }) {
                 Text("Back", color = TextSecondary)
             }
         }
 
         Spacer(Modifier.weight(1f))
-
-        // Step indicator
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Box(
-                Modifier
-                    .size(8.dp)
-                    .clip(CircleShape)
-                    .background(if (step == 0) Accent else TextMuted),
-            )
-            Box(
-                Modifier
-                    .size(8.dp)
-                    .clip(CircleShape)
-                    .background(if (step == 1) Accent else TextMuted),
-            )
-        }
-
         Spacer(Modifier.height(32.dp))
-    }
-}
-
-@Composable
-private fun FeatureRow(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Icon(icon, contentDescription = null, tint = Accent, modifier = Modifier.size(20.dp))
-        Text(text, color = TextSecondary, fontSize = 14.sp)
     }
 }

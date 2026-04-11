@@ -1477,6 +1477,32 @@ class WalletStore(context: Context) {
         syncPendingGroups()
     }
 
+    suspend fun vaultBootstrapSignup(username: String, password: String) {
+        createPassword(password)
+        enableCloudVault(username, password, isSignup = true)
+    }
+
+    suspend fun vaultBootstrapLogin(username: String, password: String) {
+        createPassword(password)
+        enableCloudVault(username, password, isSignup = false)
+    }
+
+    suspend fun vaultActivate(username: String) {
+        val password = masterPassword ?: throw IllegalStateException("Wallet is locked")
+        enableCloudVault(username, password, isSignup = true)
+    }
+
+    private val _vaultBannerDismissedAt = MutableStateFlow(
+        prefs.getLong("vaultBannerDismissedAt", 0L).let { if (it > 0) it else 0L }
+    )
+    val vaultBannerDismissedAt: StateFlow<Long> = _vaultBannerDismissedAt.asStateFlow()
+
+    fun dismissVaultBanner() {
+        val now = System.currentTimeMillis()
+        _vaultBannerDismissedAt.value = now
+        prefs.edit().putLong("vaultBannerDismissedAt", now).apply()
+    }
+
     suspend fun disableCloudVault() {
         val token = vaultToken
         if (token != null && !_cloudVaultTokenExpired.value) {
