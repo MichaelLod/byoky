@@ -12,6 +12,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -69,6 +72,14 @@ class WalletStore(context: Context) {
 
     private val _giftPreferences = MutableStateFlow<Map<String, String>>(emptyMap())
     val giftPreferences: StateFlow<Map<String, String>> = _giftPreferences.asStateFlow()
+
+    /**
+     * Last-known online status per received gift, keyed by giftId. Filled in
+     * by [probeGiftPeers] which the Wallet screen calls on launch. Treated
+     * as transient — not persisted; missing values mean "not yet probed".
+     */
+    private val _giftPeerOnline = MutableStateFlow<Map<String, Boolean>>(emptyMap())
+    val giftPeerOnline: StateFlow<Map<String, Boolean>> = _giftPeerOnline.asStateFlow()
 
     private val _tokenAllowances = MutableStateFlow<List<TokenAllowance>>(emptyList())
     val tokenAllowances: StateFlow<List<TokenAllowance>> = _tokenAllowances.asStateFlow()
@@ -368,9 +379,28 @@ class WalletStore(context: Context) {
 
     fun removeGiftedCredential(id: String) {
         val gc = _giftedCredentials.value.find { it.id == id }
-        if (gc != null && _giftPreferences.value[gc.providerId] == gc.giftId) {
-            _giftPreferences.value = _giftPreferences.value - gc.providerId
-            saveGiftPreferences()
+        if (gc != null) {
+            if (_giftPreferences.value[gc.providerId] == gc.giftId) {
+                _giftPreferences.value = _giftPreferences.value - gc.providerId
+                saveGiftPreferences()
+            }
+            // Unpin any group that was bound to this gift — avoids a dangling
+            // reference that the routing resolver would silently fall through.
+            val swept = mutableListOf<Group>()
+            val updatedGroups = _groups.value.map { g ->
+                if (g.giftId == gc.giftId) {
+                    val cleared = g.copy(giftId = null)
+                    swept.add(cleared)
+                    cleared
+                } else g
+            }
+            if (swept.isNotEmpty()) {
+                _groups.value = updatedGroups
+                saveGroups()
+                for (g in swept) {
+                    vaultScope.launch { syncGroupToVault(g) }
+                }
+            }
         }
         _giftedCredentials.value = _giftedCredentials.value.filter { it.id != id }
         saveGiftedCredentials()
@@ -390,6 +420,94 @@ class WalletStore(context: Context) {
             if (gc.giftId == giftId) gc.copy(usedTokens = usedTokens) else gc
         }
         saveGiftedCredentials()
+    }
+
+    /**
+     * Probe each non-expired received gift's relay to check whether the
+     * sender peer is online. Runs probes in parallel and fills in
+     * [giftPeerOnline] as each completes. Called from the Wallet screen on
+     * LaunchedEffect so the online dot reflects current state each time the
+     * user opens the tab.
+     */
+    fun probeGiftPeers() {
+        val active = _giftedCredentials.value.filter {
+            !isGiftExpired(it.expiresAt) && it.usedTokens < it.maxTokens
+        }
+        if (active.isEmpty()) {
+            _giftPeerOnline.value = emptyMap()
+            return
+        }
+        val activeIds = active.map { it.giftId }.toSet()
+        for (gc in active) {
+            vaultScope.launch {
+                val online = probeGiftPeerOnline(gc)
+                withContext(Dispatchers.Main) {
+                    if (activeIds.contains(gc.giftId)) {
+                        _giftPeerOnline.value = _giftPeerOnline.value + (gc.giftId to online)
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Briefly connect to a received gift's relay as recipient and read
+     * `peerOnline` from `relay:auth:result`. Returns false on any error or
+     * timeout. Used by [probeGiftPeers] to render the online dot on each
+     * received gift in the Wallet screen.
+     */
+    private suspend fun probeGiftPeerOnline(gc: GiftedCredential): Boolean {
+        // Only probe wss:// or localhost ws:// to match the proxy path's
+        // security posture — we never open plaintext sockets to random hosts.
+        val url = try { java.net.URI(gc.relayUrl) } catch (_: Throwable) { return false }
+        val isSecure = url.scheme == "wss"
+        val isLocalWs = url.scheme == "ws" &&
+            (url.host == "localhost" || url.host == "127.0.0.1" || url.host == "::1")
+        if (!isSecure && !isLocalWs) return false
+
+        return suspendCancellableCoroutine { cont ->
+            val latch = java.util.concurrent.atomic.AtomicBoolean(false)
+            fun finish(online: Boolean, ws: okhttp3.WebSocket?) {
+                if (latch.compareAndSet(false, true)) {
+                    try { ws?.close(1000, null) } catch (_: Throwable) {}
+                    if (cont.isActive) cont.resume(online)
+                }
+            }
+            val req = okhttp3.Request.Builder().url(gc.relayUrl).build()
+            val ws = vaultClient.newWebSocket(req, object : okhttp3.WebSocketListener() {
+                override fun onOpen(ws: okhttp3.WebSocket, response: okhttp3.Response) {
+                    val auth = JSONObject().apply {
+                        put("type", "relay:auth")
+                        put("roomId", gc.giftId)
+                        put("authToken", gc.authToken)
+                        put("role", "recipient")
+                    }
+                    ws.send(auth.toString())
+                }
+                override fun onMessage(ws: okhttp3.WebSocket, text: String) {
+                    try {
+                        val json = JSONObject(text)
+                        if (json.optString("type") == "relay:auth:result") {
+                            val success = json.optBoolean("success", false)
+                            val peerOnline = json.optBoolean("peerOnline", false)
+                            finish(success && peerOnline, ws)
+                        }
+                    } catch (_: Throwable) { /* ignore; timeout will fire */ }
+                }
+                override fun onFailure(ws: okhttp3.WebSocket, t: Throwable, response: okhttp3.Response?) {
+                    finish(false, ws)
+                }
+                override fun onClosed(ws: okhttp3.WebSocket, code: Int, reason: String) {
+                    finish(false, ws)
+                }
+            })
+            // 5-second cap per probe so a dead relay doesn't hold the dashboard.
+            vaultScope.launch {
+                kotlinx.coroutines.delay(5_000)
+                finish(false, ws)
+            }
+            cont.invokeOnCancellation { finish(false, ws) }
+        }
     }
 
     // MARK: - Reset
@@ -682,6 +800,7 @@ class WalletStore(context: Context) {
                         name = obj.getString("name"),
                         providerId = obj.getString("providerId"),
                         credentialId = if (obj.has("credentialId") && !obj.isNull("credentialId")) obj.getString("credentialId") else null,
+                        giftId = if (obj.has("giftId") && !obj.isNull("giftId")) obj.getString("giftId") else null,
                         model = if (obj.has("model") && !obj.isNull("model")) obj.getString("model") else null,
                         createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
                     )
@@ -701,6 +820,7 @@ class WalletStore(context: Context) {
                 put("name", g.name)
                 put("providerId", g.providerId)
                 if (g.credentialId != null) put("credentialId", g.credentialId)
+                if (g.giftId != null) put("giftId", g.giftId)
                 if (g.model != null) put("model", g.model)
                 put("createdAt", g.createdAt)
             })
@@ -778,18 +898,33 @@ class WalletStore(context: Context) {
         class ProviderInvalid : GroupError("Invalid provider")
         class CredentialNotFound : GroupError("Credential not found")
         class CredentialMismatch : GroupError("Credential does not match provider")
+        class GiftNotFound : GroupError("Gift not found")
+        class GiftMismatch : GroupError("Gift does not match provider")
+        class PinConflict : GroupError("Credential and gift are mutually exclusive")
         class NotFound : GroupError("Group not found")
         class CannotDeleteDefault : GroupError("Cannot delete the default group")
     }
 
-    fun createGroup(name: String, providerId: String, credentialId: String? = null, model: String? = null): Group {
+    fun createGroup(
+        name: String,
+        providerId: String,
+        credentialId: String? = null,
+        giftId: String? = null,
+        model: String? = null,
+    ): Group {
         val trimmed = name.trim()
         if (trimmed.isEmpty() || trimmed.length > 200) throw GroupError.NameInvalid()
         if (Provider.find(providerId) == null) throw GroupError.ProviderInvalid()
+        if (credentialId != null && giftId != null) throw GroupError.PinConflict()
         if (credentialId != null) {
             val cred = _credentials.value.firstOrNull { it.id == credentialId }
                 ?: throw GroupError.CredentialNotFound()
             if (cred.providerId != providerId) throw GroupError.CredentialMismatch()
+        }
+        if (giftId != null) {
+            val gc = _giftedCredentials.value.firstOrNull { it.giftId == giftId }
+                ?: throw GroupError.GiftNotFound()
+            if (gc.providerId != providerId) throw GroupError.GiftMismatch()
         }
         if (_groups.value.any { it.name.equals(trimmed, ignoreCase = true) }) {
             throw GroupError.NameDuplicate()
@@ -799,6 +934,7 @@ class WalletStore(context: Context) {
             name = trimmed,
             providerId = providerId,
             credentialId = credentialId,
+            giftId = giftId,
             model = model?.trim()?.takeIf { it.isNotEmpty() },
         )
         _groups.value = _groups.value + group
@@ -809,21 +945,23 @@ class WalletStore(context: Context) {
 
     /**
      * Update a group. Pass nulls for fields you don't want to change. To
-     * explicitly UNSET credentialId or model, pass the sentinel string ""
-     * (empty string) — translated to null in the patch.
+     * explicitly UNSET credentialId / giftId / model, pass the corresponding
+     * unset*** flag — credentialId / giftId / model string args are ignored
+     * when the flag is set.
      *
      * Why a sentinel rather than a triple-state Optional<Optional<String>>:
      * Kotlin doesn't have a clean way to express "missing vs. nullable" for
-     * single-string params, and adding a sealed-class wrapper for two fields
-     * is overkill at the call sites we have.
+     * single-string params, and adding a sealed-class wrapper is overkill.
      */
     fun updateGroup(
         id: String,
         name: String? = null,
         providerId: String? = null,
         credentialId: String? = null,
+        giftId: String? = null,
         model: String? = null,
         unsetCredentialId: Boolean = false,
+        unsetGiftId: Boolean = false,
         unsetModel: Boolean = false,
     ): Group {
         val idx = _groups.value.indexOfFirst { it.id == id }
@@ -840,8 +978,12 @@ class WalletStore(context: Context) {
         }
         if (providerId != null) {
             if (Provider.find(providerId) == null) throw GroupError.ProviderInvalid()
-            // Provider change invalidates credential pin unless this same patch sets it.
-            next = next.copy(providerId = providerId, credentialId = if (credentialId != null || unsetCredentialId) next.credentialId else null)
+            // Provider change invalidates both pins unless this same patch sets one.
+            next = next.copy(
+                providerId = providerId,
+                credentialId = if (credentialId != null || unsetCredentialId) next.credentialId else null,
+                giftId = if (giftId != null || unsetGiftId) next.giftId else null,
+            )
         }
         if (unsetCredentialId) {
             next = next.copy(credentialId = null)
@@ -849,7 +991,17 @@ class WalletStore(context: Context) {
             val cred = _credentials.value.firstOrNull { it.id == credentialId }
                 ?: throw GroupError.CredentialNotFound()
             if (cred.providerId != next.providerId) throw GroupError.CredentialMismatch()
-            next = next.copy(credentialId = credentialId)
+            // Setting a credential pin clears any gift pin (mutual exclusion).
+            next = next.copy(credentialId = credentialId, giftId = null)
+        }
+        if (unsetGiftId) {
+            next = next.copy(giftId = null)
+        } else if (giftId != null) {
+            val gc = _giftedCredentials.value.firstOrNull { it.giftId == giftId }
+                ?: throw GroupError.GiftNotFound()
+            if (gc.providerId != next.providerId) throw GroupError.GiftMismatch()
+            // Setting a gift pin clears any credential pin (mutual exclusion).
+            next = next.copy(giftId = giftId, credentialId = null)
         }
         if (unsetModel) {
             next = next.copy(model = null)
@@ -1460,6 +1612,7 @@ class WalletStore(context: Context) {
             .put("name", group.name)
             .put("providerId", group.providerId)
             .put("credentialId", vaultCredentialId ?: JSONObject.NULL)
+            .put("giftId", group.giftId ?: JSONObject.NULL)
             .put("model", group.model ?: JSONObject.NULL)
 
         val encoded = java.net.URLEncoder.encode(group.id, "UTF-8")

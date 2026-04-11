@@ -246,6 +246,20 @@ final class RelayPairService: ObservableObject {
         Task {
             await MainActor.run { requestCount += 1 }
 
+            // 0. Group gift pin. If the active group pins a specific gift for
+            // this provider, short-circuit all routing — the gift's relay
+            // carries the request end-to-end. This matches the extension's
+            // background resolver. Computed here (not inside the `do` block)
+            // so the existing fall-through logic below can consult it.
+            let pairedOriginLocal = await MainActor.run { self.pairedOrigin ?? "relay" }
+            let groupForRouting = await MainActor.run { wallet.groupForOrigin(pairedOriginLocal) }
+            let pinnedGift: GiftedCredential? = await MainActor.run {
+                guard let g = groupForRouting, g.providerId == providerId, let gid = g.giftId else { return nil }
+                return wallet.giftedCredentials.first {
+                    $0.giftId == gid && !isGiftedCredentialExpired($0) && $0.usedTokens < $0.maxTokens
+                }
+            }
+
             do {
                 // Resolve routing FIRST. The routing resolver inspects the
                 // group for this origin and decides between: cross-family
@@ -261,8 +275,10 @@ final class RelayPairService: ObservableObject {
                     wallet: wallet
                 )
 
-                // 1. Cross-family translation path.
-                if let routing, let translation = routing.translation {
+                // 1. Cross-family translation path. Skipped when a group-pinned
+                // gift is present — gifts carry their own relay/endpoint so
+                // there's nothing to translate on our side.
+                if pinnedGift == nil, let routing, let translation = routing.translation {
                     await self.handleRelayRequestWithTranslation(
                         requestId: requestId,
                         originalProviderId: providerId,
@@ -280,7 +296,7 @@ final class RelayPairService: ObservableObject {
                 // (e.g. Groq → OpenAI) speak identical wire formats, so we
                 // skip translation entirely and just rewrite URL + swap key
                 // + (optionally) override the body's model field.
-                if let routing, let swapTo = routing.swapToProviderId {
+                if pinnedGift == nil, let routing, let swapTo = routing.swapToProviderId {
                     await self.handleRelayRequestWithSwap(
                         requestId: requestId,
                         originalProviderId: providerId,
@@ -299,13 +315,16 @@ final class RelayPairService: ObservableObject {
                 // credential (routing.credential.providerId == providerId),
                 // or routing returned nil (no match). Gift preferences still
                 // apply here — a user can explicitly prefer a gift over
-                // their own key for a given provider.
+                // their own key for a given provider. A group-pinned gift
+                // (computed above as `pinnedGift`) overrides both.
                 let prefs = await MainActor.run { wallet.giftPreferences }
                 let giftedCreds = await MainActor.run { wallet.giftedCredentials }
                 let ownCred = routing?.credential
 
                 var useGift: GiftedCredential?
-                if let preferredGiftId = prefs[providerId],
+                if let pinnedGift {
+                    useGift = pinnedGift
+                } else if let preferredGiftId = prefs[providerId],
                    let gc = giftedCreds.first(where: {
                        $0.giftId == preferredGiftId && $0.providerId == providerId
                        && !isGiftedCredentialExpired($0) && $0.usedTokens < $0.maxTokens

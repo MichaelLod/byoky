@@ -11,16 +11,15 @@ struct GiftsView: View {
         wallet.gifts.filter { !$0.active || isGiftExpired($0) }
     }
 
-    private var activeReceived: [GiftedCredential] {
-        wallet.giftedCredentials.filter { !isGiftedCredentialExpired($0) }
-    }
-
+    /// Active received gifts now live inline on the Wallet screen alongside
+    /// owned credentials. Only expired/revoked received gifts stay here so
+    /// the user can prune them.
     private var expiredReceived: [GiftedCredential] {
         wallet.giftedCredentials.filter { isGiftedCredentialExpired($0) }
     }
 
     private var hasAnyItems: Bool {
-        !wallet.gifts.isEmpty || !wallet.giftedCredentials.isEmpty
+        !wallet.gifts.isEmpty || !expiredReceived.isEmpty
     }
 
     var body: some View {
@@ -31,9 +30,6 @@ struct GiftsView: View {
                         actionsSection
                         if !activeGifts.isEmpty {
                             sentSection
-                        }
-                        if !activeReceived.isEmpty {
-                            receivedSection
                         }
                         if !inactiveGifts.isEmpty || !expiredReceived.isEmpty {
                             expiredSection
@@ -108,22 +104,6 @@ struct GiftsView: View {
             }
         } header: {
             Text("Sent")
-        }
-    }
-
-    private var receivedSection: some View {
-        Section {
-            ForEach(activeReceived) { credential in
-                ReceivedGiftRow(credential: credential)
-            }
-            .onDelete { offsets in
-                let items = activeReceived
-                for index in offsets {
-                    wallet.removeGiftedCredential(id: items[index].id)
-                }
-            }
-        } header: {
-            Text("Received")
         }
     }
 

@@ -278,6 +278,20 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
         scope.launch {
             _requestCount.value++
             try {
+                // 0. Group gift pin. If the active group pins a specific gift
+                // for this provider, short-circuit all routing — the gift's
+                // relay carries the request end-to-end. Computed up front so
+                // the fall-through logic below can consult it.
+                val pairedOriginLocal = pairedOrigin ?: "relay"
+                val groupForRouting = wallet.groupForOrigin(pairedOriginLocal)
+                val pinnedGift: GiftedCredential? =
+                    if (groupForRouting != null && groupForRouting.providerId == providerId && groupForRouting.giftId != null) {
+                        wallet.giftedCredentials.value.firstOrNull {
+                            it.giftId == groupForRouting.giftId
+                                    && !isGiftExpired(it.expiresAt) && it.usedTokens < it.maxTokens
+                        }
+                    } else null
+
                 // Resolve routing FIRST. The routing resolver inspects the
                 // group for this origin and decides between: cross-family
                 // translation, same-family swap, direct credential lookup,
@@ -286,7 +300,9 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
                 // and lets routing rescue requests that would otherwise hit
                 // NO_CREDENTIAL (the app calls provider X but the user only
                 // has a credential for provider Y in the same family).
-                val routing = resolveRelayRouting(providerId, bodyString)
+                // Translation & swap are skipped when a gift is pinned —
+                // gifts carry their own relay/endpoint so routing is moot.
+                val routing = if (pinnedGift == null) resolveRelayRouting(providerId, bodyString) else null
 
                 // 1. Cross-family translation path.
                 if (routing != null && routing.translation != null) {
@@ -324,22 +340,25 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
                 // credential (routing.credential.providerId == providerId),
                 // or routing returned null (no match). Gift preferences still
                 // apply here — a user can explicitly prefer a gift over
-                // their own key for a given provider.
+                // their own key for a given provider. A group-pinned gift
+                // (computed above as `pinnedGift`) overrides both.
                 val prefs = wallet.giftPreferences.value
                 val giftedCreds = wallet.giftedCredentials.value
                 val ownCred = routing?.credential
 
-                var useGift: GiftedCredential? = null
-                val preferredGiftId = prefs[providerId]
-                if (preferredGiftId != null) {
-                    useGift = giftedCreds.firstOrNull {
-                        it.giftId == preferredGiftId && it.providerId == providerId
-                                && !isGiftExpired(it.expiresAt) && it.usedTokens < it.maxTokens
+                var useGift: GiftedCredential? = pinnedGift
+                if (useGift == null) {
+                    val preferredGiftId = prefs[providerId]
+                    if (preferredGiftId != null) {
+                        useGift = giftedCreds.firstOrNull {
+                            it.giftId == preferredGiftId && it.providerId == providerId
+                                    && !isGiftExpired(it.expiresAt) && it.usedTokens < it.maxTokens
+                        }
                     }
-                }
-                if (useGift == null && ownCred == null) {
-                    useGift = giftedCreds.firstOrNull {
-                        it.providerId == providerId && !isGiftExpired(it.expiresAt) && it.usedTokens < it.maxTokens
+                    if (useGift == null && ownCred == null) {
+                        useGift = giftedCreds.firstOrNull {
+                            it.providerId == providerId && !isGiftExpired(it.expiresAt) && it.usedTokens < it.maxTokens
+                        }
                     }
                 }
 

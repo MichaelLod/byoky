@@ -33,6 +33,8 @@ import com.byoky.app.data.WalletStore
 import com.byoky.app.data.capabilityGaps
 import com.byoky.app.data.capabilityLabel
 import com.byoky.app.data.detectAppCapabilities
+import com.byoky.app.data.giftBudgetRemaining
+import com.byoky.app.data.isGiftExpired
 import com.byoky.app.proxy.TranslationEngine
 import com.byoky.app.ui.theme.*
 
@@ -286,6 +288,9 @@ private fun GroupBucket(
     val pinnedCred = group.credentialId?.let { id ->
         wallet.credentials.value.firstOrNull { it.id == id }
     }
+    val pinnedGift = group.giftId?.let { gid ->
+        wallet.giftedCredentials.value.firstOrNull { it.giftId == gid }
+    }
     var menuOpen by remember { mutableStateOf(false) }
 
     Card(
@@ -336,8 +341,11 @@ private fun GroupBucket(
                     }
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        if (pinnedCred != null) "Using ${pinnedCred.label}"
-                        else "Any ${provider?.name ?: group.providerId} credential",
+                        when {
+                            pinnedGift != null -> "Using gift from ${pinnedGift.senderLabel} · ${formatTokens(giftBudgetRemaining(pinnedGift.usedTokens, pinnedGift.maxTokens))} left"
+                            pinnedCred != null -> "Using ${pinnedCred.label}"
+                            else -> "Any ${provider?.name ?: group.providerId} credential"
+                        },
                         color = TextMuted,
                         fontSize = 11.sp,
                     )
@@ -661,18 +669,52 @@ private fun GroupEditorDialog(
 ) {
     val context = LocalContext.current
     val credentials by wallet.credentials.collectAsState()
+    val giftedCredentials by wallet.giftedCredentials.collectAsState()
     val isDefault = existing?.id == DEFAULT_GROUP_ID
 
     var name by remember { mutableStateOf(existing?.name ?: "") }
     var providerId by remember { mutableStateOf(existing?.providerId ?: "anthropic") }
-    var credentialId by remember { mutableStateOf(existing?.credentialId ?: "") }
+    // Unified pin value: "", "cred:<id>", or "gift:<giftId>".
+    var pinValue by remember {
+        mutableStateOf(
+            when {
+                existing?.giftId != null -> "gift:${existing.giftId}"
+                existing?.credentialId != null -> "cred:${existing.credentialId}"
+                else -> ""
+            }
+        )
+    }
     var model by remember { mutableStateOf(existing?.model ?: "") }
     var error by remember { mutableStateOf<String?>(null) }
     var providerExpanded by remember { mutableStateOf(false) }
     var credentialExpanded by remember { mutableStateOf(false) }
 
     val matchingCreds = credentials.filter { it.providerId == providerId }
+    val matchingGifts = giftedCredentials.filter {
+        it.providerId == providerId
+                && !isGiftExpired(it.expiresAt)
+                && it.usedTokens < it.maxTokens
+    }
+    val hasAnyPinnable = matchingCreds.isNotEmpty() || matchingGifts.isNotEmpty()
     val providerName = Provider.find(providerId)?.name ?: providerId
+
+    // Resolve the current pin to a display label for the dropdown anchor.
+    val pinnedLabel: String = remember(pinValue, matchingCreds, matchingGifts) {
+        when {
+            pinValue.startsWith("cred:") -> {
+                val id = pinValue.removePrefix("cred:")
+                matchingCreds.firstOrNull { it.id == id }?.label
+                    ?: "Any $providerName credential"
+            }
+            pinValue.startsWith("gift:") -> {
+                val gid = pinValue.removePrefix("gift:")
+                matchingGifts.firstOrNull { it.giftId == gid }?.let { gc ->
+                    "🎁 ${gc.senderLabel} · ${formatTokens(giftBudgetRemaining(gc.usedTokens, gc.maxTokens))} left"
+                } ?: "Any $providerName credential"
+            }
+            else -> "Any $providerName credential"
+        }
+    }
 
     val engine = remember { TranslationEngine.get(context) }
     val suggestedModels = remember(providerId, engine.isSupported) {
@@ -756,7 +798,7 @@ private fun GroupEditorDialog(
                                 text = { Text(provider.name) },
                                 onClick = {
                                     providerId = provider.id
-                                    credentialId = ""  // provider change invalidates credential pin
+                                    pinValue = ""  // provider change invalidates any pin
                                     providerExpanded = false
                                 },
                             )
@@ -764,9 +806,7 @@ private fun GroupEditorDialog(
                     }
                 }
 
-                if (matchingCreds.isNotEmpty()) {
-                    val pinnedLabel = matchingCreds.firstOrNull { it.id == credentialId }?.label
-                        ?: "Any $providerName credential"
+                if (hasAnyPinnable) {
                     ExposedDropdownMenuBox(
                         expanded = credentialExpanded,
                         onExpandedChange = { credentialExpanded = !credentialExpanded },
@@ -788,27 +828,51 @@ private fun GroupEditorDialog(
                             DropdownMenuItem(
                                 text = { Text("Any $providerName credential") },
                                 onClick = {
-                                    credentialId = ""
+                                    pinValue = ""
                                     credentialExpanded = false
                                 },
                             )
-                            matchingCreds.forEach { c ->
+                            if (matchingCreds.isNotEmpty()) {
                                 DropdownMenuItem(
-                                    text = { Text(c.label) },
-                                    onClick = {
-                                        credentialId = c.id
-                                        credentialExpanded = false
-                                    },
+                                    enabled = false,
+                                    text = { Text("YOUR CREDENTIALS", color = TextMuted, fontSize = 10.sp) },
+                                    onClick = {},
                                 )
+                                matchingCreds.forEach { c ->
+                                    DropdownMenuItem(
+                                        text = { Text(c.label) },
+                                        onClick = {
+                                            pinValue = "cred:${c.id}"
+                                            credentialExpanded = false
+                                        },
+                                    )
+                                }
+                            }
+                            if (matchingGifts.isNotEmpty()) {
+                                DropdownMenuItem(
+                                    enabled = false,
+                                    text = { Text("GIFTS", color = TextMuted, fontSize = 10.sp) },
+                                    onClick = {},
+                                )
+                                matchingGifts.forEach { gc ->
+                                    val remaining = formatTokens(giftBudgetRemaining(gc.usedTokens, gc.maxTokens))
+                                    DropdownMenuItem(
+                                        text = { Text("🎁 ${gc.senderLabel} · $remaining left") },
+                                        onClick = {
+                                            pinValue = "gift:${gc.giftId}"
+                                            credentialExpanded = false
+                                        },
+                                    )
+                                }
                             }
                         }
                     }
                 } else {
                     // Inline warning when the chosen provider has no
-                    // credentials in the wallet. The save still goes
-                    // through (permissive mode) but the user is told up
-                    // front that this group won't actually work until a
-                    // credential is added.
+                    // credentials AND no active gifts. The save still
+                    // goes through (permissive mode) but the user is
+                    // told up front that this group won't actually work
+                    // until a credential is added or a gift is redeemed.
                     Surface(
                         color = BgMain,
                         shape = RoundedCornerShape(6.dp),
@@ -823,13 +887,13 @@ private fun GroupEditorDialog(
                             Text("⚠️", fontSize = 14.sp)
                             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Text(
-                                    "No $providerName credential",
+                                    "No $providerName credential or gift",
                                     color = TextPrimary,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Medium,
                                 )
                                 Text(
-                                    "This group can be saved, but apps using it will fail until you add a $providerName key in the Wallet tab.",
+                                    "This group can be saved, but apps using it will fail until you add a $providerName key or redeem a matching gift.",
                                     color = TextMuted,
                                     fontSize = 11.sp,
                                 )
@@ -892,11 +956,14 @@ private fun GroupEditorDialog(
             TextButton(
                 onClick = {
                     try {
+                        val credentialPin: String? = if (pinValue.startsWith("cred:")) pinValue.removePrefix("cred:") else null
+                        val giftPin: String? = if (pinValue.startsWith("gift:")) pinValue.removePrefix("gift:") else null
                         if (existing == null) {
                             wallet.createGroup(
                                 name = name,
                                 providerId = providerId,
-                                credentialId = credentialId.ifEmpty { null },
+                                credentialId = credentialPin,
+                                giftId = giftPin,
                                 model = model.ifEmpty { null },
                             )
                         } else {
@@ -904,8 +971,10 @@ private fun GroupEditorDialog(
                                 id = existing.id,
                                 name = if (isDefault) null else name,
                                 providerId = providerId,
-                                credentialId = credentialId.ifEmpty { null },
-                                unsetCredentialId = credentialId.isEmpty(),
+                                credentialId = credentialPin,
+                                unsetCredentialId = credentialPin == null,
+                                giftId = giftPin,
+                                unsetGiftId = giftPin == null,
                                 model = model.ifEmpty { null },
                                 unsetModel = model.isEmpty(),
                             )

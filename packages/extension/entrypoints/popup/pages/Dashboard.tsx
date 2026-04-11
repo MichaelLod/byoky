@@ -17,9 +17,14 @@ function formatExpiry(ms: number): string {
 }
 
 export function Dashboard() {
-  const { credentials, giftedCredentials, giftPreferences, navigate, lock, removeCredential, setGiftPreference, cloudVaultEnabled, disableCloudVault } = useWalletStore();
+  const {
+    credentials, giftedCredentials, giftPreferences, giftPeerOnline,
+    navigate, lock, removeCredential, removeGiftedCredential,
+    setGiftPreference, cloudVaultEnabled, disableCloudVault,
+  } = useWalletStore();
   const activeGifts = giftedCredentials.filter((gc) => !isGiftExpired(gc));
   const ownProviderIds = new Set(credentials.map((c) => c.providerId));
+  const hasAny = credentials.length > 0 || activeGifts.length > 0;
 
   return (
     <div>
@@ -47,16 +52,25 @@ export function Dashboard() {
         </div>
       </div>
 
-      {credentials.length === 0 ? (
+      {!hasAny ? (
         <div className="empty-state">
-          <p>No API keys or tokens yet.</p>
-          <button
-            className="btn btn-primary"
-            style={{ width: 'auto' }}
-            onClick={() => navigate('add-credential')}
-          >
-            Add credential
-          </button>
+          <p>No API keys, tokens, or gifts yet.</p>
+          <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+            <button
+              className="btn btn-primary"
+              style={{ width: 'auto' }}
+              onClick={() => navigate('add-credential')}
+            >
+              Add credential
+            </button>
+            <button
+              className="btn btn-secondary"
+              style={{ width: 'auto' }}
+              onClick={() => navigate('redeem-gift')}
+            >
+              Redeem gift
+            </button>
+          </div>
         </div>
       ) : (
         <>
@@ -88,41 +102,44 @@ export function Dashboard() {
             );
           })}
 
-          <button
-            className="btn btn-secondary"
-            style={{ marginTop: '8px' }}
-            onClick={() => navigate('add-credential')}
-          >
-            Add credential
-          </button>
-        </>
-      )}
-
-      {activeGifts.length > 0 && (
-        <>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '24px', marginBottom: '8px' }}>
-            <h3 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em', margin: 0 }}>
-              Active Gifts
-            </h3>
-            <button className="text-link" onClick={() => navigate('gifts')}>
-              Manage
-            </button>
-          </div>
           {activeGifts.map((gc) => {
             const pct = giftBudgetPercent(gc);
             const remaining = giftBudgetRemaining(gc);
             const hasOwnKey = ownProviderIds.has(gc.providerId);
             const isPreferred = giftPreferences[gc.providerId] === gc.giftId;
+            // peerOnline is populated asynchronously after refreshData;
+            // undefined means "not yet probed" — render as checking so the
+            // dot doesn't flash red before the probe lands.
+            const onlineState = giftPeerOnline[gc.giftId];
+            const dotClass = onlineState === true
+              ? 'status-dot success'
+              : onlineState === false
+                ? 'status-dot error'
+                : 'status-dot warning';
+            const dotTitle = onlineState === true
+              ? 'Sender online — gift can be used'
+              : onlineState === false
+                ? 'Sender offline — gift will fail until sender reconnects'
+                : 'Checking sender status…';
             return (
               <div key={gc.id} className="card gift-card">
                 <div className="card-header">
-                  <span className="card-title">{gc.providerName}</span>
-                  <span className="badge badge-gift">Gift</span>
-                </div>
-                <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
-                  <span className="badge badge-provider">
-                    from {gc.senderLabel}
+                  <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span className={dotClass} title={dotTitle} />
+                    {gc.providerName}
                   </span>
+                  <button
+                    className="btn btn-danger btn-sm"
+                    onClick={() => removeGiftedCredential(gc.id)}
+                  >
+                    Remove
+                  </button>
+                </div>
+                <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                  <span className="badge badge-provider">
+                    {PROVIDERS[gc.providerId]?.name ?? gc.providerId}
+                  </span>
+                  <span className="badge badge-gift">Gift · from {gc.senderLabel}</span>
                 </div>
                 <div className="gift-budget" style={{ marginTop: '8px' }}>
                   <div className="gift-budget-text">
@@ -153,6 +170,23 @@ export function Dashboard() {
               </div>
             );
           })}
+
+          <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+            <button
+              className="btn btn-secondary"
+              style={{ flex: 1 }}
+              onClick={() => navigate('add-credential')}
+            >
+              Add credential
+            </button>
+            <button
+              className="btn btn-secondary"
+              style={{ flex: 1 }}
+              onClick={() => navigate('redeem-gift')}
+            >
+              Redeem gift
+            </button>
+          </div>
         </>
       )}
     </div>

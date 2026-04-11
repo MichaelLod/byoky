@@ -213,6 +213,70 @@ func proxyViaGiftRelay(
     }
 }
 
+/// Briefly connect to a received gift's relay to check whether the sender
+/// peer is currently online. Returns true/false; treats any error or timeout
+/// as offline. The relay reports `peerOnline` in `relay:auth:result`, so we
+/// can close as soon as we read that field — single round-trip, 5 second cap.
+/// Used by `WalletStore.probeGiftPeers()` to render the online dot on each
+/// received gift in the Wallet screen.
+func probeGiftPeerOnline(giftedCredential gc: GiftedCredential) async -> Bool {
+    guard let wsUrl = URL(string: gc.relayUrl), wsUrl.scheme == "wss" else { return false }
+
+    return await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+        let ws = URLSession.shared.webSocketTask(with: wsUrl)
+        let lock = NSLock()
+        var settled = false
+        func finish(_ online: Bool) {
+            lock.lock()
+            let alreadySettled = settled
+            settled = true
+            lock.unlock()
+            guard !alreadySettled else { return }
+            ws.cancel(with: .normalClosure, reason: nil)
+            continuation.resume(returning: online)
+        }
+
+        let timeout = DispatchWorkItem { finish(false) }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 5, execute: timeout)
+
+        func listen() {
+            ws.receive { result in
+                switch result {
+                case .success(.string(let text)):
+                    guard let data = text.data(using: .utf8),
+                          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                          json["type"] as? String == "relay:auth:result" else {
+                        listen()
+                        return
+                    }
+                    let success = json["success"] as? Bool == true
+                    let peerOnline = json["peerOnline"] as? Bool == true
+                    timeout.cancel()
+                    finish(success && peerOnline)
+                case .failure:
+                    timeout.cancel()
+                    finish(false)
+                default:
+                    listen()
+                }
+            }
+        }
+
+        ws.resume()
+        let auth: [String: Any] = [
+            "type": "relay:auth",
+            "roomId": gc.giftId,
+            "authToken": gc.authToken,
+            "role": "recipient",
+        ]
+        if let data = try? JSONSerialization.data(withJSONObject: auth),
+           let str = String(data: data, encoding: .utf8) {
+            ws.send(.string(str)) { _ in }
+        }
+        listen()
+    }
+}
+
 /// Sensitive response headers that should be stripped from relay responses.
 let sensitiveResponseHeaders: Set<String> = [
     "server", "x-request-id", "x-cloud-trace-context",

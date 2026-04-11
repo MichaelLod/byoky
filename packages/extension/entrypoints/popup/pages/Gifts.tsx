@@ -5,7 +5,6 @@ import {
   createGiftLink,
   giftLinkToUrl,
   giftBudgetPercent,
-  giftBudgetRemaining,
   isGiftExpired,
   type Gift,
 } from '@byoky/core';
@@ -55,7 +54,8 @@ export function Gifts() {
 
   const activeGifts = gifts.filter((g) => g.active && !isGiftExpired(g));
   const expiredGifts = gifts.filter((g) => !g.active || isGiftExpired(g));
-  const activeReceived = giftedCredentials.filter((gc) => !isGiftExpired(gc));
+  // Active received gifts are shown on the Dashboard alongside credentials.
+  // Only expired/revoked received gifts stay here so the user can prune them.
   const expiredReceived = giftedCredentials.filter((gc) => isGiftExpired(gc));
 
   async function handleShare(gift: Gift) {
@@ -100,7 +100,7 @@ export function Gifts() {
         </button>
       </div>
 
-      {activeGifts.length === 0 && activeReceived.length === 0 && expiredGifts.length === 0 && expiredReceived.length === 0 && (
+      {activeGifts.length === 0 && expiredGifts.length === 0 && expiredReceived.length === 0 && (
         <div className="empty-state" style={{ marginTop: '16px' }}>
           <p>No gifts yet. Create one to share token access with someone.</p>
         </div>
@@ -171,53 +171,6 @@ export function Gifts() {
                       Share
                     </button>
                   </div>
-                </div>
-              </div>
-            );
-          })}
-        </>
-      )}
-
-      {/* Received gifts */}
-      {activeReceived.length > 0 && (
-        <>
-          <div className="gift-section-label">Received</div>
-          {activeReceived.map((gc) => {
-            const pct = giftBudgetPercent(gc);
-            const remaining = giftBudgetRemaining(gc);
-            return (
-              <div key={gc.id} className="card gift-card">
-                <div className="card-header">
-                  <div>
-                    <span className="card-title">{gc.providerName}</span>
-                    <div style={{ display: 'flex', gap: '6px', marginTop: '4px' }}>
-                      <span className="badge badge-gift">Gift</span>
-                      <span className="badge badge-provider">
-                        from {gc.senderLabel}
-                      </span>
-                    </div>
-                  </div>
-                  <button
-                    className="btn btn-danger btn-sm"
-                    onClick={() => removeGiftedCredential(gc.id)}
-                  >
-                    Remove
-                  </button>
-                </div>
-                <div className="gift-budget">
-                  <div className="gift-budget-text">
-                    <span>{formatTokens(remaining)} remaining</span>
-                    <span className="gift-budget-total">/ {formatTokens(gc.maxTokens)}</span>
-                  </div>
-                  <div className="allowance-bar">
-                    <div
-                      className={`allowance-bar-fill ${pct >= 90 ? 'over' : ''}`}
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                </div>
-                <div className="card-subtitle" style={{ marginTop: '6px' }}>
-                  Expires in {formatExpiry(gc.expiresAt)}
                 </div>
               </div>
             );
