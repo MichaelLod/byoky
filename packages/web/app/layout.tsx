@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { Sora, JetBrains_Mono, Outfit } from 'next/font/google';
-import { Navbar } from './components/Navbar';
 import './globals.css';
+import { NavBar } from './components/Navbar';
 
 const sora = Sora({
   subsets: ['latin'],
@@ -113,7 +113,7 @@ export default function RootLayout({
             }),
           }}
         />
-        <Navbar />
+        <NavBar />
         {children}
       </body>
     </html>
