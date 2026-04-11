@@ -10,17 +10,26 @@ export const metadata: Metadata = {
   description: post.description,
   alternates: { canonical: `/blog/${post.slug}` },
   openGraph: {
-    title: post.title,
-    description: post.description,
+    title: post.ogTitle ?? post.title,
+    description: post.ogDescription ?? post.description,
     type: 'article',
     publishedTime: post.date,
     authors: [post.author],
     tags: post.tags,
+    images: [
+      {
+        url: post.image,
+        width: 1200,
+        height: 630,
+        alt: post.imageAlt,
+      },
+    ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: post.title,
-    description: post.description,
+    title: post.ogTitle ?? post.title,
+    description: post.ogDescription ?? post.description,
+    images: [post.image],
   },
 };
 
@@ -49,6 +58,11 @@ export default function Post() {
             <span>{post.readTime}</span>
           </div>
         </header>
+
+        <figure className="blog-post-hero">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={post.image} alt={post.imageAlt} width={1200} height={630} />
+        </figure>
 
         <div className="blog-post-body">
           <p>
