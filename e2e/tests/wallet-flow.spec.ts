@@ -4,14 +4,28 @@ const TEST_PASSWORD = 'MyStr0ng!P@ssw0rd';
 const TEST_API_KEY = 'sk-ant-api03-test-key-for-e2e-testing-not-real';
 
 test.describe.serial('Byoky wallet E2E flow', () => {
-  // ── Setup & Credentials ────────────────────────────────
+  // ── Welcome screen ─────────────────────────────────────
 
-  test('setup wallet with master password', async ({ extensionPage }) => {
+  test('welcome screen renders with Get Started and offline option', async ({ extensionPage }) => {
+    await expect(extensionPage.locator('button:has-text("Get Started")')).toBeVisible({ timeout: 15_000 });
+    await expect(extensionPage.locator('button:has-text("Continue in offline mode")')).toBeVisible();
+  });
+
+  test('Get Started navigates to vault auth and Back returns', async ({ extensionPage }) => {
+    await extensionPage.click('button:has-text("Get Started")');
+    await expect(extensionPage.locator('#vault-username')).toBeVisible({ timeout: 10_000 });
+    await expect(extensionPage.locator('#vault-password')).toBeVisible();
+    await extensionPage.click('button:has-text("← Back")');
+    await expect(extensionPage.locator('button:has-text("Get Started")')).toBeVisible({ timeout: 10_000 });
+  });
+
+  test('offline path — welcome → setup wallet with master password', async ({ extensionPage }) => {
+    await extensionPage.click('button:has-text("Continue in offline mode")');
     await extensionPage.waitForSelector('#password', { timeout: 15_000 });
     await extensionPage.fill('#password', TEST_PASSWORD);
     await extensionPage.fill('#confirm', TEST_PASSWORD);
     await extensionPage.click('button:has-text("Create Wallet")');
-    await expect(extensionPage.locator('text=No API keys or tokens yet')).toBeVisible({ timeout: 30_000 });
+    await expect(extensionPage.locator('text=No API keys, tokens, or gifts yet')).toBeVisible({ timeout: 30_000 });
   });
 
   test('reject weak password on setup', async ({ context, extensionId }) => {
@@ -38,6 +52,17 @@ test.describe.serial('Byoky wallet E2E flow', () => {
     await extensionPage.fill('#apiKey', 'sk-test-openai-key-not-real');
     await extensionPage.click('button:has-text("Save")');
     await expect(extensionPage.locator('text=E2E OpenAI Key')).toBeVisible({ timeout: 30_000 });
+  });
+
+  test('Activity nav renders both tabs and switches between them', async ({ extensionPage }) => {
+    await extensionPage.click('button[title="Activity"]');
+    await expect(extensionPage.locator('button[role="tab"]:has-text("Active")')).toBeVisible({ timeout: 10_000 });
+    await expect(extensionPage.locator('button[role="tab"]:has-text("History")')).toBeVisible();
+    await expect(extensionPage.locator('button[role="tab"][aria-selected="true"]:has-text("Active")')).toBeVisible();
+    await extensionPage.click('button[role="tab"]:has-text("History")');
+    await expect(extensionPage.locator('button[role="tab"][aria-selected="true"]:has-text("History")')).toBeVisible();
+    await extensionPage.click('button[role="tab"]:has-text("Active")');
+    await expect(extensionPage.locator('button[role="tab"][aria-selected="true"]:has-text("Active")')).toBeVisible();
   });
 
   // ── Connection & Approval ──────────────────────────────
@@ -143,7 +168,8 @@ test.describe.serial('Byoky wallet E2E flow', () => {
     await extensionPage.bringToFront();
     await extensionPage.reload();
     await extensionPage.waitForLoadState('domcontentloaded');
-    await extensionPage.click('button[title="History"]');
+    await extensionPage.click('button[title="Activity"]');
+    await extensionPage.click('button[role="tab"]:has-text("History")');
     await expect(extensionPage.locator('.log-entry')).toBeVisible({ timeout: 10_000 });
   });
 

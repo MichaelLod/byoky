@@ -4,7 +4,7 @@ import { checkPasswordStrength, MIN_PASSWORD_LENGTH } from '@byoky/core';
 import { PasswordMeter } from '../components/PasswordMeter';
 
 export function Setup() {
-  const { setup, error } = useWalletStore();
+  const { setup, error, navigate } = useWalletStore();
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [localError, setLocalError] = useState('');
@@ -36,11 +36,12 @@ export function Setup() {
   return (
     <div className="center-page">
       <div className="logo-large">Byoky</div>
-      <div className="tagline">Bring Your Own Key</div>
+      <div className="tagline">Offline mode</div>
 
       <form onSubmit={handleSubmit}>
-        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '20px' }}>
-          Create a master password to encrypt your API keys.
+        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '20px', lineHeight: 1.5 }}>
+          Create a password to encrypt your keys on this device.
+          Nothing leaves your browser.
         </p>
 
         {displayError && <div className="error">{displayError}</div>}
@@ -75,6 +76,24 @@ export function Setup() {
           disabled={password.length < MIN_PASSWORD_LENGTH || strength.score < 2}
         >
           Create Wallet
+        </button>
+
+        <button
+          type="button"
+          className="text-link"
+          style={{
+            display: 'block',
+            width: '100%',
+            marginTop: '12px',
+            fontSize: '12px',
+            color: 'var(--text-muted)',
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+          }}
+          onClick={() => navigate('welcome')}
+        >
+          ← Back
         </button>
       </form>
 
