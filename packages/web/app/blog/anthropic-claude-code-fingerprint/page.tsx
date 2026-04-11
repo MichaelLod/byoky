@@ -347,33 +347,25 @@ anthropic-dangerous-direct-browser-access: true`}</code>
           </p>
           <p>
             If you&rsquo;re currently stuck on the &ldquo;Third-party apps now draw from your extra
-            usage&rdquo; message, you can wire this up in a few minutes:
+            usage&rdquo; wall, you don&rsquo;t have to re-implement any of this yourself. We built
+            a dedicated walkthrough that gets OpenClaw talking to Byoky with your Claude Pro/Max
+            subscription in about 5 minutes &mdash; install the wallet, paste the setup token,
+            point OpenClaw at the local bridge, done.
           </p>
-          <ol>
-            <li>
-              Install the{' '}
-              <a
-                href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Byoky browser extension
-              </a>{' '}
-              (or the iOS / Android app).
-            </li>
-            <li>
-              Paste your Claude Code setup token (<code>sk-ant-oat01-...</code>) into the wallet.
-            </li>
-            <li>
-              Point OpenClaw at Byoky&rsquo;s local bridge. The wallet handles the rewrite /
-              relocate on every request.
-            </li>
-          </ol>
+          <div className="blog-cta">
+            <div className="blog-cta-label">OpenClaw users, start here</div>
+            <h3>Run OpenClaw on your Claude Pro/Max plan</h3>
+            <p>
+              Step-by-step install for Chrome, Firefox, iOS and Android, plus the exact OpenClaw
+              config to point at the Byoky bridge. Free, no extra credits, no forked CLI.
+            </p>
+            <Link href="/openclaw" className="blog-cta-button">
+              Open the OpenClaw guide &rarr;
+            </Link>
+          </div>
           <p>
-            That&rsquo;s it. Same subscription, same OpenClaw, no billing wall. If you&rsquo;d
-            rather see the whole picture first, the{' '}
-            <Link href="/docs">docs</Link> walk through the proxy model, and{' '}
-            <Link href="/">byoky.com</Link> is the short version.
+            If you&rsquo;d rather see the full picture first, the <Link href="/docs">docs</Link>{' '}
+            walk through the proxy model, and <Link href="/">byoky.com</Link> is the short version.
           </p>
           <p>
             Every fingerprinting layer is a learning opportunity about how the other side thinks.
