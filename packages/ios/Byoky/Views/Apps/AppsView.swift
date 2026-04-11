@@ -97,6 +97,9 @@ struct AppsView: View {
         let pinnedCred = group.credentialId.flatMap { id in
             wallet.credentials.first { $0.id == id }
         }
+        let pinnedGift = group.giftId.flatMap { gid in
+            wallet.giftedCredentials.first { $0.giftId == gid }
+        }
 
         Section {
             if groupSessions.isEmpty {
@@ -186,7 +189,9 @@ struct AppsView: View {
                 }
             }
         } footer: {
-            if let pinnedCred {
+            if let pinnedGift {
+                Text("Using gift from \(pinnedGift.senderLabel) · \(formatTokens(giftedBudgetRemaining(pinnedGift))) left")
+            } else if let pinnedCred {
                 Text("Using \(pinnedCred.label)")
             } else {
                 Text("Any \(provider?.name ?? group.providerId) credential")
@@ -465,7 +470,8 @@ struct GroupEditorSheet: View {
 
     @State private var name: String = ""
     @State private var providerId: String = "anthropic"
-    @State private var credentialId: String = ""
+    /// Unified pin value: `""` (any), `"cred:<id>"`, or `"gift:<giftId>"`.
+    @State private var pinValue: String = ""
     @State private var model: String = ""
     @State private var error: String?
     @State private var suggestedModels: [(id: String, displayName: String)] = []
@@ -473,6 +479,18 @@ struct GroupEditorSheet: View {
 
     private var matchingCredentials: [Credential] {
         wallet.credentials.filter { $0.providerId == providerId }
+    }
+
+    private var matchingGifts: [GiftedCredential] {
+        wallet.giftedCredentials.filter {
+            $0.providerId == providerId
+            && !isGiftedCredentialExpired($0)
+            && $0.usedTokens < $0.maxTokens
+        }
+    }
+
+    private var hasAnyPinnable: Bool {
+        !matchingCredentials.isEmpty || !matchingGifts.isEmpty
     }
 
     private var navTitle: String {
@@ -503,34 +521,46 @@ struct GroupEditorSheet: View {
                         }
                     }
                     .onChange(of: providerId) { _, newValue in
-                        // Provider change invalidates the credential pin.
-                        credentialId = ""
+                        // Provider change invalidates any pin.
+                        pinValue = ""
                         loadSuggestedModels(for: newValue)
                     }
 
-                    if !matchingCredentials.isEmpty {
-                        Picker("Credential", selection: $credentialId) {
+                    if hasAnyPinnable {
+                        Picker("Credential", selection: $pinValue) {
                             Text("Any \(Provider.find(providerId)?.name ?? providerId) credential").tag("")
-                            ForEach(matchingCredentials, id: \.id) { c in
-                                Text(c.label).tag(c.id)
+                            if !matchingCredentials.isEmpty {
+                                Section("Your credentials") {
+                                    ForEach(matchingCredentials, id: \.id) { c in
+                                        Text(c.label).tag("cred:\(c.id)")
+                                    }
+                                }
+                            }
+                            if !matchingGifts.isEmpty {
+                                Section("Gifts") {
+                                    ForEach(matchingGifts, id: \.giftId) { gc in
+                                        let remainingLabel = "\(formatTokens(giftedBudgetRemaining(gc))) left"
+                                        Text("🎁 \(gc.senderLabel) · \(remainingLabel)").tag("gift:\(gc.giftId)")
+                                    }
+                                }
                             }
                         }
                     } else {
                         // Inline warning when the chosen provider has no
-                        // credentials in the wallet. The save still goes
-                        // through (permissive mode) but the user is told
-                        // up front that this group won't actually work
-                        // until a credential is added — and is shown how
-                        // to fix it.
+                        // credentials AND no active gifts. The save still
+                        // goes through (permissive mode) but the user is
+                        // told up front that this group won't actually
+                        // work until a credential is added or a gift is
+                        // redeemed.
                         HStack(alignment: .top, spacing: 8) {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .foregroundStyle(.orange)
                                 .imageScale(.medium)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("No \(Provider.find(providerId)?.name ?? providerId) credential")
+                                Text("No \(Provider.find(providerId)?.name ?? providerId) credential or gift")
                                     .font(.subheadline)
                                     .fontWeight(.medium)
-                                Text("This group can be saved, but apps using it will fail until you add a \(Provider.find(providerId)?.name ?? providerId) key in the Wallet tab.")
+                                Text("This group can be saved, but apps using it will fail until you add a \(Provider.find(providerId)?.name ?? providerId) key or redeem a matching gift.")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -540,7 +570,7 @@ struct GroupEditorSheet: View {
                 } header: {
                     Text("Destination")
                 } footer: {
-                    Text("Apps assigned to this group will route their requests through this provider/credential. Pin a credential to lock the choice; leave it as \"Any\" to use any credential of that provider.")
+                    Text("Apps assigned to this group will route their requests through this provider. Pin a credential or a gift to lock the choice; leave it as \"Any\" to use any credential of that provider.")
                 }
 
                 Section {
@@ -602,7 +632,13 @@ struct GroupEditorSheet: View {
                 if let existing = mode.existingGroup {
                     name = existing.name
                     providerId = existing.providerId
-                    credentialId = existing.credentialId ?? ""
+                    if let gid = existing.giftId {
+                        pinValue = "gift:\(gid)"
+                    } else if let cid = existing.credentialId {
+                        pinValue = "cred:\(cid)"
+                    } else {
+                        pinValue = ""
+                    }
                     model = existing.model ?? ""
                 }
                 loadSuggestedModels(for: providerId)
@@ -652,12 +688,15 @@ struct GroupEditorSheet: View {
 
     private func save() {
         do {
+            let credentialPin: String? = pinValue.hasPrefix("cred:") ? String(pinValue.dropFirst(5)) : nil
+            let giftPin: String? = pinValue.hasPrefix("gift:") ? String(pinValue.dropFirst(5)) : nil
             switch mode {
             case .create:
                 try wallet.createGroup(
                     name: name,
                     providerId: providerId,
-                    credentialId: credentialId.nilIfEmpty,
+                    credentialId: credentialPin,
+                    giftId: giftPin,
                     model: model.nilIfEmpty
                 )
             case .edit(let g):
@@ -665,7 +704,8 @@ struct GroupEditorSheet: View {
                     id: g.id,
                     name: mode.isDefault ? nil : name,
                     providerId: providerId,
-                    credentialId: .some(credentialId.nilIfEmpty),
+                    credentialId: .some(credentialPin),
+                    giftId: .some(giftPin),
                     model: .some(model.nilIfEmpty)
                 )
             }

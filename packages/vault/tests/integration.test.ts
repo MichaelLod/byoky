@@ -37,6 +37,7 @@ describe.skipIf(!DATABASE_URL)('vault integration', () => {
     initDb(DATABASE_URL!);
     startIdleSweep();
     await getDb().execute(sql`ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS encrypted_key TEXT`);
+    await getDb().execute(sql`ALTER TABLE groups ADD COLUMN IF NOT EXISTS gift_id TEXT`);
   });
 
   afterAll(async () => {

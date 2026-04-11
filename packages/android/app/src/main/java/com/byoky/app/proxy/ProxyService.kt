@@ -795,6 +795,19 @@ class ProxyService(
         val prefs = wallet.giftPreferences.value
         val giftedCreds = wallet.giftedCredentials.value
         val ownCred = wallet.credentials.value.firstOrNull { it.providerId == providerId }
+        val group = wallet.groupForOrigin("bridge")
+
+        // A group pinned to a specific gift for this provider wins over every
+        // other source — owned creds, preferences, unpinned gifts. The gift's
+        // own relay carries the request. Falls through if the pinned gift is
+        // expired, exhausted, or gone.
+        if (group != null && group.providerId == providerId && group.giftId != null) {
+            val pinnedGift = giftedCreds.firstOrNull {
+                it.giftId == group.giftId
+                        && !isGiftExpired(it.expiresAt) && it.usedTokens < it.maxTokens
+            }
+            if (pinnedGift != null) return CredentialSource.Gift(pinnedGift)
+        }
 
         val preferredGiftId = prefs[providerId]
         if (preferredGiftId != null) {

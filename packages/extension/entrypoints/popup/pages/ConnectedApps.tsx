@@ -3,6 +3,7 @@ import { useWalletStore } from '../store';
 import {
   PROVIDERS, isGiftExpired,
   type TokenAllowance, type Group, type Session, type CredentialMeta,
+  type GiftedCredential,
   type CapabilitySet,
   DEFAULT_GROUP_ID,
   detectAppCapabilities,
@@ -10,7 +11,14 @@ import {
   capabilityLabel,
   getModel,
   modelsForProvider,
+  giftBudgetRemaining,
 } from '@byoky/core';
+
+function formatTokensShort(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
+  return String(n);
+}
 
 function timeAgo(timestamp: number): string {
   const seconds = Math.floor((Date.now() - timestamp) / 1000);
@@ -190,6 +198,7 @@ export function ConnectedApps() {
         const groupSessions = sessionsByGroup.get(group.id) ?? [];
         const provider = PROVIDERS[group.providerId];
         const pinnedCred = group.credentialId ? credentials.find((c) => c.id === group.credentialId) : undefined;
+        const pinnedGift = group.giftId ? giftedCredentials.find((gc) => gc.giftId === group.giftId) : undefined;
         const isDefault = group.id === DEFAULT_GROUP_ID;
         const isDropTarget = dragOriginOver === group.id;
 
@@ -230,7 +239,11 @@ export function ConnectedApps() {
                   {group.model && <span className="badge">{group.model}</span>}
                 </div>
                 <div className="card-subtitle" style={{ marginTop: '2px' }}>
-                  {pinnedCred ? `Using ${pinnedCred.label}` : 'Any credential for this provider'}
+                  {pinnedGift
+                    ? `Using gift from ${pinnedGift.senderLabel} · ${formatTokensShort(giftBudgetRemaining(pinnedGift))} left`
+                    : pinnedCred
+                      ? `Using ${pinnedCred.label}`
+                      : 'Any credential for this provider'}
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '6px' }}>
@@ -257,6 +270,7 @@ export function ConnectedApps() {
               <GroupForm
                 group={group}
                 credentials={credentials}
+                giftedCredentials={giftedCredentials}
                 onSave={async (patch) => {
                   const ok = await updateGroup(group.id, patch);
                   if (ok) setEditingGroupId(null);
@@ -386,11 +400,13 @@ export function ConnectedApps() {
         <div className="card" style={{ marginBottom: '16px' }}>
           <GroupForm
             credentials={credentials}
+            giftedCredentials={giftedCredentials}
             onSave={async (patch) => {
               const id = await createGroup({
                 name: patch.name ?? 'Untitled',
                 providerId: patch.providerId ?? 'anthropic',
                 credentialId: patch.credentialId ?? undefined,
+                giftId: patch.giftId ?? undefined,
                 model: patch.model ?? undefined,
               });
               if (id) setShowCreateGroup(false);
@@ -446,21 +462,30 @@ export function ConnectedApps() {
 function GroupForm({
   group,
   credentials,
+  giftedCredentials,
   onSave,
   onCancel,
 }: {
   group?: Group;
   credentials: CredentialMeta[];
-  onSave: (patch: { name?: string; providerId?: string; credentialId?: string | null; model?: string | null }) => void;
+  giftedCredentials: GiftedCredential[];
+  onSave: (patch: { name?: string; providerId?: string; credentialId?: string | null; giftId?: string | null; model?: string | null }) => void;
   onCancel: () => void;
 }) {
   const isDefault = group?.id === DEFAULT_GROUP_ID;
   const [name, setName] = useState(group?.name ?? '');
   const [providerId, setProviderId] = useState(group?.providerId ?? (credentials[0]?.providerId ?? 'anthropic'));
-  const [credentialId, setCredentialId] = useState<string>(group?.credentialId ?? '');
+  // Unified pin: the dropdown value encodes the kind as `cred:<id>` or
+  // `gift:<giftId>`. Empty string means "no pin — any credential".
+  const initialPin = group?.giftId ? `gift:${group.giftId}` : group?.credentialId ? `cred:${group.credentialId}` : '';
+  const [pinValue, setPinValue] = useState<string>(initialPin);
   const [model, setModel] = useState(group?.model ?? '');
 
   const matchingCreds = credentials.filter((c) => c.providerId === providerId);
+  const matchingGifts = giftedCredentials.filter(
+    (gc) => gc.providerId === providerId && !isGiftExpired(gc) && gc.usedTokens < gc.maxTokens,
+  );
+  const hasAnyPinnable = matchingCreds.length > 0 || matchingGifts.length > 0;
   // Pull the @byoky/core registry's known models for the chosen provider.
   // Empty list means the registry has no entries — the user can still type
   // a custom model name. Mobile builds the same suggestion list via the JS
@@ -474,10 +499,13 @@ function GroupForm({
   const modelInfo = selectedModel ? buildModelInfo(selectedModel) : undefined;
 
   function handleSave() {
+    const credentialId = pinValue.startsWith('cred:') ? pinValue.slice(5) : null;
+    const giftId = pinValue.startsWith('gift:') ? pinValue.slice(5) : null;
     onSave({
       name: isDefault ? undefined : name,
       providerId,
-      credentialId: credentialId || null,
+      credentialId,
+      giftId,
       model: model || null,
     });
   }
@@ -502,7 +530,7 @@ function GroupForm({
           value={providerId}
           onChange={(e) => {
             setProviderId(e.target.value);
-            setCredentialId('');
+            setPinValue('');
           }}
         >
           {Object.values(PROVIDERS).map((p) => (
@@ -510,29 +538,43 @@ function GroupForm({
           ))}
         </select>
       </div>
-      {matchingCreds.length > 0 ? (
+      {hasAnyPinnable ? (
         <div className="form-group">
           <label>Credential (optional)</label>
-          <select value={credentialId} onChange={(e) => setCredentialId(e.target.value)}>
+          <select value={pinValue} onChange={(e) => setPinValue(e.target.value)}>
             <option value="">Any {PROVIDERS[providerId]?.name ?? providerId} credential</option>
-            {matchingCreds.map((c) => (
-              <option key={c.id} value={c.id}>{c.label}</option>
-            ))}
+            {matchingCreds.length > 0 && (
+              <optgroup label="Your credentials">
+                {matchingCreds.map((c) => (
+                  <option key={c.id} value={`cred:${c.id}`}>{c.label}</option>
+                ))}
+              </optgroup>
+            )}
+            {matchingGifts.length > 0 && (
+              <optgroup label="Gifts">
+                {matchingGifts.map((gc) => (
+                  <option key={gc.giftId} value={`gift:${gc.giftId}`}>
+                    {`🎁 ${gc.senderLabel} · ${formatTokensShort(giftBudgetRemaining(gc))} left`}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
         </div>
       ) : (
-        // Inline warning when the chosen provider has no credentials in the
-        // wallet. The save still goes through (permissive mode) but the
-        // user is told up front that this group won't actually work until
-        // a credential is added — and is shown how to fix it.
+        // Inline warning when the chosen provider has no credentials AND no
+        // active gifts in the wallet. The save still goes through
+        // (permissive mode) but the user is told up front that this group
+        // won't actually work until a credential is added — and is shown
+        // how to fix it.
         <div className="form-group group-warning">
           <div className="group-warning-icon" aria-hidden>⚠️</div>
           <div className="group-warning-body">
             <div className="group-warning-title">
-              No {PROVIDERS[providerId]?.name ?? providerId} credential
+              No {PROVIDERS[providerId]?.name ?? providerId} credential or gift
             </div>
             <div className="group-warning-text">
-              This group can be saved, but apps using it will fail until you add a {PROVIDERS[providerId]?.name ?? providerId} key in the Wallet.
+              This group can be saved, but apps using it will fail until you add a {PROVIDERS[providerId]?.name ?? providerId} key or redeem a matching gift.
             </div>
           </div>
         </div>

@@ -214,13 +214,14 @@ export async function upsertGroup(
   name: string,
   providerId: string,
   credentialId: string | null,
+  giftId: string | null,
   model: string | null,
 ) {
   const now = Date.now();
   const existing = await getGroupByUserAndId(userId, groupId);
   if (existing) {
     const [row] = await getDb().update(groups)
-      .set({ name, providerId, credentialId, model })
+      .set({ name, providerId, credentialId, giftId, model })
       .where(and(eq(groups.userId, userId), eq(groups.id, groupId)))
       .returning();
     return row;
@@ -231,6 +232,7 @@ export async function upsertGroup(
     name,
     providerId,
     credentialId,
+    giftId,
     model,
     createdAt: now,
   }).returning();

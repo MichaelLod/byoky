@@ -44,6 +44,7 @@ interface WalletState {
   tokenAllowances: TokenAllowance[];
   gifts: Gift[];
   giftedCredentials: GiftedCredential[];
+  giftPeerOnline: Record<string, boolean>;
   giftPreferences: Record<string, string>;
   groups: Group[];
   appGroups: AppGroups;
@@ -77,8 +78,8 @@ interface WalletState {
   redeemGift: (giftLinkEncoded: string) => Promise<void>;
   removeGiftedCredential: (id: string) => Promise<void>;
   setGiftPreference: (providerId: string, giftId: string | null) => Promise<void>;
-  createGroup: (input: { name: string; providerId: string; credentialId?: string; model?: string }) => Promise<string | null>;
-  updateGroup: (id: string, patch: { name?: string; providerId?: string; credentialId?: string | null; model?: string | null }) => Promise<boolean>;
+  createGroup: (input: { name: string; providerId: string; credentialId?: string; giftId?: string; model?: string }) => Promise<string | null>;
+  updateGroup: (id: string, patch: { name?: string; providerId?: string; credentialId?: string | null; giftId?: string | null; model?: string | null }) => Promise<boolean>;
   deleteGroup: (id: string) => Promise<boolean>;
   setAppGroup: (origin: string, groupId: string) => Promise<boolean>;
   installApp: (app: MarketplaceApp) => void;
@@ -112,6 +113,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   tokenAllowances: [],
   gifts: [],
   giftedCredentials: [],
+  giftPeerOnline: {},
   giftPreferences: {},
   groups: [],
   appGroups: {},
@@ -188,6 +190,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       pendingApprovals: [],
       gifts: [],
       giftedCredentials: [],
+      giftPeerOnline: {},
       giftPreferences: {},
       groups: [],
       appGroups: {},
@@ -484,6 +487,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       tokenAllowances: [],
       gifts: [],
       giftedCredentials: [],
+      giftPeerOnline: {},
       groups: [],
       appGroups: {},
       cloudVaultEnabled: false,
@@ -541,6 +545,18 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       cloudVaultTokenExpired: vaultResult.tokenExpired as boolean ?? false,
       cloudVaultPendingCount: vaultResult.pendingCount as number ?? 0,
     });
+
+    // Probe each received gift's relay to refresh the online dot on the
+    // Dashboard. Runs after the main refresh so credentials paint first,
+    // then online status fills in when the probes complete.
+    const giftedCount = ((giftedResult.giftedCredentials ?? []) as GiftedCredential[]).length;
+    if (giftedCount > 0) {
+      sendInternal('probeGiftPeers').then((probeResult) => {
+        set({ giftPeerOnline: (probeResult.online as Record<string, boolean>) ?? {} });
+      }).catch(() => { /* non-blocking */ });
+    } else {
+      set({ giftPeerOnline: {} });
+    }
   },
 
   clearError: () => set({ error: null }),
