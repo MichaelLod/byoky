@@ -9,6 +9,8 @@ export default function Home() {
       <div className="divider" />
       <ZeroCost />
       <div className="divider" />
+      <OpenClawCTA />
+      <div className="divider" />
       <Showcase />
       <div className="divider" />
       <ForDevelopers />
@@ -268,6 +270,134 @@ function ZeroCost() {
           </p>
         </FadeIn>
       </div>
+    </section>
+  );
+}
+
+/* ─── OpenClaw CTA ─────────────────────────────── */
+
+function OpenClawCTA() {
+  return (
+    <section className="openclaw-cta-section">
+      <div className="container">
+        <FadeIn>
+          <div className="openclaw-cta-card">
+            <div className="openclaw-cta-copy">
+              <div className="openclaw-cta-eyebrow">
+                <span className="openclaw-cta-dot" />
+                OpenClaw × Byoky
+              </div>
+              <h2>
+                Run <span className="hero-gradient">Claude, GPT, and Gemini</span>{' '}
+                in OpenClaw — for free.
+              </h2>
+              <p>
+                Get a free token gift from the marketplace, or plug in your
+                existing <strong>Claude Pro/Max</strong> subscription. Either way,
+                zero API credits, zero card on file — just a 5-minute setup.
+              </p>
+              <div className="openclaw-cta-actions">
+                <a href="/openclaw" className="btn btn-primary">
+                  Read the 5-minute setup
+                </a>
+                <a href="/marketplace" className="btn btn-secondary">
+                  Browse free gifts
+                </a>
+              </div>
+            </div>
+            <div className="openclaw-cta-visual" aria-hidden>
+              <pre className="openclaw-cta-code">
+{`$ npm install -g @byoky/bridge
+$ npm install -g @byoky/openclaw-plugin
+$ openclaw models auth login \\
+    --provider byoky-anthropic
+✓ bridge running
+✓ 15 providers available`}
+              </pre>
+            </div>
+          </div>
+        </FadeIn>
+      </div>
+      <style>{`
+        .openclaw-cta-section { padding: 80px 0; position: relative; }
+        .openclaw-cta-card {
+          display: grid;
+          grid-template-columns: 1.1fr 1fr;
+          gap: 48px;
+          align-items: center;
+          padding: 48px;
+          border-radius: 20px;
+          background:
+            radial-gradient(circle at 0% 0%, rgba(14,165,233,0.12), transparent 50%),
+            radial-gradient(circle at 100% 100%, rgba(14,165,233,0.08), transparent 50%),
+            var(--bg-card);
+          border: 1px solid rgba(14, 165, 233, 0.28);
+        }
+        .openclaw-cta-eyebrow {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 12px;
+          font-weight: 600;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+          color: var(--teal-light);
+          margin-bottom: 14px;
+        }
+        .openclaw-cta-dot {
+          width: 7px; height: 7px;
+          border-radius: 50%;
+          background: var(--teal);
+          box-shadow: 0 0 10px var(--teal-glow);
+        }
+        .openclaw-cta-copy h2 {
+          font-size: 32px;
+          line-height: 1.15;
+          font-weight: 700;
+          letter-spacing: -0.02em;
+          margin: 0 0 16px;
+        }
+        .openclaw-cta-copy p {
+          font-size: 16px;
+          line-height: 1.65;
+          color: var(--text-secondary);
+          margin: 0 0 24px;
+          max-width: 520px;
+        }
+        .openclaw-cta-copy strong { color: var(--text); }
+        .openclaw-cta-actions {
+          display: flex;
+          gap: 12px;
+          flex-wrap: wrap;
+        }
+        .openclaw-cta-visual {
+          min-width: 0;
+        }
+        .openclaw-cta-code {
+          margin: 0;
+          padding: 22px 24px;
+          background: #07070f;
+          border: 1px solid var(--border);
+          border-radius: 12px;
+          font-family: var(--font-mono), monospace;
+          font-size: 13px;
+          line-height: 1.75;
+          color: var(--teal-light);
+          overflow-x: auto;
+          white-space: pre;
+          box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+        }
+        @media (max-width: 860px) {
+          .openclaw-cta-section { padding: 56px 0; }
+          .openclaw-cta-card {
+            grid-template-columns: 1fr;
+            gap: 28px;
+            padding: 32px 24px;
+          }
+          .openclaw-cta-copy h2 { font-size: 26px; }
+          .openclaw-cta-code { font-size: 12px; padding: 18px 18px; }
+        }
+      `}</style>
     </section>
   );
 }
