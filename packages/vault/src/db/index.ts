@@ -64,6 +64,10 @@ export async function getUserById(id: string) {
   return row;
 }
 
+export async function deleteUser(id: string) {
+  await getDb().delete(users).where(eq(users.id, id));
+}
+
 // ─── User sessions ────────────────────────────────────────────────────────
 
 export async function createUserSession(userId: string, tokenHash: string, expiresAt: number, id?: string, encryptedKey?: string) {

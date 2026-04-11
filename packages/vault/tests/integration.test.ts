@@ -326,4 +326,55 @@ describe.skipIf(!DATABASE_URL)('vault integration', () => {
       expect(res2.status).toBe(401);
     });
   });
+
+  // ─── Delete Account ──────────────────────────────────────────────────
+
+  describe('DELETE /auth/account', () => {
+    const deleteUsername = `${TEST_PREFIX}delete_me`;
+    const deletePassword = 'MyStr0ng!Pass#2024';
+    let deleteToken: string;
+
+    it('signs up a fresh user, adds a credential, then deletes account', async () => {
+      // Sign up
+      const signupRes = await req('/auth/signup', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username: deleteUsername, password: deletePassword }),
+      });
+      expect(signupRes.status).toBe(201);
+      deleteToken = (await signupRes.json()).token;
+
+      // Add a credential to verify cascade works
+      const credRes = await req('/credentials', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${deleteToken}` },
+        body: JSON.stringify({ providerId: 'openai', apiKey: 'sk-test-delete-me', label: 'cascade test' }),
+      });
+      expect(credRes.status).toBe(201);
+
+      // Delete account
+      const deleteRes = await req('/auth/account', {
+        method: 'DELETE',
+        headers: { authorization: `Bearer ${deleteToken}` },
+      });
+      expect(deleteRes.status).toBe(200);
+
+      // Token is no longer valid (session cascaded away)
+      const followup = await req('/credentials', {
+        method: 'GET',
+        headers: { authorization: `Bearer ${deleteToken}` },
+      });
+      expect(followup.status).toBe(401);
+
+      // Username is free again
+      const checkRes = await req(`/auth/check-username/${deleteUsername}`);
+      const checkBody = await checkRes.json();
+      expect(checkBody.available).toBe(true);
+    });
+
+    it('rejects delete without auth', async () => {
+      const res = await req('/auth/account', { method: 'DELETE' });
+      expect(res.status).toBe(401);
+    });
+  });
 });

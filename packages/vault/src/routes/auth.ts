@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import crypto from 'node:crypto';
 import { hashPassword, verifyPassword, deriveKey, checkPasswordStrength } from '@byoky/core';
-import { createUser, getUserByUsername, createUserSession, deleteUserSession } from '../db/index.js';
+import { createUser, getUserByUsername, createUserSession, deleteUserSession, deleteUser } from '../db/index.js';
 import { signJwt, hashToken } from '../jwt.js';
 import { cacheKey, evictKey, wrapKey } from '../session-keys.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -107,6 +107,13 @@ auth.post('/logout', authMiddleware, async (c) => {
   const sessionId = c.get('sessionId');
   await deleteUserSession(sessionId);
   evictKey(userId);
+  return c.json({ ok: true });
+});
+
+auth.delete('/account', authMiddleware, async (c) => {
+  const userId = c.get('userId');
+  evictKey(userId);
+  await deleteUser(userId);
   return c.json({ ok: true });
 });
 

@@ -18,11 +18,10 @@ export function Settings() {
   const {
     credentials, navigate, lock,
     cloudVaultEnabled, cloudVaultUsername, cloudVaultTokenExpired, cloudVaultPendingCount,
-    disableCloudVault,
+    disableCloudVault, deleteVaultAccount, resetWallet, loading,
   } = useWalletStore();
-  const [modal, setModal] = useState<'export' | 'import' | 'cloud-vault' | 'cloud-vault-relogin' | null>(
-    cloudVaultEnabled ? null : 'cloud-vault',
-  );
+  const [modal, setModal] = useState<'export' | 'import' | 'cloud-vault' | 'cloud-vault-relogin' | null>(null);
+  const [confirm, setConfirm] = useState<'delete-account' | 'reset-wallet' | null>(null);
 
   if (modal === 'export') {
     return <ExportModal onClose={() => setModal(null)} />;
@@ -128,6 +127,35 @@ export function Settings() {
         </div>
       </div>
 
+      <div className="settings-section">
+        <h3 style={{ color: 'var(--error, #ef4444)' }}>Danger Zone</h3>
+        <div className="settings-actions" style={{ flexDirection: 'column', gap: '8px' }}>
+          {cloudVaultEnabled && (
+            <button
+              className="btn btn-secondary"
+              style={{ borderColor: 'var(--error, #ef4444)', color: 'var(--error, #ef4444)' }}
+              onClick={() => setConfirm('delete-account')}
+              disabled={loading}
+            >
+              Delete Vault Account
+            </button>
+          )}
+          <button
+            className="btn btn-secondary"
+            style={{ borderColor: 'var(--error, #ef4444)', color: 'var(--error, #ef4444)' }}
+            onClick={() => setConfirm('reset-wallet')}
+            disabled={loading}
+          >
+            Reset Wallet
+          </button>
+        </div>
+        <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
+          {cloudVaultEnabled
+            ? 'Delete account removes your vault account and all synced keys from vault.byoky.com. Reset wallet clears only this device.'
+            : 'Reset wallet clears all keys on this device. This cannot be undone.'}
+        </p>
+      </div>
+
       <button
         className="btn btn-secondary"
         style={{ marginTop: '8px' }}
@@ -136,6 +164,100 @@ export function Settings() {
         Back
       </button>
 
+      {confirm && (
+        <ConfirmDestructiveModal
+          kind={confirm}
+          cloudVaultEnabled={cloudVaultEnabled}
+          onCancel={() => setConfirm(null)}
+          onConfirm={async () => {
+            if (confirm === 'delete-account') {
+              await deleteVaultAccount();
+            } else {
+              await resetWallet();
+            }
+            setConfirm(null);
+          }}
+        />
+      )}
+
+    </div>
+  );
+}
+
+function ConfirmDestructiveModal({
+  kind, cloudVaultEnabled, onCancel, onConfirm,
+}: {
+  kind: 'delete-account' | 'reset-wallet';
+  cloudVaultEnabled: boolean;
+  onCancel: () => void;
+  onConfirm: () => void | Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  const title = kind === 'delete-account' ? 'Delete Vault Account?' : 'Reset Wallet?';
+  const description =
+    kind === 'delete-account'
+      ? 'Your vault account and all synced keys will be permanently deleted from vault.byoky.com. This device will also be reset. This cannot be undone.'
+      : cloudVaultEnabled
+      ? 'All keys on this device will be cleared. Your vault account on vault.byoky.com will NOT be deleted — use "Delete Vault Account" for that.'
+      : 'All keys on this device will be permanently deleted. This cannot be undone.';
+
+  async function handleConfirm() {
+    setBusy(true);
+    try {
+      await onConfirm();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.6)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '16px',
+        zIndex: 1000,
+      }}
+    >
+      <div
+        style={{
+          background: 'var(--bg-card, #1a1a1a)',
+          border: '1px solid var(--border, #333)',
+          borderRadius: '10px',
+          padding: '16px',
+          maxWidth: '320px',
+          width: '100%',
+        }}
+      >
+        <h3 style={{ margin: '0 0 8px', color: 'var(--error, #ef4444)', fontSize: '15px' }}>{title}</h3>
+        <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5, margin: '0 0 16px' }}>
+          {description}
+        </p>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={onCancel} disabled={busy}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn"
+            style={{
+              flex: 1,
+              background: 'var(--error, #ef4444)',
+              color: 'white',
+              border: 'none',
+            }}
+            onClick={handleConfirm}
+            disabled={busy}
+          >
+            {busy ? 'Working...' : kind === 'delete-account' ? 'Delete' : 'Reset'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
