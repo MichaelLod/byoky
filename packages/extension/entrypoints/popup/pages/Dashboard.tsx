@@ -1,5 +1,6 @@
 import { useWalletStore } from '../store';
 import { PROVIDERS, isGiftExpired, giftBudgetRemaining, giftBudgetPercent } from '@byoky/core';
+import { OfflineUpgradeBanner } from '../components/OfflineUpgradeBanner';
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -28,6 +29,7 @@ export function Dashboard() {
 
   return (
     <div>
+      <OfflineUpgradeBanner />
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <h2 className="page-title" style={{ marginBottom: 0 }}>Credentials</h2>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>

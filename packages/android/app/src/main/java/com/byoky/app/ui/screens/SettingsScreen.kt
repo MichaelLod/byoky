@@ -262,8 +262,6 @@ fun SettingsScreen(wallet: WalletStore) {
 @Composable
 fun CloudVaultSetupDialog(wallet: WalletStore, onDismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
-    var step by remember { mutableStateOf("warning") } // "warning" or "auth"
-    var understood by remember { mutableStateOf(false) }
     var isSignup by remember { mutableStateOf(true) }
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -293,40 +291,18 @@ fun CloudVaultSetupDialog(wallet: WalletStore, onDismiss: () -> Unit) {
         containerColor = BgCard,
         title = {
             Text(
-                when (step) {
-                    "warning" -> "Cloud Vault"
-                    else -> if (isSignup) "Create Vault Account" else "Login to Vault"
-                },
+                if (isSignup) "Create Vault Account" else "Login to Vault",
                 color = TextPrimary,
             )
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (step == "warning") {
-                    Text(
-                        "Cloud Vault lets websites use your credentials even when this device is offline. Your keys are sent to vault.byoky.com over an encrypted connection and stored with AES-256-GCM encryption.",
-                        color = TextSecondary,
-                        fontSize = 14.sp,
-                    )
-                    Text(
-                        "Note: your keys will be stored on a remote server.",
-                        color = TextMuted,
-                        fontSize = 13.sp,
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(
-                            checked = understood,
-                            onCheckedChange = { understood = it },
-                            colors = CheckboxDefaults.colors(checkedColor = Accent),
-                        )
-                        Text(
-                            "I understand my keys will be stored remotely",
-                            color = TextSecondary,
-                            fontSize = 13.sp,
-                        )
-                    }
-                } else {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "End-to-end encrypted with your password. We can't read your keys.",
+                    color = TextSecondary,
+                    fontSize = 12.sp,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(
                             selected = isSignup,
                             onClick = { isSignup = true; error = null },
@@ -363,43 +339,35 @@ fun CloudVaultSetupDialog(wallet: WalletStore, onDismiss: () -> Unit) {
                             }
                         } else null,
                     )
-                    OutlinedTextField(
-                        value = password,
-                        onValueChange = { password = it },
-                        label = { Text("Password") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
-                    )
-                }
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("Password") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                )
             }
         },
         confirmButton = {
-            if (step == "warning") {
-                TextButton(
-                    onClick = { step = "auth" },
-                    enabled = understood,
-                ) { Text("Continue") }
-            } else {
-                TextButton(
-                    onClick = {
-                        loading = true
-                        error = null
-                        scope.launch {
-                            try {
-                                wallet.enableCloudVault(username, password, isSignup)
-                                onDismiss()
-                            } catch (e: Exception) {
-                                error = e.message
-                            }
-                            loading = false
+            TextButton(
+                onClick = {
+                    loading = true
+                    error = null
+                    scope.launch {
+                        try {
+                            wallet.enableCloudVault(username, password, isSignup)
+                            onDismiss()
+                        } catch (e: Exception) {
+                            error = e.message
                         }
-                    },
-                    enabled = !loading && username.isNotBlank() && password.isNotBlank() &&
-                        (!isSignup || password.length >= 12) &&
-                        (!isSignup || (isUsernameValid && usernameStatus !in listOf("taken", "invalid", "checking"))),
-                ) { Text(if (loading) "Connecting..." else if (isSignup) "Sign Up" else "Login") }
-            }
+                        loading = false
+                    }
+                },
+                enabled = !loading && username.isNotBlank() && password.isNotBlank() &&
+                    (!isSignup || password.length >= 12) &&
+                    (!isSignup || (isUsernameValid && usernameStatus !in listOf("taken", "invalid", "checking"))),
+            ) { Text(if (loading) "Connecting..." else if (isSignup) "Sign Up" else "Login") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss, enabled = !loading) { Text("Cancel") }

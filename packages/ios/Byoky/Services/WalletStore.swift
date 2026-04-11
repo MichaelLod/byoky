@@ -1094,6 +1094,39 @@ final class WalletStore: ObservableObject {
         await syncPendingGroups()
     }
 
+    func vaultBootstrapSignup(username: String, password: String) async throws {
+        try createPassword(password)
+        try await enableCloudVault(username: username, password: password, isSignup: true)
+    }
+
+    func vaultBootstrapLogin(username: String, password: String) async throws {
+        try createPassword(password)
+        try await enableCloudVault(username: username, password: password, isSignup: false)
+    }
+
+    func vaultActivate(username: String, password: String) async throws {
+        try await enableCloudVault(username: username, password: password, isSignup: true)
+    }
+
+    var vaultBannerDismissedAt: Date? {
+        get {
+            let ts = UserDefaults.standard.double(forKey: "vaultBannerDismissedAt")
+            return ts > 0 ? Date(timeIntervalSince1970: ts) : nil
+        }
+        set {
+            if let d = newValue {
+                UserDefaults.standard.set(d.timeIntervalSince1970, forKey: "vaultBannerDismissedAt")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "vaultBannerDismissedAt")
+            }
+        }
+    }
+
+    func dismissVaultBanner() {
+        vaultBannerDismissedAt = Date()
+        objectWillChange.send()
+    }
+
     func disableCloudVault() async {
         if let token = vaultToken, !cloudVaultTokenExpired {
             _ = await vaultRequest(path: "/auth/logout", method: "POST", token: token)

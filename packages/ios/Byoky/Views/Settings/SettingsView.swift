@@ -306,8 +306,6 @@ struct CloudVaultSetupView: View {
     @EnvironmentObject var wallet: WalletStore
     @Environment(\.dismiss) var dismiss
 
-    @State private var step: SetupStep = .warning
-    @State private var understood = false
     @State private var isSignup = true
     @State private var username = ""
     @State private var password = ""
@@ -316,7 +314,6 @@ struct CloudVaultSetupView: View {
     @State private var usernameStatus: UsernameStatus = .idle
     @State private var checkTask: Task<Void, Never>?
 
-    enum SetupStep { case warning, auth }
     enum UsernameStatus: Equatable { case idle, checking, available, taken, invalid }
 
     private static let usernamePattern = "^[a-z0-9][a-z0-9_-]{1,28}[a-z0-9]$"
@@ -354,56 +351,14 @@ struct CloudVaultSetupView: View {
 
     var body: some View {
         NavigationStack {
-            SwiftUI.Group {
-                if step == .warning {
-                    warningView
-                } else {
-                    authView
+            authView
+                .navigationTitle("Cloud Vault")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { dismiss() }
+                    }
                 }
-            }
-            .navigationTitle("Cloud Vault")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-            }
-        }
-    }
-
-    private var warningView: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("Cloud Vault", systemImage: "cloud")
-                        .font(.headline)
-
-                    Text("Cloud Vault lets websites use your credentials even when this device is offline. Your keys are sent to vault.byoky.com over an encrypted connection and stored with AES-256-GCM encryption using a key derived from your vault password.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-
-                    Text("Note: your keys will be stored on a remote server.")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-                .padding(16)
-                .background(Color(.secondarySystemGroupedBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-
-                Toggle("I understand my keys will be stored remotely", isOn: $understood)
-                    .font(.callout)
-
-                Button {
-                    step = .auth
-                } label: {
-                    Text("Continue")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.accent)
-                .disabled(!understood)
-            }
-            .padding(24)
         }
     }
 

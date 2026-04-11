@@ -19,9 +19,20 @@ struct WalletView: View {
         NavigationStack {
             SwiftUI.Group {
                 if !hasAny {
-                    emptyState
+                    VStack {
+                        OfflineUpgradeBanner()
+                            .padding(.horizontal)
+                        emptyState
+                    }
                 } else {
                     List {
+                        if !wallet.cloudVaultEnabled {
+                            Section {
+                                OfflineUpgradeBanner()
+                                    .listRowInsets(EdgeInsets())
+                                    .listRowBackground(Color.clear)
+                            }
+                        }
                         credentialsSection
                         if !activeGifts.isEmpty {
                             giftsSection
