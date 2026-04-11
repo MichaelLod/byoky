@@ -3,20 +3,17 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 63;
 	objects = {
 
 /* Begin PBXBuildFile section */
-		103062659282229317556503 /* InstalledApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 318202839043257055831361 /* InstalledApp.swift */; };
-		954167612411969133471703 /* MarketplaceTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 139237566162993806293295 /* MarketplaceTabView.swift */; };
-		854510385110456458511102 /* InstalledAppsGrid.swift in Sources */ = {isa = PBXBuildFile; fileRef = 485395302303581323332423 /* InstalledAppsGrid.swift */; };
-		436584056867483542344126 /* AppStoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 783330071595057232112023 /* AppStoreView.swift */; };
-		108536055319540652497224 /* AppRuntimeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 513491420099025591520224 /* AppRuntimeView.swift */; };
 		00C9FE740FD03963A7D40126 /* App-BUiZUJhP.js in Resources */ = {isa = PBXBuildFile; fileRef = 2238E5CD69FCA29B0390623A /* App-BUiZUJhP.js */; };
 		00E7789627DC347BDD41E2E5 /* sidepanel-BkMmx_VB.js in Resources */ = {isa = PBXBuildFile; fileRef = EA26D6F490B8EDF5679C2148 /* sidepanel-BkMmx_VB.js */; };
 		01C40859F08D643E4BBB41AE /* RoutingResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDD23C93C263DCD747B4A451 /* RoutingResolver.swift */; };
 		08B1CDC1B03E81A3BBE759FD /* mascot.svg in Resources */ = {isa = PBXBuildFile; fileRef = DC0DEA62654413544A1EA7E8 /* mascot.svg */; };
 		100689ED1B7D1C2D9794096A /* 128.png in Resources */ = {isa = PBXBuildFile; fileRef = 985F87BA74A133D8BC27C98E /* 128.png */; };
+		103062659282229317556503 /* InstalledApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 318202839043257055831361 /* InstalledApp.swift */; };
+		108536055319540652497224 /* AppRuntimeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 513491420099025591520224 /* AppRuntimeView.swift */; };
 		138FA942DA6C2140C8979814 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00A9C75D712BA0B46E7F2642 /* Session.swift */; };
 		146415ABCD905BC7DD6E0D6F /* provider.js in Resources */ = {isa = PBXBuildFile; fileRef = E1C99C437DE8853B4A1AE051 /* provider.js */; };
 		14C99EB6E6465555E69339FB /* icon-128.png in Resources */ = {isa = PBXBuildFile; fileRef = 0AC0E9A4C958920C1E2F3B51 /* icon-128.png */; };
@@ -39,6 +36,7 @@
 		3CF13FA8D76055FF9FCED7CA /* UnlockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B641D6799174E3DFA18348D0 /* UnlockView.swift */; };
 		4023EE4BCA20BAEA2CBE0FA3 /* App-BLUjhtys.css in Resources */ = {isa = PBXBuildFile; fileRef = 6D4D9241DEA2A220843B8E50 /* App-BLUjhtys.css */; };
 		426FDFDC86B1A14E24BE30EC /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = C1A34C8CE13B080396735755 /* Main.storyboard */; };
+		436584056867483542344126 /* AppStoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 783330071595057232112023 /* AppStoreView.swift */; };
 		47B0B00BF62C491DAFC0D495 /* content.js in Resources */ = {isa = PBXBuildFile; fileRef = 60EA4054604633D1A4DD1EFB /* content.js */; };
 		491996E094E51064FAFA4268 /* WalletView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 873BB1CDCFBE3C232CBB3AEA /* WalletView.swift */; };
 		51398FDBF3E489959FCDF471 /* manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = 5D64D4BEE5EFD584B24BEBAC /* manifest.json */; };
@@ -51,6 +49,7 @@
 		7BA6B51845DFC1924B4A94E2 /* 128.png in Resources */ = {isa = PBXBuildFile; fileRef = 985F87BA74A133D8BC27C98E /* 128.png */; };
 		814715850AFB27A3F123BC63 /* background.js in Resources */ = {isa = PBXBuildFile; fileRef = 09299BEFAC748CF297377837 /* background.js */; };
 		8252A2318B69D1CDBCEAA481 /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64FBAC3C6BEC76F7FEB974CA /* KeychainService.swift */; };
+		854510385110456458511102 /* InstalledAppsGrid.swift in Sources */ = {isa = PBXBuildFile; fileRef = 485395302303581323332423 /* InstalledAppsGrid.swift */; };
 		8577BD07B91A14E78C03FEFA /* UsageParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D41E4979F0A4A1026B140EF /* UsageParser.swift */; };
 		85CBBA89610EBE33E265AF85 /* App-BLUjhtys.css in Resources */ = {isa = PBXBuildFile; fileRef = 6D4D9241DEA2A220843B8E50 /* App-BLUjhtys.css */; };
 		897EA96771A94EBFC69CB648 /* ByokySafariExtension (macOS).appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = AD49BDEC54C25469FDC97E99 /* ByokySafariExtension (macOS).appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -58,6 +57,7 @@
 		8DBCFCE1B2702B8A89917A7C /* 16.png in Resources */ = {isa = PBXBuildFile; fileRef = 8417EB973F4C7DE03887B51F /* 16.png */; };
 		9259337A0D3BACCB307D7A5F /* sidepanel-BkMmx_VB.js in Resources */ = {isa = PBXBuildFile; fileRef = EA26D6F490B8EDF5679C2148 /* sidepanel-BkMmx_VB.js */; };
 		94157241102A60C5888F4FDA /* background.js in Resources */ = {isa = PBXBuildFile; fileRef = 09299BEFAC748CF297377837 /* background.js */; };
+		954167612411969133471703 /* MarketplaceTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 139237566162993806293295 /* MarketplaceTabView.swift */; };
 		97330A144471EE383D99F769 /* mascot.svg in Resources */ = {isa = PBXBuildFile; fileRef = 1E5574BCDAA179385B325C06 /* mascot.svg */; };
 		9B12D4B89D4D436D16B4D86C /* RedeemGiftView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9287DE3DE61FB40899F6AA79 /* RedeemGiftView.swift */; };
 		9E9512AC28EA06739A48CA1F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F78BFB7A6675DC135793CDF6 /* Assets.xcassets */; };
@@ -79,6 +79,7 @@
 		CB1C89079AF94101A86166D5 /* Gift.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E36BCD2FFA43607FF65ACF1 /* Gift.swift */; };
 		CE14798EB8888E6D5AA4D6B7 /* 32.png in Resources */ = {isa = PBXBuildFile; fileRef = 43CA29F6391EE3F4FF37D482 /* 32.png */; };
 		D83D90C01974F49A95E9727E /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFCA603A5E92A878E419B12F /* OnboardingView.swift */; };
+		D7A1B2C3E4F5068798ABCDEF /* NativeBridgeHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A4B5C /* NativeBridgeHandler.swift */; };
 		D8EEB762FF7B13B7146F02FC /* RelayPairService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 952EAB8D1D82000A63C69E05 /* RelayPairService.swift */; };
 		DE6B8D49E0A63968282BA3EE /* App-BUiZUJhP.js in Resources */ = {isa = PBXBuildFile; fileRef = 2238E5CD69FCA29B0390623A /* App-BUiZUJhP.js */; };
 		DEA9478AEAC35FF19BFB415D /* PairView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39039AC240BF4D214A21B1BB /* PairView.swift */; };
@@ -138,11 +139,6 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		318202839043257055831361 /* InstalledApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstalledApp.swift; sourceTree = "<group>"; };
-		139237566162993806293295 /* MarketplaceTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketplaceTabView.swift; sourceTree = "<group>"; };
-		485395302303581323332423 /* InstalledAppsGrid.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstalledAppsGrid.swift; sourceTree = "<group>"; };
-		783330071595057232112023 /* AppStoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStoreView.swift; sourceTree = "<group>"; };
-		513491420099025591520224 /* AppRuntimeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRuntimeView.swift; sourceTree = "<group>"; };
 		00A9C75D712BA0B46E7F2642 /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
 		025A3D6E0A32412866DB3A82 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		08AA7E7BF0F6FDAE815788BF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -151,10 +147,12 @@
 		0AC0E9A4C958920C1E2F3B51 /* icon-128.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon-128.png"; sourceTree = "<group>"; };
 		0CBD55EFE40AB99127A8914B /* GiftsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GiftsView.swift; sourceTree = "<group>"; };
 		0F29592A554F62806CCC27EB /* Byoky.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Byoky.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		1E5574BCDAA179385B325C06 /* mascot.svg */ = {isa = PBXFileReference; path = mascot.svg; sourceTree = "<group>"; };
+		139237566162993806293295 /* MarketplaceTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarketplaceTabView.swift; sourceTree = "<group>"; };
+		1E5574BCDAA179385B325C06 /* mascot.svg */ = {isa = PBXFileReference; lastKnownFileType = text; path = mascot.svg; sourceTree = "<group>"; };
 		1E7CB8688EBFF715C21DBA4E /* Byoky (macOS).app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Byoky (macOS).app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		2238E5CD69FCA29B0390623A /* App-BUiZUJhP.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = "App-BUiZUJhP.js"; sourceTree = "<group>"; };
 		2E36BCD2FFA43607FF65ACF1 /* Gift.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Gift.swift; sourceTree = "<group>"; };
+		318202839043257055831361 /* InstalledApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstalledApp.swift; sourceTree = "<group>"; };
 		3460CC27A2B3D9F360016904 /* WalletStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalletStore.swift; sourceTree = "<group>"; };
 		3737A9440D94C08CC5C24E56 /* AddCredentialView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddCredentialView.swift; sourceTree = "<group>"; };
 		39039AC240BF4D214A21B1BB /* PairView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairView.swift; sourceTree = "<group>"; };
@@ -163,6 +161,8 @@
 		3F92F1285F0CC62D52543E84 /* TranslationEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslationEngine.swift; sourceTree = "<group>"; };
 		42AB93112DAA20241E4CF0DE /* ProxyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyService.swift; sourceTree = "<group>"; };
 		43CA29F6391EE3F4FF37D482 /* 32.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = 32.png; sourceTree = "<group>"; };
+		485395302303581323332423 /* InstalledAppsGrid.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstalledAppsGrid.swift; sourceTree = "<group>"; };
+		513491420099025591520224 /* AppRuntimeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRuntimeView.swift; sourceTree = "<group>"; };
 		54F9FD4B4E6C8A71978FDB71 /* mobile.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = mobile.js; sourceTree = "<group>"; };
 		5619226B06840C897C0B2516 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		57F7BF90B53E6F481C189526 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
@@ -175,22 +175,24 @@
 		6EC7AC249597267812997B80 /* ByokySafariExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = ByokySafariExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		714F4916CB5FB3073B03A86A /* popup-BkMmx_VB.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = "popup-BkMmx_VB.js"; sourceTree = "<group>"; };
 		735CB11BAAECF0D90B452E41 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		783330071595057232112023 /* AppStoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStoreView.swift; sourceTree = "<group>"; };
 		837130983F550222CC94DAB6 /* UsageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageView.swift; sourceTree = "<group>"; };
 		8417EB973F4C7DE03887B51F /* 16.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = 16.png; sourceTree = "<group>"; };
 		844E2E6F05928FA1187F4691 /* GiftRelayProxy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GiftRelayProxy.swift; sourceTree = "<group>"; };
 		873BB1CDCFBE3C232CBB3AEA /* WalletView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalletView.swift; sourceTree = "<group>"; };
 		89DFBFD38410B1E929388841 /* Credential.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Credential.swift; sourceTree = "<group>"; };
-		8B7191C659B30AFD097947B4 /* .gitkeep */ = {isa = PBXFileReference; path = .gitkeep; sourceTree = "<group>"; };
+		8B7191C659B30AFD097947B4 /* .gitkeep */ = {isa = PBXFileReference; lastKnownFileType = text; path = .gitkeep; sourceTree = "<group>"; };
 		8BD435CEEF867E4F4393E64D /* SafariExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SafariExtension.entitlements; sourceTree = "<group>"; };
 		8D41E4979F0A4A1026B140EF /* UsageParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageParser.swift; sourceTree = "<group>"; };
 		9287DE3DE61FB40899F6AA79 /* RedeemGiftView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RedeemGiftView.swift; sourceTree = "<group>"; };
 		947CA8C33A7D9713FBD7AE26 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
 		952EAB8D1D82000A63C69E05 /* RelayPairService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RelayPairService.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F60718293A4B5C /* NativeBridgeHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBridgeHandler.swift; sourceTree = "<group>"; };
 		985F87BA74A133D8BC27C98E /* 128.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = 128.png; sourceTree = "<group>"; };
 		9A81D448FC1082620143946F /* Icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = Icon.png; sourceTree = "<group>"; };
 		A9418546989D23CBC0EE88B3 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		AAAA69F936C3A13597361E8F /* popup.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = popup.html; sourceTree = "<group>"; };
-		AD49BDEC54C25469FDC97E99 /* ByokySafariExtension (macOS).appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "ByokySafariExtension (macOS).appex"; sourceTree = BUILT_PRODUCTS_DIR; };
+		AD49BDEC54C25469FDC97E99 /* ByokySafariExtension (macOS).appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; name = "ByokySafariExtension (macOS).appex"; path = ByokySafariExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		AFCA603A5E92A878E419B12F /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		B17804B334FCEF3BE7730678 /* Byoky.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Byoky.entitlements; sourceTree = "<group>"; };
 		B43E014DCAB9AF22FB314A7F /* MascotView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MascotView.swift; sourceTree = "<group>"; };
@@ -200,7 +202,7 @@
 		CB75DEEFD539F5481B40FDE4 /* CreateGiftView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateGiftView.swift; sourceTree = "<group>"; };
 		D7068BDC28BA0A572F25D021 /* SafariWebExtensionHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafariWebExtensionHandler.swift; sourceTree = "<group>"; };
 		D7D35FC06C7114F0F66FC2E8 /* Byoky-macOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "Byoky-macOS.entitlements"; sourceTree = "<group>"; };
-		DC0DEA62654413544A1EA7E8 /* mascot.svg */ = {isa = PBXFileReference; path = mascot.svg; sourceTree = "<group>"; };
+		DC0DEA62654413544A1EA7E8 /* mascot.svg */ = {isa = PBXFileReference; lastKnownFileType = text; path = mascot.svg; sourceTree = "<group>"; };
 		DDD23C93C263DCD747B4A451 /* RoutingResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutingResolver.swift; sourceTree = "<group>"; };
 		DFE5899F84197B2F2511CE0A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		E009A276D1E58F135C9704F6 /* Base */ = {isa = PBXFileReference; lastKnownFileType = text.html; name = Base; path = Base.lproj/Main.html; sourceTree = "<group>"; };
@@ -211,7 +213,7 @@
 		E73BC5475B3B3AAB9A85F440 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		EA26D6F490B8EDF5679C2148 /* sidepanel-BkMmx_VB.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = "sidepanel-BkMmx_VB.js"; sourceTree = "<group>"; };
 		EC908930D9383894DBE886A9 /* 48.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = 48.png; sourceTree = "<group>"; };
-		F0DC19C449BF3E117849DD33 /* icon.svg */ = {isa = PBXFileReference; path = icon.svg; sourceTree = "<group>"; };
+		F0DC19C449BF3E117849DD33 /* icon.svg */ = {isa = PBXFileReference; lastKnownFileType = text; path = icon.svg; sourceTree = "<group>"; };
 		F23283E953712EC1E60C89DB /* AppsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppsView.swift; sourceTree = "<group>"; };
 		F6A030A836CCE41CC0B1AE96 /* ByokyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ByokyApp.swift; sourceTree = "<group>"; };
 		F78BFB7A6675DC135793CDF6 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -235,6 +237,7 @@
 				F8E3AC629A4840595704D375 /* CryptoService.swift */,
 				844E2E6F05928FA1187F4691 /* GiftRelayProxy.swift */,
 				64FBAC3C6BEC76F7FEB974CA /* KeychainService.swift */,
+				A1B2C3D4E5F60718293A4B5C /* NativeBridgeHandler.swift */,
 				42AB93112DAA20241E4CF0DE /* ProxyService.swift */,
 				952EAB8D1D82000A63C69E05 /* RelayPairService.swift */,
 				DDD23C93C263DCD747B4A451 /* RoutingResolver.swift */,
@@ -615,7 +618,6 @@
 			);
 			mainGroup = 7299B5AFD030DC25AB5C7832;
 			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -743,6 +745,7 @@
 				8252A2318B69D1CDBCEAA481 /* KeychainService.swift in Sources */,
 				A4FAD39E6ADFF2A9EFC37F36 /* MainTabView.swift in Sources */,
 				BAAB7074EE3DAA0657C9DF80 /* MascotView.swift in Sources */,
+				D7A1B2C3E4F5068798ABCDEF /* NativeBridgeHandler.swift in Sources */,
 				D83D90C01974F49A95E9727E /* OnboardingView.swift in Sources */,
 				DEA9478AEAC35FF19BFB415D /* PairView.swift in Sources */,
 				2274751D351EAE4603D4B74A /* ProxyService.swift in Sources */,
@@ -855,6 +858,17 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = "macOS/Byoky-macOS.entitlements";
 				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = NO;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
+				ENABLE_RESOURCE_ACCESS_USB = NO;
 				INFOPLIST_FILE = macOS/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = byoky;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
@@ -1064,6 +1078,17 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = "macOS/Byoky-macOS.entitlements";
 				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = NO;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
+				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
+				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
+				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
+				ENABLE_RESOURCE_ACCESS_CONTACTS = NO;
+				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
+				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
+				ENABLE_RESOURCE_ACCESS_USB = NO;
 				INFOPLIST_FILE = macOS/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = byoky;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
