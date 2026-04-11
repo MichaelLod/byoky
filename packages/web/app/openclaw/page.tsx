@@ -37,6 +37,7 @@ export default function OpenClawTutorial() {
       <div className="container oc-container">
         <Hero />
         <FreeCallout />
+        <Overview />
         <Step
           n={1}
           title="Install the Byoky wallet"
@@ -90,6 +91,7 @@ export default function OpenClawTutorial() {
           n={2}
           title="Grab a free token gift"
           subtitle="Don't have an API key yet? Don't need one. The community shares free token gifts on the Byoky marketplace."
+          highlight
         >
           <ol className="oc-list">
             <li>
@@ -260,22 +262,6 @@ function FreeCallout() {
         <div className="oc-path-card">
           <div className="oc-path-icon" aria-hidden>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <path d="M12 6v6l4 2" />
-            </svg>
-          </div>
-          <h3>Your Claude Pro/Max subscription</h3>
-          <p>
-            Already paying for Claude Pro or Max? Connect it to Byoky with a
-            setup token and OpenClaw runs on the same subscription credits you
-            already use in <code>claude.ai</code>. <strong>No API credits, no
-            per-token billing.</strong>
-          </p>
-          <p className="oc-path-tag">Anthropic-only — uses your existing plan.</p>
-        </div>
-        <div className="oc-path-card">
-          <div className="oc-path-icon" aria-hidden>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M20 12v10H4V12" />
               <path d="M2 7h20v5H2z" />
               <path d="M12 22V7" />
@@ -294,6 +280,22 @@ function FreeCallout() {
             leaves their machine.
           </p>
           <p className="oc-path-tag">No card, no signup, no provider account.</p>
+        </div>
+        <div className="oc-path-card">
+          <div className="oc-path-icon" aria-hidden>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 6v6l4 2" />
+            </svg>
+          </div>
+          <h3>Your Claude Pro/Max subscription</h3>
+          <p>
+            Already paying for Claude Pro or Max? Connect it to Byoky with a
+            setup token and OpenClaw runs on the same subscription credits you
+            already use in <code>claude.ai</code>. <strong>No API credits, no
+            per-token billing.</strong>
+          </p>
+          <p className="oc-path-tag">Anthropic-only — uses your existing plan.</p>
         </div>
       </div>
     </div>
@@ -460,21 +462,21 @@ function Code({ children }: { children: string }) {
 
 const styles = `
 .oc-page {
-  --oc-bg-card: var(--bg-card);
-  --oc-bg-elevated: var(--bg-elevated);
-  --oc-border: var(--border);
-  --oc-border-strong: var(--border-hover);
+  --oc-bg-card: #0d0d1a;
+  --oc-bg-elevated: #14142a;
+  --oc-border: #1a1a34;
+  --oc-border-strong: #2a2a50;
   color: var(--text);
 }
 
 .oc-container {
   max-width: 820px;
-  padding-top: 40px;
-  padding-bottom: 60px;
+  padding-top: 120px;
+  padding-bottom: 96px;
 }
 
 /* ── Hero ── */
-.oc-hero { margin-bottom: 32px; }
+.oc-hero { margin-bottom: 56px; }
 .oc-eyebrow {
   display: inline-block;
   font-size: 12px;
@@ -482,8 +484,8 @@ const styles = `
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--teal);
-  background: rgba(255, 79, 0, 0.08);
-  border: 1px solid rgba(255, 79, 0, 0.25);
+  background: rgba(14, 165, 233, 0.08);
+  border: 1px solid rgba(14, 165, 233, 0.25);
   padding: 6px 12px;
   border-radius: 999px;
   margin-bottom: 22px;
@@ -497,7 +499,7 @@ const styles = `
 }
 .oc-hero-sub-line { color: var(--text); }
 .oc-grad {
-  background: linear-gradient(90deg, var(--teal), var(--teal));
+  background: linear-gradient(90deg, var(--teal-light), var(--teal));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -513,7 +515,7 @@ const styles = `
 
 /* ── Two free paths ── */
 .oc-paths {
-  margin-bottom: 36px;
+  margin-bottom: 64px;
 }
 .oc-paths-heading {
   font-size: 12px;
@@ -533,7 +535,7 @@ const styles = `
   padding: 22px 22px 18px;
   border-radius: 14px;
   background: linear-gradient(180deg, rgba(14,165,233,0.08), rgba(14,165,233,0.02));
-  border: 1px solid rgba(255, 79, 0, 0.28);
+  border: 1px solid rgba(14, 165, 233, 0.28);
   display: flex;
   flex-direction: column;
 }
@@ -553,10 +555,10 @@ const styles = `
 .oc-path-card code {
   font-family: var(--font-mono), monospace;
   font-size: 12px;
-  background: #1a1a2e;
-  padding: 2px 7px;
-  border-radius: 5px;
-  color: #e2e2ec;
+  background: var(--oc-bg-elevated);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--teal-light);
 }
 .oc-path-icon {
   width: 34px;
@@ -565,8 +567,8 @@ const styles = `
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 79, 0, 0.18);
-  color: var(--teal);
+  background: rgba(14, 165, 233, 0.18);
+  color: var(--teal-light);
   margin-bottom: 14px;
 }
 .oc-path-tag {
@@ -582,14 +584,14 @@ const styles = `
   padding: 18px 20px 14px;
   border: 1px dashed var(--oc-border-strong);
   border-radius: 12px;
-  background: rgba(255, 79, 0, 0.025);
+  background: rgba(14, 165, 233, 0.025);
 }
 .oc-sub-card-head {
   font-size: 13px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--teal);
+  color: var(--teal-light);
   margin-bottom: 10px;
 }
 .oc-sub-card p {
@@ -641,7 +643,7 @@ const styles = `
 
 /* ── Steps ── */
 .oc-step {
-  margin-bottom: 28px;
+  margin-bottom: 48px;
   padding: 28px 28px 24px;
   border: 1px solid var(--oc-border);
   border-radius: 16px;
@@ -649,7 +651,7 @@ const styles = `
   scroll-margin-top: 100px;
 }
 .oc-step-highlight {
-  border-color: rgba(255, 79, 0, 0.4);
+  border-color: rgba(14, 165, 233, 0.4);
   background: linear-gradient(180deg, rgba(14,165,233,0.06), var(--oc-bg-card) 60%);
 }
 .oc-step-head {
@@ -668,7 +670,7 @@ const styles = `
   justify-content: center;
   background: var(--oc-bg-elevated);
   border: 1px solid var(--oc-border-strong);
-  color: var(--text);
+  color: var(--teal-light);
   font-weight: 700;
   font-size: 15px;
   font-family: var(--font-mono), monospace;
@@ -677,7 +679,7 @@ const styles = `
   background: var(--teal);
   border-color: var(--teal);
   color: #001018;
-  box-shadow: 0 0 24px rgba(255, 79, 0, 0.35);
+  box-shadow: 0 0 24px rgba(14, 165, 233, 0.35);
 }
 .oc-step-head h2 {
   font-size: 21px;
@@ -697,10 +699,10 @@ const styles = `
 .oc-step-body code {
   font-family: var(--font-mono), monospace;
   font-size: 13px;
-  background: #1a1a2e;
-  padding: 2px 7px;
-  border-radius: 5px;
-  color: #e2e2ec;
+  background: var(--oc-bg-elevated);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--teal-light);
 }
 
 /* ── Install card grid (step 1) ── */
@@ -745,7 +747,7 @@ const styles = `
   line-height: 1.6;
 }
 .oc-link {
-  color: var(--teal);
+  color: var(--teal-light);
   text-decoration: underline;
   text-decoration-color: var(--oc-border-strong);
   text-underline-offset: 3px;
@@ -773,23 +775,23 @@ const styles = `
 
 /* ── Code blocks ── */
 .oc-code {
-  background: #1a1a2e;
+  background: #07070f;
   border: 1px solid var(--oc-border);
   border-radius: 10px;
   padding: 16px 18px;
   font-family: var(--font-mono), monospace;
   font-size: 13px;
   line-height: 1.7;
-  color: #e2e2ec;
+  color: var(--text);
   overflow-x: auto;
   margin: 14px 0;
 }
-.oc-code code { background: none; padding: 0; color: #e2e2ec; font-size: inherit; }
+.oc-code code { background: none; padding: 0; color: inherit; font-size: inherit; }
 
 /* ── Generic section ── */
 .oc-section {
-  margin-top: 40px;
-  margin-bottom: 16px;
+  margin-top: 64px;
+  margin-bottom: 24px;
 }
 .oc-section h2 {
   font-size: 24px;
@@ -806,10 +808,10 @@ const styles = `
 .oc-section code {
   font-family: var(--font-mono), monospace;
   font-size: 13px;
-  background: #1a1a2e;
-  padding: 2px 7px;
-  border-radius: 5px;
-  color: #e2e2ec;
+  background: var(--oc-bg-elevated);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--teal-light);
 }
 .oc-section .oc-list { color: var(--text-secondary); }
 
@@ -844,10 +846,10 @@ const styles = `
 }
 .oc-table-row code {
   font-family: var(--font-mono), monospace;
-  color: #e2e2ec;
-  background: #1a1a2e;
-  padding: 2px 7px;
-  border-radius: 5px;
+  color: var(--teal-light);
+  background: var(--oc-bg-elevated);
+  padding: 2px 6px;
+  border-radius: 4px;
   font-size: 12px;
   width: fit-content;
 }
@@ -855,7 +857,7 @@ const styles = `
 
 /* ── Closing ── */
 .oc-closing {
-  margin-top: 40px;
+  margin-top: 72px;
   padding: 36px 32px;
   border: 1px solid var(--oc-border);
   border-radius: 16px;
@@ -878,7 +880,7 @@ const styles = `
 
 /* ── Responsive ── */
 @media (max-width: 720px) {
-  .oc-container { padding-top: 32px; padding-bottom: 40px; }
+  .oc-container { padding-top: 100px; padding-bottom: 64px; }
   .oc-hero h1 { font-size: 32px; }
   .oc-lede { font-size: 16px; }
   .oc-overview-grid,
