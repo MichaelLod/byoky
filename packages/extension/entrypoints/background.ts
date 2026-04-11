@@ -1922,6 +1922,20 @@ export default defineBackground(() => {
         return { success: true };
       }
 
+      case 'cloudVaultDeleteAccount': {
+        const state = await getCloudVaultState();
+        if (!state.enabled || !state.token || state.tokenExpired) {
+          return { error: 'No active vault session' };
+        }
+        const result = await vaultFetch('/auth/account', 'DELETE', undefined, state.token);
+        if (!result.ok) {
+          const err = result.data.error as Record<string, string> | undefined;
+          return { error: err?.message ?? 'Failed to delete vault account' };
+        }
+        await clearCloudVaultState();
+        return { success: true };
+      }
+
       case 'cloudVaultStatus': {
         const state = await getCloudVaultState();
         let pendingCount = 0;

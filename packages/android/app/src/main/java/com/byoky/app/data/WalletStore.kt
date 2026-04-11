@@ -1527,6 +1527,17 @@ class WalletStore(context: Context) {
             .apply()
     }
 
+    suspend fun deleteVaultAccount() {
+        val token = vaultToken ?: throw IllegalStateException("No active vault session")
+        if (_cloudVaultTokenExpired.value) throw IllegalStateException("Vault session expired")
+        val (ok, _, data) = vaultRequest("/auth/account", "DELETE", token = token)
+        if (!ok) {
+            val err = data.optJSONObject("error")
+            throw IllegalStateException(err?.optString("message") ?: "Failed to delete vault account")
+        }
+        resetWallet()
+    }
+
     suspend fun reloginCloudVault(password: String) {
         val username = _cloudVaultUsername.value ?: throw IllegalStateException("No vault account configured")
         val body = JSONObject().put("username", username).put("password", password)

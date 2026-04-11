@@ -97,6 +97,7 @@ interface WalletState {
   setActiveApp: (app: InstalledApp) => void;
   enableCloudVault: (username: string, password: string, isSignup: boolean) => Promise<void>;
   disableCloudVault: () => Promise<void>;
+  deleteVaultAccount: () => Promise<void>;
   reloginCloudVault: (password: string) => Promise<void>;
   resetWallet: () => Promise<void>;
   refreshData: () => Promise<void>;
@@ -554,6 +555,18 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     set({ cloudVaultEnabled: false, cloudVaultUsername: null, cloudVaultTokenExpired: false, cloudVaultPendingCount: 0 });
   },
 
+  deleteVaultAccount: async () => {
+    set({ loading: true, error: null });
+    try {
+      const res = await sendInternal('cloudVaultDeleteAccount');
+      if (res.error) throw new Error(res.error as string);
+      await get().resetWallet();
+      set({ loading: false });
+    } catch (e) {
+      set({ error: (e as Error).message, loading: false });
+    }
+  },
+
   reloginCloudVault: async (password: string) => {
     set({ loading: true, error: null });
     try {
@@ -588,7 +601,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       cloudVaultPendingCount: 0,
       installedApps: [],
       activeApp: null,
-      currentPage: 'setup',
+      currentPage: 'welcome',
       error: null,
     });
   },
