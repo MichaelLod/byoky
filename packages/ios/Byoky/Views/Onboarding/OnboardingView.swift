@@ -1,11 +1,17 @@
 import SwiftUI
 
+enum OnboardingStep {
+    case welcome
+    case vaultAuth
+    case offlineSetup
+}
+
 struct OnboardingView: View {
     @EnvironmentObject var wallet: WalletStore
     @State private var password = ""
     @State private var confirmPassword = ""
     @State private var error: String?
-    @State private var step = 0
+    @State private var step: OnboardingStep = .welcome
 
     var body: some View {
         ZStack {
@@ -14,23 +20,16 @@ struct OnboardingView: View {
             VStack(spacing: 0) {
                 Spacer()
 
-                if step == 0 {
+                switch step {
+                case .welcome:
                     welcomeStep
-                } else {
+                case .vaultAuth:
+                    VaultAuthView(onBack: { withAnimation { step = .welcome } })
+                case .offlineSetup:
                     passwordStep
                 }
 
                 Spacer()
-
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(step == 0 ? Theme.accent : Theme.textMuted)
-                        .frame(width: 8, height: 8)
-                    Circle()
-                        .fill(step == 1 ? Theme.accent : Theme.textMuted)
-                        .frame(width: 8, height: 8)
-                }
-                .padding(.bottom, 32)
             }
             .padding(24)
         }
@@ -45,22 +44,14 @@ struct OnboardingView: View {
                 .font(.system(size: 32, weight: .bold))
                 .foregroundStyle(Theme.textPrimary)
 
-            Text("Your AI API keys, encrypted and always with you. Apps connect through the wallet — keys never leave your device.")
+            Text("Your encrypted wallet for AI API keys. Sync across devices, end-to-end encrypted.")
                 .font(.body)
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 16)
 
-            VStack(alignment: .leading, spacing: 12) {
-                featureRow(icon: "lock.shield", text: "AES-256-GCM encryption with Keychain")
-                featureRow(icon: "eye.slash", text: "Keys never exposed to apps")
-                featureRow(icon: "safari", text: "Works with any website via Safari extension")
-                featureRow(icon: "antenna.radiowaves.left.and.right", text: "Bridge proxy for OAuth and remote tools")
-            }
-            .padding(.top, 8)
-
             Button {
-                withAnimation { step = 1 }
+                withAnimation { step = .vaultAuth }
             } label: {
                 Text("Get Started")
                     .font(.headline)
@@ -71,6 +62,14 @@ struct OnboardingView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             }
             .padding(.top, 8)
+
+            Button {
+                withAnimation { step = .offlineSetup }
+            } label: {
+                Text("Continue in offline mode")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.textMuted)
+            }
         }
     }
 
@@ -140,7 +139,7 @@ struct OnboardingView: View {
             .disabled(!isValid)
 
             Button {
-                withAnimation { step = 0 }
+                withAnimation { step = .welcome }
             } label: {
                 Text("Back")
                     .foregroundStyle(Theme.textSecondary)
@@ -159,21 +158,9 @@ struct OnboardingView: View {
             self.error = error.localizedDescription
         }
     }
-
-    private func featureRow(icon: String, text: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 16))
-                .foregroundStyle(Theme.accent)
-                .frame(width: 24)
-            Text(text)
-                .font(.callout)
-                .foregroundStyle(Theme.textSecondary)
-        }
-    }
 }
 
-private enum PasswordQuality {
+enum PasswordQuality {
     case tooShort
     case weak(String)
     case fair

@@ -389,8 +389,6 @@ function ImportModal({ onClose }: { onClose: () => void }) {
 
 function CloudVaultModal({ onClose }: { onClose: () => void }) {
   const { enableCloudVault, loading, error, clearError } = useWalletStore();
-  const [step, setStep] = useState<'warning' | 'auth'>('warning');
-  const [understood, setUnderstood] = useState(false);
   const [isSignup, setIsSignup] = useState(true);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -446,139 +444,95 @@ function CloudVaultModal({ onClose }: { onClose: () => void }) {
   return (
     <div>
       <h2 className="page-title">
-        {step === 'warning' ? 'Cloud Vault' : isSignup ? 'Create Vault Account' : 'Login to Vault'}
+        {isSignup ? 'Create Vault Account' : 'Login to Vault'}
       </h2>
 
-      {step === 'warning' ? (
-        <>
-          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: '0 0 12px' }}>
-            Cloud Vault lets websites use your credentials even when this device
-            is offline. Your keys are sent to vault.byoky.com over an encrypted
-            connection and stored with AES-256-GCM encryption using a key
-            derived from your vault password.
-          </p>
-          <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '0 0 12px' }}>
-            Note: your keys will be stored on a remote server.
-          </p>
+      <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '0 0 12px', lineHeight: 1.5 }}>
+        End-to-end encrypted with your password. We can't read your keys.
+      </p>
 
-          <label
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              fontSize: '12px',
-              color: 'var(--text-secondary)',
-              cursor: 'pointer',
-            }}
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+        <button
+          type="button"
+          className={`btn ${isSignup ? 'btn-primary' : 'btn-secondary'}`}
+          style={{ flex: 1, fontSize: '12px' }}
+          onClick={() => { setIsSignup(true); setUsernameStatus('idle'); clearError(); }}
+        >
+          Sign Up
+        </button>
+        <button
+          type="button"
+          className={`btn ${!isSignup ? 'btn-primary' : 'btn-secondary'}`}
+          style={{ flex: 1, fontSize: '12px' }}
+          onClick={() => { setIsSignup(false); setUsernameStatus('idle'); clearError(); }}
+        >
+          Login
+        </button>
+      </div>
+
+      {error && <div className="error">{error}</div>}
+
+      <form onSubmit={handleSubmit}>
+        <div className="form-group">
+          <label htmlFor="vault-username">Username</label>
+          <input
+            id="vault-username"
+            type="text"
+            value={username}
+            onChange={(e) => handleUsernameChange(e.target.value)}
+            placeholder="Choose a username"
+            autoComplete="username"
+            autoFocus
+          />
+          {isSignup && username.length >= 3 && (
+            <p style={{
+              fontSize: '11px',
+              margin: '4px 0 0',
+              color: usernameStatus === 'available' ? 'var(--success, #4caf50)'
+                : usernameStatus === 'taken' ? 'var(--error, #ef4444)'
+                : usernameStatus === 'invalid' ? 'var(--error, #ef4444)'
+                : 'var(--text-muted)',
+            }}>
+              {usernameStatus === 'checking' && 'Checking availability...'}
+              {usernameStatus === 'available' && 'Username is available'}
+              {usernameStatus === 'taken' && 'Username is already taken'}
+              {usernameStatus === 'invalid' && 'Letters, numbers, hyphens, underscores only (3-30 chars)'}
+            </p>
+          )}
+        </div>
+
+        <div className="form-group">
+          <label htmlFor="vault-pw">Password</label>
+          <input
+            id="vault-pw"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder={isSignup ? 'At least 12 characters' : 'Your vault password'}
+          />
+          {isSignup && password.length > 0 && <PasswordMeter strength={strength} />}
+        </div>
+
+        <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
+          <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="btn btn-primary"
+            style={{ flex: 1 }}
+            disabled={
+              loading ||
+              !username ||
+              !password ||
+              (isSignup && (password.length < MIN_PASSWORD_LENGTH || strength.score < 2)) ||
+              (isSignup && (usernameStatus === 'taken' || usernameStatus === 'invalid'))
+            }
           >
-            <input
-              type="checkbox"
-              checked={understood}
-              onChange={(e) => setUnderstood(e.target.checked)}
-            />
-            I understand my keys will be stored remotely
-          </label>
-
-          <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
-            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={onClose}>
-              Cancel
-            </button>
-            <button
-              className="btn btn-primary"
-              style={{ flex: 1 }}
-              disabled={!understood}
-              onClick={() => setStep('auth')}
-            >
-              Continue
-            </button>
-          </div>
-        </>
-      ) : (
-        <>
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-            <button
-              type="button"
-              className={`btn ${isSignup ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ flex: 1, fontSize: '12px' }}
-              onClick={() => { setIsSignup(true); setUsernameStatus('idle'); clearError(); }}
-            >
-              Sign Up
-            </button>
-            <button
-              type="button"
-              className={`btn ${!isSignup ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ flex: 1, fontSize: '12px' }}
-              onClick={() => { setIsSignup(false); setUsernameStatus('idle'); clearError(); }}
-            >
-              Login
-            </button>
-          </div>
-
-          {error && <div className="error">{error}</div>}
-
-          <form onSubmit={handleSubmit}>
-            <div className="form-group">
-              <label htmlFor="vault-username">Username</label>
-              <input
-                id="vault-username"
-                type="text"
-                value={username}
-                onChange={(e) => handleUsernameChange(e.target.value)}
-                placeholder="Choose a username"
-                autoComplete="username"
-                autoFocus
-              />
-              {isSignup && username.length >= 3 && (
-                <p style={{
-                  fontSize: '11px',
-                  margin: '4px 0 0',
-                  color: usernameStatus === 'available' ? 'var(--success, #4caf50)'
-                    : usernameStatus === 'taken' ? 'var(--error, #ef4444)'
-                    : usernameStatus === 'invalid' ? 'var(--error, #ef4444)'
-                    : 'var(--text-muted)',
-                }}>
-                  {usernameStatus === 'checking' && 'Checking availability...'}
-                  {usernameStatus === 'available' && 'Username is available'}
-                  {usernameStatus === 'taken' && 'Username is already taken'}
-                  {usernameStatus === 'invalid' && 'Letters, numbers, hyphens, underscores only (3-30 chars)'}
-                </p>
-              )}
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="vault-pw">Password</label>
-              <input
-                id="vault-pw"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder={isSignup ? 'At least 12 characters' : 'Your vault password'}
-              />
-              {isSignup && password.length > 0 && <PasswordMeter strength={strength} />}
-            </div>
-
-            <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
-              <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={onClose}>
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="btn btn-primary"
-                style={{ flex: 1 }}
-                disabled={
-                  loading ||
-                  !username ||
-                  !password ||
-                  (isSignup && (password.length < MIN_PASSWORD_LENGTH || strength.score < 2)) ||
-                  (isSignup && (usernameStatus === 'taken' || usernameStatus === 'invalid'))
-                }
-              >
-                {loading ? 'Connecting...' : isSignup ? 'Sign Up' : 'Login'}
-              </button>
-            </div>
-          </form>
-        </>
-      )}
+            {loading ? 'Connecting...' : isSignup ? 'Sign Up' : 'Login'}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
