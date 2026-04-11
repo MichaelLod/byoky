@@ -59,6 +59,7 @@ export const groups = pgTable('groups', {
   name: text('name').notNull(),
   providerId: text('provider_id').notNull(),
   credentialId: text('credential_id'),
+  giftId: text('gift_id'),
   model: text('model'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 }, (t) => [

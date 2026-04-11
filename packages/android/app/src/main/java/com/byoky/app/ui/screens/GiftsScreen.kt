@@ -31,11 +31,12 @@ fun GiftsScreen(
     val giftedCredentials by wallet.giftedCredentials.collectAsState()
 
     val activeGifts = remember(gifts) { gifts.filter { it.active && !isGiftExpired(it.expiresAt) } }
-    val activeReceived = remember(giftedCredentials) { giftedCredentials.filter { !isGiftExpired(it.expiresAt) } }
+    // Active received gifts live on the Wallet screen inline with credentials.
+    // Only expired/revoked received gifts stay here so users can prune them.
     val inactiveGifts = remember(gifts) { gifts.filter { !it.active || isGiftExpired(it.expiresAt) } }
     val expiredReceived = remember(giftedCredentials) { giftedCredentials.filter { isGiftExpired(it.expiresAt) } }
 
-    val isEmpty = gifts.isEmpty() && giftedCredentials.isEmpty()
+    val isEmpty = gifts.isEmpty() && expiredReceived.isEmpty()
 
     Scaffold(
         topBar = {
@@ -96,16 +97,6 @@ fun GiftsScreen(
                     }
                     items(activeGifts, key = { it.id }) { gift ->
                         SentGiftCard(gift, wallet)
-                    }
-                }
-
-                if (activeReceived.isNotEmpty()) {
-                    item {
-                        Spacer(Modifier.height(8.dp))
-                        Text("Received", fontWeight = FontWeight.SemiBold, color = TextPrimary)
-                    }
-                    items(activeReceived, key = { it.id }) { gc ->
-                        ReceivedGiftCard(gc, wallet = wallet) { wallet.removeGiftedCredential(gc.id) }
                     }
                 }
 

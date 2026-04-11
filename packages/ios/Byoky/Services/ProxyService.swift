@@ -728,6 +728,19 @@ actor ProxyServer {
         let prefs = await MainActor.run { wallet.giftPreferences }
         let giftedCreds = await MainActor.run { wallet.giftedCredentials }
         let ownCred = await MainActor.run { wallet.credentials.first { $0.providerId == providerId } }
+        let group = await MainActor.run { wallet.groupForOrigin("bridge") }
+
+        // A group pinned to a specific gift for this provider wins over every
+        // other source — owned creds, preferences, unpinned gifts. The gift's
+        // own relay carries the request. Falls through if the pinned gift is
+        // expired, exhausted, or gone.
+        if let group, group.providerId == providerId, let pinnedGiftId = group.giftId,
+           let gc = giftedCreds.first(where: {
+               $0.giftId == pinnedGiftId
+               && !isGiftedCredentialExpired($0) && $0.usedTokens < $0.maxTokens
+           }) {
+            return .gift(gc)
+        }
 
         if let preferredGiftId = prefs[providerId],
            let gc = giftedCreds.first(where: {

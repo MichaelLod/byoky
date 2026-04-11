@@ -208,6 +208,13 @@ data class Group(
     val name: String,
     val providerId: String,
     val credentialId: String? = null,
+    /**
+     * Optional pin to a received gift (matches `GiftedCredential.giftId`).
+     * Mutually exclusive with `credentialId` — setting one clears the other.
+     * When set, the routing resolver short-circuits to the gift and sends
+     * the request through that gift's relay instead of using an owned key.
+     */
+    val giftId: String? = null,
     val model: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
 ) {
@@ -217,6 +224,7 @@ data class Group(
             name = "Default",
             providerId = providerId,
             credentialId = credentialId,
+            giftId = null,
             model = null,
         )
     }

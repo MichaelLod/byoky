@@ -1024,27 +1024,36 @@ export default defineBackground(() => {
           ? credentials.find((c) => c.id === group.credentialId)
           : undefined;
 
+      // If the group pins a received gift for this provider, it overrides
+      // both credential lookup and translation routing — the gift carries
+      // its own auth + relay and the app talks to the sender's key.
+      const groupPinnedGift =
+        group && group.providerId === req.id && group.giftId
+          ? giftedCreds.find((g) => g.giftId === group.giftId && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens)
+          : undefined;
+
       // Cross-family routing: the group's bound provider differs from what
       // the app asked for, but both providers are in known translation
       // families. Route the credential lookup to the destination family and
       // record translation metadata so the proxy handler knows to translate.
-      const crossRoute = resolveCrossFamilyRoute(group, req.id, credentials);
+      const crossRoute = groupPinnedGift ? undefined : resolveCrossFamilyRoute(group, req.id, credentials);
 
       // Same-family swap: the group's bound provider differs from what the
       // app asked for, and both providers are in the SAME family (identical
       // wire format). No translation needed — just URL rewrite + credential
       // swap + optional model override. Only consulted when cross-family
       // routing doesn't apply, so the two are mutually exclusive.
-      const swapRoute = !crossRoute
+      const swapRoute = !crossRoute && !groupPinnedGift
         ? resolveSameFamilySwapRoute(group, req.id, credentials)
         : undefined;
 
       const cred = groupPinnedCred ?? crossRoute?.cred ?? swapRoute?.cred ?? credentials.find((c) => c.providerId === req.id);
-      const gc = giftedCreds.find((g) => g.providerId === req.id && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens);
-      // Group pin wins over gift preference. Cross-family routing and
-      // same-family swap also win over gifts. Otherwise prefer gift if user
-      // explicitly chose it, else prefer own key.
-      const preferGift = !groupPinnedCred && !crossRoute && !swapRoute && gc && giftPrefs[req.id] === gc.giftId;
+      const gc = groupPinnedGift ?? giftedCreds.find((g) => g.providerId === req.id && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens);
+      // Group gift pin wins over everything. Otherwise group credential pin
+      // wins over gift preference. Cross-family routing and same-family
+      // swap also win over gifts. Otherwise prefer gift if user explicitly
+      // chose it, else prefer own key.
+      const preferGift = !!groupPinnedGift || (!groupPinnedCred && !crossRoute && !swapRoute && gc && giftPrefs[req.id] === gc.giftId);
       const useGift = preferGift || (!cred && gc);
       providerMap[req.id] = {
         available: !!(cred || gc),
@@ -1655,6 +1664,21 @@ export default defineBackground(() => {
         return { giftedCredentials: (data.giftedCredentials ?? []) as GiftedCredential[] };
       }
 
+      case 'probeGiftPeers': {
+        // Open short WebSockets to each non-expired gift's relay, auth as
+        // recipient, and read peerOnline from relay:auth:result. Used by the
+        // popup to show an online/offline dot next to each received gift.
+        // Probes run in parallel with a 5s cap each so a dead relay doesn't
+        // block the rest.
+        const data = await browser.storage.local.get('giftedCredentials');
+        const giftedCreds = (data.giftedCredentials ?? []) as GiftedCredential[];
+        const active = giftedCreds.filter((gc) => gc.expiresAt > Date.now() && gc.usedTokens < gc.maxTokens);
+        const results = await Promise.all(active.map((gc) => probeGiftPeerOnline(gc)));
+        const online: Record<string, boolean> = {};
+        active.forEach((gc, i) => { online[gc.giftId] = results[i]; });
+        return { online };
+      }
+
       case 'removeGiftedCredential': {
         const { id } = message.payload as { id: string };
         const data = await browser.storage.local.get('giftedCredentials');
@@ -1670,6 +1694,18 @@ export default defineBackground(() => {
             delete prefs[removed.providerId];
             await browser.storage.local.set({ giftPreferences: prefs });
           }
+          // Unpin any group that was bound to this gift — avoids a dangling
+          // reference that the session resolver would silently fall through.
+          const localGroups = await getGroups();
+          let groupsChanged = false;
+          for (const g of localGroups) {
+            if (g.giftId === removed.giftId) {
+              g.giftId = undefined;
+              groupsChanged = true;
+              void fireVaultGroupSave(g);
+            }
+          }
+          if (groupsChanged) await setGroups(localGroups);
         }
         refreshSessionProviders();
         return { success: true };
@@ -1702,7 +1738,7 @@ export default defineBackground(() => {
 
       case 'createGroup': {
         const result = await createGroup(message.payload as {
-          name: string; providerId: string; credentialId?: string; model?: string;
+          name: string; providerId: string; credentialId?: string; giftId?: string; model?: string;
         });
         if (result.error) return { error: result.error };
         return { group: result.group };
@@ -1711,7 +1747,7 @@ export default defineBackground(() => {
       case 'updateGroup': {
         const { id, patch } = message.payload as {
           id: string;
-          patch: { name?: string; providerId?: string; credentialId?: string | null; model?: string | null };
+          patch: { name?: string; providerId?: string; credentialId?: string | null; giftId?: string | null; model?: string | null };
         };
         const result = await updateGroup(id, patch);
         if (result.error) return { error: result.error };
@@ -2083,6 +2119,72 @@ export default defineBackground(() => {
   }
 
   // --- Gift relay proxy (recipient side) ---
+
+  /**
+   * Briefly connects to a received gift's relay to check whether the sender
+   * peer is currently online. Returns true/false; treats any error or
+   * timeout as offline. Intentionally keeps the connection short — the
+   * relay reports `peerOnline` in `relay:auth:result`, so we can close as
+   * soon as we read that field.
+   */
+  async function probeGiftPeerOnline(gc: GiftedCredential): Promise<boolean> {
+    try {
+      const parsed = new URL(gc.relayUrl);
+      const isSecure = parsed.protocol === 'wss:';
+      const isLocalWs = parsed.protocol === 'ws:' &&
+        (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.hostname === '[::1]');
+      if (!isSecure && !isLocalWs) return false;
+    } catch {
+      return false;
+    }
+
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+      const done = (online: boolean) => {
+        if (settled) return;
+        settled = true;
+        try { ws.close(); } catch { /* already closed */ }
+        clearTimeout(timer);
+        resolve(online);
+      };
+      const timer = setTimeout(() => done(false), 5_000);
+
+      let ws: WebSocket;
+      try {
+        ws = new WebSocket(gc.relayUrl);
+      } catch {
+        done(false);
+        return;
+      }
+
+      ws.onopen = () => {
+        try {
+          ws.send(JSON.stringify({
+            type: 'relay:auth',
+            roomId: gc.giftId,
+            authToken: gc.authToken,
+            role: 'recipient',
+          }));
+        } catch {
+          done(false);
+        }
+      };
+      ws.onmessage = (event) => {
+        try {
+          const raw = typeof event.data === 'string' ? event.data : '';
+          if (raw.length > 65_536) return;
+          const data = JSON.parse(raw);
+          if (data.type === 'relay:auth:result') {
+            done(data.success === true && data.peerOnline === true);
+          }
+        } catch {
+          // Ignore parse errors — timeout will resolve false
+        }
+      };
+      ws.onerror = () => done(false);
+      ws.onclose = () => done(false);
+    });
+  }
 
   async function proxyViaGiftRelay(
     responsePort: Runtime.Port,
@@ -3230,13 +3332,17 @@ export default defineBackground(() => {
           group && group.providerId === providerId && group.credentialId
             ? credentials.find(c => c.id === group.credentialId)
             : undefined;
-        const crossRoute = resolveCrossFamilyRoute(group, providerId, credentials);
-        const swapRoute = !crossRoute
+        const groupPinnedGift =
+          group && group.providerId === providerId && group.giftId
+            ? giftedCreds.find(g => g.giftId === group.giftId && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens)
+            : undefined;
+        const crossRoute = groupPinnedGift ? undefined : resolveCrossFamilyRoute(group, providerId, credentials);
+        const swapRoute = !crossRoute && !groupPinnedGift
           ? resolveSameFamilySwapRoute(group, providerId, credentials)
           : undefined;
         const cred = groupPinnedCred ?? crossRoute?.cred ?? swapRoute?.cred ?? credentials.find(c => c.providerId === providerId);
-        const gc = giftedCreds.find(g => g.providerId === providerId && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens);
-        const preferGift = !groupPinnedCred && !crossRoute && !swapRoute && gc && giftPrefs[providerId] === gc.giftId;
+        const gc = groupPinnedGift ?? giftedCreds.find(g => g.providerId === providerId && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens);
+        const preferGift = !!groupPinnedGift || (!groupPinnedCred && !crossRoute && !swapRoute && gc && giftPrefs[providerId] === gc.giftId);
         const useGift = preferGift || (!cred && gc);
         providerMap[providerId] = { available: !!(cred || gc), authMethod: useGift ? 'api_key' : (cred?.authMethod ?? 'api_key'), ...(useGift ? { gift: true } : {}) };
         if (useGift && gc) {
@@ -3381,16 +3487,27 @@ export default defineBackground(() => {
     name: string;
     providerId: string;
     credentialId?: string;
+    giftId?: string;
     model?: string;
   }): Promise<{ group?: Group; error?: string }> {
     const name = input.name?.trim();
     if (!name || name.length > 200) return { error: 'Group name must be 1-200 characters' };
     if (!PROVIDERS[input.providerId]) return { error: 'Invalid provider' };
+    if (input.credentialId && input.giftId) {
+      return { error: 'Credential and gift are mutually exclusive' };
+    }
     if (input.credentialId) {
       const creds = await getStoredCredentials();
       const cred = creds.find((c) => c.id === input.credentialId);
       if (!cred) return { error: 'Credential not found' };
       if (cred.providerId !== input.providerId) return { error: 'Credential does not match provider' };
+    }
+    if (input.giftId) {
+      const gcData = await browser.storage.local.get('giftedCredentials');
+      const giftedCreds = (gcData.giftedCredentials ?? []) as GiftedCredential[];
+      const gc = giftedCreds.find((g) => g.giftId === input.giftId);
+      if (!gc) return { error: 'Gift not found' };
+      if (gc.providerId !== input.providerId) return { error: 'Gift does not match provider' };
     }
     const groups = await getGroups();
     if (groups.some((g) => g.name.toLowerCase() === name.toLowerCase())) {
@@ -3401,6 +3518,7 @@ export default defineBackground(() => {
       name,
       providerId: input.providerId,
       credentialId: input.credentialId,
+      giftId: input.giftId,
       model: input.model?.trim() || undefined,
       createdAt: Date.now(),
     };
@@ -3412,7 +3530,7 @@ export default defineBackground(() => {
 
   async function updateGroup(
     id: string,
-    patch: { name?: string; providerId?: string; credentialId?: string | null; model?: string | null },
+    patch: { name?: string; providerId?: string; credentialId?: string | null; giftId?: string | null; model?: string | null },
   ): Promise<{ group?: Group; error?: string }> {
     const groups = await getGroups();
     const idx = groups.findIndex((g) => g.id === id);
@@ -3431,8 +3549,9 @@ export default defineBackground(() => {
     if (patch.providerId !== undefined) {
       if (!PROVIDERS[patch.providerId]) return { error: 'Invalid provider' };
       next.providerId = patch.providerId;
-      // Provider change invalidates the credential pin unless explicitly set in this patch
+      // Provider change invalidates both pins unless explicitly set in this patch
       if (patch.credentialId === undefined) next.credentialId = undefined;
+      if (patch.giftId === undefined) next.giftId = undefined;
     }
     if (patch.credentialId !== undefined) {
       if (patch.credentialId === null) {
@@ -3443,6 +3562,22 @@ export default defineBackground(() => {
         if (!cred) return { error: 'Credential not found' };
         if (cred.providerId !== next.providerId) return { error: 'Credential does not match provider' };
         next.credentialId = patch.credentialId;
+        // Setting a credential pin clears any gift pin
+        next.giftId = undefined;
+      }
+    }
+    if (patch.giftId !== undefined) {
+      if (patch.giftId === null) {
+        next.giftId = undefined;
+      } else {
+        const gcData = await browser.storage.local.get('giftedCredentials');
+        const giftedCreds = (gcData.giftedCredentials ?? []) as GiftedCredential[];
+        const gc = giftedCreds.find((g) => g.giftId === patch.giftId);
+        if (!gc) return { error: 'Gift not found' };
+        if (gc.providerId !== next.providerId) return { error: 'Gift does not match provider' };
+        next.giftId = patch.giftId;
+        // Setting a gift pin clears any credential pin
+        next.credentialId = undefined;
       }
     }
     if (patch.model !== undefined) {
@@ -4090,6 +4225,7 @@ export default defineBackground(() => {
             name: group.name,
             providerId: group.providerId,
             credentialId: vaultCredentialId ?? null,
+            giftId: group.giftId ?? null,
             model: group.model ?? null,
           },
           state.token,
@@ -4208,6 +4344,7 @@ export default defineBackground(() => {
         name: group.name,
         providerId: group.providerId,
         credentialId: vaultCredentialId ?? null,
+        giftId: group.giftId ?? null,
         model: group.model ?? null,
       }, state.token!);
       if (result.status === 401) await handleVaultAuthError();

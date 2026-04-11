@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useWalletStore } from '../store';
 import { PROVIDERS, giftLinkToUrl } from '@byoky/core';
 
@@ -23,10 +23,17 @@ export function CreateGift() {
   const [copied, setCopied] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // Sync credentialId when credentials load after mount
-  if (!credentialId && credentials.length > 0) {
-    setCredentialId(credentials[0].id);
-  }
+  // Keep the selection in sync with the credentials list: fall back to the
+  // first credential whenever the current pick becomes invalid (credentials
+  // loaded after mount, or the selected one was removed). Without this,
+  // the native <select> visually shows the first option while React state
+  // is still '', so the submit button is mysteriously disabled.
+  useEffect(() => {
+    if (credentials.length === 0) return;
+    if (!credentials.some((c) => c.id === credentialId)) {
+      setCredentialId(credentials[0].id);
+    }
+  }, [credentials, credentialId]);
 
   const selectedCred = credentials.find((c) => c.id === credentialId);
   const provider = selectedCred ? PROVIDERS[selectedCred.providerId] : null;

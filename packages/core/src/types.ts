@@ -336,7 +336,8 @@ export interface Group {
   id: string;            // stable id; DEFAULT_GROUP_ID is reserved for the default group
   name: string;          // user-facing label
   providerId: ProviderId;
-  credentialId?: string; // optional pin to a specific credential; if absent, any credential for this provider
+  credentialId?: string; // optional pin to an owned credential; mutually exclusive with giftId
+  giftId?: string;       // optional pin to a received gift (giftedCredential.giftId); mutually exclusive with credentialId
   model?: string;        // optional default model; phase 1 informational, phase 2 substituted into requests
   createdAt: number;
 }

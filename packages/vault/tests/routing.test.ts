@@ -65,6 +65,7 @@ describe.skipIf(!DATABASE_URL)('vault routing', () => {
     initDb(DATABASE_URL!);
     startIdleSweep();
     await getDb().execute(sql`ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS encrypted_key TEXT`);
+    await getDb().execute(sql`ALTER TABLE groups ADD COLUMN IF NOT EXISTS gift_id TEXT`);
 
     // Sign up the test user.
     const signup = await app.request('/auth/signup', {

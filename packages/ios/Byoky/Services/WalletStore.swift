@@ -12,6 +12,11 @@ final class WalletStore: ObservableObject {
     @Published var requestLogs: [RequestLog] = []
     @Published var gifts: [Gift] = []
     @Published var giftedCredentials: [GiftedCredential] = []
+    /// Last-known online status per received gift, keyed by giftId. Filled in
+    /// by `probeGiftPeers()` which the Wallet screen calls on appear. Treated
+    /// as transient — we don't persist it; if it's missing, the UI shows a
+    /// "checking" state until the probe lands.
+    @Published var giftPeerOnline: [String: Bool] = [:]
     @Published var giftPreferences: [String: String] = [:]  // providerId -> giftId
     @Published var tokenAllowances: [TokenAllowance] = []
     @Published var groups: [Group] = []
@@ -665,6 +670,9 @@ final class WalletStore: ObservableObject {
         case providerInvalid
         case credentialNotFound
         case credentialMismatch
+        case giftNotFound
+        case giftMismatch
+        case pinConflict
         case notFound
         case cannotDeleteDefault
 
@@ -675,6 +683,9 @@ final class WalletStore: ObservableObject {
             case .providerInvalid: return "Invalid provider"
             case .credentialNotFound: return "Credential not found"
             case .credentialMismatch: return "Credential does not match provider"
+            case .giftNotFound: return "Gift not found"
+            case .giftMismatch: return "Gift does not match provider"
+            case .pinConflict: return "Credential and gift are mutually exclusive"
             case .notFound: return "Group not found"
             case .cannotDeleteDefault: return "Cannot delete the default group"
             }
@@ -682,13 +693,26 @@ final class WalletStore: ObservableObject {
     }
 
     @discardableResult
-    func createGroup(name: String, providerId: String, credentialId: String? = nil, model: String? = nil) throws -> Group {
+    func createGroup(
+        name: String,
+        providerId: String,
+        credentialId: String? = nil,
+        giftId: String? = nil,
+        model: String? = nil
+    ) throws -> Group {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty, trimmed.count <= 200 else { throw GroupError.nameInvalid }
         guard Provider.find(providerId) != nil else { throw GroupError.providerInvalid }
+        if credentialId != nil && giftId != nil {
+            throw GroupError.pinConflict
+        }
         if let credentialId {
             guard let cred = credentials.first(where: { $0.id == credentialId }) else { throw GroupError.credentialNotFound }
             guard cred.providerId == providerId else { throw GroupError.credentialMismatch }
+        }
+        if let giftId {
+            guard let gc = giftedCredentials.first(where: { $0.giftId == giftId }) else { throw GroupError.giftNotFound }
+            guard gc.providerId == providerId else { throw GroupError.giftMismatch }
         }
         if groups.contains(where: { $0.name.lowercased() == trimmed.lowercased() }) {
             throw GroupError.nameDuplicate
@@ -698,6 +722,7 @@ final class WalletStore: ObservableObject {
             name: trimmed,
             providerId: providerId,
             credentialId: credentialId,
+            giftId: giftId,
             model: model?.trimmingCharacters(in: .whitespaces).nilIfEmpty,
             createdAt: Date()
         )
@@ -713,6 +738,7 @@ final class WalletStore: ObservableObject {
         name: String? = nil,
         providerId: String? = nil,
         credentialId: String?? = nil, // double optional: nil = no change, .some(nil) = unset
+        giftId: String?? = nil,       // same sentinel convention as credentialId
         model: String?? = nil
     ) throws -> Group {
         guard let idx = groups.firstIndex(where: { $0.id == id }) else { throw GroupError.notFound }
@@ -730,16 +756,30 @@ final class WalletStore: ObservableObject {
         if let providerId {
             guard Provider.find(providerId) != nil else { throw GroupError.providerInvalid }
             next.providerId = providerId
-            // Provider change invalidates credential pin unless this same patch sets it.
+            // Provider change invalidates both pins unless this same patch sets one.
             if credentialId == nil { next.credentialId = nil }
+            if giftId == nil { next.giftId = nil }
         }
         if case .some(let value) = credentialId {
             if let value {
                 guard let cred = credentials.first(where: { $0.id == value }) else { throw GroupError.credentialNotFound }
                 guard cred.providerId == next.providerId else { throw GroupError.credentialMismatch }
                 next.credentialId = value
+                // Setting a credential pin clears any gift pin (mutual exclusion).
+                next.giftId = nil
             } else {
                 next.credentialId = nil
+            }
+        }
+        if case .some(let value) = giftId {
+            if let value {
+                guard let gc = giftedCredentials.first(where: { $0.giftId == value }) else { throw GroupError.giftNotFound }
+                guard gc.providerId == next.providerId else { throw GroupError.giftMismatch }
+                next.giftId = value
+                // Setting a gift pin clears any credential pin (mutual exclusion).
+                next.credentialId = nil
+            } else {
+                next.giftId = nil
             }
         }
         if case .some(let value) = model {
@@ -837,6 +877,18 @@ final class WalletStore: ObservableObject {
                 giftPreferences.removeValue(forKey: gc.providerId)
                 saveGiftPreferences()
             }
+            // Unpin any group that was bound to this gift — avoids a dangling
+            // reference that the routing resolver would silently fall through.
+            var groupsChanged = false
+            for idx in groups.indices where groups[idx].giftId == gc.giftId {
+                groups[idx].giftId = nil
+                groupsChanged = true
+                let snapshot = groups[idx]
+                Task { await syncGroupToVault(snapshot) }
+            }
+            if groupsChanged {
+                try? saveGroups()
+            }
         }
         giftedCredentials.removeAll { $0.id == id }
         saveGiftedCredentials()
@@ -855,6 +907,33 @@ final class WalletStore: ObservableObject {
         if let idx = giftedCredentials.firstIndex(where: { $0.giftId == giftId }) {
             giftedCredentials[idx].usedTokens = usedTokens
             saveGiftedCredentials()
+        }
+    }
+
+    /// Probe each non-expired received gift's relay to check whether the
+    /// sender peer is online. Runs probes in parallel and fills in
+    /// `giftPeerOnline` as each completes. Called from the Wallet screen on
+    /// appear so the online dot reflects current state each time the user
+    /// opens the tab.
+    func probeGiftPeers() {
+        let active = giftedCredentials.filter { !isGiftedCredentialExpired($0) && $0.usedTokens < $0.maxTokens }
+        guard !active.isEmpty else {
+            giftPeerOnline = [:]
+            return
+        }
+        // Snapshot the set of active giftIds so we can prune stale entries
+        // after probes complete.
+        let activeIds = Set(active.map { $0.giftId })
+        for gc in active {
+            Task { [weak self] in
+                let online = await probeGiftPeerOnline(giftedCredential: gc)
+                await MainActor.run {
+                    guard let self else { return }
+                    // Drop probes for gifts that were removed while we waited.
+                    guard activeIds.contains(gc.giftId) else { return }
+                    self.giftPeerOnline[gc.giftId] = online
+                }
+            }
         }
     }
 
@@ -1115,6 +1194,7 @@ final class WalletStore: ObservableObject {
     private func syncGroupToVault(_ group: Group) async {
         guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
         let vaultCredentialId: Any = group.credentialId.flatMap { vaultCredentialMap[$0] } ?? NSNull()
+        let vaultGiftId: Any = group.giftId as Any? ?? NSNull()
         let result = await vaultRequest(
             path: "/groups/\(group.id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? group.id)",
             method: "PUT",
@@ -1122,6 +1202,7 @@ final class WalletStore: ObservableObject {
                 "name": group.name,
                 "providerId": group.providerId,
                 "credentialId": vaultCredentialId,
+                "giftId": vaultGiftId,
                 "model": group.model as Any? ?? NSNull(),
             ],
             token: token

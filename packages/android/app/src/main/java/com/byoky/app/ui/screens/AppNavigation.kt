@@ -81,6 +81,9 @@ private fun MainScreen(wallet: WalletStore) {
                     onNavigateToSettings = {
                         navController.navigate("settings") { launchSingleTop = true }
                     },
+                    onNavigateToRedeemGift = {
+                        navController.navigate("redeem-gift") { launchSingleTop = true }
+                    },
                 )
             }
             composable("gifts") {

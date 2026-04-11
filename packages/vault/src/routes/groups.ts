@@ -27,6 +27,7 @@ groups.get('/', async (c) => {
       name: g.name,
       providerId: g.providerId,
       credentialId: g.credentialId,
+      giftId: g.giftId,
       model: g.model,
       createdAt: g.createdAt,
     })),
@@ -41,6 +42,7 @@ groups.put('/:id', async (c) => {
     name?: string;
     providerId?: string;
     credentialId?: string | null;
+    giftId?: string | null;
     model?: string | null;
   }>();
 
@@ -52,6 +54,12 @@ groups.put('/:id', async (c) => {
   // its uninitialised state. Real groups must point at a known provider.
   if (groupId !== DEFAULT_GROUP_ID && !getProvider(body.providerId)) {
     return c.json({ error: { code: 'INVALID_PROVIDER', message: `Unknown provider: ${body.providerId}` } }, 400);
+  }
+
+  // credentialId and giftId are mutually exclusive — a group pins to an
+  // owned credential XOR a received gift, never both.
+  if (body.credentialId && body.giftId) {
+    return c.json({ error: { code: 'INVALID_INPUT', message: 'credentialId and giftId are mutually exclusive' } }, 400);
   }
 
   // If a credential pin is supplied, verify it exists and belongs to the
@@ -69,6 +77,7 @@ groups.put('/:id', async (c) => {
     body.name,
     body.providerId,
     body.credentialId ?? null,
+    body.giftId ?? null,
     body.model ?? null,
   );
 
@@ -78,6 +87,7 @@ groups.put('/:id', async (c) => {
       name: row.name,
       providerId: row.providerId,
       credentialId: row.credentialId,
+      giftId: row.giftId,
       model: row.model,
       createdAt: row.createdAt,
     },
