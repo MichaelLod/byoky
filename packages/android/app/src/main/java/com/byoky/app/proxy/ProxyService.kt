@@ -79,6 +79,24 @@ class ProxyService(
             ?: throw IllegalArgumentException("Unknown provider: $providerId")
 
         val url = "${provider.baseUrl}$path"
+
+        // Cross-family gift: group pins a gift whose provider differs from
+        // the app's request, model is set, pair is translatable. Handle
+        // before generic credential resolution so the cross-family gift
+        // wins over the direct-provider lookup.
+        val crossGift = resolveCrossFamilyGift(providerId, body)
+        if (crossGift != null) {
+            val (gc, translation) = crossGift
+            return proxyRequestViaGiftWithTranslation(
+                gc = gc,
+                translation = translation,
+                originalProviderId = providerId,
+                method = method,
+                headers = headers,
+                body = body,
+            )
+        }
+
         val source = resolveCredentialSource(providerId)
 
         if (source is CredentialSource.Gift) {
@@ -162,6 +180,26 @@ class ProxyService(
             ?: throw IllegalArgumentException("Unknown provider: $providerId")
 
         val url = "${provider.baseUrl}$path"
+
+        // Cross-family gift streaming path: translate request, route
+        // through gift relay, apply SSE stream translator to chunks.
+        val crossGift = resolveCrossFamilyGift(providerId, body)
+        if (crossGift != null) {
+            val (gc, translation) = crossGift
+            streamViaGiftRelayWithTranslation(
+                gc = gc,
+                translation = translation,
+                originalProviderId = providerId,
+                method = method,
+                headers = headers,
+                body = body,
+                onChunk = { trySend(it) },
+                onClose = { err -> if (err != null) close(err) else close() },
+            )
+            awaitClose { /* nothing to cancel explicitly; WS self-closes */ }
+            return@callbackFlow
+        }
+
         val credSource = resolveCredentialSource(providerId)
         var giftWs: WebSocket? = null
 
@@ -791,6 +829,34 @@ class ProxyService(
         }
     }
 
+    /**
+     * Detect a cross-family gift route. Returns (gift, translation) when
+     * the active group pins a gift whose provider differs from the app's
+     * request AND a model is set AND the pair is translatable.
+     */
+    private fun resolveCrossFamilyGift(
+        providerId: String,
+        body: ByteArray?,
+    ): Pair<GiftedCredential, com.byoky.app.data.RoutingTranslation>? {
+        val engine = translationEngine ?: return null
+        val group = wallet.groupForOrigin("bridge") ?: return null
+        if (group.providerId == providerId) return null
+        val gid = group.giftId ?: return null
+        val model = group.model
+        if (model.isNullOrEmpty()) return null
+        val srcModel = com.byoky.app.proxy.RoutingResolver.parseModel(body) ?: return null
+        if (!engine.shouldTranslate(providerId, group.providerId)) return null
+        val gc = wallet.giftedCredentials.value.firstOrNull {
+            it.giftId == gid && !isGiftExpired(it.expiresAt) && it.usedTokens < it.maxTokens
+        } ?: return null
+        return gc to com.byoky.app.data.RoutingTranslation(
+            srcProviderId = providerId,
+            dstProviderId = group.providerId,
+            srcModel = srcModel,
+            dstModel = model,
+        )
+    }
+
     private fun resolveCredentialSource(providerId: String): CredentialSource {
         val prefs = wallet.giftPreferences.value
         val giftedCreds = wallet.giftedCredentials.value
@@ -956,6 +1022,400 @@ class ProxyService(
                 respHeaders.forEach { (k, v) -> add(k, v) }
             }.build())
             .build()
+    }
+
+    /**
+     * Cross-family translation via the gift relay for the local TCP proxy
+     * non-streaming path. Translates request body src → dst, routes through
+     * the gift relay (sender holds the dst-provider API key), buffers the
+     * response, then translates dst → src. Non-2xx responses pass through
+     * verbatim.
+     */
+    private fun proxyRequestViaGiftWithTranslation(
+        gc: GiftedCredential,
+        translation: com.byoky.app.data.RoutingTranslation,
+        originalProviderId: String,
+        method: String,
+        headers: Map<String, String>,
+        body: ByteArray?,
+    ): Response {
+        val engine = translationEngine
+            ?: throw IllegalStateException("TranslationEngine context not provided")
+        val bodyString = body?.let { String(it, Charsets.UTF_8) } ?: ""
+        val isStreaming = com.byoky.app.proxy.RoutingResolver.isStreamingRequest(body)
+        val requestId = UUID.randomUUID().toString()
+
+        val ctxJson = engine.buildTranslationContext(
+            srcProviderId = translation.srcProviderId,
+            dstProviderId = translation.dstProviderId,
+            srcModel = translation.srcModel,
+            dstModel = translation.dstModel,
+            isStreaming = isStreaming,
+            requestId = requestId,
+        )
+        val translatedBody = engine.translateRequest(ctxJson, bodyString)
+        val urlString = engine.rewriteProxyUrl(translation.dstProviderId, translation.dstModel, isStreaming)
+            ?: throw IllegalStateException("rewriteProxyUrl returned null")
+
+        val filteredHeaders = headers.filterKeys {
+            it.lowercase() !in setOf("host", "authorization", "x-api-key", "anthropic-version", "content-length")
+        }
+
+        val latch = CountDownLatch(1)
+        var responseCode = 0
+        var responseMessage = ""
+        val respHeaders = mutableMapOf<String, String>()
+        val rawBody = StringBuilder()
+        var isUpstreamError = false
+        var streamHandle: Int? = null
+        var handleReleased = false
+        var error: Throwable? = null
+
+        fun releaseHandle() {
+            val h = streamHandle
+            if (h != null && !handleReleased) {
+                try { engine.releaseStreamTranslator(h) } catch (_: Throwable) {}
+                handleReleased = true
+            }
+        }
+
+        val wsReq = Request.Builder().url(gc.relayUrl).build()
+        val ws = client.newWebSocket(wsReq, object : WebSocketListener() {
+            var authenticated = false
+            var reqSent = false
+
+            override fun onOpen(ws: WebSocket, resp: Response) {
+                ws.send(JSONObject().apply {
+                    put("type", "relay:auth")
+                    put("roomId", gc.giftId)
+                    put("authToken", gc.authToken)
+                    put("role", "recipient")
+                }.toString())
+            }
+
+            fun sendReq(ws: WebSocket) {
+                if (reqSent) return
+                reqSent = true
+                ws.send(JSONObject().apply {
+                    put("type", "relay:request")
+                    put("requestId", requestId)
+                    put("providerId", translation.dstProviderId)
+                    put("url", urlString)
+                    put("method", method)
+                    put("headers", JSONObject(filteredHeaders))
+                    put("body", translatedBody)
+                }.toString())
+            }
+
+            override fun onMessage(ws: WebSocket, text: String) {
+                try {
+                    val json = JSONObject(text)
+                    when (json.optString("type")) {
+                        "relay:auth:result" -> {
+                            if (json.optBoolean("success")) {
+                                authenticated = true
+                                if (json.optBoolean("peerOnline", false)) sendReq(ws)
+                            } else {
+                                error = Exception("Gift auth failed")
+                                latch.countDown()
+                            }
+                        }
+                        "relay:peer:status" -> {
+                            if (json.optBoolean("online") && authenticated && !reqSent) sendReq(ws)
+                        }
+                        "relay:response:meta" -> {
+                            if (json.optString("requestId") == requestId) {
+                                responseCode = json.optInt("status")
+                                responseMessage = json.optString("statusText", "")
+                                isUpstreamError = responseCode !in 200..299
+                                val hdrs = json.optJSONObject("headers")
+                                hdrs?.keys()?.forEach { k -> respHeaders[k] = hdrs.getString(k) }
+                                if (!isUpstreamError && isStreaming) {
+                                    try {
+                                        streamHandle = engine.createStreamTranslator(ctxJson)
+                                    } catch (t: Throwable) {
+                                        error = t
+                                        latch.countDown()
+                                    }
+                                }
+                            }
+                        }
+                        "relay:response:chunk" -> {
+                            if (json.optString("requestId") == requestId) {
+                                val chunk = json.optString("chunk", "")
+                                val handle = streamHandle
+                                if (isUpstreamError) {
+                                    rawBody.append(chunk)
+                                } else if (handle != null) {
+                                    try {
+                                        val translated = engine.processStreamChunk(handle, chunk)
+                                        if (translated.isNotEmpty()) rawBody.append(translated)
+                                    } catch (t: Throwable) {
+                                        error = t
+                                        releaseHandle()
+                                        latch.countDown()
+                                    }
+                                } else {
+                                    // Non-streaming: accumulate the dst body.
+                                    rawBody.append(chunk)
+                                }
+                            }
+                        }
+                        "relay:response:done" -> {
+                            if (json.optString("requestId") == requestId) {
+                                val handle = streamHandle
+                                try {
+                                    if (handle != null) {
+                                        val trailing = engine.flushStreamTranslator(handle)
+                                        if (trailing.isNotEmpty()) rawBody.append(trailing)
+                                    } else if (!isUpstreamError && !isStreaming) {
+                                        // Swap dst body for translated src body.
+                                        val translated = engine.translateResponse(ctxJson, rawBody.toString())
+                                        rawBody.clear()
+                                        rawBody.append(translated)
+                                    }
+                                } catch (t: Throwable) {
+                                    error = t
+                                } finally {
+                                    releaseHandle()
+                                }
+                                latch.countDown()
+                                Thread { Thread.sleep(2000); ws.close(1000, null) }.start()
+                            }
+                        }
+                        "relay:response:error" -> {
+                            if (json.optString("requestId") == requestId) {
+                                val errObj = json.optJSONObject("error")
+                                error = Exception(errObj?.optString("message") ?: "Gift relay error")
+                                releaseHandle()
+                                latch.countDown()
+                            }
+                        }
+                        "relay:usage" -> {
+                            if (json.optString("giftId") == gc.giftId) {
+                                wallet.updateGiftedCredentialUsage(gc.giftId, json.optInt("usedTokens"))
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+
+            override fun onFailure(ws: WebSocket, t: Throwable, resp: Response?) {
+                error = Exception("Gift relay failed: ${t.message}")
+                releaseHandle()
+                latch.countDown()
+            }
+        })
+
+        if (!latch.await(150, TimeUnit.SECONDS)) {
+            ws.close(1000, null)
+            releaseHandle()
+            throw Exception("Gift relay request timed out")
+        }
+
+        error?.let { throw it }
+
+        return Response.Builder()
+            .code(if (responseCode == 0) 502 else responseCode)
+            .message(responseMessage)
+            .request(Request.Builder().url(urlString).build())
+            .protocol(okhttp3.Protocol.HTTP_1_1)
+            .body(rawBody.toString().toResponseBody("application/json".toMediaTypeOrNull()))
+            .headers(okhttp3.Headers.Builder().apply {
+                respHeaders.forEach { (k, v) -> add(k, v) }
+            }.build())
+            .build()
+    }
+
+    /**
+     * Streaming variant — feeds raw gift-relay chunks through a stream
+     * translator and calls onChunk for each translated byte slice. Closes
+     * the Flow via onClose when the relay emits done or fails.
+     */
+    private fun streamViaGiftRelayWithTranslation(
+        gc: GiftedCredential,
+        translation: com.byoky.app.data.RoutingTranslation,
+        originalProviderId: String,
+        method: String,
+        headers: Map<String, String>,
+        body: ByteArray?,
+        onChunk: (ByteArray) -> Unit,
+        onClose: (Throwable?) -> Unit,
+    ) {
+        val engine = translationEngine ?: run {
+            onClose(IllegalStateException("TranslationEngine context not provided"))
+            return
+        }
+        val bodyString = body?.let { String(it, Charsets.UTF_8) } ?: ""
+        val isStreaming = com.byoky.app.proxy.RoutingResolver.isStreamingRequest(body)
+        val requestId = UUID.randomUUID().toString()
+
+        val ctxJson: String
+        val translatedBody: String
+        val urlString: String
+        try {
+            ctxJson = engine.buildTranslationContext(
+                srcProviderId = translation.srcProviderId,
+                dstProviderId = translation.dstProviderId,
+                srcModel = translation.srcModel,
+                dstModel = translation.dstModel,
+                isStreaming = isStreaming,
+                requestId = requestId,
+            )
+            translatedBody = engine.translateRequest(ctxJson, bodyString)
+            urlString = engine.rewriteProxyUrl(translation.dstProviderId, translation.dstModel, isStreaming)
+                ?: run {
+                    onClose(IllegalStateException("rewriteProxyUrl returned null"))
+                    return
+                }
+        } catch (t: Throwable) {
+            onClose(t)
+            return
+        }
+
+        val filteredHeaders = headers.filterKeys {
+            it.lowercase() !in setOf("host", "authorization", "x-api-key", "anthropic-version", "content-length")
+        }
+
+        val wsReq = Request.Builder().url(gc.relayUrl).build()
+        client.newWebSocket(wsReq, object : WebSocketListener() {
+            var authenticated = false
+            var reqSent = false
+            var isUpstreamError = false
+            var streamHandle: Int? = null
+            var handleReleased = false
+            val accumulated = StringBuilder()
+
+            fun releaseHandle() {
+                val h = streamHandle
+                if (h != null && !handleReleased) {
+                    try { engine.releaseStreamTranslator(h) } catch (_: Throwable) {}
+                    handleReleased = true
+                }
+            }
+
+            override fun onOpen(ws: WebSocket, resp: Response) {
+                ws.send(JSONObject().apply {
+                    put("type", "relay:auth")
+                    put("roomId", gc.giftId)
+                    put("authToken", gc.authToken)
+                    put("role", "recipient")
+                }.toString())
+            }
+
+            fun sendReq(ws: WebSocket) {
+                if (reqSent) return
+                reqSent = true
+                ws.send(JSONObject().apply {
+                    put("type", "relay:request")
+                    put("requestId", requestId)
+                    put("providerId", translation.dstProviderId)
+                    put("url", urlString)
+                    put("method", method)
+                    put("headers", JSONObject(filteredHeaders))
+                    put("body", translatedBody)
+                }.toString())
+            }
+
+            override fun onMessage(ws: WebSocket, text: String) {
+                try {
+                    val json = JSONObject(text)
+                    when (json.optString("type")) {
+                        "relay:auth:result" -> {
+                            if (json.optBoolean("success")) {
+                                authenticated = true
+                                if (json.optBoolean("peerOnline", false)) sendReq(ws)
+                            } else {
+                                onClose(Exception("Gift auth failed"))
+                                ws.close(1000, null)
+                            }
+                        }
+                        "relay:peer:status" -> {
+                            if (json.optBoolean("online") && authenticated && !reqSent) sendReq(ws)
+                        }
+                        "relay:response:meta" -> {
+                            if (json.optString("requestId") == requestId) {
+                                val status = json.optInt("status")
+                                isUpstreamError = status !in 200..299
+                                if (!isUpstreamError && isStreaming) {
+                                    try {
+                                        streamHandle = engine.createStreamTranslator(ctxJson)
+                                    } catch (t: Throwable) {
+                                        onClose(t)
+                                        ws.close(1000, null)
+                                    }
+                                }
+                            }
+                        }
+                        "relay:response:chunk" -> {
+                            if (json.optString("requestId") == requestId) {
+                                val chunk = json.optString("chunk", "")
+                                val handle = streamHandle
+                                if (isUpstreamError) {
+                                    onChunk(chunk.toByteArray(Charsets.UTF_8))
+                                } else if (handle != null) {
+                                    try {
+                                        val translated = engine.processStreamChunk(handle, chunk)
+                                        if (translated.isNotEmpty()) {
+                                            onChunk(translated.toByteArray(Charsets.UTF_8))
+                                        }
+                                    } catch (t: Throwable) {
+                                        onClose(t)
+                                        releaseHandle()
+                                        ws.close(1000, null)
+                                    }
+                                } else {
+                                    accumulated.append(chunk)
+                                }
+                            }
+                        }
+                        "relay:response:done" -> {
+                            if (json.optString("requestId") == requestId) {
+                                val handle = streamHandle
+                                try {
+                                    if (handle != null) {
+                                        val trailing = engine.flushStreamTranslator(handle)
+                                        if (trailing.isNotEmpty()) {
+                                            onChunk(trailing.toByteArray(Charsets.UTF_8))
+                                        }
+                                    } else if (!isUpstreamError && !isStreaming) {
+                                        val translated = engine.translateResponse(ctxJson, accumulated.toString())
+                                        onChunk(translated.toByteArray(Charsets.UTF_8))
+                                    }
+                                } catch (t: Throwable) {
+                                    onClose(t)
+                                    releaseHandle()
+                                    ws.close(1000, null)
+                                    return
+                                } finally {
+                                    releaseHandle()
+                                }
+                                Thread { Thread.sleep(2000); ws.close(1000, null) }.start()
+                                onClose(null)
+                            }
+                        }
+                        "relay:response:error" -> {
+                            if (json.optString("requestId") == requestId) {
+                                val msg = json.optJSONObject("error")?.optString("message") ?: "Gift relay error"
+                                releaseHandle()
+                                onClose(Exception(msg))
+                                ws.close(1000, null)
+                            }
+                        }
+                        "relay:usage" -> {
+                            if (json.optString("giftId") == gc.giftId) {
+                                wallet.updateGiftedCredentialUsage(gc.giftId, json.optInt("usedTokens"))
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+
+            override fun onFailure(ws: WebSocket, t: Throwable, resp: Response?) {
+                releaseHandle()
+                onClose(Exception("Gift relay failed: ${t.message}"))
+            }
+        })
     }
 
     private fun injectStreamUsageOptions(providerId: String, body: ByteArray?): ByteArray? {
