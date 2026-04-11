@@ -1,7 +1,7 @@
 'use client';
 
 import { usePathname } from 'next/navigation';
-import { useRef, useState, useEffect } from 'react';
+import { useRef, useState, useEffect, useCallback } from 'react';
 
 const installOptions: { label: string; href: string; external: boolean; icon: string }[] = [
   { label: 'Web App', href: '/wallet/connect', external: false, icon: 'globe' },
@@ -25,10 +25,8 @@ function DropdownIcon({ name }: { name: string }) {
 const links = [
   { href: '/', label: 'Home' },
   { href: '/demo', label: 'Demo' },
-  { href: '/openclaw', label: 'OpenClaw' },
   { href: '/developer', label: 'Developers' },
   { href: '/marketplace', label: 'Marketplace' },
-  { href: '/blog', label: 'Blog' },
   { href: '/wallet', label: 'Wallet' },
 ];
 
@@ -42,7 +40,6 @@ export function NavBar() {
   const containerRef = useRef<HTMLDivElement>(null);
   const linkRefs = useRef<(HTMLAnchorElement | null)[]>([]);
   const [indicator, setIndicator] = useState({ left: 0, width: 0 });
-  const [mobileOpen, setMobileOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -80,17 +77,7 @@ export function NavBar() {
           <img src="/byoky-icon.png" alt="" style={{ height: '24px', width: 'auto' }} />
           Byoky
         </a>
-        {/* Mobile hamburger */}
-        <button
-          className="nav-burger"
-          onClick={() => setMobileOpen(!mobileOpen)}
-          style={{ display: 'none', background: 'none', border: 'none', padding: '8px', cursor: 'pointer', color: 'var(--text)' }}
-        >
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            {mobileOpen ? <><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></> : <><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="18" x2="21" y2="18" /></>}
-          </svg>
-        </button>
-        <div ref={containerRef} className={`nav-links ${mobileOpen ? 'nav-links-open' : ''}`} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '14px', position: 'relative' }}>
+        <div ref={containerRef} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '14px', position: 'relative' }}>
           {/* Sliding highlight indicator */}
           {mounted && indicator.width > 0 && (
             <div style={{
@@ -111,7 +98,6 @@ export function NavBar() {
               key={link.href}
               href={link.href}
               ref={(el) => { linkRefs.current[i] = el; }}
-              onClick={() => setMobileOpen(false)}
               style={{
                 padding: '8px 14px',
                 borderRadius: '8px',
@@ -140,56 +126,6 @@ export function NavBar() {
           </a>
         </div>
       </div>
-      {mobileOpen && (
-        <div className="nav-mobile-menu">
-          {links.map((link) => (
-            <a
-              key={link.href}
-              href={link.href}
-              onClick={() => setMobileOpen(false)}
-              style={{ fontWeight: isActive(pathname, link.href) ? 600 : 400, color: isActive(pathname, link.href) ? 'var(--teal)' : undefined }}
-            >
-              {link.label}
-            </a>
-          ))}
-          <a href="https://github.com/MichaelLod/byoky" target="_blank" rel="noopener noreferrer" onClick={() => setMobileOpen(false)}>
-            GitHub
-          </a>
-        </div>
-      )}
-      <style>{`
-        @media (max-width: 768px) {
-          .nav-burger { display: flex !important; }
-          .nav-links { display: none !important; }
-          .nav-mobile-menu {
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-            padding: 12px 24px 16px;
-            border-top: 1px solid var(--border);
-            position: absolute;
-            left: 0;
-            right: 0;
-            background: rgba(255,255,255,0.98);
-            backdrop-filter: blur(12px);
-            box-shadow: 0 8px 24px rgba(0,0,0,0.08);
-            z-index: 200;
-          }
-          .nav-mobile-menu a {
-            padding: 10px 14px;
-            border-radius: 8px;
-            font-size: 15px;
-            color: var(--text-secondary);
-            text-decoration: none;
-          }
-          .nav-mobile-menu a:hover {
-            background: var(--bg-elevated);
-          }
-        }
-        @media (min-width: 769px) {
-          .nav-mobile-menu { display: none; }
-        }
-      `}</style>
     </nav>
   );
 }

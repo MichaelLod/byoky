@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { HighlightedCode } from '../../components/SyntaxHighlight';
 
 /* ─── Navigation structure ────────────────────── */
 
@@ -654,7 +655,7 @@ function Code({ lang, children }: { lang: string; children: string }) {
   return (
     <div className="docs-code">
       {lang !== 'text' && <div className="docs-code-lang">{lang}</div>}
-      <pre><code>{children}</code></pre>
+      <pre><HighlightedCode code={children} /></pre>
     </div>
   );
 }
