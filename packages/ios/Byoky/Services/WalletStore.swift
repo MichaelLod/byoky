@@ -1134,6 +1134,18 @@ final class WalletStore: ObservableObject {
         clearCloudVaultState()
     }
 
+    func deleteVaultAccount() async throws {
+        guard let token = vaultToken, !cloudVaultTokenExpired else {
+            throw CloudVaultError.authFailed("No active vault session")
+        }
+        let result = await vaultRequest(path: "/auth/account", method: "DELETE", token: token)
+        if !result.ok {
+            let err = result.data["error"] as? [String: Any]
+            throw CloudVaultError.authFailed(err?["message"] as? String ?? "Failed to delete vault account")
+        }
+        resetWallet()
+    }
+
     func reloginCloudVault(password: String) async throws {
         guard let username = cloudVaultUsername else {
             throw CloudVaultError.authFailed("No vault account configured")
