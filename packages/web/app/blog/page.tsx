@@ -18,19 +18,25 @@ export default function BlogIndex() {
           {posts.map((post) => (
             <li key={post.slug} className="blog-card">
               <Link href={`/blog/${post.slug}`} className="blog-card-link">
-                <div className="blog-card-meta">
-                  <time>{formatDate(post.date)}</time>
-                  <span className="blog-card-dot">·</span>
-                  <span>{post.readTime}</span>
+                <div className="blog-card-cover">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={post.image} alt={post.imageAlt} width={1200} height={630} />
                 </div>
-                <h2>{post.title}</h2>
-                <p>{post.description}</p>
-                <div className="blog-card-tags">
-                  {post.tags.map((tag) => (
-                    <span key={tag} className="blog-tag">
-                      {tag}
-                    </span>
-                  ))}
+                <div className="blog-card-body">
+                  <div className="blog-card-meta">
+                    <time>{formatDate(post.date)}</time>
+                    <span className="blog-card-dot">·</span>
+                    <span>{post.readTime}</span>
+                  </div>
+                  <h2>{post.title}</h2>
+                  <p>{post.description}</p>
+                  <div className="blog-card-tags">
+                    {post.tags.map((tag) => (
+                      <span key={tag} className="blog-tag">
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </Link>
             </li>
@@ -117,9 +123,32 @@ const blogStyles = `
 
 .blog-card-link {
   display: block;
-  padding: 24px 28px;
   color: inherit;
   text-decoration: none;
+}
+
+.blog-card-cover {
+  width: 100%;
+  aspect-ratio: 1200 / 630;
+  overflow: hidden;
+  border-bottom: 1px solid var(--blog-border);
+  background: #0a0a14;
+}
+
+.blog-card-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.3s ease;
+}
+
+.blog-card:hover .blog-card-cover img {
+  transform: scale(1.02);
+}
+
+.blog-card-body {
+  padding: 22px 28px 26px;
 }
 
 .blog-card-meta {
@@ -172,8 +201,8 @@ const blogStyles = `
   .blog-hero h1 {
     font-size: 30px;
   }
-  .blog-card-link {
-    padding: 20px 22px;
+  .blog-card-body {
+    padding: 18px 20px 22px;
   }
   .blog-card h2 {
     font-size: 19px;
