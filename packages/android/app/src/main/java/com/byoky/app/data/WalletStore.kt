@@ -174,10 +174,13 @@ class WalletStore(context: Context) {
             syncPendingCredentials()
             syncPendingGroups()
         }
+        com.byoky.app.relay.GiftRelayHost.attach(this)
+        com.byoky.app.relay.GiftRelayHost.reconnectAll()
         return UnlockResult.Success
     }
 
     fun lock() {
+        com.byoky.app.relay.GiftRelayHost.disconnectAll()
         masterPassword = null
         _credentials.value = emptyList()
         _sessions.value = emptyList()
@@ -344,6 +347,7 @@ class WalletStore(context: Context) {
         )
         _gifts.value = _gifts.value + gift
         saveGifts()
+        com.byoky.app.relay.GiftRelayHost.connect(gift)
         return gift
     }
 
@@ -352,6 +356,21 @@ class WalletStore(context: Context) {
             if (it.id == id) it.copy(active = false) else it
         }
         saveGifts()
+        com.byoky.app.relay.GiftRelayHost.disconnect(id)
+    }
+
+    fun addGiftSenderUsage(giftId: String, tokens: Int): Int? {
+        if (tokens <= 0) return null
+        val list = _gifts.value.toMutableList()
+        val idx = list.indexOfFirst { it.id == giftId }
+        if (idx < 0) return null
+        val gift = list[idx]
+        if (gift.usedTokens >= gift.maxTokens) return null
+        val next = minOf(gift.maxTokens, gift.usedTokens + tokens)
+        list[idx] = gift.copy(usedTokens = next)
+        _gifts.value = list
+        saveGifts()
+        return next
     }
 
     fun redeemGift(encoded: String): Pair<Boolean, String?> {
