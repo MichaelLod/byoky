@@ -28,6 +28,7 @@ struct BridgeView: View {
 
                 Text(wallet.bridgeStatus.displayText)
                     .font(.headline)
+                    .accessibilityIdentifier("bridge.status")
 
                 if case .error(let msg) = wallet.bridgeStatus {
                     Text(msg)
@@ -47,6 +48,7 @@ struct BridgeView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(wallet.bridgeStatus.isActive ? .red : Theme.accent)
                 .disabled(isStarting)
+                .accessibilityIdentifier("bridge.toggle")
             }
             .padding(.vertical, 16)
             .frame(maxWidth: .infinity)

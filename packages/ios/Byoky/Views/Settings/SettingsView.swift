@@ -223,6 +223,7 @@ struct SettingsView: View {
                 }
             }
             .tint(Theme.accent)
+            .accessibilityIdentifier("settings.vaultToggle")
 
             if wallet.cloudVaultEnabled {
                 if let username = wallet.cloudVaultUsername {
@@ -265,6 +266,7 @@ struct SettingsView: View {
                 .contentShape(Rectangle())
             }
             .foregroundStyle(.primary)
+            .accessibilityIdentifier("settings.lock")
 
             LabeledContent("Encryption", value: "AES-256-GCM")
             LabeledContent("Key Derivation", value: "PBKDF2 (600K)")
@@ -452,6 +454,7 @@ struct CloudVaultSetupView: View {
                             .textContentType(.username)
                             .autocapitalization(.none)
                             .textFieldStyle(.roundedBorder)
+                            .accessibilityIdentifier("vaultAuth.username")
                             .onChange(of: username) { _, value in
                                 if isSignup { onUsernameChanged(value) }
                             }
@@ -482,6 +485,7 @@ struct CloudVaultSetupView: View {
                         Text("Password").font(.caption.weight(.medium))
                         SecureField(isSignup ? "At least 12 characters" : "Your vault password", text: $password)
                             .textFieldStyle(.roundedBorder)
+                            .accessibilityIdentifier("vaultAuth.password")
                     }
                 }
 
@@ -499,6 +503,7 @@ struct CloudVaultSetupView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accent)
                 .disabled(loading || username.isEmpty || password.isEmpty || (isSignup && password.count < 12) || (isSignup && (usernameStatus == .taken || usernameStatus == .invalid || usernameStatus == .checking || !isUsernameValid)))
+                .accessibilityIdentifier("vaultAuth.submit")
             }
             .padding(24)
         }

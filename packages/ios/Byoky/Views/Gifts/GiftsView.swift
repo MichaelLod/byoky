@@ -66,6 +66,7 @@ struct GiftsView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accent)
+                .accessibilityIdentifier("gifts.createGift")
 
                 NavigationLink {
                     RedeemGiftView()
@@ -74,6 +75,7 @@ struct GiftsView: View {
                 }
                 .buttonStyle(.bordered)
                 .tint(Theme.accent)
+                .accessibilityIdentifier("gifts.redeemGift")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -87,6 +89,7 @@ struct GiftsView: View {
                 Label("Create Gift", systemImage: "plus.circle.fill")
                     .foregroundStyle(Theme.accent)
             }
+            .accessibilityIdentifier("gifts.createGift")
 
             NavigationLink {
                 RedeemGiftView()
@@ -94,6 +97,7 @@ struct GiftsView: View {
                 Label("Redeem Gift", systemImage: "arrow.down.circle.fill")
                     .foregroundStyle(Theme.accent)
             }
+            .accessibilityIdentifier("gifts.redeemGift")
         }
     }
 

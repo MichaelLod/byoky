@@ -27,6 +27,10 @@ final class WalletStore: ObservableObject {
     @Published var cloudVaultEnabled = false
     @Published var cloudVaultUsername: String?
     @Published var cloudVaultTokenExpired = false
+    /// Set by ByokyApp.onOpenURL when a byoky://gift/<payload> deep link
+    /// fires. WalletView observes this and presents the redeem sheet with
+    /// the link pre-filled.
+    @Published var pendingGiftLink: String?
 
     private let keychain = KeychainService.shared
     private let crypto = CryptoService.shared
@@ -163,9 +167,13 @@ final class WalletStore: ObservableObject {
             isUnlocked: true,
             providers: credentials.map(\.providerId)
         )
+
+        GiftRelayHost.shared.attach(wallet: self)
+        GiftRelayHost.shared.reconnectAll()
     }
 
     func lock() {
+        GiftRelayHost.shared.disconnectAll()
         masterKey = nil
         credentials = []
         sessions = []
@@ -837,6 +845,7 @@ final class WalletStore: ObservableObject {
         )
         gifts.append(gift)
         saveGifts()
+        GiftRelayHost.shared.connect(gift: gift)
         return gift
     }
 
@@ -844,6 +853,24 @@ final class WalletStore: ObservableObject {
         guard let index = gifts.firstIndex(where: { $0.id == id }) else { return }
         gifts[index].active = false
         saveGifts()
+        GiftRelayHost.shared.disconnect(giftId: id)
+    }
+
+    /// Increment `gifts[giftId].usedTokens` from the sender-side gift relay
+    /// after a successful proxied request. Clamps to `maxTokens` and returns
+    /// the new value, or `nil` if the gift is gone / already at its cap.
+    func addGiftSenderUsage(giftId: String, tokens: Int) -> Int? {
+        guard tokens > 0,
+              let idx = gifts.firstIndex(where: { $0.id == giftId }) else {
+            return nil
+        }
+        let current = gifts[idx].usedTokens
+        let cap = gifts[idx].maxTokens
+        if current >= cap { return nil }
+        let next = min(cap, current + tokens)
+        gifts[idx].usedTokens = next
+        saveGifts()
+        return next
     }
 
     func redeemGift(encoded: String) throws {

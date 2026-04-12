@@ -1,0 +1,10 @@
+appId: com.byoky.app
+---
+# Wallet tab → Settings icon → Security → Lock Wallet → UnlockScreen.
+- tapOn:
+    text: "Wallet"
+    index: 0
+- tapOn: "Settings"
+- assertVisible: "Security"
+- tapOn: "Lock Wallet"
+- assertVisible: "Enter your master password to unlock"
