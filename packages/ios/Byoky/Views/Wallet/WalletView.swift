@@ -48,6 +48,7 @@ struct WalletView: View {
                     } label: {
                         Image(systemName: "gearshape")
                     }
+                    .accessibilityIdentifier("wallet.settings")
                 }
                 ToolbarItem(placement: .primaryAction) {
                     HStack(spacing: 12) {
@@ -65,6 +66,7 @@ struct WalletView: View {
                             }
                             .foregroundStyle(wallet.cloudVaultEnabled ? Theme.accent : .secondary)
                         }
+                        .accessibilityIdentifier("wallet.vaultToggle")
 
                         Menu {
                             Button {
@@ -72,25 +74,35 @@ struct WalletView: View {
                             } label: {
                                 Label("Add credential", systemImage: "key.fill")
                             }
+                            .accessibilityIdentifier("wallet.menu.addCredential")
                             Button {
                                 showRedeemGift = true
                             } label: {
                                 Label("Redeem gift", systemImage: "gift.fill")
                             }
+                            .accessibilityIdentifier("wallet.menu.redeemGift")
                         } label: {
                             Image(systemName: "plus.circle.fill")
                         }
+                        .accessibilityIdentifier("wallet.addMenu")
                     }
                 }
             }
             .sheet(isPresented: $showAddCredential) {
                 AddCredentialView()
             }
-            .sheet(isPresented: $showRedeemGift) {
+            .sheet(isPresented: $showRedeemGift, onDismiss: {
+                // Clear the deep-link trigger so the sheet doesn't re-open
+                // on the next state tick.
+                wallet.pendingGiftLink = nil
+            }) {
                 NavigationStack {
-                    RedeemGiftView()
+                    RedeemGiftView(prefilledLink: wallet.pendingGiftLink)
                 }
                 .environmentObject(wallet)
+            }
+            .onChange(of: wallet.pendingGiftLink) { _, newValue in
+                if newValue != nil { showRedeemGift = true }
             }
             .sheet(isPresented: $showSettings) {
                 NavigationStack {
@@ -132,6 +144,7 @@ struct WalletView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accent)
+                .accessibilityIdentifier("wallet.addCredentialEmpty")
 
                 Button {
                     showRedeemGift = true
@@ -140,6 +153,7 @@ struct WalletView: View {
                 }
                 .buttonStyle(.bordered)
                 .tint(Theme.accent)
+                .accessibilityIdentifier("wallet.redeemGiftEmpty")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

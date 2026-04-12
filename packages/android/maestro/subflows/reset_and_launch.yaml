@@ -1,0 +1,12 @@
+appId: com.byoky.app
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+# Freshly booted emulators sometimes fire a system_server ANR dialog on
+# top of the app. Tolerate it by waiting (rather than hard-asserting) for
+# the welcome screen; the ANR dialog self-dismisses once the system
+# catches up.
+- extendedWaitUntil:
+    visible: "Continue in offline mode"
+    timeout: 30000

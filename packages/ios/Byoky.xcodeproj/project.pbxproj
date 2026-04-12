@@ -14,6 +14,7 @@
 		020B130AC9CCA58B16E2FBFF /* OfflineUpgradeBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50CD854541B37F59AB4944AE /* OfflineUpgradeBanner.swift */; };
 		076E43143FE79F901A26D0A4 /* MarketplaceTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9CC9BD956AF6359BDDA0197 /* MarketplaceTabView.swift */; };
 		08B1CDC1B03E81A3BBE759FD /* mascot.svg in Resources */ = {isa = PBXBuildFile; fileRef = DC0DEA62654413544A1EA7E8 /* mascot.svg */; };
+		0A0B8723BEEA1F628898918C /* ByokySmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FE2FCEEC7F2B498F6F78EDB /* ByokySmokeTests.swift */; };
 		100689ED1B7D1C2D9794096A /* 128.png in Resources */ = {isa = PBXBuildFile; fileRef = 985F87BA74A133D8BC27C98E /* 128.png */; };
 		138FA942DA6C2140C8979814 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00A9C75D712BA0B46E7F2642 /* Session.swift */; };
 		146415ABCD905BC7DD6E0D6F /* provider.js in Resources */ = {isa = PBXBuildFile; fileRef = E1C99C437DE8853B4A1AE051 /* provider.js */; };
@@ -44,6 +45,7 @@
 		51398FDBF3E489959FCDF471 /* manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = 5D64D4BEE5EFD584B24BEBAC /* manifest.json */; };
 		5CFF0270ACC087AF340AF4C5 /* InstalledApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0558CF4019B73E39B5E6F2BF /* InstalledApp.swift */; };
 		5E08AFA22321BE94E55C6A71 /* SafariWebExtensionHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7068BDC28BA0A572F25D021 /* SafariWebExtensionHandler.swift */; };
+		68201816AFEDABB1041D5E13 /* ByokyCrossDeviceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40D8034A82B286AC470E14A2 /* ByokyCrossDeviceTests.swift */; };
 		7132A2CDF55F65B6D684A748 /* Group.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6514E79E49F694CAF5CE711 /* Group.swift */; };
 		7641980494574E8D7535D2C2 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 025A3D6E0A32412866DB3A82 /* SettingsView.swift */; };
 		76FA2C13DF843F2F2E7E0CF5 /* ViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E67372BB638FC0E494FB9AD4 /* ViewController.swift */; };
@@ -87,6 +89,7 @@
 		DEA9478AEAC35FF19BFB415D /* PairView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39039AC240BF4D214A21B1BB /* PairView.swift */; };
 		E153605ED5D9B4D528A3C810 /* manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = 5D64D4BEE5EFD584B24BEBAC /* manifest.json */; };
 		E2CF47501F1A2E98CCF6F907 /* sidepanel.html in Resources */ = {isa = PBXBuildFile; fileRef = E014FC45A45EB1D0C7AAF64C /* sidepanel.html */; };
+		E5016F52C39FE5A74616312A /* GiftRelayHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71D5D2CAC7B3E9C8FBC2A619 /* GiftRelayHost.swift */; };
 		E7B8712807F8177881A74E9A /* BridgeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08FF5E5F0058970F04B97736 /* BridgeView.swift */; };
 		EB7D40E8DA178797F537056E /* mobile.js in Resources */ = {isa = PBXBuildFile; fileRef = 54F9FD4B4E6C8A71978FDB71 /* mobile.js */; };
 		EE42BC6A7AC2993DC364DEA1 /* TranslationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F92F1285F0CC62D52543E84 /* TranslationEngine.swift */; };
@@ -105,6 +108,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = BA9B68DED44111DC73135CAA;
 			remoteInfo = "ByokySafariExtension (macOS)";
+		};
+		37C9B2C8BCBB1DA07650F9F2 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E71C0322A8D1A209D9509FC6 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 9C9B8B11159AC205CB39CB23;
+			remoteInfo = Byoky;
 		};
 		B6B51AFEA76C7BD20CFE3462 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -151,8 +161,10 @@
 		0AC0E9A4C958920C1E2F3B51 /* icon-128.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon-128.png"; sourceTree = "<group>"; };
 		0CBD55EFE40AB99127A8914B /* GiftsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GiftsView.swift; sourceTree = "<group>"; };
 		0F29592A554F62806CCC27EB /* Byoky.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Byoky.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		14DBA97BB88BA3A68D32F2F3 /* ByokyUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ByokyUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1E5574BCDAA179385B325C06 /* mascot.svg */ = {isa = PBXFileReference; path = mascot.svg; sourceTree = "<group>"; };
 		1E7CB8688EBFF715C21DBA4E /* Byoky (macOS).app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Byoky (macOS).app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		1FE2FCEEC7F2B498F6F78EDB /* ByokySmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ByokySmokeTests.swift; sourceTree = "<group>"; };
 		2238E5CD69FCA29B0390623A /* App-BUiZUJhP.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = "App-BUiZUJhP.js"; sourceTree = "<group>"; };
 		2E36BCD2FFA43607FF65ACF1 /* Gift.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Gift.swift; sourceTree = "<group>"; };
 		3460CC27A2B3D9F360016904 /* WalletStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalletStore.swift; sourceTree = "<group>"; };
@@ -161,6 +173,7 @@
 		3A81990611712DAE8AE2AA2A /* WalletState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalletState.swift; sourceTree = "<group>"; };
 		3AFE2DECE5FFEA212F63F5DD /* ConnectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectView.swift; sourceTree = "<group>"; };
 		3F92F1285F0CC62D52543E84 /* TranslationEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslationEngine.swift; sourceTree = "<group>"; };
+		40D8034A82B286AC470E14A2 /* ByokyCrossDeviceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ByokyCrossDeviceTests.swift; sourceTree = "<group>"; };
 		42AB93112DAA20241E4CF0DE /* ProxyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyService.swift; sourceTree = "<group>"; };
 		43CA29F6391EE3F4FF37D482 /* 32.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = 32.png; sourceTree = "<group>"; };
 		50CD854541B37F59AB4944AE /* OfflineUpgradeBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineUpgradeBanner.swift; sourceTree = "<group>"; };
@@ -175,6 +188,7 @@
 		6D4E0769A3926F6F3F9D9A36 /* Style.css */ = {isa = PBXFileReference; lastKnownFileType = text.css; path = Style.css; sourceTree = "<group>"; };
 		6EC7AC249597267812997B80 /* ByokySafariExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = ByokySafariExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		714F4916CB5FB3073B03A86A /* popup-BkMmx_VB.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = "popup-BkMmx_VB.js"; sourceTree = "<group>"; };
+		71D5D2CAC7B3E9C8FBC2A619 /* GiftRelayHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GiftRelayHost.swift; sourceTree = "<group>"; };
 		735CB11BAAECF0D90B452E41 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		76FFC0D91A4B8E5D28D5EFE0 /* AppStoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStoreView.swift; sourceTree = "<group>"; };
 		837130983F550222CC94DAB6 /* UsageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageView.swift; sourceTree = "<group>"; };
@@ -240,6 +254,7 @@
 			children = (
 				5C49197E9FF917FB760DE1C3 /* AppGroupSync.swift */,
 				F8E3AC629A4840595704D375 /* CryptoService.swift */,
+				71D5D2CAC7B3E9C8FBC2A619 /* GiftRelayHost.swift */,
 				844E2E6F05928FA1187F4691 /* GiftRelayProxy.swift */,
 				64FBAC3C6BEC76F7FEB974CA /* KeychainService.swift */,
 				05C2E108EC58F3E09AC85704 /* NativeBridgeHandler.swift */,
@@ -317,6 +332,7 @@
 			isa = PBXGroup;
 			children = (
 				F08A2AAC8794A4C5F578D0A2 /* Byoky */,
+				C704E0EF78DDD091165A7F49 /* ByokyUITests */,
 				2BBD16FA1A7754B576C7E933 /* macOS */,
 				BD9A984C5C342F39A5589379 /* SafariExtension */,
 				EE008FE1BF7F129881291BEE /* Products */,
@@ -456,6 +472,15 @@
 			path = Resources;
 			sourceTree = "<group>";
 		};
+		C704E0EF78DDD091165A7F49 /* ByokyUITests */ = {
+			isa = PBXGroup;
+			children = (
+				40D8034A82B286AC470E14A2 /* ByokyCrossDeviceTests.swift */,
+				1FE2FCEEC7F2B498F6F78EDB /* ByokySmokeTests.swift */,
+			);
+			path = ByokyUITests;
+			sourceTree = "<group>";
+		};
 		CF52DA150A7FA15A575C317A /* icon */ = {
 			isa = PBXGroup;
 			children = (
@@ -482,6 +507,7 @@
 				0F29592A554F62806CCC27EB /* Byoky.app */,
 				AD49BDEC54C25469FDC97E99 /* ByokySafariExtension (macOS).appex */,
 				6EC7AC249597267812997B80 /* ByokySafariExtension.appex */,
+				14DBA97BB88BA3A68D32F2F3 /* ByokyUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -571,6 +597,24 @@
 			productReference = AD49BDEC54C25469FDC97E99 /* ByokySafariExtension (macOS).appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		CF33A9707A973CB9BB56F8BC /* ByokyUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 98D7E732C51710977C1EE25D /* Build configuration list for PBXNativeTarget "ByokyUITests" */;
+			buildPhases = (
+				910F2C124FDE21149589630F /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				0B2B48234C1B0E52134062AC /* PBXTargetDependency */,
+			);
+			name = ByokyUITests;
+			packageProductDependencies = (
+			);
+			productName = ByokyUITests;
+			productReference = 14DBA97BB88BA3A68D32F2F3 /* ByokyUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 		FD9CE2BE86014E508C77B563 /* Byoky (macOS) */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 06B3D0B91DEA08C9BBE1D6E1 /* Build configuration list for PBXNativeTarget "Byoky (macOS)" */;
@@ -609,6 +653,10 @@
 					BA9B68DED44111DC73135CAA = {
 						DevelopmentTeam = 9X22GVKZ85;
 					};
+					CF33A9707A973CB9BB56F8BC = {
+						DevelopmentTeam = 9X22GVKZ85;
+						TestTargetID = 9C9B8B11159AC205CB39CB23;
+					};
 					FD9CE2BE86014E508C77B563 = {
 						DevelopmentTeam = 9X22GVKZ85;
 					};
@@ -632,6 +680,7 @@
 				FD9CE2BE86014E508C77B563 /* Byoky (macOS) */,
 				A0626E46D483F0C4521B886E /* ByokySafariExtension */,
 				BA9B68DED44111DC73135CAA /* ByokySafariExtension (macOS) */,
+				CF33A9707A973CB9BB56F8BC /* ByokyUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -743,6 +792,7 @@
 				37C037BF17D918925D0B882D /* Credential.swift in Sources */,
 				F0356E78CAE92B5F3A0B67BD /* CryptoService.swift in Sources */,
 				CB1C89079AF94101A86166D5 /* Gift.swift in Sources */,
+				E5016F52C39FE5A74616312A /* GiftRelayHost.swift in Sources */,
 				B518C6F26C79F447BDFA1E0F /* GiftRelayProxy.swift in Sources */,
 				C4DD7929068D64BBB04C83C4 /* GiftsView.swift in Sources */,
 				7132A2CDF55F65B6D684A748 /* Group.swift in Sources */,
@@ -775,6 +825,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		910F2C124FDE21149589630F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				68201816AFEDABB1041D5E13 /* ByokyCrossDeviceTests.swift in Sources */,
+				0A0B8723BEEA1F628898918C /* ByokySmokeTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		FA2A9B7CF8373BE51A644C79 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -786,6 +845,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		0B2B48234C1B0E52134062AC /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 9C9B8B11159AC205CB39CB23 /* Byoky */;
+			targetProxy = 37C9B2C8BCBB1DA07650F9F2 /* PBXContainerItemProxy */;
+		};
 		65C04ED76AEB0856BE4BB4D3 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = BA9B68DED44111DC73135CAA /* ByokySafariExtension (macOS) */;
@@ -861,6 +925,24 @@
 			};
 			name = Debug;
 		};
+		4016B41B66C529B8F64A7F85 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.byoky.app.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Byoky;
+			};
+			name = Debug;
+		};
 		4C294437295E8A13552788AD /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -911,6 +993,24 @@
 				PRODUCT_NAME = ByokySafariExtension;
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
+		5D7745A83FA8E79A1E09FB8F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.byoky.app.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Byoky;
 			};
 			name = Release;
 		};
@@ -1154,6 +1254,15 @@
 			buildConfigurations = (
 				84F99DF3442B4A061BFB3DB7 /* Debug */,
 				03CA3E497C4662F26B18A0DF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		98D7E732C51710977C1EE25D /* Build configuration list for PBXNativeTarget "ByokyUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4016B41B66C529B8F64A7F85 /* Debug */,
+				5D7745A83FA8E79A1E09FB8F /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

@@ -4,11 +4,19 @@ struct RedeemGiftView: View {
     @EnvironmentObject var wallet: WalletStore
     @Environment(\.dismiss) var dismiss
 
+    /// Optional pre-filled link — used when the sheet is opened from a
+    /// `byoky://gift/<payload>` deep link so the user doesn't have to paste.
+    let prefilledLink: String?
+
     @State private var linkText = ""
     @State private var previewLink: GiftLink?
     @State private var validationError: String?
     @State private var redeemError: String?
     @State private var redeemed = false
+
+    init(prefilledLink: String? = nil) {
+        self.prefilledLink = prefilledLink
+    }
 
     var body: some View {
         Form {
@@ -19,6 +27,7 @@ struct RedeemGiftView: View {
                     .onChange(of: linkText) { _ in
                         parseLink()
                     }
+                    .accessibilityIdentifier("redeemGift.link")
             } header: {
                 Text("Gift Link")
             } footer: {
@@ -72,10 +81,17 @@ struct RedeemGiftView: View {
                 }
                 .disabled(previewLink == nil || redeemed)
                 .tint(Theme.accent)
+                .accessibilityIdentifier("redeemGift.accept")
             }
         }
         .navigationTitle("Redeem Gift")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            if let prefilled = prefilledLink, linkText.isEmpty {
+                linkText = prefilled
+                parseLink()
+            }
+        }
     }
 
     private func previewRow(label: String, value: String) -> some View {

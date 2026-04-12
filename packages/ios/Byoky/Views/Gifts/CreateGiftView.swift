@@ -80,6 +80,7 @@ struct CreateGiftView: View {
                             }
                         }
                     }
+                    .accessibilityIdentifier("createGift.credential.\(credential.id)")
                 }
             } header: {
                 Text("Credential")
@@ -118,6 +119,7 @@ struct CreateGiftView: View {
                                 .clipShape(Capsule())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityIdentifier("createGift.customToggle")
                     }
                     .padding(.vertical, 4)
                 }
@@ -126,6 +128,7 @@ struct CreateGiftView: View {
                 if useCustomTokens {
                     TextField("Token budget", text: $customTokens)
                         .keyboardType(.numberPad)
+                        .accessibilityIdentifier("createGift.customTokens")
                 }
             } header: {
                 Text("Token Budget")
@@ -195,6 +198,7 @@ struct CreateGiftView: View {
                 }
                 .disabled(!isValid)
                 .tint(Theme.accent)
+                .accessibilityIdentifier("createGift.submit")
             }
         }
     }
@@ -228,6 +232,7 @@ struct CreateGiftView: View {
                         .frame(maxWidth: .infinity)
                         .background(Color(.secondarySystemGroupedBackground))
                         .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .accessibilityIdentifier("createGift.link")
 
                     HStack(spacing: 12) {
                         if let url = URL(string: urlString) {
@@ -259,6 +264,7 @@ struct CreateGiftView: View {
                     dismiss()
                 }
                 .padding(.top, 8)
+                .accessibilityIdentifier("createGift.done")
             }
             .padding(.top, 40)
             .padding()

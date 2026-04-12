@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@byoky/core": "^0.5.4"
+  }
+}

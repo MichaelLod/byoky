@@ -16,9 +16,11 @@ import androidx.compose.ui.unit.sp
 import com.byoky.app.data.WalletStore
 import com.byoky.app.ui.components.MascotView
 import com.byoky.app.ui.theme.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 internal enum class VaultUsernameStatus { IDLE, CHECKING, AVAILABLE, TAKEN, INVALID }
 
@@ -98,7 +100,14 @@ fun VaultAuthContent(wallet: WalletStore, onBack: () -> Unit) {
                         status = VaultUsernameStatus.CHECKING
                         checkJob = scope.launch {
                             delay(400)
-                            val (available, reason) = wallet.checkUsernameAvailability(trimmed)
+                            // checkUsernameAvailability is a blocking OkHttp
+                            // call; run it off the Main thread so StrictMode
+                            // doesn't throw NetworkOnMainThreadException (which
+                            // vaultRequest swallows, mis-reporting every name
+                            // as taken).
+                            val (available, reason) = withContext(Dispatchers.IO) {
+                                wallet.checkUsernameAvailability(trimmed)
+                            }
                             status = when {
                                 available -> VaultUsernameStatus.AVAILABLE
                                 reason == "invalid" -> VaultUsernameStatus.INVALID
@@ -177,10 +186,16 @@ fun VaultAuthContent(wallet: WalletStore, onBack: () -> Unit) {
                 error = null
                 scope.launch {
                     try {
-                        when (mode) {
-                            VaultAuthMode.SIGNUP -> wallet.vaultBootstrapSignup(trimmed, password)
-                            VaultAuthMode.LOGIN -> wallet.vaultBootstrapLogin(trimmed, password)
-                            VaultAuthMode.UNKNOWN -> {}
+                        // vaultBootstrap* make blocking OkHttp calls; move
+                        // them off Main to avoid NetworkOnMainThreadException
+                        // (which vaultRequest swallows and would otherwise
+                        // leave cloudVaultEnabled false after "signup").
+                        withContext(Dispatchers.IO) {
+                            when (mode) {
+                                VaultAuthMode.SIGNUP -> wallet.vaultBootstrapSignup(trimmed, password)
+                                VaultAuthMode.LOGIN -> wallet.vaultBootstrapLogin(trimmed, password)
+                                VaultAuthMode.UNKNOWN -> {}
+                            }
                         }
                     } catch (e: Exception) {
                         error = e.message ?: "Failed to connect to vault"

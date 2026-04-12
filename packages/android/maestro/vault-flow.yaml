@@ -1,0 +1,63 @@
+appId: com.byoky.app
+name: vault-flow
+tags:
+  - e2e
+---
+# Mirrors e2e/tests/vault-flow.spec.ts for the Android app.
+#
+# Coverage:
+#   1. Onboarding → Vault signup (fresh account, random username)
+#   2. Add 3 credentials: Anthropic, OpenAI, Google Gemini
+#   3. Assert credentials are synced (visible in wallet list)
+#   4. Delete vault account (wallet reset)
+#
+# Environment:
+#   ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY (see live-flow).
+#   VAULT_USERNAME — optional; defaults to e2etest + epoch if not set.
+#   VAULT_PASSWORD — must be ≥12 chars. Defaults to TestVaultPass123!long.
+#
+# Scope notes:
+# - The vault fallback scenario (close sender, recipient still proxies
+#   via vault, relaunch sender, verify usage sync) requires two paired
+#   devices and is not covered here.
+
+- runFlow:
+    file: subflows/reset_and_launch.yaml
+
+- runFlow:
+    file: subflows/vault_signup.yaml
+    env:
+      VAULT_USERNAME: ${VAULT_USERNAME}
+      VAULT_PASSWORD: "TestVaultPass123!long"
+
+- runFlow:
+    file: subflows/add_credential.yaml
+    env:
+      PROVIDER_NAME: "Anthropic"
+      API_KEY: ${ANTHROPIC_API_KEY}
+      API_KEY_FIELD_INDEX: "1"
+
+- runFlow:
+    file: subflows/add_credential.yaml
+    env:
+      PROVIDER_NAME: "OpenAI"
+      API_KEY: ${OPENAI_API_KEY}
+      API_KEY_FIELD_INDEX: "0"
+
+- runFlow:
+    file: subflows/add_credential.yaml
+    env:
+      PROVIDER_NAME: "Google Gemini"
+      API_KEY: ${GEMINI_API_KEY}
+      API_KEY_FIELD_INDEX: "0"
+
+- tapOn:
+    text: "Wallet"
+    index: 0
+- assertVisible: "3 credentials"
+- assertVisible: "Anthropic"
+- assertVisible: "OpenAI"
+- assertVisible: "Google Gemini"
+
+- runFlow:
+    file: subflows/delete_vault_account.yaml

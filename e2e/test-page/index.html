@@ -18,18 +18,21 @@
   <p>Response: <span id="response">—</span></p>
   <p>Usage: <span id="usage">—</span></p>
 
-  <button id="connect">Connect Wallet</button>
-  <button id="send-request" disabled>Send Request</button>
-  <button id="send-openai" disabled>Send OpenAI</button>
-  <button id="send-missing" disabled>Send Missing Provider</button>
-  <button id="send-gemini" disabled>Send Gemini</button>
-  <button id="check-usage" disabled>Check Usage</button>
-  <button id="check-connected" disabled>Check Connected</button>
-  <button id="disconnect" disabled>Disconnect</button>
-  <button id="connect-multi">Connect Multi-Provider</button>
+  <button id="connect">Connect (anthropic)</button>
+  <button id="connect-multi">Connect (multi)</button>
+  <button id="disconnect">Disconnect</button>
 
   <script type="module">
     import { Byoky } from '@byoky/sdk';
+
+    // Cheapest viable models per provider so live runs are ~free.
+    const CHEAP_MODELS = {
+      anthropic: 'claude-haiku-4-5-20251001',
+      openai: 'gpt-4o-mini',
+      gemini: 'gemini-2.0-flash',
+    };
+    const PROMPT = 'Reply with the single word OK.';
+    const MAX_TOKENS = 30;
 
     window._testState = {
       connected: false,
@@ -41,110 +44,51 @@
       disconnectedByWallet: false,
       isConnectedResult: null,
       proxyError: null,
+      streamed: null,
     };
 
     const byoky = new Byoky({ timeout: 120_000 });
     let session = null;
 
-    function enableButtons() {
-      document.getElementById('send-request').disabled = false;
-      document.getElementById('send-openai').disabled = false;
-      document.getElementById('send-missing').disabled = false;
-      document.getElementById('send-gemini').disabled = false;
-      document.getElementById('check-usage').disabled = false;
-      document.getElementById('check-connected').disabled = false;
-      document.getElementById('disconnect').disabled = false;
-      document.getElementById('connect').disabled = true;
-      document.getElementById('connect-multi').disabled = true;
-    }
-
-    function disableButtons() {
-      document.getElementById('send-request').disabled = true;
-      document.getElementById('send-openai').disabled = true;
-      document.getElementById('send-missing').disabled = true;
-      document.getElementById('send-gemini').disabled = true;
-      document.getElementById('check-usage').disabled = true;
-      document.getElementById('check-connected').disabled = true;
-      document.getElementById('disconnect').disabled = true;
-      document.getElementById('connect').disabled = false;
-      document.getElementById('connect-multi').disabled = false;
-    }
-
-    document.getElementById('connect').addEventListener('click', async () => {
-      try {
-        window._testState.error = null;
-        window._testState.lastError = null;
-        window._testState.disconnectedByWallet = false;
-        document.getElementById('status').textContent = 'Connecting...';
-        session = await byoky.connect({
-          providers: [{ id: 'anthropic', required: false }],
-        });
-
-        window._testState.connected = true;
-        window._testState.session = {
-          sessionKey: session.sessionKey,
-          providers: session.providers,
-        };
-
-        session.onDisconnect(() => {
-          window._testState.connected = false;
-          window._testState.disconnectedByWallet = true;
-          session = null;
-          document.getElementById('status').textContent = 'Disconnected by wallet';
-          disableButtons();
-        });
-
-        document.getElementById('status').textContent = 'Connected';
-        document.getElementById('session-key').textContent = session.sessionKey.slice(0, 16) + '...';
-        enableButtons();
-      } catch (e) {
-        window._testState.error = e.message;
-        window._testState.lastError = { code: e.code, message: e.message };
-        document.getElementById('status').textContent = 'Error: ' + e.message;
-      }
-    });
-
-    document.getElementById('connect-multi').addEventListener('click', async () => {
-      try {
-        window._testState.error = null;
-        window._testState.lastError = null;
-        window._testState.disconnectedByWallet = false;
-        document.getElementById('status').textContent = 'Connecting...';
-        session = await byoky.connect({
-          providers: [
-            { id: 'anthropic', required: false },
-            { id: 'gemini', required: false },
-          ],
-        });
-
-        window._testState.connected = true;
-        window._testState.session = {
-          sessionKey: session.sessionKey,
-          providers: session.providers,
-        };
-
-        session.onDisconnect(() => {
-          window._testState.connected = false;
-          window._testState.disconnectedByWallet = true;
-          session = null;
-          document.getElementById('status').textContent = 'Disconnected by wallet';
-          disableButtons();
-        });
-
-        document.getElementById('status').textContent = 'Connected';
-        document.getElementById('session-key').textContent = session.sessionKey.slice(0, 16) + '...';
-        enableButtons();
-      } catch (e) {
-        window._testState.error = e.message;
-        window._testState.lastError = { code: e.code, message: e.message };
-        document.getElementById('status').textContent = 'Error: ' + e.message;
-      }
-    });
-
-    document.getElementById('send-request').addEventListener('click', async () => {
-      if (!session) return;
+    function resetState() {
       window._testState.response = null;
       window._testState.proxyError = null;
+      window._testState.error = null;
+      window._testState.lastError = null;
+      window._testState.streamed = null;
+    }
+
+    async function doConnect(providers) {
+      resetState();
+      window._testState.disconnectedByWallet = false;
+      document.getElementById('status').textContent = 'Connecting...';
+      try {
+        session = await byoky.connect({
+          providers: providers.map((id) => ({ id, required: false })),
+        });
+        window._testState.connected = true;
+        window._testState.session = {
+          sessionKey: session.sessionKey,
+          providers: session.providers,
+        };
+        session.onDisconnect(() => {
+          window._testState.connected = false;
+          window._testState.disconnectedByWallet = true;
+          session = null;
+          document.getElementById('status').textContent = 'Disconnected by wallet';
+        });
+        document.getElementById('status').textContent = 'Connected';
+        document.getElementById('session-key').textContent = session.sessionKey.slice(0, 16) + '...';
+      } catch (e) {
+        window._testState.error = e.message;
+        window._testState.lastError = { code: e.code, message: e.message };
+        document.getElementById('status').textContent = 'Error: ' + e.message;
+      }
+    }
+
+    async function sendAnthropic() {
+      if (!session) return;
+      resetState();
       try {
         const proxyFetch = session.createFetch('anthropic');
         const response = await proxyFetch('https://api.anthropic.com/v1/messages', {
@@ -154,121 +98,149 @@
             'anthropic-version': '2023-06-01',
           },
           body: JSON.stringify({
-            model: 'claude-sonnet-4-20250514',
-            max_tokens: 1024,
-            messages: [{ role: 'user', content: 'Hello from E2E test!' }],
+            model: CHEAP_MODELS.anthropic,
+            max_tokens: MAX_TOKENS,
+            messages: [{ role: 'user', content: PROMPT }],
           }),
         });
-
         if (!response.ok) {
           const errData = await response.json().catch(() => ({}));
           window._testState.proxyError = {
             status: response.status,
             code: errData.error?.code ?? errData.code,
-            message: errData.error?.message ?? errData.message,
+            message: errData.error?.message ?? errData.message ?? JSON.stringify(errData),
           };
-          document.getElementById('response').textContent = 'Error ' + response.status + ': ' + (errData.message || errData.code);
           return;
         }
-
         const data = await response.json();
         window._testState.response = data;
-        document.getElementById('response').textContent = JSON.stringify(data.content?.[0]?.text ?? data);
+        document.getElementById('response').textContent = JSON.stringify(data.content?.[0]?.text ?? data).slice(0, 120);
       } catch (e) {
         window._testState.proxyError = { message: e.message };
-        document.getElementById('response').textContent = 'Error: ' + e.message;
       }
-    });
+    }
 
-    document.getElementById('send-openai').addEventListener('click', async () => {
+    async function sendOpenAI() {
       if (!session) return;
-      window._testState.response = null;
-      window._testState.proxyError = null;
+      resetState();
       try {
         const proxyFetch = session.createFetch('openai');
         const response = await proxyFetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            model: 'gpt-4o',
-            max_tokens: 1024,
-            messages: [{ role: 'user', content: 'Hello from OpenAI E2E test!' }],
+            model: CHEAP_MODELS.openai,
+            max_tokens: MAX_TOKENS,
+            messages: [{ role: 'user', content: PROMPT }],
           }),
         });
-
         if (!response.ok) {
           const errData = await response.json().catch(() => ({}));
           window._testState.proxyError = {
             status: response.status,
             code: errData.error?.code ?? errData.code,
-            message: errData.error?.message ?? errData.message,
+            message: errData.error?.message ?? errData.message ?? JSON.stringify(errData),
           };
           return;
         }
         const data = await response.json();
         window._testState.response = data;
+        document.getElementById('response').textContent = JSON.stringify(data.choices?.[0]?.message?.content ?? data).slice(0, 120);
       } catch (e) {
         window._testState.proxyError = { message: e.message };
       }
-    });
+    }
 
-    document.getElementById('send-missing').addEventListener('click', async () => {
+    async function sendAnthropicStream() {
       if (!session) return;
-      window._testState.response = null;
-      window._testState.proxyError = null;
+      resetState();
+      try {
+        const proxyFetch = session.createFetch('anthropic');
+        const response = await proxyFetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'anthropic-version': '2023-06-01',
+          },
+          body: JSON.stringify({
+            model: CHEAP_MODELS.anthropic,
+            max_tokens: MAX_TOKENS,
+            messages: [{ role: 'user', content: PROMPT }],
+            stream: true,
+          }),
+        });
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          window._testState.proxyError = {
+            status: response.status,
+            code: errData.error?.code ?? errData.code,
+            message: errData.error?.message ?? errData.message ?? JSON.stringify(errData),
+          };
+          return;
+        }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let raw = '';
+        let chunks = 0;
+        let text = '';
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const piece = decoder.decode(value, { stream: true });
+          raw += piece;
+          chunks += 1;
+        }
+        // Pull `text_delta` events out of the SSE stream so the test can
+        // assert that real content came through, not just bytes.
+        for (const line of raw.split('\n')) {
+          if (!line.startsWith('data:')) continue;
+          try {
+            const json = JSON.parse(line.slice(5).trim());
+            if (json.type === 'content_block_delta' && json.delta?.type === 'text_delta') {
+              text += json.delta.text ?? '';
+            }
+          } catch { /* ignore non-JSON lines */ }
+        }
+        window._testState.streamed = { text, chunks, rawLength: raw.length };
+      } catch (e) {
+        window._testState.proxyError = { message: e.message };
+      }
+    }
+
+    async function sendGemini() {
+      if (!session) return;
+      resetState();
       try {
         const proxyFetch = session.createFetch('gemini');
-        const response = await proxyFetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent', {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${CHEAP_MODELS.gemini}:generateContent`;
+        const response = await proxyFetch(url, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ contents: [{ parts: [{ text: 'Hello' }] }] }),
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: PROMPT }] }],
+            generationConfig: { maxOutputTokens: MAX_TOKENS },
+          }),
         });
-
         if (!response.ok) {
           const errData = await response.json().catch(() => ({}));
           window._testState.proxyError = {
             status: response.status,
             code: errData.error?.code ?? errData.code,
-            message: errData.error?.message ?? errData.message,
+            message: errData.error?.message ?? errData.message ?? JSON.stringify(errData),
           };
           return;
         }
         const data = await response.json();
         window._testState.response = data;
+        document.getElementById('response').textContent = JSON.stringify(
+          data.candidates?.[0]?.content?.parts?.[0]?.text ?? data,
+        ).slice(0, 120);
       } catch (e) {
         window._testState.proxyError = { message: e.message };
       }
-    });
+    }
 
-    document.getElementById('send-gemini').addEventListener('click', async () => {
-      if (!session) return;
-      window._testState.response = null;
-      window._testState.proxyError = null;
-      try {
-        const proxyFetch = session.createFetch('gemini');
-        const response = await proxyFetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ contents: [{ parts: [{ text: 'Hello from Gemini E2E test!' }] }] }),
-        });
-
-        if (!response.ok) {
-          const errData = await response.json().catch(() => ({}));
-          window._testState.proxyError = {
-            status: response.status,
-            code: errData.error?.code ?? errData.code,
-            message: errData.error?.message ?? errData.message,
-          };
-          return;
-        }
-        const data = await response.json();
-        window._testState.response = data;
-      } catch (e) {
-        window._testState.proxyError = { message: e.message };
-      }
-    });
-
-    document.getElementById('check-usage').addEventListener('click', async () => {
+    async function checkUsage() {
       if (!session) return;
       try {
         const usage = await session.getUsage();
@@ -276,28 +248,44 @@
         document.getElementById('usage').textContent = JSON.stringify(usage);
       } catch (e) {
         window._testState.error = e.message;
-        document.getElementById('usage').textContent = 'Error: ' + e.message;
       }
-    });
+    }
 
-    document.getElementById('check-connected').addEventListener('click', async () => {
+    async function checkConnected() {
       if (!session) return;
       try {
         const result = await session.isConnected();
         window._testState.isConnectedResult = result;
-      } catch (e) {
+      } catch {
         window._testState.isConnectedResult = false;
       }
-    });
+    }
 
-    document.getElementById('disconnect').addEventListener('click', () => {
+    function doDisconnect() {
       if (!session) return;
       session.disconnect();
       window._testState.connected = false;
       session = null;
       document.getElementById('status').textContent = 'Disconnected';
-      disableButtons();
-    });
+    }
+
+    // Exposed to Playwright via page.evaluate(() => window._byoky.sendAnthropic()).
+    // Button bindings are kept for manual debugging but tests call these directly.
+    window._byoky = {
+      connect: doConnect,
+      sendAnthropic,
+      sendAnthropicStream,
+      sendOpenAI,
+      sendGemini,
+      checkUsage,
+      checkConnected,
+      disconnect: doDisconnect,
+      resetState,
+    };
+
+    document.getElementById('connect').addEventListener('click', () => doConnect(['anthropic']));
+    document.getElementById('connect-multi').addEventListener('click', () => doConnect(['anthropic', 'openai', 'gemini']));
+    document.getElementById('disconnect').addEventListener('click', doDisconnect);
   </script>
 </body>
 </html>
