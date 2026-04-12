@@ -5,19 +5,49 @@ struct ByokyApp: App {
     @StateObject private var wallet: WalletStore
 
     init() {
-        // Test-only: `-byokyResetOnLaunch 1` wipes all local wallet state
-        // *before* the shared WalletStore is first touched. The XCUITest
-        // target passes this on launch so each run starts from a clean
-        // uninitialized welcome screen regardless of what prior runs left
-        // in the keychain. No effect in shipped builds — the launch argument
-        // is never set in production.
-        if CommandLine.arguments.contains("-byokyResetOnLaunch") {
-            // Touching the shared instance triggers its private init, which
-            // reads the keychain. resetWallet() then wipes it. Status will be
-            // .uninitialized on the next UI tick.
+        let args = CommandLine.arguments
+        let isUITest = args.contains("-byokyUITest")
+        let shouldReset = args.contains("-byokyResetOnLaunch")
+
+        if shouldReset {
             WalletStore.shared.resetWallet()
         }
+
+        // Test-only fast path: if a config file exists at
+        // /tmp/byoky-ios-test-config.json with a `geminiKey` (or any
+        // `credentials` array), auto-create the wallet + import the
+        // keys so the XCUITest can skip the flaky onboarding + add-
+        // credential form interactions entirely and go straight to the
+        // gift / bridge / group flows that actually matter.
+        if isUITest {
+            Self.autoSetupIfNeeded()
+        }
+
         _wallet = StateObject(wrappedValue: WalletStore.shared)
+    }
+
+    private static func autoSetupIfNeeded() {
+        let configPath = "/tmp/byoky-ios-test-config.json"
+        guard let data = FileManager.default.contents(atPath: configPath),
+              let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return
+        }
+
+        let w = WalletStore.shared
+        guard w.status == .uninitialized else { return }
+
+        let password = (config["password"] as? String) ?? "UITestDefault1234!"
+        try? w.createPassword(password)
+
+        if let geminiKey = config["geminiKey"] as? String, !geminiKey.isEmpty {
+            try? w.addCredential(providerId: "gemini", label: "Google Gemini", apiKey: geminiKey)
+        }
+        if let anthropicKey = config["anthropicKey"] as? String, !anthropicKey.isEmpty {
+            try? w.addCredential(providerId: "anthropic", label: "Anthropic", apiKey: anthropicKey)
+        }
+        if let openaiKey = config["openaiKey"] as? String, !openaiKey.isEmpty {
+            try? w.addCredential(providerId: "openai", label: "OpenAI", apiKey: openaiKey)
+        }
     }
 
     var body: some Scene {
