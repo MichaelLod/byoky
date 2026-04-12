@@ -310,7 +310,7 @@ export function CreateGift() {
             </div>
           )}
 
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
             <button
               type="button"
               className="btn btn-secondary"

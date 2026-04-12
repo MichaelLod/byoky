@@ -49,6 +49,7 @@ struct AppsView: View {
                     } label: {
                         Image(systemName: "plus")
                     }
+                    .accessibilityIdentifier("groups.create")
                 }
                 if wallet.sessions.count > 1 {
                     ToolbarItem(placement: .topBarLeading) {
@@ -387,6 +388,7 @@ private struct MoveToGroupSheet: View {
                                     Text(group.name)
                                         .font(.body.weight(.medium))
                                         .foregroundStyle(.primary)
+                                        .accessibilityIdentifier("moveApp.group.\(group.id)")
                                     HStack(spacing: 6) {
                                         Text(Provider.find(group.providerId)?.name ?? group.providerId)
                                             .font(.caption)
@@ -507,6 +509,7 @@ struct GroupEditorSheet: View {
                     Section {
                         TextField("Group name", text: $name)
                             .autocapitalization(.words)
+                            .accessibilityIdentifier("groupEditor.name")
                     } header: {
                         Text("Name")
                     } footer: {
@@ -520,6 +523,7 @@ struct GroupEditorSheet: View {
                             Text(provider.name).tag(provider.id)
                         }
                     }
+                    .accessibilityIdentifier("groupEditor.provider")
                     .onChange(of: providerId) { _, newValue in
                         // Provider change invalidates any pin.
                         pinValue = ""
@@ -580,6 +584,7 @@ struct GroupEditorSheet: View {
                         .onChange(of: model) { _, new in
                             updateModelInfo(for: new)
                         }
+                        .accessibilityIdentifier("groupEditor.model")
 
                     if !suggestedModels.isEmpty {
                         ForEach(suggestedModels, id: \.id) { entry in
@@ -622,10 +627,12 @@ struct GroupEditorSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                        .accessibilityIdentifier("groupEditor.cancel")
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { save() }
                         .disabled(!mode.isDefault && name.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .accessibilityIdentifier("groupEditor.save")
                 }
             }
             .onAppear {

@@ -38,6 +38,20 @@ targets:
         CODE_SIGN_ENTITLEMENTS: SafariExtension/SafariExtension.entitlements
         OTHER_LDFLAGS: ["-framework", "SafariServices"]
 
+  ByokyUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: ByokyUITests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.byoky.app.uitests
+        TEST_TARGET_NAME: Byoky
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: Byoky
+
   Byoky (macOS):
     type: application
     platform: macOS
@@ -90,8 +104,13 @@ schemes:
       targets:
         Byoky: all
         ByokySafariExtension: all
+        ByokyUITests: [test]
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - ByokyUITests
     archive:
       config: Release
   Byoky (macOS):

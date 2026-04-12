@@ -44,6 +44,7 @@ struct UnlockView: View {
                         .offset(x: isShaking ? -8 : 0)
                         .onSubmit { unlock() }
                         .disabled(isLockedOut)
+                        .accessibilityIdentifier("unlock.password")
 
                     if isLockedOut {
                         HStack(spacing: 6) {
@@ -70,6 +71,7 @@ struct UnlockView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                     }
                     .disabled(password.isEmpty || isLockedOut)
+                    .accessibilityIdentifier("unlock.submit")
                 }
                 .padding(.horizontal, 24)
 

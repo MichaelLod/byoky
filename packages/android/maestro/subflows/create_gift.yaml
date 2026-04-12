@@ -1,0 +1,32 @@
+appId: com.byoky.app
+---
+# Create a gift from the first credential in the wallet. Uses the "10K"
+# token preset and the default 24 hours expiry. Ends on the success state
+# ("Gift Created!") and returns to the Gifts list.
+- tapOn:
+    text: "Gifts"
+    index: 0
+- tapOn: "Create Gift"
+- assertVisible: "Create Gift"
+- assertVisible: "Credential"
+# Token budget preset
+- tapOn: "10K"
+# Expiry is already defaulted to "24 hours" (index 1), skip. The form
+# is longer than the viewport; scroll the submit button into view.
+# The top-bar title "Create Gift" is index 0 — the submit Button is
+# index 1.
+- scrollUntilVisible:
+    element:
+      text: "Create Gift"
+      index: 1
+    direction: DOWN
+    timeout: 5000
+- tapOn:
+    text: "Create Gift"
+    index: 1
+- extendedWaitUntil:
+    visible: "Gift Created!"
+    timeout: 10000
+- assertVisible: "Budget"
+- tapOn: "Done"
+- assertVisible: "Sent"

@@ -17,6 +17,9 @@ importers:
 
   .:
     devDependencies:
+      '@lydell/node-pty':
+        specifier: ^1.2.0-beta.3
+        version: 1.2.0-beta.3
       '@playwright/test':
         specifier: ^1.58.2
         version: 1.58.2
@@ -53,34 +56,6 @@ importers:
         version: 8.5.1(jiti@2.6.1)(postcss@8.5.8)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.3)
       typescript:
         specifier: ^5.5.0
-        version: 5.9.3
-
-  packages/chat:
-    dependencies:
-      '@byoky/sdk':
-        specifier: workspace:*
-        version: link:../sdk
-      next:
-        specifier: ^15.5.14
-        version: 15.5.14(@playwright/test@1.58.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
-      react:
-        specifier: ^19.0.0
-        version: 19.2.4
-      react-dom:
-        specifier: ^19.0.0
-        version: 19.2.4(react@19.2.4)
-    devDependencies:
-      '@types/node':
-        specifier: 25.5.0
-        version: 25.5.0
-      '@types/react':
-        specifier: ^19.0.0
-        version: 19.2.14
-      '@types/react-dom':
-        specifier: ^19.0.0
-        version: 19.2.3(@types/react@19.2.14)
-      typescript:
-        specifier: ^5.7.0
         version: 5.9.3
 
   packages/core:

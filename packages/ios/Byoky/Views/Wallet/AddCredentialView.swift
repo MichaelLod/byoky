@@ -24,6 +24,7 @@ struct AddCredentialView: View {
                                     .foregroundStyle(.primary)
                             }
                         }
+                        .accessibilityIdentifier("addCredential.provider.\(provider.id)")
                     }
                 } header: {
                     Text("Provider")
@@ -70,9 +71,12 @@ struct CredentialEntryView: View {
                 Section {
                     Picker("Type", selection: $authMethod) {
                         Text("API Key").tag(AuthMethod.apiKey)
+                            .accessibilityIdentifier("credentialEntry.authMethod.apiKey")
                         Text("Setup Token").tag(AuthMethod.oauth)
+                            .accessibilityIdentifier("credentialEntry.authMethod.setupToken")
                     }
                     .pickerStyle(.segmented)
+                    .accessibilityIdentifier("credentialEntry.authMethod")
                 } header: {
                     Text("Credential Type")
                 }
@@ -81,6 +85,7 @@ struct CredentialEntryView: View {
             Section {
                 TextField("Label", text: $label)
                     .textContentType(.name)
+                    .accessibilityIdentifier("credentialEntry.label")
 
                 SecureField(
                     authMethod == .oauth ? "Setup Token" : "API Key",
@@ -88,6 +93,7 @@ struct CredentialEntryView: View {
                 )
                 .textContentType(.password)
                 .fontDesign(.monospaced)
+                .accessibilityIdentifier("credentialEntry.apiKey")
             } header: {
                 Text("Credential")
             } footer: {
@@ -115,6 +121,7 @@ struct CredentialEntryView: View {
                 Button("Save") { save() }
                     .disabled(!isValid)
                     .fontWeight(.semibold)
+                    .accessibilityIdentifier("credentialEntry.save")
             }
         }
         .onAppear {

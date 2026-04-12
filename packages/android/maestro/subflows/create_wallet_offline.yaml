@@ -1,0 +1,16 @@
+appId: com.byoky.app
+---
+# Requires env: PASSWORD
+#
+# Welcome → offline setup → password → MainScreen (Wallet tab).
+- assertVisible: "Byoky Wallet"
+- tapOn: "Continue in offline mode"
+- assertVisible: "Set Master Password"
+- tapOn: "Master password"
+- inputText: ${PASSWORD}
+- tapOn: "Confirm password"
+- inputText: ${PASSWORD}
+- hideKeyboard
+- tapOn: "Create Wallet"
+# Landing on MainScreen → Wallet tab → empty state.
+- assertVisible: "No credentials or gifts"
