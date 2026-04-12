@@ -22,10 +22,14 @@ class MainActivity : ComponentActivity() {
         lifecycleObserver = object : DefaultLifecycleObserver {
             override fun onStop(owner: LifecycleOwner) {
                 wallet.recordBackgroundTime()
+                com.byoky.app.relay.GiftRelayHost.disconnectAll()
             }
 
             override fun onStart(owner: LifecycleOwner) {
                 wallet.checkAutoLock()
+                if (wallet.status.value == com.byoky.app.data.WalletStatus.UNLOCKED) {
+                    com.byoky.app.relay.GiftRelayHost.reconnectAll()
+                }
             }
         }
 
