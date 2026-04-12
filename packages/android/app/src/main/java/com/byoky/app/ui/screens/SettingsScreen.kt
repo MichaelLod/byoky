@@ -306,7 +306,14 @@ fun SettingsScreen(wallet: WalletStore) {
                         showDeleteAccountConfirm = false
                         scope.launch {
                             try {
-                                wallet.deleteVaultAccount()
+                                // deleteVaultAccount makes blocking OkHttp
+                                // calls; run off Main so StrictMode doesn't
+                                // throw NetworkOnMainThreadException (which
+                                // vaultRequest swallows and would surface as
+                                // a generic "Failed to delete vault account").
+                                withContext(Dispatchers.IO) {
+                                    wallet.deleteVaultAccount()
+                                }
                             } catch (e: Exception) {
                                 dangerError = e.message
                             }

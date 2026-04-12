@@ -1,0 +1,28 @@
+appId: com.byoky.app
+---
+# Wallet tab → Settings icon → Danger Zone → Delete Vault Account → confirm.
+# After deletion the wallet is reset and we land back on the onboarding
+# welcome screen.
+- tapOn:
+    text: "Wallet"
+    index: 0
+- tapOn: "Settings"
+- scrollUntilVisible:
+    element:
+      text: "Danger Zone"
+    direction: DOWN
+    timeout: 5000
+- scrollUntilVisible:
+    element:
+      text: "Delete Vault Account"
+    direction: DOWN
+    timeout: 5000
+- tapOn: "Delete Vault Account"
+- assertVisible: "Delete Vault Account?"
+# Anchored regex so we tap ONLY the dialog confirm button (plain "Delete"),
+# not the "Delete Vault Account" button or "Delete Vault Account?" title.
+- tapOn:
+    text: "^Delete$"
+- extendedWaitUntil:
+    visible: "Byoky Wallet"
+    timeout: 20000

@@ -62,6 +62,7 @@ struct OnboardingView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             }
             .padding(.top, 8)
+            .accessibilityIdentifier("onboarding.getStarted")
 
             Button {
                 withAnimation { step = .offlineSetup }
@@ -70,6 +71,7 @@ struct OnboardingView: View {
                     .font(.footnote)
                     .foregroundStyle(Theme.textMuted)
             }
+            .accessibilityIdentifier("onboarding.offlineMode")
         }
     }
 
@@ -97,6 +99,7 @@ struct OnboardingView: View {
                         RoundedRectangle(cornerRadius: 12)
                             .stroke(Color.white.opacity(0.06), lineWidth: 1)
                     )
+                    .accessibilityIdentifier("onboarding.password")
 
                 SecureField("Confirm password", text: $confirmPassword)
                     .textContentType(.newPassword)
@@ -107,6 +110,7 @@ struct OnboardingView: View {
                         RoundedRectangle(cornerRadius: 12)
                             .stroke(Color.white.opacity(0.06), lineWidth: 1)
                     )
+                    .accessibilityIdentifier("onboarding.confirmPassword")
 
                 if !password.isEmpty {
                     let quality = PasswordQuality.evaluate(password)
@@ -137,6 +141,7 @@ struct OnboardingView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             }
             .disabled(!isValid)
+            .accessibilityIdentifier("onboarding.createWallet")
 
             Button {
                 withAnimation { step = .welcome }

@@ -1,0 +1,26 @@
+appId: com.byoky.app
+name: byoky-android-e2e
+---
+# Root config for the byoky Android end-to-end suite.
+#
+# Flows:
+#   live-flow.yaml   — offline wallet: credentials, gift, revoke, lock.
+#                      Mirrors e2e/tests/live-flow.spec.ts UI coverage.
+#   vault-flow.yaml  — cloud vault: signup, credentials, delete account.
+#                      Mirrors e2e/tests/vault-flow.spec.ts UI coverage.
+#
+# Required env vars for live-flow:
+#   ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY
+#
+# Run:
+#   cd packages/android/maestro
+#   maestro test live-flow.yaml
+#   maestro test vault-flow.yaml
+#
+# Scope notes:
+# - Groups: mobile uses a single default group (Models.kt:75), no per-app
+#   routing UI — intentionally omitted vs the extension test.
+# - Two-wallet gift redeem / vault fallback: require a second device,
+#   omitted from v1. The gift create+revoke path is covered here.
+# - Real API-call coverage lives in ProxyServiceLiveFlowTest.kt
+#   (androidTest), which exercises ProxyService.proxyRequest end-to-end.

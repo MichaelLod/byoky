@@ -2,35 +2,82 @@ import { test as base, chromium, type BrowserContext, type Page } from '@playwri
 import path from 'path';
 import http from 'http';
 import fs from 'fs';
+import os from 'os';
+import { execSync } from 'child_process';
 
 const EXTENSION_PATH = path.resolve(__dirname, '../packages/extension/.output/chrome-mv3');
 const TEST_PAGE_DIR = path.resolve(__dirname, 'test-page');
+const ENV_LOCAL_PATH = path.resolve(__dirname, '../.env.local');
 
-interface TestFixtures {
-  context: BrowserContext;
-  extensionPage: Page;
+export interface Wallet {
+  ctx: BrowserContext;
+  popup: Page;
+  page: Page;
   extensionId: string;
-  testPage: Page;
 }
 
-let sharedContext: BrowserContext | null = null;
-let sharedExtensionPage: Page | null = null;
-let sharedExtensionId: string | null = null;
-let sharedTestPage: Page | null = null;
+export interface ApiKeys {
+  anthropic: string;
+  openai: string;
+  gemini: string;
+}
+
+interface TestFixtures {
+  walletA: Wallet;
+  walletB: Wallet;
+  apiKeys: ApiKeys;
+}
+
+let sharedA: Wallet | null = null;
+let sharedB: Wallet | null = null;
+let sharedApiKeys: ApiKeys | null = null;
 let server: http.Server | null = null;
 let serverPort = 0;
+
+// Exported helpers so a second spec file (vault-flow.spec.ts) can stand up
+// its own pair of fresh wallets without touching the offline fixture state.
+export { launchWallet, loadApiKeys, startServer };
+
+function parseEnvFile(filePath: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!fs.existsSync(filePath)) return out;
+  const content = fs.readFileSync(filePath, 'utf-8');
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    let value = trimmed.slice(eq + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
+function loadApiKeys(): ApiKeys {
+  const env = parseEnvFile(ENV_LOCAL_PATH);
+  const anthropic = env.ANTHROPIC_API_KEY;
+  const openai = env.OPENAI_API_KEY;
+  const gemini = env.GEMINI_API_KEY;
+  if (!anthropic || !openai || !gemini) {
+    throw new Error(
+      'Missing API keys in .env.local — need ANTHROPIC_API_KEY, OPENAI_API_KEY, and GEMINI_API_KEY for live e2e',
+    );
+  }
+  return { anthropic, openai, gemini };
+}
 
 function startServer(): Promise<number> {
   return new Promise((resolve) => {
     server = http.createServer((req, res) => {
-      // Serve test page
       if (req.url === '/' || req.url === '/index.html') {
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end(fs.readFileSync(path.join(TEST_PAGE_DIR, 'index.html'), 'utf-8'));
         return;
       }
-
-      // Serve SDK files from dist
       if (req.url?.startsWith('/sdk/')) {
         const filePath = path.resolve(__dirname, '../packages/sdk/dist', req.url.replace('/sdk/', ''));
         if (fs.existsSync(filePath)) {
@@ -49,11 +96,9 @@ function startServer(): Promise<number> {
           return;
         }
       }
-
       res.writeHead(404);
       res.end('Not found');
     });
-
     server.listen(0, () => {
       const addr = server!.address() as { port: number };
       serverPort = addr.port;
@@ -62,140 +107,136 @@ function startServer(): Promise<number> {
   });
 }
 
+/**
+ * Write a native-messaging manifest into <user_data_dir>/NativeMessagingHosts/
+ * so the extension can spawn the Byoky Bridge. Playwright's bundled Chromium
+ * does NOT pick up the system-wide manifest at
+ * ~/Library/Application Support/Chromium/NativeMessagingHosts/ when launched
+ * with a custom user-data-dir, so we install a per-profile copy that points
+ * at the globally-installed byoky-bridge CLI via a shell wrapper (Chrome
+ * spawns native hosts with a minimal PATH, which is why we need the wrapper
+ * to set PATH and call node with an absolute path).
+ */
+function installBridgeManifest(userDataDir: string, extensionId: string): void {
+  let bridgeBin: string;
+  try {
+    bridgeBin = execSync('which byoky-bridge', { encoding: 'utf-8' }).trim();
+  } catch {
+    throw new Error('byoky-bridge CLI not found on PATH — install with: pnpm --filter @byoky/bridge build && npm link (or npm i -g @byoky/bridge)');
+  }
+  const nodeBin = process.execPath;
+  const nodeDir = path.dirname(nodeBin);
+
+  const hostsDir = path.join(userDataDir, 'NativeMessagingHosts');
+  fs.mkdirSync(hostsDir, { recursive: true });
+
+  const wrapperPath = path.join(hostsDir, 'byoky-bridge-host');
+  const wrapper = [
+    '#!/bin/bash',
+    `export PATH='${nodeDir}:/usr/local/bin:/usr/bin:/bin'`,
+    `exec '${nodeBin}' '${bridgeBin}' host "$@"`,
+    '',
+  ].join('\n');
+  fs.writeFileSync(wrapperPath, wrapper);
+  fs.chmodSync(wrapperPath, 0o755);
+
+  const manifest = {
+    name: 'com.byoky.bridge',
+    description: 'Byoky Bridge (e2e test)',
+    path: wrapperPath,
+    type: 'stdio',
+    allowed_origins: [`chrome-extension://${extensionId}/`],
+  };
+  fs.writeFileSync(
+    path.join(hostsDir, 'com.byoky.bridge.json'),
+    JSON.stringify(manifest, null, 2),
+  );
+}
+
+// Known-good id for the unpacked byoky extension at the build output path.
+// Chromium derives extension IDs deterministically from the extension's
+// absolute file path, so this is stable across runs. We pre-install the
+// bridge manifest with this ID before launching; if the path ever changes,
+// the first-run launch below would surface a mismatch.
+const EXPECTED_EXTENSION_ID = 'ahhecmfcclkjdgjnmackoacldnmgmipl';
+
+async function launchWallet(label: string, port: number): Promise<Wallet> {
+  // Create a named user-data-dir so we can drop a NativeMessagingHosts
+  // manifest into it BEFORE launch — Chromium doesn't re-scan after start,
+  // but it does read the manifest fresh on each connectNative() call.
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), `byoky-e2e-${label}-`));
+  installBridgeManifest(userDataDir, EXPECTED_EXTENSION_ID);
+
+  const ctx = await chromium.launchPersistentContext(userDataDir, {
+    headless: false,
+    args: [
+      `--disable-extensions-except=${EXTENSION_PATH}`,
+      `--load-extension=${EXTENSION_PATH}`,
+      '--no-first-run',
+      '--disable-default-apps',
+    ],
+  });
+
+  let extensionId = '';
+  const workers = ctx.serviceWorkers();
+  if (workers.length > 0) {
+    extensionId = new URL(workers[0].url()).hostname;
+  } else {
+    const worker = await ctx.waitForEvent('serviceworker');
+    extensionId = new URL(worker.url()).hostname;
+  }
+  if (extensionId !== EXPECTED_EXTENSION_ID) {
+    // Rewrite the manifest with the real id — still works because Chromium
+    // reads it lazily on connectNative().
+    installBridgeManifest(userDataDir, extensionId);
+  }
+  // eslint-disable-next-line no-console
+  console.log(`[${label}] extension id: ${extensionId}`);
+
+  const popup = await ctx.newPage();
+  await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+  await popup.waitForLoadState('domcontentloaded');
+
+  const page = await ctx.newPage();
+  await page.goto(`http://localhost:${port}/`);
+  await page.waitForLoadState('domcontentloaded');
+  await page.waitForFunction(() => '__byoky__' in window, { timeout: 10_000 });
+
+  // Tag each window so console logs can be told apart if you tail them
+  await popup.evaluate((l) => { document.title = `[${l}] popup`; }, label);
+  await page.evaluate((l) => { document.title = `[${l}] page`; }, label);
+
+  return { ctx, popup, page, extensionId };
+}
+
+async function ensureWallets() {
+  if (sharedA) return;
+  sharedApiKeys = loadApiKeys();
+  const port = await startServer();
+  sharedA = await launchWallet('A', port);
+  sharedB = await launchWallet('B', port);
+}
+
 export const test = base.extend<TestFixtures>({
-  context: async ({}, use) => {
-    if (!sharedContext) {
-      const port = await startServer();
-      sharedContext = await chromium.launchPersistentContext('', {
-        headless: false,
-        args: [
-          `--disable-extensions-except=${EXTENSION_PATH}`,
-          `--load-extension=${EXTENSION_PATH}`,
-          '--no-first-run',
-          '--disable-default-apps',
-        ],
-      });
-
-      // Mock Anthropic API
-      await sharedContext.route('https://api.anthropic.com/**', async (route) => {
-        const request = route.request();
-        let body: Record<string, unknown> = {};
-        try { body = request.postDataJSON(); } catch {}
-        const messages = body.messages as Array<{ content: string }> | undefined;
-
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            id: 'msg_mock_e2e',
-            type: 'message',
-            role: 'assistant',
-            content: [{ type: 'text', text: `Mock response to: ${messages?.[0]?.content ?? 'unknown'}` }],
-            model: body.model ?? 'claude-sonnet-4-20250514',
-            usage: { input_tokens: 15, output_tokens: 25 },
-            stop_reason: 'end_turn',
-          }),
-        });
-      });
-
-      // Mock OpenAI API
-      await sharedContext.route('https://api.openai.com/**', async (route) => {
-        const request = route.request();
-        let body: Record<string, unknown> = {};
-        try { body = request.postDataJSON(); } catch {}
-        const messages = body.messages as Array<{ content: string }> | undefined;
-
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            id: 'chatcmpl-mock-e2e',
-            object: 'chat.completion',
-            choices: [{
-              index: 0,
-              message: { role: 'assistant', content: `OpenAI mock: ${messages?.[0]?.content ?? 'unknown'}` },
-              finish_reason: 'stop',
-            }],
-            model: body.model ?? 'gpt-4o',
-            usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
-          }),
-        });
-      });
-
-      // Mock Gemini API
-      await sharedContext.route('https://generativelanguage.googleapis.com/**', async (route) => {
-        const request = route.request();
-        let body: Record<string, unknown> = {};
-        try { body = request.postDataJSON(); } catch {}
-        const contents = body.contents as Array<{ parts: Array<{ text: string }> }> | undefined;
-        const inputText = contents?.[0]?.parts?.[0]?.text ?? 'unknown';
-
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            candidates: [{
-              content: { parts: [{ text: `Gemini mock: ${inputText}` }], role: 'model' },
-              finishReason: 'STOP',
-            }],
-            usageMetadata: { promptTokenCount: 12, candidatesTokenCount: 18, totalTokenCount: 30 },
-          }),
-        });
-      });
-
-      // Get extension ID from service worker
-      let extensionId = '';
-      const workers = sharedContext.serviceWorkers();
-      if (workers.length > 0) {
-        extensionId = new URL(workers[0].url()).hostname;
-      } else {
-        const worker = await sharedContext.waitForEvent('serviceworker');
-        extensionId = new URL(worker.url()).hostname;
-      }
-      sharedExtensionId = extensionId;
-
-      // Open extension popup page
-      sharedExtensionPage = await sharedContext.newPage();
-      await sharedExtensionPage.goto(`chrome-extension://${extensionId}/popup.html`);
-      await sharedExtensionPage.waitForLoadState('domcontentloaded');
-
-      // Open test page
-      sharedTestPage = await sharedContext.newPage();
-      await sharedTestPage.goto(`http://localhost:${port}/`);
-      await sharedTestPage.waitForLoadState('domcontentloaded');
-      // Wait for extension content script to inject
-      await sharedTestPage.waitForFunction(() => '__byoky__' in window, { timeout: 10_000 });
-    }
-
-    await use(sharedContext);
+  walletA: async ({}, use) => {
+    await ensureWallets();
+    await use(sharedA!);
   },
-
-  extensionPage: async ({ context }, use) => {
-    await use(sharedExtensionPage!);
+  walletB: async ({}, use) => {
+    await ensureWallets();
+    await use(sharedB!);
   },
-
-  extensionId: async ({ context }, use) => {
-    await use(sharedExtensionId!);
-  },
-
-  testPage: async ({ context }, use) => {
-    await use(sharedTestPage!);
+  apiKeys: async ({}, use) => {
+    await ensureWallets();
+    await use(sharedApiKeys!);
   },
 });
 
 export { expect } from '@playwright/test';
 
-// Cleanup after all tests
 test.afterAll(async () => {
-  if (sharedContext) {
-    await sharedContext.close();
-    sharedContext = null;
-    sharedExtensionPage = null;
-    sharedExtensionId = null;
-    sharedTestPage = null;
-  }
-  if (server) {
-    server.close();
-    server = null;
-  }
+  if (sharedA) { await sharedA.ctx.close(); sharedA = null; }
+  if (sharedB) { await sharedB.ctx.close(); sharedB = null; }
+  if (server) { server.close(); server = null; }
+  sharedApiKeys = null;
 });

@@ -1,0 +1,12 @@
+appId: com.byoky.app
+---
+# Assumes at least one active sent gift. Revokes the first one and
+# verifies it moves to the Expired / Revoked section.
+- tapOn:
+    text: "Gifts"
+    index: 0
+- assertVisible: "Sent"
+- tapOn:
+    text: "Revoke"
+    index: 0
+- assertVisible: "Expired / Revoked"
