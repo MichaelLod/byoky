@@ -36,6 +36,9 @@ fun SettingsScreen(wallet: WalletStore) {
     val cloudVaultTokenExpired by wallet.cloudVaultTokenExpired.collectAsState()
     var showCloudVaultSetup by remember { mutableStateOf(false) }
     var showCloudVaultRelogin by remember { mutableStateOf(false) }
+    var showDeleteAccountConfirm by remember { mutableStateOf(false) }
+    var showResetWalletConfirm by remember { mutableStateOf(false) }
+    var dangerError by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
         topBar = {
@@ -242,7 +245,125 @@ fun SettingsScreen(wallet: WalletStore) {
                 }
             }
 
+            // Danger Zone
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = BgCard),
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Danger Zone", color = Danger, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        if (cloudVaultEnabled)
+                            "Delete account removes your vault account and all synced keys. Reset wallet clears only this device."
+                        else
+                            "Reset wallet clears all keys on this device.",
+                        color = TextMuted,
+                        fontSize = 11.sp,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    if (cloudVaultEnabled) {
+                        OutlinedButton(
+                            onClick = { showDeleteAccountConfirm = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Danger),
+                        ) {
+                            Icon(Icons.Default.Delete, null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Delete Vault Account")
+                        }
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    OutlinedButton(
+                        onClick = { showResetWalletConfirm = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Danger),
+                    ) {
+                        Icon(Icons.Default.Refresh, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Reset Wallet")
+                    }
+                }
+            }
         }
+    }
+
+    if (showDeleteAccountConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteAccountConfirm = false },
+            containerColor = BgCard,
+            title = { Text("Delete Vault Account?", color = Danger) },
+            text = {
+                Text(
+                    "Your vault account and all synced keys will be permanently deleted from vault.byoky.com. This device will also be reset. This cannot be undone.",
+                    color = TextSecondary,
+                    fontSize = 13.sp,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteAccountConfirm = false
+                        scope.launch {
+                            try {
+                                // deleteVaultAccount makes blocking OkHttp
+                                // calls; run off Main so StrictMode doesn't
+                                // throw NetworkOnMainThreadException (which
+                                // vaultRequest swallows and would surface as
+                                // a generic "Failed to delete vault account").
+                                withContext(Dispatchers.IO) {
+                                    wallet.deleteVaultAccount()
+                                }
+                            } catch (e: Exception) {
+                                dangerError = e.message
+                            }
+                        }
+                    },
+                ) { Text("Delete", color = Danger) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteAccountConfirm = false }) { Text("Cancel") }
+            },
+        )
+    }
+
+    if (showResetWalletConfirm) {
+        AlertDialog(
+            onDismissRequest = { showResetWalletConfirm = false },
+            containerColor = BgCard,
+            title = { Text("Reset Wallet?", color = Danger) },
+            text = {
+                Text(
+                    if (cloudVaultEnabled)
+                        "All keys on this device will be cleared. Your vault account on vault.byoky.com will NOT be deleted — use Delete Vault Account for that."
+                    else
+                        "All keys on this device will be permanently deleted. This cannot be undone.",
+                    color = TextSecondary,
+                    fontSize = 13.sp,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showResetWalletConfirm = false
+                        wallet.resetWallet()
+                    },
+                ) { Text("Reset", color = Danger) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetWalletConfirm = false }) { Text("Cancel") }
+            },
+        )
+    }
+
+    dangerError?.let { errMsg ->
+        AlertDialog(
+            onDismissRequest = { dangerError = null },
+            containerColor = BgCard,
+            title = { Text("Error", color = TextPrimary) },
+            text = { Text(errMsg, color = TextSecondary, fontSize = 13.sp) },
+            confirmButton = { TextButton(onClick = { dangerError = null }) { Text("OK") } },
+        )
     }
 
     if (showCloudVaultSetup) {

@@ -1,10 +1,12 @@
 import { useEffect } from 'react';
 import { useWalletStore } from './store';
-import { Logo3D } from './components/Logo3D';
+import { Welcome } from './pages/Welcome';
+import { VaultAuth } from './pages/VaultAuth';
 import { Setup } from './pages/Setup';
 import { Unlock } from './pages/Unlock';
 import { Dashboard } from './pages/Dashboard';
 import { AddCredential } from './pages/AddCredential';
+import { Activity } from './pages/Activity';
 import { ConnectedApps } from './pages/ConnectedApps';
 import { ApprovalRequest } from './pages/ApprovalRequest';
 import { Usage } from './pages/Usage';
@@ -55,7 +57,12 @@ export default function App() {
     );
   }
 
-  const showNav = currentPage !== 'setup' && currentPage !== 'unlock' && currentPage !== 'approval';
+  const showNav =
+    currentPage !== 'welcome' &&
+    currentPage !== 'vault-auth' &&
+    currentPage !== 'setup' &&
+    currentPage !== 'unlock' &&
+    currentPage !== 'approval';
 
   return (
     <div className="app">
@@ -100,13 +107,12 @@ export default function App() {
               </svg>
             </button>
             <button
-              className={currentPage === 'connected-apps' ? 'active' : ''}
-              onClick={() => useWalletStore.getState().navigate('connected-apps')}
-              title="Sessions"
+              className={currentPage === 'activity' || currentPage === 'connected-apps' || currentPage === 'request-history' ? 'active' : ''}
+              onClick={() => useWalletStore.getState().navigate('activity')}
+              title="Activity"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
               </svg>
               {sessions.length > 0 && (
                 <span className="nav-badge">{sessions.length}</span>
@@ -124,16 +130,6 @@ export default function App() {
               </svg>
             </button>
             <button
-              className={currentPage === 'request-history' ? 'active' : ''}
-              onClick={() => useWalletStore.getState().navigate('request-history')}
-              title="History"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" />
-                <polyline points="12 6 12 12 16 14" />
-              </svg>
-            </button>
-            <button
               className={currentPage === 'settings' ? 'active' : ''}
               onClick={() => useWalletStore.getState().navigate('settings')}
               title="Settings"
@@ -146,13 +142,15 @@ export default function App() {
           </nav>
         )}
       </header>
-      <Logo3D height={showNav ? 100 : 160} />
       <main className="content">
         <div key={currentPage} className="page-enter">
+          {currentPage === 'welcome' && <Welcome />}
+          {currentPage === 'vault-auth' && <VaultAuth />}
           {currentPage === 'setup' && <Setup />}
           {currentPage === 'unlock' && <Unlock />}
           {currentPage === 'dashboard' && <Dashboard />}
           {currentPage === 'add-credential' && <AddCredential />}
+          {currentPage === 'activity' && <Activity />}
           {currentPage === 'connected-apps' && <ConnectedApps />}
           {currentPage === 'approval' && <ApprovalRequest />}
           {currentPage === 'usage' && <Usage />}
@@ -166,6 +164,11 @@ export default function App() {
           {currentPage === 'app-view' && <AppView />}
         </div>
       </main>
+      {(currentPage === 'welcome' || currentPage === 'vault-auth' || currentPage === 'setup' || currentPage === 'unlock') && (
+        <div className="mascot-peek">
+          <img src="/mascot.svg" alt="" />
+        </div>
+      )}
     </div>
   );
 }
