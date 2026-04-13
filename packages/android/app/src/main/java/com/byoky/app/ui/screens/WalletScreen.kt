@@ -30,7 +30,6 @@ import com.byoky.app.data.formatTokens
 import com.byoky.app.data.giftBudgetPercent
 import com.byoky.app.data.giftBudgetRemaining
 import com.byoky.app.data.isGiftExpired
-import com.byoky.app.ui.components.OfflineUpgradeBanner
 import com.byoky.app.ui.theme.*
 import kotlinx.coroutines.launch
 
@@ -93,7 +92,7 @@ fun WalletScreen(
                             onDismissRequest = { addMenuOpen = false },
                         ) {
                             DropdownMenuItem(
-                                text = { Text("Add credential") },
+                                text = { Text("Add API Key") },
                                 leadingIcon = { Icon(Icons.Default.Key, null, tint = Accent) },
                                 onClick = {
                                     addMenuOpen = false
@@ -124,11 +123,6 @@ fun WalletScreen(
     ) { padding ->
         if (!hasAny) {
             Column(modifier = Modifier.padding(padding)) {
-                if (!cloudVaultEnabled) {
-                    Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                        OfflineUpgradeBanner(wallet)
-                    }
-                }
                 EmptyWallet(
                     modifier = Modifier,
                     onAdd = { showAddSheet = true },
@@ -141,11 +135,6 @@ fun WalletScreen(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                if (!cloudVaultEnabled) {
-                    item {
-                        OfflineUpgradeBanner(wallet)
-                    }
-                }
                 if (credentials.isNotEmpty()) {
                     item {
                         Text(
