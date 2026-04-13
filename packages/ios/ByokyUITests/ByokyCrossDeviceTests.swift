@@ -66,12 +66,16 @@ final class ByokyCrossDeviceTests: XCTestCase {
         customField.tap()
         customField.typeText("500")
 
-        let submitBtn = app.buttons["createGift.submit"]
-        // Dismiss keyboard before tapping submit.
+        // Dismiss keyboard, then scroll the form so the submit button
+        // enters the viewport. SwiftUI Form lazy-loads cells — bottom
+        // sections don't exist in the accessibility tree until scrolled.
         if app.keyboards.element.exists {
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.1)).tap()
+            Thread.sleep(forTimeInterval: 0.5)
         }
-        XCTAssertTrue(submitBtn.waitForExistence(timeout: 3.0))
+        app.swipeUp()
+        let submitBtn = app.buttons["createGift.submit"]
+        XCTAssertTrue(submitBtn.waitForExistence(timeout: 5.0), "Create Gift submit button not found after scroll")
         submitBtn.tap()
 
         // ── 4. Read the generated gift link ────────────────────────────

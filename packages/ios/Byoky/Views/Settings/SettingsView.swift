@@ -5,10 +5,6 @@ struct SettingsView: View {
     @State private var showSafariGuide = false
     @State private var showCloudVault = false
     @State private var showCloudVaultRelogin = false
-    @State private var showDeleteAccountConfirm = false
-    @State private var showResetWalletConfirm = false
-    @State private var dangerError: String?
-
     @State private var debugSelfTestReport: String?
 
     var body: some View {
@@ -21,7 +17,6 @@ struct SettingsView: View {
                 #endif
                 aboutSection
                 safariExtensionSection
-                dangerZoneSection
             }
             .navigationTitle("Settings")
             .sheet(isPresented: $showSafariGuide) {
@@ -57,69 +52,6 @@ struct SettingsView: View {
                 }
             }
             #endif
-            .alert("Delete Vault Account?", isPresented: $showDeleteAccountConfirm) {
-                Button("Cancel", role: .cancel) {}
-                Button("Delete", role: .destructive) {
-                    Task {
-                        do {
-                            try await wallet.deleteVaultAccount()
-                        } catch {
-                            dangerError = error.localizedDescription
-                        }
-                    }
-                }
-            } message: {
-                Text("Your vault account and all synced keys will be permanently deleted from vault.byoky.com. This device will also be reset. This cannot be undone.")
-            }
-            .alert("Reset Wallet?", isPresented: $showResetWalletConfirm) {
-                Button("Cancel", role: .cancel) {}
-                Button("Reset", role: .destructive) {
-                    wallet.resetWallet()
-                }
-            } message: {
-                Text(wallet.cloudVaultEnabled
-                    ? "All keys on this device will be cleared. Your vault account on vault.byoky.com will NOT be deleted — use Delete Vault Account for that."
-                    : "All keys on this device will be permanently deleted. This cannot be undone.")
-            }
-            .alert("Error", isPresented: Binding(
-                get: { dangerError != nil },
-                set: { if !$0 { dangerError = nil } }
-            )) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(dangerError ?? "")
-            }
-        }
-    }
-
-    private var dangerZoneSection: some View {
-        Section {
-            if wallet.cloudVaultEnabled {
-                Button(role: .destructive) {
-                    showDeleteAccountConfirm = true
-                } label: {
-                    HStack {
-                        Label("Delete Vault Account", systemImage: "trash")
-                        Spacer()
-                    }
-                    .contentShape(Rectangle())
-                }
-            }
-            Button(role: .destructive) {
-                showResetWalletConfirm = true
-            } label: {
-                HStack {
-                    Label("Reset Wallet", systemImage: "arrow.counterclockwise")
-                    Spacer()
-                }
-                .contentShape(Rectangle())
-            }
-        } header: {
-            Text("Danger Zone")
-        } footer: {
-            Text(wallet.cloudVaultEnabled
-                ? "Delete account removes your vault account and all synced keys. Reset wallet clears only this device."
-                : "Reset wallet clears all keys on this device.")
         }
     }
 

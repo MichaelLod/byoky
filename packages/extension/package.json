@@ -18,10 +18,12 @@
     "@byoky/core": "workspace:*",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "three": "^0.183.2",
     "zustand": "^5.0.0"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
+    "@types/three": "^0.183.0",
     "@types/react-dom": "^19.0.0",
     "@wxt-dev/module-react": "1.1.5",
     "typescript": "^5.7.0",
