@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="accent">#FF4F00</color>
-    <color name="accent_hover">#FF6B2B</color>
-    <color name="accent_soft">#14FF4F00</color>
-    <color name="bg_main">#FFFFFF</color>
-    <color name="bg_raised">#F8F9FA</color>
-    <color name="bg_card">#FFFFFF</color>
-    <color name="bg_hover">#F1F3F5</color>
-    <color name="text_primary">#1A1A2E</color>
-    <color name="text_secondary">#64748B</color>
-    <color name="text_muted">#94A3B8</color>
-    <color name="danger">#F43F5E</color>
-    <color name="success">#22C55E</color>
-    <color name="border">#E2E8F0</color>
+    <color name="accent">#0ea5e9</color>
+    <color name="accent_hover">#38bdf8</color>
+    <color name="accent_soft">#1F0ea5e9</color>
+    <color name="bg_main">#141418</color>
+    <color name="bg_raised">#1c1c22</color>
+    <color name="bg_card">#24242c</color>
+    <color name="bg_hover">#2a2a34</color>
+    <color name="text_primary">#f5f5f7</color>
+    <color name="text_secondary">#8e8e9a</color>
+    <color name="text_muted">#55555f</color>
+    <color name="danger">#f43f5e</color>
+    <color name="success">#34d399</color>
+    <color name="border">#0Fffffff</color>
 </resources>

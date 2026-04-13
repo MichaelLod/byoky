@@ -7,9 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		00C8850FE8B3060D656F88D9 /* VaultAuthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C06BA1F3632CE31A6C57DCE7 /* VaultAuthView.swift */; };
 		00C9FE740FD03963A7D40126 /* App-BUiZUJhP.js in Resources */ = {isa = PBXBuildFile; fileRef = 2238E5CD69FCA29B0390623A /* App-BUiZUJhP.js */; };
 		00E7789627DC347BDD41E2E5 /* sidepanel-BkMmx_VB.js in Resources */ = {isa = PBXBuildFile; fileRef = EA26D6F490B8EDF5679C2148 /* sidepanel-BkMmx_VB.js */; };
 		01C40859F08D643E4BBB41AE /* RoutingResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDD23C93C263DCD747B4A451 /* RoutingResolver.swift */; };
+		020B130AC9CCA58B16E2FBFF /* OfflineUpgradeBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50CD854541B37F59AB4944AE /* OfflineUpgradeBanner.swift */; };
 		076E43143FE79F901A26D0A4 /* MarketplaceTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9CC9BD956AF6359BDDA0197 /* MarketplaceTabView.swift */; };
 		08B1CDC1B03E81A3BBE759FD /* mascot.svg in Resources */ = {isa = PBXBuildFile; fileRef = DC0DEA62654413544A1EA7E8 /* mascot.svg */; };
 		0A0B8723BEEA1F628898918C /* ByokySmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FE2FCEEC7F2B498F6F78EDB /* ByokySmokeTests.swift */; };
@@ -174,6 +176,7 @@
 		40D8034A82B286AC470E14A2 /* ByokyCrossDeviceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ByokyCrossDeviceTests.swift; sourceTree = "<group>"; };
 		42AB93112DAA20241E4CF0DE /* ProxyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyService.swift; sourceTree = "<group>"; };
 		43CA29F6391EE3F4FF37D482 /* 32.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = 32.png; sourceTree = "<group>"; };
+		50CD854541B37F59AB4944AE /* OfflineUpgradeBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineUpgradeBanner.swift; sourceTree = "<group>"; };
 		54F9FD4B4E6C8A71978FDB71 /* mobile.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = mobile.js; sourceTree = "<group>"; };
 		5619226B06840C897C0B2516 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		57F7BF90B53E6F481C189526 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
@@ -209,6 +212,7 @@
 		B17804B334FCEF3BE7730678 /* Byoky.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Byoky.entitlements; sourceTree = "<group>"; };
 		B43E014DCAB9AF22FB314A7F /* MascotView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MascotView.swift; sourceTree = "<group>"; };
 		B641D6799174E3DFA18348D0 /* UnlockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnlockView.swift; sourceTree = "<group>"; };
+		C06BA1F3632CE31A6C57DCE7 /* VaultAuthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultAuthView.swift; sourceTree = "<group>"; };
 		C3B5118B3A195AF66ECCB79E /* Script.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = Script.js; sourceTree = "<group>"; };
 		C4B71216FA68A3818CC6A692 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		CB75DEEFD539F5481B40FDE4 /* CreateGiftView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreateGiftView.swift; sourceTree = "<group>"; };
@@ -239,6 +243,7 @@
 			isa = PBXGroup;
 			children = (
 				3737A9440D94C08CC5C24E56 /* AddCredentialView.swift */,
+				50CD854541B37F59AB4944AE /* OfflineUpgradeBanner.swift */,
 				873BB1CDCFBE3C232CBB3AEA /* WalletView.swift */,
 			);
 			path = Wallet;
@@ -292,6 +297,7 @@
 			children = (
 				AFCA603A5E92A878E419B12F /* OnboardingView.swift */,
 				B641D6799174E3DFA18348D0 /* UnlockView.swift */,
+				C06BA1F3632CE31A6C57DCE7 /* VaultAuthView.swift */,
 			);
 			path = Onboarding;
 			sourceTree = "<group>";
@@ -797,6 +803,7 @@
 				076E43143FE79F901A26D0A4 /* MarketplaceTabView.swift in Sources */,
 				BAAB7074EE3DAA0657C9DF80 /* MascotView.swift in Sources */,
 				D6BE09E5B629C97D232DD633 /* NativeBridgeHandler.swift in Sources */,
+				020B130AC9CCA58B16E2FBFF /* OfflineUpgradeBanner.swift in Sources */,
 				D83D90C01974F49A95E9727E /* OnboardingView.swift in Sources */,
 				DEA9478AEAC35FF19BFB415D /* PairView.swift in Sources */,
 				2274751D351EAE4603D4B74A /* ProxyService.swift in Sources */,
@@ -811,6 +818,7 @@
 				3CF13FA8D76055FF9FCED7CA /* UnlockView.swift in Sources */,
 				8577BD07B91A14E78C03FEFA /* UsageParser.swift in Sources */,
 				AA78E43569F33CA97F4040AA /* UsageView.swift in Sources */,
+				00C8850FE8B3060D656F88D9 /* VaultAuthView.swift in Sources */,
 				2C64B2340885B3A383680C99 /* WalletState.swift in Sources */,
 				C90992A0290F62A29ABAE125 /* WalletStore.swift in Sources */,
 				491996E094E51064FAFA4268 /* WalletView.swift in Sources */,

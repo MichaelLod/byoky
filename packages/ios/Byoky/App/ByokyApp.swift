@@ -54,7 +54,7 @@ struct ByokyApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(wallet)
-                .preferredColorScheme(.light)
+                .preferredColorScheme(.dark)
                 .onOpenURL { url in
                     handleIncomingURL(url)
                 }

@@ -1,20 +1,17 @@
 import SwiftUI
 
-private enum OnboardingMode { case vault, byok }
-private enum OnboardingStep { case credentials, confirm }
+enum OnboardingStep {
+    case welcome
+    case vaultAuth
+    case offlineSetup
+}
 
 struct OnboardingView: View {
     @EnvironmentObject var wallet: WalletStore
-    @State private var mode: OnboardingMode = .vault
-    @State private var step: OnboardingStep = .credentials
-    @State private var isSignup = true
-    @State private var username = ""
     @State private var password = ""
     @State private var confirmPassword = ""
     @State private var error: String?
-    @State private var loading = false
-    @State private var usernameStatus: VaultUsernameStatus = .idle
-    @State private var checkTask: Task<Void, Never>?
+    @State private var step: OnboardingStep = .welcome
 
     var body: some View {
         ZStack {
@@ -23,94 +20,99 @@ struct OnboardingView: View {
             VStack(spacing: 0) {
                 Spacer()
 
-                if step == .confirm {
-                    confirmStep
-                } else {
-                    credentialsStep
+                switch step {
+                case .welcome:
+                    welcomeStep
+                case .vaultAuth:
+                    VaultAuthView(onBack: { withAnimation { step = .welcome } })
+                case .offlineSetup:
+                    passwordStep
                 }
 
                 Spacer()
             }
             .padding(24)
         }
+        .preferredColorScheme(.dark)
     }
 
-    // MARK: - Credentials Step
+    private var welcomeStep: some View {
+        VStack(spacing: 24) {
+            MascotView(size: 140)
 
-    private var credentialsStep: some View {
-        VStack(spacing: 20) {
-            Text("Byoky")
+            Text("Byoky Wallet")
                 .font(.system(size: 32, weight: .bold))
                 .foregroundStyle(Theme.textPrimary)
 
-            Text("One wallet.\nEvery AI app.")
+            Text("Your encrypted wallet for AI API keys. Sync across devices, end-to-end encrypted.")
                 .font(.body)
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
+                .padding(.horizontal, 16)
 
-            if mode == .vault {
-                HStack(spacing: 8) {
-                    tabButton("Sign Up", selected: isSignup) {
-                        isSignup = true
-                        resetFields()
-                    }
-                    tabButton("Log In", selected: !isSignup) {
-                        isSignup = false
-                        resetFields()
-                    }
-                }
+            Button {
+                withAnimation { step = .vaultAuth }
+            } label: {
+                Text("Get Started")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Theme.accent)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
             }
+            .padding(.top, 8)
+            .accessibilityIdentifier("onboarding.getStarted")
 
-            if mode == .byok {
-                Text("Create a local password\nto encrypt your API keys.")
-                    .font(.caption)
-                    .foregroundStyle(Theme.textSecondary)
-                    .multilineTextAlignment(.center)
+            Button {
+                withAnimation { step = .offlineSetup }
+            } label: {
+                Text("Continue in offline mode")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.textMuted)
             }
+            .accessibilityIdentifier("onboarding.offlineMode")
+        }
+    }
 
-            if let error {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(Theme.danger)
-            }
+    private var passwordStep: some View {
+        VStack(spacing: 24) {
+            MascotView(size: 100)
 
-            VStack(spacing: 12) {
-                if mode == .vault {
-                    VStack(alignment: .leading, spacing: 4) {
-                        TextField("Username", text: $username)
-                            .textContentType(.username)
-                            .autocapitalization(.none)
-                            .disableAutocorrection(true)
-                            .padding(12)
-                            .background(Theme.bgRaised)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Theme.border, lineWidth: 1.5)
-                            )
-                            .onChange(of: username) { _, newValue in
-                                if isSignup { scheduleUsernameCheck(newValue) }
-                            }
+            Text("Set Master Password")
+                .font(.system(size: 28, weight: .bold))
+                .foregroundStyle(Theme.textPrimary)
 
-                        if isSignup && username.count >= 3 {
-                            Text(statusMessage)
-                                .font(.system(size: 11))
-                                .foregroundStyle(statusColor)
-                        }
-                    }
-                }
+            Text("This password encrypts all your API keys. It's never stored — only a hash is kept to verify unlock.")
+                .font(.callout)
+                .foregroundStyle(Theme.textSecondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 16)
 
-                SecureField(isSignup ? "Password, 12 characters" : "Password", text: $password)
-                    .textContentType(isSignup ? .newPassword : .password)
-                    .padding(12)
+            VStack(spacing: 16) {
+                SecureField("Master password", text: $password)
+                    .textContentType(.newPassword)
+                    .padding(14)
                     .background(Theme.bgRaised)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Theme.border, lineWidth: 1.5)
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.white.opacity(0.06), lineWidth: 1)
                     )
+                    .accessibilityIdentifier("onboarding.password")
 
-                if isSignup && !password.isEmpty {
+                SecureField("Confirm password", text: $confirmPassword)
+                    .textContentType(.newPassword)
+                    .padding(14)
+                    .background(Theme.bgRaised)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                    )
+                    .accessibilityIdentifier("onboarding.confirmPassword")
+
+                if !password.isEmpty {
                     let quality = PasswordQuality.evaluate(password)
                     HStack(spacing: 6) {
                         Image(systemName: quality.icon)
@@ -119,221 +121,48 @@ struct OnboardingView: View {
                     .font(.caption)
                     .foregroundStyle(quality.color)
                 }
-            }
 
-            Button {
-                handleContinue()
-            } label: {
-                Text(loading ? "Connecting..." : isSignup ? "Continue" : "Log In")
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(canContinue ? Theme.accent : Theme.accent.opacity(0.3))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-            }
-            .disabled(!canContinue)
-            .accessibilityIdentifier("onboarding.continue")
-
-            Button {
-                withAnimation {
-                    mode = (mode == .vault) ? .byok : .vault
-                    resetFields()
-                    isSignup = true
+                if let error {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(Theme.danger)
                 }
-            } label: {
-                Text(mode == .vault ? "Got API keys? Add them here" : "← Back to Vault signup")
-                    .font(.caption)
-                    .foregroundStyle(Theme.textMuted)
-                    .underline()
             }
-        }
-    }
-
-    // MARK: - Confirm Step
-
-    private var confirmStep: some View {
-        VStack(spacing: 20) {
-            Text("Byoky")
-                .font(.system(size: 32, weight: .bold))
-                .foregroundStyle(Theme.textPrimary)
-
-            Text("Confirm your password")
-                .font(.body)
-                .foregroundStyle(Theme.textSecondary)
-
-            if let error {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(Theme.danger)
-            }
-
-            SecureField("Repeat your password", text: $confirmPassword)
-                .textContentType(.newPassword)
-                .padding(12)
-                .background(Theme.bgRaised)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Theme.border, lineWidth: 1.5)
-                )
 
             Button {
-                handleConfirmSubmit()
+                createWallet()
             } label: {
-                Text(loading ? "Creating..." : "Create Wallet")
+                Text("Create Wallet")
                     .font(.headline)
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
-                    .background(confirmPassword.isEmpty || loading ? Theme.accent.opacity(0.3) : Theme.accent)
+                    .background(isValid ? Theme.accent : Theme.accent.opacity(0.3))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             }
-            .disabled(confirmPassword.isEmpty || loading)
+            .disabled(!isValid)
             .accessibilityIdentifier("onboarding.createWallet")
 
             Button {
-                withAnimation {
-                    step = .credentials
-                    confirmPassword = ""
-                    error = nil
-                }
+                withAnimation { step = .welcome }
             } label: {
                 Text("Back")
-                    .font(.caption)
-                    .foregroundStyle(Theme.textMuted)
-                    .underline()
+                    .foregroundStyle(Theme.textSecondary)
             }
         }
     }
 
-    // MARK: - Helpers
-
-    private func tabButton(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(selected ? .white : Theme.textSecondary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background(selected ? Theme.accent : Theme.bgRaised)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-        }
+    private var isValid: Bool {
+        password == confirmPassword && PasswordQuality.evaluate(password).isAcceptable
     }
 
-    private var canContinue: Bool {
-        if loading { return false }
-        if password.count < 12 { return false }
-        if isSignup && !PasswordQuality.evaluate(password).isAcceptable { return false }
-        if mode == .vault && username.isEmpty { return false }
-        if mode == .vault && isSignup && (usernameStatus == .taken || usernameStatus == .invalid) { return false }
-        return true
-    }
-
-    private func handleContinue() {
-        error = nil
-        if password.count < 12 {
-            error = "Password must be at least 12 characters"
-            return
-        }
-        if isSignup && !PasswordQuality.evaluate(password).isAcceptable {
-            error = "Password is too weak"
-            return
-        }
-        if mode == .vault && username.isEmpty {
-            error = "Username is required"
-            return
-        }
-
-        if !isSignup {
-            doSubmit()
-        } else {
-            withAnimation { step = .confirm }
+    private func createWallet() {
+        do {
+            try wallet.createPassword(password)
+        } catch {
+            self.error = error.localizedDescription
         }
     }
-
-    private func handleConfirmSubmit() {
-        error = nil
-        if password != confirmPassword {
-            error = "Passwords do not match"
-            return
-        }
-        doSubmit()
-    }
-
-    private func doSubmit() {
-        loading = true
-        error = nil
-        Task {
-            do {
-                try wallet.createPassword(password)
-                if mode == .vault {
-                    let trimmed = username.lowercased().trimmingCharacters(in: .whitespaces)
-                    try await wallet.enableCloudVault(username: trimmed, password: password, isSignup: isSignup)
-                }
-            } catch {
-                await MainActor.run {
-                    self.error = error.localizedDescription
-                }
-            }
-            await MainActor.run { loading = false }
-        }
-    }
-
-    private func resetFields() {
-        password = ""
-        confirmPassword = ""
-        username = ""
-        error = nil
-        usernameStatus = .idle
-        step = .credentials
-    }
-
-    private var statusMessage: String {
-        switch usernameStatus {
-        case .checking: return "Checking availability..."
-        case .available: return "Username is available"
-        case .taken: return "Username is already taken"
-        case .invalid: return "Letters, numbers, hyphens, underscores (3-30 chars)"
-        case .idle: return ""
-        }
-    }
-
-    private var statusColor: Color {
-        switch usernameStatus {
-        case .available: return Color.green
-        case .taken, .invalid: return Theme.danger
-        default: return Theme.textMuted
-        }
-    }
-
-    private func scheduleUsernameCheck(_ raw: String) {
-        checkTask?.cancel()
-        let trimmed = raw.lowercased().trimmingCharacters(in: .whitespaces)
-        guard trimmed.count >= 3 else {
-            usernameStatus = .idle
-            return
-        }
-        let pattern = "^[a-z0-9][a-z0-9_-]{1,28}[a-z0-9]$"
-        if trimmed.range(of: pattern, options: .regularExpression) == nil {
-            usernameStatus = .invalid
-            return
-        }
-        usernameStatus = .checking
-        checkTask = Task {
-            try? await Task.sleep(nanoseconds: 400_000_000)
-            if Task.isCancelled { return }
-            let result = await wallet.checkUsernameAvailability(trimmed)
-            if Task.isCancelled { return }
-            await MainActor.run {
-                usernameStatus = result.available ? .available : (result.reason == "invalid" ? .invalid : .taken)
-            }
-        }
-    }
-}
-
-enum VaultUsernameStatus {
-    case idle, checking, available, taken, invalid
 }
 
 enum PasswordQuality {

@@ -20,10 +20,19 @@ struct WalletView: View {
             SwiftUI.Group {
                 if !hasAny {
                     VStack {
+                        OfflineUpgradeBanner()
+                            .padding(.horizontal)
                         emptyState
                     }
                 } else {
                     List {
+                        if !wallet.cloudVaultEnabled {
+                            Section {
+                                OfflineUpgradeBanner()
+                                    .listRowInsets(EdgeInsets())
+                                    .listRowBackground(Color.clear)
+                            }
+                        }
                         credentialsSection
                         if !activeGifts.isEmpty {
                             giftsSection
@@ -63,7 +72,7 @@ struct WalletView: View {
                             Button {
                                 showAddCredential = true
                             } label: {
-                                Label("Add API Key", systemImage: "key.fill")
+                                Label("Add credential", systemImage: "key.fill")
                             }
                             .accessibilityIdentifier("wallet.menu.addCredential")
                             Button {
