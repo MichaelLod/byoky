@@ -57,7 +57,7 @@ export function Logo3D({ height = 160 }: { height?: number }) {
     // Load pixel data
     fetch('/pixels.json')
       .then((r) => r.json())
-      .then((data: { width: number; height: number; pixels: [number, number, number][] }) => {
+      .then((data: { width: number; height: number; pixels: (number[])[] }) => {
         const { width: pw, height: ph, pixels } = data;
 
         const cubeGeo = new THREE.BoxGeometry(1, 1, 1);
@@ -73,19 +73,24 @@ export function Logo3D({ height = 160 }: { height?: number }) {
         const color = new THREE.Color();
         const cx = pw / 2;
         const cy = ph / 2;
+        const hasColor = pixels[0]?.length >= 5;
 
         for (let i = 0; i < count; i++) {
-          const [x, y, val] = pixels[i];
-          const brightness = val / 255;
+          const px = pixels[i];
+          const x = px[0], y = px[1];
 
           dummy.position.set(x - cx, -(y - cy), 0);
           dummy.scale.set(1, 1, 8);
           dummy.updateMatrix();
           mesh.setMatrixAt(i, dummy.matrix);
 
-          const curved = Math.pow(brightness, 1.6);
-          const g = curved * 0.88;
-          color.setRGB(g, g * 0.97, g * 0.93);
+          if (hasColor) {
+            color.setRGB(px[2] / 255, px[3] / 255, px[4] / 255);
+          } else {
+            const brightness = px[2] / 255;
+            const curved = Math.pow(brightness, 1.6) * 0.88;
+            color.setRGB(curved, curved * 0.97, curved * 0.93);
+          }
           mesh.setColorAt(i, color);
         }
 
