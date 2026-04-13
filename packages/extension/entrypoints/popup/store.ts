@@ -17,13 +17,10 @@ import {
 } from '@byoky/core';
 
 type Page =
-  | 'welcome'
-  | 'vault-auth'
   | 'setup'
   | 'unlock'
   | 'dashboard'
   | 'add-credential'
-  | 'activity'
   | 'connected-apps'
   | 'usage'
   | 'request-history'
@@ -55,7 +52,6 @@ interface WalletState {
   cloudVaultUsername: string | null;
   cloudVaultTokenExpired: boolean;
   cloudVaultPendingCount: number;
-  vaultBannerDismissedAt: number | null;
   installedApps: InstalledApp[];
   activeApp: InstalledApp | null;
   currentPage: Page;
@@ -64,11 +60,6 @@ interface WalletState {
 
   init: () => Promise<void>;
   setup: (password: string) => Promise<void>;
-  vaultBootstrapSignup: (username: string, password: string) => Promise<void>;
-  vaultBootstrapLogin: (username: string, password: string) => Promise<void>;
-  vaultActivate: (username: string) => Promise<void>;
-  dismissVaultBanner: () => Promise<void>;
-  continueOffline: () => void;
   unlock: (password: string) => Promise<boolean>;
   lock: () => Promise<void>;
   navigate: (page: Page) => void;
@@ -97,7 +88,6 @@ interface WalletState {
   setActiveApp: (app: InstalledApp) => void;
   enableCloudVault: (username: string, password: string, isSignup: boolean) => Promise<void>;
   disableCloudVault: () => Promise<void>;
-  deleteVaultAccount: () => Promise<void>;
   reloginCloudVault: (password: string) => Promise<void>;
   resetWallet: () => Promise<void>;
   refreshData: () => Promise<void>;
@@ -131,7 +121,6 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   cloudVaultUsername: null,
   cloudVaultTokenExpired: false,
   cloudVaultPendingCount: 0,
-  vaultBannerDismissedAt: null,
   installedApps: [],
   activeApp: null,
   currentPage: 'unlock',
@@ -144,20 +133,11 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     const initialized = initResult.initialized as boolean;
     const unlocked = unlockResult.unlocked as boolean;
 
-    const bannerResult = await sendInternal('getVaultBannerDismissedAt');
-    const bannerDismissedAt = (bannerResult.dismissedAt as number | null) ?? null;
-
     let page: Page = 'unlock';
-    if (!initialized) page = 'welcome';
+    if (!initialized) page = 'setup';
     else if (unlocked) page = 'dashboard';
 
-    set({
-      isInitialized: initialized,
-      isUnlocked: unlocked,
-      currentPage: page,
-      vaultBannerDismissedAt: bannerDismissedAt,
-      loading: false,
-    });
+    set({ isInitialized: initialized, isUnlocked: unlocked, currentPage: page, loading: false });
 
     if (unlocked) {
       await get().refreshData();
@@ -183,78 +163,6 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     } catch (e) {
       set({ error: (e as Error).message, loading: false });
     }
-  },
-
-  vaultBootstrapSignup: async (username: string, password: string) => {
-    set({ loading: true, error: null });
-    try {
-      const hash = await hashPassword(password);
-      const setupRes = await sendInternal('setupWallet', { passwordHash: hash });
-      if (setupRes.error) throw new Error(setupRes.error as string);
-
-      const unlockRes = await sendInternal('unlock', { password });
-      if (!unlockRes.success) throw new Error((unlockRes.error as string) ?? 'Failed to unlock');
-
-      const vaultRes = await sendInternal('cloudVaultSignup', { username, password });
-      if (vaultRes.error) {
-        set({
-          isInitialized: true,
-          isUnlocked: true,
-          currentPage: 'dashboard',
-          loading: false,
-          error: `Vault unavailable: ${vaultRes.error as string}. Wallet set up in offline mode — you can activate vault later.`,
-        });
-        await get().refreshData();
-        return;
-      }
-
-      await get().refreshData();
-      set({ isInitialized: true, isUnlocked: true, currentPage: 'dashboard', loading: false });
-    } catch (e) {
-      set({ error: (e as Error).message, loading: false });
-    }
-  },
-
-  vaultBootstrapLogin: async (username: string, password: string) => {
-    set({ loading: true, error: null });
-    try {
-      const hash = await hashPassword(password);
-      const setupRes = await sendInternal('setupWallet', { passwordHash: hash });
-      if (setupRes.error) throw new Error(setupRes.error as string);
-
-      const unlockRes = await sendInternal('unlock', { password });
-      if (!unlockRes.success) throw new Error((unlockRes.error as string) ?? 'Failed to unlock');
-
-      const vaultRes = await sendInternal('cloudVaultLogin', { username, password });
-      if (vaultRes.error) throw new Error(vaultRes.error as string);
-
-      await get().refreshData();
-      set({ isInitialized: true, isUnlocked: true, currentPage: 'dashboard', loading: false });
-    } catch (e) {
-      set({ error: (e as Error).message, loading: false });
-    }
-  },
-
-  vaultActivate: async (username: string) => {
-    set({ loading: true, error: null });
-    try {
-      const res = await sendInternal('cloudVaultActivate', { username });
-      if (res.error) throw new Error(res.error as string);
-      await get().refreshData();
-      set({ loading: false });
-    } catch (e) {
-      set({ error: (e as Error).message, loading: false });
-    }
-  },
-
-  dismissVaultBanner: async () => {
-    const now = Date.now();
-    await sendInternal('setVaultBannerDismissedAt', { dismissedAt: now });
-    set({ vaultBannerDismissedAt: now });
-  },
-
-  continueOffline: () => {
-    set({ currentPage: 'setup', error: null });
   },
 
   unlock: async (password: string) => {
@@ -293,8 +201,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   },
 
   navigate: (page: Page) => {
-    const preAuthPages: Page[] = ['welcome', 'vault-auth', 'setup', 'unlock'];
-    if (!get().isUnlocked && !preAuthPages.includes(page)) {
+    if (!get().isUnlocked && page !== 'setup' && page !== 'unlock') {
       set({ currentPage: 'unlock', error: null });
       return;
     }
@@ -555,18 +462,6 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     set({ cloudVaultEnabled: false, cloudVaultUsername: null, cloudVaultTokenExpired: false, cloudVaultPendingCount: 0 });
   },
 
-  deleteVaultAccount: async () => {
-    set({ loading: true, error: null });
-    try {
-      const res = await sendInternal('cloudVaultDeleteAccount');
-      if (res.error) throw new Error(res.error as string);
-      await get().resetWallet();
-      set({ loading: false });
-    } catch (e) {
-      set({ error: (e as Error).message, loading: false });
-    }
-  },
-
   reloginCloudVault: async (password: string) => {
     set({ loading: true, error: null });
     try {
@@ -601,7 +496,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       cloudVaultPendingCount: 0,
       installedApps: [],
       activeApp: null,
-      currentPage: 'welcome',
+      currentPage: 'setup',
       error: null,
     });
   },

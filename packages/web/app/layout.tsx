@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { Sora, JetBrains_Mono, Outfit } from 'next/font/google';
-import { Navbar } from './components/Navbar';
 import './globals.css';
+import { NavBar } from './components/Navbar';
 
 const sora = Sora({
   subsets: ['latin'],
@@ -24,26 +24,24 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   metadataBase: new URL('https://byoky.com'),
   title: {
-    default: 'Byoky — Build AI apps. Your users bring the keys.',
+    default: 'Byoky — Stripe for AI Access',
     template: '%s — Byoky',
   },
   description:
-    'Build AI apps with zero API costs. Your users connect their own keys through Byoky — encrypted locally, proxied securely. 15 providers, 2 lines to integrate. Open source.',
+    'The payment layer for AI apps. Users pay from one wallet, developers pay zero for inference. Add a Pay with Byoky button in 2 lines of code.',
   keywords: [
-    'AI API key wallet',
-    'LLM API key manager',
-    'bring your own key',
-    'BYOK',
-    'browser extension',
-    'API key security',
-    'Chrome extension security',
-    'API key theft protection',
-    'secure API key storage',
-    'AI key encryption',
-    'protect OpenAI keys',
-    'OpenAI key wallet',
-    'Anthropic key wallet',
+    'AI payment',
+    'AI wallet',
+    'Stripe for AI',
+    'AI app payments',
+    'LLM billing',
     'AI developer tools',
+    'pay per use AI',
+    'AI inference billing',
+    'OpenAI payments',
+    'Anthropic payments',
+    'AI app marketplace',
+    'developer SDK',
   ],
   alternates: {
     canonical: '/',
@@ -59,9 +57,9 @@ export const metadata: Metadata = {
     apple: '/apple-touch-icon.png',
   },
   openGraph: {
-    title: 'Byoky — Build AI apps. Your users bring the keys.',
+    title: 'Byoky — Bring Your Own Key',
     description:
-      'Build AI apps with zero API costs. Your users bring their own keys — encrypted locally, proxied securely. 15 providers, 2 lines to integrate.',
+      'A secure browser wallet for your LLM API keys. Install once, connect everywhere. Your keys never leave the extension.',
     url: 'https://byoky.com',
     siteName: 'Byoky',
     type: 'website',
@@ -70,15 +68,15 @@ export const metadata: Metadata = {
         url: '/og-image.png',
         width: 1200,
         height: 630,
-        alt: 'Byoky — Build AI apps with zero API costs',
+        alt: 'Byoky — Bring Your Own Key',
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Byoky — Build AI apps. Your users bring the keys.',
+    title: 'Byoky — Bring Your Own Key',
     description:
-      'Build AI apps with zero API costs. 15 providers, 2 lines to integrate. Your users bring their own keys — encrypted and proxied securely.',
+      'A secure browser wallet for your LLM API keys. Your keys never leave the extension.',
     images: ['/og-image.png'],
   },
 };
@@ -101,7 +99,7 @@ export default function RootLayout({
               applicationCategory: 'BrowserApplication',
               operatingSystem: 'Chrome, Firefox, Safari',
               description:
-                'Build AI apps with zero API costs. Your users bring their own keys — encrypted locally with AES-256-GCM, proxied securely. 15 providers, open source.',
+                'A secure browser wallet for your LLM API keys and setup tokens. Connect to any app — your keys never leave the extension.',
               url: 'https://byoky.com',
               offers: {
                 '@type': 'Offer',
@@ -113,7 +111,7 @@ export default function RootLayout({
             }),
           }}
         />
-        <Navbar />
+        <NavBar />
         {children}
       </body>
     </html>

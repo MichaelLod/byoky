@@ -158,10 +158,10 @@ function Installation() {
       <h3>User wallets</h3>
       <p>Your users need one of these installed:</p>
       <ul>
-        <li><a href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon" style={{ color: 'var(--teal-light)' }}>Chrome Extension</a></li>
-        <li><a href="https://addons.mozilla.org/en-US/firefox/addon/byoky/" style={{ color: 'var(--teal-light)' }}>Firefox Extension</a></li>
-        <li><a href="https://apps.apple.com/app/byoky/id6760779919" style={{ color: 'var(--teal-light)' }}>iOS App</a> (wallet + Safari extension)</li>
-        <li><a href="https://play.google.com/store/apps/details?id=com.byoky.app" style={{ color: 'var(--teal-light)' }}>Android App</a> (pair via QR or relay)</li>
+        <li><a href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon" style={{ color: 'var(--teal)' }}>Chrome Extension</a></li>
+        <li><a href="https://addons.mozilla.org/en-US/firefox/addon/byoky/" style={{ color: 'var(--teal)' }}>Firefox Extension</a></li>
+        <li><a href="https://apps.apple.com/app/byoky/id6760779919" style={{ color: 'var(--teal)' }}>iOS App</a> (wallet + Safari extension)</li>
+        <li><a href="https://play.google.com/store/apps/details?id=com.byoky.app" style={{ color: 'var(--teal)' }}>Android App</a> (pair via QR or relay)</li>
       </ul>
     </Section>
   );
@@ -318,7 +318,7 @@ const res = await fetch('https://api.anthropic.com/v1/messages', {
       <h3>session.createRelay(wsUrl)</h3>
       <p>
         Open a WebSocket relay channel so a backend server can make LLM calls through this session.
-        See <a href="#backend-relay" style={{ color: 'var(--teal-light)' }}>Backend Relay</a>.
+        See <a href="#backend-relay" style={{ color: 'var(--teal)' }}>Backend Relay</a>.
       </p>
 
       <h3>session.disconnect()</h3>
@@ -489,7 +489,7 @@ function TokenMarketplaceSection() {
     <Section id="token-marketplace" title="Token Marketplace">
       <p>
         The{' '}
-        <a href="/marketplace" style={{ color: 'var(--teal-light)' }}>
+        <a href="/marketplace" style={{ color: 'var(--teal)' }}>
           Token Marketplace
         </a>{' '}
         is a public board where users share free token gifts with the community.
@@ -675,19 +675,20 @@ function Prop({ name, type, children }: { name: string; type: string; children: 
 
 const docsStyles = `
 .docs-layout {
-  --docs-bg: #0e0e1a;
-  --docs-bg-card: #161626;
-  --docs-bg-elevated: #1c1c30;
-  --docs-border: #252540;
-  --docs-text: #ededf4;
-  --docs-text-secondary: #9494b0;
-  --docs-text-muted: #5a5a78;
+  --docs-bg: #ffffff;
+  --docs-bg-card: #ffffff;
+  --docs-bg-elevated: #f1f3f5;
+  --docs-border: #e2e8f0;
+  --docs-text: #1a1a2e;
+  --docs-text-secondary: #334155;
+  --docs-text-muted: #64748b;
 
   display: flex;
   max-width: 1100px;
   margin: 0 auto;
-  padding: 120px 20px 80px;
-  gap: 48px;
+  padding: 40px 20px 60px;
+  gap: 36px;
+  color: #1a1a2e;
 }
 
 /* ── Sidebar ── */
@@ -733,7 +734,7 @@ const docsStyles = `
 }
 
 .docs-nav-link.active {
-  color: var(--teal-light);
+  color: var(--teal);
   border-left-color: var(--teal);
 }
 
@@ -747,8 +748,8 @@ const docsStyles = `
 /* ── Hero ── */
 
 .docs-hero {
-  margin-bottom: 48px;
-  padding-bottom: 40px;
+  margin-bottom: 28px;
+  padding-bottom: 24px;
   border-bottom: 1px solid var(--docs-border);
 }
 
@@ -763,10 +764,11 @@ const docsStyles = `
 }
 
 .docs-hero h1 {
-  font-size: 40px;
+  font-size: 36px;
   font-weight: 700;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   letter-spacing: -0.02em;
+  color: #0f172a;
 }
 
 .docs-hero p {
@@ -779,8 +781,8 @@ const docsStyles = `
 /* ── Cards ── */
 
 .docs-cards-area {
-  margin-bottom: 56px;
-  padding-bottom: 48px;
+  margin-bottom: 32px;
+  padding-bottom: 28px;
   border-bottom: 1px solid var(--docs-border);
 }
 
@@ -823,27 +825,32 @@ const docsStyles = `
 /* ── Sections ── */
 
 .docs-section {
-  margin-bottom: 56px;
+  margin-bottom: 36px;
   scroll-margin-top: 80px;
 }
 
 .docs-section h2 {
-  font-size: 26px;
+  font-size: 24px;
   font-weight: 700;
-  margin-bottom: 16px;
-  color: var(--docs-text);
+  margin-bottom: 14px;
+  color: #0f172a !important;
+  -webkit-text-fill-color: #0f172a !important;
+  background: none !important;
+  letter-spacing: -0.01em;
 }
 
 .docs-section h3 {
   font-size: 17px;
   font-weight: 600;
-  margin-top: 28px;
-  margin-bottom: 10px;
-  color: var(--docs-text);
+  margin-top: 24px;
+  margin-bottom: 8px;
+  color: #1e293b !important;
+  -webkit-text-fill-color: #1e293b !important;
+  background: none !important;
 }
 
 .docs-section-body {
-  color: var(--docs-text-secondary);
+  color: #334155;
   font-size: 15px;
   line-height: 1.7;
 }
@@ -853,11 +860,11 @@ const docsStyles = `
 }
 
 .docs-section-body code {
-  background: var(--docs-bg-elevated);
-  padding: 2px 6px;
-  border-radius: 4px;
+  background: #1a1a2e;
+  padding: 2px 7px;
+  border-radius: 5px;
   font-size: 13px;
-  color: var(--teal-light);
+  color: #e2e2ec;
 }
 
 .docs-section-body ul,
@@ -874,10 +881,10 @@ const docsStyles = `
 
 .docs-code {
   position: relative;
-  background: var(--docs-bg-card);
+  background: #1a1a2e;
   border: 1px solid var(--docs-border);
   border-radius: 10px;
-  margin: 14px 0 20px;
+  margin: 14px 0 16px;
   overflow-x: auto;
 }
 
@@ -893,11 +900,11 @@ const docsStyles = `
 
 .docs-code pre {
   margin: 0;
-  padding: 18px 20px;
+  padding: 16px 18px;
   font-family: 'Fira Code', 'Consolas', 'SF Mono', monospace;
   font-size: 13px;
   line-height: 1.7;
-  color: var(--docs-text);
+  color: #e2e2ec;
 }
 
 .docs-code code {
@@ -953,17 +960,19 @@ const docsStyles = `
   align-items: center;
   gap: 10px;
   padding: 8px 12px;
-  background: var(--docs-bg-card);
+  background: var(--docs-bg-elevated);
+  border: 1px solid var(--docs-border);
   border-radius: 8px;
   font-size: 14px;
+  color: #1e293b;
 }
 
 .docs-provider-row code {
   font-size: 12px;
-  color: var(--teal-light);
-  background: var(--docs-bg-elevated);
-  padding: 2px 6px;
-  border-radius: 4px;
+  color: #e2e2ec;
+  background: #1a1a2e;
+  padding: 2px 7px;
+  border-radius: 5px;
 }
 
 .docs-provider-row span {

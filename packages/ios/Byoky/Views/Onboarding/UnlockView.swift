@@ -39,7 +39,7 @@ struct UnlockView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                         .overlay(
                             RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                                .stroke(Theme.border, lineWidth: 1.5)
                         )
                         .offset(x: isShaking ? -8 : 0)
                         .onSubmit { unlock() }
@@ -89,7 +89,7 @@ struct UnlockView: View {
             }
             .padding(24)
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(.light)
         .alert("Reset Wallet?", isPresented: $showResetConfirmation) {
             Button("Cancel", role: .cancel) {}
             Button("Reset", role: .destructive) {
