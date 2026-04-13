@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { Sora, JetBrains_Mono, Outfit } from 'next/font/google';
 import './globals.css';
-import { NavBar } from './components/Navbar';
+import { NavBar } from './components/NavBar';
 
 const sora = Sora({
   subsets: ['latin'],
