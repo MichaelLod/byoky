@@ -1854,6 +1854,41 @@ export default defineBackground(() => {
         return { success: true };
       }
 
+      case 'getVaultBannerDismissedAt': {
+        const data = await browser.storage.local.get('vaultBannerDismissedAt');
+        return { dismissedAt: (data.vaultBannerDismissedAt as number | null) ?? null };
+      }
+
+      case 'setVaultBannerDismissedAt': {
+        const { dismissedAt } = message.payload as { dismissedAt: number };
+        await browser.storage.local.set({ vaultBannerDismissedAt: dismissedAt });
+        return { success: true };
+      }
+
+      case 'cloudVaultActivate': {
+        const rlErr = checkVaultAuthRate(); if (rlErr) return rlErr;
+        if (!masterPassword) return { error: 'Wallet is locked' };
+        const { username } = message.payload as { username: string };
+        const result = await vaultFetch('/auth/signup', 'POST', { username, password: masterPassword });
+        if (!result.ok) {
+          const err = result.data.error as Record<string, string> | undefined;
+          return { error: err?.message ?? 'Signup failed' };
+        }
+        const token = result.data.token as string;
+        const sessionId = result.data.sessionId as string;
+        await saveCloudVaultState({
+          enabled: true,
+          username,
+          token,
+          sessionId,
+          tokenIssuedAt: Date.now(),
+          tokenExpired: false,
+          credentialMap: {},
+        });
+        enqueueVaultSync(() => syncAllCredentialsToVault(token));
+        return { success: true };
+      }
+
       case 'cloudVaultLogin': {
         const rlErr = checkVaultAuthRate(); if (rlErr) return rlErr;
         if (!masterPassword) return { error: 'Wallet is locked' };
@@ -1882,6 +1917,20 @@ export default defineBackground(() => {
         const state = await getCloudVaultState();
         if (state.token && !state.tokenExpired) {
           vaultFetch('/auth/logout', 'POST', undefined, state.token).catch(() => {});
+        }
+        await clearCloudVaultState();
+        return { success: true };
+      }
+
+      case 'cloudVaultDeleteAccount': {
+        const state = await getCloudVaultState();
+        if (!state.enabled || !state.token || state.tokenExpired) {
+          return { error: 'No active vault session' };
+        }
+        const result = await vaultFetch('/auth/account', 'DELETE', undefined, state.token);
+        if (!result.ok) {
+          const err = result.data.error as Record<string, string> | undefined;
+          return { error: err?.message ?? 'Failed to delete vault account' };
         }
         await clearCloudVaultState();
         return { success: true };
