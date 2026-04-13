@@ -1,7 +1,7 @@
 <p align="center">
   <br />
   <a href="https://byoky.com">
-    <img src="https://github.com/MichaelLod/byoky/raw/main/.github/icon.svg?v=2" alt="Muninn" width="80" />
+    <img src="https://github.com/MichaelLod/byoky/raw/main/.github/icon.png" alt="Byoky" width="80" />
   </a>
   <br />
   <a href="https://byoky.com">
@@ -21,11 +21,11 @@
   <a href="https://byoky.com">Website</a> · <a href="https://byoky.com/docs">Docs</a> · <a href="https://byoky.com/apps">Apps</a> · <a href="https://byoky.com/marketplace">Marketplace</a> · <a href="https://byoky.com/demo">Demo</a> · <a href="#quick-start">Quick Start</a> · <a href="https://discord.gg/gRs8S9fxcT">Discord</a> · <a href="https://github.com/MichaelLod/byoky/issues">Issues</a>
   <br />
   <br />
-  <a href="https://github.com/MichaelLod/byoky/blob/main/LICENSE"><img src="https://img.shields.io/github/license/MichaelLod/byoky?style=flat&color=0ea5e9" alt="License" /></a>
-  <a href="https://github.com/MichaelLod/byoky/stargazers"><img src="https://img.shields.io/github/stars/MichaelLod/byoky?style=flat&color=0ea5e9" alt="Stars" /></a>
-  <a href="https://github.com/MichaelLod/byoky/issues"><img src="https://img.shields.io/github/issues/MichaelLod/byoky?style=flat&color=0ea5e9" alt="Issues" /></a>
+  <a href="https://github.com/MichaelLod/byoky/blob/main/LICENSE"><img src="https://img.shields.io/github/license/MichaelLod/byoky?style=flat&color=FF4F00" alt="License" /></a>
+  <a href="https://github.com/MichaelLod/byoky/stargazers"><img src="https://img.shields.io/github/stars/MichaelLod/byoky?style=flat&color=FF4F00" alt="Stars" /></a>
+  <a href="https://github.com/MichaelLod/byoky/issues"><img src="https://img.shields.io/github/issues/MichaelLod/byoky?style=flat&color=FF4F00" alt="Issues" /></a>
   <a href="https://github.com/MichaelLod/byoky/pulls"><img src="https://img.shields.io/badge/PRs-welcome-0ea5e9?style=flat" alt="PRs Welcome" /></a>
-  <a href="https://www.npmjs.com/package/@byoky/sdk"><img src="https://img.shields.io/npm/v/@byoky/sdk?style=flat&color=0ea5e9&label=npm" alt="npm" /></a>
+  <a href="https://www.npmjs.com/package/@byoky/sdk"><img src="https://img.shields.io/npm/v/@byoky/sdk?style=flat&color=FF4F00&label=npm" alt="npm" /></a>
   <a href="https://discord.gg/gRs8S9fxcT"><img src="https://img.shields.io/discord/1485230270192943184?style=flat&color=5865F2&label=discord" alt="Discord" /></a>
 </p>
 
@@ -57,12 +57,12 @@
 
 | Platform | Version | Link |
 |----------|---------|------|
-| Chrome | ![Chrome version](https://img.shields.io/chrome-web-store/v/igjohldpldlahcjmefdhlnbcpldlgmon?style=flat&color=0ea5e9&label=) | [Chrome Web Store](https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon) · [Install from source](INSTALL.md#chrome-install-from-source) |
-| Firefox | ![Firefox version](https://img.shields.io/amo/v/byoky?style=flat&color=0ea5e9&label=) | [Mozilla Add-ons](https://addons.mozilla.org/en-US/firefox/addon/byoky/) |
-| iOS | ![npm version](https://img.shields.io/npm/v/@byoky/sdk?style=flat&color=0ea5e9&label=) | [App Store](https://apps.apple.com/app/byoky/id6760779919) |
-| Android | ![npm version](https://img.shields.io/npm/v/@byoky/sdk?style=flat&color=0ea5e9&label=) | [Google Play](https://play.google.com/store/apps/details?id=com.byoky.app) |
+| Chrome | ![Chrome version](https://img.shields.io/chrome-web-store/v/igjohldpldlahcjmefdhlnbcpldlgmon?style=flat&color=FF4F00&label=) | [Chrome Web Store](https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon) · [Install from source](INSTALL.md#chrome-install-from-source) |
+| Firefox | ![Firefox version](https://img.shields.io/amo/v/byoky?style=flat&color=FF4F00&label=) | [Mozilla Add-ons](https://addons.mozilla.org/en-US/firefox/addon/byoky/) |
+| iOS | ![npm version](https://img.shields.io/npm/v/@byoky/sdk?style=flat&color=FF4F00&label=) | [App Store](https://apps.apple.com/app/byoky/id6760779919) |
+| Android | ![npm version](https://img.shields.io/npm/v/@byoky/sdk?style=flat&color=FF4F00&label=) | [Google Play](https://play.google.com/store/apps/details?id=com.byoky.app) |
 | Safari (macOS) | Coming soon | — |
-| npm | ![npm version](https://img.shields.io/npm/v/@byoky/sdk?style=flat&color=0ea5e9&label=) | [`@byoky/sdk`](https://www.npmjs.com/package/@byoky/sdk) · [`@byoky/core`](https://www.npmjs.com/package/@byoky/core) · [`@byoky/bridge`](https://www.npmjs.com/package/@byoky/bridge) · [`@byoky/relay`](https://www.npmjs.com/package/@byoky/relay) |
+| npm | ![npm version](https://img.shields.io/npm/v/@byoky/sdk?style=flat&color=FF4F00&label=) | [`@byoky/sdk`](https://www.npmjs.com/package/@byoky/sdk) · [`@byoky/core`](https://www.npmjs.com/package/@byoky/core) · [`@byoky/bridge`](https://www.npmjs.com/package/@byoky/bridge) · [`@byoky/relay`](https://www.npmjs.com/package/@byoky/relay) |
 
 > Store reviews can take a few days. Check [byoky.com](https://byoky.com) for live version status across all platforms.
 
@@ -252,7 +252,7 @@ No environment variables. No secrets management. No leaked `.env` files. Your ke
 | **Audit log** | Every request logged — app origin, provider, status, timestamp |
 | **Spending caps** | Token allowances per app — total and per-provider limits, enforced at the proxy |
 | **Token gifts** | Share access without sharing keys — relay-backed with budget enforcement, sender-side proxy |
-| **Local only** | No cloud. No telemetry. No tracking. Your device, your keys |
+| **Cloud vault** | Optional vault sync — AES-256-GCM encrypted with your password. Keys are never stored in plaintext |
 
 ## Supported Providers
 
