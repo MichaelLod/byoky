@@ -1,12 +1,13 @@
 import type { PasswordStrength } from '@byoky/core';
 
-const COLORS = ['var(--danger)', '#f97316', '#eab308', '#22c55e', '#0ea5e9'];
+const COLORS = ['var(--danger)', '#f97316', '#eab308', '#4ade80', '#22c55e'];
 
 export function PasswordMeter({ strength }: { strength: PasswordStrength }) {
-  const color = COLORS[strength.score];
+  const isEmpty = (strength as any).score === -1;
+  const color = isEmpty ? 'transparent' : COLORS[strength.score];
 
   return (
-    <div className="password-meter">
+    <div className="password-meter" style={{ opacity: isEmpty ? 0 : 1, transition: 'opacity 0.15s' }}>
       <div className="password-meter-bars">
         {[0, 1, 2, 3, 4].map((i) => (
           <div
@@ -19,13 +20,11 @@ export function PasswordMeter({ strength }: { strength: PasswordStrength }) {
         ))}
       </div>
       <div className="password-meter-label" style={{ color }}>
-        {strength.label}
+        {strength.label || '\u00A0'}
       </div>
-      {strength.feedback.length > 0 && (
-        <div className="password-meter-feedback">
-          {strength.feedback[0]}
-        </div>
-      )}
+      <div className="password-meter-feedback">
+        {strength.feedback?.[0] || '\u00A0'}
+      </div>
     </div>
   );
 }
