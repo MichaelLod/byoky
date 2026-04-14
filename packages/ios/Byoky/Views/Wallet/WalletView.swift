@@ -60,7 +60,7 @@ struct WalletView: View {
                             }
                         } label: {
                             HStack(spacing: 4) {
-                                Text("Vault")
+                                Text("Cloud Sync")
                                     .font(.subheadline)
                                 Image(systemName: wallet.cloudVaultEnabled ? "cloud.fill" : "icloud.slash")
                             }
@@ -113,10 +113,15 @@ struct WalletView: View {
                 CloudVaultSetupView()
                     .environmentObject(wallet)
             }
-            .onAppear {
-                // Probe gift relay peers so the online dot reflects current
-                // state whenever the Wallet tab becomes visible.
-                wallet.probeGiftPeers()
+            .task {
+                // Re-probe every 15s while the Wallet is visible so the dot
+                // self-heals if the sender WS briefly blinks. A single
+                // on-appear probe would latch offline if it happened to land
+                // in a reconnect gap. Auto-cancels on view disappear.
+                while !Task.isCancelled {
+                    wallet.probeGiftPeers()
+                    try? await Task.sleep(for: .seconds(15))
+                }
             }
         }
     }

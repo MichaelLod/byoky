@@ -33,8 +33,8 @@ export function Dashboard() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <h2 className="page-title" style={{ marginBottom: 0 }}>Credentials</h2>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <span style={{ fontSize: '12px', color: cloudVaultEnabled ? 'var(--accent)' : 'var(--text-muted)' }}>Vault</span>
-          <label className="toggle-switch" title={cloudVaultEnabled ? 'Cloud Vault on' : 'Cloud Vault off'}>
+          <span style={{ fontSize: '12px', color: cloudVaultEnabled ? 'var(--accent)' : 'var(--text-muted)' }}>Cloud Sync</span>
+          <label className="toggle-switch" title={cloudVaultEnabled ? 'Cloud Sync on' : 'Cloud Sync off'}>
             <input
               type="checkbox"
               checked={cloudVaultEnabled}

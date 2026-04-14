@@ -18,7 +18,7 @@ struct OfflineUpgradeBanner: View {
                         Text("Sync across devices")
                             .font(.subheadline.bold())
                             .foregroundStyle(Theme.textPrimary)
-                        Text("Activate your vault to access your keys on any device, end-to-end encrypted.")
+                        Text("Turn on Cloud Sync to access your keys on any device, end-to-end encrypted.")
                             .font(.caption)
                             .foregroundStyle(Theme.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -37,7 +37,7 @@ struct OfflineUpgradeBanner: View {
                     Button {
                         expanded = true
                     } label: {
-                        Text("Activate vault")
+                        Text("Activate Cloud Sync")
                             .font(.caption.bold())
                             .foregroundStyle(.white)
                             .padding(.horizontal, 12)
@@ -97,11 +97,11 @@ struct OfflineUpgradeBanner: View {
             }
             .padding(12)
             .background(Theme.accent.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
-                    .stroke(Theme.accent, lineWidth: 1)
+                    .strokeBorder(Theme.accent, lineWidth: 1)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 10))
             .padding(.bottom, 12)
         }
     }

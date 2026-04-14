@@ -32,6 +32,7 @@ import com.byoky.app.data.giftBudgetRemaining
 import com.byoky.app.data.isGiftExpired
 import com.byoky.app.ui.components.OfflineUpgradeBanner
 import com.byoky.app.ui.theme.*
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -54,10 +55,16 @@ fun WalletScreen(
         giftedCredentials.filter { !isGiftExpired(it.expiresAt) }
     }
 
-    // Probe gift relays each time the Wallet tab becomes active so the
-    // online dot reflects the latest sender status.
+    // Re-probe every 15s while the Wallet is visible so the dot self-heals
+    // if the sender WS briefly blinks. A single one-shot probe would latch
+    // offline if it happened to land in a reconnect gap. The LaunchedEffect
+    // scope cancels on leave, so the loop stops when the screen goes away.
     LaunchedEffect(activeGifts.map { it.giftId }) {
-        if (activeGifts.isNotEmpty()) wallet.probeGiftPeers()
+        if (activeGifts.isEmpty()) return@LaunchedEffect
+        while (true) {
+            wallet.probeGiftPeers()
+            delay(15_000)
+        }
     }
 
     val hasAny = credentials.isNotEmpty() || activeGifts.isNotEmpty()
@@ -75,7 +82,7 @@ fun WalletScreen(
                         }
                     }) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("Vault", fontSize = 14.sp, color = if (cloudVaultEnabled) Accent else TextMuted)
+                            Text("Cloud Sync", fontSize = 14.sp, color = if (cloudVaultEnabled) Accent else TextMuted)
                             Icon(
                                 if (cloudVaultEnabled) Icons.Default.Cloud else Icons.Default.CloudOff,
                                 "Cloud Vault",

@@ -126,7 +126,7 @@ fun AppsScreen(wallet: WalletStore) {
                         ) {
                             Icon(Icons.Default.Wifi, null, tint = Warning, modifier = Modifier.size(16.dp))
                             Text(
-                                "Your device must stay online for connected apps to work. Enable Cloud Vault in Settings for offline access.",
+                                "Your device must stay online for connected apps to work. Enable Cloud Sync in Settings for offline access.",
                                 color = Warning,
                                 fontSize = 12.sp,
                             )
