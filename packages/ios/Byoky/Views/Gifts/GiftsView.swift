@@ -22,6 +22,10 @@ struct GiftsView: View {
         !wallet.gifts.isEmpty || !expiredReceived.isEmpty
     }
 
+    private var hasCredentials: Bool {
+        !wallet.credentials.isEmpty
+    }
+
     var body: some View {
         NavigationStack {
             SwiftUI.Group {
@@ -52,7 +56,9 @@ struct GiftsView: View {
             Text("No Gifts")
                 .font(.headline)
 
-            Text("Share token access without sharing your API keys. Create a gift link or redeem one you received.")
+            Text(hasCredentials
+                 ? "Share token access without sharing your API keys. Create a gift link or redeem one you received."
+                 : "Add a credential before you can create a gift. You can still redeem gifts you've received.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -66,6 +72,7 @@ struct GiftsView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accent)
+                .disabled(!hasCredentials)
                 .accessibilityIdentifier("gifts.createGift")
 
                 NavigationLink {
@@ -87,9 +94,16 @@ struct GiftsView: View {
                 CreateGiftView()
             } label: {
                 Label("Create Gift", systemImage: "plus.circle.fill")
-                    .foregroundStyle(Theme.accent)
+                    .foregroundStyle(hasCredentials ? Theme.accent : Color(.systemGray3))
             }
+            .disabled(!hasCredentials)
             .accessibilityIdentifier("gifts.createGift")
+
+            if !hasCredentials {
+                Text("Add a credential before you can create a gift.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             NavigationLink {
                 RedeemGiftView()
