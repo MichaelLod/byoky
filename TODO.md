@@ -130,8 +130,13 @@ the mobile and extension provider sets consistent.
   resurface, route them through `scripts/release.sh` rather than committing
   them by hand.
 
-### Vault integration test failure
+### Vault integration test — hermetic DB option
 
-- `packages/vault/tests/integration.test.ts` fails on every dev run because
-  it requires `DATABASE_URL` for the Railway Postgres. Either add a `.skipIf`
-  guard or document the required env var in the vault package's README.
+- `packages/vault/tests/integration.test.ts` is an integration test against
+  live Railway Postgres via `DATABASE_URL` in `.env.local`. It has
+  `describe.skipIf(!DATABASE_URL)` and `vitest.setup.env.ts` auto-loads the
+  env, so it runs on every dev machine that has the env set and cleanly
+  skips otherwise. No action needed today.
+- **Possible future improvement**: swap the real-DB dependency for
+  testcontainers (ephemeral Postgres in Docker) so the test is hermetic and
+  doesn't couple dev runs to the production DB.
