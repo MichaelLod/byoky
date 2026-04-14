@@ -10,7 +10,8 @@ const nextConfig: NextConfig = {
     }
     return [
       {
-        source: '/chat',
+        source: '/:path*',
+        has: [{ type: 'host', value: 'chat.byoky.com' }],
         headers: [
           { key: 'X-Frame-Options', value: 'ALLOWALL' },
           {
