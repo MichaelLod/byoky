@@ -58,7 +58,8 @@ struct ByokyApp: App {
         if let fireProvider = config["fireAfterSetup"] as? String, !fireProvider.isEmpty {
             let resultPath = (config["fireResultOut"] as? String)
                 ?? "/tmp/byoky-ios-proxy-result.json"
-            Task.detached { await fireTestRequestWhenGiftArrives(providerId: fireProvider, resultPath: resultPath) }
+            let firePayload = (config["firePayload"] as? String) ?? "chat"
+            Task.detached { await fireTestRequestWhenGiftArrives(providerId: fireProvider, resultPath: resultPath, firePayload: firePayload) }
         }
     }
 
@@ -66,7 +67,14 @@ struct ByokyApp: App {
     /// hit the provider's API via the gift relay and write a small JSON result
     /// summary to `resultPath`. Keeps the app running (the GiftRelayProxy
     /// recipient-side socket needs the app in foreground).
-    private static func fireTestRequestWhenGiftArrives(providerId: String, resultPath: String) async {
+    ///
+    /// `firePayload` controls which request body is used. Supported:
+    ///   - "chat" (default)   — minimal 32-token hello
+    ///   - "stream"           — same body + stream=true; proves SSE chunks survive
+    ///   - "vision"           — multipart image+text; 1×1 PNG pixel
+    ///   - "tools"            — single-turn weather-tool request
+    ///   - "structured"       — json_object/json_schema reply
+    private static func fireTestRequestWhenGiftArrives(providerId: String, resultPath: String, firePayload: String = "chat") async {
         let w = WalletStore.shared
         var gc: GiftedCredential? = nil
         for _ in 0..<180 { // 180 × 500ms = 90s
@@ -84,6 +92,7 @@ struct ByokyApp: App {
             writeResult(to: resultPath, payload: [
                 "success": false,
                 "error": "No gifted credential for provider \(providerId) within 90s",
+                "mode": firePayload,
             ])
             return
         }
@@ -94,11 +103,12 @@ struct ByokyApp: App {
         // ("Socket is not connected") from URLSessionWebSocketTask.
         try? await Task.sleep(nanoseconds: 3_000_000_000)
 
-        let (url, method, headers, body) = buildTestRequest(for: providerId)
+        let (url, method, headers, body) = buildTestRequest(for: providerId, mode: firePayload)
         guard let url else {
             writeResult(to: resultPath, payload: [
                 "success": false,
-                "error": "Unsupported provider for auto-fire: \(providerId)",
+                "error": "Unsupported provider/mode for auto-fire: \(providerId)/\(firePayload)",
+                "mode": firePayload,
             ])
             return
         }
@@ -126,13 +136,16 @@ struct ByokyApp: App {
                         break
                     }
                 }
+                let (modeOk, modeNote) = validatePayloadShape(mode: firePayload, providerId: providerId, status: status, body: responseText)
                 writeResult(to: resultPath, payload: [
-                    "success": status >= 200 && status < 400 && !responseText.isEmpty,
+                    "success": status >= 200 && status < 400 && !responseText.isEmpty && modeOk,
                     "status": status,
                     "providerId": providerId,
                     "responseBytes": responseText.count,
                     "response": String(responseText.prefix(400)),
                     "attempts": attempt,
+                    "mode": firePayload,
+                    "modeNote": modeNote ?? "",
                 ])
                 return
             } catch {
@@ -148,44 +161,116 @@ struct ByokyApp: App {
             "error": lastError?.localizedDescription ?? "unknown error",
             "providerId": providerId,
             "attempts": 3,
+            "mode": firePayload,
         ])
     }
 
-    private static func buildTestRequest(for providerId: String)
+    /// 1×1 transparent PNG, base64-encoded. Same bytes the demo-playground and Android TestSupport use.
+    private static let pixelPngB64 =
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+
+    private static func buildTestRequest(for providerId: String, mode: String)
         -> (String?, String, [String: String], String?)
     {
-        switch providerId {
-        case "anthropic":
-            // Use a model that Claude Code supports — setup tokens
-            // (sk-ant-oat01-…) only grant access to models Claude Code
-            // itself is permitted to call. Haiku 4.5 is the cheap option
-            // from that allow-list.
-            let body = """
-            {"model":"claude-haiku-4-5-20251001","max_tokens":32,"messages":[{"role":"user","content":"Say hi in one word."}]}
-            """
-            return ("https://api.anthropic.com/v1/messages", "POST", [
-                "content-type": "application/json",
-                "anthropic-version": "2023-06-01",
-            ], body)
-        case "openai":
-            let body = """
-            {"model":"gpt-4o-mini","max_tokens":32,"messages":[{"role":"user","content":"Say hi in one word."}]}
-            """
-            return ("https://api.openai.com/v1/chat/completions", "POST", [
-                "content-type": "application/json",
-            ], body)
-        case "gemini":
-            let body = """
-            {"contents":[{"parts":[{"text":"Say hi in one word."}]}]}
-            """
-            return (
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent",
-                "POST",
-                ["content-type": "application/json"],
-                body
-            )
+        let jsonHeaders = ["content-type": "application/json"]
+        let anthropicHeaders = jsonHeaders.merging(["anthropic-version": "2023-06-01"]) { _, b in b }
+
+        // Chat = minimal hello. Every other mode swaps in a mode-specific body.
+        if mode == "chat" {
+            switch providerId {
+            case "anthropic":
+                return ("https://api.anthropic.com/v1/messages", "POST", anthropicHeaders,
+                    "{\"model\":\"claude-haiku-4-5-20251001\",\"max_tokens\":32,\"messages\":[{\"role\":\"user\",\"content\":\"Say hi in one word.\"}]}")
+            case "openai":
+                return ("https://api.openai.com/v1/chat/completions", "POST", jsonHeaders,
+                    "{\"model\":\"gpt-4o-mini\",\"max_tokens\":32,\"messages\":[{\"role\":\"user\",\"content\":\"Say hi in one word.\"}]}")
+            case "gemini":
+                return ("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent", "POST", jsonHeaders,
+                    "{\"contents\":[{\"parts\":[{\"text\":\"Say hi in one word.\"}]}]}")
+            default: return (nil, "POST", [:], nil)
+            }
+        }
+
+        if mode == "stream" {
+            switch providerId {
+            case "anthropic":
+                return ("https://api.anthropic.com/v1/messages", "POST", anthropicHeaders,
+                    "{\"model\":\"claude-haiku-4-5-20251001\",\"max_tokens\":32,\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"Reply with OK.\"}]}")
+            case "openai":
+                return ("https://api.openai.com/v1/chat/completions", "POST", jsonHeaders,
+                    "{\"model\":\"gpt-4o-mini\",\"max_tokens\":32,\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"Reply with OK.\"}]}")
+            default: return (nil, "POST", [:], nil)
+            }
+        }
+
+        if mode == "vision" {
+            switch providerId {
+            case "anthropic":
+                let body = "{\"model\":\"claude-haiku-4-5-20251001\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":\"image/png\",\"data\":\"\(pixelPngB64)\"}},{\"type\":\"text\",\"text\":\"What do you see? One short sentence.\"}]}]}"
+                return ("https://api.anthropic.com/v1/messages", "POST", anthropicHeaders, body)
+            case "openai":
+                let body = "{\"model\":\"gpt-4o-mini\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:image/png;base64,\(pixelPngB64)\"}},{\"type\":\"text\",\"text\":\"What do you see? One short sentence.\"}]}]}"
+                return ("https://api.openai.com/v1/chat/completions", "POST", jsonHeaders, body)
+            case "gemini":
+                let body = "{\"contents\":[{\"parts\":[{\"inline_data\":{\"mime_type\":\"image/png\",\"data\":\"\(pixelPngB64)\"}},{\"text\":\"What do you see? One short sentence.\"}]}]}"
+                return ("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent", "POST", jsonHeaders, body)
+            default: return (nil, "POST", [:], nil)
+            }
+        }
+
+        if mode == "tools" {
+            switch providerId {
+            case "anthropic":
+                let body = "{\"model\":\"claude-haiku-4-5-20251001\",\"max_tokens\":256,\"tools\":[{\"name\":\"get_weather\",\"description\":\"Get weather for a city.\",\"input_schema\":{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\"}},\"required\":[\"city\"]}}],\"messages\":[{\"role\":\"user\",\"content\":\"What's the weather in Tokyo right now?\"}]}"
+                return ("https://api.anthropic.com/v1/messages", "POST", anthropicHeaders, body)
+            case "openai":
+                let body = "{\"model\":\"gpt-4o-mini\",\"tools\":[{\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"description\":\"Get weather.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\"}},\"required\":[\"city\"]}}}],\"messages\":[{\"role\":\"user\",\"content\":\"What's the weather in Tokyo?\"}]}"
+                return ("https://api.openai.com/v1/chat/completions", "POST", jsonHeaders, body)
+            default: return (nil, "POST", [:], nil)
+            }
+        }
+
+        if mode == "structured" {
+            switch providerId {
+            case "openai":
+                let body = "{\"model\":\"gpt-4o-mini\",\"response_format\":{\"type\":\"json_object\"},\"messages\":[{\"role\":\"user\",\"content\":\"Return JSON: {\\\"status\\\":\\\"ok\\\"}. Only the JSON.\"}]}"
+                return ("https://api.openai.com/v1/chat/completions", "POST", jsonHeaders, body)
+            case "anthropic":
+                let body = "{\"model\":\"claude-haiku-4-5-20251001\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":\"Return ONLY this JSON and nothing else: {\\\"status\\\":\\\"ok\\\"}\"}]}"
+                return ("https://api.anthropic.com/v1/messages", "POST", anthropicHeaders, body)
+            default: return (nil, "POST", [:], nil)
+            }
+        }
+
+        return (nil, "POST", [:], nil)
+    }
+
+    /// Mode-specific shape check. Returns (ok, note) — the note is echoed in
+    /// the result JSON so the orchestrator can see *why* a mode failed even
+    /// when the underlying HTTP 200 would otherwise look like success.
+    private static func validatePayloadShape(mode: String, providerId: String, status: Int, body: String) -> (Bool, String?) {
+        if status < 200 || status >= 400 || body.isEmpty { return (false, "http-\(status)") }
+        switch mode {
+        case "stream":
+            let isSse = body.contains("data:") || body.contains("event:")
+            return (isSse, isSse ? "sse-framed" : "no-sse-markers")
+        case "tools":
+            let hasAnthropicTool = providerId == "anthropic" && body.contains("tool_use")
+            let hasOpenaiTool = providerId == "openai" && body.contains("tool_calls")
+            let ok = hasAnthropicTool || hasOpenaiTool
+            return (ok, ok ? "tool-call-present" : "no-tool-call")
+        case "structured":
+            // The model's JSON reply is escaped inside the envelope's string
+            // content field, so the raw body bytes contain `\"status\":\"ok\"`
+            // with backslash escapes. Looking for literal "status" misses
+            // that form — fall back to unquoted substrings, which match both
+            // the escaped (string-embedded) and unescaped shapes.
+            let hasJson = body.contains("status") && body.contains("ok")
+            return (hasJson, hasJson ? "json-key-present" : "missing-status-key")
+        case "vision", "chat":
+            return (true, nil)
         default:
-            return (nil, "POST", [:], nil)
+            return (true, nil)
         }
     }
 

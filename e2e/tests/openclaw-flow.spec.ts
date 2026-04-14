@@ -21,9 +21,13 @@ import path from 'node:path';
 const PASSWORD = 'MyStr0ng!P@ssw0rd';
 
 let wallet: Wallet;
+let walletB: Wallet | null = null;
 let openclawHome = '';
 let authProc: IPty | null = null;
 let port = 0;
+let giftLink = '';
+
+declare const chrome: { runtime: { sendMessage: (m: unknown) => Promise<unknown> } };
 
 async function setupWallet(w: Wallet) {
   await w.popup.bringToFront();
@@ -100,6 +104,113 @@ async function waitForFile(filePath: string, timeoutMs: number): Promise<void> {
   throw new Error(`timeout waiting for ${filePath}`);
 }
 
+async function waitForBridgeFree(timeoutMs = 10_000): Promise<void> {
+  // Closing a wallet ctx terminates the extension's native messaging port,
+  // which kills the bridge subprocess bound to :19280. But the port free-up
+  // takes a moment. Poll /health — ECONNREFUSED means the port is free.
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch('http://127.0.0.1:19280/health', { signal: AbortSignal.timeout(500) });
+      void res.text().catch(() => {});
+    } catch {
+      return; // connection refused — port is free
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  throw new Error(':19280 never freed — old bridge still bound');
+}
+
+/**
+ * Runs the PTY-based `openclaw models auth login --provider byoky-anthropic`
+ * flow against the given wallet. Returns when OpenClaw has persisted its
+ * config and killed its interactive prompter. Matches the logic in the
+ * original auth test (kept identical so both callers behave the same).
+ */
+async function runOpenclawAuthFlow(w: Wallet): Promise<void> {
+  const portsBefore = allLocalListeningPorts();
+
+  authProc = spawnPty(
+    'openclaw',
+    ['models', 'auth', 'login', '--provider', 'byoky-anthropic'],
+    { name: 'xterm-color', cols: 120, rows: 30, cwd: openclawHome, env: openclawEnv() as unknown as { [key: string]: string } },
+  );
+  let ptyBuffer = '';
+  authProc.onData((d: string) => {
+    ptyBuffer += d;
+    process.stdout.write(`[auth pty] ${d}`);
+  });
+
+  let authUrl = '';
+  for (let i = 0; i < 80; i++) {
+    const now = allLocalListeningPorts();
+    const candidates = [...now].filter((p) => !portsBefore.has(p));
+    for (const p of candidates) {
+      try {
+        const res = await fetch(`http://127.0.0.1:${p}/`, { signal: AbortSignal.timeout(500) });
+        if (!res.ok) continue;
+        const html = await res.text();
+        if (html.includes('Byoky') && html.includes('BYOKY_CONNECT_REQUEST')) {
+          authUrl = `http://127.0.0.1:${p}`;
+          break;
+        }
+      } catch { /* probe failed */ }
+    }
+    if (authUrl) break;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  if (!authUrl) {
+    process.stderr.write(`[diag] pty tail:\n${ptyBuffer.slice(-2000)}\n`);
+    throw new Error('plugin callback server never bound a new port');
+  }
+  process.stdout.write(`[diag] found plugin auth url: ${authUrl}\n`);
+
+  w.page.on('console', (msg) => process.stdout.write(`[auth page console] ${msg.type()}: ${msg.text()}\n`));
+  w.page.on('pageerror', (err) => process.stderr.write(`[auth page err] ${err.message}\n`));
+  await w.page.goto(authUrl);
+  await w.page.waitForLoadState('domcontentloaded');
+  await new Promise((r) => setTimeout(r, 2000));
+
+  await w.popup.bringToFront();
+  await expect(w.popup.locator('text=wants to connect')).toBeVisible({ timeout: 20_000 });
+  await w.popup.click('button:has-text("Approve")');
+
+  const configPath = path.join(openclawHome, '.openclaw', 'openclaw.json');
+  const prodInterval = setInterval(() => {
+    try { authProc?.write('\r'); } catch { /* already exited */ }
+  }, 500);
+  try {
+    const deadline = Date.now() + 60_000;
+    while (Date.now() < deadline) {
+      if (fs.existsSync(configPath)) {
+        const text = fs.readFileSync(configPath, 'utf-8');
+        if (text.includes('byoky-anthropic') && text.includes('19280')) break;
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    if (!fs.existsSync(configPath) || !fs.readFileSync(configPath, 'utf-8').includes('byoky-anthropic')) {
+      process.stderr.write(`[diag] pty tail:\n${ptyBuffer.slice(-2000)}\n`);
+      throw new Error('openclaw never persisted the byoky-anthropic provider config');
+    }
+  } finally {
+    clearInterval(prodInterval);
+  }
+  authProc.kill();
+  authProc = null;
+}
+
+async function waitForBridgeHealthy(timeoutMs = 10_000): Promise<{ providers?: string[] }> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch('http://127.0.0.1:19280/health');
+      if (res.ok) return (await res.json()) as { providers?: string[] };
+    } catch { /* keep trying */ }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  throw new Error('byoky-bridge /health never responded on :19280');
+}
+
 test.describe.configure({ mode: 'serial' });
 
 test.describe('OpenClaw + byoky extension + bridge full flow', () => {
@@ -126,9 +237,9 @@ test.describe('OpenClaw + byoky extension + bridge full flow', () => {
       try { authProc.kill(); } catch { /* already exited */ }
       authProc = null;
     }
-    if (wallet) {
-      try { await wallet.ctx.close(); } catch { /* ignore */ }
-    }
+    // walletA may already be closed by the gift-handoff leg.
+    try { await wallet?.ctx.close(); } catch { /* ignore */ }
+    try { await walletB?.ctx.close(); } catch { /* ignore */ }
   });
 
   test('set up offline wallet', async () => {
@@ -280,5 +391,96 @@ test.describe('OpenClaw + byoky extension + bridge full flow', () => {
     expect(out).not.toMatch(/HTTP 4\d{2}|HTTP 5\d{2}/);
     expect(out.length).toBeGreaterThan(0);
     process.stdout.write(`[agent output]\n${out}\n`);
+  });
+
+  // ─── Gift hand-off leg ───────────────────────────────────────────
+  // Proves OpenClaw + the bridge can consume a *gifted* anthropic
+  // credential held by a second wallet. The flow:
+  //   walletA mints an anthropic gift → walletA closes (freeing :19280)
+  //   → walletB launches, redeems gift → openclaw re-auths against
+  //   walletB → bridge binds fresh → real call routes through walletB's
+  //   gifted credential to api.anthropic.com.
+
+  test('walletA mints anthropic gift for hand-off to walletB', async () => {
+    await wallet.popup.bringToFront();
+    await wallet.popup.click('button[title="Gifts"]');
+    await wallet.popup.click('button:has-text("Create Gift")');
+    await wallet.popup.waitForSelector('#gift-credential', { timeout: 5_000 });
+
+    // getCredentials is how the existing cross-device specs pick the right
+    // credential id — the dropdown options aren't identifiable by text.
+    const { credentials } = await wallet.popup.evaluate(async () => {
+      return (await chrome.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'getCredentials' })) as {
+        credentials: Array<{ id: string; providerId: string }>;
+      };
+    });
+    const anthropic = credentials.find((c) => c.providerId === 'anthropic');
+    expect(anthropic, 'walletA needs the anthropic credential from the earlier leg').toBeTruthy();
+    await wallet.popup.selectOption('#gift-credential', anthropic!.id);
+
+    await wallet.popup.locator('input[type="number"]').fill('2000');
+    await wallet.popup.click('button:has-text("Create Gift")');
+    await expect(wallet.popup.locator('text=Gift Created')).toBeVisible({ timeout: 15_000 });
+
+    giftLink = await wallet.popup.locator('.gift-link-text').innerText();
+    expect(giftLink).toMatch(/^https:\/\/byoky\.com\/gift#/);
+    await wallet.popup.click('button:has-text("Done")');
+  });
+
+  test('tear down walletA, free :19280 bridge', async () => {
+    await wallet.ctx.close();
+    await waitForBridgeFree();
+  });
+
+  test('launch walletB and redeem the gift', async () => {
+    walletB = await launchWallet('OCB', port);
+    await setupWallet(walletB);
+    // walletB has zero own credentials — the gift is the only anthropic
+    // route. Redeem it via the popup flow.
+    await walletB.popup.bringToFront();
+    await walletB.popup.click('button[title="Gifts"]');
+    await walletB.popup.click('button:has-text("Redeem Gift")');
+    await walletB.popup.waitForSelector('#gift-link', { timeout: 5_000 });
+    await walletB.popup.fill('#gift-link', giftLink);
+    await expect(walletB.popup.locator('.gift-preview')).toBeVisible({ timeout: 5_000 });
+    await walletB.popup.click('button:has-text("Accept Gift")');
+    await walletB.popup.click('button[title="Wallet"]');
+    await expect(walletB.popup.locator('.gift-card')).toBeVisible({ timeout: 10_000 });
+  });
+
+  test('openclaw re-authenticates against walletB', async () => {
+    // Same PTY dance as the original auth test — the helper handles the
+    // callback-port discovery + popup approval + config-write wait.
+    await runOpenclawAuthFlow(walletB!);
+  });
+
+  test('bridge is listening on :19280 (walletB instance) and reports anthropic', async () => {
+    const body = await waitForBridgeHealthy();
+    expect(body.providers).toContain('anthropic');
+  });
+
+  // Gap: background.ts:2931 (handleBridgeProxyRequest) only calls
+  // resolveCredential() — it doesn't consult giftedCredentials the way the
+  // regular extension proxy handler (background.ts:468) does. Result: when
+  // walletB has only a gifted anthropic credential, the bridge returns
+  // `No API keys in your wallet. Add a key for any provider to get
+  // started.` Leaving this test as `fixme` so it becomes a canary the day
+  // someone extends the bridge path to accept gifts.
+  test.fixme('openclaw agent via walletB gifted credential → real anthropic.com call', async () => {
+    const out = openclawSync([
+      'agent',
+      '--agent', 'byoky-test',
+      '--message', 'Reply with a single word: ready',
+      '--local',
+      '--timeout', '90',
+    ]);
+    // Tightened from the original `HTTP \d{3}` — bridge errors come back
+    // as bare `502 {...}` without the `HTTP ` prefix, so the old regex
+    // let this case slip through during the first-pass investigation.
+    expect(out).not.toMatch(/\b[45]\d{2}\s*\{/);
+    expect(out).not.toMatch(/HTTP [45]\d{2}/);
+    expect(out).not.toMatch(/No API keys in your wallet/);
+    expect(out.length).toBeGreaterThan(0);
+    process.stdout.write(`[agent output via walletB gift]\n${out}\n`);
   });
 });
