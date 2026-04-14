@@ -1076,7 +1076,9 @@ final class RelayPairService: ObservableObject {
         group: Group?
     ) -> String {
         let req = requestedProviderId
-        let groupBinding = group?.providerId
+        // An empty providerId means the sentinel default group — no routing,
+        // so treat as if no group were set.
+        let groupBinding = group?.providerId.nilIfEmpty
         // Case 1: a group is routing this app to a provider that has no credential.
         if let groupBinding, groupBinding != req {
             return "No \(groupBinding) API key found. Add a \(groupBinding) key to your wallet, or assign this app to a provider you already have a key for."

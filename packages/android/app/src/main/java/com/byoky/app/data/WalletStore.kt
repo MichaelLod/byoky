@@ -874,17 +874,23 @@ class WalletStore(context: Context) {
     }
 
     /**
-     * Make sure the default group exists. Called once per unlock. Picks a
-     * sensible provider (first credential's, falling back to anthropic).
+     * Make sure the default group exists as a routing-neutral sentinel.
+     * Apps with no explicit binding land here; the resolver sees an empty
+     * providerId and falls through to direct credential lookup.
      */
     private fun ensureDefaultGroup() {
-        if (_groups.value.any { it.id == DEFAULT_GROUP_ID }) return
-        val first = _credentials.value.firstOrNull()
-        val def = Group.makeDefault(
-            providerId = first?.providerId ?: "anthropic",
-            credentialId = first?.id,
-        )
-        _groups.value = listOf(def) + _groups.value
+        val existing = _groups.value.firstOrNull { it.id == DEFAULT_GROUP_ID }
+        if (existing != null) {
+            // Migrate stale default groups that were auto-populated with a
+            // provider binding (pre-sentinel behavior).
+            if (existing.providerId.isNotEmpty() || existing.credentialId != null) {
+                val sentinel = existing.copy(providerId = "", credentialId = null)
+                _groups.value = _groups.value.map { if (it.id == DEFAULT_GROUP_ID) sentinel else it }
+                saveGroups()
+            }
+            return
+        }
+        _groups.value = listOf(Group.makeDefault()) + _groups.value
         saveGroups()
     }
 
