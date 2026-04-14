@@ -27,12 +27,17 @@ struct Group: Identifiable, Codable, Equatable {
     var model: String?
     let createdAt: Date
 
-    static func makeDefault(providerId: String = "anthropic", credentialId: String? = nil) -> Group {
+    /// The default group is a sentinel bucket for apps with no explicit
+    /// binding. It carries no routing (empty providerId), so unbound apps
+    /// fall through to direct credential lookup for the provider they
+    /// actually request. Mirrors the vault seeding at
+    /// packages/vault/src/db/index.ts and the extension's ensureDefaultGroup.
+    static func makeDefault() -> Group {
         Group(
             id: defaultGroupId,
             name: "Default",
-            providerId: providerId,
-            credentialId: credentialId,
+            providerId: "",
+            credentialId: nil,
             giftId: nil,
             model: nil,
             createdAt: Date()

@@ -235,15 +235,17 @@ export function ConnectedApps() {
               <div style={{ minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <strong style={{ fontSize: '13px' }}>{group.name}</strong>
-                  <span className="badge badge-provider">{provider?.name ?? group.providerId}</span>
+                  {group.providerId && <span className="badge badge-provider">{provider?.name ?? group.providerId}</span>}
                   {group.model && <span className="badge">{group.model}</span>}
                 </div>
                 <div className="card-subtitle" style={{ marginTop: '2px' }}>
-                  {pinnedGift
-                    ? `Using gift from ${pinnedGift.senderLabel} · ${formatTokensShort(giftBudgetRemaining(pinnedGift))} left`
-                    : pinnedCred
-                      ? `Using ${pinnedCred.label}`
-                      : 'Any credential for this provider'}
+                  {!group.providerId
+                    ? 'No routing — apps use the provider they request'
+                    : pinnedGift
+                      ? `Using gift from ${pinnedGift.senderLabel} · ${formatTokensShort(giftBudgetRemaining(pinnedGift))} left`
+                      : pinnedCred
+                        ? `Using ${pinnedCred.label}`
+                        : 'Any credential for this provider'}
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '6px' }}>

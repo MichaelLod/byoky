@@ -219,11 +219,16 @@ data class Group(
     val createdAt: Long = System.currentTimeMillis(),
 ) {
     companion object {
-        fun makeDefault(providerId: String = "anthropic", credentialId: String? = null) = Group(
+        // The default group is a sentinel bucket for apps with no explicit
+        // binding. It carries no routing (empty providerId), so unbound apps
+        // fall through to direct credential lookup for the provider they
+        // actually request. Mirrors the vault seeding at
+        // packages/vault/src/db/index.ts and the extension's ensureDefaultGroup.
+        fun makeDefault() = Group(
             id = DEFAULT_GROUP_ID,
             name = "Default",
-            providerId = providerId,
-            credentialId = credentialId,
+            providerId = "",
+            credentialId = null,
             giftId = null,
             model = null,
         )
