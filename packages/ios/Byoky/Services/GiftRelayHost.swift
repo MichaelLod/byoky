@@ -202,7 +202,6 @@ private final class GiftRelayConnection {
 
     private func handleRelayRequest(_ json: [String: Any]) async {
         guard let requestId = json["requestId"] as? String,
-              let providerId = json["providerId"] as? String,
               let urlString = json["url"] as? String,
               let method = json["method"] as? String else { return }
 
@@ -227,6 +226,12 @@ private final class GiftRelayConnection {
             sendError(requestId: requestId, code: "PROVIDER_UNAVAILABLE", message: "Credential no longer available")
             return
         }
+        // Use the gift's provider for everything downstream — the request
+        // message's providerId is the *source* in a cross-family translated
+        // call and would mis-route URL validation, auth, usage parsing, etc.
+        // Mirrors background.ts which uses `gift.providerId` throughout
+        // handleGiftProxyRequest.
+        let providerId = gift.providerId
         guard let upstreamUrl = Provider.validateUrl(urlString, for: providerId) else {
             sendError(requestId: requestId, code: "INVALID_URL", message: "Request URL does not match provider")
             return
