@@ -19,6 +19,11 @@ class MainActivity : ComponentActivity() {
 
         val wallet = (application as ByokyApp).walletStore
 
+        // Test-only auto-setup. Driven by the UI Automator harness which
+        // launches MainActivity with byoky_test_config_json extras.
+        // No-op for production launches (extras absent).
+        TestSupport.autoSetupIfNeeded(applicationContext, wallet, intent?.extras)
+
         lifecycleObserver = object : DefaultLifecycleObserver {
             override fun onStop(owner: LifecycleOwner) {
                 wallet.recordBackgroundTime()

@@ -3,36 +3,35 @@ import type { Page } from '@playwright/test';
 import fs from 'fs';
 
 /**
- * Interactive cross-device test: desktop extension ↔ iPhone simulator.
+ * Interactive cross-device test: desktop extension ↔ Android emulator.
  *
- * Orchestrated by `scripts/run-interactive-cross-device.sh`. Runs in two
- * stages controlled via `BYOKY_STAGE`:
+ * Mirror of interactive-cross-device.spec.ts (iOS) — same legs, same
+ * shape, different sentinel paths. Orchestrated by
+ * `scripts/run-interactive-cross-device-android.sh`. Stages controlled
+ * via BYOKY_STAGE = "A1" (android sender) or "A2" (android recipient).
  *
- *   Stage 1 (BYOKY_STAGE=1, iOS is sender):
- *     Leg 0 — desktop walletA setup, import real anthropic/openai/gemini
- *             keys, hit demo with each provider (real API calls).
- *     Leg 1 — desktop walletB setup offline, redeem the iOS-created gift
- *             from /tmp/byoky-ios-gift-link.txt, remove own gemini key,
- *             connect demo, real Gemini call routes through gift relay
- *             back to the iPhone simulator. Signal iOS done.
+ *   Stage A1 (Android is sender):
+ *     Leg 0 — walletA setup, OpenAI + Gemini real demo calls.
+ *     Leg 1 — walletB redeem android gift link from
+ *             /tmp/byoky-android-gift-link.txt, real Gemini call via
+ *             gift-relay tunnels through the Android emulator.
+ *     Leg 2 — cross-family translation: anthropic-shape → gemini via the
+ *             gifted credential, response translated back.
+ *     Signal — touch /tmp/byoky-android-done.sig to release the device test.
  *
- *   Stage 2 (BYOKY_STAGE=2, iOS is recipient):
- *     Leg 2 — walletA creates an anthropic gift, writes link to
- *             /tmp/byoky-desktop-gift-link.txt, waits up to 2 min for
- *             /tmp/byoky-ios-proxy-result.json (written by the iOS
- *             auto-fire helper after iOS redeems + calls through relay).
- *             Assert success + walletA's sent gift usedTokens > 0.
- *
- * The two stages are separate Playwright invocations because the
- * orchestrator restarts the iOS simulator app between them with different
- * config (gemini-only vs fireAfterSetup:anthropic).
+ *   Stage A2 (Android is recipient):
+ *     walletA mints a 500-token Anthropic gift, writes link to
+ *     /tmp/byoky-desktop-gift-link.txt for the orchestrator to push to
+ *     the device. Waits for /tmp/byoky-android-proxy-result.json (written
+ *     by the orchestrator parsing logcat). Asserts 200 + walletA sent-gift
+ *     usedTokens > 0.
  */
 
-const STAGE = process.env.BYOKY_STAGE ?? '1';
-const IOS_GIFT_LINK_IN = '/tmp/byoky-ios-gift-link.txt';
-const IOS_DONE_SIGNAL = '/tmp/byoky-ios-done.sig';
+const STAGE = process.env.BYOKY_STAGE ?? 'A1';
+const ANDROID_GIFT_LINK_IN = '/tmp/byoky-android-gift-link.txt';
+const ANDROID_DONE_SIGNAL = '/tmp/byoky-android-done.sig';
 const DESKTOP_GIFT_LINK_OUT = '/tmp/byoky-desktop-gift-link.txt';
-const IOS_PROXY_RESULT = '/tmp/byoky-ios-proxy-result.json';
+const ANDROID_PROXY_RESULT = '/tmp/byoky-android-proxy-result.json';
 
 const PASSWORD = 'CrossDevice1234!';
 
@@ -158,18 +157,18 @@ async function sendInternalFromPopup<T>(popup: Page, action: string, payload?: R
 test.describe.configure({ mode: 'serial' });
 
 // ─────────────────────────────────────────────────────────────────────────
-// Stage 1: iOS as sender, desktop receives
+// Stage A1: Android as sender, desktop receives
 // ─────────────────────────────────────────────────────────────────────────
 
-if (STAGE === '1') {
-  test.describe('Interactive cross-device — Stage 1 (iOS→desktop)', () => {
+if (STAGE === 'A1') {
+  test.describe('Interactive cross-device — Stage A1 (Android→desktop)', () => {
     let demoOrigin = '';
     let giftLink = '';
 
     test('Leg 0: walletA setup + import real keys + demo hits OpenAI and Gemini', async ({ walletA, apiKeys }) => {
       await setupWallet(walletA);
       // We import anthropic too (Stage 2 uses it to mint the gift), but the
-      // real anthropic demo call is covered end-to-end by Stage 2 (iOS
+      // real anthropic demo call is covered end-to-end by Stage A2 (Android
       // redeems + auto-fires through the bridge). No need to double-up
       // here — the Anthropic setup token is more rate-limit-sensitive than
       // raw API keys, so hammering it once per leg causes flakes.
@@ -188,17 +187,17 @@ if (STAGE === '1') {
       console.log(`[stage1/leg0] demo origin ${demoOrigin} — openai + gemini real calls ok`);
     });
 
-    test('Leg 1: walletB redeems iOS gift', async ({ walletB }) => {
+    test('Leg 1: walletB redeems Android gift', async ({ walletB }) => {
       await setupWallet(walletB);
 
-      if (!fs.existsSync(IOS_GIFT_LINK_IN)) {
+      if (!fs.existsSync(ANDROID_GIFT_LINK_IN)) {
         throw new Error(
-          `No iOS gift link at ${IOS_GIFT_LINK_IN} — the XCUITest testIOSSendsGift_Interactive should run alongside this stage`,
+          `No Android gift link at ${ANDROID_GIFT_LINK_IN} — the UI Automator testAndroidSendsGift_Interactive should run alongside this stage`,
         );
       }
-      giftLink = fs.readFileSync(IOS_GIFT_LINK_IN, 'utf-8').trim();
+      giftLink = fs.readFileSync(ANDROID_GIFT_LINK_IN, 'utf-8').trim();
       expect(giftLink).toMatch(/^(https:\/\/byoky\.com\/gift|byoky:\/\/gift)/);
-      console.log(`[stage1/leg1] got iOS gift link: ${giftLink.slice(0, 60)}…`);
+      console.log(`[stage1/leg1] got Android gift link: ${giftLink.slice(0, 60)}…`);
 
       await walletB.popup.bringToFront();
       await walletB.popup.click('button[title="Gifts"]');
@@ -213,13 +212,13 @@ if (STAGE === '1') {
 
     let demoOriginB = '';
 
-    test('Leg 1: real Gemini call routes through iOS via gift-relay', async ({ walletB, apiKeys }) => {
+    test('Leg 1: real Gemini call routes through Android via gift-relay', async ({ walletB, apiKeys }) => {
       // walletB has no gemini key of its own — the gift is the only route.
       // Also approve anthropic on the session so Leg 2 can reuse it for
       // the translated anthropic-shape call without re-prompting.
       await connectFromPage(walletB, ['anthropic', 'gemini']);
       demoOriginB = await walletB.page.evaluate(() => window.location.origin);
-      // Sender (iOS) opens its relay socket lazily; give it a beat.
+      // Sender (Android) opens its relay socket lazily; give it a beat.
       await walletB.page.waitForTimeout(3000);
 
       const { response, proxyError } = await sendFromPage(walletB, 'sendGemini');
@@ -234,7 +233,7 @@ if (STAGE === '1') {
     test('Leg 2: anthropic-shape request translates to gemini, routes through gift-relay', async ({ walletB }) => {
       // Cross-family translation cross-device: walletB creates a group that
       // routes the anthropic family onto gemini, pointed at gemini-2.0-flash.
-      // walletB has no gemini credential of its own — the iOS gift is the
+      // walletB has no gemini credential of its own — the Android gift is the
       // only source — so the resolved call tunnels through the relay.
       // Assert the response still comes back in anthropic shape (the
       // translation engine rewrites the gemini-shape response).
@@ -300,20 +299,20 @@ if (STAGE === '1') {
       expect(translated!.status).toBeLessThan(400);
     });
 
-    test('Leg 2: signal iOS sender to exit', async () => {
-      fs.writeFileSync(IOS_DONE_SIGNAL, 'done');
-      console.log(`[stage1/leg2] dropped ${IOS_DONE_SIGNAL} — iOS sender can exit`);
+    test('Leg 2: signal Android sender to exit', async () => {
+      fs.writeFileSync(ANDROID_DONE_SIGNAL, 'done');
+      console.log(`[stage1/leg2] dropped ${ANDROID_DONE_SIGNAL} — Android sender can exit`);
     });
   });
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Stage 2: desktop as sender, iOS receives + auto-fires real call
+// Stage A2: desktop as sender, Android receives + auto-fires real call
 // ─────────────────────────────────────────────────────────────────────────
 
-if (STAGE === '2') {
-  test.describe('Interactive cross-device — Stage 2 (desktop→iOS)', () => {
-    test('Leg 2: walletA setup + import anthropic + mint gift for iOS', async ({ walletA, apiKeys }) => {
+if (STAGE === 'A2') {
+  test.describe('Interactive cross-device — Stage A2 (desktop→Android)', () => {
+    test('Leg 2: walletA setup + import anthropic + mint gift for Android', async ({ walletA, apiKeys }) => {
       await setupWallet(walletA);
       await addCredential(walletA, 'anthropic', 'Stage2 Anthropic', apiKeys.anthropic);
 
@@ -342,24 +341,24 @@ if (STAGE === '2') {
       await walletA.popup.click('button:has-text("Done")');
     });
 
-    test('Leg 2: wait for iOS auto-fire to complete and assert real response', async ({ walletA }) => {
-      console.log(`[stage2/leg2] waiting for iOS auto-fire result at ${IOS_PROXY_RESULT}…`);
+    test('Leg 2: wait for Android auto-fire to complete and assert real response', async ({ walletA }) => {
+      console.log(`[stage2/leg2] waiting for Android auto-fire result at ${ANDROID_PROXY_RESULT}…`);
       const start = Date.now();
       const deadline = start + 120_000;
-      while (!fs.existsSync(IOS_PROXY_RESULT)) {
+      while (!fs.existsSync(ANDROID_PROXY_RESULT)) {
         if (Date.now() > deadline) {
           throw new Error(
-            `iOS never dropped ${IOS_PROXY_RESULT} within 2min — check XCUITest log for testIOSRedeemsGift_Interactive`,
+            `Android never dropped ${ANDROID_PROXY_RESULT} within 2min — orchestrator should have logged a PROXY_RESULT from BYOKY_TEST logcat`,
           );
         }
         await new Promise((r) => setTimeout(r, 500));
       }
-      const raw = fs.readFileSync(IOS_PROXY_RESULT, 'utf-8');
-      console.log(`[stage2/leg2] iOS proxy result after ${Math.round((Date.now() - start) / 1000)}s:`);
+      const raw = fs.readFileSync(ANDROID_PROXY_RESULT, 'utf-8');
+      console.log(`[stage2/leg2] Android proxy result after ${Math.round((Date.now() - start) / 1000)}s:`);
       console.log(raw);
 
       const result = JSON.parse(raw) as ProxyResult;
-      expect(result.success, `iOS proxy failed: ${JSON.stringify(result)}`).toBe(true);
+      expect(result.success, `Android proxy failed: ${JSON.stringify(result)}`).toBe(true);
       expect(result.providerId).toBe('anthropic');
       expect(result.responseBytes).toBeGreaterThan(0);
 

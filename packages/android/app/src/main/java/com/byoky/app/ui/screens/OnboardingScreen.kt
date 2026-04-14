@@ -48,6 +48,7 @@ fun OnboardingScreen(wallet: WalletStore) {
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    var vaultMode by remember { mutableStateOf(VaultAuthMode.SIGNUP) }
 
     Column(
         modifier = Modifier
@@ -82,7 +83,10 @@ fun OnboardingScreen(wallet: WalletStore) {
             Spacer(Modifier.height(32.dp))
 
             Button(
-                onClick = { step = OnboardingStep.VAULT_AUTH },
+                onClick = {
+                    vaultMode = VaultAuthMode.SIGNUP
+                    step = OnboardingStep.VAULT_AUTH
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),
@@ -95,11 +99,12 @@ fun OnboardingScreen(wallet: WalletStore) {
             Spacer(Modifier.height(8.dp))
 
             TextButton(onClick = { step = OnboardingStep.OFFLINE_SETUP }) {
-                Text("Continue in offline mode", color = TextMuted, fontSize = 12.sp)
+                Text("Continue with your API keys", color = TextMuted, fontSize = 12.sp)
             }
         } else if (step == OnboardingStep.VAULT_AUTH) {
             VaultAuthContent(
                 wallet = wallet,
+                initialMode = vaultMode,
                 onBack = { step = OnboardingStep.WELCOME },
             )
         } else {

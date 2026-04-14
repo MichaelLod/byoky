@@ -12,6 +12,7 @@ struct OnboardingView: View {
     @State private var confirmPassword = ""
     @State private var error: String?
     @State private var step: OnboardingStep = .welcome
+    @State private var vaultMode: AuthMode = .signup
 
     var body: some View {
         ZStack {
@@ -24,7 +25,10 @@ struct OnboardingView: View {
                 case .welcome:
                     welcomeStep
                 case .vaultAuth:
-                    VaultAuthView(onBack: { withAnimation { step = .welcome } })
+                    VaultAuthView(
+                        initialMode: vaultMode,
+                        onBack: { withAnimation { step = .welcome } },
+                    )
                 case .offlineSetup:
                     passwordStep
                 }
@@ -51,6 +55,7 @@ struct OnboardingView: View {
                 .padding(.horizontal, 16)
 
             Button {
+                vaultMode = .signup
                 withAnimation { step = .vaultAuth }
             } label: {
                 Text("Get Started")
@@ -67,11 +72,11 @@ struct OnboardingView: View {
             Button {
                 withAnimation { step = .offlineSetup }
             } label: {
-                Text("Continue in offline mode")
+                Text("Continue with your API keys")
                     .font(.footnote)
                     .foregroundStyle(Theme.textMuted)
             }
-            .accessibilityIdentifier("onboarding.offlineMode")
+            .accessibilityIdentifier("onboarding.byokMode")
         }
     }
 
