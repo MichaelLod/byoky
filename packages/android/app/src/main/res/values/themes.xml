@@ -5,4 +5,10 @@
         <item name="android:navigationBarColor">#141418</item>
         <item name="android:windowBackground">#141418</item>
     </style>
+
+    <style name="Theme.Byoky.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher_foreground</item>
+        <item name="postSplashScreenTheme">@style/Theme.Byoky</item>
+    </style>
 </resources>
