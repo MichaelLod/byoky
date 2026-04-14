@@ -13,4 +13,6 @@
     <color name="danger">#f43f5e</color>
     <color name="success">#34d399</color>
     <color name="border">#0Fffffff</color>
+    <color name="ic_launcher_background">#0c1a33</color>
+    <color name="splash_background">#0c1a33</color>
 </resources>
