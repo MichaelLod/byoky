@@ -21,6 +21,7 @@ const installOptions = [
 export function Navbar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const [embedded, setEmbedded] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -33,7 +34,12 @@ export function Navbar() {
     return () => document.removeEventListener('mousedown', handleClick);
   }, [open]);
 
-  if (pathname === '/chat') return null;
+  useEffect(() => {
+    const w = window as unknown as { __byokyBridge?: unknown };
+    if (window.self !== window.top || w.__byokyBridge) setEmbedded(true);
+  }, []);
+
+  if (pathname === '/chat' || embedded) return null;
 
   return (
     <nav className="navbar">
