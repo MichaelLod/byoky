@@ -223,7 +223,7 @@ struct AppsView: View {
     private var cloudVaultWarning: some View {
         Section {
             Label(
-                "Your device must stay online for connected apps to work. Enable Cloud Vault in Settings for offline access.",
+                "Your device must stay online for connected apps to work. Enable Cloud Sync in Settings for offline access.",
                 systemImage: "wifi"
             )
             .font(.caption)

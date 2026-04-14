@@ -115,7 +115,7 @@ fun VaultAuthContent(wallet: WalletStore, initialMode: VaultAuthMode, onBack: ()
 
         Text(
             if (mode == VaultAuthMode.LOGIN)
-                "Sign in to sync keys from your vault."
+                "Sign in to sync keys from Cloud Sync."
             else
                 "End-to-end encrypted with your password. We can't read your keys.",
             color = TextSecondary,

@@ -39,8 +39,7 @@ fun OfflineUpgradeBanner(wallet: WalletStore) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(Accent.copy(alpha = 0.08f))
+            .background(Accent.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
             .border(1.dp, Accent, RoundedCornerShape(10.dp))
             .padding(12.dp),
     ) {
@@ -54,7 +53,7 @@ fun OfflineUpgradeBanner(wallet: WalletStore) {
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "Activate your vault to access your keys on any device, end-to-end encrypted.",
+                    "Turn on Cloud Sync to access your keys on any device, end-to-end encrypted.",
                     fontSize = 12.sp,
                     color = TextSecondary,
                 )
@@ -73,7 +72,7 @@ fun OfflineUpgradeBanner(wallet: WalletStore) {
                 colors = ButtonDefaults.buttonColors(containerColor = Accent),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
             ) {
-                Text("Activate vault", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text("Activate Cloud Sync", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
         } else {
             OutlinedTextField(
@@ -111,7 +110,7 @@ fun OfflineUpgradeBanner(wallet: WalletStore) {
                                 expanded = false
                                 username = ""
                             } catch (e: Exception) {
-                                error = e.message ?: "Failed to activate vault"
+                                error = e.message ?: "Failed to activate Cloud Sync"
                             } finally {
                                 loading = false
                             }

@@ -291,20 +291,20 @@ export function CreateGift() {
               <strong>Browser and Bridge must stay online.</strong> This credential
               is a setup token that requires the Byoky Bridge. Gift recipients can
               only use this gift while your browser is running, the extension is
-              active, and the Bridge is installed — even with Cloud Vault enabled.
+              active, and the Bridge is installed — even with Cloud Sync enabled.
             </div>
           )}
 
           {cloudVaultEnabled && selectedCred?.authMethod !== 'oauth' && (
             <div className="info-box">
-              <strong>Cloud Vault fallback enabled.</strong> When your browser
-              is closed, the vault server will handle gift requests automatically.
+              <strong>Cloud Sync fallback enabled.</strong> When your browser
+              is closed, the Cloud Sync server will handle gift requests automatically.
             </div>
           )}
 
           {!cloudVaultEnabled && selectedCred?.authMethod !== 'oauth' && (
             <div className="warning-box">
-              <strong>Device must stay online.</strong> Since Cloud Vault is off,
+              <strong>Device must stay online.</strong> Since Cloud Sync is off,
               gift recipients can only use this gift while your browser is running
               and this extension is active.
             </div>

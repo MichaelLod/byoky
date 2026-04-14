@@ -242,7 +242,7 @@ fun CreateGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
                         ) {
                             Icon(Icons.Default.Wifi, null, tint = Warning, modifier = Modifier.size(16.dp))
                             Text(
-                                "Your device must stay online for the recipient to use this gift. Enable Cloud Vault in Settings for offline access.",
+                                "Your device must stay online for the recipient to use this gift. Enable Cloud Sync in Settings for offline access.",
                                 color = Warning,
                                 fontSize = 13.sp,
                             )
