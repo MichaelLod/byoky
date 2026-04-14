@@ -27,12 +27,15 @@ let port = 0;
 
 async function setupWallet(w: Wallet) {
   await w.popup.bringToFront();
-  await expect(w.popup.locator('button:has-text("Get Started")')).toBeVisible({ timeout: 15_000 });
-  await w.popup.click('button:has-text("Continue in offline mode")');
+  // Unified Setup lands in vault mode; click the BYOK toggle to go offline.
+  await expect(w.popup.locator('button:has-text("Got API keys?")')).toBeVisible({ timeout: 15_000 });
+  await w.popup.click('button:has-text("Got API keys?")');
   await w.popup.waitForSelector('#password', { timeout: 15_000 });
   await w.popup.fill('#password', PASSWORD);
+  await w.popup.click('button:has-text("Continue")');
+  await w.popup.waitForSelector('#confirm', { timeout: 10_000 });
   await w.popup.fill('#confirm', PASSWORD);
-  await w.popup.click('button:has-text("Create Wallet")');
+  await w.popup.click('button:has-text("Create wallet")');
   await expect(w.popup.locator('text=No API keys, tokens, or gifts yet')).toBeVisible({ timeout: 30_000 });
 }
 
