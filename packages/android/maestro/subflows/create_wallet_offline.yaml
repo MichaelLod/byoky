@@ -4,7 +4,7 @@ appId: com.byoky.app
 #
 # Welcome → offline setup → password → MainScreen (Wallet tab).
 - assertVisible: "Byoky Wallet"
-- tapOn: "Continue in offline mode"
+- tapOn: "Continue with your API keys"
 - assertVisible: "Set Master Password"
 - tapOn: "Master password"
 - inputText: ${PASSWORD}

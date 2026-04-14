@@ -1,5 +1,7 @@
 package com.byoky.app.ui.screens
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -27,6 +29,27 @@ internal enum class VaultUsernameStatus { IDLE, CHECKING, AVAILABLE, TAKEN, INVA
 enum class VaultAuthMode { SIGNUP, LOGIN }
 
 private val usernamePattern = Regex("^[a-z0-9][a-z0-9_-]{1,28}[a-z0-9]$")
+
+@Composable
+private fun ModeTab(selected: Boolean, label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .clickable(onClick = onClick)
+            .background(
+                if (selected) BgCard else androidx.compose.ui.graphics.Color.Transparent,
+                shape = RoundedCornerShape(7.dp),
+            )
+            .padding(vertical = 8.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            color = if (selected) TextPrimary else TextMuted,
+            fontSize = 13.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+        )
+    }
+}
 
 @Composable
 fun VaultAuthContent(wallet: WalletStore, initialMode: VaultAuthMode, onBack: () -> Unit) {
@@ -61,13 +84,36 @@ fun VaultAuthContent(wallet: WalletStore, initialMode: VaultAuthMode, onBack: ()
         Spacer(Modifier.height(20.dp))
 
         Text(
-            if (mode == VaultAuthMode.LOGIN) "Welcome back" else "Create your account",
+            "Your vault, your keys",
             fontSize = 24.sp,
             fontWeight = FontWeight.Bold,
             color = TextPrimary,
         )
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(12.dp))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(BgRaised, shape = RoundedCornerShape(10.dp))
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            ModeTab(
+                selected = mode == VaultAuthMode.SIGNUP,
+                label = "Create account",
+                onClick = { mode = VaultAuthMode.SIGNUP; error = null },
+                modifier = Modifier.weight(1f),
+            )
+            ModeTab(
+                selected = mode == VaultAuthMode.LOGIN,
+                label = "Sign in",
+                onClick = { mode = VaultAuthMode.LOGIN; error = null },
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        Spacer(Modifier.height(12.dp))
 
         Text(
             if (mode == VaultAuthMode.LOGIN)

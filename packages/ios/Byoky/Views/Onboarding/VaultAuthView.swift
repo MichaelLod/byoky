@@ -49,9 +49,17 @@ struct VaultAuthView: View {
         VStack(spacing: 20) {
             MascotView(size: 100)
 
-            Text(mode == .login ? "Welcome back" : "Create your account")
+            Text("Your vault, your keys")
                 .font(.system(size: 24, weight: .bold))
                 .foregroundStyle(Theme.textPrimary)
+
+            HStack(spacing: 4) {
+                modeTab(.signup, title: "Create account")
+                modeTab(.login, title: "Sign in")
+            }
+            .padding(4)
+            .background(Theme.bgRaised)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
 
             Text(mode == .login
                 ? "Sign in to sync keys from your vault."
@@ -128,6 +136,24 @@ struct VaultAuthView: View {
                     .foregroundStyle(Theme.textSecondary)
             }
         }
+    }
+
+    @ViewBuilder
+    private func modeTab(_ target: AuthMode, title: String) -> some View {
+        let selected = mode == target
+        Button {
+            mode = target
+            error = nil
+        } label: {
+            Text(title)
+                .font(.system(size: 13, weight: selected ? .semibold : .regular))
+                .foregroundStyle(selected ? Theme.textPrimary : Theme.textMuted)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(selected ? Theme.bgCard : Color.clear)
+                .clipShape(RoundedRectangle(cornerRadius: 7))
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder

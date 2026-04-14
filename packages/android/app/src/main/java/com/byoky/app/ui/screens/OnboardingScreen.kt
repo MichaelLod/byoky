@@ -93,28 +93,13 @@ fun OnboardingScreen(wallet: WalletStore) {
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Accent),
             ) {
-                Text("Create account", fontWeight = FontWeight.SemiBold)
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            OutlinedButton(
-                onClick = {
-                    vaultMode = VaultAuthMode.LOGIN
-                    step = OnboardingStep.VAULT_AUTH
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp),
-                shape = RoundedCornerShape(12.dp),
-            ) {
-                Text("Sign in", fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                Text("Get Started", fontWeight = FontWeight.SemiBold)
             }
 
             Spacer(Modifier.height(8.dp))
 
             TextButton(onClick = { step = OnboardingStep.OFFLINE_SETUP }) {
-                Text("Continue in offline mode", color = TextMuted, fontSize = 12.sp)
+                Text("Continue with your API keys", color = TextMuted, fontSize = 12.sp)
             }
         } else if (step == OnboardingStep.VAULT_AUTH) {
             VaultAuthContent(

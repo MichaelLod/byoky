@@ -5,7 +5,7 @@ import { PasswordMeter } from '../components/PasswordMeter';
 
 type UsernameStatus = 'idle' | 'checking' | 'available' | 'taken' | 'invalid';
 type Mode = 'vault-signup' | 'vault-login' | 'byok';
-type Step = 'chooser' | 'credentials' | 'confirm';
+type Step = 'welcome' | 'credentials' | 'confirm';
 
 async function sendInternal(action: string, payload?: unknown): Promise<Record<string, unknown>> {
   return browser.runtime.sendMessage({
@@ -17,7 +17,7 @@ async function sendInternal(action: string, payload?: unknown): Promise<Record<s
 
 export function Setup() {
   const { setup, vaultBootstrapSignup, vaultBootstrapLogin, error, clearError, loading } = useWalletStore();
-  const [step, setStep] = useState<Step>('chooser');
+  const [step, setStep] = useState<Step>('welcome');
   const [mode, setMode] = useState<Mode>('vault-signup');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -66,6 +66,7 @@ export function Setup() {
   }
 
   function switchVaultMode(next: 'vault-signup' | 'vault-login') {
+    if (!isVault) return;
     setMode(next);
     setLocalError('');
     clearError();
@@ -122,8 +123,8 @@ export function Setup() {
 
   const displayError = localError || error;
 
-  // Chooser step —— explicit entry points.
-  if (step === 'chooser') {
+  // Welcome step — primary "Get Started" (→ vault signup) + BYOK link.
+  if (step === 'welcome') {
     return (
       <div className="center-page">
         <div className="logo-large">Byoky</div>
@@ -137,19 +138,10 @@ export function Setup() {
           <button
             type="button"
             className="btn btn-primary"
-            style={{ width: '100%', marginBottom: '10px' }}
+            style={{ width: '100%', marginBottom: '12px' }}
             onClick={() => goToCredentials('vault-signup')}
           >
-            Create account
-          </button>
-
-          <button
-            type="button"
-            className="btn btn-secondary"
-            style={{ width: '100%', marginBottom: '16px' }}
-            onClick={() => goToCredentials('vault-login')}
-          >
-            Sign in
+            Get Started
           </button>
 
           <button
@@ -168,7 +160,7 @@ export function Setup() {
             }}
             onClick={() => goToCredentials('byok')}
           >
-            Continue in offline mode
+            Continue with your API keys
           </button>
         </div>
       </div>
@@ -256,10 +248,7 @@ export function Setup() {
       : mode === 'vault-login' ? 'Sign in'
       : 'Continue';
 
-  const screenTitle =
-    mode === 'vault-signup' ? 'Create your account'
-      : mode === 'vault-login' ? 'Welcome back'
-      : 'Set a password';
+  const screenTitle = mode === 'byok' ? 'Set a password' : 'Your vault, your keys';
 
   return (
     <div className="center-page">
@@ -267,6 +256,54 @@ export function Setup() {
       <div className="tagline">{screenTitle}</div>
 
       <form onSubmit={handleCredentialsSubmit} style={{ marginTop: '16px' }}>
+        {isVault && (
+          <div style={{
+            display: 'flex',
+            gap: '4px',
+            padding: '4px',
+            background: 'var(--bg-raised)',
+            borderRadius: '10px',
+            marginBottom: '16px',
+          }}>
+            <button
+              type="button"
+              onClick={() => switchVaultMode('vault-signup')}
+              style={{
+                flex: 1,
+                padding: '8px 12px',
+                fontSize: '13px',
+                fontWeight: mode === 'vault-signup' ? 600 : 400,
+                background: mode === 'vault-signup' ? 'var(--bg-card)' : 'transparent',
+                color: mode === 'vault-signup' ? 'var(--text)' : 'var(--text-muted)',
+                border: 'none',
+                borderRadius: '7px',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              Create account
+            </button>
+            <button
+              type="button"
+              onClick={() => switchVaultMode('vault-login')}
+              style={{
+                flex: 1,
+                padding: '8px 12px',
+                fontSize: '13px',
+                fontWeight: mode === 'vault-login' ? 600 : 400,
+                background: mode === 'vault-login' ? 'var(--bg-card)' : 'transparent',
+                color: mode === 'vault-login' ? 'var(--text)' : 'var(--text-muted)',
+                border: 'none',
+                borderRadius: '7px',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              Sign in
+            </button>
+          </div>
+        )}
+
         <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '0 0 16px', lineHeight: 1.5 }}>
           {mode === 'byok'
             ? 'This password encrypts your keys on this device. Nothing leaves your browser.'
@@ -367,7 +404,7 @@ export function Setup() {
             border: 'none',
             cursor: 'pointer',
           }}
-          onClick={() => { setStep('chooser'); setLocalError(''); clearError(); }}
+          onClick={() => { setStep('welcome'); setLocalError(''); clearError(); }}
         >
           ← Back
         </button>

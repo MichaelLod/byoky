@@ -25,11 +25,11 @@ final class ByokySmokeTests: XCTestCase {
         print(app.debugDescription)
         print("=== END TREE ===")
 
-        let createAccount = app.buttons["onboarding.createAccount"]
+        let getStarted = app.buttons["onboarding.getStarted"]
         let unlockPassword = app.secureTextFields["unlock.password"]
         let walletTab = app.buttons["tab.wallet"]
 
-        let found = createAccount.waitForExistence(timeout: 5.0)
+        let found = getStarted.waitForExistence(timeout: 5.0)
             || unlockPassword.waitForExistence(timeout: 1.0)
             || walletTab.waitForExistence(timeout: 1.0)
 
