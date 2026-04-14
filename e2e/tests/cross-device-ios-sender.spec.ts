@@ -73,10 +73,11 @@ test.describe('Cross-device: iOS-sender → desktop-recipient', () => {
     await expect(walletB.popup.locator('.gift-card')).toBeVisible({ timeout: 10_000 });
   });
 
-  // This is the test that captures COD-13. Marked fixme so the suite is
-  // green while the bug is open; flip to a plain test() once the iOS
-  // sender-side relay ships.
-  test.fixme('desktop wallet B — gift sender should report online (COD-13)', async ({ walletB }) => {
+  // COD-13 regression: iOS auto-setup never attached GiftRelayHost so the
+  // sender socket never opened; recipient probes always saw offline. Fixed
+  // in WalletStore.createPassword by attaching + reconnecting on first
+  // unlock, mirroring unlock(password:).
+  test('desktop wallet B — gift sender should report online (COD-13)', async ({ walletB }) => {
     await walletB.popup.bringToFront();
     // Give the peer-probe a beat to settle — desktop probes on Wallet
     // appear and again on an interval.

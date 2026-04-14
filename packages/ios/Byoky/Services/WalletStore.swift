@@ -114,6 +114,12 @@ final class WalletStore: ObservableObject {
         status = .unlocked
 
         AppGroupSync.shared.syncWalletState(isUnlocked: true, providers: [])
+
+        // Without this attach, gifts created before the user's first
+        // lock+unlock cycle never open their sender-side relay socket —
+        // recipients hit 503 GIFT_SENDER_OFFLINE. See COD-13.
+        GiftRelayHost.shared.attach(wallet: self)
+        GiftRelayHost.shared.reconnectAll()
     }
 
     func unlock(password: String) throws {
