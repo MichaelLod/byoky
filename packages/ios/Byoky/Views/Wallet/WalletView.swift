@@ -25,17 +25,16 @@ struct WalletView: View {
                         emptyState
                     }
                 } else {
-                    List {
+                    VStack(spacing: 0) {
                         if !wallet.cloudVaultEnabled {
-                            Section {
-                                OfflineUpgradeBanner()
-                                    .listRowInsets(EdgeInsets())
-                                    .listRowBackground(Color.clear)
-                            }
+                            OfflineUpgradeBanner()
+                                .padding(.horizontal)
                         }
-                        credentialsSection
-                        if !activeGifts.isEmpty {
-                            giftsSection
+                        List {
+                            credentialsSection
+                            if !activeGifts.isEmpty {
+                                giftsSection
+                            }
                         }
                     }
                 }
