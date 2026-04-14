@@ -388,6 +388,8 @@ Or submit via the web form at [byoky.com/apps/submit](https://byoky.com/apps/sub
 - Users can disable or uninstall apps at any time
 - Per-app usage tracking and provider access controls
 
+**Hosting requirement:** your app URL must allow iframe embedding. Don't set `X-Frame-Options: DENY`/`SAMEORIGIN`; either omit CSP `frame-ancestors` or set it to `*` (or include the Byoky extension origin). The submission API verifies this automatically.
+
 ## Built with Byoky
 
 | Project | Description |
