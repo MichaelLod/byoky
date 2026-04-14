@@ -290,7 +290,7 @@ function ChatView({ session, onDisconnect }: { session: ByokySession; onDisconne
         <div className="provider-select">
           <label>Provider:</label>
           <select value={selectedProvider} onChange={e => setSelectedProvider(e.target.value)}>
-            {providerIds.map(id => <option key={id} value={id}>{providers[id].name}</option>)}
+            {providerIds.filter(id => session.providers[id]?.available).map(id => <option key={id} value={id}>{providers[id].name}</option>)}
           </select>
         </div>
         <div className="header-actions">

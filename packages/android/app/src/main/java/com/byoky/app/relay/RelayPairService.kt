@@ -1405,7 +1405,9 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
             group: com.byoky.app.data.Group?,
         ): String {
             val req = requestedProviderId
-            val groupBinding = group?.providerId
+            // An empty providerId means the sentinel default group — no
+            // routing, so treat as if no group were set.
+            val groupBinding = group?.providerId?.takeIf { it.isNotEmpty() }
             // Case 1: routing rule points at a provider with no credential.
             if (groupBinding != null && groupBinding != req) {
                 return "No $groupBinding API key found. Add a $groupBinding key to your wallet, or assign this app to a provider you already have a key for."

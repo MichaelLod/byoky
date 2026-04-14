@@ -642,17 +642,21 @@ final class WalletStore: ObservableObject {
         try keychain.saveCodable(key: appGroupsKey, value: appGroups)
     }
 
-    /// Make sure the default group exists. Called once per unlock. If no
-    /// default exists yet, pick a sensible default provider from the user's
-    /// first credential (or fall back to anthropic).
+    /// Make sure the default group exists as a routing-neutral sentinel.
+    /// Apps with no explicit binding land here; the resolver sees an empty
+    /// providerId and falls through to direct credential lookup.
     private func ensureDefaultGroup() throws {
-        if groups.contains(where: { $0.id == defaultGroupId }) { return }
-        let first = credentials.first
-        let def = Group.makeDefault(
-            providerId: first?.providerId ?? "anthropic",
-            credentialId: first?.id
-        )
-        groups.insert(def, at: 0)
+        if let idx = groups.firstIndex(where: { $0.id == defaultGroupId }) {
+            // Migrate stale default groups that were auto-populated with a
+            // provider binding (pre-sentinel behavior).
+            if !groups[idx].providerId.isEmpty || groups[idx].credentialId != nil {
+                groups[idx].providerId = ""
+                groups[idx].credentialId = nil
+                try saveGroups()
+            }
+            return
+        }
+        groups.insert(Group.makeDefault(), at: 0)
         try saveGroups()
     }
 
