@@ -48,6 +48,7 @@ fun OnboardingScreen(wallet: WalletStore) {
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    var vaultMode by remember { mutableStateOf(VaultAuthMode.SIGNUP) }
 
     Column(
         modifier = Modifier
@@ -82,14 +83,32 @@ fun OnboardingScreen(wallet: WalletStore) {
             Spacer(Modifier.height(32.dp))
 
             Button(
-                onClick = { step = OnboardingStep.VAULT_AUTH },
+                onClick = {
+                    vaultMode = VaultAuthMode.SIGNUP
+                    step = OnboardingStep.VAULT_AUTH
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Accent),
             ) {
-                Text("Get Started", fontWeight = FontWeight.SemiBold)
+                Text("Create account", fontWeight = FontWeight.SemiBold)
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            OutlinedButton(
+                onClick = {
+                    vaultMode = VaultAuthMode.LOGIN
+                    step = OnboardingStep.VAULT_AUTH
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                shape = RoundedCornerShape(12.dp),
+            ) {
+                Text("Sign in", fontWeight = FontWeight.SemiBold, color = TextPrimary)
             }
 
             Spacer(Modifier.height(8.dp))
@@ -100,6 +119,7 @@ fun OnboardingScreen(wallet: WalletStore) {
         } else if (step == OnboardingStep.VAULT_AUTH) {
             VaultAuthContent(
                 wallet = wallet,
+                initialMode = vaultMode,
                 onBack = { step = OnboardingStep.WELCOME },
             )
         } else {

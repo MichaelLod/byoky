@@ -116,13 +116,14 @@ async function setInputValue(popup: Wallet['popup'], selector: string, value: st
 
 async function vaultSignup(w: Wallet, username: string) {
   await w.popup.bringToFront();
-  // Unified Setup lands directly in vault mode — no "Get Started" gate.
-  await w.popup.waitForSelector('#vault-username', { timeout: 15_000 });
+  // Chooser → Create account → vault-signup form.
+  await expect(w.popup.locator('button:has-text("Create account")')).toBeVisible({ timeout: 15_000 });
+  await w.popup.click('button:has-text("Create account")');
+  await w.popup.waitForSelector('#vault-username', { timeout: 10_000 });
   await setInputValue(w.popup, '#vault-username', username);
   // Wait for the async availability probe. The status hint confirms the
-  // vault said this username is free (and that the button will act as
-  // signup rather than login).
-  await expect(w.popup.locator('text=Available — creating a new account')).toBeVisible({ timeout: 15_000 });
+  // vault said this username is free.
+  await expect(w.popup.locator('text=Available').first()).toBeVisible({ timeout: 15_000 });
   // Sanity check: confirm the input still holds exactly what we set. If
   // something (autofill, autocomplete) mutated it, fail loudly rather
   // than sending a corrupted username to the vault.

@@ -12,6 +12,7 @@ struct OnboardingView: View {
     @State private var confirmPassword = ""
     @State private var error: String?
     @State private var step: OnboardingStep = .welcome
+    @State private var vaultMode: AuthMode = .signup
 
     var body: some View {
         ZStack {
@@ -24,7 +25,10 @@ struct OnboardingView: View {
                 case .welcome:
                     welcomeStep
                 case .vaultAuth:
-                    VaultAuthView(onBack: { withAnimation { step = .welcome } })
+                    VaultAuthView(
+                        initialMode: vaultMode,
+                        onBack: { withAnimation { step = .welcome } },
+                    )
                 case .offlineSetup:
                     passwordStep
                 }
@@ -51,9 +55,10 @@ struct OnboardingView: View {
                 .padding(.horizontal, 16)
 
             Button {
+                vaultMode = .signup
                 withAnimation { step = .vaultAuth }
             } label: {
-                Text("Get Started")
+                Text("Create account")
                     .font(.headline)
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
@@ -62,7 +67,26 @@ struct OnboardingView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             }
             .padding(.top, 8)
-            .accessibilityIdentifier("onboarding.getStarted")
+            .accessibilityIdentifier("onboarding.createAccount")
+
+            Button {
+                vaultMode = .login
+                withAnimation { step = .vaultAuth }
+            } label: {
+                Text("Sign in")
+                    .font(.headline)
+                    .foregroundStyle(Theme.textPrimary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Theme.bgRaised)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.white.opacity(0.08), lineWidth: 1),
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            .padding(.top, 8)
+            .accessibilityIdentifier("onboarding.signIn")
 
             Button {
                 withAnimation { step = .offlineSetup }

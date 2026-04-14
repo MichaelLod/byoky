@@ -47,8 +47,9 @@ interface ProxyResult {
 
 async function setupWallet(w: Wallet) {
   await w.popup.bringToFront();
-  await expect(w.popup.locator('button:has-text("Got API keys?")')).toBeVisible({ timeout: 15_000 });
-  await w.popup.click('button:has-text("Got API keys?")');
+  // Chooser step → offline mode → password → confirm → Create wallet.
+  await expect(w.popup.locator('button:has-text("Continue in offline mode")')).toBeVisible({ timeout: 15_000 });
+  await w.popup.click('button:has-text("Continue in offline mode")');
   await w.popup.waitForSelector('#password', { timeout: 15_000 });
   await w.popup.fill('#password', PASSWORD);
   await w.popup.click('button:has-text("Continue")');
