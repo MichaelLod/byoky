@@ -310,18 +310,20 @@ private fun GroupBucket(
                             fontWeight = FontWeight.SemiBold,
                             color = TextPrimary,
                         )
-                        Spacer(Modifier.width(8.dp))
-                        Box(
-                            modifier = Modifier
-                                .background(Accent.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
-                                .padding(horizontal = 6.dp, vertical = 2.dp),
-                        ) {
-                            Text(
-                                provider?.name ?: group.providerId,
-                                color = Accent,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Medium,
-                            )
+                        if (group.providerId.isNotEmpty()) {
+                            Spacer(Modifier.width(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .background(Accent.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                            ) {
+                                Text(
+                                    provider?.name ?: group.providerId,
+                                    color = Accent,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Medium,
+                                )
+                            }
                         }
                         if (!group.model.isNullOrEmpty()) {
                             Spacer(Modifier.width(6.dp))
@@ -342,6 +344,7 @@ private fun GroupBucket(
                     Spacer(Modifier.height(2.dp))
                     Text(
                         when {
+                            group.providerId.isEmpty() -> "No routing — apps use the provider they request"
                             pinnedGift != null -> "Using gift from ${pinnedGift.senderLabel} · ${formatTokens(giftBudgetRemaining(pinnedGift.usedTokens, pinnedGift.maxTokens))} left"
                             pinnedCred != null -> "Using ${pinnedCred.label}"
                             else -> "Any ${provider?.name ?: group.providerId} credential"
@@ -623,7 +626,8 @@ private fun MoveToGroupSheet(
                             )
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    provider?.name ?: group.providerId,
+                                    if (group.providerId.isEmpty()) "No routing"
+                                    else provider?.name ?: group.providerId,
                                     color = TextSecondary,
                                     fontSize = 12.sp,
                                 )

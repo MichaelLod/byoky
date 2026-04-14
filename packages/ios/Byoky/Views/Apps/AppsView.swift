@@ -154,13 +154,15 @@ struct AppsView: View {
             HStack(spacing: 6) {
                 Text(group.name)
                     .font(.callout.weight(.semibold))
-                Text(provider?.name ?? group.providerId)
-                    .font(.caption2.weight(.medium))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Theme.accent.opacity(0.15))
-                    .foregroundStyle(Theme.accent)
-                    .clipShape(Capsule())
+                if !group.providerId.isEmpty {
+                    Text(provider?.name ?? group.providerId)
+                        .font(.caption2.weight(.medium))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Theme.accent.opacity(0.15))
+                        .foregroundStyle(Theme.accent)
+                        .clipShape(Capsule())
+                }
                 if let model = group.model, !model.isEmpty {
                     Text(model)
                         .font(.caption2.monospaced())
@@ -190,7 +192,9 @@ struct AppsView: View {
                 }
             }
         } footer: {
-            if let pinnedGift {
+            if group.providerId.isEmpty {
+                Text("No routing — apps use the provider they request")
+            } else if let pinnedGift {
                 Text("Using gift from \(pinnedGift.senderLabel) · \(formatTokens(giftedBudgetRemaining(pinnedGift))) left")
             } else if let pinnedCred {
                 Text("Using \(pinnedCred.label)")
@@ -390,7 +394,9 @@ private struct MoveToGroupSheet: View {
                                         .foregroundStyle(.primary)
                                         .accessibilityIdentifier("moveApp.group.\(group.id)")
                                     HStack(spacing: 6) {
-                                        Text(Provider.find(group.providerId)?.name ?? group.providerId)
+                                        Text(group.providerId.isEmpty
+                                             ? "No routing"
+                                             : (Provider.find(group.providerId)?.name ?? group.providerId))
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                         if let model = group.model, !model.isEmpty {

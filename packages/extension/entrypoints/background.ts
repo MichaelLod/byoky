@@ -3677,23 +3677,30 @@ export default defineBackground(() => {
     await browser.storage.local.set({ appGroups });
   }
 
-  // Ensures the default group exists. Called on first credential add and
-  // before any group resolution. Returns the default group.
+  // Ensures the default group exists. The default group is a sentinel bucket
+  // for apps with no explicit binding — it carries no routing (empty
+  // providerId), so unbound apps fall through to direct credential lookup
+  // for the provider they actually request. Mirrors the vault seeding at
+  // packages/vault/src/db/index.ts.
   async function ensureDefaultGroup(): Promise<Group> {
     const groups = await getGroups();
-    let def = groups.find((g) => g.id === DEFAULT_GROUP_ID);
-    if (def) return def;
-
-    // Pick a sensible default provider/credential: the first credential the
-    // user has added. If they have none yet, the default group is created
-    // lazily on first add and we use the freshly-added credential's provider.
-    const credentials = await getStoredCredentials();
-    const first = credentials[0];
-    def = {
+    const existing = groups.find((g) => g.id === DEFAULT_GROUP_ID);
+    if (existing) {
+      // Migrate stale default groups that were auto-populated with a
+      // provider binding (pre-sentinel behavior). The default group must
+      // stay routing-neutral; users wire routing by creating real groups
+      // and assigning apps to them.
+      if (existing.providerId || existing.credentialId) {
+        existing.providerId = '';
+        existing.credentialId = undefined;
+        await setGroups(groups);
+      }
+      return existing;
+    }
+    const def: Group = {
       id: DEFAULT_GROUP_ID,
       name: 'Default',
-      providerId: first?.providerId ?? 'anthropic',
-      credentialId: first?.id,
+      providerId: '',
       createdAt: Date.now(),
     };
     groups.unshift(def);
