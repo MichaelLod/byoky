@@ -20,6 +20,40 @@ function isValidHttpsUrl(s: string): boolean {
   }
 }
 
+async function checkIframeEmbeddable(url: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+  let res: Response;
+  try {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 5000);
+    res = await fetch(url, { method: 'GET', redirect: 'follow', signal: controller.signal });
+    clearTimeout(t);
+  } catch {
+    return { ok: false, reason: 'Could not reach the app URL. Make sure it is publicly accessible.' };
+  }
+
+  const xfo = res.headers.get('x-frame-options')?.toLowerCase().trim();
+  if (xfo === 'deny' || xfo === 'sameorigin') {
+    return { ok: false, reason: `App URL sets X-Frame-Options: ${xfo}, which blocks iframe embedding. Remove it or replace with a CSP frame-ancestors directive allowing the Byoky extension.` };
+  }
+
+  const csp = res.headers.get('content-security-policy');
+  if (csp) {
+    const fa = /frame-ancestors\s+([^;]+)/i.exec(csp)?.[1]?.trim().toLowerCase();
+    if (fa) {
+      const sources = fa.split(/\s+/);
+      if (sources.includes("'none'")) {
+        return { ok: false, reason: "App URL sets Content-Security-Policy: frame-ancestors 'none', which blocks iframe embedding." };
+      }
+      const allowsAny = sources.some((s) => s === '*' || s === 'https:' || s.includes('byoky.com') || s.startsWith('chrome-extension:') || s.startsWith('moz-extension:'));
+      if (!allowsAny) {
+        return { ok: false, reason: `App URL's CSP frame-ancestors (${fa}) does not allow the Byoky extension. Add * or https: or a chrome-extension:/moz-extension: source.` };
+      }
+    }
+  }
+
+  return { ok: true };
+}
+
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as Record<string, unknown>;
@@ -98,6 +132,12 @@ export async function POST(request: Request) {
         { error: 'At least one provider is required' },
         { status: 400 },
       );
+    }
+
+    // Verify the app URL allows iframe embedding (required for display in the extension popup)
+    const embed = await checkIframeEmbeddable(url);
+    if (!embed.ok) {
+      return NextResponse.json({ error: embed.reason }, { status: 400 });
     }
 
     // Append to submissions file for review

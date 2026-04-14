@@ -74,8 +74,13 @@ export default function SubmitPage() {
   return (
     <main style={{ maxWidth: 600, margin: '0 auto', padding: '40px 20px', fontFamily: 'system-ui' }}>
       <h1>Submit Your App</h1>
-      <p style={{ color: '#666', marginBottom: 32 }}>
+      <p style={{ color: '#666', marginBottom: 16 }}>
         Submit your app to the Byoky Marketplace. Apps must use HTTPS and the @byoky/sdk for all LLM access.
+      </p>
+      <p style={{ color: '#666', marginBottom: 32, fontSize: 14 }}>
+        Your app runs inside a sandboxed iframe in the Byoky extension. Your server must allow iframe embedding — either
+        omit <code>X-Frame-Options</code> or set <code>Content-Security-Policy: frame-ancestors *</code>. We&apos;ll verify
+        this automatically when you submit.
       </p>
 
       <form onSubmit={handleSubmit}>
