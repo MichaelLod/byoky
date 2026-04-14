@@ -1446,74 +1446,92 @@ class WalletStore(context: Context) {
         }
     }
 
-    fun createVaultAppSession(appOrigin: String, providerIds: List<String>): Pair<String, String>? {
-        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return null
-        val token = vaultToken ?: return null
-        val providers = JSONArray()
-        for (id in providerIds) {
-            providers.put(JSONObject().put("id", id))
-        }
-        val body = JSONObject()
-            .put("appOrigin", appOrigin)
-            .put("providers", providers)
-        val (ok, status, data) = vaultRequest("/connect", "POST", body, token)
-        if (status == 401) {
-            _cloudVaultTokenExpired.value = true
-            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
-            return null
-        }
-        if (!ok) return null
-        val ast = data.optString("appSessionToken", "")
-        if (ast.isEmpty()) return null
-        return Pair(VAULT_URL, ast)
-    }
+    // Every vault-touching entry point wraps its body in `withContext(Dispatchers.IO)`
+    // so callers can invoke these from any coroutine scope — including a
+    // Compose `scope.launch {}` defaulting to Main — without blocking the
+    // UI thread on OkHttp. `vaultRequest` swallows all exceptions (including
+    // NetworkOnMainThreadException) into Triple(false, 0, {}), so the Main-
+    // thread misuse silently reports "operation failed" rather than crashing.
+    // Enforcing IO dispatch here makes call sites impossible to get wrong.
 
-    fun checkUsernameAvailability(username: String): Pair<Boolean, String?> {
-        val encoded = java.net.URLEncoder.encode(username, "UTF-8")
-        val (ok, _, data) = vaultRequest("/auth/check-username/$encoded", "GET")
-        if (!ok) return Pair(false, null)
-        val available = data.optBoolean("available", false)
-        val reason = data.optString("reason", "").takeIf { it.isNotEmpty() }
-        return Pair(available, reason)
-    }
+    suspend fun createVaultAppSession(appOrigin: String, providerIds: List<String>): Pair<String, String>? =
+        withContext(Dispatchers.IO) {
+            if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return@withContext null
+            val token = vaultToken ?: return@withContext null
+            val providers = JSONArray()
+            for (id in providerIds) {
+                providers.put(JSONObject().put("id", id))
+            }
+            val body = JSONObject()
+                .put("appOrigin", appOrigin)
+                .put("providers", providers)
+            val (ok, status, data) = vaultRequest("/connect", "POST", body, token)
+            if (status == 401) {
+                _cloudVaultTokenExpired.value = true
+                prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
+                return@withContext null
+            }
+            if (!ok) return@withContext null
+            val ast = data.optString("appSessionToken", "")
+            if (ast.isEmpty()) return@withContext null
+            Pair(VAULT_URL, ast)
+        }
+
+    suspend fun checkUsernameAvailability(username: String): Pair<Boolean, String?> =
+        withContext(Dispatchers.IO) {
+            val encoded = java.net.URLEncoder.encode(username, "UTF-8")
+            val (ok, _, data) = vaultRequest("/auth/check-username/$encoded", "GET")
+            if (!ok) return@withContext Pair(false, null)
+            val available = data.optBoolean("available", false)
+            val reason = data.optString("reason", "").takeIf { it.isNotEmpty() }
+            Pair(available, reason)
+        }
 
     suspend fun enableCloudVault(username: String, password: String, isSignup: Boolean) {
-        val path = if (isSignup) "/auth/signup" else "/auth/login"
-        val body = JSONObject().put("username", username).put("password", password)
-        val (ok, _, data) = vaultRequest(path, "POST", body)
-        if (!ok) {
-            val err = data.optJSONObject("error")
-            throw IllegalStateException(err?.optString("message") ?: if (isSignup) "Signup failed" else "Login failed")
+        withContext(Dispatchers.IO) {
+            val path = if (isSignup) "/auth/signup" else "/auth/login"
+            val body = JSONObject().put("username", username).put("password", password)
+            val (ok, _, data) = vaultRequest(path, "POST", body)
+            if (!ok) {
+                val err = data.optJSONObject("error")
+                throw IllegalStateException(err?.optString("message") ?: if (isSignup) "Signup failed" else "Login failed")
+            }
+            val token = data.getString("token")
+            val sessionId = data.getString("sessionId")
+
+            vaultToken = token
+            vaultSessionId = sessionId
+            vaultTokenIssuedAt = System.currentTimeMillis()
+            _cloudVaultEnabled.value = true
+            _cloudVaultUsername.value = username
+            _cloudVaultTokenExpired.value = false
+            vaultCredentialMap.clear()
+            saveCloudVaultConfig()
+
+            syncAllCredentialsToVault()
+            syncPendingGroups()
         }
-        val token = data.getString("token")
-        val sessionId = data.getString("sessionId")
-
-        vaultToken = token
-        vaultSessionId = sessionId
-        vaultTokenIssuedAt = System.currentTimeMillis()
-        _cloudVaultEnabled.value = true
-        _cloudVaultUsername.value = username
-        _cloudVaultTokenExpired.value = false
-        vaultCredentialMap.clear()
-        saveCloudVaultConfig()
-
-        syncAllCredentialsToVault()
-        syncPendingGroups()
     }
 
     suspend fun vaultBootstrapSignup(username: String, password: String) {
-        createPassword(password)
-        enableCloudVault(username, password, isSignup = true)
+        withContext(Dispatchers.IO) {
+            createPassword(password)
+            enableCloudVault(username, password, isSignup = true)
+        }
     }
 
     suspend fun vaultBootstrapLogin(username: String, password: String) {
-        createPassword(password)
-        enableCloudVault(username, password, isSignup = false)
+        withContext(Dispatchers.IO) {
+            createPassword(password)
+            enableCloudVault(username, password, isSignup = false)
+        }
     }
 
     suspend fun vaultActivate(username: String) {
-        val password = masterPassword ?: throw IllegalStateException("Wallet is locked")
-        enableCloudVault(username, password, isSignup = true)
+        withContext(Dispatchers.IO) {
+            val password = masterPassword ?: throw IllegalStateException("Wallet is locked")
+            enableCloudVault(username, password, isSignup = true)
+        }
     }
 
     private val _vaultBannerDismissedAt = MutableStateFlow(
@@ -1528,56 +1546,62 @@ class WalletStore(context: Context) {
     }
 
     suspend fun disableCloudVault() {
-        val token = vaultToken
-        if (token != null && !_cloudVaultTokenExpired.value) {
-            try { vaultRequest("/auth/logout", "POST", token = token) } catch (_: Exception) {}
-        }
+        withContext(Dispatchers.IO) {
+            val token = vaultToken
+            if (token != null && !_cloudVaultTokenExpired.value) {
+                try { vaultRequest("/auth/logout", "POST", token = token) } catch (_: Exception) {}
+            }
 
-        _cloudVaultEnabled.value = false
-        _cloudVaultUsername.value = null
-        _cloudVaultTokenExpired.value = false
-        vaultToken = null
-        vaultSessionId = null
-        vaultTokenIssuedAt = 0
-        vaultCredentialMap.clear()
-        prefs.edit()
-            .remove("cloudVault_enabled")
-            .remove("cloudVault_username")
-            .remove("cloudVault_token")
-            .remove("cloudVault_sessionId")
-            .remove("cloudVault_tokenIssuedAt")
-            .remove("cloudVault_tokenExpired")
-            .remove("cloudVault_credentialMap")
-            .apply()
+            _cloudVaultEnabled.value = false
+            _cloudVaultUsername.value = null
+            _cloudVaultTokenExpired.value = false
+            vaultToken = null
+            vaultSessionId = null
+            vaultTokenIssuedAt = 0
+            vaultCredentialMap.clear()
+            prefs.edit()
+                .remove("cloudVault_enabled")
+                .remove("cloudVault_username")
+                .remove("cloudVault_token")
+                .remove("cloudVault_sessionId")
+                .remove("cloudVault_tokenIssuedAt")
+                .remove("cloudVault_tokenExpired")
+                .remove("cloudVault_credentialMap")
+                .apply()
+        }
     }
 
     suspend fun deleteVaultAccount() {
-        val token = vaultToken ?: throw IllegalStateException("No active vault session")
-        if (_cloudVaultTokenExpired.value) throw IllegalStateException("Vault session expired")
-        val (ok, _, data) = vaultRequest("/auth/account", "DELETE", token = token)
-        if (!ok) {
-            val err = data.optJSONObject("error")
-            throw IllegalStateException(err?.optString("message") ?: "Failed to delete vault account")
+        withContext(Dispatchers.IO) {
+            val token = vaultToken ?: throw IllegalStateException("No active vault session")
+            if (_cloudVaultTokenExpired.value) throw IllegalStateException("Vault session expired")
+            val (ok, _, data) = vaultRequest("/auth/account", "DELETE", token = token)
+            if (!ok) {
+                val err = data.optJSONObject("error")
+                throw IllegalStateException(err?.optString("message") ?: "Failed to delete vault account")
+            }
+            resetWallet()
         }
-        resetWallet()
     }
 
     suspend fun reloginCloudVault(password: String) {
-        val username = _cloudVaultUsername.value ?: throw IllegalStateException("No vault account configured")
-        val body = JSONObject().put("username", username).put("password", password)
-        val (ok, _, data) = vaultRequest("/auth/login", "POST", body)
-        if (!ok) {
-            val err = data.optJSONObject("error")
-            throw IllegalStateException(err?.optString("message") ?: "Login failed")
-        }
-        vaultToken = data.getString("token")
-        vaultSessionId = data.getString("sessionId")
-        vaultTokenIssuedAt = System.currentTimeMillis()
-        _cloudVaultTokenExpired.value = false
-        saveCloudVaultConfig()
+        withContext(Dispatchers.IO) {
+            val username = _cloudVaultUsername.value ?: throw IllegalStateException("No vault account configured")
+            val body = JSONObject().put("username", username).put("password", password)
+            val (ok, _, data) = vaultRequest("/auth/login", "POST", body)
+            if (!ok) {
+                val err = data.optJSONObject("error")
+                throw IllegalStateException(err?.optString("message") ?: "Login failed")
+            }
+            vaultToken = data.getString("token")
+            vaultSessionId = data.getString("sessionId")
+            vaultTokenIssuedAt = System.currentTimeMillis()
+            _cloudVaultTokenExpired.value = false
+            saveCloudVaultConfig()
 
-        syncPendingCredentials()
-        syncPendingGroups()
+            syncPendingCredentials()
+            syncPendingGroups()
+        }
     }
 
     private fun syncAddToVault(localId: String, providerId: String, label: String, authMethod: String, plainKey: String) {
