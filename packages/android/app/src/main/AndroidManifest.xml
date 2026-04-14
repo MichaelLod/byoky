@@ -10,6 +10,7 @@
         android:name=".ByokyApp"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:label="Byoky"
         android:supportsRtl="true"
         android:theme="@style/Theme.Byoky"
@@ -18,7 +19,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:theme="@style/Theme.Byoky">
+            android:theme="@style/Theme.Byoky.Splash">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
