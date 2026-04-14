@@ -71,6 +71,7 @@
 		A962C829D5C4AF88C4AFB298 /* icon.svg in Resources */ = {isa = PBXBuildFile; fileRef = F0DC19C449BF3E117849DD33 /* icon.svg */; };
 		AA78E43569F33CA97F4040AA /* UsageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 837130983F550222CC94DAB6 /* UsageView.swift */; };
 		AEBA7F454469FC1935478195 /* SafariWebExtensionHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7068BDC28BA0A572F25D021 /* SafariWebExtensionHandler.swift */; };
+		B2B316166AD6E9C36C18DA6E /* ByokyInteractiveCrossDeviceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5110402B6328020286ADD71C /* ByokyInteractiveCrossDeviceTests.swift */; };
 		B440B9ECC45449385E44D259 /* 32.png in Resources */ = {isa = PBXBuildFile; fileRef = 43CA29F6391EE3F4FF37D482 /* 32.png */; };
 		B518C6F26C79F447BDFA1E0F /* GiftRelayProxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 844E2E6F05928FA1187F4691 /* GiftRelayProxy.swift */; };
 		BAAB7074EE3DAA0657C9DF80 /* MascotView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B43E014DCAB9AF22FB314A7F /* MascotView.swift */; };
@@ -177,6 +178,7 @@
 		42AB93112DAA20241E4CF0DE /* ProxyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyService.swift; sourceTree = "<group>"; };
 		43CA29F6391EE3F4FF37D482 /* 32.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = 32.png; sourceTree = "<group>"; };
 		50CD854541B37F59AB4944AE /* OfflineUpgradeBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineUpgradeBanner.swift; sourceTree = "<group>"; };
+		5110402B6328020286ADD71C /* ByokyInteractiveCrossDeviceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ByokyInteractiveCrossDeviceTests.swift; sourceTree = "<group>"; };
 		54F9FD4B4E6C8A71978FDB71 /* mobile.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = mobile.js; sourceTree = "<group>"; };
 		5619226B06840C897C0B2516 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		57F7BF90B53E6F481C189526 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
@@ -476,6 +478,7 @@
 			isa = PBXGroup;
 			children = (
 				40D8034A82B286AC470E14A2 /* ByokyCrossDeviceTests.swift */,
+				5110402B6328020286ADD71C /* ByokyInteractiveCrossDeviceTests.swift */,
 				1FE2FCEEC7F2B498F6F78EDB /* ByokySmokeTests.swift */,
 			);
 			path = ByokyUITests;
@@ -830,6 +833,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				68201816AFEDABB1041D5E13 /* ByokyCrossDeviceTests.swift in Sources */,
+				B2B316166AD6E9C36C18DA6E /* ByokyInteractiveCrossDeviceTests.swift in Sources */,
 				0A0B8723BEEA1F628898918C /* ByokySmokeTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
