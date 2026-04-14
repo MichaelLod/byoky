@@ -1,7 +1,5 @@
 import { useEffect } from 'react';
 import { useWalletStore } from './store';
-import { Welcome } from './pages/Welcome';
-import { VaultAuth } from './pages/VaultAuth';
 import { Setup } from './pages/Setup';
 import { Unlock } from './pages/Unlock';
 import { Dashboard } from './pages/Dashboard';
@@ -58,8 +56,6 @@ export default function App() {
   }
 
   const showNav =
-    currentPage !== 'welcome' &&
-    currentPage !== 'vault-auth' &&
     currentPage !== 'setup' &&
     currentPage !== 'unlock' &&
     currentPage !== 'approval';
@@ -144,8 +140,6 @@ export default function App() {
       </header>
       <main className="content">
         <div key={currentPage} className="page-enter">
-          {currentPage === 'welcome' && <Welcome />}
-          {currentPage === 'vault-auth' && <VaultAuth />}
           {currentPage === 'setup' && <Setup />}
           {currentPage === 'unlock' && <Unlock />}
           {currentPage === 'dashboard' && <Dashboard />}
@@ -164,7 +158,7 @@ export default function App() {
           {currentPage === 'app-view' && <AppView />}
         </div>
       </main>
-      {(currentPage === 'welcome' || currentPage === 'vault-auth' || currentPage === 'setup' || currentPage === 'unlock') && (
+      {(currentPage === 'setup' || currentPage === 'unlock') && (
         <div className="mascot-peek">
           <img src="/mascot.svg" alt="" />
         </div>

@@ -17,8 +17,6 @@ import {
 } from '@byoky/core';
 
 type Page =
-  | 'welcome'
-  | 'vault-auth'
   | 'setup'
   | 'unlock'
   | 'dashboard'
@@ -68,7 +66,6 @@ interface WalletState {
   vaultBootstrapLogin: (username: string, password: string) => Promise<void>;
   vaultActivate: (username: string) => Promise<void>;
   dismissVaultBanner: () => Promise<void>;
-  continueOffline: () => void;
   unlock: (password: string) => Promise<boolean>;
   lock: () => Promise<void>;
   navigate: (page: Page) => void;
@@ -148,7 +145,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     const bannerDismissedAt = (bannerResult.dismissedAt as number | null) ?? null;
 
     let page: Page = 'unlock';
-    if (!initialized) page = 'welcome';
+    if (!initialized) page = 'setup';
     else if (unlocked) page = 'dashboard';
 
     set({
@@ -253,10 +250,6 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     set({ vaultBannerDismissedAt: now });
   },
 
-  continueOffline: () => {
-    set({ currentPage: 'setup', error: null });
-  },
-
   unlock: async (password: string) => {
     set({ loading: true, error: null });
     const unlockResult = await sendInternal('unlock', { password });
@@ -293,7 +286,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   },
 
   navigate: (page: Page) => {
-    const preAuthPages: Page[] = ['welcome', 'vault-auth', 'setup', 'unlock'];
+    const preAuthPages: Page[] = ['setup', 'unlock'];
     if (!get().isUnlocked && !preAuthPages.includes(page)) {
       set({ currentPage: 'unlock', error: null });
       return;
@@ -601,7 +594,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       cloudVaultPendingCount: 0,
       installedApps: [],
       activeApp: null,
-      currentPage: 'welcome',
+      currentPage: 'setup',
       error: null,
     });
   },
