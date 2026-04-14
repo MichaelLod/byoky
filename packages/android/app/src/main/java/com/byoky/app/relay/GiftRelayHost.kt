@@ -190,7 +190,6 @@ private class GiftRelayConnection(
 
     private fun handleRelayRequest(json: JSONObject) {
         val requestId = json.optString("requestId").takeIf { it.isNotEmpty() } ?: return
-        val providerId = json.optString("providerId").takeIf { it.isNotEmpty() } ?: return
         val urlString = json.optString("url").takeIf { it.isNotEmpty() } ?: return
         val method = json.optString("method").takeIf { it.isNotEmpty() } ?: return
 
@@ -215,6 +214,12 @@ private class GiftRelayConnection(
             return
         }
 
+        // Use the gift's provider for everything downstream — the request
+        // message's providerId is the *source* in a cross-family translated
+        // call and would mis-route URL validation, auth, usage parsing.
+        // Mirrors background.ts handleGiftProxyRequest which uses
+        // `gift.providerId` throughout.
+        val providerId = gift.providerId
         val provider = Provider.find(providerId)
         if (provider == null) {
             sendError(requestId, "INVALID_URL", "Unknown provider")
