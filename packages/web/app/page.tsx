@@ -52,7 +52,7 @@ function Hero() {
         <FadeIn delay={0.1}>
           <h1>
             <span className="hero-eyebrow">Bring Your Own Key.</span>
-            <span className="hero-gradient">Build AI apps. Pay nothing for AI.</span>
+            <span className="hero-gradient">MetaMask for AI API Keys.</span>
           </h1>
         </FadeIn>
         <FadeIn delay={0.2}>
