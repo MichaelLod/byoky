@@ -140,6 +140,11 @@ class WalletStore(context: Context) {
         prefs.edit().putString("password_hash", hash).apply()
         masterPassword = password
         _status.value = WalletStatus.UNLOCKED
+        // Without this attach, gifts created before the user's first
+        // lock+unlock cycle never open their sender-side relay socket —
+        // recipients hit 503 GIFT_SENDER_OFFLINE. See COD-13.
+        com.byoky.app.relay.GiftRelayHost.attach(this)
+        com.byoky.app.relay.GiftRelayHost.reconnectAll()
     }
 
     fun unlock(password: String): UnlockResult {
