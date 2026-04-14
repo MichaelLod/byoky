@@ -48,9 +48,10 @@ async function shareGift(gift: Gift) {
 }
 
 export function Gifts() {
-  const { gifts, giftedCredentials, navigate, revokeGift, removeGiftedCredential } =
+  const { gifts, giftedCredentials, credentials, navigate, revokeGift, removeGiftedCredential } =
     useWalletStore();
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const hasCredentials = credentials.length > 0;
 
   const activeGifts = gifts.filter((g) => g.active && !isGiftExpired(g));
   const expiredGifts = gifts.filter((g) => !g.active || isGiftExpired(g));
@@ -80,7 +81,12 @@ export function Gifts() {
       </p>
 
       <div className="gift-actions">
-        <button className="btn btn-primary" onClick={() => navigate('create-gift')}>
+        <button
+          className="btn btn-primary"
+          onClick={() => navigate('create-gift')}
+          disabled={!hasCredentials}
+          title={hasCredentials ? undefined : 'Add a credential before gifting'}
+        >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M20 12v10H4V12" />
             <path d="M2 7h20v5H2z" />
@@ -102,7 +108,20 @@ export function Gifts() {
 
       {activeGifts.length === 0 && expiredGifts.length === 0 && expiredReceived.length === 0 && (
         <div className="empty-state" style={{ marginTop: '16px' }}>
-          <p>No gifts yet. Create one to share token access with someone.</p>
+          {hasCredentials ? (
+            <p>No gifts yet. Create one to share token access with someone.</p>
+          ) : (
+            <>
+              <p>Add a credential before you can create a gift.</p>
+              <button
+                className="btn btn-primary"
+                style={{ width: 'auto', marginTop: '8px' }}
+                onClick={() => navigate('add-credential')}
+              >
+                Add credential
+              </button>
+            </>
+          )}
         </div>
       )}
 
