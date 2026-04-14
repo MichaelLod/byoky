@@ -116,19 +116,23 @@ async function setInputValue(popup: Wallet['popup'], selector: string, value: st
 
 async function vaultSignup(w: Wallet, username: string) {
   await w.popup.bringToFront();
-  await expect(w.popup.locator('button:has-text("Get Started")')).toBeVisible({ timeout: 15_000 });
-  await w.popup.click('button:has-text("Get Started")');
-  await w.popup.waitForSelector('#vault-username', { timeout: 10_000 });
+  // Unified Setup lands directly in vault mode — no "Get Started" gate.
+  await w.popup.waitForSelector('#vault-username', { timeout: 15_000 });
   await setInputValue(w.popup, '#vault-username', username);
-  // Wait for the async availability probe — button label settles to
-  // "Create account" once the vault reports the username as available.
-  await expect(w.popup.locator('button:has-text("Create account")')).toBeVisible({ timeout: 15_000 });
+  // Wait for the async availability probe. The status hint confirms the
+  // vault said this username is free (and that the button will act as
+  // signup rather than login).
+  await expect(w.popup.locator('text=Available — creating a new account')).toBeVisible({ timeout: 15_000 });
   // Sanity check: confirm the input still holds exactly what we set. If
   // something (autofill, autocomplete) mutated it, fail loudly rather
   // than sending a corrupted username to the vault.
   const actualUsername = await w.popup.inputValue('#vault-username');
   expect(actualUsername, 'vault-username input value was mutated after fill').toBe(username);
-  await setInputValue(w.popup, '#vault-password', PASSWORD);
+  await setInputValue(w.popup, '#password', PASSWORD);
+  await w.popup.click('button:has-text("Continue")');
+  // Step 2: confirm password
+  await w.popup.waitForSelector('#confirm', { timeout: 10_000 });
+  await setInputValue(w.popup, '#confirm', PASSWORD);
   await w.popup.click('button:has-text("Create account")');
   // Dashboard shows the empty-state hint when signup lands successfully.
   await expect(w.popup.locator('text=No API keys, tokens, or gifts yet')).toBeVisible({ timeout: 30_000 });
