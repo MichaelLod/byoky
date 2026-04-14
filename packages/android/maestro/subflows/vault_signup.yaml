@@ -2,12 +2,12 @@ appId: com.byoky.app
 ---
 # Requires env: VAULT_USERNAME, VAULT_PASSWORD
 #
-# Welcome → Create account → VaultAuthContent (signup mode) → fill
-# username (waits for availability check) → fill password → Create
-# account → MainScreen.
+# Welcome → Get Started → VaultAuthContent (signup tab) → fill username
+# (waits for availability check) → fill password → Create account →
+# MainScreen.
 - assertVisible: "Byoky Wallet"
-- tapOn: "Create account"
-- assertVisible: "Create your account"
+- tapOn: "Get Started"
+- assertVisible: "Your vault, your keys"
 - tapOn: "Choose a username"
 - inputText: ${VAULT_USERNAME}
 # Availability check is debounced 400ms; wait for the AVAILABLE state.

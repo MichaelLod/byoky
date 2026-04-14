@@ -58,7 +58,7 @@ struct OnboardingView: View {
                 vaultMode = .signup
                 withAnimation { step = .vaultAuth }
             } label: {
-                Text("Create account")
+                Text("Get Started")
                     .font(.headline)
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
@@ -67,35 +67,16 @@ struct OnboardingView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             }
             .padding(.top, 8)
-            .accessibilityIdentifier("onboarding.createAccount")
-
-            Button {
-                vaultMode = .login
-                withAnimation { step = .vaultAuth }
-            } label: {
-                Text("Sign in")
-                    .font(.headline)
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(Theme.bgRaised)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.white.opacity(0.08), lineWidth: 1),
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-            }
-            .padding(.top, 8)
-            .accessibilityIdentifier("onboarding.signIn")
+            .accessibilityIdentifier("onboarding.getStarted")
 
             Button {
                 withAnimation { step = .offlineSetup }
             } label: {
-                Text("Continue in offline mode")
+                Text("Continue with your API keys")
                     .font(.footnote)
                     .foregroundStyle(Theme.textMuted)
             }
-            .accessibilityIdentifier("onboarding.offlineMode")
+            .accessibilityIdentifier("onboarding.byokMode")
         }
     }
 

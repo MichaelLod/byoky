@@ -116,9 +116,9 @@ async function setInputValue(popup: Wallet['popup'], selector: string, value: st
 
 async function vaultSignup(w: Wallet, username: string) {
   await w.popup.bringToFront();
-  // Chooser → Create account → vault-signup form.
-  await expect(w.popup.locator('button:has-text("Create account")')).toBeVisible({ timeout: 15_000 });
-  await w.popup.click('button:has-text("Create account")');
+  // Welcome → Get Started → vault form with signup tab pre-selected.
+  await expect(w.popup.locator('button:has-text("Get Started")')).toBeVisible({ timeout: 15_000 });
+  await w.popup.click('button:has-text("Get Started")');
   await w.popup.waitForSelector('#vault-username', { timeout: 10_000 });
   await setInputValue(w.popup, '#vault-username', username);
   // Wait for the async availability probe. The status hint confirms the

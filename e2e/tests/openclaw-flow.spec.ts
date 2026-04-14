@@ -27,9 +27,9 @@ let port = 0;
 
 async function setupWallet(w: Wallet) {
   await w.popup.bringToFront();
-  // Chooser step → offline mode → password → confirm → Create wallet.
-  await expect(w.popup.locator('button:has-text("Continue in offline mode")')).toBeVisible({ timeout: 15_000 });
-  await w.popup.click('button:has-text("Continue in offline mode")');
+  // Welcome → BYOK link → password → confirm → Create wallet.
+  await expect(w.popup.locator('button:has-text("Continue with your API keys")')).toBeVisible({ timeout: 15_000 });
+  await w.popup.click('button:has-text("Continue with your API keys")');
   await w.popup.waitForSelector('#password', { timeout: 15_000 });
   await w.popup.fill('#password', PASSWORD);
   await w.popup.click('button:has-text("Continue")');
