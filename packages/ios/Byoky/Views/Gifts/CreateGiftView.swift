@@ -177,7 +177,7 @@ struct CreateGiftView: View {
 
             if !wallet.cloudVaultEnabled {
                 Section {
-                    Label("Your device must stay online for the recipient to use this gift. Enable Cloud Vault in Settings for offline access.", systemImage: "wifi")
+                    Label("Your device must stay online for the recipient to use this gift. Enable Cloud Sync in Settings for offline access.", systemImage: "wifi")
                         .font(.caption)
                         .foregroundStyle(.orange)
                 } header: {
