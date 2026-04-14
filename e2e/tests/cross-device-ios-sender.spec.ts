@@ -33,9 +33,9 @@ function readGiftLink(): string {
 
 async function setupWallet(w: Wallet, password: string) {
   await w.popup.bringToFront();
-  // Unified Setup lands in vault mode; click the BYOK toggle to go offline.
-  await expect(w.popup.locator('button:has-text("Got API keys?")')).toBeVisible({ timeout: 15_000 });
-  await w.popup.click('button:has-text("Got API keys?")');
+  // Chooser step → offline mode → password → confirm → Create wallet.
+  await expect(w.popup.locator('button:has-text("Continue in offline mode")')).toBeVisible({ timeout: 15_000 });
+  await w.popup.click('button:has-text("Continue in offline mode")');
   await w.popup.waitForSelector('#password', { timeout: 15_000 });
   await w.popup.fill('#password', password);
   await w.popup.click('button:has-text("Continue")');

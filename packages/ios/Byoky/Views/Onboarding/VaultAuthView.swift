@@ -16,15 +16,13 @@ struct VaultAuthView: View {
     @State private var error: String?
     @State private var loading = false
     @State private var checkTask: Task<Void, Never>?
+    @State private var mode: AuthMode
 
     let onBack: () -> Void
 
-    private var mode: AuthMode {
-        switch status {
-        case .available: return .signup
-        case .taken: return .login
-        default: return .unknown
-        }
+    init(initialMode: AuthMode, onBack: @escaping () -> Void) {
+        _mode = State(initialValue: initialMode)
+        self.onBack = onBack
     }
 
     private var buttonLabel: String {
@@ -33,27 +31,31 @@ struct VaultAuthView: View {
         switch mode {
         case .signup: return "Create account"
         case .login: return "Sign in"
-        case .unknown: return "Continue"
         }
     }
 
     private var canSubmit: Bool {
         guard !loading, username.count >= 3, !password.isEmpty else { return false }
-        if mode == .signup {
+        switch mode {
+        case .signup:
+            guard status == .available else { return false }
             return password.count >= 12 && PasswordQuality.evaluate(password).isAcceptable
+        case .login:
+            return status == .taken
         }
-        return mode == .login
     }
 
     var body: some View {
         VStack(spacing: 20) {
             MascotView(size: 100)
 
-            Text("Your vault, your keys")
+            Text(mode == .login ? "Welcome back" : "Create your account")
                 .font(.system(size: 24, weight: .bold))
                 .foregroundStyle(Theme.textPrimary)
 
-            Text("End-to-end encrypted with your password. We can't read your keys.")
+            Text(mode == .login
+                ? "Sign in to sync keys from your vault."
+                : "End-to-end encrypted with your password. We can't read your keys.")
                 .font(.footnote)
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
@@ -61,7 +63,7 @@ struct VaultAuthView: View {
 
             VStack(spacing: 14) {
                 VStack(alignment: .leading, spacing: 4) {
-                    TextField("Choose or enter your username", text: $username)
+                    TextField(mode == .login ? "Your username" : "Choose a username", text: $username)
                         .textContentType(.username)
                         .autocapitalization(.none)
                         .disableAutocorrection(true)
@@ -77,9 +79,7 @@ struct VaultAuthView: View {
                         }
 
                     if username.count >= 3 {
-                        Text(statusMessage)
-                            .font(.caption2)
-                            .foregroundStyle(statusColor)
+                        usernameStatusHint
                     }
                 }
 
@@ -130,21 +130,43 @@ struct VaultAuthView: View {
         }
     }
 
-    private var statusMessage: String {
-        switch status {
-        case .checking: return "Checking..."
-        case .available: return "Available — creating a new account"
-        case .taken: return "Existing account — signing in"
-        case .invalid: return "Letters, numbers, hyphens, underscores only (3-30 chars)"
-        case .idle: return ""
-        }
-    }
-
-    private var statusColor: Color {
-        switch status {
-        case .available: return Color.green
-        case .invalid: return Theme.danger
-        default: return Theme.textMuted
+    @ViewBuilder
+    private var usernameStatusHint: some View {
+        switch (mode, status) {
+        case (_, .checking):
+            Text("Checking...")
+                .font(.caption2)
+                .foregroundStyle(Theme.textMuted)
+        case (_, .invalid):
+            Text("Letters, numbers, hyphens, underscores only (3-30 chars)")
+                .font(.caption2)
+                .foregroundStyle(Theme.danger)
+        case (.signup, .available):
+            Text("Available")
+                .font(.caption2)
+                .foregroundStyle(Color.green)
+        case (.login, .taken):
+            Text("Account found")
+                .font(.caption2)
+                .foregroundStyle(Color.green)
+        case (.signup, .taken):
+            HStack(spacing: 4) {
+                Text("Already taken.")
+                    .foregroundStyle(Theme.danger)
+                Button("Sign in instead") { mode = .login }
+                    .foregroundStyle(Theme.accent)
+            }
+            .font(.caption2)
+        case (.login, .available):
+            HStack(spacing: 4) {
+                Text("No account with this username.")
+                    .foregroundStyle(Theme.danger)
+                Button("Create one") { mode = .signup }
+                    .foregroundStyle(Theme.accent)
+            }
+            .font(.caption2)
+        case (_, .idle):
+            EmptyView()
         }
     }
 
@@ -189,8 +211,6 @@ struct VaultAuthView: View {
                 try await wallet.vaultBootstrapSignup(username: trimmed, password: password)
             case .login:
                 try await wallet.vaultBootstrapLogin(username: trimmed, password: password)
-            case .unknown:
-                return
             }
         } catch {
             self.error = error.localizedDescription
@@ -198,8 +218,7 @@ struct VaultAuthView: View {
     }
 }
 
-private enum AuthMode {
+enum AuthMode {
     case signup
     case login
-    case unknown
 }
