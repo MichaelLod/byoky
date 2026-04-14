@@ -68,7 +68,7 @@ export function Settings() {
       </div>
 
       <div className="settings-section">
-        <h3>Cloud Vault</h3>
+        <h3>Cloud Sync</h3>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
           <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
             Sync credentials to the cloud
@@ -137,7 +137,7 @@ export function Settings() {
               onClick={() => setConfirm('delete-account')}
               disabled={loading}
             >
-              Delete Vault Account
+              Delete Cloud Sync Account
             </button>
           )}
           <button
@@ -194,12 +194,12 @@ function ConfirmDestructiveModal({
 }) {
   const [busy, setBusy] = useState(false);
 
-  const title = kind === 'delete-account' ? 'Delete Vault Account?' : 'Reset Wallet?';
+  const title = kind === 'delete-account' ? 'Delete Cloud Sync Account?' : 'Reset Wallet?';
   const description =
     kind === 'delete-account'
-      ? 'Your vault account and all synced keys will be permanently deleted from vault.byoky.com. This device will also be reset. This cannot be undone.'
+      ? 'Your Cloud Sync account and all synced keys will be permanently deleted. This device will also be reset. This cannot be undone.'
       : cloudVaultEnabled
-      ? 'All keys on this device will be cleared. Your vault account on vault.byoky.com will NOT be deleted — use "Delete Vault Account" for that.'
+      ? 'All keys on this device will be cleared. Your Cloud Sync account will NOT be deleted — use "Delete Cloud Sync Account" for that.'
       : 'All keys on this device will be permanently deleted. This cannot be undone.';
 
   async function handleConfirm() {
@@ -566,7 +566,7 @@ function CloudVaultModal({ onClose }: { onClose: () => void }) {
   return (
     <div>
       <h2 className="page-title">
-        {isSignup ? 'Create Vault Account' : 'Login to Vault'}
+        {isSignup ? 'Create Cloud Sync Account' : 'Login to Cloud Sync'}
       </h2>
 
       <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '0 0 12px', lineHeight: 1.5 }}>

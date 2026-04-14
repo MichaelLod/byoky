@@ -155,7 +155,7 @@ export function ConnectedApps() {
         <div className="warning-box" style={{ marginBottom: '12px' }}>
           <strong>Device must stay online.</strong> Connected apps can only make
           requests while your browser is running and this extension is active.
-          Enable Cloud Vault in Settings for offline access.
+          Enable Cloud Sync in Settings for offline access.
         </div>
       )}
 

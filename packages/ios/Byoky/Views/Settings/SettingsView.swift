@@ -57,7 +57,7 @@ struct SettingsView: View {
                 }
             }
             #endif
-            .alert("Delete Vault Account?", isPresented: $showDeleteAccountConfirm) {
+            .alert("Delete Cloud Sync Account?", isPresented: $showDeleteAccountConfirm) {
                 Button("Cancel", role: .cancel) {}
                 Button("Delete", role: .destructive) {
                     Task {
@@ -78,7 +78,7 @@ struct SettingsView: View {
                 }
             } message: {
                 Text(wallet.cloudVaultEnabled
-                    ? "All keys on this device will be cleared. Your vault account on vault.byoky.com will NOT be deleted — use Delete Vault Account for that."
+                    ? "All keys on this device will be cleared. Your Cloud Sync account will NOT be deleted — use Delete Cloud Sync Account for that."
                     : "All keys on this device will be permanently deleted. This cannot be undone.")
             }
             .alert("Error", isPresented: Binding(
@@ -99,7 +99,7 @@ struct SettingsView: View {
                     showDeleteAccountConfirm = true
                 } label: {
                     HStack {
-                        Label("Delete Vault Account", systemImage: "trash")
+                        Label("Delete Cloud Sync Account", systemImage: "trash")
                         Spacer()
                     }
                     .contentShape(Rectangle())
@@ -213,10 +213,10 @@ struct SettingsView: View {
                         .frame(width: 32)
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Cloud Vault")
+                        Text("Cloud Sync")
                             .font(.body.weight(.medium))
                             .foregroundStyle(.primary)
-                        Text("Sync credentials to vault.byoky.com")
+                        Text("Sync credentials across your devices")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -246,7 +246,7 @@ struct SettingsView: View {
                 }
             }
         } header: {
-            Text("Cloud Vault")
+            Text("Cloud Sync")
         } footer: {
             if !wallet.cloudVaultEnabled {
                 Text("Websites can use your keys even when this device is offline. Keys are encrypted server-side with AES-256-GCM.")
@@ -421,7 +421,7 @@ struct CloudVaultSetupView: View {
     var body: some View {
         NavigationStack {
             authView
-                .navigationTitle("Cloud Vault")
+                .navigationTitle("Cloud Sync")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
@@ -587,7 +587,7 @@ struct CloudVaultReloginView: View {
                 }
                 .padding(24)
             }
-            .navigationTitle("Re-login to Cloud Vault")
+            .navigationTitle("Re-login to Cloud Sync")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

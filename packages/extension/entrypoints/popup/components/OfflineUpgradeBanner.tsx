@@ -61,7 +61,7 @@ export function OfflineUpgradeBanner() {
         Sync across devices
       </div>
       <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
-        Activate your vault to access your keys on any device, end-to-end encrypted.
+        Turn on Cloud Sync to access your keys on any device, end-to-end encrypted.
       </div>
 
       {!expanded ? (
@@ -71,7 +71,7 @@ export function OfflineUpgradeBanner() {
           style={{ fontSize: '12px', padding: '6px 12px' }}
           onClick={() => setExpanded(true)}
         >
-          Activate vault
+          Activate Cloud Sync
         </button>
       ) : (
         <div style={{ marginTop: '8px' }}>

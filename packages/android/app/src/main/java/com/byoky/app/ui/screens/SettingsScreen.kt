@@ -93,7 +93,7 @@ fun SettingsScreen(wallet: WalletStore) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Cloud, null, tint = Accent, modifier = Modifier.size(20.dp))
                             Spacer(Modifier.width(10.dp))
-                            Text("Cloud Vault", fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                            Text("Cloud Sync", fontWeight = FontWeight.SemiBold, color = TextPrimary)
                         }
                         Switch(
                             checked = cloudVaultEnabled,
@@ -255,7 +255,7 @@ fun SettingsScreen(wallet: WalletStore) {
                     Spacer(Modifier.height(4.dp))
                     Text(
                         if (cloudVaultEnabled)
-                            "Delete account removes your vault account and all synced keys. Reset wallet clears only this device."
+                            "Delete account removes your Cloud Sync account and all synced keys. Reset wallet clears only this device."
                         else
                             "Reset wallet clears all keys on this device.",
                         color = TextMuted,
@@ -270,7 +270,7 @@ fun SettingsScreen(wallet: WalletStore) {
                         ) {
                             Icon(Icons.Default.Delete, null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(8.dp))
-                            Text("Delete Vault Account")
+                            Text("Delete Cloud Sync Account")
                         }
                         Spacer(Modifier.height(8.dp))
                     }
@@ -292,7 +292,7 @@ fun SettingsScreen(wallet: WalletStore) {
         AlertDialog(
             onDismissRequest = { showDeleteAccountConfirm = false },
             containerColor = BgCard,
-            title = { Text("Delete Vault Account?", color = Danger) },
+            title = { Text("Delete Cloud Sync Account?", color = Danger) },
             text = {
                 Text(
                     "Your vault account and all synced keys will be permanently deleted from vault.byoky.com. This device will also be reset. This cannot be undone.",
@@ -328,7 +328,7 @@ fun SettingsScreen(wallet: WalletStore) {
             text = {
                 Text(
                     if (cloudVaultEnabled)
-                        "All keys on this device will be cleared. Your vault account on vault.byoky.com will NOT be deleted — use Delete Vault Account for that."
+                        "All keys on this device will be cleared. Your Cloud Sync account will NOT be deleted — use Delete Cloud Sync Account for that."
                     else
                         "All keys on this device will be permanently deleted. This cannot be undone.",
                     color = TextSecondary,
@@ -406,7 +406,7 @@ fun CloudVaultSetupDialog(wallet: WalletStore, onDismiss: () -> Unit) {
         containerColor = BgCard,
         title = {
             Text(
-                if (isSignup) "Create Vault Account" else "Login to Vault",
+                if (isSignup) "Create Cloud Sync Account" else "Login to Cloud Sync",
                 color = TextPrimary,
             )
         },
@@ -501,11 +501,11 @@ private fun CloudVaultReloginDialog(wallet: WalletStore, onDismiss: () -> Unit) 
     AlertDialog(
         onDismissRequest = { if (!loading) onDismiss() },
         containerColor = BgCard,
-        title = { Text("Re-login to Cloud Vault", color = TextPrimary) },
+        title = { Text("Re-login to Cloud Sync", color = TextPrimary) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    "Your session has expired. Enter your vault password to reconnect.",
+                    "Your session has expired. Enter your Cloud Sync password to reconnect.",
                     color = TextSecondary,
                     fontSize = 14.sp,
                 )
