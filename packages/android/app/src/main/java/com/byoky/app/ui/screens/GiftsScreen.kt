@@ -29,6 +29,7 @@ fun GiftsScreen(
 ) {
     val gifts by wallet.gifts.collectAsState()
     val giftedCredentials by wallet.giftedCredentials.collectAsState()
+    val credentials by wallet.credentials.collectAsState()
 
     val activeGifts = remember(gifts) { gifts.filter { it.active && !isGiftExpired(it.expiresAt) } }
     // Active received gifts live on the Wallet screen inline with credentials.
@@ -37,6 +38,7 @@ fun GiftsScreen(
     val expiredReceived = remember(giftedCredentials) { giftedCredentials.filter { isGiftExpired(it.expiresAt) } }
 
     val isEmpty = gifts.isEmpty() && expiredReceived.isEmpty()
+    val hasCredentials = credentials.isNotEmpty()
 
     Scaffold(
         topBar = {
@@ -55,6 +57,7 @@ fun GiftsScreen(
                 modifier = Modifier.padding(padding),
                 onCreateGift = onNavigateToCreate,
                 onRedeemGift = onNavigateToRedeem,
+                hasCredentials = hasCredentials,
             )
         } else {
             LazyColumn(
@@ -69,6 +72,7 @@ fun GiftsScreen(
                     ) {
                         Button(
                             onClick = onNavigateToCreate,
+                            enabled = hasCredentials,
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Accent),
@@ -87,6 +91,14 @@ fun GiftsScreen(
                             Spacer(Modifier.width(6.dp))
                             Text("Redeem Gift")
                         }
+                    }
+                    if (!hasCredentials) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "Add a credential before you can create a gift.",
+                            color = TextMuted,
+                            fontSize = 12.sp,
+                        )
                     }
                 }
 
@@ -118,7 +130,12 @@ fun GiftsScreen(
 }
 
 @Composable
-private fun EmptyGifts(modifier: Modifier, onCreateGift: () -> Unit, onRedeemGift: () -> Unit) {
+private fun EmptyGifts(
+    modifier: Modifier,
+    onCreateGift: () -> Unit,
+    onRedeemGift: () -> Unit,
+    hasCredentials: Boolean,
+) {
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -136,7 +153,10 @@ private fun EmptyGifts(modifier: Modifier, onCreateGift: () -> Unit, onRedeemGif
         Text("No Gifts", fontWeight = FontWeight.SemiBold, color = TextPrimary)
         Spacer(Modifier.height(8.dp))
         Text(
-            "Share token access without sharing your API keys. Create a gift link or redeem one you received.",
+            if (hasCredentials)
+                "Share token access without sharing your API keys. Create a gift link or redeem one you received."
+            else
+                "Add a credential before you can create a gift. You can still redeem gifts you've received.",
             color = TextSecondary,
             textAlign = TextAlign.Center,
             fontSize = 14.sp,
@@ -144,6 +164,7 @@ private fun EmptyGifts(modifier: Modifier, onCreateGift: () -> Unit, onRedeemGif
         Spacer(Modifier.height(24.dp))
         Button(
             onClick = onCreateGift,
+            enabled = hasCredentials,
             shape = RoundedCornerShape(12.dp),
             colors = ButtonDefaults.buttonColors(containerColor = Accent),
         ) {
