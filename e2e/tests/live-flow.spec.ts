@@ -19,9 +19,9 @@ let demoOrigin = '';
 
 async function setupWallet(w: Wallet) {
   await w.popup.bringToFront();
-  // Unified Setup lands in vault mode; click the BYOK toggle to go offline.
-  await expect(w.popup.locator('button:has-text("Got API keys?")')).toBeVisible({ timeout: 15_000 });
-  await w.popup.click('button:has-text("Got API keys?")');
+  // Welcome → BYOK link → password → confirm → Create wallet.
+  await expect(w.popup.locator('button:has-text("Continue with your API keys")')).toBeVisible({ timeout: 15_000 });
+  await w.popup.click('button:has-text("Continue with your API keys")');
   await w.popup.waitForSelector('#password', { timeout: 15_000 });
   await w.popup.fill('#password', PASSWORD);
   await w.popup.click('button:has-text("Continue")');

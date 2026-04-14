@@ -1,5 +1,7 @@
 package com.byoky.app.ui.screens
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -24,39 +26,53 @@ import kotlinx.coroutines.withContext
 
 internal enum class VaultUsernameStatus { IDLE, CHECKING, AVAILABLE, TAKEN, INVALID }
 
-internal enum class VaultAuthMode { SIGNUP, LOGIN, UNKNOWN }
+enum class VaultAuthMode { SIGNUP, LOGIN }
 
 private val usernamePattern = Regex("^[a-z0-9][a-z0-9_-]{1,28}[a-z0-9]$")
 
 @Composable
-fun VaultAuthContent(wallet: WalletStore, onBack: () -> Unit) {
+private fun ModeTab(selected: Boolean, label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .clickable(onClick = onClick)
+            .background(
+                if (selected) BgCard else androidx.compose.ui.graphics.Color.Transparent,
+                shape = RoundedCornerShape(7.dp),
+            )
+            .padding(vertical = 8.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            color = if (selected) TextPrimary else TextMuted,
+            fontSize = 13.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+        )
+    }
+}
+
+@Composable
+fun VaultAuthContent(wallet: WalletStore, initialMode: VaultAuthMode, onBack: () -> Unit) {
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var status by remember { mutableStateOf(VaultUsernameStatus.IDLE) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
+    var mode by remember { mutableStateOf(initialMode) }
     val scope = rememberCoroutineScope()
     var checkJob by remember { mutableStateOf<Job?>(null) }
-
-    val mode = when (status) {
-        VaultUsernameStatus.AVAILABLE -> VaultAuthMode.SIGNUP
-        VaultUsernameStatus.TAKEN -> VaultAuthMode.LOGIN
-        else -> VaultAuthMode.UNKNOWN
-    }
 
     val buttonLabel = when {
         loading -> "Connecting..."
         status == VaultUsernameStatus.CHECKING -> "Checking username..."
         mode == VaultAuthMode.SIGNUP -> "Create account"
-        mode == VaultAuthMode.LOGIN -> "Sign in"
-        else -> "Continue"
+        else -> "Sign in"
     }
 
     val quality = if (password.isNotEmpty()) PasswordQualityResult.evaluate(password) else null
     val canSubmit = !loading && username.length >= 3 && password.isNotEmpty() && when (mode) {
-        VaultAuthMode.SIGNUP -> password.length >= 12 && quality?.isAcceptable == true
-        VaultAuthMode.LOGIN -> true
-        VaultAuthMode.UNKNOWN -> false
+        VaultAuthMode.SIGNUP -> status == VaultUsernameStatus.AVAILABLE && password.length >= 12 && quality?.isAcceptable == true
+        VaultAuthMode.LOGIN -> status == VaultUsernameStatus.TAKEN
     }
 
     Column(
@@ -74,10 +90,36 @@ fun VaultAuthContent(wallet: WalletStore, onBack: () -> Unit) {
             color = TextPrimary,
         )
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(12.dp))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(BgRaised, shape = RoundedCornerShape(10.dp))
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            ModeTab(
+                selected = mode == VaultAuthMode.SIGNUP,
+                label = "Create account",
+                onClick = { mode = VaultAuthMode.SIGNUP; error = null },
+                modifier = Modifier.weight(1f),
+            )
+            ModeTab(
+                selected = mode == VaultAuthMode.LOGIN,
+                label = "Sign in",
+                onClick = { mode = VaultAuthMode.LOGIN; error = null },
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        Spacer(Modifier.height(12.dp))
 
         Text(
-            "End-to-end encrypted with your password. We can't read your keys.",
+            if (mode == VaultAuthMode.LOGIN)
+                "Sign in to sync keys from your vault."
+            else
+                "End-to-end encrypted with your password. We can't read your keys.",
             color = TextSecondary,
             textAlign = TextAlign.Center,
             fontSize = 12.sp,
@@ -100,11 +142,6 @@ fun VaultAuthContent(wallet: WalletStore, onBack: () -> Unit) {
                         status = VaultUsernameStatus.CHECKING
                         checkJob = scope.launch {
                             delay(400)
-                            // checkUsernameAvailability is a blocking OkHttp
-                            // call; run it off the Main thread so StrictMode
-                            // doesn't throw NetworkOnMainThreadException (which
-                            // vaultRequest swallows, mis-reporting every name
-                            // as taken).
                             val (available, reason) = withContext(Dispatchers.IO) {
                                 wallet.checkUsernameAvailability(trimmed)
                             }
@@ -117,7 +154,7 @@ fun VaultAuthContent(wallet: WalletStore, onBack: () -> Unit) {
                     }
                 }
             },
-            label = { Text("Username") },
+            label = { Text(if (mode == VaultAuthMode.LOGIN) "Your username" else "Choose a username") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
             colors = OutlinedTextFieldDefaults.colors(
@@ -131,19 +168,48 @@ fun VaultAuthContent(wallet: WalletStore, onBack: () -> Unit) {
 
         if (username.length >= 3) {
             Spacer(Modifier.height(4.dp))
-            val statusMessage = when (status) {
-                VaultUsernameStatus.CHECKING -> "Checking..."
-                VaultUsernameStatus.AVAILABLE -> "Available — creating a new account"
-                VaultUsernameStatus.TAKEN -> "Existing account — signing in"
-                VaultUsernameStatus.INVALID -> "Letters, numbers, hyphens, underscores only (3-30 chars)"
-                VaultUsernameStatus.IDLE -> ""
+            when {
+                status == VaultUsernameStatus.CHECKING ->
+                    Text("Checking...", color = TextMuted, fontSize = 11.sp, modifier = Modifier.align(Alignment.Start))
+                status == VaultUsernameStatus.INVALID ->
+                    Text(
+                        "Letters, numbers, hyphens, underscores only (3-30 chars)",
+                        color = Danger, fontSize = 11.sp, modifier = Modifier.align(Alignment.Start),
+                    )
+                mode == VaultAuthMode.SIGNUP && status == VaultUsernameStatus.AVAILABLE ->
+                    Text("Available", color = Success, fontSize = 11.sp, modifier = Modifier.align(Alignment.Start))
+                mode == VaultAuthMode.LOGIN && status == VaultUsernameStatus.TAKEN ->
+                    Text("Account found", color = Success, fontSize = 11.sp, modifier = Modifier.align(Alignment.Start))
+                mode == VaultAuthMode.SIGNUP && status == VaultUsernameStatus.TAKEN ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.align(Alignment.Start),
+                    ) {
+                        Text("Already taken.", color = Danger, fontSize = 11.sp)
+                        TextButton(
+                            onClick = { mode = VaultAuthMode.LOGIN },
+                            contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp),
+                        ) {
+                            Text("Sign in instead", color = Accent, fontSize = 11.sp)
+                        }
+                    }
+                mode == VaultAuthMode.LOGIN && status == VaultUsernameStatus.AVAILABLE ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.align(Alignment.Start),
+                    ) {
+                        Text("No account with this username.", color = Danger, fontSize = 11.sp)
+                        TextButton(
+                            onClick = { mode = VaultAuthMode.SIGNUP },
+                            contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp),
+                        ) {
+                            Text("Create one", color = Accent, fontSize = 11.sp)
+                        }
+                    }
+                else -> {}
             }
-            val statusColor = when (status) {
-                VaultUsernameStatus.AVAILABLE -> Success
-                VaultUsernameStatus.INVALID -> Danger
-                else -> TextMuted
-            }
-            Text(statusMessage, color = statusColor, fontSize = 11.sp, modifier = Modifier.align(Alignment.Start))
         }
 
         Spacer(Modifier.height(12.dp))
@@ -194,7 +260,6 @@ fun VaultAuthContent(wallet: WalletStore, onBack: () -> Unit) {
                             when (mode) {
                                 VaultAuthMode.SIGNUP -> wallet.vaultBootstrapSignup(trimmed, password)
                                 VaultAuthMode.LOGIN -> wallet.vaultBootstrapLogin(trimmed, password)
-                                VaultAuthMode.UNKNOWN -> {}
                             }
                         }
                     } catch (e: Exception) {

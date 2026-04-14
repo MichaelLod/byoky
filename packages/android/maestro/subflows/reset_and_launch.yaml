@@ -8,5 +8,5 @@ appId: com.byoky.app
 # the welcome screen; the ANR dialog self-dismisses once the system
 # catches up.
 - extendedWaitUntil:
-    visible: "Continue in offline mode"
+    visible: "Get Started"
     timeout: 30000
