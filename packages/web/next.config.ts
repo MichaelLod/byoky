@@ -10,17 +10,6 @@ const nextConfig: NextConfig = {
     }
     return [
       {
-        source: '/:path*',
-        has: [{ type: 'host', value: 'chat.byoky.com' }],
-        headers: [
-          { key: 'X-Frame-Options', value: 'ALLOWALL' },
-          {
-            key: 'Content-Security-Policy',
-            value: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' wss://*.byoky.com https://*.byoky.com; frame-ancestors *;",
-          },
-        ],
-      },
-      {
         source: '/api/apps/apps/:path*',
         headers: [
           { key: 'Access-Control-Allow-Origin', value: '*' },
@@ -53,6 +42,17 @@ const nextConfig: NextConfig = {
           {
             key: 'Content-Security-Policy',
             value: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://avatars.githubusercontent.com; connect-src 'self' wss://*.byoky.com https://*.byoky.com https://api.github.com https://gist.githubusercontent.com; frame-ancestors 'none';",
+          },
+        ],
+      },
+      {
+        source: '/:path*',
+        has: [{ type: 'host', value: 'chat.byoky.com' }],
+        headers: [
+          { key: 'X-Frame-Options', value: 'ALLOWALL' },
+          {
+            key: 'Content-Security-Policy',
+            value: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' wss://*.byoky.com https://*.byoky.com; frame-ancestors *;",
           },
         ],
       },
