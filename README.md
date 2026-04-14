@@ -356,6 +356,9 @@ pnpm --filter @byoky/extension build:all     # Chrome + Firefox + Safari
 - [x] Remote OpenClaw via relay (cloud deployment, zero key exposure)
 - [x] App Ecosystem — curated marketplace, in-wallet app runtime (sandboxed iframe/WebView), developer submission flow
 - [x] Token Marketplace — public gift board where users share free tokens with the community
+- [x] Mobile gift hosting — iOS and Android wallets serve gifts from the phone (previously extension-only)
+- [x] Cross-provider translation for gifts — gift an Anthropic key, recipient can call it from the OpenAI SDK (or vice versa)
+- [x] Gifted credentials via bridge proxy — CLI/desktop apps can use gifts through `@byoky/bridge`
 - [ ] Password change (re-encrypt vault with new master password)
 
 ## App Ecosystem
