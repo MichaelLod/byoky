@@ -459,14 +459,7 @@ test.describe('OpenClaw + byoky extension + bridge full flow', () => {
     expect(body.providers).toContain('anthropic');
   });
 
-  // Gap: background.ts:2931 (handleBridgeProxyRequest) only calls
-  // resolveCredential() — it doesn't consult giftedCredentials the way the
-  // regular extension proxy handler (background.ts:468) does. Result: when
-  // walletB has only a gifted anthropic credential, the bridge returns
-  // `No API keys in your wallet. Add a key for any provider to get
-  // started.` Leaving this test as `fixme` so it becomes a canary the day
-  // someone extends the bridge path to accept gifts.
-  test.fixme('openclaw agent via walletB gifted credential → real anthropic.com call', async () => {
+  test('openclaw agent via walletB gifted credential → real anthropic.com call', async () => {
     const out = openclawSync([
       'agent',
       '--agent', 'byoky-test',
@@ -474,6 +467,7 @@ test.describe('OpenClaw + byoky extension + bridge full flow', () => {
       '--local',
       '--timeout', '90',
     ]);
+    process.stdout.write(`[agent raw output via walletB gift]\n--BEGIN--\n${out}\n--END--\n`);
     // Tightened from the original `HTTP \d{3}` — bridge errors come back
     // as bare `502 {...}` without the `HTTP ` prefix, so the old regex
     // let this case slip through during the first-pass investigation.
@@ -481,6 +475,5 @@ test.describe('OpenClaw + byoky extension + bridge full flow', () => {
     expect(out).not.toMatch(/HTTP [45]\d{2}/);
     expect(out).not.toMatch(/No API keys in your wallet/);
     expect(out.length).toBeGreaterThan(0);
-    process.stdout.write(`[agent output via walletB gift]\n${out}\n`);
   });
 });

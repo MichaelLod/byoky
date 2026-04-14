@@ -2271,8 +2271,14 @@ export default defineBackground(() => {
     });
   }
 
+  // Structural sink so both the regular extension Runtime.Port and a bridge
+  // adapter can receive the relay's response events. The bridge transport
+  // uses a different wire protocol than the popup port, so a thin adapter
+  // (see makeBridgeGiftResponseSink) translates the message types.
+  type ProxyResponseSink = { postMessage(msg: unknown): void };
+
   async function proxyViaGiftRelay(
-    responsePort: Runtime.Port,
+    responsePort: ProxyResponseSink,
     msg: ProxyRequest,
     sp: { giftId?: string; giftRelayUrl?: string; giftAuthToken?: string },
     session: Session,
@@ -2862,6 +2868,57 @@ export default defineBackground(() => {
     }
   }
 
+  /**
+   * Adapter that lets proxyViaGiftRelay emit into the bridge's native-messaging
+   * wire protocol. The regular port uses BYOKY_PROXY_RESPONSE_* messages; the
+   * bridge expects proxy_http_* messages. Keep translation straight-through —
+   * every field the relay produces maps 1:1, only the envelope changes.
+   */
+  function makeBridgeGiftResponseSink(): ProxyResponseSink {
+    return {
+      postMessage(raw: unknown) {
+        const m = raw as {
+          type: string;
+          requestId: string;
+          status?: number;
+          headers?: Record<string, string>;
+          chunk?: string;
+          error?: { code?: string; message?: string };
+        };
+        switch (m.type) {
+          case 'BYOKY_PROXY_RESPONSE_META':
+            bridgeProxyPort?.postMessage({
+              type: 'proxy_http_response_meta',
+              requestId: m.requestId,
+              status: m.status ?? 200,
+              headers: m.headers ?? {},
+            });
+            return;
+          case 'BYOKY_PROXY_RESPONSE_CHUNK':
+            bridgeProxyPort?.postMessage({
+              type: 'proxy_http_response_chunk',
+              requestId: m.requestId,
+              chunk: m.chunk ?? '',
+            });
+            return;
+          case 'BYOKY_PROXY_RESPONSE_DONE':
+            bridgeProxyPort?.postMessage({
+              type: 'proxy_http_response_done',
+              requestId: m.requestId,
+            });
+            return;
+          case 'BYOKY_PROXY_RESPONSE_ERROR':
+            bridgeProxyPort?.postMessage({
+              type: 'proxy_http_error',
+              requestId: m.requestId,
+              error: m.error?.message ?? 'Gift relay error',
+            });
+            return;
+        }
+      },
+    };
+  }
+
   async function handleBridgeProxyRequest(msg: Record<string, unknown>): Promise<void> {
     if (typeof msg.requestId !== 'string' || typeof msg.sessionKey !== 'string' ||
         typeof msg.providerId !== 'string' || typeof msg.url !== 'string' ||
@@ -2928,6 +2985,40 @@ export default defineBackground(() => {
       return;
     }
 
+    // Gift path: the bridge transport previously only consulted
+    // resolveCredential (owned credentials) and bailed with "No API keys in
+    // your wallet" when the session's only route was a gift. That excluded
+    // OpenClaw/CLI clients from consuming gifted credentials. Detect the
+    // gift route up front and forward through the relay just like the
+    // popup-port proxy handler does at line ~603.
+    const sessionProvider = session.providers.find((sp) => sp.providerId === providerId);
+    const isGift = !!(sessionProvider?.giftId && sessionProvider.giftRelayUrl && sessionProvider.giftAuthToken);
+
+    if (!validateProxyUrl(providerId, url)) {
+      bridgeProxyPort?.postMessage({
+        type: 'proxy_http_error',
+        requestId,
+        error: 'Request URL does not match the provider\'s registered base URL',
+      });
+      return;
+    }
+
+    if (isGift) {
+      const sink = makeBridgeGiftResponseSink();
+      await proxyViaGiftRelay(
+        sink,
+        { requestId, sessionKey, providerId, url, method, headers, body },
+        sessionProvider!,
+        session,
+        // Cross-family gift translation through the bridge is out of scope
+        // for v1 — the simple same-family gift case is what the OpenClaw
+        // e2e test hit. Extend here when a bridge client needs cross-family
+        // routing; mirror the popup path's translation context building.
+        undefined,
+      );
+      return;
+    }
+
     const credential = await resolveCredential(session, providerId);
     if (!credential) {
       const allCreds = await getStoredCredentials();
@@ -2947,19 +3038,9 @@ export default defineBackground(() => {
 
     // Cross-family translation + same-family swap context
     // (mirrors the popup port path).
-    const sessionProvider = session.providers.find((sp) => sp.providerId === providerId);
     const translation = sessionProvider?.translation;
     const swap = sessionProvider?.swap;
     const effectiveProviderId = translation?.dstProviderId ?? swap?.dstProviderId ?? providerId;
-
-    if (!validateProxyUrl(providerId, url)) {
-      bridgeProxyPort?.postMessage({
-        type: 'proxy_http_error',
-        requestId,
-        error: 'Request URL does not match the provider\'s registered base URL',
-      });
-      return;
-    }
 
     try {
       const apiKey = await decryptCredentialKey(credential);
