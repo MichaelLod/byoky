@@ -581,6 +581,18 @@ function AppEcosystem() {
         <li>Installing an app auto-trusts its origin for the declared providers</li>
         <li>Users can disable or uninstall apps at any time</li>
       </ul>
+
+      <h3>Hosting requirements</h3>
+      <p>
+        Because your app loads inside an iframe in the Byoky extension, your server must allow iframe
+        embedding. Do <em>not</em> set <code>X-Frame-Options: DENY</code> or <code>SAMEORIGIN</code>,
+        and either omit <code>Content-Security-Policy</code> <code>frame-ancestors</code> or set it
+        to something permissive:
+      </p>
+      <Code lang="http">{`Content-Security-Policy: frame-ancestors *`}</Code>
+      <p>
+        We verify this automatically at submission time and reject apps that would fail to load.
+      </p>
     </Section>
   );
 }
@@ -630,6 +642,7 @@ function AppManifest() {
       <h3>Review criteria</h3>
       <ul>
         <li>App loads over HTTPS</li>
+        <li>App URL allows iframe embedding (no <code>X-Frame-Options: DENY</code> / <code>SAMEORIGIN</code>, no restrictive <code>frame-ancestors</code>)</li>
         <li>Uses <code>@byoky/sdk</code> for all LLM access</li>
         <li>Only requests providers it actually uses</li>
         <li>No obfuscated JavaScript</li>
