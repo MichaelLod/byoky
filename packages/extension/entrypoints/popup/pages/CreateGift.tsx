@@ -266,10 +266,10 @@ export function CreateGift() {
                 onChange={(e) => setListPublicly(e.target.checked)}
                 style={{ width: 16, height: 16, accentColor: 'var(--accent)' }}
               />
-              List on Token Marketplace
+              List on Token Pool
             </label>
             <p className="form-hint">
-              Make this gift public so anyone can redeem it from byoky.com/marketplace.
+              Make this gift public so anyone can redeem it from byoky.com/token-pool.
             </p>
             {listPublicly && (
               <input

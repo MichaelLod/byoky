@@ -96,8 +96,8 @@ export default function OpenClawTutorial() {
           <ol className="oc-list">
             <li>
               Open the{' '}
-              <a className="oc-link" href="/marketplace">
-                Token Token Pool
+              <a className="oc-link" href="/token-pool">
+                Token Pool
               </a>
               .
             </li>
@@ -254,7 +254,7 @@ function Hero() {
         Zero extra cost. Keys never exposed.
       </p>
       <div className="oc-cta-row" style={{ justifyContent: 'center' }}>
-        <a className="btn btn-primary" href="/marketplace">
+        <a className="btn btn-primary" href="/token-pool">
           Browse free gifts
         </a>
         <a
@@ -288,7 +288,7 @@ function FreeCallout() {
           <h3>Token gift from the token pool</h3>
           <p>
             Anyone can gift token access on the{' '}
-            <a className="oc-link" href="/marketplace">
+            <a className="oc-link" href="/token-pool">
               Byoky token pool
             </a>
             . OpenClaw runs entirely on the gifter&apos;s budget — capped,
@@ -421,7 +421,7 @@ function Closing() {
         Claude or GPT inside OpenClaw in under five minutes.
       </p>
       <div className="oc-cta-row">
-        <a className="btn btn-primary" href="/marketplace">
+        <a className="btn btn-primary" href="/token-pool">
           Browse free gifts
         </a>
         <a

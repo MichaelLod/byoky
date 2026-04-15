@@ -94,7 +94,7 @@ const categories = [
       { id: 'backend-relay', label: 'Backend Relay' },
       { id: 'bridge', label: 'Bridge (CLI)' },
       { id: 'token-gifts', label: 'Token Gifts' },
-      { id: 'token-marketplace', label: 'Token Marketplace' },
+      { id: 'token-pool', label: 'Token Pool' },
       { id: 'cross-provider', label: 'Cross-Provider Routing' },
     ],
   },
@@ -155,7 +155,7 @@ export default function Docs() {
         <BackendRelay />
         <Bridge />
         <TokenGifts />
-        <TokenMarketplaceSection />
+        <TokenPoolSection />
         <CrossProviderRouting />
         <AppEcosystem />
         <AppManifest />
@@ -553,13 +553,13 @@ byoky-relay  # default port 8787`}</Code>
   );
 }
 
-function TokenMarketplaceSection() {
+function TokenPoolSection() {
   return (
-    <Section id="token-marketplace" title="Token Marketplace">
+    <Section id="token-pool" title="Token Pool">
       <p>
         The{' '}
-        <a href="/marketplace" style={{ color: 'var(--teal-dark)' }}>
-          Token Marketplace
+        <a href="/token-pool" style={{ color: 'var(--teal-dark)' }}>
+          Token Pool
         </a>{' '}
         is a public board where users share free token gifts with the community.
       </p>
@@ -567,9 +567,9 @@ function TokenMarketplaceSection() {
       <h3>How it works</h3>
       <ol>
         <li>Create a gift in your wallet (extension or mobile)</li>
-        <li>Check &quot;List on Token Marketplace&quot;</li>
+        <li>Check &quot;List on Token Pool&quot;</li>
         <li>Add a display name (or stay anonymous)</li>
-        <li>Your gift appears on the marketplace for anyone to redeem</li>
+        <li>Your gift appears on the token pool for anyone to redeem</li>
       </ol>
 
       <h3>What users see</h3>
