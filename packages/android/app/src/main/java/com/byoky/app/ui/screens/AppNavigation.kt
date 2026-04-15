@@ -1,15 +1,25 @@
 package com.byoky.app.ui.screens
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.byoky.app.data.WalletStatus
 import com.byoky.app.data.WalletStore
@@ -31,6 +41,8 @@ fun AppNavigation(wallet: WalletStore) {
 private fun MainScreen(wallet: WalletStore) {
     val navController = rememberNavController()
     var selectedTab by remember { mutableIntStateOf(0) }
+    var fabMenuOpen by remember { mutableStateOf(false) }
+    var showAddCredentialFromFab by remember { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
     val pairService = remember { RelayPairService(context.applicationContext) }
 
@@ -42,7 +54,68 @@ private fun MainScreen(wallet: WalletStore) {
         Triple("Apps", Icons.Default.Apps, "apps"),
     )
 
+    // Hide FAB on routes where the global "+" actions don't make sense (the
+    // user is already inside one of the targets).
+    val backStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = backStackEntry?.destination?.route
+    val showFab = currentRoute !in setOf("redeem-gift", "create-gift", "settings")
+
     Scaffold(
+        floatingActionButton = {
+            if (showFab) {
+                Box {
+                    FloatingActionButton(
+                        onClick = { fabMenuOpen = true },
+                        containerColor = Color.Transparent,
+                        shape = CircleShape,
+                        modifier = Modifier
+                            .shadow(elevation = 8.dp, shape = CircleShape, ambientColor = Accent, spotColor = Accent)
+                            .clip(CircleShape)
+                            .background(
+                                brush = Brush.linearGradient(
+                                    colors = listOf(Color(0xFF38BDF8), Accent),
+                                ),
+                            )
+                            .size(56.dp),
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = "Open add menu", tint = Color.White)
+                    }
+                    DropdownMenu(
+                        expanded = fabMenuOpen,
+                        onDismissRequest = { fabMenuOpen = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Add credential") },
+                            leadingIcon = { Icon(Icons.Default.Key, null, tint = Accent) },
+                            onClick = {
+                                fabMenuOpen = false
+                                showAddCredentialFromFab = true
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Redeem gift") },
+                            leadingIcon = { Icon(Icons.Default.Redeem, null, tint = Accent) },
+                            onClick = {
+                                fabMenuOpen = false
+                                navController.navigate("redeem-gift") { launchSingleTop = true }
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Add app") },
+                            leadingIcon = { Icon(Icons.Default.Apps, null, tint = Accent) },
+                            onClick = {
+                                fabMenuOpen = false
+                                selectedTab = 4
+                                navController.navigate("apps") {
+                                    popUpTo("wallet") { inclusive = false }
+                                    launchSingleTop = true
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+        },
         bottomBar = {
             NavigationBar(
                 containerColor = MaterialTheme.colorScheme.surface,
@@ -108,5 +181,9 @@ private fun MainScreen(wallet: WalletStore) {
             composable("apps") { MarketplaceTabScreen(wallet) }
             composable("settings") { SettingsScreen(wallet) }
         }
+    }
+
+    if (showAddCredentialFromFab) {
+        AddCredentialSheet(wallet) { showAddCredentialFromFab = false }
     }
 }

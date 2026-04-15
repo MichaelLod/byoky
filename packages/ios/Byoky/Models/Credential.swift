@@ -8,7 +8,7 @@ enum AuthMethod: String, Codable {
 struct Credential: Identifiable, Codable {
     let id: String
     let providerId: String
-    let label: String
+    var label: String
     let authMethod: AuthMethod
     let createdAt: Date
 

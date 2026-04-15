@@ -12,6 +12,13 @@ data class Credential(
     val createdAt: Long = System.currentTimeMillis(),
 )
 
+/** Aggregated request stats for a credential (or provider) over a time window. */
+data class CredentialUsageStats(
+    val requests: Int,
+    val inputTokens: Int,
+    val outputTokens: Int,
+)
+
 data class Session(
     val id: String = UUID.randomUUID().toString(),
     val appOrigin: String,
