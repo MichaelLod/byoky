@@ -4,6 +4,72 @@ import { useState } from 'react';
 
 /* ─── Navigation structure ────────────────────── */
 
+const AI_PROMPT = `You are helping me build an app on Byoky (https://byoky.com).
+
+# What Byoky is
+
+Byoky is a BYOK ("bring your own key") wallet for AI. Users store their API keys for providers like Anthropic, OpenAI, Gemini, etc. in an encrypted browser extension or mobile app. My app never sees the keys — it calls the user's wallet through a proxied session.
+
+# Setup
+
+\`\`\`bash
+npm install @byoky/sdk
+# or scaffold a full project:
+npx create-byoky-app my-app
+\`\`\`
+
+# Quickstart (browser app)
+
+\`\`\`ts
+import Anthropic from '@anthropic-ai/sdk';
+import { Byoky } from '@byoky/sdk';
+
+const byoky = new Byoky();
+const session = await byoky.connect({
+  providers: [{ id: 'anthropic', required: true }],
+  modal: true, // built-in connect UI: extension detection + QR for mobile wallets
+});
+
+// Use the native provider SDK — just pass Byoky's fetch and sessionKey
+const client = new Anthropic({
+  apiKey: session.sessionKey,
+  fetch: session.createFetch('anthropic'),
+});
+
+const msg = await client.messages.create({
+  model: 'claude-sonnet-4-20250514',
+  max_tokens: 1024,
+  messages: [{ role: 'user', content: 'Hello!' }],
+});
+\`\`\`
+
+# Session API
+
+- \`session.createFetch(providerId)\` — drop-in \`fetch\` for any provider SDK. Streaming, vision, and file uploads all work unchanged.
+- \`session.createRelay(wsUrl)\` — open a WebSocket so a backend server can make LLM calls through this session.
+- \`session.getUsage()\` — returns { requests, inputTokens, outputTokens, byProvider }.
+- \`session.onDisconnect(cb)\` / \`session.onProvidersUpdated(cb)\` — lifecycle callbacks.
+- \`session.sessionKey\`, \`session.proxyUrl\`, \`session.providers\` — session properties.
+- \`byoky.tryReconnect()\` — silently restore a previous session (returns null if nothing to restore).
+- \`byoky.connectViaVault({ vaultUrl, username, password, providers, appOrigin })\` — connect via a Byoky Vault server (works in Node.js too; \`appOrigin\` required server-side).
+
+# Supported providers (use these IDs with createFetch)
+
+anthropic, openai, gemini, mistral, cohere, xai, deepseek, perplexity, groq, together, fireworks, openrouter, azure_openai
+
+# Backend relay (for server-side LLM calls)
+
+Frontend opens \`session.createRelay('wss://your-app.com/ws/relay')\`. Backend uses \`ByokyServer\` from \`@byoky/sdk/server\` and calls \`client.createFetch(id)\` the same way. Your backend never sees the API key — all traffic relays through the user's browser → extension → LLM.
+
+# Rules
+
+- Use native provider SDKs (Anthropic, OpenAI, Google GenAI, etc.). Pass \`session.createFetch(id)\` as \`fetch\` and \`session.sessionKey\` as \`apiKey\`.
+- Never collect or prompt the user for an API key — Byoky replaces that entirely.
+- Users install one of: Chrome/Firefox extension, iOS app, or Android app. The SDK's \`modal: true\` handles extension detection, relay fallback, and QR pairing for mobile automatically.
+- Full docs: https://byoky.com/docs
+
+Now help me build: `;
+
 const categories = [
   {
     label: 'Getting Started',
@@ -73,6 +139,7 @@ export default function Docs() {
             Everything you need to integrate Byoky into your app &mdash; from
             quickstart to API reference.
           </p>
+          <AiPromptCTA />
         </div>
 
         <DocsCards />
@@ -654,6 +721,57 @@ function AppManifest() {
 
 /* ─── Components ───────────────────────────────── */
 
+function AiPromptCTA() {
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(AI_PROMPT);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* clipboard denied — fall through silently */
+    }
+  };
+
+  return (
+    <div className="docs-ai-cta">
+      <div className="docs-ai-cta-text">
+        <div className="docs-ai-cta-title">
+          <span className="docs-ai-cta-spark" aria-hidden>✦</span>
+          Building with an AI assistant?
+        </div>
+        <div className="docs-ai-cta-subtitle">
+          Copy the setup prompt, paste into Claude, ChatGPT, or Cursor, and start building
+          with a Byoky-aware model.
+        </div>
+      </div>
+      <button
+        type="button"
+        className={`docs-ai-cta-btn ${copied ? 'copied' : ''}`}
+        onClick={copy}
+      >
+        {copied ? (
+          <>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Copied
+          </>
+        ) : (
+          <>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" strokeWidth="2" />
+              <path d="M5 15V5a2 2 0 0 1 2-2h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+            Copy prompt for AI
+          </>
+        )}
+      </button>
+    </div>
+  );
+}
+
 function Section({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
   return (
     <section id={id} className="docs-section">
@@ -787,6 +905,87 @@ const docsStyles = `
   color: var(--docs-text-secondary);
   line-height: 1.6;
   max-width: 560px;
+}
+
+/* ── AI prompt CTA ── */
+
+.docs-ai-cta {
+  margin-top: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 18px 22px;
+  background: var(--docs-bg-card);
+  border: 1px solid var(--docs-border);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.docs-ai-cta-text {
+  min-width: 0;
+}
+
+.docs-ai-cta-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--docs-text);
+  margin-bottom: 4px;
+}
+
+.docs-ai-cta-spark {
+  color: var(--teal);
+  font-size: 14px;
+}
+
+.docs-ai-cta-subtitle {
+  font-size: 13.5px;
+  color: var(--docs-text-muted);
+  line-height: 1.5;
+}
+
+.docs-ai-cta-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--docs-text);
+  color: var(--docs-bg-card);
+  border: none;
+  border-radius: 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+  font-family: inherit;
+}
+
+.docs-ai-cta-btn:hover {
+  background: #000;
+}
+
+.docs-ai-cta-btn:active {
+  transform: translateY(1px);
+}
+
+.docs-ai-cta-btn.copied {
+  background: var(--teal);
+  color: #fff;
+}
+
+@media (max-width: 640px) {
+  .docs-ai-cta {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
+  }
+  .docs-ai-cta-btn {
+    justify-content: center;
+  }
 }
 
 /* ── Cards ── */
