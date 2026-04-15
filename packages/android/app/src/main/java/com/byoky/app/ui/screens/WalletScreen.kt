@@ -51,7 +51,6 @@ fun WalletScreen(
     val cloudVaultEnabled by wallet.cloudVaultEnabled.collectAsState()
     var showAddSheet by remember { mutableStateOf(false) }
     var showCloudVaultSetup by remember { mutableStateOf(false) }
-    var addMenuOpen by remember { mutableStateOf(false) }
     var expandedCredentialId by remember { mutableStateOf<String?>(null) }
     var renameTarget by remember { mutableStateOf<Credential?>(null) }
     val scope = rememberCoroutineScope()
@@ -110,32 +109,6 @@ fun WalletScreen(
                                 "Cloud Vault",
                                 tint = if (cloudVaultEnabled) Accent else TextMuted,
                                 modifier = Modifier.size(20.dp),
-                            )
-                        }
-                    }
-                    Box {
-                        IconButton(onClick = { addMenuOpen = true }) {
-                            Icon(Icons.Default.AddCircle, "Add", tint = Accent)
-                        }
-                        DropdownMenu(
-                            expanded = addMenuOpen,
-                            onDismissRequest = { addMenuOpen = false },
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("Add credential") },
-                                leadingIcon = { Icon(Icons.Default.Key, null, tint = Accent) },
-                                onClick = {
-                                    addMenuOpen = false
-                                    showAddSheet = true
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Redeem gift") },
-                                leadingIcon = { Icon(Icons.Default.Redeem, null, tint = Accent) },
-                                onClick = {
-                                    addMenuOpen = false
-                                    onNavigateToRedeemGift()
-                                },
                             )
                         }
                     }
