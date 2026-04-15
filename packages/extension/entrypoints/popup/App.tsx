@@ -19,7 +19,12 @@ import { AppView } from './pages/AppView';
 import { FloatingActionMenu } from './components/FloatingActionMenu';
 
 export default function App() {
-  const { currentPage, modal, sessions, pendingApprovals, loading, init, closeModal } = useWalletStore();
+  const { currentPage, modal, sessions, pendingApprovals, loading, pendingGiftLink, init, closeModal, dismissPendingGift } = useWalletStore();
+
+  const handleCloseModal = () => {
+    if (pendingGiftLink) dismissPendingGift();
+    closeModal();
+  };
 
   useEffect(() => {
     init();
@@ -38,6 +43,8 @@ export default function App() {
         });
       } else if (msg.action === 'sessionChanged' || msg.action === 'usageUpdated') {
         useWalletStore.getState().refreshData();
+      } else if (msg.action === 'giftStaged') {
+        useWalletStore.getState().loadPendingGift();
       }
     }
     try {
@@ -174,7 +181,7 @@ export default function App() {
       {modal && (
         <Modal
           title={modal === 'add-credential' ? 'Add credential' : 'Redeem gift'}
-          onClose={closeModal}
+          onClose={handleCloseModal}
         >
           {modal === 'add-credential' && <AddCredential />}
           {modal === 'redeem-gift' && <RedeemGift />}

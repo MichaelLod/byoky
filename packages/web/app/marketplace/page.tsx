@@ -1,8 +1,53 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { isExtensionInstalled, encodeQr, qrToSvg } from '@byoky/sdk';
 
 const MARKETPLACE_API = process.env.NEXT_PUBLIC_MARKETPLACE_URL ?? 'https://marketplace.byoky.com';
+
+function toMobileDeepLink(giftLink: string): string {
+  try {
+    const url = new URL(giftLink);
+    if (url.hash.startsWith('#')) return `byoky://gift/${url.hash.slice(1)}`;
+    const parts = url.pathname.split('/').filter(Boolean);
+    const encoded = parts[parts.length - 1] ?? '';
+    return encoded ? `byoky://gift/${encoded}` : giftLink;
+  } catch {
+    return giftLink;
+  }
+}
+
+function stageGiftInExtension(giftLink: string): Promise<boolean> {
+  if (typeof window === 'undefined' || !isExtensionInstalled()) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    const timeout = setTimeout(() => {
+      channel.port1.onmessage = null;
+      resolve(false);
+    }, 3000);
+    channel.port1.onmessage = (event) => {
+      clearTimeout(timeout);
+      const payload = (event.data as { payload?: { ok?: boolean } } | undefined)?.payload;
+      resolve(payload?.ok === true);
+    };
+    window.postMessage(
+      {
+        type: 'BYOKY_STAGE_GIFT',
+        requestId:
+          typeof crypto !== 'undefined' && 'randomUUID' in crypto
+            ? crypto.randomUUID()
+            : String(Math.random()),
+        giftLink,
+      },
+      window.location.origin,
+      [channel.port2],
+    );
+  });
+}
+
+type RedeemResult =
+  | { status: 'sent-to-extension'; giftLink: string }
+  | { status: 'show-qr'; giftLink: string };
 
 const PROVIDER_ICONS: Record<string, string> = {
   anthropic: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/claude.svg',
@@ -92,7 +137,15 @@ export default function Marketplace() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [redeeming, setRedeeming] = useState<string | null>(null);
-  const [redeemLink, setRedeemLink] = useState<string | null>(null);
+  const [redeemResult, setRedeemResult] = useState<RedeemResult | null>(null);
+  const [hasExtension, setHasExtension] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    setHasExtension(isExtensionInstalled());
+    const t = setTimeout(() => setHasExtension(isExtensionInstalled()), 500);
+    return () => clearTimeout(t);
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -128,6 +181,7 @@ export default function Marketplace() {
 
   async function handleRedeem(id: string) {
     setRedeeming(id);
+    setCopied(false);
     try {
       const res = await fetch(`${MARKETPLACE_API}/gifts/${id}/redeem`);
       if (!res.ok) {
@@ -136,9 +190,26 @@ export default function Marketplace() {
         return;
       }
       const data = await res.json();
-      setRedeemLink(data.giftLink);
+      const giftLink = data.giftLink as string;
+
+      if (hasExtension) {
+        const ok = await stageGiftInExtension(giftLink);
+        setRedeemResult({ status: ok ? 'sent-to-extension' : 'show-qr', giftLink });
+      } else {
+        setRedeemResult({ status: 'show-qr', giftLink });
+      }
     } finally {
       setRedeeming(null);
+    }
+  }
+
+  async function copyGiftLink(link: string) {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      /* clipboard may be blocked; user can select text manually */
     }
   }
 
@@ -177,19 +248,14 @@ export default function Marketplace() {
         </div>
       </div>
 
-      {/* ── Redeem link banner ── */}
-      {redeemLink && (
-        <div className="mp-redeem-banner">
-          <p style={{ fontWeight: 600, marginBottom: 8 }}>Gift link ready!</p>
-          <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
-            Open your Byoky wallet &rarr; Gifts &rarr; Redeem Gift &rarr; paste this link:
-          </p>
-          <code className="mp-redeem-code">{redeemLink}</code>
-          <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
-            <button onClick={() => navigator.clipboard.writeText(redeemLink)} className="mp-btn">Copy</button>
-            <button onClick={() => setRedeemLink(null)} className="mp-btn mp-btn-muted">Close</button>
-          </div>
-        </div>
+      {/* ── Redeem result modal ── */}
+      {redeemResult && (
+        <RedeemModal
+          result={redeemResult}
+          copied={copied}
+          onCopy={() => copyGiftLink(redeemResult.giftLink)}
+          onClose={() => setRedeemResult(null)}
+        />
       )}
 
       {loading && <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 40 }}>Loading...</p>}
@@ -440,23 +506,90 @@ export default function Marketplace() {
           font-size: 14px;
         }
 
-        /* ── Redeem banner ── */
-        .mp-redeem-banner {
-          background: var(--bg-card, #fff);
-          border: 1px solid #FF4F00;
-          border-radius: 14px;
+        /* ── Redeem modal ── */
+        .mp-modal-backdrop {
+          position: fixed;
+          inset: 0;
+          background: rgba(20, 20, 22, 0.55);
+          backdrop-filter: blur(4px);
+          -webkit-backdrop-filter: blur(4px);
+          display: flex;
+          align-items: center;
+          justify-content: center;
           padding: 20px;
-          margin-bottom: 32px;
+          z-index: 1000;
+          animation: mp-fade-in 0.18s ease-out;
         }
-        .mp-redeem-code {
-          display: block;
-          background: var(--bg-elevated, #f5f5f4);
-          padding: 10px 14px;
-          border-radius: 8px;
+        .mp-modal {
+          background: var(--bg-card, #fff);
+          border: 1px solid var(--border, #e5e5e5);
+          border-radius: 18px;
+          padding: 28px 24px 22px;
+          max-width: 380px;
+          width: 100%;
+          text-align: center;
+          box-shadow: 0 20px 60px rgba(0, 0, 0, 0.18);
+          animation: mp-modal-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        @keyframes mp-fade-in {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes mp-modal-in {
+          from { opacity: 0; transform: translateY(8px) scale(0.98); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .mp-modal-icon {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 52px;
+          height: 52px;
+          border-radius: 14px;
+          background: rgba(255, 79, 0, 0.08);
+          border: 1px solid rgba(255, 79, 0, 0.18);
+          margin-bottom: 12px;
+        }
+        .mp-modal h3 {
+          font-size: 18px;
+          font-weight: 800;
+          letter-spacing: -0.01em;
+          margin: 0 0 6px;
+        }
+        .mp-modal p {
+          font-size: 13px;
+          color: var(--text-secondary);
+          margin: 0 0 18px;
+          line-height: 1.5;
+        }
+        .mp-qr-wrap {
+          background: #fff;
+          border: 1px solid var(--border, #e5e5e5);
+          border-radius: 12px;
+          padding: 12px;
+          display: inline-flex;
+          margin-bottom: 18px;
+        }
+        .mp-qr-wrap svg { display: block; }
+        .mp-modal-actions {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+        .mp-link-btn {
+          background: transparent;
+          border: none;
+          color: var(--text-muted);
           font-size: 12px;
-          word-break: break-all;
-          color: #e64500;
+          font-weight: 600;
+          cursor: pointer;
+          padding: 6px 10px;
+          border-radius: 6px;
+          text-decoration: underline;
+          text-underline-offset: 3px;
+          transition: color 0.15s;
         }
+        .mp-link-btn:hover { color: #FF4F00; }
 
         /* ── Empty state ── */
         .mp-empty {
@@ -530,6 +663,80 @@ function GiftCard({ gift, expired, onRedeem, redeeming }: {
           {redeeming ? 'Getting tokens...' : 'Get Free Tokens'}
         </button>
       )}
+    </div>
+  );
+}
+
+function RedeemModal({
+  result,
+  copied,
+  onCopy,
+  onClose,
+}: {
+  result: RedeemResult;
+  copied: boolean;
+  onCopy: () => void;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div className="mp-modal-backdrop" onMouseDown={onClose}>
+      <div className="mp-modal" onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+        {result.status === 'sent-to-extension' ? (
+          <>
+            <div className="mp-modal-icon">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FF4F00" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+            </div>
+            <h3>Sent to your wallet</h3>
+            <p>
+              Open your Byoky extension (toolbar icon) to review and accept the gift.
+              You&apos;ll see the sender, provider, token budget, and expiry before anything is added.
+            </p>
+          </>
+        ) : (
+          <>
+            <div className="mp-modal-icon">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#FF4F00" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="7" height="7" rx="1" />
+                <rect x="14" y="3" width="7" height="7" rx="1" />
+                <rect x="3" y="14" width="7" height="7" rx="1" />
+                <path d="M14 14h3v3h-3zM20 14h1M14 20h1M17 17h4v4h-4z" />
+              </svg>
+            </div>
+            <h3>Scan with Byoky mobile</h3>
+            <p>Open the Byoky app on your phone and scan to receive the gift.</p>
+            <div className="mp-qr-wrap">
+              <span
+                aria-label="Gift QR code"
+                dangerouslySetInnerHTML={{
+                  __html: qrToSvg(encodeQr(toMobileDeepLink(result.giftLink)), {
+                    size: 220,
+                    margin: 2,
+                    darkColor: '#1a1a1a',
+                    lightColor: '#fff',
+                  }),
+                }}
+              />
+            </div>
+          </>
+        )}
+
+        <div className="mp-modal-actions">
+          <button className="mp-btn mp-btn-full" onClick={onClose}>Done</button>
+          <button className="mp-link-btn" onClick={onCopy}>
+            {copied ? 'Link copied' : 'Copy gift link instead'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

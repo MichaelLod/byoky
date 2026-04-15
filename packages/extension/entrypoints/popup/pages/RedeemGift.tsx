@@ -1,12 +1,19 @@
-import { useState, type FormEvent } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { useWalletStore } from '../store';
 import { decodeGiftLink, validateGiftLink, type GiftLink } from '@byoky/core';
 
 export function RedeemGift() {
-  const { redeemGift, closeModal, error, loading } = useWalletStore();
+  const { redeemGift, closeModal, dismissPendingGift, pendingGiftLink, error, loading } = useWalletStore();
   const [linkInput, setLinkInput] = useState('');
   const [preview, setPreview] = useState<GiftLink | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (pendingGiftLink && !linkInput) {
+      handleParse(pendingGiftLink);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingGiftLink]);
 
   function handleParse(value: string) {
     setLinkInput(value);
@@ -140,7 +147,10 @@ export function RedeemGift() {
           <button
             type="button"
             className="btn btn-secondary"
-            onClick={closeModal}
+            onClick={() => {
+              if (pendingGiftLink) dismissPendingGift();
+              closeModal();
+            }}
           >
             Cancel
           </button>
