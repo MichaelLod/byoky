@@ -667,6 +667,16 @@ function Showcase() {
         <FadeIn>
           <h2>See it in action.</h2>
         </FadeIn>
+        <FadeIn delay={0.1}>
+          <div className="showcase-tour">
+            <video controls playsInline preload="metadata" poster="/demos/hero-demo.gif">
+              <source src="/demos/walkthrough.mp4" type="video/mp4" />
+            </video>
+            <p className="showcase-tour-caption">
+              Narrated 40-second tour — every provider, every device, every feature.
+            </p>
+          </div>
+        </FadeIn>
         <div className="showcase-grid">
           {showcaseItems.map((item, i) => (
             <FadeIn key={item.label} delay={0.1 * i}>
