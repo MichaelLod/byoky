@@ -5,6 +5,7 @@ struct MainTabView: View {
     @State private var selectedTab: Int = 0
     @State private var showAddCredential = false
     @State private var showRedeemGift = false
+    @State private var showAppStore = false
 
     private static let appsTabIndex = 2
 
@@ -51,7 +52,7 @@ struct MainTabView: View {
             FloatingActionMenu(
                 onAddCredential: { showAddCredential = true },
                 onRedeemGift: { showRedeemGift = true },
-                onAddApp: { selectedTab = MainTabView.appsTabIndex }
+                onAddApp: { showAppStore = true }
             )
             // Lift above the tab bar (49pt standard + safe-area inset).
             .padding(.trailing, 18)
@@ -68,6 +69,10 @@ struct MainTabView: View {
                 RedeemGiftView(prefilledLink: wallet.pendingGiftLink)
             }
             .environmentObject(wallet)
+        }
+        .sheet(isPresented: $showAppStore) {
+            AppStoreView()
+                .environmentObject(wallet)
         }
     }
 }

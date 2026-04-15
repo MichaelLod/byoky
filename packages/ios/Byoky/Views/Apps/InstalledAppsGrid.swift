@@ -2,7 +2,7 @@ import SwiftUI
 
 struct InstalledAppsGrid: View {
     @EnvironmentObject var wallet: WalletStore
-    @State private var showStore = false
+    let onBrowseStore: () -> Void
 
     private var enabledApps: [InstalledApp] { wallet.installedApps.filter(\.enabled) }
     private var disabledApps: [InstalledApp] { wallet.installedApps.filter { !$0.enabled } }
@@ -29,9 +29,6 @@ struct InstalledAppsGrid: View {
             }
             .padding(.top, 16)
         }
-        .sheet(isPresented: $showStore) {
-            AppStoreView()
-        }
     }
 
     private var emptyState: some View {
@@ -45,7 +42,7 @@ struct InstalledAppsGrid: View {
                 .font(.caption)
                 .foregroundStyle(Theme.textMuted)
                 .multilineTextAlignment(.center)
-            Button("Browse Store") { showStore = true }
+            Button("Browse Store", action: onBrowseStore)
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accent)
                 .padding(.top, 4)

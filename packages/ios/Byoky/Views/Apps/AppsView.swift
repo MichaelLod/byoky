@@ -33,6 +33,17 @@ struct AppsView: View {
                     cloudVaultWarning
                 }
 
+                Section {
+                    Button {
+                        showCreateGroup = true
+                    } label: {
+                        Label("New group", systemImage: "plus")
+                            .font(.callout.weight(.medium))
+                            .foregroundStyle(Theme.accent)
+                    }
+                    .accessibilityIdentifier("groups.create")
+                }
+
                 ForEach(orderedGroups) { group in
                     groupSection(group)
                 }
@@ -46,14 +57,6 @@ struct AppsView: View {
             .toolbarBackground(Theme.bgMain, for: .navigationBar)
             .navigationTitle("Apps")
             .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        showCreateGroup = true
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                    .accessibilityIdentifier("groups.create")
-                }
                 if wallet.sessions.count > 1 {
                     ToolbarItem(placement: .topBarLeading) {
                         Menu {

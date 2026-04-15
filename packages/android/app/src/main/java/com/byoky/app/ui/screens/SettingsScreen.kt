@@ -59,26 +59,6 @@ fun SettingsScreen(wallet: WalletStore) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            // Firefox Extension
-            Card(
-                colors = CardDefaults.cardColors(containerColor = BgCard),
-                shape = RoundedCornerShape(16.dp),
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Extension, null, tint = Accent, modifier = Modifier.size(20.dp))
-                        Spacer(Modifier.width(10.dp))
-                        Text("Firefox Extension", fontWeight = FontWeight.SemiBold, color = TextPrimary)
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "Install the Byoky extension for Firefox on Android to proxy requests from websites. Chrome on Android doesn't support extensions.",
-                        color = TextSecondary,
-                        fontSize = 14.sp,
-                    )
-                }
-            }
-
             // Cloud Vault
             Card(
                 colors = CardDefaults.cardColors(containerColor = BgCard),

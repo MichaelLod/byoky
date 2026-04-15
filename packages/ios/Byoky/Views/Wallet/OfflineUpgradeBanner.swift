@@ -4,11 +4,7 @@ private let dismissCooldown: TimeInterval = 7 * 24 * 3600
 
 struct OfflineUpgradeBanner: View {
     @EnvironmentObject var wallet: WalletStore
-    @State private var expanded = false
-    @State private var username = ""
-    @State private var password = ""
-    @State private var error: String?
-    @State private var loading = false
+    let onActivate: () -> Void
 
     var body: some View {
         if shouldShow {
@@ -33,66 +29,16 @@ struct OfflineUpgradeBanner: View {
                     }
                 }
 
-                if !expanded {
-                    Button {
-                        expanded = true
-                    } label: {
-                        Text("Activate Cloud Sync")
-                            .font(.caption.bold())
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Theme.accent)
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                    }
-                } else {
-                    TextField("Username", text: $username)
-                        .textContentType(.username)
-                        .autocapitalization(.none)
-                        .disableAutocorrection(true)
-                        .padding(10)
-                        .background(Theme.bgRaised)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                    SecureField("Your password", text: $password)
-                        .textContentType(.password)
-                        .padding(10)
-                        .background(Theme.bgRaised)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                    if let error {
-                        Text(error)
-                            .font(.caption2)
-                            .foregroundStyle(Theme.danger)
-                    }
-
-                    HStack(spacing: 8) {
-                        Button {
-                            Task { await activate() }
-                        } label: {
-                            Text(loading ? "Activating..." : "Activate")
-                                .font(.caption.bold())
-                                .foregroundStyle(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
-                                .background((username.isEmpty || password.isEmpty || loading) ? Theme.accent.opacity(0.3) : Theme.accent)
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
-                        }
-                        .disabled(username.isEmpty || password.isEmpty || loading)
-
-                        Button {
-                            expanded = false
-                            username = ""
-                            password = ""
-                            error = nil
-                        } label: {
-                            Text("Cancel")
-                                .font(.caption)
-                                .foregroundStyle(Theme.textSecondary)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
-                        }
-                    }
+                Button {
+                    onActivate()
+                } label: {
+                    Text("Activate Cloud Sync")
+                        .font(.caption.bold())
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Theme.accent)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
             }
             .padding(12)
@@ -112,21 +58,5 @@ struct OfflineUpgradeBanner: View {
             return false
         }
         return true
-    }
-
-    private func activate() async {
-        let trimmed = username.lowercased().trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty, !password.isEmpty else { return }
-        loading = true
-        defer { loading = false }
-        do {
-            try await wallet.vaultActivate(username: trimmed, password: password)
-            expanded = false
-            username = ""
-            password = ""
-            error = nil
-        } catch {
-            self.error = error.localizedDescription
-        }
     }
 }

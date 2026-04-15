@@ -19,9 +19,19 @@ export function Settings() {
     credentials, navigate, lock,
     cloudVaultEnabled, cloudVaultUsername, cloudVaultTokenExpired, cloudVaultPendingCount,
     disableCloudVault, deleteVaultAccount, resetWallet, loading,
+    settingsInitialModal, consumeSettingsInitialModal,
   } = useWalletStore();
-  const [modal, setModal] = useState<'export' | 'import' | 'cloud-vault' | 'cloud-vault-relogin' | null>(null);
+  const [modal, setModal] = useState<'export' | 'import' | 'cloud-vault' | 'cloud-vault-relogin' | null>(
+    settingsInitialModal,
+  );
   const [confirm, setConfirm] = useState<'delete-account' | 'reset-wallet' | null>(null);
+
+  useEffect(() => {
+    if (settingsInitialModal) {
+      setModal(settingsInitialModal);
+      consumeSettingsInitialModal();
+    }
+  }, [settingsInitialModal, consumeSettingsInitialModal]);
 
   if (modal === 'export') {
     return <ExportModal onClose={() => setModal(null)} />;

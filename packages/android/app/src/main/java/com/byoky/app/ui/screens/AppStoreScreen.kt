@@ -62,8 +62,14 @@ fun AppStoreScreen(wallet: WalletStore, onBack: () -> Unit) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = BgMain,
+                    titleContentColor = TextPrimary,
+                    navigationIconContentColor = TextPrimary,
+                ),
             )
         },
+        containerColor = BgMain,
     ) { padding ->
         Column(modifier = Modifier.padding(padding)) {
             OutlinedTextField(

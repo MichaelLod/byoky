@@ -31,11 +31,6 @@ fun ConnectScreen(wallet: WalletStore, pairService: RelayPairService) {
                 selectedTabIndex = selectedTab,
                 containerColor = BgMain,
                 contentColor = Accent,
-                indicator = {
-                    TabRowDefaults.SecondaryIndicator(
-                        color = Accent,
-                    )
-                },
             ) {
                 tabs.forEachIndexed { index, title ->
                     Tab(

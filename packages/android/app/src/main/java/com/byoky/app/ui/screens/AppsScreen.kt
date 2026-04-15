@@ -1,6 +1,7 @@
 package com.byoky.app.ui.screens
 
 import android.text.format.DateUtils
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -97,9 +98,6 @@ fun AppsScreen(wallet: WalletStore) {
                             Icon(Icons.Default.Close, "Disconnect all", tint = Danger)
                         }
                     }
-                    IconButton(onClick = { creatingGroup = true }) {
-                        Icon(Icons.Default.Add, "New group", tint = Accent)
-                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = BgMain,
@@ -132,6 +130,20 @@ fun AppsScreen(wallet: WalletStore) {
                             )
                         }
                     }
+                }
+            }
+
+            item {
+                OutlinedButton(
+                    onClick = { creatingGroup = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    border = BorderStroke(1.dp, Accent.copy(alpha = 0.4f)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Accent),
+                ) {
+                    Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("New group", fontSize = 13.sp, fontWeight = FontWeight.Medium)
                 }
             }
 

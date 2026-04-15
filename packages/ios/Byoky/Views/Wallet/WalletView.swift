@@ -23,14 +23,14 @@ struct WalletView: View {
             SwiftUI.Group {
                 if !hasAny {
                     VStack {
-                        OfflineUpgradeBanner()
+                        OfflineUpgradeBanner(onActivate: { showCloudVaultSetup = true })
                             .padding(.horizontal)
                         emptyState
                     }
                 } else {
                     VStack(spacing: 0) {
                         if !wallet.cloudVaultEnabled {
-                            OfflineUpgradeBanner()
+                            OfflineUpgradeBanner(onActivate: { showCloudVaultSetup = true })
                                 .padding(.horizontal)
                         }
                         List {
