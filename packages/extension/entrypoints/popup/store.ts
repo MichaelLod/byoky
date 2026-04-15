@@ -21,7 +21,7 @@ type Page =
   | 'unlock'
   | 'dashboard'
   | 'add-credential'
-  | 'activity'
+  | 'connect'
   | 'connected-apps'
   | 'usage'
   | 'request-history'

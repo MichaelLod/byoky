@@ -49,9 +49,9 @@ private fun MainScreen(wallet: WalletStore) {
     val tabs = listOf(
         Triple("Wallet", Icons.Default.Wallet, "wallet"),
         Triple("Gifts", Icons.Default.CardGiftcard, "gifts"),
+        Triple("Apps", Icons.Default.Apps, "apps"),
         Triple("Connect", Icons.Default.CellTower, "connect"),
         Triple("Usage", Icons.Default.BarChart, "usage"),
-        Triple("Apps", Icons.Default.Apps, "apps"),
     )
 
     // Hide FAB on routes where the global "+" actions don't make sense (the
@@ -105,7 +105,7 @@ private fun MainScreen(wallet: WalletStore) {
                             leadingIcon = { Icon(Icons.Default.Apps, null, tint = Accent) },
                             onClick = {
                                 fabMenuOpen = false
-                                selectedTab = 4
+                                selectedTab = 2
                                 navController.navigate("apps") {
                                     popUpTo("wallet") { inclusive = false }
                                     launchSingleTop = true
