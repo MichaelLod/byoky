@@ -15,7 +15,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.byoky.app.data.WalletStore
-import com.byoky.app.ui.components.MascotView
+import com.byoky.app.ui.components.BrandMark
 import com.byoky.app.ui.theme.*
 
 internal data class PasswordQualityResult(
@@ -60,7 +60,7 @@ fun OnboardingScreen(wallet: WalletStore) {
         Spacer(Modifier.weight(1f))
 
         if (step == OnboardingStep.WELCOME) {
-            MascotView(modifier = Modifier.size(140.dp))
+            BrandMark(modifier = Modifier.size(140.dp))
 
             Spacer(Modifier.height(24.dp))
 
@@ -109,7 +109,7 @@ fun OnboardingScreen(wallet: WalletStore) {
             )
         } else {
             // Password step
-            MascotView(
+            BrandMark(
                 modifier = Modifier.size(100.dp),
             )
 

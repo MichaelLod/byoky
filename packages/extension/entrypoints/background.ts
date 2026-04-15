@@ -104,7 +104,7 @@ export default defineBackground(() => {
     const text = count > 0 ? String(count) : '';
     try {
       browser.action.setBadgeText({ text });
-      browser.action.setBadgeBackgroundColor({ color: '#0ea5e9' });
+      browser.action.setBadgeBackgroundColor({ color: '#FF4F00' });
     } catch {
       // Fallback for older APIs
     }
@@ -594,6 +594,10 @@ export default defineBackground(() => {
           if (swap.dstModel && !msg.bodyEncoding && msg.body) {
             translatedBody = rewriteModelInJsonBody(msg.body, swap.dstModel);
           }
+        } else if (sessionProvider?.modelOverride && !msg.bodyEncoding && msg.body) {
+          // Direct path, same provider, but the group pins a model. The
+          // group's model is the strongest force — override the SDK's choice.
+          translatedBody = rewriteModelInJsonBody(msg.body, sessionProvider.modelOverride);
         }
 
         // Gift path: hand the translated body/URL to the gift relay, along
@@ -1115,6 +1119,9 @@ export default defineBackground(() => {
         };
         if (crossRoute) sp.translation = crossRoute.translation;
         else if (swapRoute) sp.swap = swapRoute.swap;
+        else if (group && group.providerId === req.id && group.model) {
+          sp.modelOverride = group.model;
+        }
         sessionProviders.push(sp);
       }
     }
@@ -3137,6 +3144,10 @@ export default defineBackground(() => {
         if (swap.dstModel && body) {
           translatedBody = rewriteModelInJsonBody(body, swap.dstModel);
         }
+      } else if (sessionProvider?.modelOverride && body) {
+        // Direct path, same provider, but the group pins a model. The
+        // group's model is the strongest force — override the SDK's choice.
+        translatedBody = rewriteModelInJsonBody(body, sessionProvider.modelOverride);
       }
 
       const realHeaders = buildHeaders(effectiveProviderId, headers, apiKey, credential.authMethod);
@@ -3491,6 +3502,8 @@ export default defineBackground(() => {
     } else if (swap) {
       entry.actualProviderId = swap.dstProviderId;
       if (swap.dstModel) entry.actualModel = swap.dstModel;
+    } else if (sp?.modelOverride) {
+      entry.actualModel = sp.modelOverride;
     }
 
     // Capture the group routing this request, if any (the resolver auto-
@@ -3647,6 +3660,9 @@ export default defineBackground(() => {
           const sp: SessionProvider = { providerId, credentialId: cred.id, available: true, authMethod: cred.authMethod };
           if (crossRoute) sp.translation = crossRoute.translation;
           else if (swapRoute) sp.swap = swapRoute.swap;
+          else if (group && group.providerId === providerId && group.model) {
+            sp.modelOverride = group.model;
+          }
           newSessionProviders.push(sp);
         }
       }

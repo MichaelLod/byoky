@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { GitHubStarButton } from '../components/GitHubStarButton';
+import { highlightCode } from '../components/highlight';
 
 /* ─── Navigation structure ────────────────────── */
 

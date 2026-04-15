@@ -71,7 +71,10 @@ export default function App() {
   return (
     <div className="app">
       <header className="header">
-        <h1 className="logo">Byoky</h1>
+        <h1 className="logo">
+          <img src="/icon.svg" alt="" className="logo-mark" />
+          Byoky
+        </h1>
         {showNav && (
           <nav className="nav">
             <button
@@ -167,11 +170,6 @@ export default function App() {
           {currentPage === 'app-view' && <AppView />}
         </div>
       </main>
-      {(currentPage === 'setup' || currentPage === 'unlock') && (
-        <div className="mascot-peek">
-          <img src="/mascot.svg" alt="" />
-        </div>
-      )}
       {showFab && <FloatingActionMenu />}
       {modal && (
         <Modal

@@ -127,6 +127,9 @@ export function Setup() {
   if (step === 'welcome') {
     return (
       <div className="center-page">
+        <div className="brand-mark">
+          <img src="/icon.svg" alt="" />
+        </div>
         <div className="logo-large">Byoky</div>
         <div className="tagline">Your encrypted wallet for AI API keys</div>
 
@@ -171,6 +174,9 @@ export function Setup() {
   if (step === 'confirm') {
     return (
       <div className="center-page">
+        <div className="brand-mark">
+          <img src="/icon.svg" alt="" />
+        </div>
         <div className="logo-large">Byoky</div>
         <div className="tagline">Confirm your password</div>
 
@@ -252,6 +258,9 @@ export function Setup() {
 
   return (
     <div className="center-page">
+      <div className="brand-mark">
+        <img src="/icon.svg" alt="" />
+      </div>
       <div className="logo-large">Byoky</div>
       <div className="tagline">{screenTitle}</div>
 

@@ -52,9 +52,15 @@ struct RoutingResolver {
             return swap
         }
 
-        // 3. Direct credential match.
+        // 3. Direct credential match. When the group also pins a model for
+        // this provider, surface it so the proxy rewrites the body — the
+        // group is the strongest routing force, stronger than the SDK's
+        // model choice.
         if let cred = credentials.first(where: { $0.providerId == requestedProviderId }) {
-            return RoutingDecision(credential: cred, translation: nil)
+            let override: String? = (group?.providerId == requestedProviderId)
+                ? group?.model?.nilIfEmpty
+                : nil
+            return RoutingDecision(credential: cred, translation: nil, modelOverride: override)
         }
 
         return nil

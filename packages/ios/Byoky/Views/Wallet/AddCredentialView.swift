@@ -13,8 +13,7 @@ struct AddCredentialView: View {
                     ForEach(Provider.all) { provider in
                         NavigationLink(value: provider) {
                             HStack(spacing: 12) {
-                                Image(systemName: provider.icon)
-                                    .font(.system(size: 16))
+                                ProviderIcon(providerId: provider.id, size: 18)
                                     .foregroundStyle(Theme.accent)
                                     .frame(width: 32, height: 32)
                                     .background(Theme.accent.opacity(0.1))
@@ -40,7 +39,7 @@ struct AddCredentialView: View {
                 }
             }
             .navigationDestination(for: Provider.self) { provider in
-                CredentialEntryView(provider: provider)
+                CredentialEntryView(provider: provider, onSaved: dismiss)
             }
         }
     }
@@ -48,9 +47,9 @@ struct AddCredentialView: View {
 
 struct CredentialEntryView: View {
     @EnvironmentObject var wallet: WalletStore
-    @Environment(\.dismiss) var dismiss
 
     let provider: Provider
+    let onSaved: DismissAction
 
     @State private var label = ""
     @State private var apiKey = ""
@@ -137,7 +136,7 @@ struct CredentialEntryView: View {
                 apiKey: apiKey,
                 authMethod: authMethod
             )
-            dismiss()
+            onSaved()
         } catch {
             self.error = error.localizedDescription
         }

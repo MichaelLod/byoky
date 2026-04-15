@@ -82,17 +82,24 @@ struct RoutingDecision {
     /// before forwarding. Used by same-family swaps where the group binds a
     /// specific destination model that should override the SDK's choice.
     let swapDstModel: String?
+    /// Direct-path model override. Set when the group targets the same
+    /// provider as the request (no translation/swap needed) but pins a
+    /// specific model. The proxy rewrites the body's `model` field. The
+    /// group is the strongest routing force — its model wins over the SDK's.
+    let modelOverride: String?
 
     init(
         credential: Credential,
         translation: RoutingTranslation? = nil,
         swapToProviderId: String? = nil,
-        swapDstModel: String? = nil
+        swapDstModel: String? = nil,
+        modelOverride: String? = nil
     ) {
         self.credential = credential
         self.translation = translation
         self.swapToProviderId = swapToProviderId
         self.swapDstModel = swapDstModel
+        self.modelOverride = modelOverride
     }
 
     var needsTranslation: Bool { translation != nil }

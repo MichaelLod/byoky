@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { highlightCode } from './highlight';
+import { highlightCode } from '../../components/highlight';
 
 const examples = [
   {

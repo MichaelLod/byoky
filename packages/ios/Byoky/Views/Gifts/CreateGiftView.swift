@@ -56,8 +56,7 @@ struct CreateGiftView: View {
                         selectedCredential = credential
                     } label: {
                         HStack(spacing: 12) {
-                            Image(systemName: Provider.find(credential.providerId)?.icon ?? "key")
-                                .font(.system(size: 16))
+                            ProviderIcon(providerId: credential.providerId, size: 16)
                                 .foregroundStyle(Theme.accent)
                                 .frame(width: 32, height: 32)
                                 .background(Theme.accent.opacity(0.1))

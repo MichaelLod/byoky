@@ -33,6 +33,7 @@ import com.byoky.app.data.giftBudgetPercent
 import com.byoky.app.data.giftBudgetRemaining
 import com.byoky.app.data.isGiftExpired
 import com.byoky.app.ui.components.OfflineUpgradeBanner
+import com.byoky.app.ui.components.ProviderIcon
 import com.byoky.app.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -335,11 +336,10 @@ private fun GiftCredentialCard(
                         .background(AccentSoft),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(
-                        Icons.Default.CardGiftcard,
-                        contentDescription = null,
+                    ProviderIcon(
+                        providerId = gc.providerId,
                         tint = Accent,
-                        modifier = Modifier.size(20.dp),
+                        size = 20.dp,
                     )
                 }
 
@@ -471,11 +471,10 @@ private fun CredentialCard(
                         .background(AccentSoft),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(
-                        Icons.Default.Key,
-                        contentDescription = null,
+                    ProviderIcon(
+                        providerId = credential.providerId,
                         tint = Accent,
-                        modifier = Modifier.size(20.dp),
+                        size = 20.dp,
                     )
                 }
 
@@ -621,9 +620,23 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(12.dp),
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(AccentSoft),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                ProviderIcon(
+                                    providerId = provider.id,
+                                    tint = Accent,
+                                    size = 18.dp,
+                                )
+                            }
+                            Spacer(Modifier.width(12.dp))
                             Text(provider.name, color = TextPrimary, modifier = Modifier.weight(1f))
                             if (selectedProvider?.id == provider.id) {
                                 Icon(Icons.Default.Check, null, tint = Accent, modifier = Modifier.size(18.dp))

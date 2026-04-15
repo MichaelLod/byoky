@@ -44,11 +44,19 @@ import { shouldTranslate, sameFamily } from './translate/index.js';
  *
  * Exactly one of `translation` and `swap` may be set; both being absent means
  * the resolver picked a direct credential (or fell through to default).
+ *
+ * `modelOverride` is orthogonal to those branches: when the group pins a
+ * model, the proxy rewrites the outgoing body's `model` field to it. For
+ * cross-family (translation) and same-family-swap paths, the pinned model is
+ * already carried in translation.dstModel / swap.dstModel. `modelOverride` is
+ * the direct-path (same-provider) carrier — without it, a group's model pin
+ * is silently dropped when the app already targets the group's provider.
  */
 export interface RoutingDecision {
   credential: Credential;
   translation?: SessionTranslation;
   swap?: SessionSwap;
+  modelOverride?: string;
 }
 
 /**
@@ -85,12 +93,21 @@ export function resolveRoute(
   //        attribution and a silent swap masks the user's intent.
   //    (b) No pin → use any credential of the provider, most-recently-used
   //        first.
+  //
+  // In both sub-cases, when the group also pins a model, surface it as
+  // `modelOverride` so the proxy rewrites the outgoing body. The group is
+  // the strongest routing force — it must override the app's model choice
+  // even when no provider swap / translation is needed.
+  const modelOverride =
+    group && group.providerId === requestedProviderId && group.model
+      ? group.model
+      : undefined;
   if (group && group.providerId === requestedProviderId && group.credentialId) {
     const pinned = credentials.find((c) => c.id === group.credentialId);
-    return pinned ? { credential: pinned } : null;
+    return pinned ? { credential: pinned, modelOverride } : null;
   }
   const direct = credentials.find((c) => c.providerId === requestedProviderId);
-  if (direct) return { credential: direct };
+  if (direct) return { credential: direct, modelOverride };
 
   return null;
 }

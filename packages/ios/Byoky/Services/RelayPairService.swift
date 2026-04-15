@@ -460,7 +460,15 @@ final class RelayPairService: ObservableObject {
                 request.httpMethod = method
                 request.timeoutInterval = 120
 
-                let finalBody = injectStreamUsageOptions(providerId: providerId, body: bodyString)
+                // Group-pinned model wins over the SDK's choice even on the
+                // direct path (same provider, no translation/swap needed).
+                let forwardedBody: String?
+                if let override = routing?.modelOverride, !override.isEmpty {
+                    forwardedBody = rewriteModelInJsonBody(bodyString, to: override)
+                } else {
+                    forwardedBody = bodyString
+                }
+                let finalBody = injectStreamUsageOptions(providerId: providerId, body: forwardedBody)
                 if let finalBody {
                     request.httpBody = finalBody.data(using: .utf8)
                 }

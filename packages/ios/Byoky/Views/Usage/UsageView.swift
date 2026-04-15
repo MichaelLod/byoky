@@ -64,6 +64,8 @@ struct UsageView: View {
                 }
                 .padding()
             }
+            .background(Theme.bgMain)
+            .toolbarBackground(Theme.bgMain, for: .navigationBar)
             .navigationTitle("Usage")
         }
     }
@@ -84,7 +86,11 @@ struct UsageView: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 10))
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(Theme.bgRaised)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Theme.border, lineWidth: 1)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
@@ -106,7 +112,11 @@ struct UsageView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 16)
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(Theme.bgCard)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Theme.border, lineWidth: 1)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
@@ -169,7 +179,11 @@ struct UsageView: View {
                     }
                 }
                 .padding(14)
-                .background(Color(.secondarySystemGroupedBackground))
+                .background(Theme.bgCard)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Theme.border, lineWidth: 1)
+                )
                 .clipShape(RoundedRectangle(cornerRadius: 12))
             }
         }

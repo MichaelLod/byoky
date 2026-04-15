@@ -1,6 +1,7 @@
 import { useState, useEffect, type FormEvent } from 'react';
 import { useWalletStore } from '../store';
 import { PROVIDERS } from '@byoky/core';
+import { ProviderIcon } from '../components/ProviderIcon';
 
 const providerOptions = Object.values(PROVIDERS);
 
@@ -88,17 +89,22 @@ export function AddCredential() {
       <form onSubmit={handleSubmit}>
         <div className="form-group">
           <label htmlFor="provider">Provider</label>
-          <select
-            id="provider"
-            value={providerId}
-            onChange={(e) => handleProviderChange(e.target.value)}
-          >
-            {providerOptions.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+          <div className="provider-field">
+            <div className="provider-icon-box">
+              <ProviderIcon providerId={providerId} size={22} />
+            </div>
+            <select
+              id="provider"
+              value={providerId}
+              onChange={(e) => handleProviderChange(e.target.value)}
+            >
+              {providerOptions.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {supportsOAuth && (

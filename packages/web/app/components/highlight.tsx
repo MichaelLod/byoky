@@ -14,7 +14,7 @@ export function highlightCode(code: string): ReactNode[] {
     else if (keyword) cls = 'tk-keyword';
     else if (num) cls = 'tk-number';
     else if (ident) {
-      if (['JSON', 'session', 'response', 'Byoky', 'Anthropic', 'OpenAI', 'fetch', 'Promise', 'console'].includes(ident)) cls = 'tk-builtin';
+      if (['JSON', 'session', 'response', 'Byoky', 'ByokyServer', 'Anthropic', 'OpenAI', 'fetch', 'Promise', 'console'].includes(ident)) cls = 'tk-builtin';
       else if (ident.includes('.')) cls = '';
       else cls = 'tk-ident';
     } else if (punct) cls = 'tk-punct';

@@ -37,12 +37,12 @@ struct OnboardingView: View {
             }
             .padding(24)
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(.light)
     }
 
     private var welcomeStep: some View {
         VStack(spacing: 24) {
-            MascotView(size: 140)
+            BrandMark(size: 140)
 
             Text("Byoky Wallet")
                 .font(.system(size: 32, weight: .bold))
@@ -82,7 +82,7 @@ struct OnboardingView: View {
 
     private var passwordStep: some View {
         VStack(spacing: 24) {
-            MascotView(size: 100)
+            BrandMark(size: 100)
 
             Text("Set Master Password")
                 .font(.system(size: 28, weight: .bold))
@@ -102,7 +102,7 @@ struct OnboardingView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                            .stroke(Theme.border, lineWidth: 1)
                     )
                     .accessibilityIdentifier("onboarding.password")
 
@@ -113,7 +113,7 @@ struct OnboardingView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                            .stroke(Theme.border, lineWidth: 1)
                     )
                     .accessibilityIdentifier("onboarding.confirmPassword")
 

@@ -20,7 +20,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.byoky.app.data.WalletStore
-import com.byoky.app.ui.components.MascotView
+import com.byoky.app.ui.components.BrandMark
 import com.byoky.app.ui.theme.*
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -82,7 +82,7 @@ fun VaultAuthContent(wallet: WalletStore, initialMode: VaultAuthMode, onBack: ()
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        MascotView(modifier = Modifier.size(100.dp))
+        BrandMark(modifier = Modifier.size(100.dp))
 
         Spacer(Modifier.height(20.dp))
 

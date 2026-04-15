@@ -8,7 +8,7 @@ import androidx.compose.ui.res.painterResource
 import com.byoky.app.R
 
 @Composable
-fun MascotView(modifier: Modifier = Modifier) {
+fun BrandMark(modifier: Modifier = Modifier) {
     Image(
         painter = painterResource(id = R.drawable.mascot),
         contentDescription = null,

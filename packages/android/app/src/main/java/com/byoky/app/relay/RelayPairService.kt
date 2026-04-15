@@ -436,17 +436,23 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
 
                 applyAuth(filteredHeaders, providerId, ownCred.authMethod, apiKey, bodyString)
 
-                val finalBody = if (providerId == "anthropic" && ownCred.authMethod == com.byoky.app.data.AuthMethod.OAUTH && bodyString != null) {
+                // Group-pinned model wins over the SDK's choice even on the
+                // direct path (same provider, no translation/swap needed).
+                val bodyWithModel = routing?.modelOverride?.let { override ->
+                    rewriteModelInJsonBody(bodyString, override)
+                } ?: bodyString
+
+                val finalBody = if (providerId == "anthropic" && ownCred.authMethod == com.byoky.app.data.AuthMethod.OAUTH && bodyWithModel != null) {
                     try {
-                        val parsed = JSONObject(bodyString)
+                        val parsed = JSONObject(bodyWithModel)
                         val prefix = "You are Claude Code, Anthropic's official CLI for Claude."
                         val existing = parsed.optString("system", "").takeIf { it.isNotEmpty() }
                         if (existing == null) parsed.put("system", prefix)
                         else parsed.put("system", "$prefix\n\n$existing")
                         parsed.toString()
-                    } catch (_: Exception) { bodyString }
+                    } catch (_: Exception) { bodyWithModel }
                 } else {
-                    bodyString
+                    bodyWithModel
                 }
 
                 val injectedBody = injectStreamUsageOptions(providerId, finalBody)

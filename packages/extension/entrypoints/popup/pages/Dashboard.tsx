@@ -9,6 +9,7 @@ import {
   type CredentialMeta,
 } from '@byoky/core';
 import { OfflineUpgradeBanner } from '../components/OfflineUpgradeBanner';
+import { ProviderIcon } from '../components/ProviderIcon';
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -133,10 +134,15 @@ export function Dashboard() {
             return (
               <div key={gc.id} className="card gift-card">
                 <div className="card-header">
-                  <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span className={dotClass} title={dotTitle} />
-                    {gc.providerName}
-                  </span>
+                  <div className="credential-card-heading">
+                    <div className="provider-icon-box provider-icon-box-sm">
+                      <ProviderIcon providerId={gc.providerId} size={18} />
+                    </div>
+                    <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span className={dotClass} title={dotTitle} />
+                      {gc.providerName}
+                    </span>
+                  </div>
                   <button
                     className="btn btn-danger btn-sm"
                     onClick={() => removeGiftedCredential(gc.id)}
@@ -257,20 +263,25 @@ function CredentialCard({ cred, usage, expanded, onToggle, onRemove }: Credentia
       }}
     >
       <div className="card-header">
-        {editing ? (
-          <input
-            ref={inputRef}
-            className="credential-label-input"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commit}
-            onKeyDown={handleKey}
-            onClick={(e) => e.stopPropagation()}
-            maxLength={60}
-          />
-        ) : (
-          <span className="card-title">{cred.label}</span>
-        )}
+        <div className="credential-card-heading">
+          <div className="provider-icon-box provider-icon-box-sm">
+            <ProviderIcon providerId={cred.providerId} size={18} />
+          </div>
+          {editing ? (
+            <input
+              ref={inputRef}
+              className="credential-label-input"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={commit}
+              onKeyDown={handleKey}
+              onClick={(e) => e.stopPropagation()}
+              maxLength={60}
+            />
+          ) : (
+            <span className="card-title">{cred.label}</span>
+          )}
+        </div>
         <div className="card-actions" onClick={(e) => e.stopPropagation()}>
           <button
             className="icon-btn"

@@ -1,8 +1,8 @@
 import SwiftUI
 import WebKit
 
-/// Renders the Byoky owl mascot from the bundled SVG.
-struct MascotView: View {
+/// Renders the Byoky "B" brand mark from the bundled SVG.
+struct BrandMark: View {
     var size: CGFloat = 120
 
     var body: some View {
@@ -12,10 +12,30 @@ struct MascotView: View {
             SVGWebView(svg: svgString)
                 .frame(width: size, height: size)
         } else {
-            // Fallback: simple owl silhouette using SF Symbol
-            Image(systemName: "bird.fill")
+            Image(systemName: "key.fill")
                 .font(.system(size: size * 0.5))
                 .foregroundStyle(Theme.accent)
+        }
+    }
+}
+
+
+/// Renders a provider's brand mark from the asset catalog. Falls back to a
+/// generic key glyph when the provider id isn't recognized.
+struct ProviderIcon: View {
+    let providerId: String
+    var size: CGFloat = 20
+
+    var body: some View {
+        if let provider = Provider.find(providerId) {
+            Image(provider.icon)
+                .resizable()
+                .renderingMode(.template)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: size, height: size)
+        } else {
+            Image(systemName: "key")
+                .font(.system(size: size))
         }
     }
 }

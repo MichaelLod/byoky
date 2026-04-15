@@ -25,6 +25,7 @@ import com.byoky.app.data.WalletStatus
 import com.byoky.app.data.WalletStore
 import com.byoky.app.relay.RelayPairService
 import com.byoky.app.ui.theme.Accent
+import com.byoky.app.ui.theme.AccentHover
 
 @Composable
 fun AppNavigation(wallet: WalletStore) {
@@ -73,7 +74,7 @@ private fun MainScreen(wallet: WalletStore) {
                             .clip(CircleShape)
                             .background(
                                 brush = Brush.linearGradient(
-                                    colors = listOf(Color(0xFF38BDF8), Accent),
+                                    colors = listOf(AccentHover, Accent),
                                 ),
                             )
                             .size(56.dp),
