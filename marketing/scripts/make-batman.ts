@@ -231,27 +231,31 @@ function buildBeatFilter(
   const videoAspect = VIDEO_W / VIDEO_H;
   const isLandscape = Math.abs(aspect - videoAspect) < 0.25;
 
-  // Oversize the main frame so we have headroom for a screen shake (crop)
-  // without black edges. 1.15x oversample → 12% of width on each side.
+  // Oversize for shake headroom. 1.15x → 12% on each side.
   const CW = Math.round(VIDEO_W * 1.15);
   const CH = Math.round(VIDEO_H * 1.15);
 
-  // Background/foreground chain for the beat content, oversized.
+  // INSET the composite into ~78% of the canvas so the burst + zoom + shake
+  // have breathing room around the edges — otherwise at peak zoom the
+  // composite headline and outer devices get sliced by the crop window.
+  const INSET = 0.78;
+  const INNER_W = Math.round(CW * INSET);
+  const INNER_H = Math.round(CH * INSET);
+
   const bgChain = isLandscape
-    ? `[0:v]scale=${CW}:${CH}:force_original_aspect_ratio=decrease,pad=${CW}:${CH}:(ow-iw)/2:(oh-ih)/2:color=#141418[content]`
+    ? `[0:v]scale=${INNER_W}:${INNER_H}:force_original_aspect_ratio=decrease,pad=${CW}:${CH}:(ow-iw)/2:(oh-ih)/2:color=#141418[content]`
     : [
         `[0:v]split=2[bg0][fg0]`,
         `[bg0]scale=${CW}:${CH}:force_original_aspect_ratio=increase,crop=${CW}:${CH},boxblur=40:2,eq=brightness=-0.08[bg]`,
-        `[fg0]scale=${CW}:${CH}:force_original_aspect_ratio=decrease[fg]`,
+        `[fg0]scale=${INNER_W}:${INNER_H}:force_original_aspect_ratio=decrease[fg]`,
         `[bg][fg]overlay=(W-w)/2:(H-h)/2[content]`,
       ].join(';');
 
-  // Hard zoom-punch: peak zoom at t=0, snaps back to 1.00 by t=punch.
-  // Landscape sources get a 1.25× peak (gives room for the burst + shake
-  // without cutting composite edges); portrait sources get 1.12× (smaller
-  // punch so the tall aspect doesn't slice at the top/bottom during peak).
+  // Softer zoom punch now that content is inset — 1.10 landscape / 1.06
+  // portrait. With the 78% inset, even at 1.10× peak the composite still
+  // sits comfortably inside the 1920×1080 crop window.
   const punch = 0.3;
-  const peakZoom = isLandscape ? 1.25 : 1.12;
+  const peakZoom = isLandscape ? 1.10 : 1.06;
   const zoomDelta = peakZoom - 1.0;
   const zoomExpr = `if(lt(t,${punch}),${peakZoom}-${zoomDelta.toFixed(3)}*(t/${punch}),1.0+0.02*(t-${punch})/${(dur - punch).toFixed(2)})`;
 
