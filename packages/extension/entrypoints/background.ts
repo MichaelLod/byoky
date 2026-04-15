@@ -1180,6 +1180,7 @@ export default defineBackground(() => {
           enqueueVaultSync(async () => {
             await syncPendingCredentials();
             await syncPendingGroups();
+            await syncPendingGifts();
           });
         } else {
           unlockFailures++;
@@ -1262,6 +1263,20 @@ export default defineBackground(() => {
 
         refreshSessionProviders();
         fireVaultSync(newCred.id as string, cpId, cLabel, cAuth, cleanValue).catch(() => {});
+        return { success: true };
+      }
+
+      case 'renameCredential': {
+        const { id: rnId, label: rnLabel } = message.payload as { id: string; label: string };
+        const newLabel = rnLabel.trim();
+        if (!newLabel) return { error: 'Label cannot be empty' };
+        const rnData = await browser.storage.local.get('credentials');
+        const rnCreds = (rnData.credentials ?? []) as Array<Record<string, unknown>>;
+        const rnIdx = rnCreds.findIndex((c) => c.id === rnId);
+        if (rnIdx < 0) return { error: 'Credential not found' };
+        rnCreds[rnIdx] = { ...rnCreds[rnIdx], label: newLabel };
+        await browser.storage.local.set({ credentials: rnCreds });
+        fireVaultRename(rnId, newLabel).catch(() => {});
         return { success: true };
       }
 
@@ -1643,7 +1658,20 @@ export default defineBackground(() => {
         // Register with Cloud Vault as fallback sender
         registerGiftWithVault(gift, credentialId).catch(() => {});
 
-        return { success: true, giftLink: encoded };
+        return { success: true, giftLink: encoded, giftId: gift.id };
+      }
+
+      case 'setGiftMarketplaceToken': {
+        const { giftId, token } = message.payload as { giftId: string; token: string };
+        if (!giftId || typeof token !== 'string' || !token) return { error: 'Invalid input' };
+        const gData = await browser.storage.local.get('gifts');
+        const gList = (gData.gifts ?? []) as Gift[];
+        const idx = gList.findIndex((g) => g.id === giftId);
+        if (idx === -1) return { error: 'Gift not found' };
+        gList[idx].marketplaceManagementToken = token;
+        await browser.storage.local.set({ gifts: gList });
+        uploadMarketplaceTokenToVault(giftId, token).catch(() => {});
+        return { success: true };
       }
 
       case 'getGifts': {
@@ -1850,7 +1878,11 @@ export default defineBackground(() => {
           tokenExpired: false,
           credentialMap: {},
         });
-        enqueueVaultSync(() => syncAllCredentialsToVault(token));
+        await browser.storage.local.set({ 'cloudVault.lastUsername': username });
+        enqueueVaultSync(async () => {
+          await syncAllCredentialsToVault(token);
+          await syncPendingGifts();
+        });
         return { success: true };
       }
 
@@ -1885,7 +1917,11 @@ export default defineBackground(() => {
           tokenExpired: false,
           credentialMap: {},
         });
-        enqueueVaultSync(() => syncAllCredentialsToVault(token));
+        await browser.storage.local.set({ 'cloudVault.lastUsername': username });
+        enqueueVaultSync(async () => {
+          await syncAllCredentialsToVault(token);
+          await syncPendingGifts();
+        });
         return { success: true };
       }
 
@@ -1909,7 +1945,11 @@ export default defineBackground(() => {
           tokenExpired: false,
           credentialMap: {},
         });
-        enqueueVaultSync(() => syncAllCredentialsToVault(token));
+        await browser.storage.local.set({ 'cloudVault.lastUsername': username });
+        enqueueVaultSync(async () => {
+          await syncAllCredentialsToVault(token);
+          await syncPendingGifts();
+        });
         return { success: true };
       }
 
@@ -1933,11 +1973,14 @@ export default defineBackground(() => {
           return { error: err?.message ?? 'Failed to delete vault account' };
         }
         await clearCloudVaultState();
+        await browser.storage.local.remove('cloudVault.lastUsername');
         return { success: true };
       }
 
       case 'cloudVaultStatus': {
         const state = await getCloudVaultState();
+        const lastUsernameData = await browser.storage.local.get('cloudVault.lastUsername');
+        const lastUsername = (lastUsernameData['cloudVault.lastUsername'] as string) ?? null;
         let pendingCount = 0;
         if (state.enabled) {
           const credentials = await getStoredCredentials();
@@ -1946,6 +1989,7 @@ export default defineBackground(() => {
         return {
           enabled: state.enabled,
           username: state.username,
+          lastUsername,
           tokenExpired: state.tokenExpired || (state.enabled && state.tokenIssuedAt > 0 && isVaultTokenExpired(state.tokenIssuedAt)),
           pendingCount,
         };
@@ -1973,6 +2017,7 @@ export default defineBackground(() => {
         enqueueVaultSync(async () => {
           await syncPendingCredentials();
           await syncPendingGroups();
+          await syncPendingGifts();
         });
         return { success: true };
       }
@@ -4443,6 +4488,22 @@ export default defineBackground(() => {
     await saveCloudVaultState({ credentialMap: state.credentialMap });
   }
 
+  async function syncRenameToVault(
+    localId: string,
+    label: string,
+    token: string,
+  ): Promise<void> {
+    const state = await getCloudVaultState();
+    const vaultId = state.credentialMap[localId];
+    if (!vaultId) return;
+
+    const result = await vaultFetch(`/credentials/${vaultId}`, 'PATCH', { label }, token);
+
+    if (result.status === 401) {
+      await handleVaultAuthError();
+    }
+  }
+
   /**
    * Backfill local groups + app→group bindings to the cloud vault.
    *
@@ -4568,6 +4629,16 @@ export default defineBackground(() => {
     enqueueVaultSync(() => syncRemoveFromVault(localId, state.token!));
   }
 
+  async function fireVaultRename(localId: string, label: string): Promise<void> {
+    const state = await getCloudVaultState();
+    if (!state.enabled || !state.token || state.tokenExpired) return;
+    if (isVaultTokenExpired(state.tokenIssuedAt)) {
+      await handleVaultAuthError();
+      return;
+    }
+    enqueueVaultSync(() => syncRenameToVault(localId, label, state.token!));
+  }
+
   // ─── Cloud Vault group sync ─────────────────────────────────────────
   //
   // Mirrors the user's group/app-group state to the vault so the vault can
@@ -4667,8 +4738,29 @@ export default defineBackground(() => {
         maxTokens: gift.maxTokens,
         usedTokens: gift.usedTokens,
         expiresAt: gift.expiresAt,
+        marketplaceManagementToken: gift.marketplaceManagementToken,
       }, state.token!);
 
+      if (result.status === 401) {
+        await handleVaultAuthError();
+      }
+    });
+  }
+
+  async function uploadMarketplaceTokenToVault(giftId: string, token: string): Promise<void> {
+    const state = await getCloudVaultState();
+    if (!state.enabled || !state.token || state.tokenExpired) return;
+    if (isVaultTokenExpired(state.tokenIssuedAt)) {
+      await handleVaultAuthError();
+      return;
+    }
+    enqueueVaultSync(async () => {
+      const result = await vaultFetch(
+        `/gifts/${encodeURIComponent(giftId)}/marketplace-token`,
+        'PATCH',
+        { marketplaceManagementToken: token },
+        state.token!,
+      );
       if (result.status === 401) {
         await handleVaultAuthError();
       }
@@ -4689,6 +4781,26 @@ export default defineBackground(() => {
         await handleVaultAuthError();
       }
     });
+  }
+
+  async function syncPendingGifts(): Promise<void> {
+    const state = await getCloudVaultState();
+    if (!state.enabled || !state.token || state.tokenExpired) return;
+    if (isVaultTokenExpired(state.tokenIssuedAt)) {
+      await handleVaultAuthError();
+      return;
+    }
+    if (!masterPassword) return;
+
+    const gifts = await getGiftsFromStorage();
+    for (const gift of gifts) {
+      if (!gift.active || gift.expiresAt <= Date.now()) continue;
+      try {
+        await registerGiftWithVault(gift, gift.credentialId);
+      } catch {
+        // Non-blocking — retry next opportunity
+      }
+    }
   }
 
   async function syncGiftUsageFromVault(giftId: string): Promise<void> {
@@ -4718,4 +4830,45 @@ export default defineBackground(() => {
       await browser.storage.local.set({ gifts });
     }
   }
+
+  // --- Marketplace heartbeat ---
+  //
+  // Mirrors the vault's heartbeat worker: every 4 min, for each active gift
+  // with a stored management token, POST /gifts/:id/heartbeat so the
+  // marketplace badge stays "online" while the user's browser is running.
+  // chrome.alarms survives MV3 service-worker shutdowns; setInterval would
+  // be dropped every 30s idle.
+
+  const MARKETPLACE_URL = 'https://marketplace.byoky.com';
+  const MARKETPLACE_HEARTBEAT_ALARM = 'byoky:marketplace-heartbeat';
+
+  async function runMarketplaceHeartbeat(): Promise<void> {
+    const data = await browser.storage.local.get('gifts');
+    const gifts = (data.gifts ?? []) as Gift[];
+    const now = Date.now();
+    await Promise.all(gifts.map(async (gift) => {
+      if (!gift.active || gift.expiresAt <= now) return;
+      if (!gift.marketplaceManagementToken) return;
+      try {
+        await fetch(`${MARKETPLACE_URL}/gifts/${encodeURIComponent(gift.id)}/heartbeat`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${gift.marketplaceManagementToken}` },
+        });
+      } catch {
+        // Network hiccup — retry on the next tick.
+      }
+    }));
+  }
+
+  browser.alarms.create(MARKETPLACE_HEARTBEAT_ALARM, {
+    periodInMinutes: 4,
+    delayInMinutes: 0,
+  });
+  browser.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === MARKETPLACE_HEARTBEAT_ALARM) {
+      runMarketplaceHeartbeat().catch(() => {});
+    }
+  });
+  // Fire once on startup so gifts flip to online without waiting 4 min.
+  runMarketplaceHeartbeat().catch(() => {});
 });

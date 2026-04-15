@@ -6,8 +6,9 @@ import {
   injectStreamUsageOptions,
   injectClaudeCodeSystemPrompt,
 } from '@byoky/core';
-import { getActiveGifts, incrementGiftUsage, forceUpdateGiftUsage, deleteExpiredGifts } from './db/index.js';
+import { getActiveGifts, incrementGiftUsage, forceUpdateGiftUsage, deleteExpiredGifts, getDb } from './db/index.js';
 import { decryptGiftSecret } from './gift-crypto.js';
+import { sql } from 'drizzle-orm';
 
 interface GiftRow {
   id: string;
@@ -21,6 +22,7 @@ interface GiftRow {
   usedTokens: number;
   expiresAt: number;
   active: boolean | null;
+  encryptedMarketplaceMgmtToken: string | null;
 }
 
 const connections = new Map<string, WebSocket>();
@@ -31,7 +33,13 @@ const RECONNECT_MAX_DELAY = 300_000; // 5 minutes
 const PING_INTERVAL = 120_000;
 const REQUEST_TIMEOUT = 120_000;
 
+// Heartbeat cadence chosen to stay well inside the marketplace's 5-minute
+// online threshold so there's slack for one missed tick.
+const MARKETPLACE_HEARTBEAT_INTERVAL = 4 * 60 * 1000;
+const MARKETPLACE_URL = process.env.MARKETPLACE_URL ?? 'https://marketplace.byoky.com';
+
 let cleanupTimer: ReturnType<typeof setInterval> | undefined;
+let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
 
 export function connectGift(gift: GiftRow): void {
   if (connections.has(gift.id)) return;
@@ -298,6 +306,16 @@ function sendError(ws: WebSocket, requestId: string, code: string, message: stri
 export async function startGiftRelay(): Promise<void> {
   console.log('[gift-relay] starting...');
 
+  // Idempotent column add so old deployments pick up the marketplace
+  // heartbeat feature without a separate drizzle-kit push step.
+  try {
+    await getDb().execute(
+      sql`ALTER TABLE gifts ADD COLUMN IF NOT EXISTS encrypted_marketplace_mgmt_token TEXT`,
+    );
+  } catch (err) {
+    console.error('[gift-relay] schema migration error:', err);
+  }
+
   try {
     await deleteExpiredGifts();
     const activeGifts = await getActiveGifts();
@@ -330,12 +348,53 @@ export async function startGiftRelay(): Promise<void> {
     }
   }, 60 * 60 * 1000); // every hour
   cleanupTimer.unref();
+
+  // Marketplace heartbeat worker: for each active gift with a stored
+  // management token, POST /gifts/:id/heartbeat so the marketplace badge
+  // reflects "online" even when every user device is backgrounded.
+  heartbeatTimer = setInterval(() => {
+    runMarketplaceHeartbeat().catch((err) => {
+      console.error('[gift-relay] marketplace heartbeat error:', err);
+    });
+  }, MARKETPLACE_HEARTBEAT_INTERVAL);
+  heartbeatTimer.unref();
+  // Fire once at startup so gifts flip to online without waiting 4 min.
+  runMarketplaceHeartbeat().catch((err) => {
+    console.error('[gift-relay] marketplace heartbeat error:', err);
+  });
+}
+
+async function runMarketplaceHeartbeat(): Promise<void> {
+  const active = await getActiveGifts();
+  const now = Date.now();
+  await Promise.all(active.map(async (gift) => {
+    if (gift.expiresAt <= now) return;
+    if (!gift.encryptedMarketplaceMgmtToken) return;
+    let token: string;
+    try {
+      token = await decryptGiftSecret(gift.encryptedMarketplaceMgmtToken);
+    } catch {
+      return;
+    }
+    try {
+      await fetch(`${MARKETPLACE_URL}/gifts/${encodeURIComponent(gift.id)}/heartbeat`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch {
+      // Network hiccup — retry on the next tick.
+    }
+  }));
 }
 
 export function stopGiftRelay(): void {
   if (cleanupTimer) {
     clearInterval(cleanupTimer);
     cleanupTimer = undefined;
+  }
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = undefined;
   }
   for (const [id, ws] of connections) {
     ws.close();

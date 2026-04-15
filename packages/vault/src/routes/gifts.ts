@@ -6,6 +6,7 @@ import {
   getGiftById,
   deleteGift,
   countActiveGiftsByUser,
+  updateGiftMarketplaceToken,
 } from '../db/index.js';
 import { encryptGiftSecret } from '../gift-crypto.js';
 import { authMiddleware } from '../middleware/auth.js';
@@ -31,9 +32,10 @@ gifts.post('/', async (c) => {
     maxTokens?: number;
     usedTokens?: number;
     expiresAt?: number;
+    marketplaceManagementToken?: string;
   }>();
 
-  const { giftId, providerId, authMethod, apiKey, relayAuthToken, relayUrl, maxTokens, usedTokens, expiresAt } = body;
+  const { giftId, providerId, authMethod, apiKey, relayAuthToken, relayUrl, maxTokens, usedTokens, expiresAt, marketplaceManagementToken } = body;
 
   if (!giftId || !providerId || !authMethod || !apiKey || !relayAuthToken || !relayUrl || !maxTokens || !expiresAt) {
     return c.json({ error: { code: 'INVALID_INPUT', message: 'Missing required fields' } }, 400);
@@ -83,8 +85,16 @@ gifts.post('/', async (c) => {
     return c.json({ error: { code: 'LIMIT_EXCEEDED', message: `Maximum ${MAX_GIFTS_PER_USER} active gifts allowed` } }, 429);
   }
 
+  if (marketplaceManagementToken !== undefined &&
+      (typeof marketplaceManagementToken !== 'string' || marketplaceManagementToken.length > MAX_STRING_LENGTH)) {
+    return c.json({ error: { code: 'INVALID_INPUT', message: 'Invalid marketplaceManagementToken' } }, 400);
+  }
+
   const encryptedApiKey = await encryptGiftSecret(apiKey);
   const encryptedRelayToken = await encryptGiftSecret(relayAuthToken);
+  const encryptedMarketplaceMgmtToken = marketplaceManagementToken
+    ? await encryptGiftSecret(marketplaceManagementToken)
+    : null;
 
   let gift;
   try {
@@ -92,6 +102,7 @@ gifts.post('/', async (c) => {
       giftId, userId, providerId, authMethod,
       encryptedApiKey, encryptedRelayToken, relayUrl,
       maxTokens, safeUsedTokens, expiresAt,
+      encryptedMarketplaceMgmtToken,
     );
   } catch (err: unknown) {
     // Handle duplicate gift ID (unique constraint violation)
@@ -146,6 +157,23 @@ gifts.delete('/:id', async (c) => {
   const giftId = c.req.param('id');
   disconnectGift(giftId);
   await deleteGift(userId, giftId);
+  return c.json({ success: true });
+});
+
+gifts.patch('/:id/marketplace-token', async (c) => {
+  const userId = c.get('userId');
+  const giftId = c.req.param('id');
+  const body = await c.req.json<{ marketplaceManagementToken?: string }>();
+  const token = body.marketplaceManagementToken;
+  if (typeof token !== 'string' || token.length === 0 || token.length > MAX_STRING_LENGTH) {
+    return c.json({ error: { code: 'INVALID_INPUT', message: 'Invalid marketplaceManagementToken' } }, 400);
+  }
+  const existing = await getGiftById(userId, giftId);
+  if (!existing) {
+    return c.json({ error: { code: 'NOT_FOUND', message: 'Gift not found' } }, 404);
+  }
+  const encrypted = await encryptGiftSecret(token);
+  await updateGiftMarketplaceToken(userId, giftId, encrypted);
   return c.json({ success: true });
 });
 

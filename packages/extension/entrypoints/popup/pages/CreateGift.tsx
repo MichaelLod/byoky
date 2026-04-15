@@ -12,7 +12,7 @@ const EXPIRY_OPTIONS = [
 const BUDGET_PRESETS = [10_000, 50_000, 100_000, 500_000, 1_000_000];
 
 export function CreateGift() {
-  const { credentials, createGift, navigate, error, cloudVaultEnabled } = useWalletStore();
+  const { credentials, createGift, setGiftMarketplaceToken, navigate, error, cloudVaultEnabled } = useWalletStore();
   const [credentialId, setCredentialId] = useState(credentials[0]?.id ?? '');
   const [maxTokens, setMaxTokens] = useState(100_000);
   const [expiryMs, setExpiryMs] = useState(EXPIRY_OPTIONS[1].ms);
@@ -42,7 +42,7 @@ export function CreateGift() {
     e.preventDefault();
     if (!selectedCred) return;
     setSubmitting(true);
-    const encoded = await createGift(
+    const result = await createGift(
       credentialId,
       selectedCred.providerId,
       selectedCred.label,
@@ -51,16 +51,17 @@ export function CreateGift() {
       relayUrl,
     );
     setSubmitting(false);
-    if (encoded) {
+    if (result) {
+      const { giftLink: encoded, giftId } = result;
       const link = giftLinkToUrl(encoded);
       setGiftLink(link);
       if (listPublicly) {
         try {
-          await fetch('https://marketplace.byoky.com/gifts', {
+          const resp = await fetch('https://marketplace.byoky.com/gifts', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              id: encoded.split(':')[0] || crypto.randomUUID(),
+              id: giftId,
               providerId: selectedCred.providerId,
               gifterName: gifterName.trim() || 'Anonymous',
               giftLink: link,
@@ -69,6 +70,12 @@ export function CreateGift() {
               expiresAt: Date.now() + expiryMs,
             }),
           });
+          if (resp.ok) {
+            const body = await resp.json() as { managementToken?: string };
+            if (body.managementToken) {
+              await setGiftMarketplaceToken(giftId, body.managementToken);
+            }
+          }
         } catch {
           // Marketplace listing failed silently — gift still works
         }

@@ -5,6 +5,7 @@ import {
   createCredential,
   getCredentialById,
   deleteCredential,
+  updateCredentialLabel,
 } from '../db/index.js';
 import { getCachedKey, recoverCachedKey } from '../session-keys.js';
 import { encryptWithKey, decryptWithKey } from '../crypto.js';
@@ -89,6 +90,25 @@ credentials.post('/', async (c) => {
       createdAt: row.createdAt,
     },
   }, 201);
+});
+
+credentials.patch('/:id', async (c) => {
+  const userId = c.get('userId');
+  const credentialId = c.req.param('id');
+  const body = await c.req.json<{ label?: string }>();
+  const label = body.label?.trim();
+
+  if (!label) {
+    return c.json({ error: { code: 'INVALID_INPUT', message: 'label is required' } }, 400);
+  }
+
+  const credential = await getCredentialById(userId, credentialId);
+  if (!credential) {
+    return c.json({ error: { code: 'NOT_FOUND', message: 'Credential not found' } }, 404);
+  }
+
+  await updateCredentialLabel(userId, credentialId, label);
+  return c.json({ ok: true });
 });
 
 credentials.delete('/:id', async (c) => {

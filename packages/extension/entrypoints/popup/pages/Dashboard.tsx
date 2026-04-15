@@ -1,5 +1,13 @@
+import { useState, useMemo, useRef, useEffect, type KeyboardEvent } from 'react';
 import { useWalletStore } from '../store';
-import { PROVIDERS, isGiftExpired, giftBudgetRemaining, giftBudgetPercent } from '@byoky/core';
+import {
+  PROVIDERS,
+  isGiftExpired,
+  giftBudgetRemaining,
+  giftBudgetPercent,
+  type RequestLogEntry,
+  type CredentialMeta,
+} from '@byoky/core';
 import { OfflineUpgradeBanner } from '../components/OfflineUpgradeBanner';
 
 function formatTokens(n: number): string {
@@ -17,15 +25,47 @@ function formatExpiry(ms: number): string {
   return `${hours}h`;
 }
 
+interface ProviderUsage {
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+// Aggregate the last 7 days of successful requests per provider. Per-credential
+// granularity isn't possible (request log only carries providerId, not a
+// credentialId), so multiple credentials of the same provider share these
+// numbers — acceptable for an at-a-glance card.
+function computeUsageByProvider(log: RequestLogEntry[]): Map<string, ProviderUsage> {
+  const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const byProvider = new Map<string, ProviderUsage>();
+  for (const entry of log) {
+    if (entry.timestamp < cutoff) continue;
+    if (entry.status >= 400) continue;
+    const usage = byProvider.get(entry.providerId) ?? { requests: 0, inputTokens: 0, outputTokens: 0 };
+    usage.requests++;
+    usage.inputTokens += entry.inputTokens ?? 0;
+    usage.outputTokens += entry.outputTokens ?? 0;
+    byProvider.set(entry.providerId, usage);
+  }
+  return byProvider;
+}
+
 export function Dashboard() {
   const {
-    credentials, giftedCredentials, giftPreferences, giftPeerOnline,
+    credentials, giftedCredentials, giftPreferences, giftPeerOnline, requestLog,
     navigate, lock, removeCredential, removeGiftedCredential,
     setGiftPreference, cloudVaultEnabled, disableCloudVault,
   } = useWalletStore();
   const activeGifts = giftedCredentials.filter((gc) => !isGiftExpired(gc));
   const ownProviderIds = new Set(credentials.map((c) => c.providerId));
   const hasAny = credentials.length > 0 || activeGifts.length > 0;
+  const usageByProvider = useMemo(() => computeUsageByProvider(requestLog), [requestLog]);
+
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  function toggleExpand(id: string) {
+    setExpandedId((prev) => (prev === id ? null : id));
+  }
 
   return (
     <div>
@@ -57,61 +97,28 @@ export function Dashboard() {
       {!hasAny ? (
         <div className="empty-state">
           <p>No API keys, tokens, or gifts yet.</p>
-          <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-            <button
-              className="btn btn-primary"
-              style={{ width: 'auto' }}
-              onClick={() => navigate('add-credential')}
-            >
-              Add credential
-            </button>
-            <button
-              className="btn btn-secondary"
-              style={{ width: 'auto' }}
-              onClick={() => navigate('redeem-gift')}
-            >
-              Redeem gift
-            </button>
-          </div>
+          <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '8px' }}>
+            Tap the + button to add a credential or redeem a gift.
+          </p>
         </div>
       ) : (
         <>
-          {credentials.map((cred) => {
-            const provider = PROVIDERS[cred.providerId];
-            return (
-              <div key={cred.id} className="card">
-                <div className="card-header">
-                  <span className="card-title">{cred.label}</span>
-                  <button
-                    className="btn btn-danger btn-sm"
-                    onClick={() => removeCredential(cred.id)}
-                  >
-                    Remove
-                  </button>
-                </div>
-                <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
-                  <span className="badge badge-provider">
-                    {provider?.name ?? cred.providerId}
-                  </span>
-                  <span className="badge badge-method">
-                    {cred.authMethod === 'oauth' ? 'Setup Token' : 'API Key'}
-                  </span>
-                </div>
-                <div className="card-subtitle" style={{ marginTop: '8px' }}>
-                  Added {new Date(cred.createdAt).toLocaleDateString()}
-                </div>
-              </div>
-            );
-          })}
+          {credentials.map((cred) => (
+            <CredentialCard
+              key={cred.id}
+              cred={cred}
+              usage={usageByProvider.get(cred.providerId)}
+              expanded={expandedId === cred.id}
+              onToggle={() => toggleExpand(cred.id)}
+              onRemove={() => removeCredential(cred.id)}
+            />
+          ))}
 
           {activeGifts.map((gc) => {
             const pct = giftBudgetPercent(gc);
             const remaining = giftBudgetRemaining(gc);
             const hasOwnKey = ownProviderIds.has(gc.providerId);
             const isPreferred = giftPreferences[gc.providerId] === gc.giftId;
-            // peerOnline is populated asynchronously after refreshData;
-            // undefined means "not yet probed" — render as checking so the
-            // dot doesn't flash red before the probe lands.
             const onlineState = giftPeerOnline[gc.giftId];
             const dotClass = onlineState === true
               ? 'status-dot success'
@@ -172,25 +179,155 @@ export function Dashboard() {
               </div>
             );
           })}
-
-          <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-            <button
-              className="btn btn-secondary"
-              style={{ flex: 1 }}
-              onClick={() => navigate('add-credential')}
-            >
-              Add credential
-            </button>
-            <button
-              className="btn btn-secondary"
-              style={{ flex: 1 }}
-              onClick={() => navigate('redeem-gift')}
-            >
-              Redeem gift
-            </button>
-          </div>
         </>
       )}
+    </div>
+  );
+}
+
+interface CredentialCardProps {
+  cred: CredentialMeta;
+  usage: ProviderUsage | undefined;
+  expanded: boolean;
+  onToggle: () => void;
+  onRemove: () => void;
+}
+
+function CredentialCard({ cred, usage, expanded, onToggle, onRemove }: CredentialCardProps) {
+  const { renameCredential } = useWalletStore();
+  const provider = PROVIDERS[cred.providerId];
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(cred.label);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [editing]);
+
+  useEffect(() => {
+    if (!editing) setDraft(cred.label);
+  }, [cred.label, editing]);
+
+  async function commit() {
+    const next = draft.trim();
+    setEditing(false);
+    if (!next || next === cred.label) {
+      setDraft(cred.label);
+      return;
+    }
+    const ok = await renameCredential(cred.id, next);
+    if (!ok) setDraft(cred.label);
+  }
+
+  function cancel() {
+    setEditing(false);
+    setDraft(cred.label);
+  }
+
+  function handleKey(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      commit();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      cancel();
+    }
+  }
+
+  function startEdit(e: React.MouseEvent) {
+    e.stopPropagation();
+    setEditing(true);
+  }
+
+  return (
+    <div
+      className={`card credential-card ${expanded ? 'expanded' : ''}`}
+      onClick={editing ? undefined : onToggle}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (editing) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onToggle();
+        }
+      }}
+    >
+      <div className="card-header">
+        {editing ? (
+          <input
+            ref={inputRef}
+            className="credential-label-input"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={handleKey}
+            onClick={(e) => e.stopPropagation()}
+            maxLength={60}
+          />
+        ) : (
+          <span className="card-title">{cred.label}</span>
+        )}
+        <div className="card-actions" onClick={(e) => e.stopPropagation()}>
+          <button
+            className="icon-btn"
+            onClick={startEdit}
+            title="Rename"
+            aria-label="Rename credential"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+            </svg>
+          </button>
+          <button
+            className="btn btn-danger btn-sm"
+            onClick={onRemove}
+          >
+            Remove
+          </button>
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+        <span className="badge badge-provider">
+          {provider?.name ?? cred.providerId}
+        </span>
+        <span className="badge badge-method">
+          {cred.authMethod === 'oauth' ? 'Setup Token' : 'API Key'}
+        </span>
+      </div>
+      <div className="card-subtitle" style={{ marginTop: '8px' }}>
+        Added {new Date(cred.createdAt).toLocaleDateString()}
+      </div>
+
+      <div className={`credential-usage ${expanded ? 'open' : ''}`}>
+        <div className="credential-usage-inner">
+          {usage && usage.requests > 0 ? (
+            <>
+              <div className="usage-mini-label">Last 7 days</div>
+              <div className="usage-mini-grid">
+                <div>
+                  <div className="usage-mini-value">{usage.requests}</div>
+                  <div className="usage-mini-tag">requests</div>
+                </div>
+                <div>
+                  <div className="usage-mini-value">{formatTokens(usage.inputTokens)}</div>
+                  <div className="usage-mini-tag">input</div>
+                </div>
+                <div>
+                  <div className="usage-mini-value">{formatTokens(usage.outputTokens)}</div>
+                  <div className="usage-mini-tag">output</div>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="usage-mini-empty">No usage in the last 7 days.</div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

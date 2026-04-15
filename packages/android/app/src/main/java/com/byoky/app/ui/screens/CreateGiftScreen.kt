@@ -310,7 +310,17 @@ fun CreateGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
                                         .url("https://marketplace.byoky.com/gifts")
                                         .post(body.toString().toRequestBody("application/json".toMediaType()))
                                         .build()
-                                    okhttp3.OkHttpClient().newCall(req).execute().close()
+                                    okhttp3.OkHttpClient().newCall(req).execute().use { resp ->
+                                        if (resp.isSuccessful) {
+                                            val text = resp.body?.string() ?: ""
+                                            val mgmtToken = try {
+                                                org.json.JSONObject(text).optString("managementToken", "").takeIf { it.isNotEmpty() }
+                                            } catch (_: Exception) { null }
+                                            if (mgmtToken != null) {
+                                                wallet.setGiftMarketplaceToken(gift.id, mgmtToken)
+                                            }
+                                        }
+                                    }
                                 } catch (_: Exception) {}
                             }.start()
                         }

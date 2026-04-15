@@ -118,6 +118,10 @@ export const gifts = pgTable('gifts', {
   expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   active: boolean('active').notNull().default(true),
+  // Optional marketplace management token (encrypted at rest) for the
+  // vault to ping /gifts/:id/heartbeat on the owner's behalf — so a gift
+  // stays "online" on the marketplace while the device is backgrounded.
+  encryptedMarketplaceMgmtToken: text('encrypted_marketplace_mgmt_token'),
 }, (t) => [
   index('idx_gifts_user').on(t.userId),
 ]);
