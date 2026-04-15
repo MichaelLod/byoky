@@ -46,21 +46,25 @@ export function Navbar() {
       <div className="container navbar-inner">
         <a href="/" className="navbar-brand">
           <svg width="28" height="28" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <polygon points="40,5 64,3 88,5 64,14" fill="#0ea5e9"/>
-            <polygon points="40,5 22,12 44,18" fill="#0284c7"/>
-            <polygon points="88,5 106,12 84,18" fill="#0284c7"/>
-            <polygon points="22,12 12,26 36,26" fill="#075985"/>
-            <polygon points="106,12 116,26 92,26" fill="#075985"/>
-            <polygon points="12,26 6,42 30,40" fill="#082f49"/>
-            <polygon points="116,26 122,42 98,40" fill="#082f49"/>
-            <polygon points="36,26 30,40 48,38" fill="#1e0a4a"/>
-            <polygon points="92,26 98,40 80,38" fill="#1e0a4a"/>
-            <circle cx="24" cy="46" r="4.5" fill="#7dd3fc"/>
-            <circle cx="24" cy="46" r="2.2" fill="#e0d4ff"/>
-            <circle cx="104" cy="46" r="4.5" fill="#7dd3fc"/>
-            <circle cx="104" cy="46" r="2.2" fill="#e0d4ff"/>
-            <polygon points="52,56 64,60 64,88" fill="#3f3f4a"/>
-            <polygon points="76,56 64,60 64,88" fill="#353540"/>
+            <polygon points="40,5 64,3 88,5 64,14" fill="#7dd3fc"/>
+            <polygon points="40,5 22,12 44,18" fill="#38bdf8"/>
+            <polygon points="88,5 106,12 84,18" fill="#38bdf8"/>
+            <polygon points="22,12 12,26 36,26" fill="#0ea5e9"/>
+            <polygon points="106,12 116,26 92,26" fill="#0ea5e9"/>
+            <polygon points="12,26 6,42 30,40" fill="#0284c7"/>
+            <polygon points="116,26 122,42 98,40" fill="#0284c7"/>
+            <polygon points="36,26 30,40 48,38" fill="#075985"/>
+            <polygon points="92,26 98,40 80,38" fill="#075985"/>
+            <polygon points="44,18 84,18 80,38 48,38" fill="#38bdf8"/>
+            <polygon points="48,38 80,38 76,56 52,56" fill="#0284c7"/>
+            <polygon points="30,40 48,38 52,56 36,56" fill="#0369a1"/>
+            <polygon points="98,40 80,38 76,56 92,56" fill="#0369a1"/>
+            <circle cx="48" cy="46" r="3.5" fill="#ffffff"/>
+            <circle cx="48" cy="46" r="1.8" fill="#082f49"/>
+            <circle cx="80" cy="46" r="3.5" fill="#ffffff"/>
+            <circle cx="80" cy="46" r="1.8" fill="#082f49"/>
+            <polygon points="52,56 64,60 64,88" fill="#1e3a5f"/>
+            <polygon points="76,56 64,60 64,88" fill="#14213d"/>
           </svg>
           Byoky
         </a>
