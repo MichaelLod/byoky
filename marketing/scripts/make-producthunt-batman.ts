@@ -301,18 +301,22 @@ function buildBeatFilter(imgPath: string, dur: number): string {
 
   const CW = Math.round(VIDEO_W * 1.15);
   const CH = Math.round(VIDEO_H * 1.15);
+  // Inset composite to 78% of canvas so edges stay visible during zoom/shake
+  const INSET = 0.78;
+  const INNER_W = Math.round(CW * INSET);
+  const INNER_H = Math.round(CH * INSET);
 
   const bgChain = isLandscape
-    ? `[0:v]scale=${CW}:${CH}:force_original_aspect_ratio=decrease,pad=${CW}:${CH}:(ow-iw)/2:(oh-ih)/2:color=#141418[content]`
+    ? `[0:v]scale=${INNER_W}:${INNER_H}:force_original_aspect_ratio=decrease,pad=${CW}:${CH}:(ow-iw)/2:(oh-ih)/2:color=#141418[content]`
     : [
         `[0:v]split=2[bg0][fg0]`,
         `[bg0]scale=${CW}:${CH}:force_original_aspect_ratio=increase,crop=${CW}:${CH},boxblur=40:2,eq=brightness=-0.08[bg]`,
-        `[fg0]scale=${CW}:${CH}:force_original_aspect_ratio=decrease[fg]`,
+        `[fg0]scale=${INNER_W}:${INNER_H}:force_original_aspect_ratio=decrease[fg]`,
         `[bg][fg]overlay=(W-w)/2:(H-h)/2[content]`,
       ].join(';');
 
   const punch = 0.3;
-  const peakZoom = isLandscape ? 1.25 : 1.12;
+  const peakZoom = isLandscape ? 1.10 : 1.06;
   const zoomDelta = peakZoom - 1.0;
   const zoomExpr = `if(lt(t,${punch}),${peakZoom}-${zoomDelta.toFixed(3)}*(t/${punch}),1.0+0.02*(t-${punch})/${(dur - punch).toFixed(2)})`;
 
