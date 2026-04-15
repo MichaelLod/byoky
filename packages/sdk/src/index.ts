@@ -11,6 +11,9 @@ export {
   type ConnectResponse,
   type ProviderRequirement,
   type SessionUsage,
+  type GiftLink,
   ByokyError,
   ByokyErrorCode,
+  decodeGiftLink,
+  validateGiftLink,
 } from '@byoky/core';
