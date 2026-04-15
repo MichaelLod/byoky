@@ -331,7 +331,7 @@ export default defineBackground(() => {
           const { sessionKey } = message.payload as { sessionKey: string };
           const session = sessions.get(sessionKey);
           if (session) {
-            const disconnectOrigin = resolveOrigin(sender);
+            const disconnectOrigin = resolveAppOrigin(sender, message);
             if (disconnectOrigin === session.appOrigin) {
               sessions.delete(sessionKey);
               persistSessions();
@@ -347,7 +347,7 @@ export default defineBackground(() => {
         } else if (message.type === 'BYOKY_SESSION_STATUS') {
           const { sessionKey } = message.payload as { sessionKey: string };
           const session = sessions.get(sessionKey);
-          const statusOrigin = resolveOrigin(sender);
+          const statusOrigin = resolveAppOrigin(sender, message);
           if (!session || !statusOrigin || statusOrigin === 'unknown' || statusOrigin !== session.appOrigin) {
             response = {
               type: 'BYOKY_SESSION_STATUS_RESPONSE',
@@ -367,7 +367,7 @@ export default defineBackground(() => {
         } else if (message.type === 'BYOKY_SESSION_USAGE') {
           const { sessionKey } = message.payload as { sessionKey: string };
           const session = sessions.get(sessionKey);
-          const usageOrigin = resolveOrigin(sender);
+          const usageOrigin = resolveAppOrigin(sender, message);
           if (!session || !usageOrigin || usageOrigin === 'unknown' || usageOrigin !== session.appOrigin) {
             response = {
               type: 'BYOKY_SESSION_USAGE_RESPONSE',
@@ -393,13 +393,19 @@ export default defineBackground(() => {
 
     if (port.name !== 'byoky-proxy') return;
 
-    // Capture the origin from the port sender (set by Chrome, can't be spoofed)
+    // Capture the origin from the port sender (set by Chrome, can't be spoofed).
+    // For extension-popup-relayed requests, each message declares its own
+    // `appOrigin` (trusted because only self-pages can open this port).
     const senderUrl = port.sender?.url || port.sender?.tab?.url;
     const portOrigin = senderUrl ? new URL(senderUrl).origin : null;
+    const popupRelay = isSelfSender(port.sender);
 
     port.onMessage.addListener(async (raw: unknown) => {
-      const msg = raw as ProxyRequest;
+      const msg = raw as ProxyRequest & { appOrigin?: string };
       if (msg.sessionKey == null) return;
+      const effectiveOrigin = popupRelay && typeof msg.appOrigin === 'string'
+        ? (() => { try { return new URL(msg.appOrigin).origin; } catch { return portOrigin; } })()
+        : portOrigin;
 
       resetIdleTimer();
 
@@ -428,7 +434,7 @@ export default defineBackground(() => {
       }
 
       // Verify the requesting origin matches the session's approved origin
-      if (!portOrigin || portOrigin !== session.appOrigin) {
+      if (!effectiveOrigin || effectiveOrigin !== session.appOrigin) {
         port.postMessage({
           type: 'BYOKY_PROXY_RESPONSE_ERROR',
           requestId: msg.requestId,
@@ -782,6 +788,31 @@ export default defineBackground(() => {
     return url ? new URL(url).origin : 'unknown';
   }
 
+  /** True when the port/message comes from one of the extension's own pages
+   * (popup, sidepanel). Only those pages can declare an `appOrigin` on
+   * behalf of an iframe they host. */
+  function isSelfSender(sender: Runtime.MessageSender | undefined): boolean {
+    const url = sender?.url;
+    if (!url) return false;
+    return url.startsWith(`chrome-extension://${browser.runtime.id}/`)
+      || url.startsWith(`moz-extension://${browser.runtime.id}/`)
+      || url.startsWith(`safari-web-extension://${browser.runtime.id}/`);
+  }
+
+  /** When the message is relayed by the extension's own popup on behalf of
+   * an iframe it hosts, trust the declared `appOrigin`. Otherwise use the
+   * sender's real origin. Matches the iOS bridge semantic where the wallet
+   * app injects session context for iframes it opens. */
+  function resolveAppOrigin(
+    sender: Runtime.MessageSender,
+    message: { appOrigin?: unknown },
+  ): string {
+    if (isSelfSender(sender) && typeof message.appOrigin === 'string') {
+      try { return new URL(message.appOrigin).origin; } catch {}
+    }
+    return resolveOrigin(sender);
+  }
+
   function findActiveSession(origin: string): Session | undefined {
     if (origin === 'unknown') return undefined;
     for (const session of sessions.values()) {
@@ -809,10 +840,11 @@ export default defineBackground(() => {
   }
 
   async function handleConnect(
-    message: { id: string; payload: ConnectRequest },
+    message: { id: string; payload: ConnectRequest; appOrigin?: string },
     sender: Runtime.MessageSender,
   ): Promise<unknown> {
-    const origin = resolveOrigin(sender);
+    const origin = resolveAppOrigin(sender, message);
+    const fromPopup = isSelfSender(sender);
 
     if (isConnectRateLimited(origin)) {
       return {
@@ -835,6 +867,15 @@ export default defineBackground(() => {
         requestId: message.id,
         payload: { code: 'NO_SESSION', message: 'No active session for this origin' },
       };
+    }
+
+    // Popup-relayed connect: the wallet itself is opening this app, so
+    // auto-create a session with no approval prompt (iOS-equivalent).
+    if (fromPopup && masterPassword) {
+      return await createSession(
+        { id: message.id, payload: message.payload },
+        origin,
+      );
     }
 
     // If there's already a pending approval for this origin, wait for its result

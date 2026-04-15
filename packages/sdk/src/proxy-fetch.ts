@@ -1,4 +1,5 @@
 import type { SerializedFormDataEntry } from '@byoky/core';
+import { getMessageTarget } from './detect.js';
 
 interface ReadBodyResult {
   body: string;
@@ -96,7 +97,8 @@ export function createProxyFetch(
         channel.port1.close();
       }
 
-      window.postMessage(
+      const { target, origin } = getMessageTarget();
+      target.postMessage(
         {
           type: 'BYOKY_PROXY_REQUEST',
           requestId,
@@ -108,7 +110,7 @@ export function createProxyFetch(
           body: bodyResult?.body,
           bodyEncoding: bodyResult?.bodyEncoding,
         },
-        window.location.origin,
+        origin,
         [channel.port2],
       );
     });
