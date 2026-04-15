@@ -11,11 +11,9 @@
     </picture>
   </a>
   <br />
-  <strong>Bring your own AI. Pay your own bill.</strong>
+  <strong>Your AI budget is going to waste.</strong>
   <br />
-  Open-source AI wallet — 15 providers, 2 lines to integrate, cross-provider translation.
-  <br />
-  Your keys stay encrypted on your device. Apps never see them.
+  Byoky lets you share your token budget with friends, your team, or anyone building cool stuff — without exposing your keys.
   <br />
   <br />
   <a href="https://byoky.com">Website</a> · <a href="https://byoky.com/docs">Docs</a> · <a href="https://byoky.com/apps">Apps</a> · <a href="https://byoky.com/marketplace">Marketplace</a> · <a href="https://byoky.com/demo">Demo</a> · <a href="#quick-start">Quick Start</a> · <a href="https://discord.gg/gRs8S9fxcT">Discord</a> · <a href="https://github.com/MichaelLod/byoky/issues">Issues</a>
