@@ -9,6 +9,7 @@ dist/
 .env.local
 .vercel
 test-results/
+marketing/
 
 # Marketing assets — generated locally from e2e captures, never committed
 marketing/raw/

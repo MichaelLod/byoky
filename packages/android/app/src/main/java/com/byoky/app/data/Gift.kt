@@ -17,6 +17,10 @@ data class Gift(
     val createdAt: Long = System.currentTimeMillis(),
     val active: Boolean = true,
     val relayUrl: String,
+    /** Marketplace management token — only set when the gift was listed
+     *  publicly. Used by the app + vault to keep the marketplace online
+     *  badge fresh via POST /gifts/:id/heartbeat. */
+    val marketplaceManagementToken: String? = null,
 )
 
 data class GiftLink(

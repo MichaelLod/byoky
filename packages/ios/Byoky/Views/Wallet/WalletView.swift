@@ -109,7 +109,7 @@ struct WalletView: View {
                 }
             }
             .sheet(isPresented: $showCloudVaultSetup) {
-                CloudVaultSetupView()
+                CloudVaultSetupView(lastUsername: wallet.cloudVaultLastUsername)
                     .environmentObject(wallet)
             }
             .task {

@@ -510,9 +510,9 @@ function ImportModal({ onClose }: { onClose: () => void }) {
 }
 
 function CloudVaultModal({ onClose }: { onClose: () => void }) {
-  const { enableCloudVault, loading, error, clearError } = useWalletStore();
-  const [isSignup, setIsSignup] = useState(true);
-  const [username, setUsername] = useState('');
+  const { enableCloudVault, loading, error, clearError, cloudVaultLastUsername } = useWalletStore();
+  const [isSignup, setIsSignup] = useState(!cloudVaultLastUsername);
+  const [username, setUsername] = useState(cloudVaultLastUsername ?? '');
   const [password, setPassword] = useState('');
   const [usernameStatus, setUsernameStatus] = useState<'idle' | 'checking' | 'available' | 'taken' | 'invalid'>('idle');
   const checkTimer = useRef<ReturnType<typeof setTimeout>>(undefined);

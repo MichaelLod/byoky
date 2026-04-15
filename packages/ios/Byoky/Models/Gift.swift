@@ -13,6 +13,10 @@ struct Gift: Identifiable, Codable {
     let createdAt: Date
     var active: Bool
     let relayUrl: String
+    /// Marketplace management token — only set when the gift was listed
+    /// publicly. Used by the app + vault to keep the marketplace online badge
+    /// fresh via POST /gifts/:id/heartbeat.
+    var marketplaceManagementToken: String?
 }
 
 struct GiftLink: Codable {

@@ -291,7 +291,7 @@ struct CreateGiftView: View {
         if listPublicly, let gift = createdGift {
             let (encoded, _) = createGiftLink(from: gift)
             let link = giftLinkToUrl(encoded)
-            Task {
+            Task { @MainActor in
                 var request = URLRequest(url: URL(string: "https://marketplace.byoky.com/gifts")!)
                 request.httpMethod = "POST"
                 request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -305,7 +305,11 @@ struct CreateGiftView: View {
                     "expiresAt": Int(gift.expiresAt.timeIntervalSince1970 * 1000),
                 ]
                 request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-                _ = try? await URLSession.shared.data(for: request)
+                guard let (data, response) = try? await URLSession.shared.data(for: request) else { return }
+                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return }
+                guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let mgmtToken = json["managementToken"] as? String else { return }
+                wallet.setGiftMarketplaceToken(giftId: gift.id, token: mgmtToken)
             }
         }
     }
