@@ -1,0 +1,25 @@
+{
+  "name": "@byoky/marketing",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Marketing material generator (screenshots, composites, narrated video)",
+  "scripts": {
+    "capture:extension": "playwright test --config scripts/playwright.config.ts scripts/capture-extension.spec.ts",
+    "capture:web": "playwright test --config scripts/playwright.config.ts scripts/capture-web.spec.ts",
+    "capture:ios": "bash scripts/capture-ios.sh",
+    "capture:android": "bash scripts/capture-android.sh",
+    "compose": "tsx scripts/compose.ts",
+    "narrate": "tsx scripts/narrate.ts",
+    "video": "tsx scripts/video.ts",
+    "all:desktop": "pnpm capture:extension && pnpm capture:web && pnpm compose && pnpm narrate && pnpm video",
+    "all": "pnpm capture:extension && pnpm capture:web && pnpm capture:ios && pnpm capture:android && pnpm compose && pnpm narrate && pnpm video"
+  },
+  "dependencies": {
+    "sharp": "^0.34.2",
+    "tsx": "^4.19.2"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@types/node": "^22.10.5"
+  }
+}
