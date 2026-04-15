@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useWalletStore } from '../store';
 
 export function FloatingActionMenu() {
-  const { navigate } = useWalletStore();
+  const { navigate, openModal } = useWalletStore();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
@@ -22,16 +22,21 @@ export function FloatingActionMenu() {
     };
   }, [open]);
 
-  function go(page: 'add-credential' | 'redeem-gift' | 'app-store') {
+  function pickModal(target: 'add-credential' | 'redeem-gift') {
     setOpen(false);
-    navigate(page);
+    openModal(target);
+  }
+
+  function pickPage(target: 'app-store') {
+    setOpen(false);
+    navigate(target);
   }
 
   return (
     <div className={`fab-root ${open ? 'open' : ''}`} ref={rootRef}>
       {open && (
         <div className="fab-menu" role="menu">
-          <button className="fab-menu-item" role="menuitem" onClick={() => go('add-credential')}>
+          <button className="fab-menu-item" role="menuitem" onClick={() => pickModal('add-credential')}>
             <span className="fab-menu-icon">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="2" y="6" width="20" height="12" rx="2" />
@@ -40,7 +45,7 @@ export function FloatingActionMenu() {
             </span>
             <span>Add credential</span>
           </button>
-          <button className="fab-menu-item" role="menuitem" onClick={() => go('redeem-gift')}>
+          <button className="fab-menu-item" role="menuitem" onClick={() => pickModal('redeem-gift')}>
             <span className="fab-menu-icon">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M20 12v10H4V12" />
@@ -52,7 +57,7 @@ export function FloatingActionMenu() {
             </span>
             <span>Redeem gift</span>
           </button>
-          <button className="fab-menu-item" role="menuitem" onClick={() => go('app-store')}>
+          <button className="fab-menu-item" role="menuitem" onClick={() => pickPage('app-store')}>
             <span className="fab-menu-icon">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="2" y="2" width="9" height="9" rx="2" />

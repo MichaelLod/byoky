@@ -3,7 +3,7 @@ import { useWalletStore } from '../store';
 import { decodeGiftLink, validateGiftLink, type GiftLink } from '@byoky/core';
 
 export function RedeemGift() {
-  const { redeemGift, navigate, error, loading } = useWalletStore();
+  const { redeemGift, closeModal, error, loading } = useWalletStore();
   const [linkInput, setLinkInput] = useState('');
   const [preview, setPreview] = useState<GiftLink | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
@@ -75,7 +75,6 @@ export function RedeemGift() {
 
   return (
     <div>
-      <h2 className="page-title">Redeem Gift</h2>
       <p className="page-subtitle">
         Paste a gift link to receive token access from another Byoky user.
       </p>
@@ -141,7 +140,7 @@ export function RedeemGift() {
           <button
             type="button"
             className="btn btn-secondary"
-            onClick={() => navigate('gifts')}
+            onClick={closeModal}
           >
             Cancel
           </button>
