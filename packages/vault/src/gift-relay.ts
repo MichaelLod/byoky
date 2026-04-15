@@ -28,8 +28,8 @@ interface GiftRow {
 const connections = new Map<string, WebSocket>();
 const budgetLocks = new Map<string, Promise<void>>();
 const reconnectAttempts = new Map<string, number>();
-const RECONNECT_BASE_DELAY = 10_000;
-const RECONNECT_MAX_DELAY = 300_000; // 5 minutes
+const RECONNECT_BASE_DELAY = 2_000;
+const RECONNECT_MAX_DELAY = 60_000;
 const PING_INTERVAL = 120_000;
 const REQUEST_TIMEOUT = 120_000;
 
@@ -107,16 +107,12 @@ export function connectGift(gift: GiftRow): void {
       }
     });
 
-    ws.on('close', (code) => {
+    ws.on('close', () => {
       if (pingInterval) clearInterval(pingInterval);
       connections.delete(gift.id);
-
-      // Don't reconnect if we were kicked by primary sender (code 4001)
-      // or if the gift is no longer active/valid
-      if (code === 4001) {
-        console.log(`[gift-relay] kicked by primary sender for gift ${gift.id.slice(0, 8)}, will retry later`);
-      }
-
+      // The relay now lets senders coexist — the primary device and the
+      // vault fallback both stay connected concurrently — so any close is
+      // treated uniformly as "reconnect".
       scheduleReconnect(gift);
     });
 
