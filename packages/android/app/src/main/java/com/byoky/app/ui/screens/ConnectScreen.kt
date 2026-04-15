@@ -12,7 +12,7 @@ import com.byoky.app.ui.theme.*
 @Composable
 fun ConnectScreen(wallet: WalletStore, pairService: RelayPairService) {
     var selectedTab by remember { mutableIntStateOf(0) }
-    val tabs = listOf("Pair", "Bridge")
+    val tabs = listOf("Pair", "Sessions")
 
     Scaffold(
         topBar = {
@@ -50,7 +50,7 @@ fun ConnectScreen(wallet: WalletStore, pairService: RelayPairService) {
 
             when (selectedTab) {
                 0 -> PairContent(wallet, pairService)
-                1 -> BridgeContent(wallet)
+                1 -> AppsScreen(wallet)
             }
         }
     }

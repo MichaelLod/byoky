@@ -4,7 +4,7 @@ import { Setup } from './pages/Setup';
 import { Unlock } from './pages/Unlock';
 import { Dashboard } from './pages/Dashboard';
 import { AddCredential } from './pages/AddCredential';
-import { Activity } from './pages/Activity';
+import { Connect } from './pages/Connect';
 import { ConnectedApps } from './pages/ConnectedApps';
 import { ApprovalRequest } from './pages/ApprovalRequest';
 import { Usage } from './pages/Usage';
@@ -111,12 +111,15 @@ export default function App() {
               </svg>
             </button>
             <button
-              className={currentPage === 'activity' || currentPage === 'connected-apps' || currentPage === 'request-history' ? 'active' : ''}
-              onClick={() => useWalletStore.getState().navigate('activity')}
-              title="Activity"
+              className={currentPage === 'connect' || currentPage === 'connected-apps' || currentPage === 'request-history' ? 'active' : ''}
+              onClick={() => useWalletStore.getState().navigate('connect')}
+              title="Connect"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                <path d="M5 12.55a11 11 0 0 1 14.08 0" />
+                <path d="M1.42 9a16 16 0 0 1 21.16 0" />
+                <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
+                <line x1="12" y1="20" x2="12.01" y2="20" />
               </svg>
               {sessions.length > 0 && (
                 <span className="nav-badge">{sessions.length}</span>
@@ -151,7 +154,7 @@ export default function App() {
           {currentPage === 'setup' && <Setup />}
           {currentPage === 'unlock' && <Unlock />}
           {currentPage === 'dashboard' && <Dashboard />}
-          {currentPage === 'activity' && <Activity />}
+          {currentPage === 'connect' && <Connect />}
           {currentPage === 'connected-apps' && <ConnectedApps />}
           {currentPage === 'approval' && <ApprovalRequest />}
           {currentPage === 'usage' && <Usage />}

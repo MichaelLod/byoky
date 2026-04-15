@@ -6,7 +6,7 @@ struct MainTabView: View {
     @State private var showAddCredential = false
     @State private var showRedeemGift = false
 
-    private static let appsTabIndex = 4
+    private static let appsTabIndex = 2
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -25,26 +25,26 @@ struct MainTabView: View {
                     .accessibilityIdentifier("tab.gifts")
                     .tag(1)
 
-                ConnectView()
-                    .tabItem {
-                        Label("Connect", systemImage: "antenna.radiowaves.left.and.right")
-                    }
-                    .accessibilityIdentifier("tab.connect")
-                    .tag(2)
-
-                UsageView()
-                    .tabItem {
-                        Label("Usage", systemImage: "chart.bar")
-                    }
-                    .accessibilityIdentifier("tab.usage")
-                    .tag(3)
-
                 MarketplaceTabView()
                     .tabItem {
                         Label("Apps", systemImage: "square.grid.2x2")
                     }
                     .accessibilityIdentifier("tab.apps")
                     .tag(MainTabView.appsTabIndex)
+
+                ConnectView()
+                    .tabItem {
+                        Label("Connect", systemImage: "antenna.radiowaves.left.and.right")
+                    }
+                    .accessibilityIdentifier("tab.connect")
+                    .tag(3)
+
+                UsageView()
+                    .tabItem {
+                        Label("Usage", systemImage: "chart.bar")
+                    }
+                    .accessibilityIdentifier("tab.usage")
+                    .tag(4)
             }
             .tint(Theme.accent)
 
