@@ -53,41 +53,21 @@ struct WalletView: View {
                     .accessibilityIdentifier("wallet.settings")
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    HStack(spacing: 12) {
-                        Button {
-                            if wallet.cloudVaultEnabled {
-                                Task { await wallet.disableCloudVault() }
-                            } else {
-                                showCloudVaultSetup = true
-                            }
-                        } label: {
-                            HStack(spacing: 4) {
-                                Text("Cloud Sync")
-                                    .font(.subheadline)
-                                Image(systemName: wallet.cloudVaultEnabled ? "cloud.fill" : "icloud.slash")
-                            }
-                            .foregroundStyle(wallet.cloudVaultEnabled ? Theme.accent : .secondary)
+                    Button {
+                        if wallet.cloudVaultEnabled {
+                            Task { await wallet.disableCloudVault() }
+                        } else {
+                            showCloudVaultSetup = true
                         }
-                        .accessibilityIdentifier("wallet.vaultToggle")
-
-                        Menu {
-                            Button {
-                                showAddCredential = true
-                            } label: {
-                                Label("Add credential", systemImage: "key.fill")
-                            }
-                            .accessibilityIdentifier("wallet.menu.addCredential")
-                            Button {
-                                showRedeemGift = true
-                            } label: {
-                                Label("Redeem gift", systemImage: "gift.fill")
-                            }
-                            .accessibilityIdentifier("wallet.menu.redeemGift")
-                        } label: {
-                            Image(systemName: "plus.circle.fill")
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("Cloud Sync")
+                                .font(.subheadline)
+                            Image(systemName: wallet.cloudVaultEnabled ? "cloud.fill" : "icloud.slash")
                         }
-                        .accessibilityIdentifier("wallet.addMenu")
+                        .foregroundStyle(wallet.cloudVaultEnabled ? Theme.accent : .secondary)
                     }
+                    .accessibilityIdentifier("wallet.vaultToggle")
                 }
             }
             .sheet(isPresented: $showAddCredential) {
