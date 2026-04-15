@@ -4,6 +4,12 @@ import type { MarketplaceApp } from '@byoky/core';
 
 const MARKETPLACE_URL = 'https://byoky.com/api/apps';
 
+function resolveIcon(icon: string | undefined): string | undefined {
+  if (!icon) return undefined;
+  if (icon.startsWith('http://') || icon.startsWith('https://') || icon.startsWith('data:')) return icon;
+  return `https://byoky.com${icon.startsWith('/') ? '' : '/'}${icon}`;
+}
+
 export function AppStore() {
   const { navigate, installedApps, installApp } = useWalletStore();
   const [apps, setApps] = useState<MarketplaceApp[]>([]);
@@ -70,7 +76,7 @@ export function AppStore() {
           <div key={app.id} className="card store-app-card">
             <div className="store-app-row">
               {app.icon ? (
-                <img src={app.icon} alt={app.name} className="store-app-icon" />
+                <img src={resolveIcon(app.icon)} alt={app.name} className="store-app-icon" />
               ) : (
                 <div className="store-app-icon-placeholder">
                   {app.name.charAt(0).toUpperCase()}

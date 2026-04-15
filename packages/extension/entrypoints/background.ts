@@ -296,7 +296,7 @@ export default defineBackground(() => {
       const extensionOrigin = new URL(browser.runtime.getURL('/popup.html')).origin;
       const isExtensionPage = senderUrl.startsWith(extensionOrigin + '/');
       if (!isExtensionPage) {
-        const ALLOWED_CONTENT_ACTIONS = ['startBridgeProxy', 'checkBridge', 'startOAuth'];
+        const ALLOWED_CONTENT_ACTIONS = ['startBridgeProxy', 'checkBridge', 'startOAuth', 'stagePendingGift'];
         if (!ALLOWED_CONTENT_ACTIONS.includes((message as { action: string }).action)) return;
       }
       return handleInternal(message as { action: string; payload?: unknown });
@@ -1698,6 +1698,29 @@ export default defineBackground(() => {
           unregisterGiftFromVault(giftId).catch(() => {});
         }
         return { success: true };
+      }
+
+      case 'stagePendingGift': {
+        const { giftLink } = (message.payload ?? {}) as { giftLink?: string };
+        if (typeof giftLink !== 'string' || giftLink.length === 0 || giftLink.length > 16_000) {
+          return { ok: false, error: 'Invalid gift link' };
+        }
+        await browser.storage.local.set({ pendingGiftLink: giftLink });
+        browser.runtime.sendMessage({
+          type: 'BYOKY_INTERNAL',
+          action: 'giftStaged',
+        }).catch(() => {});
+        return { ok: true };
+      }
+
+      case 'getPendingGift': {
+        const data = await browser.storage.local.get('pendingGiftLink');
+        return { giftLink: (data.pendingGiftLink as string | undefined) ?? null };
+      }
+
+      case 'clearPendingGift': {
+        await browser.storage.local.remove('pendingGiftLink');
+        return { ok: true };
       }
 
       case 'redeemGift': {

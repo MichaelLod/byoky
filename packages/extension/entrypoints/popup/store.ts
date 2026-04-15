@@ -59,6 +59,7 @@ interface WalletState {
   activeApp: InstalledApp | null;
   currentPage: Page;
   modal: 'add-credential' | 'redeem-gift' | null;
+  pendingGiftLink: string | null;
   loading: boolean;
   error: string | null;
 
@@ -88,6 +89,8 @@ interface WalletState {
   setGiftMarketplaceToken: (giftId: string, token: string) => Promise<void>;
   revokeGift: (giftId: string) => Promise<void>;
   redeemGift: (giftLinkEncoded: string) => Promise<void>;
+  loadPendingGift: () => Promise<void>;
+  dismissPendingGift: () => Promise<void>;
   removeGiftedCredential: (id: string) => Promise<void>;
   setGiftPreference: (providerId: string, giftId: string | null) => Promise<void>;
   createGroup: (input: { name: string; providerId: string; credentialId?: string; giftId?: string; model?: string }) => Promise<string | null>;
@@ -140,6 +143,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   activeApp: null,
   currentPage: 'unlock',
   modal: null,
+  pendingGiftLink: null,
   loading: true,
   error: null,
 

@@ -117,13 +117,25 @@ const byoky = new Byoky({ timeout: 120_000 });
 export function ChatApp() {
   const [session, setSession] = useState<ByokySession | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [restoring, setRestoring] = useState(true);
 
   useEffect(() => {
-    byoky.tryReconnect().then((s) => {
-      if (s) onConnected(s);
-      setRestoring(false);
-    });
+    (async () => {
+      try {
+        const s = await byoky.tryReconnect();
+        if (s) { onConnected(s); return; }
+      } catch {}
+      // Auto-connect when loaded inside the Byoky extension popup (trusted
+      // installed apps auto-approve; non-trusted sites will fall through to
+      // the manual Connect button).
+      const inPopup = typeof window !== 'undefined' && window.location.hash.includes('byoky-in-popup');
+      if (!inPopup) return;
+      try {
+        const s = await byoky.connect({
+          providers: providerIds.map(id => ({ id, required: false })),
+        });
+        onConnected(s);
+      } catch {}
+    })();
   }, []);
 
   function onConnected(s: ByokySession) {
@@ -146,8 +158,6 @@ export function ChatApp() {
       setError(err.message);
     }
   }
-
-  if (restoring) return null;
 
   return (
     <div className="chat-app">
