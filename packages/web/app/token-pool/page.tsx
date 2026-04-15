@@ -5,16 +5,16 @@ import { isExtensionInstalled, encodeQr, qrToSvg } from '@byoky/sdk';
 
 const MARKETPLACE_API = process.env.NEXT_PUBLIC_MARKETPLACE_URL ?? 'https://marketplace.byoky.com';
 
-function toMobileDeepLink(giftLink: string): string {
-  try {
-    const url = new URL(giftLink);
-    if (url.hash.startsWith('#')) return `byoky://gift/${url.hash.slice(1)}`;
-    const parts = url.pathname.split('/').filter(Boolean);
-    const encoded = parts[parts.length - 1] ?? '';
-    return encoded ? `byoky://gift/${encoded}` : giftLink;
-  } catch {
-    return giftLink;
-  }
+const CHROME_STORE = 'https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon';
+const FIREFOX_STORE = 'https://addons.mozilla.org/en-US/firefox/addon/byoky/';
+const IOS_STORE = 'https://apps.apple.com/app/byoky/id6760779919';
+
+function extensionStoreUrl(): string {
+  if (typeof navigator === 'undefined') return CHROME_STORE;
+  const ua = navigator.userAgent.toLowerCase();
+  if (ua.includes('firefox')) return FIREFOX_STORE;
+  if (ua.includes('safari') && !ua.includes('chrome')) return IOS_STORE;
+  return CHROME_STORE;
 }
 
 function stageGiftInExtension(giftLink: string): Promise<boolean> {
@@ -500,6 +500,15 @@ export default function Marketplace() {
         .mp-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
         .mp-btn-muted { background: var(--bg-elevated, #f5f5f4); color: var(--text-secondary); }
         .mp-btn-muted:hover { background: var(--bg-elevated, #e5e5e5); }
+        .mp-btn-secondary {
+          background: var(--bg-elevated, #f5f5f4);
+          color: var(--text, #1a1a1a);
+          text-decoration: none;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .mp-btn-secondary:hover { background: var(--border, #e5e5e5); transform: translateY(-1px); }
         .mp-btn-full {
           width: 100%;
           padding: 12px;
@@ -713,12 +722,15 @@ function RedeemModal({
               </svg>
             </div>
             <h3>Scan with Byoky mobile</h3>
-            <p>Open the Byoky app on your phone and scan to receive the gift.</p>
+            <p>
+              Scan with your phone to receive the gift. No app yet? The page
+              will redirect you to the App Store or Play Store.
+            </p>
             <div className="mp-qr-wrap">
               <span
                 aria-label="Gift QR code"
                 dangerouslySetInnerHTML={{
-                  __html: qrToSvg(encodeQr(toMobileDeepLink(result.giftLink)), {
+                  __html: qrToSvg(encodeQr(result.giftLink), {
                     size: 220,
                     margin: 2,
                     darkColor: '#1a1a1a',
@@ -732,6 +744,16 @@ function RedeemModal({
 
         <div className="mp-modal-actions">
           <button className="mp-btn mp-btn-full" onClick={onClose}>Done</button>
+          {result.status === 'show-qr' && (
+            <a
+              className="mp-btn mp-btn-full mp-btn-secondary"
+              href={extensionStoreUrl()}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Install the Byoky extension
+            </a>
+          )}
           <button className="mp-link-btn" onClick={onCopy}>
             {copied ? 'Link copied' : 'Copy gift link instead'}
           </button>
