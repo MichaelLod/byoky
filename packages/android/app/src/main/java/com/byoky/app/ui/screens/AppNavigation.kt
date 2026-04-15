@@ -1,6 +1,7 @@
 package com.byoky.app.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
@@ -59,25 +60,20 @@ private fun MainScreen(wallet: WalletStore) {
     // user is already inside one of the targets).
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
-    val showFab = currentRoute !in setOf("redeem-gift", "create-gift", "settings")
+    val showFab = currentRoute !in setOf("redeem-gift", "create-gift", "settings", "app-store")
 
     Scaffold(
         floatingActionButton = {
             if (showFab) {
                 Box {
-                    FloatingActionButton(
-                        onClick = { fabMenuOpen = true },
-                        containerColor = Color.Transparent,
-                        shape = CircleShape,
+                    Box(
                         modifier = Modifier
                             .shadow(elevation = 8.dp, shape = CircleShape, ambientColor = Accent, spotColor = Accent)
                             .clip(CircleShape)
-                            .background(
-                                brush = Brush.linearGradient(
-                                    colors = listOf(AccentHover, Accent),
-                                ),
-                            )
-                            .size(56.dp),
+                            .background(Brush.linearGradient(colors = listOf(AccentHover, Accent)))
+                            .size(56.dp)
+                            .clickable { fabMenuOpen = true },
+                        contentAlignment = Alignment.Center,
                     ) {
                         Icon(Icons.Default.Add, contentDescription = "Open add menu", tint = Color.White)
                     }
@@ -106,11 +102,7 @@ private fun MainScreen(wallet: WalletStore) {
                             leadingIcon = { Icon(Icons.Default.Apps, null, tint = Accent) },
                             onClick = {
                                 fabMenuOpen = false
-                                selectedTab = 2
-                                navController.navigate("apps") {
-                                    popUpTo("wallet") { inclusive = false }
-                                    launchSingleTop = true
-                                }
+                                navController.navigate("app-store") { launchSingleTop = true }
                             },
                         )
                     }
@@ -179,7 +171,15 @@ private fun MainScreen(wallet: WalletStore) {
             }
             composable("connect") { ConnectScreen(wallet, pairService) }
             composable("usage") { UsageScreen(wallet) }
-            composable("apps") { MarketplaceTabScreen(wallet) }
+            composable("apps") {
+                MarketplaceTabScreen(
+                    wallet = wallet,
+                    onBrowseStore = { navController.navigate("app-store") { launchSingleTop = true } },
+                )
+            }
+            composable("app-store") {
+                AppStoreScreen(wallet = wallet, onBack = { navController.popBackStack() })
+            }
             composable("settings") { SettingsScreen(wallet) }
         }
     }

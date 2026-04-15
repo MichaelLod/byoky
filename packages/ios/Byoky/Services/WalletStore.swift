@@ -1161,10 +1161,6 @@ final class WalletStore: ObservableObject {
         try await enableCloudVault(username: username, password: password, isSignup: false)
     }
 
-    func vaultActivate(username: String, password: String) async throws {
-        try await enableCloudVault(username: username, password: password, isSignup: true)
-    }
-
     var vaultBannerDismissedAt: Date? {
         get {
             let ts = UserDefaults.standard.double(forKey: "vaultBannerDismissedAt")

@@ -59,6 +59,7 @@ interface WalletState {
   activeApp: InstalledApp | null;
   currentPage: Page;
   modal: 'add-credential' | 'redeem-gift' | null;
+  settingsInitialModal: 'cloud-vault' | null;
   pendingGiftLink: string | null;
   loading: boolean;
   error: string | null;
@@ -67,7 +68,8 @@ interface WalletState {
   setup: (password: string) => Promise<void>;
   vaultBootstrapSignup: (username: string, password: string) => Promise<void>;
   vaultBootstrapLogin: (username: string, password: string) => Promise<void>;
-  vaultActivate: (username: string) => Promise<void>;
+  openSettingsCloudVault: () => void;
+  consumeSettingsInitialModal: () => void;
   dismissVaultBanner: () => Promise<void>;
   unlock: (password: string) => Promise<boolean>;
   lock: () => Promise<void>;
@@ -143,6 +145,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   activeApp: null,
   currentPage: 'unlock',
   modal: null,
+  settingsInitialModal: null,
   pendingGiftLink: null,
   loading: true,
   error: null,
@@ -246,17 +249,12 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     }
   },
 
-  vaultActivate: async (username: string) => {
-    set({ loading: true, error: null });
-    try {
-      const res = await sendInternal('cloudVaultActivate', { username });
-      if (res.error) throw new Error(res.error as string);
-      await get().refreshData();
-      set({ loading: false });
-    } catch (e) {
-      set({ error: (e as Error).message, loading: false });
-    }
+  openSettingsCloudVault: () => {
+    if (!get().isUnlocked) return;
+    set({ currentPage: 'settings', settingsInitialModal: 'cloud-vault', modal: null, error: null });
   },
+
+  consumeSettingsInitialModal: () => set({ settingsInitialModal: null }),
 
   dismissVaultBanner: async () => {
     const now = Date.now();

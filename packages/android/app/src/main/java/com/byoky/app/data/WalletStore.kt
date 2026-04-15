@@ -1556,13 +1556,6 @@ class WalletStore(context: Context) {
         }
     }
 
-    suspend fun vaultActivate(username: String) {
-        withContext(Dispatchers.IO) {
-            val password = masterPassword ?: throw IllegalStateException("Wallet is locked")
-            enableCloudVault(username, password, isSignup = true)
-        }
-    }
-
     private val _vaultBannerDismissedAt = MutableStateFlow(
         prefs.getLong("vaultBannerDismissedAt", 0L).let { if (it > 0) it else 0L }
     )

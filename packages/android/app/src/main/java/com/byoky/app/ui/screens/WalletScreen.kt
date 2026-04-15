@@ -129,7 +129,7 @@ fun WalletScreen(
             Column(modifier = Modifier.padding(padding)) {
                 if (!cloudVaultEnabled) {
                     Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                        OfflineUpgradeBanner(wallet)
+                        OfflineUpgradeBanner(wallet, onActivate = { showCloudVaultSetup = true })
                     }
                 }
                 EmptyWallet(
@@ -146,7 +146,7 @@ fun WalletScreen(
             ) {
                 if (!cloudVaultEnabled) {
                     item {
-                        OfflineUpgradeBanner(wallet)
+                        OfflineUpgradeBanner(wallet, onActivate = { showCloudVaultSetup = true })
                     }
                 }
                 if (credentials.isNotEmpty()) {

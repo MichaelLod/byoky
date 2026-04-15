@@ -193,6 +193,34 @@ export function ConnectedApps() {
         </div>
       )}
 
+      <button
+        className="btn btn-secondary btn-sm"
+        style={{ marginTop: '4px', marginBottom: '12px' }}
+        onClick={() => setShowCreateGroup(true)}
+      >
+        + New group
+      </button>
+
+      {showCreateGroup && (
+        <div className="card" style={{ marginBottom: '16px' }}>
+          <GroupForm
+            credentials={credentials}
+            giftedCredentials={giftedCredentials}
+            onSave={async (patch) => {
+              const id = await createGroup({
+                name: patch.name ?? 'Untitled',
+                providerId: patch.providerId ?? 'anthropic',
+                credentialId: patch.credentialId ?? undefined,
+                giftId: patch.giftId ?? undefined,
+                model: patch.model ?? undefined,
+              });
+              if (id) setShowCreateGroup(false);
+            }}
+            onCancel={() => setShowCreateGroup(false)}
+          />
+        </div>
+      )}
+
       {/* Groups: each is a drop target. Apps in the group are listed inside. */}
       {orderedGroups.map((group) => {
         const groupSessions = sessionsByGroup.get(group.id) ?? [];
@@ -389,34 +417,6 @@ export function ConnectedApps() {
           </div>
         );
       })}
-
-      <button
-        className="btn btn-secondary btn-sm"
-        style={{ marginTop: '4px', marginBottom: '16px' }}
-        onClick={() => setShowCreateGroup(true)}
-      >
-        + New group
-      </button>
-
-      {showCreateGroup && (
-        <div className="card" style={{ marginBottom: '16px' }}>
-          <GroupForm
-            credentials={credentials}
-            giftedCredentials={giftedCredentials}
-            onSave={async (patch) => {
-              const id = await createGroup({
-                name: patch.name ?? 'Untitled',
-                providerId: patch.providerId ?? 'anthropic',
-                credentialId: patch.credentialId ?? undefined,
-                giftId: patch.giftId ?? undefined,
-                model: patch.model ?? undefined,
-              });
-              if (id) setShowCreateGroup(false);
-            }}
-            onCancel={() => setShowCreateGroup(false)}
-          />
-        </div>
-      )}
 
       {trustedSites.length > 0 && (
         <div style={{ marginTop: sessions.length > 0 ? '24px' : '0' }}>

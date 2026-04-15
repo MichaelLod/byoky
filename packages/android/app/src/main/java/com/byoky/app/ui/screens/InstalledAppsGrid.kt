@@ -28,29 +28,27 @@ import com.byoky.app.data.WalletStore
 import com.byoky.app.ui.theme.*
 
 @Composable
-fun InstalledAppsGrid(wallet: WalletStore) {
+fun InstalledAppsGrid(
+    wallet: WalletStore,
+    onBrowseStore: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val apps by wallet.installedApps.collectAsState()
-    var showStore by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
     val enabledApps = apps.filter { it.enabled }
     val disabledApps = apps.filter { !it.enabled }
 
-    if (showStore) {
-        AppStoreScreen(wallet = wallet, onBack = { showStore = false })
-        return
-    }
-
     if (apps.isEmpty()) {
         Box(
-            modifier = Modifier.fillMaxSize().padding(32.dp),
+            modifier = modifier.fillMaxSize().padding(32.dp),
             contentAlignment = Alignment.Center,
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Icon(Icons.Default.Apps, contentDescription = null, modifier = Modifier.size(48.dp), tint = TextMuted)
                 Text("No apps installed", color = TextSecondary)
                 Text("Browse the store to find apps that use your API keys.", fontSize = 13.sp, color = TextMuted, textAlign = TextAlign.Center)
-                Button(onClick = { showStore = true }, colors = ButtonDefaults.buttonColors(containerColor = Accent)) {
+                Button(onClick = onBrowseStore, colors = ButtonDefaults.buttonColors(containerColor = Accent)) {
                     Text("Browse Store")
                 }
             }
@@ -58,10 +56,10 @@ fun InstalledAppsGrid(wallet: WalletStore) {
         return
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    Column(modifier = modifier.fillMaxSize()) {
         LazyVerticalGrid(
             columns = GridCells.Fixed(4),
-            contentPadding = PaddingValues(horizontal = 16.dp),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {

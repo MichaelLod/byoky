@@ -1968,34 +1968,6 @@ export default defineBackground(() => {
         return { success: true };
       }
 
-      case 'cloudVaultActivate': {
-        const rlErr = checkVaultAuthRate(); if (rlErr) return rlErr;
-        if (!masterPassword) return { error: 'Wallet is locked' };
-        const { username } = message.payload as { username: string };
-        const result = await vaultFetch('/auth/signup', 'POST', { username, password: masterPassword });
-        if (!result.ok) {
-          const err = result.data.error as Record<string, string> | undefined;
-          return { error: err?.message ?? 'Signup failed' };
-        }
-        const token = result.data.token as string;
-        const sessionId = result.data.sessionId as string;
-        await saveCloudVaultState({
-          enabled: true,
-          username,
-          token,
-          sessionId,
-          tokenIssuedAt: Date.now(),
-          tokenExpired: false,
-          credentialMap: {},
-        });
-        await browser.storage.local.set({ 'cloudVault.lastUsername': username });
-        enqueueVaultSync(async () => {
-          await syncAllCredentialsToVault(token);
-          await syncPendingGifts();
-        });
-        return { success: true };
-      }
-
       case 'cloudVaultLogin': {
         const rlErr = checkVaultAuthRate(); if (rlErr) return rlErr;
         if (!masterPassword) return { error: 'Wallet is locked' };
