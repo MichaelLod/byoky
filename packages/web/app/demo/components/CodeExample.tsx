@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { highlightCode } from './highlight';
 
 const examples = [
   {
@@ -361,7 +362,7 @@ export function CodeExample() {
           <span className="code-filename">{active.filename}</span>
         </div>
         <pre className="code-body">
-          <code>{active.code}</code>
+          <code>{highlightCode(active.code)}</code>
         </pre>
       </div>
 
