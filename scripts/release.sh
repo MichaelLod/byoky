@@ -205,8 +205,8 @@ if ! git diff --quiet HEAD 2>/dev/null; then
 fi
 
 CURRENT_BRANCH=$(git branch --show-current)
-if [ "$CURRENT_BRANCH" != "dev" ] && [ "$CURRENT_BRANCH" != "main" ]; then
-  WARNINGS+=("On branch '$CURRENT_BRANCH' (expected dev or main)")
+if [ "$CURRENT_BRANCH" != "main" ]; then
+  WARNINGS+=("On branch '$CURRENT_BRANCH' (expected main)")
 fi
 
 # Store credentials check
