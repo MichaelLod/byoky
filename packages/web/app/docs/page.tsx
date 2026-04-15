@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { GitHubStarButton } from '../components/GitHubStarButton';
 
 /* ─── Navigation structure ────────────────────── */
 
@@ -135,6 +136,7 @@ export default function Docs() {
         <div className="docs-hero">
           <span className="docs-hero-label">Documentation</span>
           <h1>Byoky Docs</h1>
+          <GitHubStarButton repo="MichaelLod/byoky" />
           <p>
             Everything you need to integrate Byoky into your app &mdash; from
             quickstart to API reference.

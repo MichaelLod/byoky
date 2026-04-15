@@ -2,6 +2,8 @@ import { FadeIn } from './components/FadeIn';
 import { AnimatedCounter } from './components/AnimatedCounter';
 import { VersionStatus } from './components/VersionStatus';
 import { ProviderMarquee } from './components/ProviderMarquee';
+import { GitHubStars } from './components/GitHubStars';
+import { GitHubStarButton } from './components/GitHubStarButton';
 
 export default function Home() {
   return (
@@ -22,12 +24,16 @@ export default function Home() {
       <div className="divider" />
       <Security />
       <div className="divider" />
-      <CrossProviderRouting />
+      <section className="side-by-side-section">
+        <div className="container">
+          <div className="side-by-side-grid">
+            <CrossProviderRouting />
+            <MobileWallet />
+          </div>
+        </div>
+      </section>
       <div className="divider" />
-      <MobileWallet />
-      <div className="divider" />
-      <OpenSource />
-      <ClosingCTA />
+      <ClosingStrip />
       <Footer />
     </>
   );
@@ -303,7 +309,7 @@ function OpenClawCTA() {
                 in OpenClaw — for free.
               </h2>
               <p>
-                Get a free token gift from the marketplace, or plug in your
+                Get a free token gift from the token pool, or plug in your
                 existing <strong>Claude Pro/Max</strong> subscription. Either way,
                 zero API credits, zero card on file — just a 5-minute setup.
               </p>
@@ -724,59 +730,35 @@ function Providers() {
 
 function CrossProviderRouting() {
   return (
-    <section className="openclaw-section">
-      <div className="container">
         <FadeIn>
-          <div className="openclaw-card">
-            <div className="openclaw-badge">New</div>
-            <div className="openclaw-content">
-              <div className="openclaw-header">
-                <div className="openclaw-logo openclaw-logo-cloud">
-                  <ShuffleIcon />
-                </div>
-                <div>
-                  <h3>One App. Any Provider.</h3>
-                  <p className="openclaw-tagline">
-                    Drag an app between groups to swap which model it talks to —
-                    even across providers.
-                  </p>
-                </div>
+          <div className="sbs-card">
+            <div className="sbs-badge">Cross-Provider</div>
+            <div className="sbs-icon-row">
+              <ShuffleIcon />
+            </div>
+            <h3 className="sbs-title">One App. Any Provider.</h3>
+            <p className="sbs-desc">
+              Move an app from a Claude group into a GPT group — the wallet translates
+              requests on the fly. Anthropic ↔ OpenAI ↔ Gemini ↔ Cohere. No code changes.
+            </p>
+            <div className="openclaw-flow" style={{ marginTop: 16 }}>
+              <div className="openclaw-flow-step">
+                <span className="openclaw-flow-label">Your App</span>
+                <span className="openclaw-flow-sub">Anthropic SDK</span>
               </div>
-              <p className="openclaw-desc">
-                Bucket your connected apps into groups and pin each group to a
-                credential. Move an app from a Claude group into a GPT group
-                and the wallet transparently translates the request — Anthropic
-                ↔ OpenAI ↔ Gemini ↔ Cohere. Request bodies, response bodies,
-                and SSE streams are rewritten on the fly. Apps keep calling
-                their preferred SDK; the wallet picks the upstream.
-              </p>
-              <div className="openclaw-flow">
-                <div className="openclaw-flow-step">
-                  <span className="openclaw-flow-label">Your App</span>
-                  <span className="openclaw-flow-sub">Anthropic SDK</span>
-                </div>
-                <span className="openclaw-flow-arrow">&rarr;</span>
-                <div className="openclaw-flow-step openclaw-flow-highlight">
-                  <span className="openclaw-flow-label">Wallet</span>
-                  <span className="openclaw-flow-sub">Translates on the fly</span>
-                </div>
-                <span className="openclaw-flow-arrow">&rarr;</span>
-                <div className="openclaw-flow-step">
-                  <span className="openclaw-flow-label">GPT-4o</span>
-                  <span className="openclaw-flow-sub">OpenAI API</span>
-                </div>
+              <span className="openclaw-flow-arrow">&rarr;</span>
+              <div className="openclaw-flow-step openclaw-flow-highlight">
+                <span className="openclaw-flow-label">Wallet</span>
+                <span className="openclaw-flow-sub">Translates</span>
               </div>
-              <p className="openclaw-desc">
-                <strong>No code changes.</strong> Live sessions reroute the next
-                request automatically. Run the same agent on Claude one day and
-                GPT the next without touching a line of code. Try a new model
-                without rewriting your prompts.
-              </p>
+              <span className="openclaw-flow-arrow">&rarr;</span>
+              <div className="openclaw-flow-step">
+                <span className="openclaw-flow-label">GPT-4o</span>
+                <span className="openclaw-flow-sub">OpenAI API</span>
+              </div>
             </div>
           </div>
         </FadeIn>
-      </div>
-    </section>
   );
 }
 
@@ -784,132 +766,61 @@ function CrossProviderRouting() {
 
 function MobileWallet() {
   return (
-    <section className="openclaw-section">
-      <div className="container">
-        <FadeIn>
-          <div className="openclaw-card">
-            <div className="openclaw-badge">Mobile</div>
-            <div className="openclaw-content">
-              <div className="openclaw-header">
-                <div className="openclaw-logo openclaw-logo-cloud">
-                  <PhoneIcon />
-                </div>
-                <div>
-                  <h3>No Extension? Use Your Phone</h3>
-                  <p className="openclaw-tagline">
-                    Connect any browser to your Byoky mobile wallet via QR code.
-                  </p>
-                </div>
+        <FadeIn delay={0.1}>
+          <div className="sbs-card">
+            <div className="sbs-badge">Mobile</div>
+            <div className="sbs-icon-row">
+              <PhoneIcon />
+            </div>
+            <h3 className="sbs-title">No Extension? Use Your Phone.</h3>
+            <p className="sbs-desc">
+              Scan a QR code with the Byoky iOS or Android app. Your keys proxy
+              through your phone. Works on any browser, any computer.
+            </p>
+            <div className="openclaw-flow" style={{ marginTop: 16 }}>
+              <div className="openclaw-flow-step">
+                <span className="openclaw-flow-label">Browser</span>
+                <span className="openclaw-flow-sub">Any device</span>
               </div>
-              <p className="openclaw-desc">
-                No browser extension needed. The web app shows a pairing code,
-                you scan it with the Byoky iOS or Android app, and your keys
-                proxy through your phone. Works on any browser, any computer.
-                Keep the app open while using the web app.
-              </p>
-              <div className="openclaw-flow">
-                <div className="openclaw-flow-step">
-                  <span className="openclaw-flow-label">Web App</span>
-                  <span className="openclaw-flow-sub">Any browser</span>
-                </div>
-                <span className="openclaw-flow-arrow">&harr;</span>
-                <div className="openclaw-flow-step">
-                  <span className="openclaw-flow-label">Relay</span>
-                  <span className="openclaw-flow-sub">WebSocket</span>
-                </div>
-                <span className="openclaw-flow-arrow">&harr;</span>
-                <div className="openclaw-flow-step openclaw-flow-highlight">
-                  <span className="openclaw-flow-label">Phone Wallet</span>
-                  <span className="openclaw-flow-sub">Keys stay here</span>
-                </div>
-                <span className="openclaw-flow-arrow">&rarr;</span>
-                <div className="openclaw-flow-step">
-                  <span className="openclaw-flow-label">LLM API</span>
-                </div>
+              <span className="openclaw-flow-arrow">&harr;</span>
+              <div className="openclaw-flow-step openclaw-flow-highlight">
+                <span className="openclaw-flow-label">Phone</span>
+                <span className="openclaw-flow-sub">Keys here</span>
               </div>
-              <div className="code-block">
-                <div className="code-header">
-                  <div className="code-dots">
-                    <span className="code-dot code-dot-red" />
-                    <span className="code-dot code-dot-yellow" />
-                    <span className="code-dot code-dot-green" />
-                  </div>
-                  <span className="code-filename">app.ts</span>
-                </div>
-                <pre className="code-body"><code>{`const session = await byoky.connect({
-  providers: [{ id: 'anthropic' }],
-  useRelay: true,
-  modal: true, // built-in connect UI with QR code
-});
-// Works exactly the same as extension mode`}</code></pre>
+              <span className="openclaw-flow-arrow">&rarr;</span>
+              <div className="openclaw-flow-step">
+                <span className="openclaw-flow-label">LLM API</span>
               </div>
             </div>
           </div>
         </FadeIn>
-      </div>
-    </section>
   );
 }
 
 
 /* ─── Open Source ───────────────────────────────── */
 
-function OpenSource() {
+function ClosingStrip() {
   return (
-    <section className="oss-section">
+    <section className="closing-strip">
       <div className="container">
-        <FadeIn>
-          <h2>Built in the open.</h2>
-          <p className="subtitle">
-            Byoky is fully open source under the MIT license. Audit the code,
-            contribute, or fork it.
-          </p>
-          <a
-            href="https://github.com/MichaelLod/byoky"
-            className="oss-badge"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <GitHubIcon />
-            Star on GitHub
-          </a>
-          <p className="oss-license">MIT License — free forever.</p>
-        </FadeIn>
-      </div>
-    </section>
-  );
-}
-
-/* ─── Closing CTA ─────────────────────────────── */
-
-function ClosingCTA() {
-  return (
-    <section className="cta-section">
-      <div className="cta-glow" aria-hidden />
-      <div className="container">
-        <FadeIn>
-          <h2>Ready to own your AI keys?</h2>
-          <p className="subtitle">
-            Install in 30 seconds. No account required.
-          </p>
-          <div className="cta-actions">
+        <div className="closing-strip-inner">
+          <span className="closing-strip-label">Open source · MIT licensed</span>
+          <div className="closing-strip-actions">
+            <GitHubStarButton repo="MichaelLod/byoky" />
             <a
               href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon"
-              className="btn btn-primary"
+              className="btn btn-primary btn-sm"
               target="_blank"
               rel="noopener noreferrer"
             >
-              <DownloadIcon />
-              Install for Chrome
+              Install Wallet
             </a>
-            <a
-              href="/docs"
-              className="btn btn-secondary"
-            >
+            <a href="/docs" className="closing-strip-link">
               Read the Docs
             </a>
           </div>
-        </FadeIn>
+        </div>
       </div>
     </section>
   );
@@ -921,46 +832,31 @@ function Footer() {
   return (
     <footer className="footer">
       <div className="container">
-        <div className="footer-inner">
-          <span className="footer-brand">Byoky</span>
-          <div className="footer-links">
-            <a
-              href="https://github.com/MichaelLod/byoky"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              GitHub
-            </a>
-            <a href="/docs">
-              Docs
-            </a>
-            <a href="/apps">
-              App Store
-            </a>
-            <a href="/marketplace">
-              Token Marketplace
-            </a>
-            <a href="/demo">
-              Demo
-            </a>
-            <a
-              href="https://github.com/MichaelLod/byoky/tree/main/packages/openclaw-plugin"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              OpenClaw Plugin
-            </a>
-            <a
-              href="https://github.com/MichaelLod/byoky/blob/main/LICENSE"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              MIT License
-            </a>
+        <div className="footer-grid">
+          <div className="footer-col">
+            <span className="footer-brand">Byoky</span>
+            <span className="footer-note">The AI token network.</span>
           </div>
-          <span className="footer-note">
-            Made for developers who care about key security.
-          </span>
+          <div className="footer-col">
+            <span className="footer-col-title">Product</span>
+            <a href="/docs">Docs</a>
+            <a href="/demo">Demo</a>
+            <a href="/marketplace">Token Pool</a>
+            <a href="/openclaw">OpenClaw</a>
+          </div>
+          <div className="footer-col">
+            <span className="footer-col-title">Resources</span>
+            <a href="https://github.com/MichaelLod/byoky" target="_blank" rel="noopener noreferrer">GitHub</a>
+            <a href="https://github.com/MichaelLod/byoky/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a>
+            <a href="/blog">Blog</a>
+          </div>
+          <div className="footer-col">
+            <span className="footer-col-title">Install</span>
+            <a href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon" target="_blank" rel="noopener noreferrer">Chrome</a>
+            <a href="https://addons.mozilla.org/en-US/firefox/addon/byoky/" target="_blank" rel="noopener noreferrer">Firefox</a>
+            <a href="https://apps.apple.com/app/byoky/id6760779919" target="_blank" rel="noopener noreferrer">iOS</a>
+            <a href="https://play.google.com/store/apps/details?id=com.byoky.app" target="_blank" rel="noopener noreferrer">Android</a>
+          </div>
         </div>
       </div>
     </footer>

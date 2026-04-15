@@ -103,9 +103,12 @@ const blogStyles = `
   list-style: none;
   padding: 0;
   margin: 0;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
   gap: 16px;
+}
+@media (max-width: 640px) {
+  .blog-list { grid-template-columns: 1fr; }
 }
 
 .blog-card {
@@ -148,7 +151,7 @@ const blogStyles = `
 }
 
 .blog-card-body {
-  padding: 22px 28px 26px;
+  padding: 16px 20px 20px;
 }
 
 .blog-card-meta {
@@ -166,7 +169,7 @@ const blogStyles = `
 }
 
 .blog-card h2 {
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 700;
   margin-bottom: 8px;
   color: var(--blog-text);

@@ -10,7 +10,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'Run OpenClaw with Byoky — free, no API credits required',
     description:
-      'Use OpenClaw with Claude, GPT, and Gemini for free. Grab a token gift from the Byoky marketplace, or sign in with your Claude Pro/Max subscription. Up in 5 minutes.',
+      'Use OpenClaw with Claude, GPT, and Gemini for free. Grab a token gift from the Byoky token pool, or sign in with your Claude Pro/Max subscription. Up in 5 minutes.',
     url: 'https://byoky.com/openclaw',
     type: 'article',
     images: [
@@ -26,7 +26,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'Run OpenClaw with Byoky — free, no API credits required',
     description:
-      'Use OpenClaw with Claude, GPT, and Gemini for free. Grab a token gift from the marketplace, or sign in with your Claude Pro/Max subscription.',
+      'Use OpenClaw with Claude, GPT, and Gemini for free. Grab a token gift from the token pool, or sign in with your Claude Pro/Max subscription.',
     images: ['/openclaw-og.png'],
   },
 };
@@ -90,14 +90,14 @@ export default function OpenClawTutorial() {
         <Step
           n={2}
           title="Grab a free token gift"
-          subtitle="Don't have an API key yet? Don't need one. The community shares free token gifts on the Byoky marketplace."
+          subtitle="Don't have an API key yet? Don't need one. The community shares free token gifts on the Byoky token pool."
           highlight
         >
           <ol className="oc-list">
             <li>
               Open the{' '}
               <a className="oc-link" href="/marketplace">
-                Token Marketplace
+                Token Token Pool
               </a>
               .
             </li>
@@ -118,7 +118,7 @@ export default function OpenClawTutorial() {
             real key never reaches you, and OpenClaw never sees it either.
           </p>
           <p className="oc-note oc-note-muted">
-            Already have your own API key? Skip the marketplace and add the
+            Already have your own API key? Skip the token pool and add the
             credential directly in the wallet.
           </p>
 
@@ -285,11 +285,11 @@ function FreeCallout() {
               <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" />
             </svg>
           </div>
-          <h3>Token gift from the marketplace</h3>
+          <h3>Token gift from the token pool</h3>
           <p>
             Anyone can gift token access on the{' '}
             <a className="oc-link" href="/marketplace">
-              Byoky marketplace
+              Byoky token pool
             </a>
             . OpenClaw runs entirely on the gifter&apos;s budget — capped,
             revocable, and proxied through their wallet so their key never
@@ -331,7 +331,7 @@ function Overview() {
         <div className="oc-overview-card">
           <span className="oc-overview-num">2</span>
           <h3>Get free tokens</h3>
-          <p>Redeem a gift from the marketplace, or use your own key.</p>
+          <p>Redeem a gift from the token pool, or use your own key.</p>
         </div>
         <div className="oc-overview-card">
           <span className="oc-overview-num">3</span>
@@ -417,7 +417,7 @@ function Closing() {
     <section className="oc-closing">
       <h2>Ready to try it?</h2>
       <p>
-        Grab a free token gift from the marketplace and you&apos;ll be running
+        Grab a free token gift from the token pool and you&apos;ll be running
         Claude or GPT inside OpenClaw in under five minutes.
       </p>
       <div className="oc-cta-row">

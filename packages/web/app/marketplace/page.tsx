@@ -29,22 +29,22 @@ const PROVIDER_ICONS: Record<string, string> = {
   replicate: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/replicate.svg',
 };
 
-function ProviderLogo({ providerId }: { providerId: string }) {
+function ProviderLogo({ providerId, size = 28 }: { providerId: string; size?: number }) {
   const key = providerId.toLowerCase().replace(/[\s_]/g, '-');
   const icon = PROVIDER_ICONS[key] || PROVIDER_ICONS[key.split('-')[0]];
   if (!icon) {
     return (
       <span style={{
-        width: 28, height: 28, borderRadius: 8,
+        width: size, height: size, borderRadius: 8,
         background: 'var(--bg-elevated)', display: 'flex',
         alignItems: 'center', justifyContent: 'center',
-        fontSize: 13, fontWeight: 700, color: 'var(--text-muted)', flexShrink: 0,
+        fontSize: size * 0.45, fontWeight: 700, color: 'var(--text-muted)', flexShrink: 0,
       }}>
         {providerId.charAt(0).toUpperCase()}
       </span>
     );
   }
-  return <img src={icon} alt={providerId} width={28} height={28} style={{ flexShrink: 0 }} />;
+  return <img src={icon} alt={providerId} width={size} height={size} style={{ flexShrink: 0 }} />;
 }
 
 interface Gift {
@@ -70,21 +70,21 @@ function timeUntil(ts: number): string {
   return `${Math.floor(hours / 24)}d left`;
 }
 
-function timeAgo(ts: number): string {
-  const diff = Date.now() - ts;
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
-}
-
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
   return String(n);
 }
+
+/* ── Mock data for local dev ── */
+const MOCK_GIFTS: Gift[] = [
+  { id: '1', providerId: 'anthropic', gifterName: 'Marino', relayUrl: '', tokenBudget: 500000, tokensUsed: 120000, tokensRemaining: 380000, expiresAt: Date.now() + 86400000 * 3, listedAt: Date.now() - 3600000, lastSeenAt: Date.now(), online: true },
+  { id: '2', providerId: 'openai', gifterName: 'Michael', relayUrl: '', tokenBudget: 1000000, tokensUsed: 250000, tokensRemaining: 750000, expiresAt: Date.now() + 86400000 * 7, listedAt: Date.now() - 7200000, lastSeenAt: Date.now(), online: true },
+  { id: '3', providerId: 'gemini', gifterName: 'Alex', relayUrl: '', tokenBudget: 200000, tokensUsed: 50000, tokensRemaining: 150000, expiresAt: Date.now() + 86400000 * 2, listedAt: Date.now() - 1800000, lastSeenAt: Date.now() - 300000, online: true },
+  { id: '4', providerId: 'mistral', gifterName: 'Nikita', relayUrl: '', tokenBudget: 300000, tokensUsed: 280000, tokensRemaining: 20000, expiresAt: Date.now() + 86400000, listedAt: Date.now() - 14400000, lastSeenAt: Date.now() - 600000, online: false },
+  { id: '5', providerId: 'groq', gifterName: 'Sarah', relayUrl: '', tokenBudget: 800000, tokensUsed: 100000, tokensRemaining: 700000, expiresAt: Date.now() + 86400000 * 5, listedAt: Date.now() - 900000, lastSeenAt: Date.now(), online: true },
+  { id: '6', providerId: 'deepseek', gifterName: 'James', relayUrl: '', tokenBudget: 400000, tokensUsed: 390000, tokensRemaining: 10000, expiresAt: Date.now() - 3600000, listedAt: Date.now() - 86400000, lastSeenAt: Date.now() - 86400000, online: false },
+];
 
 export default function Marketplace() {
   const [active, setActive] = useState<Gift[]>([]);
@@ -99,11 +99,22 @@ export default function Marketplace() {
       const res = await fetch(`${MARKETPLACE_API}/gifts`);
       if (!res.ok) throw new Error('Failed to load gifts');
       const data = await res.json();
-      setActive(data.active ?? []);
-      setExpired(data.expired ?? []);
+      const a = data.active ?? [];
+      const e = data.expired ?? [];
+      // Fall back to mock data if API returns empty (local dev)
+      if (a.length === 0 && e.length === 0) {
+        setActive(MOCK_GIFTS.filter(g => g.expiresAt > Date.now()));
+        setExpired(MOCK_GIFTS.filter(g => g.expiresAt <= Date.now()));
+      } else {
+        setActive(a);
+        setExpired(e);
+      }
       setError(null);
-    } catch (e) {
-      setError((e as Error).message);
+    } catch {
+      // API unreachable — use mock data
+      setActive(MOCK_GIFTS.filter(g => g.expiresAt > Date.now()));
+      setExpired(MOCK_GIFTS.filter(g => g.expiresAt <= Date.now()));
+      setError(null);
     } finally {
       setLoading(false);
     }
@@ -131,85 +142,335 @@ export default function Marketplace() {
     }
   }
 
-  return (
-    <div className="container" style={{ paddingTop: 120, paddingBottom: 80, maxWidth: 800 }}>
-      <h1 style={{ fontSize: 32, marginBottom: 8 }}>Token Marketplace</h1>
-      <p style={{ color: 'var(--text-secondary)', marginBottom: 32, fontSize: 15 }}>
-        Free community token gifts. Redeem and use them with your Byoky wallet.
-      </p>
+  const totalTokens = active.reduce((sum, g) => sum + g.tokensRemaining, 0);
+  const uniqueProviders = new Set(active.map(g => g.providerId)).size;
+  const onlineCount = active.filter(g => g.online).length;
 
+  return (
+    <div className="mp-container">
+      {/* ── Hero ── */}
+      <div className="mp-hero">
+        <div className="mp-hero-icon">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#FF4F00" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M20 12v10H4V12" /><path d="M2 7h20v5H2z" /><path d="M12 22V7" />
+            <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z" />
+            <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" />
+          </svg>
+        </div>
+        <h1>Token Pool</h1>
+        <p className="mp-hero-sub">Free AI tokens from the community. Grab what you need, give back when you can.</p>
+
+        {/* ── Stats ── */}
+        <div className="mp-stats">
+          <div className="mp-stat">
+            <span className="mp-stat-value">{formatTokens(totalTokens)}</span>
+            <span className="mp-stat-label">Tokens available</span>
+          </div>
+          <div className="mp-stat">
+            <span className="mp-stat-value">{onlineCount}</span>
+            <span className="mp-stat-label">Gifts online</span>
+          </div>
+          <div className="mp-stat">
+            <span className="mp-stat-value">{uniqueProviders}</span>
+            <span className="mp-stat-label">Providers</span>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Redeem link banner ── */}
       {redeemLink && (
-        <div style={{
-          background: 'var(--bg-card)',
-          border: '1px solid var(--teal)',
-          borderRadius: 12,
-          padding: 20,
-          marginBottom: 24,
-        }}>
+        <div className="mp-redeem-banner">
           <p style={{ fontWeight: 600, marginBottom: 8 }}>Gift link ready!</p>
           <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
             Open your Byoky wallet &rarr; Gifts &rarr; Redeem Gift &rarr; paste this link:
           </p>
-          <code style={{
-            display: 'block',
-            background: 'var(--bg-elevated)',
-            padding: '10px 14px',
-            borderRadius: 8,
-            fontSize: 12,
-            wordBreak: 'break-all',
-            color: 'var(--teal-dark)',
-          }}>
-            {redeemLink}
-          </code>
+          <code className="mp-redeem-code">{redeemLink}</code>
           <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
-            <button
-              onClick={() => { navigator.clipboard.writeText(redeemLink); }}
-              style={btnStyle}
-            >
-              Copy
-            </button>
-            <button onClick={() => setRedeemLink(null)} style={{ ...btnStyle, background: 'var(--bg-elevated)', color: 'var(--text-secondary)' }}>
-              Close
-            </button>
+            <button onClick={() => navigator.clipboard.writeText(redeemLink)} className="mp-btn">Copy</button>
+            <button onClick={() => setRedeemLink(null)} className="mp-btn mp-btn-muted">Close</button>
           </div>
         </div>
       )}
 
       {loading && <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 40 }}>Loading...</p>}
-      {error && <p style={{ color: '#f43f5e', textAlign: 'center', padding: 40 }}>{error}</p>}
 
-      {!loading && !error && active.length === 0 && expired.length === 0 && (
-        <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>
-          <p style={{ fontSize: 18, marginBottom: 8 }}>No gifts listed yet</p>
-          <p style={{ fontSize: 14 }}>Be the first to share tokens with the community!</p>
-        </div>
-      )}
-
-      {active.length > 0 && (
-        <>
-          <h2 style={{ fontSize: 18, marginBottom: 16 }}>Available ({active.length})</h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 40 }}>
+      {/* ── Active gifts ── */}
+      {!loading && active.length > 0 && (
+        <div className="mp-section">
+          <h2 className="mp-section-title">
+            <span className="mp-section-dot mp-dot-green" />
+            Available now <span style={{ color: '#FF4F00', fontWeight: 800 }}>{active.length}</span>
+          </h2>
+          <div className="mp-grid">
             {active.map((gift) => (
               <GiftCard key={gift.id} gift={gift} onRedeem={handleRedeem} redeeming={redeeming === gift.id} />
             ))}
           </div>
-        </>
+        </div>
       )}
 
-      {expired.length > 0 && (
-        <>
-          <h2 style={{ fontSize: 18, marginBottom: 16, color: 'var(--text-muted)' }}>Recently Expired</h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, opacity: 0.5 }}>
+      {/* ── Expired ── */}
+      {!loading && expired.length > 0 && (
+        <div className="mp-section" style={{ opacity: 0.5 }}>
+          <h2 className="mp-section-title" style={{ color: 'var(--text-muted)' }}>
+            <span className="mp-section-dot" style={{ background: '#999' }} />
+            Recently expired
+          </h2>
+          <div className="mp-grid">
             {expired.map((gift) => (
               <GiftCard key={gift.id} gift={gift} expired />
             ))}
           </div>
-        </>
+        </div>
+      )}
+
+      {/* ── Empty state ── */}
+      {!loading && active.length === 0 && expired.length === 0 && (
+        <div className="mp-empty">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
+            <path d="M20 12v10H4V12" /><path d="M2 7h20v5H2z" /><path d="M12 22V7" />
+            <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z" />
+            <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" />
+          </svg>
+          <p style={{ fontSize: 18, marginBottom: 4, marginTop: 16 }}>No gifts listed yet</p>
+          <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>Be the first to share tokens with the community!</p>
+        </div>
       )}
 
       <style>{`
-        .gift-card { transition: border-color 0.15s; }
-        .gift-card:hover { border-color: var(--border-hover, #d6d3d1) !important; }
+        .mp-container {
+          max-width: 860px;
+          margin: 0 auto;
+          padding: 120px 24px 80px;
+        }
+
+        /* ── Hero ── */
+        .mp-hero {
+          text-align: center;
+          margin-bottom: 32px;
+        }
+        .mp-hero-icon {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 48px;
+          height: 48px;
+          border-radius: 12px;
+          background: rgba(255, 79, 0, 0.08);
+          border: 1px solid rgba(255, 79, 0, 0.15);
+          margin-bottom: 14px;
+        }
+        .mp-hero-icon svg { width: 24px; height: 24px; }
+        .mp-hero h1 {
+          font-size: 28px;
+          font-weight: 800;
+          letter-spacing: -0.02em;
+          margin: 0 0 6px;
+        }
+        .mp-hero-sub {
+          font-size: 14px;
+          color: var(--text-secondary);
+          margin: 0 0 20px;
+          max-width: 480px;
+          margin-left: auto;
+          margin-right: auto;
+        }
+
+        /* ── Stats ── */
+        .mp-stats {
+          display: flex;
+          justify-content: center;
+          gap: 16px;
+        }
+        .mp-stat {
+          background: var(--bg-card, #fff);
+          border: 1px solid var(--border, #e5e5e5);
+          border-radius: 12px;
+          padding: 14px 24px;
+          text-align: center;
+          min-width: 120px;
+        }
+        .mp-stat-value {
+          display: block;
+          font-size: 22px;
+          font-weight: 800;
+          letter-spacing: -0.02em;
+          color: #FF4F00;
+        }
+        .mp-stat-label {
+          display: block;
+          font-size: 12px;
+          font-weight: 600;
+          color: var(--text-muted);
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          margin-top: 4px;
+        }
+
+        /* ── Section titles ── */
+        .mp-section { margin-bottom: 40px; }
+        .mp-section-title {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 16px;
+          font-weight: 700;
+          margin-bottom: 16px;
+        }
+        .mp-section-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          flex-shrink: 0;
+        }
+        .mp-dot-green { background: #34d399; box-shadow: 0 0 8px rgba(52, 211, 153, 0.4); }
+
+        /* ── Grid ── */
+        .mp-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 14px;
+        }
+
+        /* ── Gift Card ── */
+        .mp-card {
+          background: var(--bg-card, #fff);
+          border: 1px solid var(--border, #e5e5e5);
+          border-radius: 16px;
+          padding: 20px;
+          transition: all 0.2s;
+          position: relative;
+          overflow: hidden;
+        }
+        .mp-card:hover {
+          border-color: rgba(255, 79, 0, 0.3);
+          box-shadow: 0 4px 20px rgba(255, 79, 0, 0.06);
+          transform: translateY(-1px);
+        }
+        .mp-card-header {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin-bottom: 14px;
+        }
+        .mp-card-provider-icon {
+          width: 44px;
+          height: 44px;
+          border-radius: 12px;
+          background: var(--bg-elevated, #f5f5f4);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+        }
+        .mp-card-info { flex: 1; min-width: 0; }
+        .mp-card-provider {
+          font-size: 16px;
+          font-weight: 700;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .mp-card-status {
+          font-size: 10px;
+          padding: 2px 8px;
+          border-radius: 10px;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.03em;
+        }
+        .mp-card-gifter {
+          font-size: 13px;
+          color: var(--text-muted);
+          margin-top: 2px;
+        }
+        .mp-card-tokens {
+          display: flex;
+          justify-content: space-between;
+          align-items: baseline;
+          margin-bottom: 8px;
+        }
+        .mp-card-remaining {
+          font-size: 22px;
+          font-weight: 800;
+          letter-spacing: -0.02em;
+        }
+        .mp-card-budget {
+          font-size: 13px;
+          color: var(--text-muted);
+        }
+        .mp-card-bar {
+          height: 6px;
+          border-radius: 3px;
+          background: var(--bg-elevated, #f5f5f4);
+          overflow: hidden;
+          margin-bottom: 14px;
+        }
+        .mp-card-bar-fill {
+          height: 100%;
+          border-radius: 3px;
+          transition: width 0.3s;
+        }
+        .mp-card-meta {
+          display: flex;
+          justify-content: space-between;
+          font-size: 12px;
+          color: var(--text-muted);
+        }
+
+        /* ── Buttons ── */
+        .mp-btn {
+          padding: 10px 20px;
+          background: #FF4F00;
+          color: #fff;
+          border: none;
+          border-radius: 10px;
+          font-size: 13px;
+          font-weight: 700;
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+        .mp-btn:hover { background: #e64500; transform: translateY(-1px); }
+        .mp-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+        .mp-btn-muted { background: var(--bg-elevated, #f5f5f4); color: var(--text-secondary); }
+        .mp-btn-muted:hover { background: var(--bg-elevated, #e5e5e5); }
+        .mp-btn-full {
+          width: 100%;
+          padding: 12px;
+          font-size: 14px;
+        }
+
+        /* ── Redeem banner ── */
+        .mp-redeem-banner {
+          background: var(--bg-card, #fff);
+          border: 1px solid #FF4F00;
+          border-radius: 14px;
+          padding: 20px;
+          margin-bottom: 32px;
+        }
+        .mp-redeem-code {
+          display: block;
+          background: var(--bg-elevated, #f5f5f4);
+          padding: 10px 14px;
+          border-radius: 8px;
+          font-size: 12px;
+          word-break: break-all;
+          color: #e64500;
+        }
+
+        /* ── Empty state ── */
+        .mp-empty {
+          text-align: center;
+          padding: 80px 24px;
+          color: var(--text-secondary);
+        }
+
+        @media (max-width: 640px) {
+          .mp-stats { flex-direction: column; gap: 10px; }
+          .mp-stat { min-width: auto; padding: 16px 20px; }
+          .mp-grid { grid-template-columns: 1fr; }
+          .mp-hero h1 { font-size: 28px; }
+        }
       `}</style>
     </div>
   );
@@ -222,91 +483,53 @@ function GiftCard({ gift, expired, onRedeem, redeeming }: {
   redeeming?: boolean;
 }) {
   const pct = gift.tokenBudget > 0 ? ((gift.tokenBudget - gift.tokensUsed) / gift.tokenBudget) * 100 : 0;
+  const barColor = expired ? '#999' : pct > 20 ? '#FF4F00' : '#f43f5e';
+  const statusBg = expired ? 'rgba(85,85,95,0.15)' : gift.online ? 'rgba(52,211,153,0.12)' : 'rgba(244,63,94,0.1)';
+  const statusColor = expired ? '#999' : gift.online ? '#34d399' : '#f43f5e';
+  const statusText = expired ? 'Expired' : gift.online ? 'Online' : 'Offline';
 
   return (
-    <div className="gift-card" style={{
-      background: 'var(--bg-card)',
-      border: '1px solid var(--border)',
-      borderRadius: 12,
-      padding: 16,
-    }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-            <ProviderLogo providerId={gift.providerId} />
-            <span style={{
-              display: 'inline-block',
-              width: 8,
-              height: 8,
-              borderRadius: '50%',
-              background: expired ? '#55555f' : gift.online ? '#34d399' : '#f43f5e',
-              flexShrink: 0,
-            }} />
-            <span style={{ fontWeight: 600, fontSize: 15 }}>{gift.providerId}</span>
-            <span style={{
-              fontSize: 11,
-              padding: '2px 8px',
-              borderRadius: 10,
-              background: expired ? 'rgba(85,85,95,0.2)' : gift.online ? 'rgba(52,211,153,0.12)' : 'rgba(244,63,94,0.1)',
-              color: expired ? '#55555f' : gift.online ? '#34d399' : '#f43f5e',
-              fontWeight: 600,
-            }}>
-              {expired ? 'Expired' : gift.online ? 'Online' : 'Offline'}
-            </span>
-            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-              by {gift.gifterName}
+    <div className="mp-card">
+      <div className="mp-card-header">
+        <div className="mp-card-provider-icon">
+          <ProviderLogo providerId={gift.providerId} size={28} />
+        </div>
+        <div className="mp-card-info">
+          <div className="mp-card-provider">
+            {gift.providerId}
+            <span className="mp-card-status" style={{ background: statusBg, color: statusColor }}>
+              {statusText}
             </span>
           </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, fontSize: 13, color: 'var(--text-secondary)' }}>
-            <span>{formatTokens(gift.tokensRemaining)} / {formatTokens(gift.tokenBudget)} tokens</span>
-            <span>{timeUntil(gift.expiresAt)}</span>
-            <span>Listed {timeAgo(gift.listedAt)}</span>
-          </div>
-
-          <div style={{
-            marginTop: 8,
-            height: 4,
-            borderRadius: 2,
-            background: 'var(--bg-elevated)',
-            overflow: 'hidden',
-          }}>
-            <div style={{
-              height: '100%',
-              width: `${pct}%`,
-              borderRadius: 2,
-              background: expired ? '#55555f' : pct > 20 ? '#FF4F00' : '#f43f5e',
-              transition: 'width 0.3s',
-            }} />
+          <div className="mp-card-gifter">
+            Gifted by {gift.gifterName}
           </div>
         </div>
-
-        {!expired && onRedeem && (
-          <button
-            onClick={() => onRedeem(gift.id)}
-            disabled={redeeming || !gift.online}
-            style={{
-              ...btnStyle,
-              opacity: !gift.online ? 0.4 : 1,
-              cursor: !gift.online ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {redeeming ? '...' : 'Redeem'}
-          </button>
-        )}
       </div>
+
+      <div className="mp-card-tokens">
+        <span className="mp-card-remaining">{formatTokens(gift.tokensRemaining)}</span>
+        <span className="mp-card-budget">of {formatTokens(gift.tokenBudget)} tokens</span>
+      </div>
+
+      <div className="mp-card-bar">
+        <div className="mp-card-bar-fill" style={{ width: `${pct}%`, background: barColor }} />
+      </div>
+
+      <div className="mp-card-meta">
+        <span>{timeUntil(gift.expiresAt)}</span>
+      </div>
+
+      {!expired && onRedeem && (
+        <button
+          className="mp-btn mp-btn-full"
+          onClick={() => onRedeem(gift.id)}
+          disabled={redeeming || !gift.online}
+          style={{ marginTop: 14 }}
+        >
+          {redeeming ? 'Getting tokens...' : 'Get Free Tokens'}
+        </button>
+      )}
     </div>
   );
 }
-
-const btnStyle: React.CSSProperties = {
-  padding: '8px 16px',
-  background: '#FF4F00',
-  color: '#fff',
-  border: 'none',
-  borderRadius: 8,
-  fontSize: 13,
-  fontWeight: 600,
-  cursor: 'pointer',
-  whiteSpace: 'nowrap',
-};

@@ -1340,6 +1340,63 @@ section {
   background: var(--bg);
 }
 
+.side-by-side-section { padding: 40px 0; }
+.side-by-side-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+  align-items: stretch;
+}
+@media (max-width: 860px) {
+  .side-by-side-grid { grid-template-columns: 1fr; }
+}
+
+.sbs-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 32px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.sbs-card:hover {
+  border-color: rgba(255, 79, 0, 0.25);
+  box-shadow: 0 4px 24px rgba(255, 79, 0, 0.06);
+}
+.sbs-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #FF4F00;
+  background: rgba(255, 79, 0, 0.08);
+  padding: 4px 12px;
+  border-radius: 6px;
+  margin-bottom: 20px;
+  align-self: flex-start;
+}
+.sbs-icon-row {
+  margin-bottom: 16px;
+  color: var(--text-muted);
+}
+.sbs-icon-row svg { width: 28px; height: 28px; }
+.sbs-title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 10px;
+}
+.sbs-desc {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  margin: 0;
+  flex: 1;
+}
+
 .openclaw-card {
   position: relative;
   background: var(--bg-card);
@@ -1520,22 +1577,62 @@ section {
    Open Source
    ============================================= */
 
+/* ── Closing strip ── */
+.closing-strip {
+  padding: 24px 0;
+  border-top: 1px solid var(--border);
+}
+.closing-strip-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.closing-strip-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.closing-strip-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.closing-strip-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+.closing-strip-link:hover { color: #FF4F00; }
+.closing-strip-link svg { width: 16px; height: 16px; }
+@media (max-width: 640px) {
+  .closing-strip-inner { justify-content: center; text-align: center; }
+}
+
 .oss-section {
   text-align: center;
   background: var(--bg-surface);
+  padding: 48px 0;
 }
 
 .oss-section h2 {
-  font-size: 44px;
-  margin-bottom: 14px;
+  font-size: 24px;
+  margin-bottom: 8px;
 }
 
 .oss-section .subtitle {
-  font-size: 17px;
+  font-size: 15px;
   color: var(--text-secondary);
   max-width: 480px;
-  margin: 0 auto 40px;
-  line-height: 1.7;
+  margin: 0 auto 24px;
+  line-height: 1.6;
 }
 
 .oss-badge {
@@ -1576,7 +1673,7 @@ section {
 .cta-section {
   position: relative;
   text-align: center;
-  padding: 100px 0;
+  padding: 48px 0;
   overflow: hidden;
 }
 
@@ -1593,15 +1690,15 @@ section {
 }
 
 .cta-section h2 {
-  font-size: 44px;
-  margin-bottom: 14px;
+  font-size: 24px;
+  margin-bottom: 8px;
   position: relative;
 }
 
 .cta-section .subtitle {
-  font-size: 17px;
+  font-size: 15px;
   color: var(--text-secondary);
-  margin: 0 auto 40px;
+  margin: 0 auto 24px;
   position: relative;
 }
 
@@ -1618,39 +1715,46 @@ section {
    ============================================= */
 
 .footer {
-  padding: 48px 0;
+  padding: 48px 0 32px;
   border-top: 1px solid var(--border);
 }
 
-.footer-inner {
+.footer-grid {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1fr 1fr;
+  gap: 40px;
+}
+
+.footer-col {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.footer-col a {
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+.footer-col a:hover { color: #FF4F00; }
+
+.footer-col-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 4px;
 }
 
 .footer-brand {
   font-size: 18px;
-  font-weight: 700;
+  font-weight: 800;
   letter-spacing: -0.03em;
-  background: linear-gradient(135deg, var(--teal), var(--teal-light));
-  -webkit-background-clip: text;
+  color: var(--text);
   -webkit-text-fill-color: transparent;
   background-clip: text;
-}
-
-.footer-links {
-  display: flex;
-  gap: 28px;
-}
-
-.footer-links a {
-  font-size: 14px;
-  color: var(--text-secondary);
-  transition: color 0.2s;
-}
-
-.footer-links a:hover {
-  color: var(--text);
 }
 
 .footer-note {
@@ -2061,10 +2165,9 @@ section {
     font-size: 14px;
   }
 
-  .footer-inner {
-    flex-direction: column;
-    gap: 20px;
-    text-align: center;
+  .footer-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
   }
 
   .code-body pre {
