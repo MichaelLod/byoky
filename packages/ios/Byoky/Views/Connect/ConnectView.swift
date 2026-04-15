@@ -8,7 +8,7 @@ struct ConnectView: View {
             VStack(spacing: 0) {
                 Picker("Mode", selection: $selectedMode) {
                     Text("Pair").tag(0)
-                    Text("Bridge").tag(1)
+                    Text("Sessions").tag(1)
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal)
@@ -17,7 +17,7 @@ struct ConnectView: View {
                 if selectedMode == 0 {
                     PairView()
                 } else {
-                    BridgeView()
+                    AppsView()
                 }
             }
             .navigationTitle("Connect")

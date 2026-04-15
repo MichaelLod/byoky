@@ -21,7 +21,6 @@ final class WalletStore: ObservableObject {
     @Published var tokenAllowances: [TokenAllowance] = []
     @Published var groups: [Group] = []
     @Published var appGroups: AppGroups = [:]
-    @Published var bridgeStatus: BridgeStatus = .inactive
     @Published var lockoutEndTime: Date?
     @Published var installedApps: [InstalledApp] = []
     @Published var cloudVaultEnabled = false
@@ -237,7 +236,6 @@ final class WalletStore: ObservableObject {
         tokenAllowances = []
         groups = []
         appGroups = [:]
-        bridgeStatus = .inactive
         installedApps = []
         UserDefaults.standard.removeObject(forKey: installedAppsKey)
 
@@ -675,8 +673,7 @@ final class WalletStore: ObservableObject {
 
     /// Returns the group that should route this origin's requests — the user's
     /// per-app binding from `appGroups`, falling back to the default group when
-    /// no binding exists. Used by both `ProxyService` and `RelayPairService`
-    /// before each upstream call.
+    /// no binding exists. Used by `RelayPairService` before each upstream call.
     func groupForOrigin(_ origin: String) -> Group? {
         if let bound = appGroups[origin], let group = groups.first(where: { $0.id == bound }) {
             return group

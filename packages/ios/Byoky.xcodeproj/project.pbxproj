@@ -21,7 +21,6 @@
 		14C99EB6E6465555E69339FB /* icon-128.png in Resources */ = {isa = PBXBuildFile; fileRef = 0AC0E9A4C958920C1E2F3B51 /* icon-128.png */; };
 		1882D56F4C9F04AE9B67D1BF /* 48.png in Resources */ = {isa = PBXBuildFile; fileRef = EC908930D9383894DBE886A9 /* 48.png */; };
 		1FB75D9F7943391093D57044 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DFE5899F84197B2F2511CE0A /* Assets.xcassets */; };
-		2274751D351EAE4603D4B74A /* ProxyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42AB93112DAA20241E4CF0DE /* ProxyService.swift */; };
 		234B1C740A60D3A24EEDD94A /* 16.png in Resources */ = {isa = PBXBuildFile; fileRef = 8417EB973F4C7DE03887B51F /* 16.png */; };
 		23E5852D5C614BCB5355CD57 /* popup-BkMmx_VB.js in Resources */ = {isa = PBXBuildFile; fileRef = 714F4916CB5FB3073B03A86A /* popup-BkMmx_VB.js */; };
 		23E6A02A19BD7A1297B129C0 /* provider.js in Resources */ = {isa = PBXBuildFile; fileRef = E1C99C437DE8853B4A1AE051 /* provider.js */; };
@@ -91,7 +90,6 @@
 		E153605ED5D9B4D528A3C810 /* manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = 5D64D4BEE5EFD584B24BEBAC /* manifest.json */; };
 		E2CF47501F1A2E98CCF6F907 /* sidepanel.html in Resources */ = {isa = PBXBuildFile; fileRef = E014FC45A45EB1D0C7AAF64C /* sidepanel.html */; };
 		E5016F52C39FE5A74616312A /* GiftRelayHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71D5D2CAC7B3E9C8FBC2A619 /* GiftRelayHost.swift */; };
-		E7B8712807F8177881A74E9A /* BridgeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08FF5E5F0058970F04B97736 /* BridgeView.swift */; };
 		EB7D40E8DA178797F537056E /* mobile.js in Resources */ = {isa = PBXBuildFile; fileRef = 54F9FD4B4E6C8A71978FDB71 /* mobile.js */; };
 		EE42BC6A7AC2993DC364DEA1 /* TranslationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F92F1285F0CC62D52543E84 /* TranslationEngine.swift */; };
 		F0356E78CAE92B5F3A0B67BD /* CryptoService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8E3AC629A4840595704D375 /* CryptoService.swift */; };
@@ -157,7 +155,6 @@
 		0558CF4019B73E39B5E6F2BF /* InstalledApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstalledApp.swift; sourceTree = "<group>"; };
 		05C2E108EC58F3E09AC85704 /* NativeBridgeHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBridgeHandler.swift; sourceTree = "<group>"; };
 		08AA7E7BF0F6FDAE815788BF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
-		08FF5E5F0058970F04B97736 /* BridgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeView.swift; sourceTree = "<group>"; };
 		09299BEFAC748CF297377837 /* background.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = background.js; sourceTree = "<group>"; };
 		0AC0E9A4C958920C1E2F3B51 /* icon-128.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "icon-128.png"; sourceTree = "<group>"; };
 		0CBD55EFE40AB99127A8914B /* GiftsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GiftsView.swift; sourceTree = "<group>"; };
@@ -175,7 +172,6 @@
 		3AFE2DECE5FFEA212F63F5DD /* ConnectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectView.swift; sourceTree = "<group>"; };
 		3F92F1285F0CC62D52543E84 /* TranslationEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslationEngine.swift; sourceTree = "<group>"; };
 		40D8034A82B286AC470E14A2 /* ByokyCrossDeviceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ByokyCrossDeviceTests.swift; sourceTree = "<group>"; };
-		42AB93112DAA20241E4CF0DE /* ProxyService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyService.swift; sourceTree = "<group>"; };
 		43CA29F6391EE3F4FF37D482 /* 32.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = 32.png; sourceTree = "<group>"; };
 		50CD854541B37F59AB4944AE /* OfflineUpgradeBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineUpgradeBanner.swift; sourceTree = "<group>"; };
 		5110402B6328020286ADD71C /* ByokyInteractiveCrossDeviceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ByokyInteractiveCrossDeviceTests.swift; sourceTree = "<group>"; };
@@ -260,7 +256,6 @@
 				844E2E6F05928FA1187F4691 /* GiftRelayProxy.swift */,
 				64FBAC3C6BEC76F7FEB974CA /* KeychainService.swift */,
 				05C2E108EC58F3E09AC85704 /* NativeBridgeHandler.swift */,
-				42AB93112DAA20241E4CF0DE /* ProxyService.swift */,
 				952EAB8D1D82000A63C69E05 /* RelayPairService.swift */,
 				DDD23C93C263DCD747B4A451 /* RoutingResolver.swift */,
 				3F92F1285F0CC62D52543E84 /* TranslationEngine.swift */,
@@ -366,7 +361,6 @@
 				B43E014DCAB9AF22FB314A7F /* MascotView.swift */,
 				5619226B06840C897C0B2516 /* RootView.swift */,
 				AEFC5C4007252B5BF22D1CF4 /* Apps */,
-				B5F1E9B8AB243B7294A988CA /* Bridge */,
 				83E16B269D98EB861D5410C3 /* Connect */,
 				34AADB3B846CF3B6DFEDF012 /* Gifts */,
 				3ACEB5821A5BACC00C2CD5DE /* Onboarding */,
@@ -442,14 +436,6 @@
 				E9CC9BD956AF6359BDDA0197 /* MarketplaceTabView.swift */,
 			);
 			path = Apps;
-			sourceTree = "<group>";
-		};
-		B5F1E9B8AB243B7294A988CA /* Bridge */ = {
-			isa = PBXGroup;
-			children = (
-				08FF5E5F0058970F04B97736 /* BridgeView.swift */,
-			);
-			path = Bridge;
 			sourceTree = "<group>";
 		};
 		BD9A984C5C342F39A5589379 /* SafariExtension */ = {
@@ -788,7 +774,6 @@
 				3F4812204ED4AEA4DFB1ACE2 /* AppRuntimeView.swift in Sources */,
 				29CAE3FC7A2481BCDE7139A5 /* AppStoreView.swift in Sources */,
 				2E66E9FCCBA7D9AF87AC6A73 /* AppsView.swift in Sources */,
-				E7B8712807F8177881A74E9A /* BridgeView.swift in Sources */,
 				37A41EB94C5EDE0EEE6DE20F /* ByokyApp.swift in Sources */,
 				BF56351DC152B4A588DC36B9 /* ConnectView.swift in Sources */,
 				24E9A7EA7D40FB33D869014A /* CreateGiftView.swift in Sources */,
@@ -809,7 +794,6 @@
 				020B130AC9CCA58B16E2FBFF /* OfflineUpgradeBanner.swift in Sources */,
 				D83D90C01974F49A95E9727E /* OnboardingView.swift in Sources */,
 				DEA9478AEAC35FF19BFB415D /* PairView.swift in Sources */,
-				2274751D351EAE4603D4B74A /* ProxyService.swift in Sources */,
 				9B12D4B89D4D436D16B4D86C /* RedeemGiftView.swift in Sources */,
 				D8EEB762FF7B13B7146F02FC /* RelayPairService.swift in Sources */,
 				2714E5DDAE8A60036E198BEC /* RootView.swift in Sources */,

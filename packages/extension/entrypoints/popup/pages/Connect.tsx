@@ -2,10 +2,10 @@ import { useState } from 'react';
 import { ConnectedApps } from './ConnectedApps';
 import { RequestHistory } from './RequestHistory';
 
-type ActivityTab = 'active' | 'history';
+type ConnectTab = 'sessions' | 'history';
 
-export function Activity() {
-  const [tab, setTab] = useState<ActivityTab>('active');
+export function Connect() {
+  const [tab, setTab] = useState<ConnectTab>('sessions');
 
   return (
     <div>
@@ -21,22 +21,22 @@ export function Activity() {
         <button
           role="tab"
           type="button"
-          aria-selected={tab === 'active'}
+          aria-selected={tab === 'sessions'}
           className="tab-button"
-          onClick={() => setTab('active')}
+          onClick={() => setTab('sessions')}
           style={{
             flex: 1,
             padding: '10px 8px',
             background: 'none',
             border: 'none',
-            borderBottom: `2px solid ${tab === 'active' ? 'var(--accent)' : 'transparent'}`,
-            color: tab === 'active' ? 'var(--text)' : 'var(--text-muted)',
+            borderBottom: `2px solid ${tab === 'sessions' ? 'var(--accent)' : 'transparent'}`,
+            color: tab === 'sessions' ? 'var(--text)' : 'var(--text-muted)',
             fontSize: '13px',
-            fontWeight: tab === 'active' ? 600 : 400,
+            fontWeight: tab === 'sessions' ? 600 : 400,
             cursor: 'pointer',
           }}
         >
-          Active
+          Sessions
         </button>
         <button
           role="tab"
@@ -60,7 +60,7 @@ export function Activity() {
         </button>
       </div>
 
-      {tab === 'active' ? <ConnectedApps /> : <RequestHistory />}
+      {tab === 'sessions' ? <ConnectedApps /> : <RequestHistory />}
     </div>
   );
 }
