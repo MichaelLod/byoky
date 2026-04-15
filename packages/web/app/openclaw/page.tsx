@@ -462,10 +462,10 @@ function Code({ children }: { children: string }) {
 
 const styles = `
 .oc-page {
-  --oc-bg-card: #0d0d1a;
-  --oc-bg-elevated: #14142a;
-  --oc-border: #1a1a34;
-  --oc-border-strong: #2a2a50;
+  --oc-bg-card: #ffffff;
+  --oc-bg-elevated: #f5f5f4;
+  --oc-border: #e7e5e4;
+  --oc-border-strong: #d6d3d1;
   color: var(--text);
 }
 
@@ -670,7 +670,7 @@ const styles = `
   justify-content: center;
   background: var(--oc-bg-elevated);
   border: 1px solid var(--oc-border-strong);
-  color: var(--teal-light);
+  color: var(--teal-dark);
   font-weight: 700;
   font-size: 15px;
   font-family: var(--font-mono), monospace;
@@ -678,8 +678,8 @@ const styles = `
 .oc-step-highlight .oc-step-num {
   background: var(--teal);
   border-color: var(--teal);
-  color: #001018;
-  box-shadow: 0 0 24px rgba(14, 165, 233, 0.35);
+  color: #ffffff;
+  box-shadow: 0 4px 14px rgba(2, 132, 199, 0.25);
 }
 .oc-step-head h2 {
   font-size: 21px;
@@ -702,7 +702,7 @@ const styles = `
   background: var(--oc-bg-elevated);
   padding: 2px 6px;
   border-radius: 4px;
-  color: var(--teal-light);
+  color: var(--teal-dark);
 }
 
 /* ── Install card grid (step 1) ── */
@@ -747,7 +747,7 @@ const styles = `
   line-height: 1.6;
 }
 .oc-link {
-  color: var(--teal-light);
+  color: var(--teal);
   text-decoration: underline;
   text-decoration-color: var(--oc-border-strong);
   text-underline-offset: 3px;
@@ -775,7 +775,7 @@ const styles = `
 
 /* ── Code blocks ── */
 .oc-code {
-  background: #07070f;
+  background: #ffffff;
   border: 1px solid var(--oc-border);
   border-radius: 10px;
   padding: 16px 18px;
@@ -785,6 +785,7 @@ const styles = `
   color: var(--text);
   overflow-x: auto;
   margin: 14px 0;
+  box-shadow: 0 4px 12px rgba(28, 25, 23, 0.03);
 }
 .oc-code code { background: none; padding: 0; color: inherit; font-size: inherit; }
 
@@ -861,7 +862,7 @@ const styles = `
   padding: 36px 32px;
   border: 1px solid var(--oc-border);
   border-radius: 16px;
-  background: radial-gradient(circle at top right, rgba(14,165,233,0.12), transparent 60%), var(--oc-bg-card);
+  background: radial-gradient(circle at top right, rgba(2, 132, 199, 0.06), transparent 60%), var(--oc-bg-card);
   text-align: center;
 }
 .oc-closing h2 {

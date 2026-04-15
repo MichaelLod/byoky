@@ -8,5 +8,5 @@ export const metadata: Metadata = {
 };
 
 export default function BlogLayout({ children }: { children: React.ReactNode }) {
-  return <div style={{ background: '#0e0e1a', minHeight: '100vh' }}>{children}</div>;
+  return <div style={{ background: 'var(--bg)', minHeight: '100vh' }}>{children}</div>;
 }
