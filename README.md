@@ -305,7 +305,53 @@ byoky/
 │   ├── create-byoky-app/ # CLI scaffolder — npx create-byoky-app
 │   ├── vault/         # Encrypted cloud vault backup server
 │   └── web/           # Landing page (byoky.com) + MiniApps + Developer Hub
+├── e2e/               # Playwright cross-device tests (Chrome + iOS + Android)
+└── marketing/         # Screenshot + composite + video pipeline (gitignored outputs)
 ```
+
+## Marketing pipeline
+
+`marketing/` contains a self-contained pipeline that generates every asset
+needed for the Chrome Web Store, Firefox AMO, iOS App Store, Google Play, and
+Product Hunt — plus narrated walkthrough videos — by reusing the e2e Playwright
+fixtures and the iOS/Android simulators the e2e suite already drives.
+
+```bash
+pnpm marketing:install                  # one-time: Sharp, Playwright, Chromium
+pnpm marketing:desktop                  # Chrome + web + composites + narration + video
+pnpm marketing:capture:ios              # requires booted iOS simulator
+pnpm marketing:capture:android          # requires adb-visible emulator
+pnpm marketing:all                      # end-to-end
+```
+
+**What gets generated** (all under `marketing/`, gitignored):
+- `raw/popup-frames/*.png` — Chrome extension popup states (16 screens)
+- `raw/web/*.png` — landing / demo / chat / marketplace hero + store shots
+- `raw/ios/*.png` — native iOS simulator captures @ 1320×2868 (App Store 6.9″)
+- `raw/android/*.png` — Android emulator captures @ 1080×1920 (Play portrait)
+- `composites/*.png` — 6 Chrome/Firefox store slides · 6 iOS App Store slides ·
+  Chrome promo small (440×280) + marquee (1400×560) · Product Hunt cover
+  (1270×760) + header (1200×630) + thumb (240×240) · multi-screen eye-catcher
+  (1920×1080)
+- `voiceover/narration.wav` — Gemini 2.5 Flash TTS (Puck voice) with
+  per-segment style direction
+- `videos/walkthrough.mp4` — 16:9 narrated walkthrough (+ square + vertical)
+- `videos/product-hunt.mp4` — Product Hunt launch variant (+ square + vertical)
+- `videos/walkthrough-batman.mp4` — punchy Batman-TV-style remix with
+  comic-book starburst overlays (POW! BAM! ZOOM!), hard zoom punches, screen
+  shake, and color-flash transitions between beats
+
+**Key design decisions:**
+- iOS marketing capture runs [`ByokyMarketingTests.swift`](packages/ios/ByokyUITests/ByokyMarketingTests.swift)
+  — a slim XCUITest that walks the app through every store-worthy screen and
+  pauses at sentinel files so a parallel bash runner can snap via
+  `xcrun simctl io screenshot`.
+- Videos use `scale+lanczos+eval=frame` for sub-pixel smooth Ken-Burns motion
+  (ffmpeg's `zoompan` rounds crop offsets to integers, producing visible 1px
+  wobble — avoided here).
+- Aspect-ratio variants (1:1 square, 9:16 vertical) preserve the full 16:9
+  content with a blurred-fill background behind the letterbox bars, not a
+  hard center-crop.
 
 ## Development
 

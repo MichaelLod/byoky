@@ -22,7 +22,17 @@
     "test:e2e:headed": "pnpm build:core && pnpm build:sdk && pnpm build:extension && npx playwright test --config e2e/playwright.config.ts --headed",
     "release": "./scripts/release.sh",
     "release:status": "./scripts/release.sh status",
-    "release:retry": "./scripts/release.sh retry"
+    "release:retry": "./scripts/release.sh retry",
+    "marketing:install": "cd marketing && pnpm install --ignore-workspace && pnpm exec playwright install chromium",
+    "marketing:capture:extension": "pnpm build:core && pnpm build:sdk && pnpm build:extension && cd marketing && pnpm capture:extension",
+    "marketing:capture:web": "cd marketing && pnpm capture:web",
+    "marketing:capture:ios": "cd marketing && pnpm capture:ios",
+    "marketing:capture:android": "cd marketing && pnpm capture:android",
+    "marketing:compose": "cd marketing && pnpm compose",
+    "marketing:narrate": "cd marketing && pnpm narrate",
+    "marketing:video": "cd marketing && pnpm video",
+    "marketing:desktop": "pnpm marketing:capture:extension && pnpm marketing:capture:web && pnpm marketing:compose && pnpm marketing:narrate && pnpm marketing:video",
+    "marketing:all": "pnpm marketing:capture:extension && pnpm marketing:capture:web && pnpm marketing:capture:ios && pnpm marketing:capture:android && pnpm marketing:compose && pnpm marketing:narrate && pnpm marketing:video"
   },
   "license": "MIT",
   "engines": {
