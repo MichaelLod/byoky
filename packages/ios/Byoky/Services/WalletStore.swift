@@ -360,6 +360,16 @@ final class WalletStore: ObservableObject {
         Task { await syncAddToVault(localId: localId, providerId: providerId, label: label, authMethod: authMethod.rawValue, plainKey: apiKey) }
     }
 
+    func updateCredentialLabel(id: String, newLabel: String) throws {
+        let trimmed = newLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw WalletError.invalidInput }
+        guard let idx = credentials.firstIndex(where: { $0.id == id }) else { return }
+        guard credentials[idx].label != trimmed else { return }
+        credentials[idx].label = trimmed
+        try saveCredentials()
+        Task { await syncRenameToVault(localId: id, newLabel: trimmed) }
+    }
+
     func removeCredential(_ credential: Credential) throws {
         let localId = credential.id
         try keychain.delete(key: "key_\(credential.id)")
@@ -1255,6 +1265,18 @@ final class WalletStore: ObservableObject {
         saveVaultCredentialMap()
     }
 
+    private func syncRenameToVault(localId: String, newLabel: String) async {
+        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
+        guard let vaultId = vaultCredentialMap[localId] else { return }
+
+        let result = await vaultRequest(path: "/credentials/\(vaultId)", method: "PATCH", body: ["label": newLabel], token: token)
+
+        if result.status == 401 {
+            cloudVaultTokenExpired = true
+            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
+        }
+    }
+
     private func syncPendingCredentials() async {
         guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
         if let issued = vaultTokenIssuedAt, Date().timeIntervalSince(issued) > 6 * 24 * 3600 {
@@ -1503,6 +1525,7 @@ enum WalletError: LocalizedError {
     case passwordHashFailed
     case credentialNotFound
     case lockedOut(Int)
+    case invalidInput
 
     var errorDescription: String? {
         switch self {
@@ -1511,6 +1534,7 @@ enum WalletError: LocalizedError {
         case .passwordHashFailed: return "Failed to hash password"
         case .credentialNotFound: return "Credential not found"
         case .lockedOut(let seconds): return "Too many attempts. Try again in \(seconds)s"
+        case .invalidInput: return "Invalid input"
         }
     }
 }

@@ -2050,6 +2050,63 @@ body {
   padding-bottom: 88px;
 }
 
+/* ── Modal (popup overlay for add-credential / redeem-gift) ── */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 100;
+  animation: modal-fade-in 0.16s ease;
+}
+
+@keyframes modal-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modal-sheet {
+  width: 100%;
+  max-width: 420px;
+  max-height: 90vh;
+  background: var(--bg);
+  border-top-left-radius: 16px;
+  border-top-right-radius: 16px;
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  animation: modal-slide-up 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes modal-slide-up {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px 10px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.modal-title {
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--text);
+}
+
+.modal-body {
+  padding: 16px 20px 20px;
+  overflow-y: auto;
+}
+
 /* Respect reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

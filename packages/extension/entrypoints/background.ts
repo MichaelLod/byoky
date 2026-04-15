@@ -2623,9 +2623,15 @@ export default defineBackground(() => {
     const data = await browser.storage.local.get('giftedCredentials');
     const giftedCreds = (data.giftedCredentials ?? []) as GiftedCredential[];
     const idx = giftedCreds.findIndex((gc) => gc.giftId === giftId);
-    if (idx !== -1) {
+    if (idx !== -1 && giftedCreds[idx].usedTokens !== usedTokens) {
       giftedCreds[idx].usedTokens = usedTokens;
       await browser.storage.local.set({ giftedCredentials: giftedCreds });
+      // Notify the popup so the remaining-tokens bar updates live instead
+      // of waiting for the next navigation.
+      browser.runtime.sendMessage({
+        type: 'BYOKY_INTERNAL',
+        action: 'usageUpdated',
+      }).catch(() => {});
     }
   }
 
@@ -4298,21 +4304,32 @@ export default defineBackground(() => {
 
   async function updateGiftUsage(gift: Gift, providerId: string, fullBody: string, ws: WebSocket) {
     const usage = parseUsage(providerId, fullBody);
-    if (usage) {
-      const totalTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
-      const refreshData = await browser.storage.local.get('gifts');
-      const refreshGifts = (refreshData.gifts ?? []) as Gift[];
-      const gIdx = refreshGifts.findIndex((rg) => rg.id === gift.id);
-      if (gIdx !== -1 && refreshGifts[gIdx].usedTokens + totalTokens <= refreshGifts[gIdx].maxTokens) {
-        refreshGifts[gIdx].usedTokens += totalTokens;
-        await browser.storage.local.set({ gifts: refreshGifts });
-        ws.send(JSON.stringify({
-          type: 'relay:usage',
-          giftId: gift.id,
-          usedTokens: refreshGifts[gIdx].usedTokens,
-        }));
-      }
-    }
+    if (!usage) return;
+    const totalTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
+    if (totalTokens <= 0) return;
+    const refreshData = await browser.storage.local.get('gifts');
+    const refreshGifts = (refreshData.gifts ?? []) as Gift[];
+    const gIdx = refreshGifts.findIndex((rg) => rg.id === gift.id);
+    if (gIdx === -1) return;
+    // Always record what was actually consumed, but cap the stored value
+    // at maxTokens so UI never shows "105K / 100K". The over-budget case
+    // is handled server-side at budget check time; this is just a mirror.
+    const next = Math.min(
+      refreshGifts[gIdx].maxTokens,
+      refreshGifts[gIdx].usedTokens + totalTokens,
+    );
+    if (next === refreshGifts[gIdx].usedTokens) return;
+    refreshGifts[gIdx].usedTokens = next;
+    await browser.storage.local.set({ gifts: refreshGifts });
+    ws.send(JSON.stringify({
+      type: 'relay:usage',
+      giftId: gift.id,
+      usedTokens: next,
+    }));
+    browser.runtime.sendMessage({
+      type: 'BYOKY_INTERNAL',
+      action: 'usageUpdated',
+    }).catch(() => {});
   }
 
   async function reconnectGiftRelays() {
