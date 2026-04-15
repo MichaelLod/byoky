@@ -1,6 +1,7 @@
 export default defineContentScript({
   matches: ['<all_urls>'],
   runAt: 'document_start',
+  allFrames: true,
 
   main() {
     // Ports registered by SDK instances for push notifications (revocations).
