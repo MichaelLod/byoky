@@ -17,6 +17,10 @@ struct VaultAuthView: View {
     @State private var loading = false
     @State private var checkTask: Task<Void, Never>?
     @State private var mode: AuthMode
+    @State private var showPassword = false
+    @FocusState private var focusedField: FocusField?
+
+    private enum FocusField: Hashable { case username, password }
 
     let onBack: () -> Void
 
@@ -71,35 +75,74 @@ struct VaultAuthView: View {
 
             VStack(spacing: 14) {
                 VStack(alignment: .leading, spacing: 4) {
-                    TextField(mode == .login ? "Your username" : "Choose a username", text: $username)
-                        .textContentType(.username)
-                        .autocapitalization(.none)
-                        .disableAutocorrection(true)
-                        .padding(14)
-                        .background(Theme.bgRaised)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color.white.opacity(0.06), lineWidth: 1)
-                        )
-                        .onChange(of: username) { _, newValue in
-                            scheduleUsernameCheck(newValue)
-                        }
+                    HStack(spacing: 10) {
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 15))
+                            .foregroundStyle(Theme.textMuted)
+                            .frame(width: 18)
+                        TextField(mode == .login ? "Your username" : "Choose a username", text: $username)
+                            .textContentType(.username)
+                            .autocapitalization(.none)
+                            .disableAutocorrection(true)
+                            .focused($focusedField, equals: .username)
+                            .submitLabel(.next)
+                            .onSubmit { focusedField = .password }
+                            .onChange(of: username) { _, newValue in
+                                scheduleUsernameCheck(newValue)
+                            }
+                    }
+                    .padding(14)
+                    .background(Theme.bgRaised)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(focusedField == .username ? Theme.accent : Color.white.opacity(0.06),
+                                    lineWidth: focusedField == .username ? 1.5 : 1)
+                    )
+                    .animation(.easeInOut(duration: 0.15), value: focusedField)
 
                     if username.count >= 3 {
                         usernameStatusHint
                     }
                 }
 
-                SecureField(mode == .login ? "Your password" : "At least 12 characters", text: $password)
+                HStack(spacing: 10) {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 15))
+                        .foregroundStyle(Theme.textMuted)
+                        .frame(width: 18)
+                    SwiftUI.Group {
+                        if showPassword {
+                            TextField(mode == .login ? "Your password" : "At least 12 characters", text: $password)
+                        } else {
+                            SecureField(mode == .login ? "Your password" : "At least 12 characters", text: $password)
+                        }
+                    }
                     .textContentType(mode == .login ? .password : .newPassword)
-                    .padding(14)
-                    .background(Theme.bgRaised)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color.white.opacity(0.06), lineWidth: 1)
-                    )
+                    .autocapitalization(.none)
+                    .disableAutocorrection(true)
+                    .focused($focusedField, equals: .password)
+                    .submitLabel(.go)
+                    .onSubmit { Task { await submit() } }
+                    Button {
+                        showPassword.toggle()
+                    } label: {
+                        Image(systemName: showPassword ? "eye.slash.fill" : "eye.fill")
+                            .font(.system(size: 15))
+                            .foregroundStyle(Theme.textMuted)
+                            .frame(width: 18)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(14)
+                .background(Theme.bgRaised)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(focusedField == .password ? Theme.accent : Color.white.opacity(0.06),
+                                lineWidth: focusedField == .password ? 1.5 : 1)
+                )
+                .animation(.easeInOut(duration: 0.15), value: focusedField)
 
                 if mode == .signup && !password.isEmpty {
                     let quality = PasswordQuality.evaluate(password)
