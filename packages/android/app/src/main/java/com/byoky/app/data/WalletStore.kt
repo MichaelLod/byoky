@@ -91,9 +91,6 @@ class WalletStore(context: Context) {
     private val _appGroups = MutableStateFlow<Map<String, String>>(emptyMap())
     val appGroups: StateFlow<Map<String, String>> = _appGroups.asStateFlow()
 
-    private val _bridgeStatus = MutableStateFlow(BridgeStatus.INACTIVE)
-    val bridgeStatus: StateFlow<BridgeStatus> = _bridgeStatus.asStateFlow()
-
     private val _lockoutEndTime = MutableStateFlow<Long?>(null)
     val lockoutEndTime: StateFlow<Long?> = _lockoutEndTime.asStateFlow()
 
@@ -614,7 +611,6 @@ class WalletStore(context: Context) {
         _tokenAllowances.value = emptyList()
         _installedApps.value = emptyList()
         plainPrefs.edit().remove("installed_apps").apply()
-        _bridgeStatus.value = BridgeStatus.INACTIVE
 
         // Reset brute-force state
         failedAttempts = 0
@@ -625,12 +621,6 @@ class WalletStore(context: Context) {
             .apply()
 
         _status.value = WalletStatus.UNINITIALIZED
-    }
-
-    // MARK: - Bridge
-
-    fun setBridgeStatus(status: BridgeStatus) {
-        _bridgeStatus.value = status
     }
 
     // MARK: - Marketplace Apps

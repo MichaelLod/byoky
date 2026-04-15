@@ -187,13 +187,6 @@ object AllowanceCheck {
     }
 }
 
-enum class BridgeStatus {
-    INACTIVE, STARTING, ACTIVE, ERROR;
-
-    var port: Int = 0
-    var errorMessage: String? = null
-}
-
 /**
  * Stable id for the always-present default group. Mirrors `DEFAULT_GROUP_ID`
  * in `packages/core/src/types.ts`. Apps with no explicit binding land here.
