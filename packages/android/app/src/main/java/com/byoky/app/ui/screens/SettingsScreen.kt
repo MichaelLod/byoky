@@ -377,8 +377,9 @@ fun SettingsScreen(wallet: WalletStore) {
 @Composable
 fun CloudVaultSetupDialog(wallet: WalletStore, onDismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
-    var isSignup by remember { mutableStateOf(true) }
-    var username by remember { mutableStateOf("") }
+    val lastUsername by wallet.cloudVaultLastUsername.collectAsState()
+    var isSignup by remember { mutableStateOf(lastUsername == null) }
+    var username by remember { mutableStateOf(lastUsername ?: "") }
     var password by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }

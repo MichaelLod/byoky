@@ -19,7 +19,7 @@ export default defineConfig({
   manifest: {
     name: 'Byoky',
     description: 'Encrypt your AI API keys locally. Never trust another extension with your OpenAI, Anthropic, or Gemini keys.',
-    permissions: ['storage', 'sidePanel', 'identity', 'nativeMessaging'],
+    permissions: ['storage', 'sidePanel', 'identity', 'nativeMessaging', 'alarms'],
     content_security_policy: {
       extension_pages: "script-src 'self'; object-src 'self'",
     },

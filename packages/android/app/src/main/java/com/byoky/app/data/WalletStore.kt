@@ -8,6 +8,7 @@ import com.byoky.app.crypto.CryptoService
 import com.byoky.app.proxy.TranslationEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -102,6 +103,9 @@ class WalletStore(context: Context) {
     private val _cloudVaultUsername = MutableStateFlow<String?>(null)
     val cloudVaultUsername: StateFlow<String?> = _cloudVaultUsername.asStateFlow()
 
+    private val _cloudVaultLastUsername = MutableStateFlow<String?>(null)
+    val cloudVaultLastUsername: StateFlow<String?> = _cloudVaultLastUsername.asStateFlow()
+
     private val _cloudVaultTokenExpired = MutableStateFlow(false)
     val cloudVaultTokenExpired: StateFlow<Boolean> = _cloudVaultTokenExpired.asStateFlow()
 
@@ -178,6 +182,8 @@ class WalletStore(context: Context) {
         vaultScope.launch {
             syncPendingCredentials()
             syncPendingGroups()
+            syncPendingGifts()
+            reconcileGiftUsageWithVault()
         }
         com.byoky.app.relay.GiftRelayHost.attach(this)
         com.byoky.app.relay.GiftRelayHost.reconnectAll()
@@ -353,6 +359,7 @@ class WalletStore(context: Context) {
         _gifts.value = _gifts.value + gift
         saveGifts()
         com.byoky.app.relay.GiftRelayHost.connect(gift)
+        vaultScope.launch { registerGiftWithVault(gift) }
         return gift
     }
 
@@ -362,6 +369,7 @@ class WalletStore(context: Context) {
         }
         saveGifts()
         com.byoky.app.relay.GiftRelayHost.disconnect(id)
+        vaultScope.launch { unregisterGiftFromVault(id) }
     }
 
     fun addGiftSenderUsage(giftId: String, tokens: Int): Int? {
@@ -566,6 +574,7 @@ class WalletStore(context: Context) {
         editor.remove("tokenAllowances")
         editor.remove("cloudVault_enabled")
         editor.remove("cloudVault_username")
+        editor.remove("cloudVault_lastUsername")
         editor.remove("cloudVault_token")
         editor.remove("cloudVault_sessionId")
         editor.remove("cloudVault_tokenIssuedAt")
@@ -575,6 +584,7 @@ class WalletStore(context: Context) {
 
         _cloudVaultEnabled.value = false
         _cloudVaultUsername.value = null
+        _cloudVaultLastUsername.value = null
         _cloudVaultTokenExpired.value = false
         vaultToken = null
         vaultSessionId = null
@@ -1379,11 +1389,13 @@ class WalletStore(context: Context) {
         private const val VAULT_URL = "https://vault.byoky.com"
         private val JSON_MEDIA = "application/json".toMediaType()
         private const val SIX_DAYS_MS = 6L * 24 * 60 * 60 * 1000
+        private const val MARKETPLACE_URL = "https://marketplace.byoky.com"
     }
 
     private fun loadCloudVaultState() {
         _cloudVaultEnabled.value = prefs.getBoolean("cloudVault_enabled", false)
         _cloudVaultUsername.value = prefs.getString("cloudVault_username", null)
+        _cloudVaultLastUsername.value = prefs.getString("cloudVault_lastUsername", null)
         vaultToken = prefs.getString("cloudVault_token", null)
         vaultSessionId = prefs.getString("cloudVault_sessionId", null)
         vaultTokenIssuedAt = prefs.getLong("cloudVault_tokenIssuedAt", 0)
@@ -1410,6 +1422,7 @@ class WalletStore(context: Context) {
         prefs.edit()
             .putBoolean("cloudVault_enabled", _cloudVaultEnabled.value)
             .putString("cloudVault_username", _cloudVaultUsername.value)
+            .putString("cloudVault_lastUsername", _cloudVaultLastUsername.value)
             .putString("cloudVault_token", vaultToken)
             .putString("cloudVault_sessionId", vaultSessionId)
             .putLong("cloudVault_tokenIssuedAt", vaultTokenIssuedAt)
@@ -1510,12 +1523,14 @@ class WalletStore(context: Context) {
             vaultTokenIssuedAt = System.currentTimeMillis()
             _cloudVaultEnabled.value = true
             _cloudVaultUsername.value = username
+            _cloudVaultLastUsername.value = username
             _cloudVaultTokenExpired.value = false
             vaultCredentialMap.clear()
             saveCloudVaultConfig()
 
             syncAllCredentialsToVault()
             syncPendingGroups()
+            syncPendingGifts()
         }
     }
 
@@ -1607,6 +1622,8 @@ class WalletStore(context: Context) {
 
             syncPendingCredentials()
             syncPendingGroups()
+            syncPendingGifts()
+            reconcileGiftUsageWithVault()
         }
     }
 
@@ -1766,5 +1783,191 @@ class WalletStore(context: Context) {
         for ((origin, groupId) in _appGroups.value) {
             syncAppGroupToVault(origin, groupId)
         }
+    }
+
+    // ─── Vault gift relay ────────────────────────────────────────────────
+
+    /**
+     * Upload a gift to the cloud vault so it can act as a priority-0 fallback
+     * sender when this device is backgrounded / offline. Mirrors the browser
+     * extension's registerGiftWithVault.
+     */
+    private fun registerGiftWithVault(gift: Gift) {
+        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
+        if (vaultTokenIssuedAt > 0 && System.currentTimeMillis() - vaultTokenIssuedAt > SIX_DAYS_MS) {
+            _cloudVaultTokenExpired.value = true
+            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
+            return
+        }
+        val token = vaultToken ?: return
+        val credential = _credentials.value.firstOrNull { it.id == gift.credentialId } ?: return
+        val apiKey = try { decryptKey(credential) } catch (_: Exception) { return }
+
+        val body = JSONObject()
+            .put("giftId", gift.id)
+            .put("providerId", gift.providerId)
+            .put("authMethod", credential.authMethod.name.lowercase())
+            .put("apiKey", apiKey)
+            .put("relayAuthToken", gift.authToken)
+            .put("relayUrl", gift.relayUrl)
+            .put("maxTokens", gift.maxTokens)
+            .put("usedTokens", gift.usedTokens)
+            .put("expiresAt", gift.expiresAt)
+        if (gift.marketplaceManagementToken != null) {
+            body.put("marketplaceManagementToken", gift.marketplaceManagementToken)
+        }
+
+        val (_, status, _) = vaultRequest("/gifts", "POST", body, token)
+        if (status == 401) {
+            _cloudVaultTokenExpired.value = true
+            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
+        }
+    }
+
+    /**
+     * Upload the marketplace management token to the vault so its heartbeat
+     * worker can keep the marketplace badge "online" on our behalf. Called
+     * after CreateGiftScreen receives the token from marketplace listing.
+     */
+    private fun uploadMarketplaceTokenToVault(giftId: String, marketplaceToken: String) {
+        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
+        val token = vaultToken ?: return
+        val body = JSONObject().put("marketplaceManagementToken", marketplaceToken)
+        val encoded = java.net.URLEncoder.encode(giftId, "UTF-8")
+        val (_, status, _) = vaultRequest("/gifts/$encoded/marketplace-token", "PATCH", body, token)
+        if (status == 401) {
+            _cloudVaultTokenExpired.value = true
+            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
+        }
+    }
+
+    /**
+     * Persist the marketplace management token on a local gift and upload it
+     * to the vault. Called by CreateGiftScreen after a successful public
+     * listing returns a mgmt token.
+     */
+    fun setGiftMarketplaceToken(giftId: String, marketplaceToken: String) {
+        val list = _gifts.value.toMutableList()
+        val idx = list.indexOfFirst { it.id == giftId }
+        if (idx < 0) return
+        list[idx] = list[idx].copy(marketplaceManagementToken = marketplaceToken)
+        _gifts.value = list
+        saveGifts()
+        vaultScope.launch { uploadMarketplaceTokenToVault(giftId, marketplaceToken) }
+    }
+
+    private fun unregisterGiftFromVault(giftId: String) {
+        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
+        val token = vaultToken ?: return
+        val (_, status, _) = vaultRequest("/gifts/$giftId", "DELETE", token = token)
+        if (status == 401) {
+            _cloudVaultTokenExpired.value = true
+            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
+        }
+    }
+
+    /**
+     * If the vault serviced requests while this device was offline, its
+     * usedTokens may be ahead of ours. Pull and clamp-up the local copy.
+     */
+    private fun syncGiftUsageFromVault(giftId: String) {
+        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
+        val token = vaultToken ?: return
+        val (ok, status, data) = vaultRequest("/gifts/$giftId", "GET", token = token)
+        if (status == 401) {
+            _cloudVaultTokenExpired.value = true
+            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
+            return
+        }
+        if (!ok) return
+        val vaultGift = data.optJSONObject("gift") ?: return
+        if (!vaultGift.has("usedTokens")) return
+        val vaultUsed = vaultGift.optInt("usedTokens", -1)
+        if (vaultUsed < 0) return
+
+        val list = _gifts.value.toMutableList()
+        val idx = list.indexOfFirst { it.id == giftId }
+        if (idx < 0) return
+        val gift = list[idx]
+        if (vaultUsed > gift.usedTokens) {
+            list[idx] = gift.copy(usedTokens = vaultUsed)
+            _gifts.value = list
+            saveGifts()
+        }
+    }
+
+    private fun syncPendingGifts() {
+        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
+        val now = System.currentTimeMillis()
+        for (gift in _gifts.value) {
+            if (!gift.active || gift.expiresAt <= now) continue
+            registerGiftWithVault(gift)
+        }
+    }
+
+    /**
+     * Reconcile `usedTokens` for every active gift against the vault. Called
+     * when the app returns to the foreground so the UI reflects usage the
+     * vault billed while we were backgrounded. Runs blocking IO — callers
+     * must already be off the Main dispatcher.
+     */
+    private fun reconcileGiftUsageWithVault() {
+        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
+        val now = System.currentTimeMillis()
+        for (gift in _gifts.value) {
+            if (!gift.active || gift.expiresAt <= now) continue
+            syncGiftUsageFromVault(gift.id)
+        }
+    }
+
+    /** Main-thread-safe entry point for the Activity lifecycle callback. */
+    fun reconcileGiftUsageOnForeground() {
+        vaultScope.launch { reconcileGiftUsageWithVault() }
+    }
+
+    // ─── Marketplace heartbeat ───────────────────────────────────────────
+    //
+    // While the app is foregrounded, we ping /gifts/:id/heartbeat every 4
+    // min so the marketplace badge stays "online". The vault covers the
+    // backgrounded case once the user enables Cloud Sync.
+
+    private val marketplaceClient = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
+        .build()
+
+    private fun heartbeatMarketplace() {
+        val now = System.currentTimeMillis()
+        for (gift in _gifts.value) {
+            if (!gift.active || gift.expiresAt <= now) continue
+            val mgmtToken = gift.marketplaceManagementToken ?: continue
+            try {
+                val req = Request.Builder()
+                    .url("$MARKETPLACE_URL/gifts/${java.net.URLEncoder.encode(gift.id, "UTF-8")}/heartbeat")
+                    .addHeader("Authorization", "Bearer $mgmtToken")
+                    .post("".toRequestBody(null))
+                    .build()
+                marketplaceClient.newCall(req).execute().close()
+            } catch (_: Exception) {
+                // Network hiccup — retry on the next tick.
+            }
+        }
+    }
+
+    private var marketplaceHeartbeatJob: Job? = null
+
+    fun startMarketplaceHeartbeat() {
+        if (marketplaceHeartbeatJob?.isActive == true) return
+        marketplaceHeartbeatJob = vaultScope.launch {
+            while (true) {
+                heartbeatMarketplace()
+                kotlinx.coroutines.delay(4 * 60 * 1000)
+            }
+        }
+    }
+
+    fun stopMarketplaceHeartbeat() {
+        marketplaceHeartbeatJob?.cancel()
+        marketplaceHeartbeatJob = null
     }
 }

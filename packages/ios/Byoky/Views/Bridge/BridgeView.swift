@@ -66,7 +66,7 @@ struct BridgeView: View {
                         .foregroundStyle(Theme.accent)
                 }
 
-                Text("The bridge acts as a local proxy between Safari and your API keys. It's needed for:")
+                Text("The bridge acts as a local proxy between apps and your API keys. It's needed for:")
                     .font(.callout)
                     .foregroundStyle(.secondary)
 

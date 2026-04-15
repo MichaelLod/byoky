@@ -26,6 +26,7 @@ final class WalletStore: ObservableObject {
     @Published var installedApps: [InstalledApp] = []
     @Published var cloudVaultEnabled = false
     @Published var cloudVaultUsername: String?
+    @Published var cloudVaultLastUsername: String?
     @Published var cloudVaultTokenExpired = false
     /// Set by ByokyApp.onOpenURL when a byoky://gift/<payload> deep link
     /// fires. WalletView observes this and presents the redeem sheet with
@@ -167,6 +168,8 @@ final class WalletStore: ObservableObject {
         Task {
             await syncPendingCredentials()
             await syncPendingGroups()
+            await syncPendingGifts()
+            await reconcileGiftUsageWithVault()
         }
 
         AppGroupSync.shared.syncWalletState(
@@ -223,7 +226,7 @@ final class WalletStore: ObservableObject {
         try? keychain.delete(key: tokenAllowancesKey)
         try? keychain.delete(key: groupsKey)
         try? keychain.delete(key: appGroupsKey)
-        clearCloudVaultState()
+        clearCloudVaultState(clearLastUsername: true)
 
         // Clear in-memory state
         credentials = []
@@ -856,6 +859,7 @@ final class WalletStore: ObservableObject {
         gifts.append(gift)
         saveGifts()
         GiftRelayHost.shared.connect(gift: gift)
+        Task { await registerGiftWithVault(gift) }
         return gift
     }
 
@@ -864,6 +868,7 @@ final class WalletStore: ObservableObject {
         gifts[index].active = false
         saveGifts()
         GiftRelayHost.shared.disconnect(giftId: id)
+        Task { await unregisterGiftFromVault(giftId: id) }
     }
 
     /// Increment `gifts[giftId].usedTokens` from the sender-side gift relay
@@ -1015,6 +1020,7 @@ final class WalletStore: ObservableObject {
     private func loadCloudVaultState() {
         cloudVaultEnabled = (try? keychain.loadString(key: "cloudVault_enabled")) == "true"
         cloudVaultUsername = try? keychain.loadString(key: "cloudVault_username")
+        cloudVaultLastUsername = try? keychain.loadString(key: "cloudVault_lastUsername")
         vaultToken = try? keychain.loadString(key: "cloudVault_token")
         vaultSessionId = try? keychain.loadString(key: "cloudVault_sessionId")
         cloudVaultTokenExpired = (try? keychain.loadString(key: "cloudVault_tokenExpired")) == "true"
@@ -1038,6 +1044,7 @@ final class WalletStore: ObservableObject {
     private func saveCloudVaultConfig() {
         try? keychain.saveString(key: "cloudVault_enabled", value: cloudVaultEnabled ? "true" : "false")
         if let username = cloudVaultUsername { try? keychain.saveString(key: "cloudVault_username", value: username) }
+        if let lastUsername = cloudVaultLastUsername { try? keychain.saveString(key: "cloudVault_lastUsername", value: lastUsername) }
         if let token = vaultToken { try? keychain.saveString(key: "cloudVault_token", value: token) }
         if let sid = vaultSessionId { try? keychain.saveString(key: "cloudVault_sessionId", value: sid) }
         if let issued = vaultTokenIssuedAt {
@@ -1053,7 +1060,7 @@ final class WalletStore: ObservableObject {
         }
     }
 
-    private func clearCloudVaultState() {
+    private func clearCloudVaultState(clearLastUsername: Bool = false) {
         cloudVaultEnabled = false
         cloudVaultUsername = nil
         cloudVaultTokenExpired = false
@@ -1064,6 +1071,10 @@ final class WalletStore: ObservableObject {
         for key in ["cloudVault_enabled", "cloudVault_username", "cloudVault_token", "cloudVault_sessionId",
                      "cloudVault_tokenIssuedAt", "cloudVault_tokenExpired", "cloudVault_credentialMap"] {
             try? keychain.delete(key: key)
+        }
+        if clearLastUsername {
+            cloudVaultLastUsername = nil
+            try? keychain.delete(key: "cloudVault_lastUsername")
         }
     }
 
@@ -1123,12 +1134,14 @@ final class WalletStore: ObservableObject {
         vaultTokenIssuedAt = Date()
         cloudVaultEnabled = true
         cloudVaultUsername = username
+        cloudVaultLastUsername = username
         cloudVaultTokenExpired = false
         vaultCredentialMap = [:]
         saveCloudVaultConfig()
 
         await syncAllCredentialsToVault()
         await syncPendingGroups()
+        await syncPendingGifts()
     }
 
     func vaultBootstrapSignup(username: String, password: String) async throws {
@@ -1205,6 +1218,8 @@ final class WalletStore: ObservableObject {
 
         await syncPendingCredentials()
         await syncPendingGroups()
+        await syncPendingGifts()
+        await reconcileGiftUsageWithVault()
     }
 
     private func syncAddToVault(localId: String, providerId: String, label: String, authMethod: String, plainKey: String) async {
@@ -1344,6 +1359,140 @@ final class WalletStore: ObservableObject {
         }
         for (origin, groupId) in appGroups {
             await syncAppGroupToVault(origin: origin, groupId: groupId)
+        }
+    }
+
+    // MARK: - Vault gift relay
+
+    /// Upload a gift to the cloud vault so it can act as a priority-0 fallback
+    /// sender when this device is backgrounded / offline. Mirrors the browser
+    /// extension's `registerGiftWithVault`.
+    func registerGiftWithVault(_ gift: Gift) async {
+        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
+        if let issued = vaultTokenIssuedAt, Date().timeIntervalSince(issued) > 6 * 24 * 3600 {
+            cloudVaultTokenExpired = true
+            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
+            return
+        }
+        guard let credential = credentials.first(where: { $0.id == gift.credentialId }) else { return }
+        guard let apiKey = try? decryptKey(for: credential) else { return }
+
+        var body: [String: Any] = [
+            "giftId": gift.id,
+            "providerId": gift.providerId,
+            "authMethod": credential.authMethod.rawValue,
+            "apiKey": apiKey,
+            "relayAuthToken": gift.authToken,
+            "relayUrl": gift.relayUrl,
+            "maxTokens": gift.maxTokens,
+            "usedTokens": gift.usedTokens,
+            "expiresAt": Int(gift.expiresAt.timeIntervalSince1970 * 1000),
+        ]
+        if let mgmtToken = gift.marketplaceManagementToken {
+            body["marketplaceManagementToken"] = mgmtToken
+        }
+        let result = await vaultRequest(path: "/gifts", method: "POST", body: body, token: token)
+        if result.status == 401 {
+            cloudVaultTokenExpired = true
+            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
+        }
+    }
+
+    /// Upload the marketplace management token to the vault so its heartbeat
+    /// worker can keep the marketplace badge "online" on our behalf. Called
+    /// after we successfully list a gift and receive the token.
+    func uploadMarketplaceTokenToVault(giftId: String, token marketplaceToken: String) async {
+        guard cloudVaultEnabled, let vaultBearer = vaultToken, !cloudVaultTokenExpired else { return }
+        let result = await vaultRequest(
+            path: "/gifts/\(giftId)/marketplace-token",
+            method: "PATCH",
+            body: ["marketplaceManagementToken": marketplaceToken],
+            token: vaultBearer,
+        )
+        if result.status == 401 {
+            cloudVaultTokenExpired = true
+            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
+        }
+    }
+
+    /// Persist a marketplace management token on a local gift and upload a
+    /// copy to the vault. Called by `CreateGiftView` right after the gift
+    /// was listed publicly and the marketplace returned a mgmt token.
+    func setGiftMarketplaceToken(giftId: String, token marketplaceToken: String) {
+        guard let idx = gifts.firstIndex(where: { $0.id == giftId }) else { return }
+        gifts[idx].marketplaceManagementToken = marketplaceToken
+        saveGifts()
+        Task { await uploadMarketplaceTokenToVault(giftId: giftId, token: marketplaceToken) }
+    }
+
+    func unregisterGiftFromVault(giftId: String) async {
+        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
+        let result = await vaultRequest(path: "/gifts/\(giftId)", method: "DELETE", token: token)
+        if result.status == 401 {
+            cloudVaultTokenExpired = true
+            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
+        }
+    }
+
+    /// If the vault serviced requests while this device was offline, its
+    /// `usedTokens` may be ahead of ours. Pull and clamp-up the local copy.
+    func syncGiftUsageFromVault(giftId: String) async {
+        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
+        let result = await vaultRequest(path: "/gifts/\(giftId)", method: "GET", token: token)
+        if result.status == 401 {
+            cloudVaultTokenExpired = true
+            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
+            return
+        }
+        guard result.ok,
+              let vaultGift = result.data["gift"] as? [String: Any],
+              let vaultUsed = vaultGift["usedTokens"] as? Int else { return }
+        guard let idx = gifts.firstIndex(where: { $0.id == giftId }) else { return }
+        if vaultUsed > gifts[idx].usedTokens {
+            gifts[idx].usedTokens = vaultUsed
+            saveGifts()
+        }
+    }
+
+    /// Backfill every active, non-expired gift to the vault. Runs on
+    /// vault-enable and unlock. The vault's `POST /gifts` returns 409 for
+    /// gifts it already has, which we tolerate.
+    private func syncPendingGifts() async {
+        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
+        _ = token
+        for gift in gifts where gift.active && Date() < gift.expiresAt {
+            await registerGiftWithVault(gift)
+        }
+    }
+
+    /// Reconcile `usedTokens` for every active gift against the vault. Called
+    /// when the app returns to the foreground so the UI reflects usage the
+    /// vault billed while we were backgrounded.
+    func reconcileGiftUsageWithVault() async {
+        guard cloudVaultEnabled, vaultToken != nil, !cloudVaultTokenExpired else { return }
+        for gift in gifts where gift.active && Date() < gift.expiresAt {
+            await syncGiftUsageFromVault(giftId: gift.id)
+        }
+    }
+
+    // MARK: - Marketplace heartbeat
+    //
+    // Clients-side heartbeat that mirrors the vault's worker: while this app
+    // is in the foreground, we POST /gifts/:id/heartbeat every 4 min so the
+    // marketplace "online" badge stays green. The vault covers the phone-in-
+    // pocket case.
+
+    private static let marketplaceUrl = "https://marketplace.byoky.com"
+
+    func heartbeatMarketplace() async {
+        let now = Date()
+        for gift in gifts where gift.active && now < gift.expiresAt {
+            guard let mgmtToken = gift.marketplaceManagementToken else { continue }
+            guard let url = URL(string: "\(Self.marketplaceUrl)/gifts/\(gift.id)/heartbeat") else { continue }
+            var request = URLRequest(url: url, timeoutInterval: 10)
+            request.httpMethod = "POST"
+            request.setValue("Bearer \(mgmtToken)", forHTTPHeaderField: "Authorization")
+            _ = try? await URLSession.shared.data(for: request)
         }
     }
 }
