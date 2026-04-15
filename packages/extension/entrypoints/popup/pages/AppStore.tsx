@@ -70,43 +70,59 @@ export function AppStore() {
         </div>
       )}
 
-      {apps.map((app) => {
-        const installed = installedIds.has(app.id);
-        return (
-          <div key={app.id} className="card store-app-card">
-            <div className="store-app-row">
-              {app.icon ? (
-                <img src={resolveIcon(app.icon)} alt={app.name} className="store-app-icon" />
-              ) : (
-                <div className="store-app-icon-placeholder">
-                  {app.name.charAt(0).toUpperCase()}
-                </div>
-              )}
-              <div className="store-app-info">
-                <div className="card-title">
-                  {app.name}
-                  {app.verified && <span className="badge badge-verified" title="Verified">Verified</span>}
-                  {app.featured && <span className="badge badge-featured">Featured</span>}
-                </div>
-                <div className="card-subtitle">{app.author.name}</div>
-                <p className="store-app-desc">{app.description}</p>
-                <div className="store-app-providers">
-                  {app.providers.map((p) => (
-                    <span key={p} className="badge badge-provider">{p}</span>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <button
-              className={`btn btn-sm ${installed ? 'btn-secondary' : 'btn-primary'}`}
-              disabled={installed}
-              onClick={() => installApp(app)}
-            >
-              {installed ? 'Installed' : 'Install'}
-            </button>
+      {apps.map((app) => (
+        <StoreAppCard
+          key={app.id}
+          app={app}
+          installed={installedIds.has(app.id)}
+          onInstall={() => installApp(app)}
+        />
+      ))}
+    </div>
+  );
+}
+
+function StoreAppCard({
+  app, installed, onInstall,
+}: { app: MarketplaceApp; installed: boolean; onInstall: () => void }) {
+  const [iconFailed, setIconFailed] = useState(false);
+  return (
+    <div className="card store-app-card">
+      <div className="store-app-row">
+        {app.icon && !iconFailed ? (
+          <img
+            src={resolveIcon(app.icon)}
+            alt={app.name}
+            className="store-app-icon"
+            onError={() => setIconFailed(true)}
+          />
+        ) : (
+          <div className="store-app-icon-placeholder">
+            {app.name.charAt(0).toUpperCase()}
           </div>
-        );
-      })}
+        )}
+        <div className="store-app-info">
+          <div className="card-title">
+            {app.name}
+            {app.verified && <span className="badge badge-verified" title="Verified">Verified</span>}
+            {app.featured && <span className="badge badge-featured">Featured</span>}
+          </div>
+          <div className="card-subtitle">{app.author.name}</div>
+          <p className="store-app-desc">{app.description}</p>
+          <div className="store-app-providers">
+            {app.providers.map((p) => (
+              <span key={p} className="badge badge-provider">{p}</span>
+            ))}
+          </div>
+        </div>
+      </div>
+      <button
+        className={`btn btn-sm ${installed ? 'btn-secondary' : 'btn-primary'}`}
+        disabled={installed}
+        onClick={onInstall}
+      >
+        {installed ? 'Installed' : 'Install'}
+      </button>
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useWalletStore } from '../store';
 import type { InstalledApp } from '@byoky/core';
 
@@ -54,6 +55,7 @@ export function Apps() {
 
 function AppIcon({ app }: { app: InstalledApp }) {
   const { navigate, setActiveApp, toggleApp, uninstallApp } = useWalletStore();
+  const [iconFailed, setIconFailed] = useState(false);
 
   function handleClick() {
     if (!app.enabled) return;
@@ -64,8 +66,13 @@ function AppIcon({ app }: { app: InstalledApp }) {
   return (
     <div className={`app-icon-card ${!app.enabled ? 'disabled' : ''}`}>
       <button className="app-icon-btn" onClick={handleClick} title={app.name}>
-        {app.icon ? (
-          <img src={resolveIcon(app.icon)} alt={app.name} className="app-icon-img" />
+        {app.icon && !iconFailed ? (
+          <img
+            src={resolveIcon(app.icon)}
+            alt={app.name}
+            className="app-icon-img"
+            onError={() => setIconFailed(true)}
+          />
         ) : (
           <div className="app-icon-placeholder">
             {app.name.charAt(0).toUpperCase()}

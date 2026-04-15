@@ -1,6 +1,6 @@
 import type { AuthMethod, ConnectRequest, ConnectResponse, SessionUsage } from '@byoky/core';
 import { ByokyError, ByokyErrorCode, isByokyMessage, encodePairPayload } from '@byoky/core';
-import { isExtensionInstalled, getStoreUrl } from './detect.js';
+import { isExtensionInstalled, getStoreUrl, getMessageTarget } from './detect.js';
 import { createProxyFetch } from './proxy-fetch.js';
 import { createRelayFetch } from './relay-fetch.js';
 import { createRelayClient, type RelayConnection } from './relay-client.js';
@@ -668,11 +668,14 @@ export class Byoky {
         for (const cb of providersUpdatedCallbacks) cb(newProviders);
       }
     };
-    window.postMessage(
-      { type: 'BYOKY_REGISTER_NOTIFY' },
-      window.location.origin,
-      [notifyChannel.port2],
-    );
+    {
+      const { target, origin } = getMessageTarget();
+      target.postMessage(
+        { type: 'BYOKY_REGISTER_NOTIFY' },
+        origin,
+        [notifyChannel.port2],
+      );
+    }
 
     saveExtSession(response);
     return session;
@@ -716,23 +719,25 @@ export class Byoky {
         channel.port1.close();
       }
 
-      window.postMessage(
+      const { target, origin } = getMessageTarget();
+      target.postMessage(
         {
           type: 'BYOKY_CONNECT_REQUEST',
           id: requestId,
           requestId,
           payload: request,
         },
-        window.location.origin,
+        origin,
         [channel.port2],
       );
     });
   }
 
   private sendDisconnect(sessionKey: string): void {
-    window.postMessage(
+    const { target, origin } = getMessageTarget();
+    target.postMessage(
       { type: 'BYOKY_DISCONNECT', payload: { sessionKey } },
-      window.location.origin,
+      origin,
     );
   }
 
@@ -757,11 +762,12 @@ export class Byoky {
         channel.port1.close();
       }
 
-      window.postMessage({
+      const { target, origin } = getMessageTarget();
+      target.postMessage({
         type: 'BYOKY_SESSION_STATUS',
         requestId,
         payload: { sessionKey },
-      }, window.location.origin, [channel.port2]);
+      }, origin, [channel.port2]);
     });
   }
 
@@ -793,11 +799,12 @@ export class Byoky {
         channel.port1.close();
       }
 
-      window.postMessage({
+      const { target, origin } = getMessageTarget();
+      target.postMessage({
         type: 'BYOKY_SESSION_USAGE',
         requestId,
         payload: { sessionKey },
-      }, window.location.origin, [channel.port2]);
+      }, origin, [channel.port2]);
     });
   }
 }
