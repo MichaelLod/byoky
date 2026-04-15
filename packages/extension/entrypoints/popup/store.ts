@@ -176,6 +176,8 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       }
       if (get().pendingApprovals.length > 0) {
         set({ currentPage: 'approval' });
+      } else {
+        await get().loadPendingGift();
       }
     }
   },
@@ -272,6 +274,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       if (appsResult.apps) {
         set({ installedApps: appsResult.apps as InstalledApp[] });
       }
+      await get().loadPendingGift();
       return true;
     }
     set({ error: 'Incorrect password', loading: false });
@@ -444,11 +447,24 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     try {
       const result = await sendInternal('redeemGift', { giftLinkEncoded });
       if (result.error) throw new Error(result.error as string);
+      await sendInternal('clearPendingGift');
       await get().refreshData();
-      set({ modal: null, loading: false });
+      set({ modal: null, pendingGiftLink: null, loading: false });
     } catch (e) {
       set({ error: (e as Error).message, loading: false });
     }
+  },
+
+  loadPendingGift: async () => {
+    if (!get().isUnlocked) return;
+    const result = await sendInternal('getPendingGift');
+    const link = (result.giftLink as string | null) ?? null;
+    if (link) set({ pendingGiftLink: link, modal: 'redeem-gift' });
+  },
+
+  dismissPendingGift: async () => {
+    await sendInternal('clearPendingGift');
+    set({ pendingGiftLink: null });
   },
 
   removeGiftedCredential: async (id: string) => {
