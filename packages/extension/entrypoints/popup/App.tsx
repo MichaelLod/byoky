@@ -19,7 +19,7 @@ import { AppView } from './pages/AppView';
 import { FloatingActionMenu } from './components/FloatingActionMenu';
 
 export default function App() {
-  const { currentPage, sessions, pendingApprovals, loading, init } = useWalletStore();
+  const { currentPage, modal, sessions, pendingApprovals, loading, init, closeModal } = useWalletStore();
 
   useEffect(() => {
     init();
@@ -63,11 +63,10 @@ export default function App() {
 
   const showFab =
     showNav &&
-    currentPage !== 'add-credential' &&
-    currentPage !== 'redeem-gift' &&
     currentPage !== 'create-gift' &&
     currentPage !== 'app-store' &&
-    currentPage !== 'app-view';
+    currentPage !== 'app-view' &&
+    !modal;
 
   return (
     <div className="app">
@@ -152,7 +151,6 @@ export default function App() {
           {currentPage === 'setup' && <Setup />}
           {currentPage === 'unlock' && <Unlock />}
           {currentPage === 'dashboard' && <Dashboard />}
-          {currentPage === 'add-credential' && <AddCredential />}
           {currentPage === 'activity' && <Activity />}
           {currentPage === 'connected-apps' && <ConnectedApps />}
           {currentPage === 'approval' && <ApprovalRequest />}
@@ -161,7 +159,6 @@ export default function App() {
           {currentPage === 'settings' && <Settings />}
           {currentPage === 'gifts' && <Gifts />}
           {currentPage === 'create-gift' && <CreateGift />}
-          {currentPage === 'redeem-gift' && <RedeemGift />}
           {currentPage === 'apps' && <Apps />}
           {currentPage === 'app-store' && <AppStore />}
           {currentPage === 'app-view' && <AppView />}
@@ -173,6 +170,42 @@ export default function App() {
         </div>
       )}
       {showFab && <FloatingActionMenu />}
+      {modal && (
+        <Modal
+          title={modal === 'add-credential' ? 'Add credential' : 'Redeem gift'}
+          onClose={closeModal}
+        >
+          {modal === 'add-credential' && <AddCredential />}
+          {modal === 'redeem-gift' && <RedeemGift />}
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <div className="modal-sheet" onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title}>
+        <div className="modal-header">
+          <span className="modal-title">{title}</span>
+          <button className="icon-btn" onClick={onClose} aria-label="Close">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+        <div className="modal-body">{children}</div>
+      </div>
     </div>
   );
 }

@@ -6,6 +6,9 @@ struct WalletView: View {
     @State private var showSettings = false
     @State private var showCloudVaultSetup = false
     @State private var showRedeemGift = false
+    @State private var expandedCredentialId: String?
+    @State private var renamingCredential: Credential?
+    @State private var renameDraft: String = ""
 
     private var activeGifts: [GiftedCredential] {
         wallet.giftedCredentials.filter { !isGiftedCredentialExpired($0) }
@@ -112,6 +115,20 @@ struct WalletView: View {
                 CloudVaultSetupView(lastUsername: wallet.cloudVaultLastUsername)
                     .environmentObject(wallet)
             }
+            .alert("Rename credential", isPresented: Binding(
+                get: { renamingCredential != nil },
+                set: { if !$0 { renamingCredential = nil } }
+            ), presenting: renamingCredential) { credential in
+                TextField("Label", text: $renameDraft)
+                    .accessibilityIdentifier("wallet.renameCredential.field")
+                Button("Save") {
+                    try? wallet.updateCredentialLabel(id: credential.id, newLabel: renameDraft)
+                    renamingCredential = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    renamingCredential = nil
+                }
+            }
             .task {
                 // Re-probe every 15s while the Wallet is visible so the dot
                 // self-heals if the sender WS briefly blinks. A single
@@ -166,7 +183,20 @@ struct WalletView: View {
     private var credentialsSection: some View {
         Section {
             ForEach(wallet.credentials) { credential in
-                CredentialRow(credential: credential)
+                CredentialRow(
+                    credential: credential,
+                    isExpanded: expandedCredentialId == credential.id,
+                    usage: providerUsage(for: credential.providerId),
+                    onToggle: {
+                        withAnimation(.easeInOut(duration: 0.22)) {
+                            expandedCredentialId = expandedCredentialId == credential.id ? nil : credential.id
+                        }
+                    },
+                    onRename: {
+                        renameDraft = credential.label
+                        renamingCredential = credential
+                    }
+                )
             }
             .onDelete { offsets in
                 for index in offsets {
@@ -176,6 +206,24 @@ struct WalletView: View {
         } header: {
             Text("\(wallet.credentials.count) credential\(wallet.credentials.count == 1 ? "" : "s")")
         }
+    }
+
+    /// Aggregate the last 7 days of successful requests for a provider. Returned
+    /// per-credential by querying providerId — multiple credentials of the same
+    /// provider will share these numbers (the request log doesn't carry a
+    /// credentialId), which is acceptable for an at-a-glance card.
+    private func providerUsage(for providerId: String) -> CredentialUsage {
+        let cutoff = Date().addingTimeInterval(-7 * 24 * 60 * 60)
+        var usage = CredentialUsage(requests: 0, inputTokens: 0, outputTokens: 0)
+        for log in wallet.requestLogs {
+            guard log.timestamp >= cutoff else { continue }
+            guard log.providerId == providerId else { continue }
+            guard log.statusCode < 400 else { continue }
+            usage.requests += 1
+            usage.inputTokens += log.inputTokens ?? 0
+            usage.outputTokens += log.outputTokens ?? 0
+        }
+        return usage
     }
 
     private var giftsSection: some View {
@@ -195,36 +243,109 @@ struct WalletView: View {
     }
 }
 
+struct CredentialUsage {
+    var requests: Int
+    var inputTokens: Int
+    var outputTokens: Int
+}
+
 struct CredentialRow: View {
     let credential: Credential
+    let isExpanded: Bool
+    let usage: CredentialUsage
+    let onToggle: () -> Void
+    let onRename: () -> Void
 
     var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: Provider.find(credential.providerId)?.icon ?? "key")
-                .font(.system(size: 18))
-                .foregroundStyle(Theme.accent)
-                .frame(width: 36, height: 36)
-                .background(Theme.accent.opacity(0.1))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 14) {
+                Image(systemName: Provider.find(credential.providerId)?.icon ?? "key")
+                    .font(.system(size: 18))
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 36, height: 36)
+                    .background(Theme.accent.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(credential.label)
-                    .font(.body.weight(.medium))
-                Text(Provider.find(credential.providerId)?.name ?? credential.providerId)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(credential.label)
+                        .font(.body.weight(.medium))
+                    Text(Provider.find(credential.providerId)?.name ?? credential.providerId)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button {
+                    onRename()
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Rename credential")
+                .accessibilityIdentifier("wallet.credential.rename")
+
+                Text(credential.authMethod == .apiKey ? "API Key" : "OAuth")
+                    .font(.caption2.weight(.medium))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color(.systemGray5))
+                    .clipShape(Capsule())
+
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
+            }
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+            .onTapGesture { onToggle() }
+
+            if isExpanded {
+                Divider().padding(.top, 8)
+                CredentialUsagePanel(usage: usage)
+                    .padding(.top, 10)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+}
+
+private struct CredentialUsagePanel: View {
+    let usage: CredentialUsage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("LAST 7 DAYS")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            if usage.requests == 0 {
+                Text("No usage in the last 7 days.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .italic()
+            } else {
+                HStack(spacing: 16) {
+                    statColumn(value: "\(usage.requests)", label: "requests")
+                    statColumn(value: formatWalletTokens(usage.inputTokens), label: "input")
+                    statColumn(value: formatWalletTokens(usage.outputTokens), label: "output")
+                }
             }
-
-            Spacer()
-
-            Text(credential.authMethod == .apiKey ? "API Key" : "OAuth")
-                .font(.caption2.weight(.medium))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Color(.systemGray5))
-                .clipShape(Capsule())
         }
-        .padding(.vertical, 4)
+        .padding(.bottom, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func statColumn(value: String, label: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(value).font(.headline)
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

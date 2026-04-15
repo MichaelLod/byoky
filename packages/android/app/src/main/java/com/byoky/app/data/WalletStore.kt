@@ -284,6 +284,20 @@ class WalletStore(context: Context) {
         vaultScope.launch { syncRemoveFromVault(localId) }
     }
 
+    fun updateCredentialLabel(credentialId: String, newLabel: String) {
+        val trimmed = newLabel.trim()
+        if (trimmed.isEmpty()) return
+        val current = _credentials.value
+        val idx = current.indexOfFirst { it.id == credentialId }
+        if (idx < 0) return
+        if (current[idx].label == trimmed) return
+        _credentials.value = current.toMutableList().apply {
+            this[idx] = this[idx].copy(label = trimmed)
+        }
+        saveCredentials()
+        vaultScope.launch { syncRenameToVault(credentialId, trimmed) }
+    }
+
     fun decryptKey(credential: Credential): String {
         val password = masterPassword ?: throw IllegalStateException("Wallet locked")
         val encrypted = prefs.getString("key_${credential.id}", null)
@@ -1452,6 +1466,10 @@ class WalletStore(context: Context) {
                     val reqBody = (body?.toString() ?: "{}").toRequestBody(JSON_MEDIA)
                     builder.post(reqBody)
                 }
+                "PATCH" -> {
+                    val reqBody = (body?.toString() ?: "{}").toRequestBody(JSON_MEDIA)
+                    builder.patch(reqBody)
+                }
                 "DELETE" -> builder.delete()
                 else -> builder.get()
             }
@@ -1666,6 +1684,20 @@ class WalletStore(context: Context) {
         }
         vaultCredentialMap.remove(localId)
         saveVaultCredentialMap()
+    }
+
+    private fun syncRenameToVault(localId: String, newLabel: String) {
+        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
+        val token = vaultToken ?: return
+        val vaultId = vaultCredentialMap[localId] ?: return
+
+        val body = JSONObject().put("label", newLabel)
+        val (_, status, _) = vaultRequest("/credentials/$vaultId", "PATCH", body = body, token = token)
+
+        if (status == 401) {
+            _cloudVaultTokenExpired.value = true
+            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
+        }
     }
 
     private fun syncPendingCredentials() {

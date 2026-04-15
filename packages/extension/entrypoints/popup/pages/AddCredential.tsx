@@ -17,7 +17,7 @@ async function checkBridge(): Promise<boolean> {
 }
 
 export function AddCredential() {
-  const { addApiKey, addSetupToken, startOAuth, navigate, error, loading, clearError } = useWalletStore();
+  const { addApiKey, addSetupToken, startOAuth, closeModal, error, loading, clearError } = useWalletStore();
   const [providerId, setProviderId] = useState('anthropic');
   const [authMethod, setAuthMethod] = useState<'api_key' | 'oauth'>('api_key');
   const [label, setLabel] = useState('');
@@ -79,7 +79,6 @@ export function AddCredential() {
 
   return (
     <div>
-      <h2 className="page-title">Add Credential</h2>
       <p className="page-subtitle">
         Add a credential for {provider?.name ?? 'an LLM provider'}.
       </p>
@@ -226,7 +225,7 @@ export function AddCredential() {
           <button
             type="button"
             className="btn btn-secondary"
-            onClick={() => navigate('dashboard')}
+            onClick={closeModal}
           >
             Cancel
           </button>

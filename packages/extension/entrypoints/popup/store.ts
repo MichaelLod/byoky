@@ -58,6 +58,7 @@ interface WalletState {
   installedApps: InstalledApp[];
   activeApp: InstalledApp | null;
   currentPage: Page;
+  modal: 'add-credential' | 'redeem-gift' | null;
   loading: boolean;
   error: string | null;
 
@@ -70,6 +71,8 @@ interface WalletState {
   unlock: (password: string) => Promise<boolean>;
   lock: () => Promise<void>;
   navigate: (page: Page) => void;
+  openModal: (modal: 'add-credential' | 'redeem-gift') => void;
+  closeModal: () => void;
   addApiKey: (providerId: string, label: string, apiKey: string) => Promise<void>;
   addSetupToken: (providerId: string, label: string, token: string) => Promise<void>;
   startOAuth: (providerId: string, label: string) => Promise<void>;
@@ -136,6 +139,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   installedApps: [],
   activeApp: null,
   currentPage: 'unlock',
+  modal: null,
   loading: true,
   error: null,
 
@@ -286,17 +290,32 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       installedApps: [],
       activeApp: null,
       currentPage: 'unlock',
+      modal: null,
     });
   },
 
   navigate: (page: Page) => {
     const preAuthPages: Page[] = ['setup', 'unlock'];
     if (!get().isUnlocked && !preAuthPages.includes(page)) {
-      set({ currentPage: 'unlock', error: null });
+      set({ currentPage: 'unlock', error: null, modal: null });
       return;
     }
-    set({ currentPage: page, error: null });
+    // The credential and gift-redemption flows are popup-style overlays now;
+    // route legacy navigate() calls there to the modal so the underlying page
+    // stays visible.
+    if (page === 'add-credential' || page === 'redeem-gift') {
+      set({ modal: page, error: null });
+      return;
+    }
+    set({ currentPage: page, error: null, modal: null });
   },
+
+  openModal: (modal) => {
+    if (!get().isUnlocked) return;
+    set({ modal, error: null });
+  },
+
+  closeModal: () => set({ modal: null, error: null }),
 
   addApiKey: async (providerId: string, label: string, apiKey: string) => {
     set({ loading: true, error: null });
@@ -306,7 +325,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       });
       if (result.error) throw new Error(result.error as string);
       await get().refreshData();
-      set({ currentPage: 'dashboard', loading: false });
+      set({ modal: null, loading: false });
     } catch (e) {
       set({ error: (e as Error).message, loading: false });
     }
@@ -320,7 +339,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       });
       if (result.error) throw new Error(result.error as string);
       await get().refreshData();
-      set({ currentPage: 'dashboard', loading: false });
+      set({ modal: null, loading: false });
     } catch (e) {
       set({ error: (e as Error).message, loading: false });
     }
@@ -334,7 +353,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
         throw new Error((oauthResult.error as string) || 'OAuth flow failed');
       }
       await get().refreshData();
-      set({ currentPage: 'dashboard', loading: false });
+      set({ modal: null, loading: false });
     } catch (e) {
       set({ error: (e as Error).message, loading: false });
     }
@@ -422,7 +441,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       const result = await sendInternal('redeemGift', { giftLinkEncoded });
       if (result.error) throw new Error(result.error as string);
       await get().refreshData();
-      set({ currentPage: 'gifts', loading: false });
+      set({ modal: null, loading: false });
     } catch (e) {
       set({ error: (e as Error).message, loading: false });
     }
@@ -615,6 +634,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       installedApps: [],
       activeApp: null,
       currentPage: 'setup',
+      modal: null,
       error: null,
     });
   },

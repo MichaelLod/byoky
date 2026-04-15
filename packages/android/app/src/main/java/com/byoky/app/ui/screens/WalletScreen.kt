@@ -1,6 +1,7 @@
 package com.byoky.app.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -23,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.byoky.app.data.AuthMethod
 import com.byoky.app.data.Credential
+import com.byoky.app.data.CredentialUsageStats
 import com.byoky.app.data.GiftedCredential
 import com.byoky.app.data.Provider
 import com.byoky.app.data.WalletStore
@@ -45,11 +47,31 @@ fun WalletScreen(
     val credentials by wallet.credentials.collectAsState()
     val giftedCredentials by wallet.giftedCredentials.collectAsState()
     val giftPeerOnline by wallet.giftPeerOnline.collectAsState()
+    val requestLogs by wallet.requestLogs.collectAsState()
     val cloudVaultEnabled by wallet.cloudVaultEnabled.collectAsState()
     var showAddSheet by remember { mutableStateOf(false) }
     var showCloudVaultSetup by remember { mutableStateOf(false) }
     var addMenuOpen by remember { mutableStateOf(false) }
+    var expandedCredentialId by remember { mutableStateOf<String?>(null) }
+    var renameTarget by remember { mutableStateOf<Credential?>(null) }
     val scope = rememberCoroutineScope()
+
+    // Aggregate the last 7 days of successful requests per provider. Per-credential
+    // granularity isn't possible (request log only carries providerId, not a
+    // credentialId), so multiple credentials of the same provider share these
+    // numbers — acceptable for an at-a-glance card.
+    val usageByProvider = remember(requestLogs) {
+        val cutoff = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000
+        val acc = mutableMapOf<String, IntArray>()  // [requests, input, output]
+        for (log in requestLogs) {
+            if (log.timestamp < cutoff || log.statusCode >= 400) continue
+            val arr = acc.getOrPut(log.providerId) { IntArray(3) }
+            arr[0] += 1
+            arr[1] += log.inputTokens ?: 0
+            arr[2] += log.outputTokens ?: 0
+        }
+        acc.mapValues { CredentialUsageStats(it.value[0], it.value[1], it.value[2]) }
+    }
 
     val activeGifts = remember(giftedCredentials) {
         giftedCredentials.filter { !isGiftExpired(it.expiresAt) }
@@ -163,9 +185,16 @@ fun WalletScreen(
                         )
                     }
                     items(credentials, key = { it.id }) { credential ->
-                        CredentialCard(credential) {
-                            wallet.removeCredential(credential)
-                        }
+                        CredentialCard(
+                            credential = credential,
+                            usage = usageByProvider[credential.providerId],
+                            isExpanded = expandedCredentialId == credential.id,
+                            onToggle = {
+                                expandedCredentialId = if (expandedCredentialId == credential.id) null else credential.id
+                            },
+                            onRename = { renameTarget = credential },
+                            onDelete = { wallet.removeCredential(credential) },
+                        )
                     }
                 }
                 if (activeGifts.isNotEmpty()) {
@@ -204,7 +233,50 @@ fun WalletScreen(
                 onDismiss = { showCloudVaultSetup = false },
             )
         }
+
+        renameTarget?.let { target ->
+            RenameCredentialDialog(
+                initialLabel = target.label,
+                onDismiss = { renameTarget = null },
+                onConfirm = { newLabel ->
+                    wallet.updateCredentialLabel(target.id, newLabel)
+                    renameTarget = null
+                },
+            )
+        }
     }
+}
+
+@Composable
+private fun RenameCredentialDialog(
+    initialLabel: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var draft by remember { mutableStateOf(initialLabel) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Rename credential") },
+        text = {
+            OutlinedTextField(
+                value = draft,
+                onValueChange = { draft = it },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(draft) },
+                enabled = draft.trim().isNotEmpty() && draft.trim() != initialLabel,
+            ) { Text("Save") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+        containerColor = BgCard,
+    )
 }
 
 @Composable
@@ -402,69 +474,132 @@ private fun formatGiftExpiry(expiresAt: Long): String {
 }
 
 @Composable
-private fun CredentialCard(credential: Credential, onDelete: () -> Unit) {
+private fun CredentialCard(
+    credential: Credential,
+    usage: CredentialUsageStats?,
+    isExpanded: Boolean,
+    onToggle: () -> Unit,
+    onRename: () -> Unit,
+    onDelete: () -> Unit,
+) {
     val provider = Provider.find(credential.providerId)
 
     Card(
         colors = CardDefaults.cardColors(containerColor = BgCard),
         shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.clickable { onToggle() },
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(AccentSoft),
-                contentAlignment = Alignment.Center,
-            ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(AccentSoft),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Default.Key,
+                        contentDescription = null,
+                        tint = Accent,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+
+                Spacer(Modifier.width(14.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        credential.label,
+                        fontWeight = FontWeight.Medium,
+                        color = TextPrimary,
+                    )
+                    Text(
+                        provider?.name ?: credential.providerId,
+                        fontSize = 12.sp,
+                        color = TextSecondary,
+                    )
+                }
+
+                IconButton(onClick = onRename, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Default.Edit, "Rename", tint = TextMuted, modifier = Modifier.size(18.dp))
+                }
+
+                Text(
+                    if (credential.authMethod == AuthMethod.API_KEY) "API Key" else "OAuth",
+                    fontSize = 11.sp,
+                    color = TextSecondary,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(BgHover)
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+
+                IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Default.Delete, "Remove", tint = TextMuted, modifier = Modifier.size(18.dp))
+                }
+
                 Icon(
-                    Icons.Default.Key,
-                    contentDescription = null,
-                    tint = Accent,
+                    if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    null,
+                    tint = TextMuted,
                     modifier = Modifier.size(20.dp),
                 )
             }
 
-            Spacer(Modifier.width(14.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    credential.label,
-                    fontWeight = FontWeight.Medium,
-                    color = TextPrimary,
-                )
-                Text(
-                    provider?.name ?: credential.providerId,
-                    fontSize = 12.sp,
-                    color = TextSecondary,
-                )
-            }
-
-            Text(
-                if (credential.authMethod == AuthMethod.API_KEY) "API Key" else "OAuth",
-                fontSize = 11.sp,
-                color = TextSecondary,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(BgHover)
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-            )
-
-            IconButton(onClick = onDelete) {
-                Icon(Icons.Default.Delete, "Remove", tint = TextMuted, modifier = Modifier.size(18.dp))
+            if (isExpanded) {
+                Spacer(Modifier.height(12.dp))
+                HorizontalDivider(color = BgHover)
+                Spacer(Modifier.height(10.dp))
+                CredentialUsagePanel(usage = usage)
             }
         }
     }
 }
 
+@Composable
+private fun CredentialUsagePanel(usage: CredentialUsageStats?) {
+    Column {
+        Text(
+            "LAST 7 DAYS",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = TextMuted,
+        )
+        Spacer(Modifier.height(8.dp))
+        if (usage == null || usage.requests == 0) {
+            Text(
+                "No usage in the last 7 days.",
+                fontSize = 12.sp,
+                color = TextSecondary,
+            )
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                UsageStat(value = usage.requests.toString(), label = "requests")
+                UsageStat(value = formatUsageTokens(usage.inputTokens), label = "input")
+                UsageStat(value = formatUsageTokens(usage.outputTokens), label = "output")
+            }
+        }
+    }
+}
+
+@Composable
+private fun UsageStat(value: String, label: String) {
+    Column {
+        Text(value, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+        Text(label, fontSize = 11.sp, color = TextMuted)
+    }
+}
+
+private fun formatUsageTokens(n: Int): String = when {
+    n >= 1_000_000 -> "%.1fM".format(n / 1_000_000.0)
+    n >= 1_000 -> "%dK".format(n / 1_000)
+    else -> n.toString()
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
+internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
     var selectedProvider by remember { mutableStateOf<Provider?>(null) }
     var label by remember { mutableStateOf("") }
     var apiKey by remember { mutableStateOf("") }
