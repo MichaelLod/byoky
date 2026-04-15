@@ -51,15 +51,15 @@ function Hero() {
         </FadeIn>
         <FadeIn delay={0.1}>
           <h1>
-            <span className="hero-eyebrow">Bring your own AI.</span>
-            <span className="hero-gradient">Pay your own bill.</span>
+            <span className="hero-eyebrow">Your AI budget</span>
+            <span className="hero-gradient">is going to waste.</span>
           </h1>
         </FadeIn>
         <FadeIn delay={0.2}>
           <p>
-            Your users connect their own API keys through Byoky.
-            You get Claude, GPT-4, Gemini, and 12 more providers —
-            without spending a cent on infrastructure.
+            Byoky lets you share your token budget with friends,
+            your team, or anyone building cool stuff —
+            without exposing your keys.
           </p>
         </FadeIn>
         <FadeIn delay={0.3}>
