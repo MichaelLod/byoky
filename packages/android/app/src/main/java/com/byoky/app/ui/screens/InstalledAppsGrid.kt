@@ -59,17 +59,6 @@ fun InstalledAppsGrid(wallet: WalletStore) {
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.End,
-        ) {
-            TextButton(onClick = { showStore = true }) {
-                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("Store")
-            }
-        }
-
         LazyVerticalGrid(
             columns = GridCells.Fixed(4),
             contentPadding = PaddingValues(horizontal = 16.dp),

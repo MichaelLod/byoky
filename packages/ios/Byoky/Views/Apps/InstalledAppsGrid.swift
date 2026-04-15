@@ -29,15 +29,6 @@ struct InstalledAppsGrid: View {
             }
             .padding(.top, 16)
         }
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showStore = true
-                } label: {
-                    Label("Store", systemImage: "plus")
-                }
-            }
-        }
         .sheet(isPresented: $showStore) {
             AppStoreView()
         }

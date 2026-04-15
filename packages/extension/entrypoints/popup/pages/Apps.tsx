@@ -2,21 +2,13 @@ import { useWalletStore } from '../store';
 import type { InstalledApp } from '@byoky/core';
 
 export function Apps() {
-  const { installedApps, navigate, toggleApp, uninstallApp } = useWalletStore();
+  const { installedApps, navigate } = useWalletStore();
   const enabledApps = installedApps.filter((a) => a.enabled);
   const disabledApps = installedApps.filter((a) => !a.enabled);
 
   return (
     <div>
-      <div className="page-title-row">
-        <h2 className="page-title">Apps</h2>
-        <button
-          className="btn btn-sm btn-primary"
-          onClick={() => navigate('app-store')}
-        >
-          + Store
-        </button>
-      </div>
+      <h2 className="page-title">Apps</h2>
 
       {installedApps.length === 0 ? (
         <div className="empty-state">
