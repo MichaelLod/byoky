@@ -23,7 +23,7 @@ struct UnlockView: View {
             VStack(spacing: 32) {
                 Spacer()
 
-                MascotView(size: 120)
+                BrandMark(size: 120)
 
                 Text("Byoky Wallet")
                     .font(.system(size: 28, weight: .bold))
@@ -69,7 +69,7 @@ struct UnlockView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
-                            .stroke(isPasswordFocused ? Theme.accent : Color.white.opacity(0.06),
+                            .stroke(isPasswordFocused ? Theme.accent : Theme.border,
                                     lineWidth: isPasswordFocused ? 1.5 : 1)
                     )
                     .animation(.easeInOut(duration: 0.15), value: isPasswordFocused)
@@ -119,7 +119,7 @@ struct UnlockView: View {
             }
             .padding(24)
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(.light)
         .alert("Reset Wallet?", isPresented: $showResetConfirmation) {
             Button("Cancel", role: .cancel) {}
             Button("Reset", role: .destructive) {

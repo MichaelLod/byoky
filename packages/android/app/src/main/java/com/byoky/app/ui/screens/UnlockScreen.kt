@@ -19,7 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.byoky.app.data.UnlockResult
 import com.byoky.app.data.WalletStore
-import com.byoky.app.ui.components.MascotView
+import com.byoky.app.ui.components.BrandMark
 import com.byoky.app.ui.theme.*
 import kotlinx.coroutines.delay
 
@@ -73,7 +73,7 @@ fun UnlockScreen(wallet: WalletStore) {
     ) {
         Spacer(Modifier.weight(1f))
 
-        MascotView(modifier = Modifier.size(120.dp))
+        BrandMark(modifier = Modifier.size(120.dp))
 
         Spacer(Modifier.height(24.dp))
 

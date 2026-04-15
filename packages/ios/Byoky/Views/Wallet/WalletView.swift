@@ -39,9 +39,13 @@ struct WalletView: View {
                                 giftsSection
                             }
                         }
+                        .scrollContentBackground(.hidden)
+                        .background(Theme.bgMain)
                     }
                 }
             }
+            .background(Theme.bgMain)
+            .toolbarBackground(Theme.bgMain, for: .navigationBar)
             .navigationTitle("Wallet")
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -239,8 +243,7 @@ struct CredentialRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 14) {
-                Image(systemName: Provider.find(credential.providerId)?.icon ?? "key")
-                    .font(.system(size: 18))
+                ProviderIcon(providerId: credential.providerId, size: 18)
                     .foregroundStyle(Theme.accent)
                     .frame(width: 36, height: 36)
                     .background(Theme.accent.opacity(0.1))
@@ -340,9 +343,6 @@ struct GiftCredentialRow: View {
         Provider.find(credential.providerId)?.name ?? credential.providerName
     }
 
-    private var providerIcon: String {
-        Provider.find(credential.providerId)?.icon ?? "gift"
-    }
 
     private var remaining: Int {
         giftedBudgetRemaining(credential)
@@ -375,8 +375,7 @@ struct GiftCredentialRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 14) {
-                Image(systemName: providerIcon)
-                    .font(.system(size: 18))
+                ProviderIcon(providerId: credential.providerId, size: 18)
                     .foregroundStyle(Theme.accent)
                     .frame(width: 36, height: 36)
                     .background(Theme.accent.opacity(0.1))

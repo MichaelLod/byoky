@@ -51,7 +51,7 @@ struct VaultAuthView: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            MascotView(size: 100)
+            BrandMark(size: 100)
 
             Text("Your vault, your keys")
                 .font(.system(size: 24, weight: .bold))
@@ -96,7 +96,7 @@ struct VaultAuthView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
-                            .stroke(focusedField == .username ? Theme.accent : Color.white.opacity(0.06),
+                            .stroke(focusedField == .username ? Theme.accent : Theme.border,
                                     lineWidth: focusedField == .username ? 1.5 : 1)
                     )
                     .animation(.easeInOut(duration: 0.15), value: focusedField)
@@ -139,7 +139,7 @@ struct VaultAuthView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12)
-                        .stroke(focusedField == .password ? Theme.accent : Color.white.opacity(0.06),
+                        .stroke(focusedField == .password ? Theme.accent : Theme.border,
                                 lineWidth: focusedField == .password ? 1.5 : 1)
                 )
                 .animation(.easeInOut(duration: 0.15), value: focusedField)
@@ -213,11 +213,11 @@ struct VaultAuthView: View {
         case (.signup, .available):
             Text("Available")
                 .font(.caption2)
-                .foregroundStyle(Color.green)
+                .foregroundStyle(Theme.success)
         case (.login, .taken):
             Text("Account found")
                 .font(.caption2)
-                .foregroundStyle(Color.green)
+                .foregroundStyle(Theme.success)
         case (.signup, .taken):
             HStack(spacing: 4) {
                 Text("Already taken.")

@@ -20,6 +20,8 @@ struct ConnectView: View {
                     AppsView()
                 }
             }
+            .background(Theme.bgMain)
+            .toolbarBackground(Theme.bgMain, for: .navigationBar)
             .navigationTitle("Connect")
         }
     }

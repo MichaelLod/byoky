@@ -1,6 +1,7 @@
 package com.byoky.app.ui.screens
 
 import android.content.Intent
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -18,6 +19,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.byoky.app.data.*
+import com.byoky.app.ui.components.ProviderIcon
 import com.byoky.app.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -204,6 +206,20 @@ private fun SentGiftCard(gift: Gift, wallet: WalletStore, dimmed: Boolean = fals
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(AccentSoft.copy(alpha = alpha)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    ProviderIcon(
+                        providerId = gift.providerId,
+                        tint = Accent.copy(alpha = alpha),
+                        size = 18.dp,
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         provider?.name ?: gift.providerId,

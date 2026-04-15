@@ -50,9 +50,17 @@ object RoutingResolver {
         val swap = trySameFamilySwap(requestedProviderId, group, credentials, engine)
         if (swap != null) return swap
 
-        // 3. Direct credential match.
+        // 3. Direct credential match. When the group also pins a model for
+        // this provider, surface it so the proxy rewrites the body — the
+        // group is the strongest routing force, stronger than the SDK's
+        // model choice.
         val direct = credentials.firstOrNull { it.providerId == requestedProviderId }
-        if (direct != null) return RoutingDecision(direct, translation = null)
+        if (direct != null) {
+            val override = if (group?.providerId == requestedProviderId) {
+                group.model?.takeIf { it.isNotEmpty() }
+            } else null
+            return RoutingDecision(direct, translation = null, modelOverride = override)
+        }
 
         return null
     }

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { ByokySession, SessionUsage } from '@byoky/sdk';
-import { highlightCode } from './highlight';
+import { highlightCode } from '../../components/highlight';
 
 interface Props {
   session: ByokySession;

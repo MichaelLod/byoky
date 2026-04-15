@@ -188,10 +188,20 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
                 return
             }
 
+            // The group is the strongest routing force: when it pins a
+            // model for the requested provider, rewrite the body before
+            // forwarding, even though no translation/swap is needed.
+            let forwardedBody: String?
+            if let override = routing?.modelOverride, !override.isEmpty {
+                forwardedBody = rewriteModelInJsonBody(bodyString, to: override)
+            } else {
+                forwardedBody = bodyString
+            }
+
             await proxyDirect(
                 requestId: requestId, providerId: providerId,
                 url: url, urlString: urlString, method: method,
-                headers: headers, bodyString: bodyString, credential: credential
+                headers: headers, bodyString: forwardedBody, credential: credential
             )
         }
     }

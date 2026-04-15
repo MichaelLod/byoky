@@ -167,6 +167,10 @@ proxy.post('/', async (c) => {
     }
   } else if (isSwapping && decision.swap?.dstModel && effectiveBody) {
     effectiveBody = rewriteModelInJsonBody(effectiveBody, decision.swap.dstModel);
+  } else if (decision.modelOverride && effectiveBody) {
+    // Direct path, same provider, but the group pins a model. The group is
+    // the strongest routing force — override the SDK's choice.
+    effectiveBody = rewriteModelInJsonBody(effectiveBody, decision.modelOverride);
   }
 
   // Effective URL. Translation and swap both rewrite the URL because the
@@ -213,7 +217,10 @@ proxy.post('/', async (c) => {
       providerId: requestedProviderId,
       actualProviderId: isTranslating || isSwapping ? upstreamProviderId : undefined,
       model: parseModel(reqBody),
-      actualModel: isTranslating || isSwapping ? upstreamModel : undefined,
+      actualModel:
+        isTranslating || isSwapping
+          ? upstreamModel
+          : decision.modelOverride,
       groupId: groupRow?.id,
       url,
       method: method ?? 'POST',
@@ -286,7 +293,10 @@ proxy.post('/', async (c) => {
         providerId: requestedProviderId,
         actualProviderId: isTranslating || isSwapping ? upstreamProviderId : undefined,
         model: parseModel(reqBody),
-        actualModel: isTranslating || isSwapping ? upstreamModel : undefined,
+        actualModel:
+          isTranslating || isSwapping
+            ? upstreamModel
+            : decision.modelOverride,
         groupId: groupRow?.id,
         url,
         method: method ?? 'POST',
@@ -321,7 +331,10 @@ proxy.post('/', async (c) => {
     providerId: requestedProviderId,
     actualProviderId: isTranslating || isSwapping ? upstreamProviderId : undefined,
     model: parseModel(reqBody),
-    actualModel: isTranslating || isSwapping ? upstreamModel : undefined,
+    actualModel:
+      isTranslating || isSwapping
+        ? upstreamModel
+        : decision.modelOverride,
     groupId: groupRow?.id,
     url,
     method: method ?? 'POST',

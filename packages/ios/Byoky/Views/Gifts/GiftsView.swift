@@ -39,10 +39,14 @@ struct GiftsView: View {
                             expiredSection
                         }
                     }
+                    .scrollContentBackground(.hidden)
+                    .background(Theme.bgMain)
                 } else {
                     emptyState
                 }
             }
+            .background(Theme.bgMain)
+            .toolbarBackground(Theme.bgMain, for: .navigationBar)
             .navigationTitle("Gifts")
         }
     }
@@ -157,9 +161,6 @@ struct SentGiftRow: View {
         Provider.find(gift.providerId)?.name ?? gift.providerId
     }
 
-    private var providerIcon: String {
-        Provider.find(gift.providerId)?.icon ?? "key"
-    }
 
     private var remaining: Int {
         giftBudgetRemaining(gift)
@@ -188,8 +189,7 @@ struct SentGiftRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
-                Image(systemName: providerIcon)
-                    .font(.system(size: 16))
+                ProviderIcon(providerId: gift.providerId, size: 16)
                     .foregroundStyle(Theme.accent)
                     .frame(width: 32, height: 32)
                     .background(Theme.accent.opacity(0.1))

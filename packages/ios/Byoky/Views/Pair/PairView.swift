@@ -22,6 +22,8 @@ struct PairView: View {
                 errorSection(message: msg)
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.bgMain)
         .sheet(isPresented: $showScanner) {
             QRScannerView { code in
                 showScanner = false

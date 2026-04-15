@@ -14,6 +14,9 @@ export function Unlock() {
 
   return (
     <div className="center-page">
+      <div className="brand-mark">
+        <img src="/icon.svg" alt="" />
+      </div>
       <div className="logo-large">Byoky</div>
       <div className="tagline">Welcome back</div>
 
@@ -50,7 +53,7 @@ export function Unlock() {
         </>
       ) : (
         <div style={{ textAlign: 'center', padding: '0 8px' }}>
-          <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
+          <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)', marginBottom: 8 }}>
             Reset Wallet?
           </div>
           <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 20, lineHeight: 1.5 }}>

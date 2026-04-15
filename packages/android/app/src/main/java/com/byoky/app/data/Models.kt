@@ -34,23 +34,22 @@ data class Provider(
     val id: String,
     val name: String,
     val baseUrl: String,
-    val icon: String,
 ) {
     companion object {
         val all = listOf(
-            Provider("anthropic", "Anthropic", "https://api.anthropic.com", "brain"),
-            Provider("openai", "OpenAI", "https://api.openai.com", "sparkles"),
-            Provider("gemini", "Google Gemini", "https://generativelanguage.googleapis.com", "auto_awesome"),
-            Provider("mistral", "Mistral", "https://api.mistral.ai", "air"),
-            Provider("cohere", "Cohere", "https://api.cohere.com", "chat_bubble"),
-            Provider("xai", "xAI (Grok)", "https://api.x.ai", "bolt"),
-            Provider("deepseek", "DeepSeek", "https://api.deepseek.com", "search"),
-            Provider("perplexity", "Perplexity", "https://api.perplexity.ai", "help"),
-            Provider("groq", "Groq", "https://api.groq.com", "speed"),
-            Provider("together", "Together AI", "https://api.together.xyz", "group"),
-            Provider("fireworks", "Fireworks AI", "https://api.fireworks.ai", "local_fire_department"),
-            Provider("openrouter", "OpenRouter", "https://openrouter.ai/api", "route"),
-            Provider("azure_openai", "Azure OpenAI", "https://openai.azure.com", "cloud"),
+            Provider("anthropic", "Anthropic", "https://api.anthropic.com"),
+            Provider("openai", "OpenAI", "https://api.openai.com"),
+            Provider("gemini", "Google Gemini", "https://generativelanguage.googleapis.com"),
+            Provider("mistral", "Mistral", "https://api.mistral.ai"),
+            Provider("cohere", "Cohere", "https://api.cohere.com"),
+            Provider("xai", "xAI (Grok)", "https://api.x.ai"),
+            Provider("deepseek", "DeepSeek", "https://api.deepseek.com"),
+            Provider("perplexity", "Perplexity", "https://api.perplexity.ai"),
+            Provider("groq", "Groq", "https://api.groq.com"),
+            Provider("together", "Together AI", "https://api.together.xyz"),
+            Provider("fireworks", "Fireworks AI", "https://api.fireworks.ai"),
+            Provider("openrouter", "OpenRouter", "https://openrouter.ai/api"),
+            Provider("azure_openai", "Azure OpenAI", "https://openai.azure.com"),
         )
 
         /**
@@ -271,6 +270,13 @@ data class RoutingDecision(
      * specific destination model that should override the SDK's choice.
      */
     val swapDstModel: String? = null,
+    /**
+     * Direct-path model override. Set when the group targets the same
+     * provider as the request (no translation/swap needed) but pins a
+     * specific model. The proxy rewrites the body's `model` field. The
+     * group is the strongest routing force — its model wins over the SDK's.
+     */
+    val modelOverride: String? = null,
 ) {
     val needsTranslation: Boolean get() = translation != null
     val needsSwap: Boolean get() = swapToProviderId != null

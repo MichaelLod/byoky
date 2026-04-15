@@ -108,6 +108,14 @@ export interface SessionProvider {
    * Mutually exclusive with `translation`.
    */
   swap?: SessionSwap;
+  /**
+   * Direct-path model override. Set when the group binds the requested
+   * provider (no cross-family / swap needed) but pins a specific model. The
+   * proxy handler rewrites the outgoing body's top-level `model` field to
+   * this value. Translation and swap carry their pinned model in their own
+   * `dstModel`; `modelOverride` is only used on the plain direct path.
+   */
+  modelOverride?: string;
 }
 
 export interface SessionTranslation {

@@ -1,33 +1,26 @@
 import SwiftUI
 
 enum Theme {
-    // Extension palette: --accent: #0ea5e9
+    // Brand palette: --accent: #FF4F00
     static let accent = Color("Accent")
     static let accentSoft = Color("AccentSoft")
     static let accentHover = Color("AccentHover")
 
-    // Extension palette: --bg: #141418, --bg-raised: #1c1c22, --bg-card: #24242c
+    // Light palette: --bg: #fafaf9, --bg-raised: #f5f5f4, --bg-card: #ffffff
     static let bgMain = Color("BgMain")
     static let bgRaised = Color("BgRaised")
     static let bgCard = Color("BgCard")
 
     // Semantic
-    static let danger = Color(red: 0.957, green: 0.247, blue: 0.369) // #f43f5e
-    static let success = Color(red: 0.204, green: 0.827, blue: 0.600) // #34d399
+    static let danger = Color(red: 0.863, green: 0.149, blue: 0.149) // #dc2626
+    static let success = Color(red: 0.086, green: 0.639, blue: 0.290) // #16a34a
 
-    // Text
-    static let textPrimary = Color(red: 0.961, green: 0.961, blue: 0.969) // #f5f5f7
-    static let textSecondary = Color(red: 0.557, green: 0.557, blue: 0.604) // #8e8e9a
-    static let textMuted = Color(red: 0.333, green: 0.333, blue: 0.373) // #55555f
+    // Text (warm stone)
+    static let textPrimary = Color(red: 0.110, green: 0.098, blue: 0.090) // #1c1917
+    static let textSecondary = Color(red: 0.341, green: 0.325, blue: 0.306) // #57534e
+    static let textMuted = Color(red: 0.659, green: 0.635, blue: 0.620) // #a8a29e
 
-    // Eyes of the owl mascot
-    static let eyeCyan = Color(red: 0.490, green: 0.827, blue: 0.988) // #7dd3fc
-    static let eyePupil = Color(red: 0.878, green: 0.831, blue: 1.0) // #e0d4ff
-
-    // Logo gradient (matches extension header logo)
-    static let logoGradient = LinearGradient(
-        colors: [Color(red: 0.490, green: 0.827, blue: 0.988), Color(red: 0.055, green: 0.647, blue: 0.914)],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
+    // Borders
+    static let border = Color(red: 0.906, green: 0.898, blue: 0.886) // #e7e5e4
+    static let borderHover = Color(red: 0.839, green: 0.827, blue: 0.816) // #d6d3d1
 }

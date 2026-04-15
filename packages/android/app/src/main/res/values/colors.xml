@@ -1,18 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="accent">#0ea5e9</color>
-    <color name="accent_hover">#38bdf8</color>
-    <color name="accent_soft">#1F0ea5e9</color>
-    <color name="bg_main">#141418</color>
-    <color name="bg_raised">#1c1c22</color>
-    <color name="bg_card">#24242c</color>
-    <color name="bg_hover">#2a2a34</color>
-    <color name="text_primary">#f5f5f7</color>
-    <color name="text_secondary">#8e8e9a</color>
-    <color name="text_muted">#55555f</color>
-    <color name="danger">#f43f5e</color>
-    <color name="success">#34d399</color>
-    <color name="border">#0Fffffff</color>
-    <color name="ic_launcher_background">#0c1a33</color>
-    <color name="splash_background">#0c1a33</color>
+    <color name="accent">#FF4F00</color>
+    <color name="accent_hover">#FF6A2A</color>
+    <color name="accent_soft">#1FFF4F00</color>
+    <color name="bg_main">#f5f5f4</color>
+    <color name="bg_raised">#f5f5f4</color>
+    <color name="bg_card">#ffffff</color>
+    <color name="bg_hover">#e7e5e4</color>
+    <color name="text_primary">#1c1917</color>
+    <color name="text_secondary">#57534e</color>
+    <color name="text_muted">#a8a29e</color>
+    <color name="danger">#dc2626</color>
+    <color name="success">#16a34a</color>
+    <color name="border">#e7e5e4</color>
+    <color name="ic_launcher_background">#FF4F00</color>
+    <color name="splash_background">#f5f5f4</color>
 </resources>

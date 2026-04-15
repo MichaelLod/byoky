@@ -106,7 +106,7 @@ struct FloatingActionMenu: View {
                 .frame(width: 56, height: 56)
                 .background(
                     LinearGradient(
-                        colors: [Color(red: 0.22, green: 0.74, blue: 0.97), Theme.accent],
+                        colors: [Theme.accentHover, Theme.accent],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     )

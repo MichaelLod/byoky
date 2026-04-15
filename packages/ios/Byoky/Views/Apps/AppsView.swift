@@ -41,6 +41,9 @@ struct AppsView: View {
                     emptyState
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.bgMain)
+            .toolbarBackground(Theme.bgMain, for: .navigationBar)
             .navigationTitle("Apps")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {

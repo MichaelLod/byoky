@@ -145,7 +145,12 @@ class ProxyService(
 
         applyAuth(filteredHeaders, providerId, own.credential.authMethod, own.apiKey)
 
-        val injectedBody = injectStreamUsageOptions(providerId, body)
+        // Group-pinned model wins over the SDK's choice even on the direct
+        // path (no provider swap or translation needed, just a body rewrite).
+        val overriddenBody = routing?.modelOverride?.let { override ->
+            rewriteModelInJsonBody(body?.toString(Charsets.UTF_8), override)?.toByteArray(Charsets.UTF_8)
+        } ?: body
+        val injectedBody = injectStreamUsageOptions(providerId, overriddenBody)
         val finalBody = if (providerId == "anthropic" && own.credential.authMethod == AuthMethod.OAUTH && injectedBody != null) {
             injectClaudeCodeSystemPrompt(injectedBody)
         } else {
@@ -322,7 +327,12 @@ class ProxyService(
 
                 applyAuth(filteredHeaders, providerId, own.credential.authMethod, own.apiKey)
 
-                val injectedBody = injectStreamUsageOptions(providerId, body)
+                // Group-pinned model wins over the SDK's choice even on the
+                // direct path (same provider, no translation/swap needed).
+                val overriddenBody = routing?.modelOverride?.let { override ->
+                    rewriteModelInJsonBody(body?.toString(Charsets.UTF_8), override)?.toByteArray(Charsets.UTF_8)
+                } ?: body
+                val injectedBody = injectStreamUsageOptions(providerId, overriddenBody)
                 val finalBody = if (providerId == "anthropic" && own.credential.authMethod == AuthMethod.OAUTH && injectedBody != null) {
                     injectClaudeCodeSystemPrompt(injectedBody)
                 } else {

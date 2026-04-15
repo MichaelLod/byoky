@@ -177,6 +177,48 @@ describe('resolveRoute', () => {
 
       expect(decision!.credential.id).toBe('c2');
     });
+
+    it('surfaces modelOverride when same-provider group pins a model', () => {
+      // The group is the strongest routing force — its model must override
+      // whatever the SDK put in the body. Without this, a user who pinned
+      // Opus in the group would still see Sonnet if the app hardcoded it.
+      const credentials = [cred('c1', 'anthropic')];
+      const g = group('anthropic', { model: 'claude-opus-4-6' });
+
+      const decision = resolveRoute('anthropic', g, credentials);
+
+      expect(decision!.credential.id).toBe('c1');
+      expect(decision!.modelOverride).toBe('claude-opus-4-6');
+      expect(decision!.translation).toBeUndefined();
+      expect(decision!.swap).toBeUndefined();
+    });
+
+    it('surfaces modelOverride alongside a credential pin on the same provider', () => {
+      const credentials = [cred('c1', 'openai'), cred('c2', 'openai')];
+      const g = group('openai', { model: 'gpt-4o', credentialId: 'c2' });
+
+      const decision = resolveRoute('openai', g, credentials);
+
+      expect(decision!.credential.id).toBe('c2');
+      expect(decision!.modelOverride).toBe('gpt-4o');
+    });
+
+    it('does not set modelOverride when the group has no model pinned', () => {
+      const credentials = [cred('c1', 'openai')];
+      const g = group('openai');
+
+      const decision = resolveRoute('openai', g, credentials);
+
+      expect(decision!.modelOverride).toBeUndefined();
+    });
+
+    it('does not set modelOverride when no group is set', () => {
+      const credentials = [cred('c1', 'openai')];
+
+      const decision = resolveRoute('openai', undefined, credentials);
+
+      expect(decision!.modelOverride).toBeUndefined();
+    });
   });
 
   describe('priority order', () => {
