@@ -51,13 +51,13 @@ export default function BlogIndex() {
 
 const blogStyles = `
 .blog-layout {
-  --blog-bg: #0e0e1a;
-  --blog-bg-card: #161626;
-  --blog-bg-elevated: #1c1c30;
-  --blog-border: #252540;
-  --blog-text: #ededf4;
-  --blog-text-secondary: #9494b0;
-  --blog-text-muted: #5a5a78;
+  --blog-bg: #fafaf9;
+  --blog-bg-card: #ffffff;
+  --blog-bg-elevated: #f5f5f4;
+  --blog-border: #e7e5e4;
+  --blog-text: #1c1917;
+  --blog-text-secondary: #44403c;
+  --blog-text-muted: #78716c;
 
   max-width: 820px;
   margin: 0 auto;
@@ -132,7 +132,7 @@ const blogStyles = `
   aspect-ratio: 1200 / 630;
   overflow: hidden;
   border-bottom: 1px solid var(--blog-border);
-  background: #0a0a14;
+  background: var(--blog-bg-elevated);
 }
 
 .blog-card-cover img {
@@ -192,8 +192,8 @@ const blogStyles = `
   font-family: var(--font-code);
   padding: 3px 8px;
   border-radius: 999px;
-  background: rgba(14, 165, 233, 0.1);
-  color: var(--teal-light);
+  background: rgba(2, 132, 199, 0.1);
+  color: var(--teal-dark);
   letter-spacing: 0.02em;
 }
 
