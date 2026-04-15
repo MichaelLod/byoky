@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { ByokySession, SessionUsage } from '@byoky/sdk';
+import { highlightCode } from './highlight';
 
 interface Props {
   session: ByokySession;
@@ -125,7 +126,7 @@ export function SessionInfo({ session }: Props) {
             <span className="code-dot green" />
             <span className="code-filename">session-api.ts</span>
           </div>
-          <pre className="code-body"><code>{`// Check connection status
+          <pre className="code-body"><code>{highlightCode(`// Check connection status
 const connected = await session.isConnected();
 
 // Get this session's usage
@@ -139,7 +140,7 @@ session.onDisconnect(() => {
 
 // Token allowances are enforced by the wallet.
 // If a limit is exceeded, requests return 429
-// with code: 'QUOTA_EXCEEDED'.`}</code></pre>
+// with code: 'QUOTA_EXCEEDED'.`)}</code></pre>
         </div>
       </div>
     </div>
