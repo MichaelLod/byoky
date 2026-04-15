@@ -2,6 +2,7 @@ export default defineContentScript({
   matches: ['<all_urls>'],
   runAt: 'document_start',
   world: 'MAIN',
+  allFrames: true,
 
   main() {
     // Inject the byoky provider into the page context
