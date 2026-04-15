@@ -1,27 +1,27 @@
 <svg width="480" height="140" viewBox="0 0 480 140" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <linearGradient id="glow" x1="0" y1="0" x2="480" y2="140" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#0ea5e9" stop-opacity="0.15"/>
-      <stop offset="50%" stop-color="#38bdf8" stop-opacity="0.08"/>
-      <stop offset="100%" stop-color="#0ea5e9" stop-opacity="0.15"/>
+      <stop offset="0%" stop-color="#FF4F00" stop-opacity="0.18"/>
+      <stop offset="50%" stop-color="#FF6A2A" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#FF4F00" stop-opacity="0.18"/>
     </linearGradient>
     <linearGradient id="textGrad" x1="120" y1="40" x2="360" y2="100" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#e4e4ec"/>
-      <stop offset="100%" stop-color="#7dd3fc"/>
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#FF9A5C"/>
     </linearGradient>
     <linearGradient id="accent" x1="0" y1="0" x2="100%" y2="0">
       <stop offset="0%" stop-color="transparent"/>
-      <stop offset="50%" stop-color="#0ea5e9"/>
+      <stop offset="50%" stop-color="#FF4F00"/>
       <stop offset="100%" stop-color="transparent"/>
     </linearGradient>
   </defs>
-  <rect width="480" height="140" rx="16" fill="#08081a"/>
+  <rect width="480" height="140" rx="16" fill="#0f0a06"/>
   <rect width="480" height="140" rx="16" fill="url(#glow)"/>
-  <rect x="0" y="138" width="480" height="2" fill="url(#accent)" opacity="0.4"/>
+  <rect x="0" y="138" width="480" height="2" fill="url(#accent)" opacity="0.5"/>
   <!-- Logo text -->
   <text x="240" y="55" font-family="system-ui, -apple-system, sans-serif" font-size="36" font-weight="700" fill="url(#textGrad)" letter-spacing="-1" text-anchor="middle">Byoky</text>
   <!-- Tagline -->
-  <text x="240" y="82" font-family="system-ui, -apple-system, sans-serif" font-size="14" fill="#7a7a9c" text-anchor="middle" letter-spacing="0.5">Bring Your Own Key</text>
+  <text x="240" y="82" font-family="system-ui, -apple-system, sans-serif" font-size="14" fill="#FF8A4C" text-anchor="middle" letter-spacing="0.5">Bring Your Own Key</text>
   <!-- Subtitle -->
-  <text x="240" y="110" font-family="system-ui, -apple-system, sans-serif" font-size="12" fill="#464866" text-anchor="middle">Secure browser wallet for your AI credentials</text>
+  <text x="240" y="110" font-family="system-ui, -apple-system, sans-serif" font-size="12" fill="#8a7866" text-anchor="middle">Share your AI budget without sharing your keys</text>
 </svg>
