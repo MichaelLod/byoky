@@ -5,13 +5,17 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -53,6 +57,7 @@ private fun ModeTab(selected: Boolean, label: String, onClick: () -> Unit, modif
 fun VaultAuthContent(wallet: WalletStore, initialMode: VaultAuthMode, onBack: () -> Unit) {
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var showPassword by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf(VaultUsernameStatus.IDLE) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
@@ -151,6 +156,9 @@ fun VaultAuthContent(wallet: WalletStore, initialMode: VaultAuthMode, onBack: ()
                 }
             },
             label = { Text(if (mode == VaultAuthMode.LOGIN) "Your username" else "Choose a username") },
+            leadingIcon = {
+                Icon(Icons.Filled.Person, contentDescription = null, tint = TextMuted, modifier = Modifier.size(18.dp))
+            },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
             colors = OutlinedTextFieldDefaults.colors(
@@ -214,7 +222,20 @@ fun VaultAuthContent(wallet: WalletStore, initialMode: VaultAuthMode, onBack: ()
             value = password,
             onValueChange = { password = it },
             label = { Text(if (mode == VaultAuthMode.LOGIN) "Your password" else "At least 12 characters") },
-            visualTransformation = PasswordVisualTransformation(),
+            leadingIcon = {
+                Icon(Icons.Filled.Lock, contentDescription = null, tint = TextMuted, modifier = Modifier.size(18.dp))
+            },
+            trailingIcon = {
+                IconButton(onClick = { showPassword = !showPassword }) {
+                    Icon(
+                        if (showPassword) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                        contentDescription = if (showPassword) "Hide password" else "Show password",
+                        tint = TextMuted,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            },
+            visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
             colors = OutlinedTextFieldDefaults.colors(
