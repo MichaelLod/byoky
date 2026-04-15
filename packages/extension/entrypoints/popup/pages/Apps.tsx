@@ -1,6 +1,12 @@
 import { useWalletStore } from '../store';
 import type { InstalledApp } from '@byoky/core';
 
+function resolveIcon(icon: string | undefined): string | undefined {
+  if (!icon) return undefined;
+  if (icon.startsWith('http://') || icon.startsWith('https://') || icon.startsWith('data:')) return icon;
+  return `https://byoky.com${icon.startsWith('/') ? '' : '/'}${icon}`;
+}
+
 export function Apps() {
   const { installedApps, navigate } = useWalletStore();
   const enabledApps = installedApps.filter((a) => a.enabled);
@@ -59,7 +65,7 @@ function AppIcon({ app }: { app: InstalledApp }) {
     <div className={`app-icon-card ${!app.enabled ? 'disabled' : ''}`}>
       <button className="app-icon-btn" onClick={handleClick} title={app.name}>
         {app.icon ? (
-          <img src={app.icon} alt={app.name} className="app-icon-img" />
+          <img src={resolveIcon(app.icon)} alt={app.name} className="app-icon-img" />
         ) : (
           <div className="app-icon-placeholder">
             {app.name.charAt(0).toUpperCase()}

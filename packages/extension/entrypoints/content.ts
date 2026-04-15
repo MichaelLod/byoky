@@ -112,6 +112,28 @@ export default defineContentScript({
         if (replyPort) {
           notifyPorts.add(replyPort);
         }
+      } else if (data.type === 'BYOKY_STAGE_GIFT') {
+        // Stage a gift link so the popup can auto-open the redeem modal
+        // with it pre-filled. User must still click Accept — this only
+        // saves them a copy/paste.
+        if (typeof data.giftLink !== 'string' || data.giftLink.length > 16_000) return;
+        browser.runtime.sendMessage({
+          type: 'BYOKY_INTERNAL',
+          action: 'stagePendingGift',
+          payload: { giftLink: data.giftLink },
+        }).then((response) => {
+          reply({
+            type: 'BYOKY_STAGE_GIFT_ACK',
+            requestId: data.requestId,
+            payload: response,
+          });
+        }).catch(() => {
+          reply({
+            type: 'BYOKY_STAGE_GIFT_ACK',
+            requestId: data.requestId,
+            payload: { ok: false, error: 'Extension unavailable' },
+          });
+        });
       }
     });
 

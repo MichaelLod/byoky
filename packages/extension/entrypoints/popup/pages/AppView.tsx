@@ -16,6 +16,9 @@ export function AppView() {
       navigate('apps');
       return null;
     }
+    // Hash marker tells the app it's running inside the extension popup so
+    // the SDK can auto-connect via the trusted-site entry created at install.
+    parsed.hash = parsed.hash ? `${parsed.hash}&byoky-in-popup=1` : 'byoky-in-popup=1';
     safeUrl = parsed.href;
   } catch {
     navigate('apps');

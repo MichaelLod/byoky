@@ -4,7 +4,7 @@
     "name": "Byoky Chat",
     "slug": "byoky-chat",
     "url": "https://chat.byoky.com",
-    "icon": "/icons/byoky-chat.png",
+    "icon": "https://byoky.com/icons/byoky-chat.png",
     "description": "Multi-provider AI chat powered by your own API keys. Switch between Claude, GPT, and Gemini in one conversation.",
     "category": "chat",
     "providers": ["anthropic", "openai", "gemini"],
