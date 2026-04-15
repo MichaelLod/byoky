@@ -180,7 +180,12 @@ for (let i = 0; i < segments.length; i++) {
     '-filter_complex', filter, '-map', '[out]',
     '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
     '-r', String(FPS),
-    '-preset', 'medium', '-crf', '20',
+    // Target bitrate VBR — CRF alone would drop to ~135 kb/s on our dark
+    // low-entropy frames (visibly pixelated at 1080p). -b:v + -minrate
+    // forces a 4 Mbps floor, -maxrate 8M allows headroom for busier frames.
+    '-preset', 'medium',
+    '-b:v', '5M', '-minrate', '4M', '-maxrate', '8M', '-bufsize', '16M',
+    '-profile:v', 'high', '-level', '4.2',
     out,
   ];
   console.log(`  ⏳ beat ${seg.id} (${dur.toFixed(2)}s)`);
