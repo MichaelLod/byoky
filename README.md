@@ -11,7 +11,7 @@
     </picture>
   </a>
   <br />
-  <strong>Bring Your Own Key</strong>
+  <strong>Bring your own AI. Pay your own bill.</strong>
   <br />
   Open-source AI wallet — 15 providers, 2 lines to integrate, cross-provider translation.
   <br />
