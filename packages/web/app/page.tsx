@@ -7,13 +7,13 @@ export default function Home() {
     <>
       <Hero />
       <div className="divider" />
-      <ZeroCost />
-      <div className="divider" />
       <OpenClawCTA />
       <div className="divider" />
-      <Showcase />
-      <div className="divider" />
       <ForDevelopers />
+      <div className="divider" />
+      <ZeroCost />
+      <div className="divider" />
+      <Showcase />
       <div className="divider" />
       <HowItWorks />
       <div className="divider" />
@@ -46,20 +46,19 @@ function Hero() {
         <FadeIn>
           <div className="hero-badge">
             <span className="hero-badge-dot" />
-            Open-source &middot; 15 providers &middot; 2 lines to integrate
+            The AI token network
           </div>
         </FadeIn>
         <FadeIn delay={0.1}>
           <h1>
-            <span className="hero-eyebrow">Your AI budget</span>
-            <span className="hero-gradient">is going to waste.</span>
+            <span className="hero-eyebrow">One network.</span>
+            <span className="hero-gradient">All your AI tokens.</span>
           </h1>
         </FadeIn>
         <FadeIn delay={0.2}>
           <p>
             Byoky lets you share your token budget with friends,
-            your team, or anyone building cool stuff —
-            without exposing your keys.
+            your team, or anyone building cool stuff — without exposing your keys.
           </p>
         </FadeIn>
         <FadeIn delay={0.3}>
@@ -307,12 +306,16 @@ function OpenClawCTA() {
             </div>
             <div className="openclaw-cta-visual" aria-hidden>
               <pre className="openclaw-cta-code">
-{`$ npm install -g @byoky/bridge
-$ npm install -g @byoky/openclaw-plugin
-$ openclaw models auth login \\
-    --provider byoky-anthropic
-✓ bridge running
-✓ 15 providers available`}
+<span className="tc">{'# Install the bridge + plugin'}</span>{'\n'}
+<span className="tk">$</span> npm install -g <span className="ts">@byoky/bridge</span>{'\n'}
+<span className="tk">$</span> npm install -g <span className="ts">@byoky/openclaw-plugin</span>{'\n'}
+{'\n'}
+<span className="tc">{'# Connect your wallet'}</span>{'\n'}
+<span className="tk">$</span> openclaw models auth login {'\\'}
+{'\n'}    --provider <span className="ts">byoky-anthropic</span>{'\n'}
+{'\n'}
+<span className="tv">{'✓'}</span> bridge running{'\n'}
+<span className="tv">{'✓'}</span> <span className="tt">15</span> providers available
               </pre>
             </div>
           </div>
@@ -328,10 +331,10 @@ $ openclaw models auth login \\
           padding: 48px;
           border-radius: 20px;
           background:
-            radial-gradient(circle at 0% 0%, rgba(14,165,233,0.12), transparent 50%),
-            radial-gradient(circle at 100% 100%, rgba(14,165,233,0.08), transparent 50%),
+            radial-gradient(circle at 0% 0%, rgba(255,79,0,0.08), transparent 50%),
+            radial-gradient(circle at 100% 100%, rgba(255,79,0,0.05), transparent 50%),
             var(--bg-card);
-          border: 1px solid rgba(14, 165, 233, 0.28);
+          border: 1px solid rgba(255, 79, 0, 0.2);
         }
         .openclaw-cta-eyebrow {
           display: inline-flex;

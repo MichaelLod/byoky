@@ -11,28 +11,38 @@ function GitHubIcon() {
   );
 }
 
+function DropdownIcon({ name }: { name: string }) {
+  switch (name) {
+    case 'chrome': return <svg width="16" height="16" viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="#fff" stroke="#ddd" strokeWidth="1"/><path d="M24 8a16 16 0 0 1 13.86 8H24v0z" fill="#EA4335"/><path d="M37.86 16A16 16 0 0 1 24 40l6.93-12z" fill="#FBBC05"/><path d="M24 40A16 16 0 0 1 10.14 16l6.93 12z" fill="#34A853"/><path d="M10.14 16A16 16 0 0 1 24 8v8z" fill="#4285F4"/><circle cx="24" cy="24" r="6" fill="#fff"/><circle cx="24" cy="24" r="4" fill="#4285F4"/></svg>;
+    case 'firefox': return <svg width="16" height="16" viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="#fff" stroke="#ddd" strokeWidth="1"/><path d="M38 18c-1-4-4-7-8-9 2 2 3 5 3 7 0 3-2 6-5 7-4 1-7-1-7-1s1 5 6 6c4 1 8-1 10-4 1-1 1-3 1-6z" fill="#FF4F00"/><path d="M14 30c-1-3 0-6 2-9 1-2 3-3 5-4-2 2-3 4-2 7 0 2 2 4 4 5 3 1 6 0 7-2-1 3-4 6-8 6-3 1-6-1-8-3z" fill="#FF9500"/></svg>;
+    case 'apple': return <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>;
+    case 'android': return <svg width="16" height="16" viewBox="0 0 24 24" fill="#3DDC84"><path d="M17.523 15.341a.91.91 0 0 0 .916-.907V9.478a.91.91 0 0 0-.916-.907.91.91 0 0 0-.917.907v4.956a.91.91 0 0 0 .917.907zm-11.046 0a.91.91 0 0 0 .917-.907V9.478a.91.91 0 0 0-.917-.907.91.91 0 0 0-.916.907v4.956a.91.91 0 0 0 .916.907zm1.48 5.178c0 .504.41.912.916.912h.95v2.66a.91.91 0 0 0 .916.909.91.91 0 0 0 .917-.908v-2.66h1.688v2.66a.91.91 0 0 0 .916.909.91.91 0 0 0 .917-.908v-2.66h.95a.914.914 0 0 0 .916-.913V8.879H7.957v11.64zM15.4 3.11l1.124-1.727a.235.235 0 0 0-.073-.324.237.237 0 0 0-.326.072l-1.14 1.75A6.813 6.813 0 0 0 12 2.321c-1.07 0-2.08.195-3.003.56L7.857 1.13a.236.236 0 0 0-.325-.072.235.235 0 0 0-.073.324L8.583 3.11C6.572 4.12 5.204 6.071 5.204 8.338h13.592c0-2.267-1.368-4.219-3.396-5.228zM9.662 6.39a.57.57 0 0 1-.572-.568.57.57 0 0 1 .572-.57.57.57 0 0 1 .573.57.57.57 0 0 1-.573.569zm4.676 0a.57.57 0 0 1-.573-.568.57.57 0 0 1 .573-.57.57.57 0 0 1 .572.57.57.57 0 0 1-.572.569z"/></svg>;
+    default: return null;
+  }
+}
+
 const installOptions = [
-  { label: 'Chrome', href: 'https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon' },
-  { label: 'Firefox', href: 'https://addons.mozilla.org/en-US/firefox/addon/byoky/' },
-  { label: 'iOS', href: 'https://apps.apple.com/app/byoky/id6760779919' },
-  { label: 'Android', href: 'https://play.google.com/store/apps/details?id=com.byoky.app' },
+  { label: 'Chrome', href: 'https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon', icon: 'chrome' },
+  { label: 'Firefox', href: 'https://addons.mozilla.org/en-US/firefox/addon/byoky/', icon: 'firefox' },
+  { label: 'iOS', href: 'https://apps.apple.com/app/byoky/id6760779919', icon: 'apple' },
+  { label: 'Android', href: 'https://play.google.com/store/apps/details?id=com.byoky.app', icon: 'android' },
 ];
 
 export function Navbar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [embedded, setEmbedded] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    if (open) document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [open]);
+  function handleEnter() {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    setOpen(true);
+  }
+  function handleLeave() {
+    timeoutRef.current = setTimeout(() => setOpen(false), 150);
+  }
+
+  useEffect(() => () => { if (timeoutRef.current) clearTimeout(timeoutRef.current); }, []);
 
   useEffect(() => {
     const w = window as unknown as { __byokyBridge?: unknown };
@@ -45,27 +55,7 @@ export function Navbar() {
     <nav className="navbar">
       <div className="container navbar-inner">
         <a href="/" className="navbar-brand">
-          <svg width="28" height="28" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <polygon points="40,5 64,3 88,5 64,14" fill="#7dd3fc"/>
-            <polygon points="40,5 22,12 44,18" fill="#38bdf8"/>
-            <polygon points="88,5 106,12 84,18" fill="#38bdf8"/>
-            <polygon points="22,12 12,26 36,26" fill="#0ea5e9"/>
-            <polygon points="106,12 116,26 92,26" fill="#0ea5e9"/>
-            <polygon points="12,26 6,42 30,40" fill="#0284c7"/>
-            <polygon points="116,26 122,42 98,40" fill="#0284c7"/>
-            <polygon points="36,26 30,40 48,38" fill="#075985"/>
-            <polygon points="92,26 98,40 80,38" fill="#075985"/>
-            <polygon points="44,18 84,18 80,38 48,38" fill="#38bdf8"/>
-            <polygon points="48,38 80,38 76,56 52,56" fill="#0284c7"/>
-            <polygon points="30,40 48,38 52,56 36,56" fill="#0369a1"/>
-            <polygon points="98,40 80,38 76,56 92,56" fill="#0369a1"/>
-            <circle cx="48" cy="46" r="3.5" fill="#ffffff"/>
-            <circle cx="48" cy="46" r="1.8" fill="#082f49"/>
-            <circle cx="80" cy="46" r="3.5" fill="#ffffff"/>
-            <circle cx="80" cy="46" r="1.8" fill="#082f49"/>
-            <polygon points="52,56 64,60 64,88" fill="#1e3a5f"/>
-            <polygon points="76,56 64,60 64,88" fill="#14213d"/>
-          </svg>
+          <img src="/byoky_logo.svg" alt="Byoky" width="28" height="28" />
           Byoky
         </a>
         <div className="navbar-links">
@@ -85,11 +75,12 @@ export function Navbar() {
           >
             <GitHubIcon />
           </a>
-          <div ref={menuRef} className="install-dropdown">
-            <button
-              className="btn btn-primary btn-sm"
-              onClick={() => setOpen(!open)}
-            >
+          <div
+            className="install-dropdown"
+            onMouseEnter={handleEnter}
+            onMouseLeave={handleLeave}
+          >
+            <button className="btn btn-primary btn-sm">
               Install
               <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" style={{ marginLeft: 4 }}>
                 <path d={open ? 'M3 8l3-3 3 3' : 'M3 4l3 3 3-3'} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
@@ -105,6 +96,7 @@ export function Navbar() {
                     rel="noopener noreferrer"
                     className="install-dropdown-item"
                   >
+                    <DropdownIcon name={opt.icon} />
                     {opt.label}
                   </a>
                 ))}
