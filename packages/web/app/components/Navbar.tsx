@@ -59,11 +59,12 @@ export function Navbar() {
           Byoky
         </a>
         <div className="navbar-links">
+          <a href="/">Home</a>
           <a href="/docs">Docs</a>
           <a href="/openclaw">OpenClaw</a>
-          <a href="/blog">Blog</a>
           <a href="/demo">Demo</a>
           <a href="/marketplace">Marketplace</a>
+          <a href="/blog">Blog</a>
         </div>
         <div className="navbar-right">
           <a
