@@ -3,29 +3,35 @@
 import { WebSocketServer, WebSocket } from "ws";
 import { timingSafeEqual, randomBytes } from "node:crypto";
 
-// A room can host a single sender and now an arbitrary number of recipients,
-// each identified by a server-assigned `connId`. When a recipient sends a
-// `relay:request`, the server rewrites the `requestId` into a tagged form
-// `r:<connId>:<origId>` so the sender's response (carrying the same tagged
-// id) can be routed back to the exact recipient — without any client-side
-// protocol change.
+// A room now supports multiple concurrent *senders* (the user's primary
+// device + the vault's priority-0 fallback, for instance) and multiple
+// concurrent *recipients*. Recipient requests route to the highest-priority
+// currently connected sender. When that sender disconnects, the next one
+// in the priority-sorted list takes over with zero reconnect gap — which is
+// the fix for "gift sender offline" flapping when a mobile app backgrounds
+// and the vault fallback is temporarily kicked out.
 //
-// Multi-recipient unlocks the "gift redeemed by many people" use case: the
-// budget still lives on the sender, but each recipient gets its own
-// independent request/response lane over the same room.
+// Recipient request/response pairing: the relay rewrites `requestId` into a
+// tagged form `r:<connId>:<origId>` before forwarding to the active sender,
+// then reverses the tag on the response so each recipient only receives its
+// own replies. Clients don't see the tag.
+interface SenderConn {
+  ws: WebSocket;
+  priority: number;
+}
+
 interface Room {
-  sender?: WebSocket;
-  senderPriority: number;
-  recipients: Map<string, WebSocket>;     // connId → recipient ws
+  senders: SenderConn[];           // sorted by priority desc
+  recipients: Map<string, WebSocket>;  // connId → recipient ws
   authToken: string;
   lastActivity: number;
 }
 
 const PORT = parseInt(process.env.PORT || "8787", 10);
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
-// Cap per-room recipients so a single gift can't be weaponised to DoS the
-// relay by opening thousands of sockets on the same room.
+// Cap per-room connection counts so a single gift can't DoS the relay.
 const MAX_RECIPIENTS_PER_ROOM = 50;
+const MAX_SENDERS_PER_ROOM = 4;
 
 const rooms = new Map<string, Room>();
 const authAttempts = new Map<string, number[]>();
@@ -42,11 +48,24 @@ function touchRoom(room: Room): void {
   room.lastActivity = Date.now();
 }
 
+function activeSender(room: Room): WebSocket | null {
+  for (const s of room.senders) {
+    if (s.ws.readyState === WebSocket.OPEN) return s.ws;
+  }
+  return null;
+}
+
+function hasLiveSender(room: Room): boolean {
+  return activeSender(room) !== null;
+}
+
 function cleanupIdleRooms(): void {
   const now = Date.now();
   for (const [roomId, room] of rooms) {
     if (now - room.lastActivity > IDLE_TIMEOUT_MS) {
-      if (room.sender?.readyState === WebSocket.OPEN) room.sender.close();
+      for (const s of room.senders) {
+        if (s.ws.readyState === WebSocket.OPEN) s.ws.close();
+      }
       for (const ws of room.recipients.values()) {
         if (ws.readyState === WebSocket.OPEN) ws.close();
       }
@@ -93,7 +112,7 @@ wss.on("connection", (ws) => {
       if (msg.type !== "relay:auth") return;
 
       const { roomId, authToken, role } = msg;
-      // Clamp priority to 0–1: 0 = fallback (vault), 1 = primary (extension)
+      // Clamp priority to 0–1: 0 = fallback (vault), 1 = primary (device).
       const priority = typeof msg.priority === "number" ? Math.max(0, Math.min(1, Math.floor(msg.priority))) : 1;
       if (
         typeof roomId !== "string" ||
@@ -134,15 +153,14 @@ wss.on("connection", (ws) => {
         if (!timingSafeEqual(a, b) || expected.length !== provided.length) {
           // If the room has no active connections, it's stale — delete it
           // so the next connection can create a fresh room with the correct token
-          const senderDead = !room.sender || room.sender.readyState !== WebSocket.OPEN;
+          const sendersDead = room.senders.every((s) => s.ws.readyState !== WebSocket.OPEN);
           const recipientsDead = Array.from(room.recipients.values())
             .every((r) => r.readyState !== WebSocket.OPEN);
           const staleMs = Date.now() - room.lastActivity;
-          if (senderDead && recipientsDead && staleMs > IDLE_TIMEOUT_MS) {
+          if (sendersDead && recipientsDead && staleMs > IDLE_TIMEOUT_MS) {
             rooms.delete(roomId);
             console.log(`[auth] deleted stale room ${roomId.slice(0, 8)}... (token mismatch, idle ${Math.round(staleMs / 1000)}s, no active peers)`);
-            // Create fresh room with the new token
-            room = { authToken, senderPriority: 0, recipients: new Map(), lastActivity: Date.now() };
+            room = { authToken, senders: [], recipients: new Map(), lastActivity: Date.now() };
             rooms.set(roomId, room);
           } else {
             console.log(`[auth] rejected: token mismatch for room ${roomId.slice(0, 8)}...`);
@@ -152,19 +170,16 @@ wss.on("connection", (ws) => {
         }
 
         if (role === "sender") {
-          if (room.sender && room.sender.readyState === WebSocket.OPEN) {
-            if (priority > room.senderPriority) {
-              console.log(`[auth] takeover: new sender (priority ${priority}) kicks existing (priority ${room.senderPriority}) in room ${roomId.slice(0, 8)}...`);
-              for (const r of room.recipients.values()) {
-                send(r, { type: "relay:peer:status", online: false, kicked: true });
-              }
-              room.sender.close(4001, "replaced by higher-priority sender");
-              room.sender = undefined;
-            } else {
-              console.log(`[auth] rejected: sender already connected in room ${roomId.slice(0, 8)}...`);
-              send(ws, { type: "relay:auth:result", success: false, error: "sender already connected" });
-              return;
-            }
+          // Coexist senders: the primary (priority 1) and the vault fallback
+          // (priority 0) both stay connected. Requests go to whichever is
+          // currently highest-priority and live. No more kick — that caused
+          // the vault to bounce through a reconnect-backoff window every
+          // time the primary device came and went.
+          const liveCount = room.senders.filter((s) => s.ws.readyState === WebSocket.OPEN).length;
+          if (liveCount >= MAX_SENDERS_PER_ROOM) {
+            console.log(`[auth] rejected: sender cap (${MAX_SENDERS_PER_ROOM}) reached in room ${roomId.slice(0, 8)}...`);
+            send(ws, { type: "relay:auth:result", success: false, error: "sender cap reached" });
+            return;
           }
         } else {
           if (room.recipients.size >= MAX_RECIPIENTS_PER_ROOM) {
@@ -174,41 +189,51 @@ wss.on("connection", (ws) => {
           }
         }
       } else {
-        room = { authToken, senderPriority: 0, recipients: new Map(), lastActivity: Date.now() };
+        room = { authToken, senders: [], recipients: new Map(), lastActivity: Date.now() };
         rooms.set(roomId, room);
       }
 
       if (role === "sender") {
-        room.sender = ws;
-        room.senderPriority = priority;
-      } else {
-        authedConnId = randomBytes(8).toString("hex");
-        room.recipients.set(authedConnId, ws);
+        // Keep senders sorted priority-desc so activeSender() is O(1) over
+        // the short list. Ties broken by insertion order.
+        const wasLive = hasLiveSender(room);
+        const insertAt = room.senders.findIndex((s) => s.priority < priority);
+        const entry: SenderConn = { ws, priority };
+        if (insertAt < 0) room.senders.push(entry);
+        else room.senders.splice(insertAt, 0, entry);
+
+        touchRoom(room);
+        authedRoomId = roomId;
+        authedRole = role;
+
+        const peerOnline = room.recipients.size > 0;
+        send(ws, { type: "relay:auth:result", success: true, peerOnline });
+        console.log(`[auth] sender joined room ${roomId.slice(0, 8)}... (priority ${priority}, senders=${room.senders.length})`);
+
+        // First sender joining flips "online" for recipients.
+        if (!wasLive) {
+          for (const r of room.recipients.values()) {
+            send(r, { type: "relay:peer:status", online: true });
+          }
+        }
+        return;
       }
 
+      // role === "recipient"
+      authedConnId = randomBytes(8).toString("hex");
+      room.recipients.set(authedConnId, ws);
       touchRoom(room);
       authedRoomId = roomId;
       authedRole = role;
 
-      const peerOnline = role === "sender"
-        ? room.recipients.size > 0
-        : !!room.sender && room.sender.readyState === WebSocket.OPEN;
-
+      const peerOnline = hasLiveSender(room);
       send(ws, { type: "relay:auth:result", success: true, peerOnline });
-      console.log(`[auth] ${role} joined room ${roomId.slice(0, 8)}... (peer ${peerOnline ? "online" : "offline"}${role === "recipient" ? `, recipients=${room.recipients.size}` : ""})`);
+      console.log(`[auth] recipient joined room ${roomId.slice(0, 8)}... (recipients=${room.recipients.size}, peer=${peerOnline ? "online" : "offline"})`);
 
-      if (role === "sender") {
-        // Tell every recipient the sender is online.
-        for (const r of room.recipients.values()) {
-          send(r, { type: "relay:peer:status", online: true });
-        }
-      } else if (room.sender && room.sender.readyState === WebSocket.OPEN) {
-        // First recipient flips the sender from "offline" to "online".
-        // Every subsequent recipient also emits online (idempotent for the
-        // sender; harmless) so the sender knows a new peer just joined.
-        send(room.sender, { type: "relay:peer:status", online: true });
+      // Notify every live sender that a new recipient is here.
+      for (const s of room.senders) {
+        if (s.ws.readyState === WebSocket.OPEN) send(s.ws, { type: "relay:peer:status", online: true });
       }
-
       return;
     }
 
@@ -223,16 +248,14 @@ wss.on("connection", (ws) => {
         // back here. Sender sees the tagged id; client never sees it.
         const tagged = tagRequestId(authedConnId, msg.requestId);
         const rewritten = JSON.stringify({ ...msg, requestId: tagged });
-        if (room.sender && room.sender.readyState === WebSocket.OPEN) {
-          room.sender.send(rewritten);
-        }
+        const target = activeSender(room);
+        if (target) target.send(rewritten);
         return;
       }
       if (msg.type === "relay:pair:ack") {
-        // Pairing flow is 1:1 — forward the ack to the sender as-is.
-        if (room.sender && room.sender.readyState === WebSocket.OPEN) {
-          room.sender.send(String(raw));
-        }
+        // Pairing flow is 1:1 — forward the ack to the active sender as-is.
+        const target = activeSender(room);
+        if (target) target.send(String(raw));
         return;
       }
       return;
@@ -256,8 +279,8 @@ wss.on("connection", (ws) => {
       }
 
       if (msg.type === "relay:usage") {
-        // Usage updates apply to the whole gift, not a single recipient —
-        // broadcast to every recipient so their wallets stay in sync.
+        // Usage updates apply to the whole gift — broadcast to every
+        // recipient so their wallets stay in sync.
         for (const r of room.recipients.values()) {
           if (r.readyState === WebSocket.OPEN) r.send(String(raw));
         }
@@ -290,21 +313,27 @@ wss.on("connection", (ws) => {
     if (!room) return;
 
     if (authedRole === "sender") {
-      room.sender = undefined;
-      room.senderPriority = 0;
-      for (const r of room.recipients.values()) {
-        if (r.readyState === WebSocket.OPEN) {
-          send(r, { type: "relay:peer:status", online: false });
+      room.senders = room.senders.filter((s) => s.ws !== ws);
+      // Notify recipients only when the LAST live sender is gone.
+      if (!hasLiveSender(room)) {
+        for (const r of room.recipients.values()) {
+          if (r.readyState === WebSocket.OPEN) {
+            send(r, { type: "relay:peer:status", online: false });
+          }
         }
       }
     } else if (authedConnId) {
       room.recipients.delete(authedConnId);
-      if (room.recipients.size === 0 && room.sender && room.sender.readyState === WebSocket.OPEN) {
-        send(room.sender, { type: "relay:peer:status", online: false });
+      if (room.recipients.size === 0) {
+        for (const s of room.senders) {
+          if (s.ws.readyState === WebSocket.OPEN) {
+            send(s.ws, { type: "relay:peer:status", online: false });
+          }
+        }
       }
     }
 
-    if (!room.sender && room.recipients.size === 0) {
+    if (room.senders.length === 0 && room.recipients.size === 0) {
       rooms.delete(authedRoomId);
       console.log(`[cleanup] removed empty room ${authedRoomId.slice(0, 8)}...`);
     }
