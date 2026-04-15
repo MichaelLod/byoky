@@ -210,20 +210,24 @@ async function buildDemo(demo: Demo, backdrop: string): Promise<void> {
     console.log(`  🖼  shot ${i} rendered (${demo.shots[i].dur.toFixed(1)}s)`);
   }
 
-  // Per-shot MP4s with subtle zoom (1.00 → 1.03) using 2× oversample so
-  // the downsampled output is jitter-free.
+  // Per-shot MP4s with subtle zoom (1.00 → 1.03). Use scale+lanczos+eval=frame
+  // instead of zoompan — zoompan rounds crop offsets to integers each frame,
+  // producing visible 1px wobble ("shake"). scale+lanczos interpolates at
+  // sub-pixel precision so motion is actually smooth.
   const shotClips: string[] = [];
   for (let i = 0; i < shotImages.length; i++) {
     const { file, dur } = shotImages[i];
     const clipOut = path.join(TMP, `${demo.name}-clip${i}.mp4`);
-    const totalFrames = Math.max(1, Math.round(dur * FPS));
-    const zoomExpr = `1.0+0.03*on/${totalFrames}`;
+    const zoomExpr = `1.0+0.03*t/${dur.toFixed(2)}`;
     const filter = [
-      `[0:v]scale=${W * 2}:${H * 2}:force_original_aspect_ratio=decrease,pad=${W * 2}:${H * 2}:(ow-iw)/2:(oh-ih)/2:color=${BG}[main]`,
-      `[main]zoompan=z='${zoomExpr}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${totalFrames}:s=${W}x${H}:fps=${FPS},format=yuv420p[out]`,
+      `[0:v]scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=${BG}[main]`,
+      `[main]scale=w='${W}*${zoomExpr}':h='${H}*${zoomExpr}':flags=lanczos:eval=frame,crop=${W}:${H}:(in_w-${W})/2:(in_h-${H})/2,fps=${FPS},format=yuv420p[out]`,
     ].join(';');
+    // Target 2M VBR with a 1.5M floor — CRF alone lets bitrate collapse
+    // to ~250 kb/s on our dark frames (visibly pixelated when scaled up
+    // in the landing-page grid).
     execSync(
-      `ffmpeg -y -loop 1 -i "${file}" -t ${dur.toFixed(2)} -filter_complex "${filter}" -map "[out]" -c:v libx264 -pix_fmt yuv420p -r ${FPS} -preset medium -crf 22 "${clipOut}"`,
+      `ffmpeg -y -loop 1 -i "${file}" -t ${dur.toFixed(2)} -filter_complex "${filter}" -map "[out]" -c:v libx264 -pix_fmt yuv420p -r ${FPS} -preset medium -b:v 2M -minrate 1500k -maxrate 3M -bufsize 6M "${clipOut}"`,
       { stdio: 'pipe' },
     );
     shotClips.push(clipOut);
@@ -239,7 +243,7 @@ async function buildDemo(demo: Demo, backdrop: string): Promise<void> {
     const offset = cumulativeDur - fadeDur;
     const combined = path.join(TMP, `${demo.name}-xfade${i}.mp4`);
     execSync(
-      `ffmpeg -y -i "${current}" -i "${next}" -filter_complex "[0:v][1:v]xfade=transition=fade:duration=${fadeDur}:offset=${offset.toFixed(2)},format=yuv420p" -c:v libx264 -pix_fmt yuv420p -preset medium -crf 22 -r ${FPS} "${combined}"`,
+      `ffmpeg -y -i "${current}" -i "${next}" -filter_complex "[0:v][1:v]xfade=transition=fade:duration=${fadeDur}:offset=${offset.toFixed(2)},format=yuv420p" -c:v libx264 -pix_fmt yuv420p -preset medium -b:v 2M -minrate 1500k -maxrate 3M -bufsize 6M -r ${FPS} "${combined}"`,
       { stdio: 'pipe' },
     );
     current = combined;
@@ -249,7 +253,7 @@ async function buildDemo(demo: Demo, backdrop: string): Promise<void> {
   // Final: loop-friendly fade-in/out bookends
   const final = path.join(OUT, `${demo.name}.mp4`);
   execSync(
-    `ffmpeg -y -i "${current}" -vf "fade=t=in:st=0:d=0.3,fade=t=out:st=${(cumulativeDur - 0.3).toFixed(2)}:d=0.3,format=yuv420p" -c:v libx264 -pix_fmt yuv420p -preset medium -crf 23 -movflags +faststart -an "${final}"`,
+    `ffmpeg -y -i "${current}" -vf "fade=t=in:st=0:d=0.3,fade=t=out:st=${(cumulativeDur - 0.3).toFixed(2)}:d=0.3,format=yuv420p" -c:v libx264 -pix_fmt yuv420p -preset medium -b:v 2M -minrate 1500k -maxrate 3M -bufsize 6M -movflags +faststart -an "${final}"`,
     { stdio: 'pipe' },
   );
 

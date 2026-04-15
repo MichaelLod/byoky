@@ -225,7 +225,10 @@ async function chromeStoreSlide(slide: Slide, idx: number, suffix = 'chrome-stor
   }
 
   const back = await sharp(backdrop(W, H)).png().toBuffer();
-  const popupFramed = await (await deviceFrame(popupPath, { kind: 'browser', targetWidth: 380 })).toBuffer();
+  // Popup at 520px wide → ~40% of the 1280 canvas. Previously 380 (30%)
+  // felt tiny in the video at any embed size; bigger popup means the UI
+  // inside is actually readable.
+  const popupFramed = await (await deviceFrame(popupPath, { kind: 'browser', targetWidth: 520, maxHeight: 760 })).toBuffer();
   const popupMeta = await sharp(popupFramed).metadata();
 
   const popupX = 100;
