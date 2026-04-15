@@ -1,11 +1,11 @@
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Token Marketplace — Byoky',
+  title: 'Token Pool — Byoky',
   description: 'Browse free community token gifts. Redeem API tokens shared by generous users.',
-  alternates: { canonical: '/marketplace' },
+  alternates: { canonical: '/token-pool' },
 };
 
-export default function MarketplaceLayout({ children }: { children: React.ReactNode }) {
+export default function TokenPoolLayout({ children }: { children: React.ReactNode }) {
   return children;
 }

@@ -33,7 +33,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.7,
     },
     {
-      url: 'https://byoky.com/marketplace',
+      url: 'https://byoky.com/token-pool',
       lastModified: new Date(),
       changeFrequency: 'daily',
       priority: 0.8,

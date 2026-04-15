@@ -257,9 +257,9 @@ fun CreateGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("List on Token Marketplace", fontWeight = FontWeight.Medium)
+                        Text("List on Token Pool", fontWeight = FontWeight.Medium)
                         Text(
-                            "Make public at byoky.com/marketplace",
+                            "Make public at byoky.com/token-pool",
                             fontSize = 12.sp,
                             color = TextMuted,
                         )

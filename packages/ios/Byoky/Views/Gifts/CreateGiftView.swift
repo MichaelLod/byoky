@@ -155,16 +155,16 @@ struct CreateGiftView: View {
             }
 
             Section {
-                Toggle("List on Token Marketplace", isOn: $listPublicly)
+                Toggle("List on Token Pool", isOn: $listPublicly)
                     .tint(Theme.accent)
                 if listPublicly {
                     TextField("Display name", text: $gifterName)
                         .textContentType(.name)
                 }
             } header: {
-                Text("Marketplace")
+                Text("Token Pool")
             } footer: {
-                Text("Make this gift public so anyone can redeem it from byoky.com/marketplace.")
+                Text("Make this gift public so anyone can redeem it from byoky.com/token-pool.")
             }
 
             if let error {

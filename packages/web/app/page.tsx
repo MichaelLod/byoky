@@ -317,7 +317,7 @@ function OpenClawCTA() {
                 <a href="/openclaw" className="btn btn-primary">
                   Read the 5-minute setup
                 </a>
-                <a href="/marketplace" className="btn btn-secondary">
+                <a href="/token-pool" className="btn btn-secondary">
                   Browse free gifts
                 </a>
               </div>
@@ -841,7 +841,7 @@ function Footer() {
             <span className="footer-col-title">Product</span>
             <a href="/docs">Docs</a>
             <a href="/demo">Demo</a>
-            <a href="/marketplace">Token Pool</a>
+            <a href="/token-pool">Token Pool</a>
             <a href="/openclaw">OpenClaw</a>
           </div>
           <div className="footer-col">
