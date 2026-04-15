@@ -12,9 +12,9 @@
   --text: #1c1917;
   --text-secondary: #57534e;
   --text-muted: #a8a29e;
-  --teal: #0284c7;
-  --teal-light: #0ea5e9;
-  --teal-dark: #075985;
+  --teal: #FF4F00;
+  --teal-light: #ff6a2a;
+  --teal-dark: #e64500;
   --green: #16a34a;
   --red: #dc2626;
   --font-sans: var(--font-outfit), system-ui, -apple-system, sans-serif;

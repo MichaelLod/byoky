@@ -222,22 +222,38 @@ byoky-bridge install`}
 /* ─── Sections ─────────────────────────────────── */
 
 function Hero() {
+  const products = [
+    { name: 'Claude Code', icon: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/claude.svg' },
+    { name: 'Codex', icon: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/openai.svg' },
+    { name: 'Gemini CLI', icon: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/gemini.svg' },
+  ];
+
   return (
     <header className="oc-hero">
       <div className="oc-eyebrow">OpenClaw × Byoky</div>
-      <h1>
-        Run <span className="oc-grad">Claude, GPT, and Gemini</span> in
-        OpenClaw.<br />
-        <span className="oc-hero-sub-line">No API credits required.</span>
-      </h1>
+      <h1>Run AI agents in OpenClaw — for free.</h1>
+      <div style={{
+        display: 'flex', gap: '16px', justifyContent: 'center',
+        flexWrap: 'wrap', margin: '24px 0',
+      }}>
+        {products.map((p) => (
+          <div key={p.name} style={{
+            display: 'flex', alignItems: 'center', gap: '10px',
+            padding: '12px 20px', borderRadius: '12px',
+            background: 'var(--bg-card, #fff)',
+            border: '1px solid var(--border, #e5e5e5)',
+            fontSize: '15px', fontWeight: 600,
+          }}>
+            <img src={p.icon} alt="" width={24} height={24} />
+            {p.name}
+          </div>
+        ))}
+      </div>
       <p className="oc-lede">
-        OpenClaw is an open-source AI agent CLI. Byoky is a key wallet that
-        proxies LLM calls so the API key never leaves the device. Pair them
-        with a free token gift from the marketplace — or sign in with your
-        existing Claude Pro/Max subscription — and OpenClaw runs frontier
-        models at zero extra cost.
+        Grab a free token gift or use your Claude Pro/Max subscription.<br />
+        Zero extra cost. Keys never exposed.
       </p>
-      <div className="oc-cta-row">
+      <div className="oc-cta-row" style={{ justifyContent: 'center' }}>
         <a className="btn btn-primary" href="/marketplace">
           Browse free gifts
         </a>
@@ -476,7 +492,7 @@ const styles = `
 }
 
 /* ── Hero ── */
-.oc-hero { margin-bottom: 56px; }
+.oc-hero { margin-bottom: 56px; text-align: center; }
 .oc-eyebrow {
   display: inline-block;
   font-size: 12px;
@@ -484,8 +500,8 @@ const styles = `
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--teal);
-  background: rgba(14, 165, 233, 0.08);
-  border: 1px solid rgba(14, 165, 233, 0.25);
+  background: rgba(255, 79, 0, 0.08);
+  border: 1px solid rgba(255, 79, 0, 0.25);
   padding: 6px 12px;
   border-radius: 999px;
   margin-bottom: 22px;

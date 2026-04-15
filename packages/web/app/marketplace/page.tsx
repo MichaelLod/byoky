@@ -4,6 +4,49 @@ import { useState, useEffect, useCallback } from 'react';
 
 const MARKETPLACE_API = process.env.NEXT_PUBLIC_MARKETPLACE_URL ?? 'https://marketplace.byoky.com';
 
+const PROVIDER_ICONS: Record<string, string> = {
+  anthropic: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/claude.svg',
+  openai: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/openai.svg',
+  gemini: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/gemini.svg',
+  google: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/gemini.svg',
+  mistral: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/mistral.svg',
+  xai: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/grok.svg',
+  grok: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/grok.svg',
+  deepseek: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/deepseek.svg',
+  cohere: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/cohere.svg',
+  groq: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/groq.svg',
+  perplexity: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/perplexity.svg',
+  together: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/together.svg',
+  fireworks: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/fireworks.svg',
+  openrouter: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/openrouter.svg',
+  azure: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/azureai.svg',
+  ollama: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/ollama.svg',
+  bedrock: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/bedrock.svg',
+  lmstudio: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/lmstudio.svg',
+  vertexai: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/vertexai.svg',
+  'hugging-face': 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/huggingface.svg',
+  huggingface: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/huggingface.svg',
+  replicate: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/replicate.svg',
+};
+
+function ProviderLogo({ providerId }: { providerId: string }) {
+  const key = providerId.toLowerCase().replace(/[\s_]/g, '-');
+  const icon = PROVIDER_ICONS[key] || PROVIDER_ICONS[key.split('-')[0]];
+  if (!icon) {
+    return (
+      <span style={{
+        width: 28, height: 28, borderRadius: 8,
+        background: 'var(--bg-elevated)', display: 'flex',
+        alignItems: 'center', justifyContent: 'center',
+        fontSize: 13, fontWeight: 700, color: 'var(--text-muted)', flexShrink: 0,
+      }}>
+        {providerId.charAt(0).toUpperCase()}
+      </span>
+    );
+  }
+  return <img src={icon} alt={providerId} width={28} height={28} style={{ flexShrink: 0 }} />;
+}
+
 interface Gift {
   id: string;
   providerId: string;
@@ -190,6 +233,7 @@ function GiftCard({ gift, expired, onRedeem, redeeming }: {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
         <div style={{ flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <ProviderLogo providerId={gift.providerId} />
             <span style={{
               display: 'inline-block',
               width: 8,
@@ -231,7 +275,7 @@ function GiftCard({ gift, expired, onRedeem, redeeming }: {
               height: '100%',
               width: `${pct}%`,
               borderRadius: 2,
-              background: expired ? '#55555f' : pct > 20 ? '#0ea5e9' : '#f43f5e',
+              background: expired ? '#55555f' : pct > 20 ? '#FF4F00' : '#f43f5e',
               transition: 'width 0.3s',
             }} />
           </div>
@@ -257,7 +301,7 @@ function GiftCard({ gift, expired, onRedeem, redeeming }: {
 
 const btnStyle: React.CSSProperties = {
   padding: '8px 16px',
-  background: '#0ea5e9',
+  background: '#FF4F00',
   color: '#fff',
   border: 'none',
   borderRadius: 8,

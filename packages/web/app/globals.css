@@ -991,12 +991,12 @@ section {
 }
 
 /* Syntax tokens */
-.tk { color: #FF4F00; }       /* keyword */
-.ts { color: #16a34a; }       /* string */
-.tt { color: #c2410c; }       /* type — deep orange */
+.tk { color: #7c3aed; }       /* keyword — purple */
+.ts { color: #16a34a; }       /* string — green */
+.tt { color: #0891b2; }       /* type — teal */
 .tp { color: var(--text); }   /* property */
 .tc { color: var(--text-muted); } /* comment */
-.tv { color: #ea580c; }       /* value — warm orange */
+.tv { color: #2563eb; }       /* value — blue */
 .tn { color: var(--text-secondary); } /* punctuation */
 
 /* =============================================

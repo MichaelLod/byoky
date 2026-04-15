@@ -781,11 +781,46 @@ function Section({ id, title, children }: { id: string; title: string; children:
   );
 }
 
+function highlightCode(code: string, lang: string): string {
+  if (lang === 'text') return code.replace(/</g, '&lt;');
+
+  let html = code.replace(/</g, '&lt;');
+
+  if (lang === 'bash') {
+    // Comments
+    html = html.replace(/(#[^\n]*)/g, '<span class="tk-comment">$1</span>');
+    // $ prompt
+    html = html.replace(/^(\$)/gm, '<span class="tk-keyword">$1</span>');
+    // Flags
+    html = html.replace(/(\s)(--?\w[\w-]*)/g, '$1<span class="tk-value">$2</span>');
+    // Strings
+    html = html.replace(/(&#39;[^&#]*&#39;|"[^"]*")/g, '<span class="tk-string">$1</span>');
+    // Success markers
+    html = html.replace(/(✓)/g, '<span class="tk-value">$1</span>');
+    return html;
+  }
+
+  // TypeScript / JavaScript
+  // Strings (single-quoted via html entities and double-quoted and backtick)
+  html = html.replace(/(&#39;[^&#]*&#39;|'[^']*'|"[^"]*"|`[^`]*`)/g, '<span class="tk-string">$1</span>');
+  // Comments
+  html = html.replace(/(\/\/[^\n]*)/g, '<span class="tk-comment">$1</span>');
+  // Keywords
+  html = html.replace(/\b(import|from|export|const|let|var|function|async|await|new|return|if|else|true|false|null|undefined|void|type|interface|class|extends|implements|typeof|as)\b/g, '<span class="tk-keyword">$1</span>');
+  // Types (PascalCase words)
+  html = html.replace(/\b([A-Z][a-zA-Z0-9]+)\b/g, '<span class="tk-type">$1</span>');
+  // Numbers
+  html = html.replace(/\b(\d+)\b/g, '<span class="tk-value">$1</span>');
+
+  return html;
+}
+
 function Code({ lang, children }: { lang: string; children: string }) {
+  const html = highlightCode(children, lang);
   return (
     <div className="docs-code">
       {lang !== 'text' && <div className="docs-code-lang">{lang}</div>}
-      <pre><code>{children}</code></pre>
+      <pre><code dangerouslySetInnerHTML={{ __html: html }} /></pre>
     </div>
   );
 }
@@ -1118,6 +1153,14 @@ const docsStyles = `
   color: inherit !important;
   font-size: inherit;
 }
+
+/* ── Syntax highlighting ── */
+
+.tk-keyword { color: #7c3aed; }
+.tk-string { color: #16a34a; }
+.tk-type { color: #0891b2; }
+.tk-comment { color: #a8a29e; font-style: italic; }
+.tk-value { color: #2563eb; }
 
 /* ── Props ── */
 

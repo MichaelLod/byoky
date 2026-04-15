@@ -1,6 +1,7 @@
 import { FadeIn } from './components/FadeIn';
 import { AnimatedCounter } from './components/AnimatedCounter';
 import { VersionStatus } from './components/VersionStatus';
+import { ProviderMarquee } from './components/ProviderMarquee';
 
 export default function Home() {
   return (
@@ -18,8 +19,6 @@ export default function Home() {
       <HowItWorks />
       <div className="divider" />
       <Providers />
-      <div className="divider" />
-      <ThreatContext />
       <div className="divider" />
       <Security />
       <div className="divider" />
@@ -286,8 +285,21 @@ function OpenClawCTA() {
                 <span className="openclaw-cta-dot" />
                 OpenClaw × Byoky
               </div>
-              <h2>
-                Run <span className="hero-gradient">Claude, GPT, and Gemini</span>{' '}
+              <h2 style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }}>
+                Run{' '}
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                  <img src="https://unpkg.com/@lobehub/icons-static-svg@latest/icons/claude.svg" alt="" width={24} height={24} />
+                  Claude Code,
+                </span>{' '}
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                  <img src="https://unpkg.com/@lobehub/icons-static-svg@latest/icons/openai.svg" alt="" width={24} height={24} />
+                  Codex,
+                </span>{' '}
+                and{' '}
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                  <img src="https://unpkg.com/@lobehub/icons-static-svg@latest/icons/gemini.svg" alt="" width={24} height={24} />
+                  Gemini
+                </span>{' '}
                 in OpenClaw — for free.
               </h2>
               <p>
@@ -705,62 +717,7 @@ function Showcase() {
 /* ─── Providers ────────────────────────────────── */
 
 function Providers() {
-  const row1 = [
-    { name: 'Anthropic', type: 'API Key + Setup Token', cls: 'anthropic', letter: 'A' },
-    { name: 'OpenAI', type: 'API Key', cls: 'openai', letter: 'O' },
-    { name: 'Google Gemini', type: 'API Key + OAuth', cls: 'gemini', letter: 'G' },
-    { name: 'Mistral', type: 'API Key', cls: 'mistral', letter: 'M' },
-    { name: 'xAI (Grok)', type: 'API Key', cls: 'xai', letter: 'X' },
-    { name: 'DeepSeek', type: 'API Key', cls: 'deepseek', letter: 'D' },
-    { name: 'Cohere', type: 'API Key', cls: 'cohere', letter: 'C' },
-    { name: 'Groq', type: 'API Key', cls: 'groq', letter: 'G' },
-  ];
-  const row2 = [
-    { name: 'Perplexity', type: 'API Key', cls: 'perplexity', letter: 'P' },
-    { name: 'Together AI', type: 'API Key', cls: 'together', letter: 'T' },
-    { name: 'Fireworks AI', type: 'API Key', cls: 'fireworks', letter: 'F' },
-    { name: 'OpenRouter', type: 'API Key', cls: 'openrouter', letter: 'O' },
-    { name: 'Azure OpenAI', type: 'API Key', cls: 'azure', letter: 'A' },
-  ];
-
-  return (
-    <section className="providers-section">
-      <div className="container">
-        <FadeIn>
-          <h2>Your providers.</h2>
-          <p className="subtitle">
-            15 providers supported. Bring credentials from any of them.
-          </p>
-        </FadeIn>
-      </div>
-      <FadeIn delay={0.1}>
-        <div className="providers-marquee">
-          <div className="providers-track">
-            {[...row1, ...row1].map((p, i) => (
-              <div key={i} className="provider-card">
-                <div className={`provider-logo provider-logo-${p.cls}`}>{p.letter}</div>
-                <div>
-                  <div className="provider-name">{p.name}</div>
-                  <div className="provider-type">{p.type}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-          <div className="providers-track providers-track-reverse">
-            {[...row2, ...row2].map((p, i) => (
-              <div key={i} className="provider-card">
-                <div className={`provider-logo provider-logo-${p.cls}`}>{p.letter}</div>
-                <div>
-                  <div className="provider-name">{p.name}</div>
-                  <div className="provider-type">{p.type}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </FadeIn>
-    </section>
-  );
+  return <ProviderMarquee />;
 }
 
 /* ─── Cross-Provider Routing ───────────────────── */
