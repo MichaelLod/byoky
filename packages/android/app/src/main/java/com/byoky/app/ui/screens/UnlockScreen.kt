@@ -4,12 +4,17 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.byoky.app.data.UnlockResult
@@ -21,6 +26,7 @@ import kotlinx.coroutines.delay
 @Composable
 fun UnlockScreen(wallet: WalletStore) {
     var password by remember { mutableStateOf("") }
+    var showPassword by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var shakeOffset by remember { mutableFloatStateOf(0f) }
     val lockoutEndTime by wallet.lockoutEndTime.collectAsState()
@@ -91,7 +97,23 @@ fun UnlockScreen(wallet: WalletStore) {
             value = password,
             onValueChange = { password = it; error = null },
             label = { Text("Master password") },
-            visualTransformation = PasswordVisualTransformation(),
+            leadingIcon = {
+                Icon(Icons.Filled.Lock, contentDescription = null, tint = TextMuted, modifier = Modifier.size(18.dp))
+            },
+            trailingIcon = {
+                IconButton(
+                    onClick = { showPassword = !showPassword },
+                    enabled = lockoutRemaining <= 0,
+                ) {
+                    Icon(
+                        if (showPassword) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                        contentDescription = if (showPassword) "Hide password" else "Show password",
+                        tint = TextMuted,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            },
+            visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
             singleLine = true,
             enabled = lockoutRemaining <= 0,
             modifier = Modifier

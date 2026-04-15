@@ -7,6 +7,8 @@ struct UnlockView: View {
     @State private var isShaking = false
     @State private var lockoutRemaining: Int = 0
     @State private var showResetConfirmation = false
+    @State private var showPassword = false
+    @FocusState private var isPasswordFocused: Bool
 
     private let lockoutTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -32,19 +34,47 @@ struct UnlockView: View {
                     .foregroundStyle(Theme.textSecondary)
 
                 VStack(spacing: 16) {
-                    SecureField("Master password", text: $password)
+                    HStack(spacing: 10) {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 15))
+                            .foregroundStyle(Theme.textMuted)
+                            .frame(width: 18)
+                        SwiftUI.Group {
+                            if showPassword {
+                                TextField("Master password", text: $password)
+                            } else {
+                                SecureField("Master password", text: $password)
+                            }
+                        }
                         .textContentType(.password)
-                        .padding(14)
-                        .background(Theme.bgRaised)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color.white.opacity(0.06), lineWidth: 1)
-                        )
-                        .offset(x: isShaking ? -8 : 0)
+                        .autocapitalization(.none)
+                        .disableAutocorrection(true)
+                        .focused($isPasswordFocused)
+                        .submitLabel(.go)
                         .onSubmit { unlock() }
-                        .disabled(isLockedOut)
                         .accessibilityIdentifier("unlock.password")
+                        Button {
+                            showPassword.toggle()
+                        } label: {
+                            Image(systemName: showPassword ? "eye.slash.fill" : "eye.fill")
+                                .font(.system(size: 15))
+                                .foregroundStyle(Theme.textMuted)
+                                .frame(width: 18)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isLockedOut)
+                    }
+                    .padding(14)
+                    .background(Theme.bgRaised)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(isPasswordFocused ? Theme.accent : Color.white.opacity(0.06),
+                                    lineWidth: isPasswordFocused ? 1.5 : 1)
+                    )
+                    .animation(.easeInOut(duration: 0.15), value: isPasswordFocused)
+                    .offset(x: isShaking ? -8 : 0)
+                    .disabled(isLockedOut)
 
                     if isLockedOut {
                         HStack(spacing: 6) {
