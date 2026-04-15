@@ -338,9 +338,7 @@
   font-weight: 700;
   margin-bottom: 14px;
   letter-spacing: -0.03em;
-  background: linear-gradient(to bottom, #fff, #b0b0cc);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  color: var(--text);
 }
 
 .demo-app .connect-card p {
@@ -780,14 +778,14 @@
   white-space: pre;
 }
 
-.demo-app .tk-keyword { color: #c084fc; }
-.demo-app .tk-string { color: #86efac; }
-.demo-app .tk-number { color: #fbbf24; }
-.demo-app .tk-bool { color: #fbbf24; }
-.demo-app .tk-comment { color: #505070; font-style: italic; }
-.demo-app .tk-builtin { color: #7dd3fc; }
-.demo-app .tk-punct { color: #6b7280; }
-.demo-app .tk-ident { color: #e2e8f0; }
+.demo-app .tk-keyword { color: #7c3aed; }
+.demo-app .tk-string { color: #16a34a; }
+.demo-app .tk-number { color: #b45309; }
+.demo-app .tk-bool { color: #b45309; }
+.demo-app .tk-comment { color: #94a3b8; font-style: italic; }
+.demo-app .tk-builtin { color: #0891b2; }
+.demo-app .tk-punct { color: #64748b; }
+.demo-app .tk-ident { color: #1c1917; }
 
 /* ── Chat Input ── */
 
@@ -1229,9 +1227,7 @@
   font-weight: 700;
   margin-bottom: 14px;
   letter-spacing: -0.03em;
-  background: linear-gradient(to bottom, #fff, #a0a0c0);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  color: var(--text);
 }
 
 .demo-app .code-desc {
