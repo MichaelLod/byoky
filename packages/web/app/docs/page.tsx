@@ -158,10 +158,10 @@ function Installation() {
       <h3>User wallets</h3>
       <p>Your users need one of these installed:</p>
       <ul>
-        <li><a href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon" style={{ color: 'var(--teal-light)' }}>Chrome Extension</a></li>
-        <li><a href="https://addons.mozilla.org/en-US/firefox/addon/byoky/" style={{ color: 'var(--teal-light)' }}>Firefox Extension</a></li>
-        <li><a href="https://apps.apple.com/app/byoky/id6760779919" style={{ color: 'var(--teal-light)' }}>iOS App</a> (wallet + Safari extension)</li>
-        <li><a href="https://play.google.com/store/apps/details?id=com.byoky.app" style={{ color: 'var(--teal-light)' }}>Android App</a> (pair via QR or relay)</li>
+        <li><a href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon" style={{ color: 'var(--teal-dark)' }}>Chrome Extension</a></li>
+        <li><a href="https://addons.mozilla.org/en-US/firefox/addon/byoky/" style={{ color: 'var(--teal-dark)' }}>Firefox Extension</a></li>
+        <li><a href="https://apps.apple.com/app/byoky/id6760779919" style={{ color: 'var(--teal-dark)' }}>iOS App</a> (wallet + Safari extension)</li>
+        <li><a href="https://play.google.com/store/apps/details?id=com.byoky.app" style={{ color: 'var(--teal-dark)' }}>Android App</a> (pair via QR or relay)</li>
       </ul>
     </Section>
   );
@@ -318,7 +318,7 @@ const res = await fetch('https://api.anthropic.com/v1/messages', {
       <h3>session.createRelay(wsUrl)</h3>
       <p>
         Open a WebSocket relay channel so a backend server can make LLM calls through this session.
-        See <a href="#backend-relay" style={{ color: 'var(--teal-light)' }}>Backend Relay</a>.
+        See <a href="#backend-relay" style={{ color: 'var(--teal-dark)' }}>Backend Relay</a>.
       </p>
 
       <h3>session.disconnect()</h3>
@@ -489,7 +489,7 @@ function TokenMarketplaceSection() {
     <Section id="token-marketplace" title="Token Marketplace">
       <p>
         The{' '}
-        <a href="/marketplace" style={{ color: 'var(--teal-light)' }}>
+        <a href="/marketplace" style={{ color: 'var(--teal-dark)' }}>
           Token Marketplace
         </a>{' '}
         is a public board where users share free token gifts with the community.
@@ -688,13 +688,13 @@ function Prop({ name, type, children }: { name: string; type: string; children: 
 
 const docsStyles = `
 .docs-layout {
-  --docs-bg: #0e0e1a;
-  --docs-bg-card: #161626;
-  --docs-bg-elevated: #1c1c30;
-  --docs-border: #252540;
-  --docs-text: #ededf4;
-  --docs-text-secondary: #9494b0;
-  --docs-text-muted: #5a5a78;
+  --docs-bg: #fafaf9;
+  --docs-bg-card: #ffffff;
+  --docs-bg-elevated: #f5f5f4;
+  --docs-border: #e7e5e4;
+  --docs-text: #1c1917;
+  --docs-text-secondary: #44403c;
+  --docs-text-muted: #78716c;
 
   display: flex;
   max-width: 1100px;
@@ -746,7 +746,7 @@ const docsStyles = `
 }
 
 .docs-nav-link.active {
-  color: var(--teal-light);
+  color: var(--teal-dark);
   border-left-color: var(--teal);
 }
 
@@ -870,7 +870,7 @@ const docsStyles = `
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 13px;
-  color: var(--teal-light);
+  color: var(--teal-dark);
 }
 
 .docs-section-body ul,
@@ -973,7 +973,7 @@ const docsStyles = `
 
 .docs-provider-row code {
   font-size: 12px;
-  color: var(--teal-light);
+  color: var(--teal-dark);
   background: var(--docs-bg-elevated);
   padding: 2px 6px;
   border-radius: 4px;

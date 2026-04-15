@@ -376,16 +376,16 @@ $ openclaw models auth login \\
         .openclaw-cta-code {
           margin: 0;
           padding: 22px 24px;
-          background: #07070f;
+          background: #ffffff;
           border: 1px solid var(--border);
           border-radius: 12px;
           font-family: var(--font-mono), monospace;
           font-size: 13px;
           line-height: 1.75;
-          color: var(--teal-light);
+          color: var(--text);
           overflow-x: auto;
           white-space: pre;
-          box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+          box-shadow: 0 20px 40px rgba(28, 25, 23, 0.06);
         }
         @media (max-width: 860px) {
           .openclaw-cta-section { padding: 56px 0; }

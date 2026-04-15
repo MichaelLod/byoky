@@ -114,7 +114,7 @@ export default function Marketplace() {
             borderRadius: 8,
             fontSize: 12,
             wordBreak: 'break-all',
-            color: 'var(--teal-light)',
+            color: 'var(--teal-dark)',
           }}>
             {redeemLink}
           </code>
@@ -166,7 +166,7 @@ export default function Marketplace() {
 
       <style>{`
         .gift-card { transition: border-color 0.15s; }
-        .gift-card:hover { border-color: var(--border-hover, #2a2a50) !important; }
+        .gift-card:hover { border-color: var(--border-hover, #d6d3d1) !important; }
       `}</style>
     </div>
   );
