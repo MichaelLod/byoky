@@ -1122,6 +1122,31 @@ section {
   margin-bottom: 40px;
 }
 
+.showcase-tour {
+  max-width: 960px;
+  margin: 0 auto 56px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: linear-gradient(145deg, rgba(13, 13, 26, 0.8), rgba(9, 9, 20, 0.6));
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+}
+
+.showcase-tour video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #141418;
+}
+
+.showcase-tour-caption {
+  padding: 14px 20px;
+  font-size: 14px;
+  color: var(--text-muted, #8e8e9a);
+  border-top: 1px solid var(--border);
+  margin: 0;
+}
+
 .showcase-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
