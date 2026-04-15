@@ -14,6 +14,11 @@ export interface Gift {
   createdAt: number;
   active: boolean;
   relayUrl: string;
+  /** Marketplace management token — only set if the gift was listed publicly.
+   * Clients send it with `/gifts/:id/heartbeat` so the marketplace shows the
+   * gift as online; the vault holds an encrypted copy so it can heartbeat
+   * while every device is backgrounded. */
+  marketplaceManagementToken?: string;
 }
 
 // --- Gift link (shareable payload) ---

@@ -51,6 +51,7 @@ interface WalletState {
   appGroups: AppGroups;
   cloudVaultEnabled: boolean;
   cloudVaultUsername: string | null;
+  cloudVaultLastUsername: string | null;
   cloudVaultTokenExpired: boolean;
   cloudVaultPendingCount: number;
   vaultBannerDismissedAt: number | null;
@@ -73,13 +74,15 @@ interface WalletState {
   addSetupToken: (providerId: string, label: string, token: string) => Promise<void>;
   startOAuth: (providerId: string, label: string) => Promise<void>;
   removeCredential: (id: string) => Promise<void>;
+  renameCredential: (id: string, label: string) => Promise<boolean>;
   revokeSession: (sessionId: string) => Promise<void>;
   approveConnect: (approvalId: string, trust: boolean) => Promise<void>;
   rejectConnect: (approvalId: string) => Promise<void>;
   removeTrustedSite: (origin: string) => Promise<void>;
   setAllowance: (allowance: TokenAllowance) => Promise<void>;
   removeAllowance: (origin: string) => Promise<void>;
-  createGift: (credentialId: string, providerId: string, label: string, maxTokens: number, expiresInMs: number, relayUrl: string) => Promise<string | null>;
+  createGift: (credentialId: string, providerId: string, label: string, maxTokens: number, expiresInMs: number, relayUrl: string) => Promise<{ giftLink: string; giftId: string } | null>;
+  setGiftMarketplaceToken: (giftId: string, token: string) => Promise<void>;
   revokeGift: (giftId: string) => Promise<void>;
   redeemGift: (giftLinkEncoded: string) => Promise<void>;
   removeGiftedCredential: (id: string) => Promise<void>;
@@ -126,6 +129,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   appGroups: {},
   cloudVaultEnabled: false,
   cloudVaultUsername: null,
+  cloudVaultLastUsername: null,
   cloudVaultTokenExpired: false,
   cloudVaultPendingCount: 0,
   vaultBannerDismissedAt: null,
@@ -341,6 +345,17 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     await get().refreshData();
   },
 
+  renameCredential: async (id: string, label: string) => {
+    set({ error: null });
+    const result = await sendInternal('renameCredential', { id, label });
+    if (result.error) {
+      set({ error: result.error as string });
+      return false;
+    }
+    await get().refreshData();
+    return true;
+  },
+
   revokeSession: async (sessionId: string) => {
     await sendInternal('revokeSession', { sessionId });
     await get().refreshData();
@@ -385,11 +400,15 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       });
       if (result.error) throw new Error(result.error as string);
       await get().refreshData();
-      return result.giftLink as string;
+      return { giftLink: result.giftLink as string, giftId: result.giftId as string };
     } catch (e) {
       set({ error: (e as Error).message });
       return null;
     }
+  },
+
+  setGiftMarketplaceToken: async (giftId, token) => {
+    await sendInternal('setGiftMarketplaceToken', { giftId, token });
   },
 
   revokeGift: async (giftId: string) => {
@@ -590,6 +609,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       appGroups: {},
       cloudVaultEnabled: false,
       cloudVaultUsername: null,
+      cloudVaultLastUsername: null,
       cloudVaultTokenExpired: false,
       cloudVaultPendingCount: 0,
       installedApps: [],
@@ -640,6 +660,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       appGroups: (groupsResult.appGroups ?? {}) as AppGroups,
       cloudVaultEnabled: vaultResult.enabled as boolean ?? false,
       cloudVaultUsername: vaultResult.username as string ?? null,
+      cloudVaultLastUsername: (vaultResult.lastUsername as string | null) ?? null,
       cloudVaultTokenExpired: vaultResult.tokenExpired as boolean ?? false,
       cloudVaultPendingCount: vaultResult.pendingCount as number ?? 0,
     });

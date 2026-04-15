@@ -1,18 +1,31 @@
 #!/usr/bin/env node
 
 import { WebSocketServer, WebSocket } from "ws";
-import { timingSafeEqual } from "node:crypto";
+import { timingSafeEqual, randomBytes } from "node:crypto";
 
+// A room can host a single sender and now an arbitrary number of recipients,
+// each identified by a server-assigned `connId`. When a recipient sends a
+// `relay:request`, the server rewrites the `requestId` into a tagged form
+// `r:<connId>:<origId>` so the sender's response (carrying the same tagged
+// id) can be routed back to the exact recipient — without any client-side
+// protocol change.
+//
+// Multi-recipient unlocks the "gift redeemed by many people" use case: the
+// budget still lives on the sender, but each recipient gets its own
+// independent request/response lane over the same room.
 interface Room {
   sender?: WebSocket;
   senderPriority: number;
-  recipient?: WebSocket;
+  recipients: Map<string, WebSocket>;     // connId → recipient ws
   authToken: string;
   lastActivity: number;
 }
 
 const PORT = parseInt(process.env.PORT || "8787", 10);
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+// Cap per-room recipients so a single gift can't be weaponised to DoS the
+// relay by opening thousands of sockets on the same room.
+const MAX_RECIPIENTS_PER_ROOM = 50;
 
 const rooms = new Map<string, Room>();
 const authAttempts = new Map<string, number[]>();
@@ -34,7 +47,9 @@ function cleanupIdleRooms(): void {
   for (const [roomId, room] of rooms) {
     if (now - room.lastActivity > IDLE_TIMEOUT_MS) {
       if (room.sender?.readyState === WebSocket.OPEN) room.sender.close();
-      if (room.recipient?.readyState === WebSocket.OPEN) room.recipient.close();
+      for (const ws of room.recipients.values()) {
+        if (ws.readyState === WebSocket.OPEN) ws.close();
+      }
       rooms.delete(roomId);
       console.log(`[cleanup] removed idle room ${roomId.slice(0, 8)}...`);
     }
@@ -43,6 +58,18 @@ function cleanupIdleRooms(): void {
 
 const cleanupInterval = setInterval(cleanupIdleRooms, 60_000);
 
+function tagRequestId(connId: string, origId: string): string {
+  return `r:${connId}:${origId}`;
+}
+
+function parseRequestId(tagged: string): { connId: string; origId: string } | null {
+  if (!tagged.startsWith("r:")) return null;
+  const rest = tagged.slice(2);
+  const sep = rest.indexOf(":");
+  if (sep < 0) return null;
+  return { connId: rest.slice(0, sep), origId: rest.slice(sep + 1) };
+}
+
 const wss = new WebSocketServer({ port: PORT, maxPayload: 20 * 1024 * 1024 }, () => {
   console.log(`relay listening on port ${PORT}`);
 });
@@ -50,11 +77,12 @@ const wss = new WebSocketServer({ port: PORT, maxPayload: 20 * 1024 * 1024 }, ()
 wss.on("connection", (ws) => {
   let authedRoomId: string | null = null;
   let authedRole: "sender" | "recipient" | null = null;
+  let authedConnId: string | null = null;
 
   console.log("[connect] new connection");
 
   ws.on("message", (raw) => {
-    let msg: { type: string; roomId?: string; authToken?: string; role?: string; [k: string]: unknown };
+    let msg: { type: string; roomId?: string; authToken?: string; role?: string; requestId?: string; [k: string]: unknown };
     try {
       msg = JSON.parse(String(raw));
     } catch {
@@ -107,13 +135,14 @@ wss.on("connection", (ws) => {
           // If the room has no active connections, it's stale — delete it
           // so the next connection can create a fresh room with the correct token
           const senderDead = !room.sender || room.sender.readyState !== WebSocket.OPEN;
-          const recipientDead = !room.recipient || room.recipient.readyState !== WebSocket.OPEN;
+          const recipientsDead = Array.from(room.recipients.values())
+            .every((r) => r.readyState !== WebSocket.OPEN);
           const staleMs = Date.now() - room.lastActivity;
-          if (senderDead && recipientDead && staleMs > IDLE_TIMEOUT_MS) {
+          if (senderDead && recipientsDead && staleMs > IDLE_TIMEOUT_MS) {
             rooms.delete(roomId);
             console.log(`[auth] deleted stale room ${roomId.slice(0, 8)}... (token mismatch, idle ${Math.round(staleMs / 1000)}s, no active peers)`);
             // Create fresh room with the new token
-            room = { authToken, senderPriority: 0, lastActivity: Date.now() };
+            room = { authToken, senderPriority: 0, recipients: new Map(), lastActivity: Date.now() };
             rooms.set(roomId, room);
           } else {
             console.log(`[auth] rejected: token mismatch for room ${roomId.slice(0, 8)}...`);
@@ -121,38 +150,63 @@ wss.on("connection", (ws) => {
             return;
           }
         }
-        if (room[role] && room[role]!.readyState === WebSocket.OPEN) {
-          // Sender priority takeover: higher priority kicks lower priority
-          if (role === "sender" && priority > room.senderPriority) {
-            console.log(`[auth] takeover: new sender (priority ${priority}) kicks existing (priority ${room.senderPriority}) in room ${roomId.slice(0, 8)}...`);
-            send(room.sender!, { type: "relay:peer:status", online: false, kicked: true });
-            room.sender!.close(4001, "replaced by higher-priority sender");
-            room.sender = undefined;
-          } else {
-            console.log(`[auth] rejected: ${role} already connected in room ${roomId.slice(0, 8)}...`);
-            send(ws, { type: "relay:auth:result", success: false, error: `${role} already connected` });
+
+        if (role === "sender") {
+          if (room.sender && room.sender.readyState === WebSocket.OPEN) {
+            if (priority > room.senderPriority) {
+              console.log(`[auth] takeover: new sender (priority ${priority}) kicks existing (priority ${room.senderPriority}) in room ${roomId.slice(0, 8)}...`);
+              for (const r of room.recipients.values()) {
+                send(r, { type: "relay:peer:status", online: false, kicked: true });
+              }
+              room.sender.close(4001, "replaced by higher-priority sender");
+              room.sender = undefined;
+            } else {
+              console.log(`[auth] rejected: sender already connected in room ${roomId.slice(0, 8)}...`);
+              send(ws, { type: "relay:auth:result", success: false, error: "sender already connected" });
+              return;
+            }
+          }
+        } else {
+          if (room.recipients.size >= MAX_RECIPIENTS_PER_ROOM) {
+            console.log(`[auth] rejected: recipient cap reached in room ${roomId.slice(0, 8)}...`);
+            send(ws, { type: "relay:auth:result", success: false, error: "recipient cap reached" });
             return;
           }
         }
       } else {
-        room = { authToken, senderPriority: 0, lastActivity: Date.now() };
+        room = { authToken, senderPriority: 0, recipients: new Map(), lastActivity: Date.now() };
         rooms.set(roomId, room);
       }
 
-      room[role] = ws;
-      if (role === "sender") room.senderPriority = priority;
+      if (role === "sender") {
+        room.sender = ws;
+        room.senderPriority = priority;
+      } else {
+        authedConnId = randomBytes(8).toString("hex");
+        room.recipients.set(authedConnId, ws);
+      }
+
       touchRoom(room);
       authedRoomId = roomId;
       authedRole = role;
 
-      const peer = role === "sender" ? room.recipient : room.sender;
-      const peerOnline = !!peer && peer.readyState === WebSocket.OPEN;
+      const peerOnline = role === "sender"
+        ? room.recipients.size > 0
+        : !!room.sender && room.sender.readyState === WebSocket.OPEN;
 
       send(ws, { type: "relay:auth:result", success: true, peerOnline });
-      console.log(`[auth] ${role} joined room ${roomId.slice(0, 8)}... (peer ${peerOnline ? "online" : "offline"})`);
+      console.log(`[auth] ${role} joined room ${roomId.slice(0, 8)}... (peer ${peerOnline ? "online" : "offline"}${role === "recipient" ? `, recipients=${room.recipients.size}` : ""})`);
 
-      if (peerOnline) {
-        send(peer!, { type: "relay:peer:status", online: true });
+      if (role === "sender") {
+        // Tell every recipient the sender is online.
+        for (const r of room.recipients.values()) {
+          send(r, { type: "relay:peer:status", online: true });
+        }
+      } else if (room.sender && room.sender.readyState === WebSocket.OPEN) {
+        // First recipient flips the sender from "offline" to "online".
+        // Every subsequent recipient also emits online (idempotent for the
+        // sender; harmless) so the sender knows a new peer just joined.
+        send(room.sender, { type: "relay:peer:status", online: true });
       }
 
       return;
@@ -163,9 +217,23 @@ wss.on("connection", (ws) => {
 
     touchRoom(room);
 
-    if (authedRole === "recipient" && (msg.type === "relay:request" || msg.type === "relay:pair:ack")) {
-      if (room.sender && room.sender.readyState === WebSocket.OPEN) {
-        room.sender.send(String(raw));
+    if (authedRole === "recipient") {
+      if (msg.type === "relay:request" && typeof msg.requestId === "string" && authedConnId) {
+        // Tag the requestId with the recipient's connId so responses route
+        // back here. Sender sees the tagged id; client never sees it.
+        const tagged = tagRequestId(authedConnId, msg.requestId);
+        const rewritten = JSON.stringify({ ...msg, requestId: tagged });
+        if (room.sender && room.sender.readyState === WebSocket.OPEN) {
+          room.sender.send(rewritten);
+        }
+        return;
+      }
+      if (msg.type === "relay:pair:ack") {
+        // Pairing flow is 1:1 — forward the ack to the sender as-is.
+        if (room.sender && room.sender.readyState === WebSocket.OPEN) {
+          room.sender.send(String(raw));
+        }
+        return;
       }
       return;
     }
@@ -175,14 +243,36 @@ wss.on("connection", (ws) => {
         msg.type === "relay:response:meta" ||
         msg.type === "relay:response:chunk" ||
         msg.type === "relay:response:done" ||
-        msg.type === "relay:response:error" ||
-        msg.type === "relay:usage" ||
+        msg.type === "relay:response:error"
+      ) {
+        const tagged = typeof msg.requestId === "string" ? msg.requestId : "";
+        const parsed = parseRequestId(tagged);
+        if (!parsed) return;
+        const target = room.recipients.get(parsed.connId);
+        if (!target || target.readyState !== WebSocket.OPEN) return;
+        const rewritten = JSON.stringify({ ...msg, requestId: parsed.origId });
+        target.send(rewritten);
+        return;
+      }
+
+      if (msg.type === "relay:usage") {
+        // Usage updates apply to the whole gift, not a single recipient —
+        // broadcast to every recipient so their wallets stay in sync.
+        for (const r of room.recipients.values()) {
+          if (r.readyState === WebSocket.OPEN) r.send(String(raw));
+        }
+        return;
+      }
+
+      if (
         msg.type === "relay:pair:hello" ||
         msg.type === "relay:vault:offer" ||
         msg.type === "relay:vault:offer:failed"
       ) {
-        if (room.recipient && room.recipient.readyState === WebSocket.OPEN) {
-          room.recipient.send(String(raw));
+        // Pairing flow — broadcast to every recipient; the pairing
+        // initiator will be the only one that cares.
+        for (const r of room.recipients.values()) {
+          if (r.readyState === WebSocket.OPEN) r.send(String(raw));
         }
         return;
       }
@@ -199,15 +289,22 @@ wss.on("connection", (ws) => {
     const room = rooms.get(authedRoomId);
     if (!room) return;
 
-    room[authedRole] = undefined;
-    if (authedRole === "sender") room.senderPriority = 0;
-
-    const peer = authedRole === "sender" ? room.recipient : room.sender;
-    if (peer && peer.readyState === WebSocket.OPEN) {
-      send(peer, { type: "relay:peer:status", online: false });
+    if (authedRole === "sender") {
+      room.sender = undefined;
+      room.senderPriority = 0;
+      for (const r of room.recipients.values()) {
+        if (r.readyState === WebSocket.OPEN) {
+          send(r, { type: "relay:peer:status", online: false });
+        }
+      }
+    } else if (authedConnId) {
+      room.recipients.delete(authedConnId);
+      if (room.recipients.size === 0 && room.sender && room.sender.readyState === WebSocket.OPEN) {
+        send(room.sender, { type: "relay:peer:status", online: false });
+      }
     }
 
-    if (!room.sender && !room.recipient) {
+    if (!room.sender && room.recipients.size === 0) {
       rooms.delete(authedRoomId);
       console.log(`[cleanup] removed empty room ${authedRoomId.slice(0, 8)}...`);
     }

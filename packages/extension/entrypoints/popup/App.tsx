@@ -16,6 +16,7 @@ import { RedeemGift } from './pages/RedeemGift';
 import { Apps } from './pages/Apps';
 import { AppStore } from './pages/AppStore';
 import { AppView } from './pages/AppView';
+import { FloatingActionMenu } from './components/FloatingActionMenu';
 
 export default function App() {
   const { currentPage, sessions, pendingApprovals, loading, init } = useWalletStore();
@@ -59,6 +60,14 @@ export default function App() {
     currentPage !== 'setup' &&
     currentPage !== 'unlock' &&
     currentPage !== 'approval';
+
+  const showFab =
+    showNav &&
+    currentPage !== 'add-credential' &&
+    currentPage !== 'redeem-gift' &&
+    currentPage !== 'create-gift' &&
+    currentPage !== 'app-store' &&
+    currentPage !== 'app-view';
 
   return (
     <div className="app">
@@ -138,7 +147,7 @@ export default function App() {
           </nav>
         )}
       </header>
-      <main className="content">
+      <main className={`content ${showFab ? 'has-fab' : ''}`}>
         <div key={currentPage} className="page-enter">
           {currentPage === 'setup' && <Setup />}
           {currentPage === 'unlock' && <Unlock />}
@@ -163,6 +172,7 @@ export default function App() {
           <img src="/mascot.svg" alt="" />
         </div>
       )}
+      {showFab && <FloatingActionMenu />}
     </div>
   );
 }

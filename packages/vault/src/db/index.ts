@@ -195,6 +195,11 @@ export async function deleteCredential(userId: string, credentialId: string) {
   return result.length > 0;
 }
 
+export async function updateCredentialLabel(userId: string, credentialId: string, label: string) {
+  await getDb().update(credentials).set({ label })
+    .where(and(eq(credentials.id, credentialId), eq(credentials.userId, userId)));
+}
+
 export async function updateCredentialLastUsed(credentialId: string) {
   await getDb().update(credentials).set({ lastUsedAt: Date.now() }).where(eq(credentials.id, credentialId));
 }
@@ -352,12 +357,24 @@ export async function createGift(
   maxTokens: number,
   usedTokens: number,
   expiresAt: number,
+  encryptedMarketplaceMgmtToken: string | null = null,
 ) {
   const [row] = await getDb().insert(gifts).values({
     id, userId, providerId, authMethod, encryptedApiKey, encryptedRelayToken,
     relayUrl, maxTokens, usedTokens, expiresAt, createdAt: Date.now(), active: true,
+    encryptedMarketplaceMgmtToken,
   }).returning();
   return row;
+}
+
+export async function updateGiftMarketplaceToken(
+  userId: string,
+  giftId: string,
+  encryptedMarketplaceMgmtToken: string,
+) {
+  await getDb().update(gifts)
+    .set({ encryptedMarketplaceMgmtToken })
+    .where(and(eq(gifts.id, giftId), eq(gifts.userId, userId)));
 }
 
 export async function getGiftsByUser(userId: string) {

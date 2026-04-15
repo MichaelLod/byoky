@@ -2,7 +2,6 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject var wallet: WalletStore
-    @State private var showSafariGuide = false
     @State private var showCloudVault = false
     @State private var showCloudVaultRelogin = false
     @State private var showDeleteAccountConfirm = false
@@ -20,15 +19,11 @@ struct SettingsView: View {
                 translationDebugSection
                 #endif
                 aboutSection
-                safariExtensionSection
                 dangerZoneSection
             }
             .navigationTitle("Settings")
-            .sheet(isPresented: $showSafariGuide) {
-                SafariExtensionGuide()
-            }
             .sheet(isPresented: $showCloudVault) {
-                CloudVaultSetupView()
+                CloudVaultSetupView(lastUsername: wallet.cloudVaultLastUsername)
                     .environmentObject(wallet)
             }
             .sheet(isPresented: $showCloudVaultRelogin) {
@@ -160,40 +155,6 @@ struct SettingsView: View {
     }
     #endif
 
-    private var safariExtensionSection: some View {
-        Section {
-            Button {
-                showSafariGuide = true
-            } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "safari")
-                        .font(.system(size: 20))
-                        .foregroundStyle(Theme.accent)
-                        .frame(width: 32)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Safari Extension Setup")
-                            .font(.body.weight(.medium))
-                            .foregroundStyle(.primary)
-                        Text("Enable Byoky in Safari to proxy requests")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Spacer()
-
-                    Image(systemName: "chevron.right")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-        } header: {
-            Text("Safari Extension")
-        } footer: {
-            Text("The Safari extension lets websites connect to your wallet. You need to enable it once in Safari settings.")
-        }
-    }
-
     private var cloudVaultSection: some View {
         Section {
             Toggle(isOn: Binding(
@@ -289,94 +250,12 @@ struct SettingsView: View {
     }
 }
 
-struct SafariExtensionGuide: View {
-    @Environment(\.dismiss) var dismiss
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    Text("Enable the Byoky Safari extension to let websites connect to your wallet.")
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-
-                    guideStep(
-                        number: 1,
-                        title: "Open Settings",
-                        description: "Go to Settings → Safari → Extensions"
-                    )
-
-                    guideStep(
-                        number: 2,
-                        title: "Enable Byoky",
-                        description: "Find \"Byoky\" in the list and toggle it on"
-                    )
-
-                    guideStep(
-                        number: 3,
-                        title: "Allow Permissions",
-                        description: "Grant permission for \"All Websites\" or specific sites you use"
-                    )
-
-                    guideStep(
-                        number: 4,
-                        title: "Keep the App Open",
-                        description: "For OAuth tokens and remote tools, keep the Byoky app in the foreground. The bridge proxy runs as long as the app is active — if you switch away, it pauses and resumes when you return."
-                    )
-
-                    Divider()
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Important", systemImage: "exclamationmark.triangle")
-                            .font(.headline)
-                            .foregroundStyle(.orange)
-
-                        Text("API key-based requests work even when the app is in the background. Only OAuth token requests and remote relay connections require the app to stay active.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(16)
-                    .background(Color.orange.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                }
-                .padding(24)
-            }
-            .navigationTitle("Safari Extension")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
-        }
-    }
-
-    private func guideStep(number: Int, title: String, description: String) -> some View {
-        HStack(alignment: .top, spacing: 14) {
-            Text("\(number)")
-                .font(.callout.weight(.bold))
-                .foregroundStyle(.white)
-                .frame(width: 28, height: 28)
-                .background(Theme.accent)
-                .clipShape(Circle())
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.body.weight(.semibold))
-                Text(description)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-}
-
 struct CloudVaultSetupView: View {
     @EnvironmentObject var wallet: WalletStore
     @Environment(\.dismiss) var dismiss
 
-    @State private var isSignup = true
-    @State private var username = ""
+    @State private var isSignup: Bool
+    @State private var username: String
     @State private var password = ""
     @State private var loading = false
     @State private var error: String?
@@ -384,6 +263,11 @@ struct CloudVaultSetupView: View {
     @State private var checkTask: Task<Void, Never>?
 
     enum UsernameStatus: Equatable { case idle, checking, available, taken, invalid }
+
+    init(lastUsername: String? = nil) {
+        _isSignup = State(initialValue: lastUsername == nil)
+        _username = State(initialValue: lastUsername ?? "")
+    }
 
     private static let usernamePattern = "^[a-z0-9][a-z0-9_-]{1,28}[a-z0-9]$"
 
