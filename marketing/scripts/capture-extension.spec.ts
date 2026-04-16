@@ -66,7 +66,8 @@ async function launchPopup(): Promise<{ ctx: BrowserContext; popup: Page; extId:
 
 async function addCredential(popup: Page, providerId: string, label: string, apiKey: string) {
   await popup.click('button[title="Wallet"]').catch(() => {});
-  await popup.click('button:has-text("Add credential")');
+  await popup.click('.fab-button');
+  await popup.click('.fab-menu-item:has-text("Add credential")');
   await popup.waitForSelector('#provider', { timeout: 8000 });
   await popup.selectOption('#provider', providerId);
   const isSetupToken = providerId === 'anthropic' && apiKey.startsWith('sk-ant-oat01-');
@@ -108,7 +109,8 @@ test('capture extension popup screens for marketing', async () => {
 
     // ── 4. Add Anthropic credential ──────────────────────────────────────
     if (env.ANTHROPIC_API_KEY) {
-      await popup.click('button:has-text("Add credential")');
+      await popup.click('.fab-button');
+      await popup.click('.fab-menu-item:has-text("Add credential")');
       await popup.waitForSelector('#provider', { timeout: 8000 });
       await snap(popup, '06-add-credential-form');
 
