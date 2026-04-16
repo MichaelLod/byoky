@@ -104,6 +104,7 @@ interface Gift {
   listedAt: number;
   lastSeenAt: number;
   online: boolean;
+  unlisted?: boolean;
 }
 
 function timeUntil(ts: number): string {
@@ -114,6 +115,21 @@ function timeUntil(ts: number): string {
   if (hours < 24) return `${hours}h left`;
   return `${Math.floor(hours / 24)}d left`;
 }
+
+type GiftStatus = 'online' | 'unavailable' | 'removed' | 'expired';
+
+function deriveGiftStatus(gift: Gift, variant: 'active' | 'expired' | 'removed'): GiftStatus {
+  if (variant === 'removed' || gift.unlisted) return 'removed';
+  if (variant === 'expired') return 'expired';
+  return gift.online ? 'online' : 'unavailable';
+}
+
+const STATUS_STYLES: Record<GiftStatus, { bg: string; color: string; label: string }> = {
+  online: { bg: 'rgba(52,211,153,0.12)', color: '#34d399', label: 'Online' },
+  unavailable: { bg: 'rgba(244,63,94,0.1)', color: '#f43f5e', label: 'Unavailable' },
+  removed: { bg: 'rgba(85,85,95,0.15)', color: '#6b7280', label: 'Removed' },
+  expired: { bg: 'rgba(85,85,95,0.15)', color: '#999', label: 'Expired' },
+};
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -134,6 +150,7 @@ const MOCK_GIFTS: Gift[] = [
 export default function Marketplace() {
   const [active, setActive] = useState<Gift[]>([]);
   const [expired, setExpired] = useState<Gift[]>([]);
+  const [removed, setRemoved] = useState<Gift[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [redeeming, setRedeeming] = useState<string | null>(null);
@@ -154,19 +171,23 @@ export default function Marketplace() {
       const data = await res.json();
       const a = data.active ?? [];
       const e = data.expired ?? [];
+      const r = data.removed ?? [];
       // Fall back to mock data if API returns empty (local dev)
-      if (a.length === 0 && e.length === 0) {
+      if (a.length === 0 && e.length === 0 && r.length === 0) {
         setActive(MOCK_GIFTS.filter(g => g.expiresAt > Date.now()));
         setExpired(MOCK_GIFTS.filter(g => g.expiresAt <= Date.now()));
+        setRemoved([]);
       } else {
         setActive(a);
         setExpired(e);
+        setRemoved(r);
       }
       setError(null);
     } catch {
       // API unreachable — use mock data
       setActive(MOCK_GIFTS.filter(g => g.expiresAt > Date.now()));
       setExpired(MOCK_GIFTS.filter(g => g.expiresAt <= Date.now()));
+      setRemoved([]);
       setError(null);
     } finally {
       setLoading(false);
@@ -275,23 +296,26 @@ export default function Marketplace() {
         </div>
       )}
 
-      {/* ── Expired ── */}
-      {!loading && expired.length > 0 && (
+      {/* ── No longer available (expired + removed) ── */}
+      {!loading && (expired.length > 0 || removed.length > 0) && (
         <div className="mp-section" style={{ opacity: 0.5 }}>
           <h2 className="mp-section-title" style={{ color: 'var(--text-muted)' }}>
             <span className="mp-section-dot" style={{ background: '#999' }} />
-            Recently expired
+            No longer available
           </h2>
           <div className="mp-grid">
+            {removed.map((gift) => (
+              <GiftCard key={gift.id} gift={gift} variant="removed" />
+            ))}
             {expired.map((gift) => (
-              <GiftCard key={gift.id} gift={gift} expired />
+              <GiftCard key={gift.id} gift={gift} variant="expired" />
             ))}
           </div>
         </div>
       )}
 
       {/* ── Empty state ── */}
-      {!loading && active.length === 0 && expired.length === 0 && (
+      {!loading && active.length === 0 && expired.length === 0 && removed.length === 0 && (
         <div className="mp-empty">
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
             <path d="M20 12v10H4V12" /><path d="M2 7h20v5H2z" /><path d="M12 22V7" />
@@ -618,17 +642,17 @@ export default function Marketplace() {
   );
 }
 
-function GiftCard({ gift, expired, onRedeem, redeeming }: {
+function GiftCard({ gift, variant = 'active', onRedeem, redeeming }: {
   gift: Gift;
-  expired?: boolean;
+  variant?: 'active' | 'expired' | 'removed';
   onRedeem?: (id: string) => void;
   redeeming?: boolean;
 }) {
+  const status = deriveGiftStatus(gift, variant);
   const pct = gift.tokenBudget > 0 ? ((gift.tokenBudget - gift.tokensUsed) / gift.tokenBudget) * 100 : 0;
-  const barColor = expired ? '#999' : pct > 20 ? '#FF4F00' : '#f43f5e';
-  const statusBg = expired ? 'rgba(85,85,95,0.15)' : gift.online ? 'rgba(52,211,153,0.12)' : 'rgba(244,63,94,0.1)';
-  const statusColor = expired ? '#999' : gift.online ? '#34d399' : '#f43f5e';
-  const statusText = expired ? 'Expired' : gift.online ? 'Online' : 'Offline';
+  const barColor = status !== 'online' && status !== 'unavailable' ? '#999' : pct > 20 ? '#FF4F00' : '#f43f5e';
+  const { bg: statusBg, color: statusColor, label: statusText } = STATUS_STYLES[status];
+  const expired = variant === 'expired' || variant === 'removed';
 
   return (
     <div className="mp-card">

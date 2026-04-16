@@ -100,26 +100,29 @@ app.get('/gifts', async (c) => {
   const now = Date.now();
   const ONLINE_THRESHOLD = 5 * 60 * 1000;
 
+  const strip = (g: typeof gifts[number]) => ({
+    ...g,
+    giftLink: undefined,
+    tokensRemaining: Math.max(0, g.tokenBudget - g.tokensUsed),
+  });
+
   const active = gifts
-    .filter((g) => g.expiresAt > now && g.tokensUsed < g.tokenBudget)
-    .map((g) => ({
-      ...g,
-      giftLink: undefined,
-      online: now - g.lastSeenAt < ONLINE_THRESHOLD,
-      tokensRemaining: g.tokenBudget - g.tokensUsed,
-    }));
+    .filter((g) => !g.unlisted && g.expiresAt > now && g.tokensUsed < g.tokenBudget)
+    .map((g) => ({ ...strip(g), online: now - g.lastSeenAt < ONLINE_THRESHOLD }));
 
   const expired = gifts
-    .filter((g) => g.expiresAt <= now || g.tokensUsed >= g.tokenBudget)
+    .filter((g) => !g.unlisted && (g.expiresAt <= now || g.tokensUsed >= g.tokenBudget))
     .slice(0, 20)
-    .map((g) => ({
-      ...g,
-      giftLink: undefined,
-      online: false,
-      tokensRemaining: Math.max(0, g.tokenBudget - g.tokensUsed),
-    }));
+    .map((g) => ({ ...strip(g), online: false }));
 
-  return c.json({ active, expired });
+  // Surface recently-revoked gifts so the UI can show a "Removed" badge
+  // instead of silently dropping them from the list.
+  const removed = gifts
+    .filter((g) => g.unlisted)
+    .slice(0, 20)
+    .map((g) => ({ ...strip(g), online: false }));
+
+  return c.json({ active, expired, removed });
 });
 
 // Get gift link for redemption (rate-limited)

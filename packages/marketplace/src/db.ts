@@ -49,14 +49,14 @@ export interface PublicGift {
   expiresAt: number;
   listedAt: number;
   lastSeenAt: number;
+  unlisted: boolean;
 }
 
 export async function listGifts(limit = 100, offset = 0): Promise<PublicGift[]> {
   const rows = await sql`
     SELECT id, provider_id, gifter_name, gift_link, relay_url,
-           token_budget, tokens_used, expires_at, listed_at, last_seen_at
+           token_budget, tokens_used, expires_at, listed_at, last_seen_at, unlisted
     FROM marketplace_gifts
-    WHERE unlisted = FALSE
     ORDER BY listed_at DESC
     LIMIT ${limit} OFFSET ${offset}
   `;
@@ -139,5 +139,6 @@ function toPublicGift(row: Record<string, unknown>): PublicGift {
     expiresAt: Number(row.expires_at),
     listedAt: Number(row.listed_at),
     lastSeenAt: Number(row.last_seen_at),
+    unlisted: row.unlisted === true,
   };
 }
