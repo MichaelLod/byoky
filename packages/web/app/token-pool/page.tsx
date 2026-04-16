@@ -234,9 +234,11 @@ export default function Marketplace() {
     }
   }
 
-  const totalTokens = active.reduce((sum, g) => sum + g.tokensRemaining, 0);
-  const uniqueProviders = new Set(active.map(g => g.providerId)).size;
-  const onlineCount = active.filter(g => g.online).length;
+  const onlineGifts = active.filter(g => g.online);
+  const offlineGifts = active.filter(g => !g.online);
+  const totalTokens = onlineGifts.reduce((sum, g) => sum + g.tokensRemaining, 0);
+  const uniqueProviders = new Set(onlineGifts.map(g => g.providerId)).size;
+  const onlineCount = onlineGifts.length;
 
   return (
     <div className="mp-container">
@@ -281,15 +283,31 @@ export default function Marketplace() {
 
       {loading && <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 40 }}>Loading...</p>}
 
-      {/* ── Active gifts ── */}
-      {!loading && active.length > 0 && (
+      {/* ── Online gifts ── */}
+      {!loading && onlineGifts.length > 0 && (
         <div className="mp-section">
           <h2 className="mp-section-title">
             <span className="mp-section-dot mp-dot-green" />
-            Available now <span style={{ color: '#FF4F00', fontWeight: 800 }}>{active.length}</span>
+            Available now <span style={{ color: '#FF4F00', fontWeight: 800 }}>{onlineGifts.length}</span>
           </h2>
           <div className="mp-grid">
-            {active.map((gift) => (
+            {onlineGifts.map((gift) => (
+              <GiftCard key={gift.id} gift={gift} onRedeem={handleRedeem} redeeming={redeeming === gift.id} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Currently offline (active but gifter not online) ── */}
+      {!loading && offlineGifts.length > 0 && (
+        <div className="mp-section" style={{ opacity: 0.7 }}>
+          <h2 className="mp-section-title" style={{ color: 'var(--text-muted)' }}>
+            <span className="mp-section-dot" style={{ background: '#f43f5e' }} />
+            Currently offline <span style={{ color: 'var(--text-muted)', fontWeight: 800 }}>{offlineGifts.length}</span>
+          </h2>
+          <p className="mp-section-sub">The gifter is offline right now. These may come back online later.</p>
+          <div className="mp-grid">
+            {offlineGifts.map((gift) => (
               <GiftCard key={gift.id} gift={gift} onRedeem={handleRedeem} redeeming={redeeming === gift.id} />
             ))}
           </div>
@@ -414,6 +432,11 @@ export default function Marketplace() {
           flex-shrink: 0;
         }
         .mp-dot-green { background: #34d399; box-shadow: 0 0 8px rgba(52, 211, 153, 0.4); }
+        .mp-section-sub {
+          font-size: 13px;
+          color: var(--text-muted);
+          margin: -8px 0 16px;
+        }
 
         /* ── Grid ── */
         .mp-grid {
