@@ -106,7 +106,9 @@ export function DocsPlayground({ open, tab, onClose }: Props) {
 
         <div className="docs-drawer-body">
           {session ? (
-            <Playground session={session} initialTab={tab} />
+            <div className="demo-app docs-drawer-demo">
+              <Playground session={session} initialTab={tab} />
+            </div>
           ) : (
             <ConnectCard
               connecting={connecting}

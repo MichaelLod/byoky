@@ -1890,6 +1890,13 @@ const docsStyles = `
   margin: 0;
 }
 
+.docs-drawer-demo {
+  min-height: auto !important;
+  background: transparent !important;
+  display: block !important;
+  font-size: 14px;
+}
+
 /* Connect card inside drawer */
 
 .docs-drawer-connect {
