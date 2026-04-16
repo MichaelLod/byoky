@@ -70,6 +70,11 @@ export function VersionStatus() {
                 review in progress · hang tight
               </span>
             )}
+            {p.platform === 'Android' && p.pending && (
+              <span className="version-status-source" title="Play review typically takes 1–3 days">
+                review in progress · hang tight
+              </span>
+            )}
           </div>
         ))}
       </div>
