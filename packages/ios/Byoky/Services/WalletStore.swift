@@ -31,6 +31,10 @@ final class WalletStore: ObservableObject {
     /// fires. WalletView observes this and presents the redeem sheet with
     /// the link pre-filled.
     @Published var pendingGiftLink: String?
+    /// Set by ByokyApp.onOpenURL when a byoky://pair/<payload> deep link
+    /// fires. MainTabView switches to the Connect tab and PairView auto-
+    /// kicks off the relay handshake with the decoded payload.
+    @Published var pendingPairLink: String?
 
     private let keychain = KeychainService.shared
     private let crypto = CryptoService.shared
@@ -872,10 +876,14 @@ final class WalletStore: ObservableObject {
 
     func revokeGift(id: String) {
         guard let index = gifts.firstIndex(where: { $0.id == id }) else { return }
+        let mgmtToken = gifts[index].marketplaceManagementToken
         gifts[index].active = false
         saveGifts()
         GiftRelayHost.shared.disconnect(giftId: id)
         Task { await unregisterGiftFromVault(giftId: id) }
+        if let mgmtToken {
+            Task { await unlistMarketplaceGift(giftId: id, token: mgmtToken) }
+        }
     }
 
     /// Increment `gifts[giftId].usedTokens` from the sender-side gift relay
@@ -1509,6 +1517,17 @@ final class WalletStore: ObservableObject {
             request.setValue("Bearer \(mgmtToken)", forHTTPHeaderField: "Authorization")
             _ = try? await URLSession.shared.data(for: request)
         }
+    }
+
+    /// Best-effort: tell the marketplace the gift has been revoked so its
+    /// public listing flips to "Removed" right away instead of waiting for
+    /// the heartbeat to age out.
+    func unlistMarketplaceGift(giftId: String, token mgmtToken: String) async {
+        guard let url = URL(string: "\(Self.marketplaceUrl)/gifts/\(giftId)") else { return }
+        var request = URLRequest(url: url, timeoutInterval: 10)
+        request.httpMethod = "DELETE"
+        request.setValue("Bearer \(mgmtToken)", forHTTPHeaderField: "Authorization")
+        _ = try? await URLSession.shared.data(for: request)
     }
 }
 

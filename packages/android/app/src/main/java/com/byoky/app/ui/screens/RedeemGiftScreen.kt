@@ -19,9 +19,16 @@ import com.byoky.app.ui.theme.*
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RedeemGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
+    val pendingGiftLink by wallet.pendingGiftLink.collectAsState()
     var linkText by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var redeemed by remember { mutableStateOf(false) }
+
+    LaunchedEffect(pendingGiftLink) {
+        val link = pendingGiftLink ?: return@LaunchedEffect
+        linkText = link
+        wallet.setPendingGiftLink(null)
+    }
 
     val rawPayload = remember(linkText) {
         val trimmed = linkText.trim()

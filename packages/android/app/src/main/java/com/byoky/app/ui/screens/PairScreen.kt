@@ -44,8 +44,16 @@ fun PairContent(wallet: WalletStore, pairService: RelayPairService) {
     val status by pairService.status.collectAsState()
     val requestCount by pairService.requestCount.collectAsState()
     val credentials by wallet.credentials.collectAsState()
+    val pendingPairLink by wallet.pendingPairLink.collectAsState()
     var showScanner by remember { mutableStateOf(false) }
     var manualCode by remember { mutableStateOf("") }
+
+    LaunchedEffect(pendingPairLink) {
+        val link = pendingPairLink ?: return@LaunchedEffect
+        val encoded = stripPairLinkPrefix(link)
+        connectWithCode(encoded, pairService, wallet)
+        wallet.setPendingPairLink(null)
+    }
 
     Box {
         Column(
@@ -98,6 +106,15 @@ private fun connectWithCode(code: String, pairService: RelayPairService, wallet:
         return
     }
     pairService.connect(payload, wallet)
+}
+
+private fun stripPairLinkPrefix(link: String): String {
+    return when {
+        link.startsWith("byoky://pair/") -> link.removePrefix("byoky://pair/")
+        link.startsWith("https://byoky.com/pair#") -> link.removePrefix("https://byoky.com/pair#")
+        link.startsWith("https://byoky.com/pair/") -> link.removePrefix("https://byoky.com/pair/")
+        else -> link
+    }
 }
 
 @Composable
