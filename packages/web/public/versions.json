@@ -1,6 +1,6 @@
 {
   "local": "0.7.0",
-  "native": "1.0.16",
+  "native": "1.0.17",
   "platforms": [
     {
       "platform": "Chrome",
@@ -17,12 +17,13 @@
       "platform": "iOS",
       "version": "1.0.12",
       "status": "live",
-      "pending": "1.0.16"
+      "pending": "1.0.17"
     },
     {
       "platform": "Android",
       "version": "1.0.16",
-      "status": "live"
+      "status": "live",
+      "pending": "1.0.17"
     },
     {
       "platform": "npm",
@@ -30,5 +31,5 @@
       "status": "live"
     }
   ],
-  "generatedAt": "2026-04-16T05:50:08.116Z"
+  "generatedAt": "2026-04-16T06:06:19.777Z"
 }

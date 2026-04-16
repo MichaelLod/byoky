@@ -96,9 +96,9 @@ function Hero() {
           </div>
           <div className="hero-rollout">
             <strong>v0.7.0 rollout:</strong>{' '}
-            <span className="hero-rollout-live">Firefox &amp; Android live</span>
+            <span className="hero-rollout-live">Firefox live</span>
             {' · '}
-            Chrome in review —{' '}
+            Chrome, iOS &amp; Android all in store review — for Chrome,{' '}
             <a
               href="https://github.com/MichaelLod/byoky/blob/main/INSTALL.md#chrome-install-from-source"
               target="_blank"
@@ -106,8 +106,7 @@ function Hero() {
             >
               build from source &amp; load unpacked
             </a>
-            {' · '}
-            iOS in Apple review, hang tight
+            {' '}to use today; for iOS &amp; Android, hang tight
           </div>
         </FadeIn>
         <FadeIn delay={0.35}>
