@@ -1,4 +1,6 @@
-import type { ReactNode } from 'react';
+'use client';
+
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { FadeIn } from './FadeIn';
 
 type Speaker = 'marco' | 'leo';
@@ -51,6 +53,31 @@ const CONTACTS: Record<Speaker, { name: string; initial: string; avatar: string 
   leo: { name: 'Leo', initial: 'L', avatar: 'linear-gradient(135deg, #4ecbd9, #0891b2)' },
 };
 
+type FlatMsg = Message & {
+  speaker: Speaker;
+  isFirstInRun: boolean;
+  showTypingBefore: boolean;
+};
+
+const FLAT: FlatMsg[] = (() => {
+  const out: FlatMsg[] = [];
+  CONVERSATION.forEach((run, runIdx) => {
+    run.msgs.forEach((msg, msgIdx) => {
+      const isFirstInRun = msgIdx === 0;
+      out.push({
+        ...msg,
+        speaker: run.speaker,
+        isFirstInRun,
+        showTypingBefore: isFirstInRun && runIdx > 0,
+      });
+    });
+  });
+  return out;
+})();
+
+const MESSAGE_DELAY = 1000;
+const TYPING_DELAY = 700;
+
 export function WhatsAppChat() {
   return (
     <section className="wa-section">
@@ -72,68 +99,77 @@ export function WhatsAppChat() {
           </div>
         </FadeIn>
 
-        <div className="wa-stage">
+        <div className="wa-layout">
           <FadeIn delay={0.15}>
             <Phone pov="leo" />
           </FadeIn>
+
+          <div className="wa-copy">
+            <FadeIn delay={0.25}>
+              <div className="wa-feature">
+                <div className="wa-feature-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M20 12v10H4V12" />
+                    <path d="M2 7h20v5H2z" />
+                    <path d="M12 22V7" />
+                    <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z" />
+                    <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3>Send a token gift in one tap</h3>
+                  <p>
+                    Pick a provider, set a budget cap, share the link. They redeem it
+                    in their wallet — your API key never leaves yours.
+                  </p>
+                </div>
+              </div>
+            </FadeIn>
+            <FadeIn delay={0.35}>
+              <div className="wa-feature">
+                <div className="wa-feature-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 11l18-8-8 18-2-8-8-2z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3>Requests relay through you</h3>
+                  <p>
+                    Their prompts hit your wallet, which forwards them to Anthropic using
+                    your key. They get tokens. You keep control.
+                  </p>
+                </div>
+              </div>
+            </FadeIn>
+            <FadeIn delay={0.45}>
+              <div className="wa-feature">
+                <div className="wa-feature-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="M4.93 4.93l14.14 14.14" />
+                  </svg>
+                </div>
+                <div>
+                  <h3>Revoke any time</h3>
+                  <p>
+                    One click kills the gift. Budget caps enforce limits automatically
+                    so nobody burns through your quota by accident.
+                  </p>
+                </div>
+              </div>
+            </FadeIn>
+            <FadeIn delay={0.55}>
+              <div className="wa-cta-row">
+                <a href="/token-pool" className="btn btn-primary">
+                  Browse free gifts
+                </a>
+                <a href="/docs#gifts" className="btn btn-secondary">
+                  How gifting works
+                </a>
+              </div>
+            </FadeIn>
+          </div>
         </div>
-
-        <FadeIn delay={0.4}>
-          <div className="wa-features">
-            <div className="wa-feature">
-              <div className="wa-feature-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M20 12v10H4V12" />
-                  <path d="M2 7h20v5H2z" />
-                  <path d="M12 22V7" />
-                  <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z" />
-                  <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" />
-                </svg>
-              </div>
-              <h3>Send a token gift in one tap</h3>
-              <p>
-                Pick a provider, set a budget cap, share the link. They redeem it
-                in their wallet — your API key never leaves yours.
-              </p>
-            </div>
-            <div className="wa-feature">
-              <div className="wa-feature-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 11l18-8-8 18-2-8-8-2z" />
-                </svg>
-              </div>
-              <h3>Requests relay through you</h3>
-              <p>
-                Their prompts hit your wallet, which forwards them to Anthropic using
-                your key. They get tokens. You keep control.
-              </p>
-            </div>
-            <div className="wa-feature">
-              <div className="wa-feature-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="9" />
-                  <path d="M4.93 4.93l14.14 14.14" />
-                </svg>
-              </div>
-              <h3>Revoke any time</h3>
-              <p>
-                One click kills the gift. Budget caps enforce limits automatically
-                so nobody burns through your quota by accident.
-              </p>
-            </div>
-          </div>
-        </FadeIn>
-
-        <FadeIn delay={0.5}>
-          <div className="wa-cta-row">
-            <a href="/token-pool" className="btn btn-primary">
-              Browse free gifts
-            </a>
-            <a href="/docs#gifts" className="btn btn-secondary">
-              How gifting works
-            </a>
-          </div>
-        </FadeIn>
       </div>
 
       <style>{`
@@ -198,26 +234,23 @@ export function WhatsAppChat() {
           color: var(--text-secondary);
         }
 
-        /* ─── Phone stage ────────────────────────── */
-        .wa-stage {
-          display: flex;
-          justify-content: center;
-          margin: 0 auto 72px;
+        /* ─── Two-column layout ──────────────────── */
+        .wa-layout {
+          display: grid;
+          grid-template-columns: minmax(300px, 360px) 1fr;
+          gap: 72px;
+          align-items: center;
         }
 
-        /* ─── Features row ───────────────────────── */
-        .wa-features {
-          display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 32px;
-          max-width: 960px;
-          margin: 0 auto 36px;
+        .wa-copy {
+          display: flex;
+          flex-direction: column;
+          gap: 24px;
         }
         .wa-feature {
-          padding: 28px;
-          border-radius: 16px;
-          background: var(--bg-card);
-          border: 1px solid var(--border);
+          display: flex;
+          gap: 16px;
+          align-items: flex-start;
         }
         .wa-feature-icon {
           width: 44px;
@@ -227,33 +260,35 @@ export function WhatsAppChat() {
           color: #128c4a;
           display: grid;
           place-items: center;
-          margin-bottom: 16px;
+          flex-shrink: 0;
           border: 1px solid rgba(37, 211, 102, 0.22);
         }
         .wa-feature-icon svg { width: 22px; height: 22px; }
         .wa-feature h3 {
-          font-size: 17px;
+          font-size: 18px;
           font-weight: 600;
           letter-spacing: -0.01em;
-          margin-bottom: 6px;
+          margin-bottom: 4px;
           color: var(--text);
         }
         .wa-feature p {
-          font-size: 14.5px;
+          font-size: 15px;
           line-height: 1.55;
           color: var(--text-secondary);
           margin: 0;
         }
-
         .wa-cta-row {
           display: flex;
           gap: 12px;
           flex-wrap: wrap;
-          justify-content: center;
+          margin-top: 4px;
         }
 
         @media (max-width: 820px) {
-          .wa-features { grid-template-columns: 1fr; gap: 16px; }
+          .wa-layout {
+            grid-template-columns: 1fr;
+            gap: 48px;
+          }
           .wa-head h2 { font-size: 34px; }
         }
         @media (max-width: 480px) {
@@ -270,8 +305,81 @@ export function WhatsAppChat() {
 function Phone({ pov }: { pov: Speaker }) {
   const contact = pov === 'leo' ? CONTACTS.marco : CONTACTS.leo;
 
+  const [visible, setVisible] = useState(0);
+  const [typingFor, setTypingFor] = useState<Speaker | null>(null);
+  const [started, setStarted] = useState(false);
+  const phoneRef = useRef<HTMLDivElement>(null);
+  const messagesRef = useRef<HTMLDivElement>(null);
+
+  // Kick off playback when phone scrolls into view
+  useEffect(() => {
+    if (started) return;
+    const node = phoneRef.current;
+    if (!node) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setStarted(true);
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.3 }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [started]);
+
+  // Drive the reveal sequence
+  useEffect(() => {
+    if (!started) return;
+    if (visible >= FLAT.length) return;
+
+    const next = FLAT[visible];
+    let timers: ReturnType<typeof setTimeout>[] = [];
+
+    // Only show typing for the other party, not ourselves
+    const showTyping = next.showTypingBefore && next.speaker !== pov;
+
+    if (showTyping) {
+      timers.push(
+        setTimeout(() => setTypingFor(next.speaker), 300),
+        setTimeout(() => {
+          setTypingFor(null);
+          setVisible((v) => v + 1);
+        }, TYPING_DELAY + 300)
+      );
+    } else {
+      timers.push(
+        setTimeout(() => setVisible((v) => v + 1), visible === 0 ? 400 : MESSAGE_DELAY)
+      );
+    }
+
+    return () => timers.forEach(clearTimeout);
+  }, [visible, started]);
+
+  // Auto-scroll the messages pane
+  useEffect(() => {
+    if (!messagesRef.current) return;
+    messagesRef.current.scrollTo({
+      top: messagesRef.current.scrollHeight,
+      behavior: 'smooth',
+    });
+  }, [visible, typingFor]);
+
+  const flatUpTo = useMemo(() => FLAT.slice(0, visible), [visible]);
+  // Re-group the visible slice back into runs so tails render correctly
+  const visibleRuns = useMemo(() => {
+    const runs: { speaker: Speaker; msgs: FlatMsg[] }[] = [];
+    flatUpTo.forEach((m) => {
+      const last = runs[runs.length - 1];
+      if (last && last.speaker === m.speaker) last.msgs.push(m);
+      else runs.push({ speaker: m.speaker, msgs: [m] });
+    });
+    return runs;
+  }, [flatUpTo]);
+
   return (
-    <div className="wa-phone">
+    <div className="wa-phone" ref={phoneRef}>
       <div className="wa-phone-notch" aria-hidden />
       <div className="wa-phone-screen">
         <div className="wa-header">
@@ -283,7 +391,7 @@ function Phone({ pov }: { pov: Speaker }) {
           </div>
           <div className="wa-meta">
             <div className="wa-name">{contact.name}</div>
-            <div className="wa-status">online</div>
+            <div className="wa-status">{typingFor === contact.name.toLowerCase() ? 'typing…' : 'online'}</div>
           </div>
           <div className="wa-actions">
             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
@@ -297,19 +405,19 @@ function Phone({ pov }: { pov: Speaker }) {
 
         <div className="wa-chat">
           <div className="wa-wallpaper" aria-hidden />
-          <div className="wa-messages">
+          <div className="wa-messages" ref={messagesRef}>
             <div className="wa-day">
               <span>TODAY</span>
             </div>
-            {CONVERSATION.map((run, runIdx) => {
+            {visibleRuns.map((run, runIdx) => {
               const side = run.speaker === pov ? 'out' : 'in';
               return (
                 <div key={runIdx} className={`wa-run wa-run-${side}`}>
                   {run.msgs.map((msg, i) => {
-                    const isFirst = i === 0;
+                    const tail = msg.isFirstInRun;
                     if (msg.link) {
                       return (
-                        <div key={i} className={`wa-bubble wa-bubble-${side} wa-bubble-link${isFirst ? ` wa-tail-${side}` : ''}`}>
+                        <div key={i} className={`wa-bubble wa-bubble-${side} wa-bubble-link wa-enter${tail ? ` wa-tail-${side}` : ''}`}>
                           <ByokyLinkPreview />
                           <div className="wa-link-caption">
                             install it, ping me, i&apos;ll send a gift 🎁
@@ -322,7 +430,7 @@ function Phone({ pov }: { pov: Speaker }) {
                       );
                     }
                     return (
-                      <div key={i} className={`wa-bubble wa-bubble-${side}${isFirst ? ` wa-tail-${side}` : ''}`}>
+                      <div key={i} className={`wa-bubble wa-bubble-${side} wa-enter${tail ? ` wa-tail-${side}` : ''}`}>
                         {msg.text}
                         <span className="wa-time">
                           {msg.time}
@@ -334,6 +442,15 @@ function Phone({ pov }: { pov: Speaker }) {
                 </div>
               );
             })}
+            {typingFor && (
+              <div className={`wa-run wa-run-${typingFor === pov ? 'out' : 'in'}`}>
+                <div className={`wa-typing wa-typing-${typingFor === pov ? 'out' : 'in'}`} aria-label="typing">
+                  <span />
+                  <span />
+                  <span />
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -360,11 +477,12 @@ function Phone({ pov }: { pov: Speaker }) {
         </div>
       </div>
 
-      <style>{`
+      <style jsx>{`
         .wa-phone {
           position: relative;
           width: 100%;
           max-width: 340px;
+          margin: 0 auto;
           aspect-ratio: 340 / 700;
           border-radius: 42px;
           background: linear-gradient(145deg, #1f1f1f, #0a0a0a);
@@ -415,6 +533,7 @@ function Phone({ pov }: { pov: Speaker }) {
           font-size: 14px;
           font-weight: 700;
           flex-shrink: 0;
+          color: #fff;
         }
         .wa-meta { flex: 1; min-width: 0; line-height: 1.15; }
         .wa-name { font-size: 14.5px; font-weight: 600; letter-spacing: -0.01em; }
@@ -442,6 +561,7 @@ function Phone({ pov }: { pov: Speaker }) {
           overflow-y: auto;
           padding: 6px 8px 10px;
           scrollbar-width: none;
+          scroll-behavior: smooth;
         }
         .wa-messages::-webkit-scrollbar { display: none; }
 
@@ -469,7 +589,7 @@ function Phone({ pov }: { pov: Speaker }) {
         .wa-bubble {
           position: relative;
           max-width: 78%;
-          padding: 6px 9px 6px;
+          padding: 6px 9px;
           border-radius: 8px;
           font-size: 13px;
           line-height: 1.38;
@@ -477,9 +597,21 @@ function Phone({ pov }: { pov: Speaker }) {
           word-wrap: break-word;
           box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.13);
         }
-        .wa-bubble strong { font-weight: 700; }
+        .wa-bubble :global(strong) { font-weight: 700; }
         .wa-bubble-in { background: #fff; }
         .wa-bubble-out { background: #d9fdd3; }
+
+        .wa-enter {
+          animation: wa-pop 0.28s cubic-bezier(0.18, 0.85, 0.32, 1.18) both;
+          transform-origin: top;
+        }
+        .wa-run-in .wa-enter { transform-origin: top left; }
+        .wa-run-out .wa-enter { transform-origin: top right; }
+        @keyframes wa-pop {
+          0% { opacity: 0; transform: translateY(6px) scale(0.9); }
+          70% { opacity: 1; transform: translateY(0) scale(1.02); }
+          100% { opacity: 1; transform: translateY(0) scale(1); }
+        }
 
         .wa-tail-in { border-top-left-radius: 0; }
         .wa-tail-in::before {
@@ -518,7 +650,7 @@ function Phone({ pov }: { pov: Speaker }) {
           top: 4px;
           white-space: nowrap;
         }
-        .wa-time svg { width: 14px; height: 14px; }
+        .wa-time :global(svg) { width: 14px; height: 14px; }
 
         .wa-bubble-link {
           max-width: 86%;
@@ -530,6 +662,39 @@ function Phone({ pov }: { pov: Speaker }) {
           font-size: 13px;
           color: #111b21;
           line-height: 1.38;
+        }
+
+        /* ─── Typing indicator ────────────────────── */
+        .wa-typing {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          padding: 10px 12px;
+          border-radius: 8px;
+          box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.13);
+          animation: wa-pop 0.22s ease-out both;
+        }
+        .wa-typing-in {
+          background: #fff;
+          border-top-left-radius: 0;
+        }
+        .wa-typing-out {
+          background: #d9fdd3;
+          border-top-right-radius: 0;
+        }
+        .wa-typing span {
+          width: 6px;
+          height: 6px;
+          border-radius: 999px;
+          background: #8696a0;
+          display: inline-block;
+          animation: wa-dots 1.3s infinite ease-in-out both;
+        }
+        .wa-typing span:nth-child(1) { animation-delay: -0.32s; }
+        .wa-typing span:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes wa-dots {
+          0%, 80%, 100% { opacity: 0.35; transform: translateY(0); }
+          40% { opacity: 1; transform: translateY(-2px); }
         }
 
         .wa-composer {
@@ -551,7 +716,7 @@ function Phone({ pov }: { pov: Speaker }) {
           color: #54656f;
           font-size: 12.5px;
         }
-        .wa-composer-input svg { width: 17px; height: 17px; flex-shrink: 0; }
+        .wa-composer-input :global(svg) { width: 17px; height: 17px; flex-shrink: 0; }
         .wa-composer-input span { flex: 1; }
         .wa-mic {
           width: 34px;
@@ -562,13 +727,13 @@ function Phone({ pov }: { pov: Speaker }) {
           place-items: center;
           flex-shrink: 0;
         }
-        .wa-mic svg { width: 18px; height: 18px; }
+        .wa-mic :global(svg) { width: 18px; height: 18px; }
       `}</style>
     </div>
   );
 }
 
-/* ─── byoky.com link preview (mini hero render) ── */
+/* ─── byoky.com link preview ────────────────────── */
 
 function ByokyLinkPreview() {
   return (
@@ -618,7 +783,7 @@ function ByokyLinkPreview() {
         </div>
       </div>
 
-      <style>{`
+      <style jsx>{`
         .wa-link {
           display: block;
           border-radius: 6px;
@@ -778,7 +943,7 @@ function ByokyLinkPreview() {
           width: 12px;
           height: 12px;
         }
-        .wa-link-favicon svg {
+        .wa-link-favicon :global(svg) {
           width: 12px;
           height: 12px;
         }
