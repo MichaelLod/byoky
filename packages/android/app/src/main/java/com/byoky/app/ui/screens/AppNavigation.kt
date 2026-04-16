@@ -62,6 +62,30 @@ private fun MainScreen(wallet: WalletStore) {
     val currentRoute = backStackEntry?.destination?.route
     val showFab = currentRoute !in setOf("redeem-gift", "create-gift", "settings", "app-store")
 
+    // When a byoky://pair/<payload> deep link arrives, MainActivity sets
+    // wallet.pendingPairLink. Switch to the Connect tab so PairContent can
+    // pick it up and kick off the relay handshake.
+    val pendingPairLink by wallet.pendingPairLink.collectAsState()
+    val connectIndex = tabs.indexOfFirst { it.third == "connect" }
+    LaunchedEffect(pendingPairLink) {
+        if (pendingPairLink != null && connectIndex >= 0) {
+            selectedTab = connectIndex
+            navController.navigate("connect") {
+                popUpTo("wallet") { inclusive = false }
+                launchSingleTop = true
+            }
+        }
+    }
+
+    // byoky://gift/<payload> deep link: route to the redeem-gift screen
+    // which pulls the link from wallet.pendingGiftLink on appear.
+    val pendingGiftLink by wallet.pendingGiftLink.collectAsState()
+    LaunchedEffect(pendingGiftLink) {
+        if (pendingGiftLink != null) {
+            navController.navigate("redeem-gift") { launchSingleTop = true }
+        }
+    }
+
     Scaffold(
         floatingActionButton = {
             if (showFab) {

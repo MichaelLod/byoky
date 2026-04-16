@@ -12,8 +12,10 @@ export {
   type ProviderRequirement,
   type SessionUsage,
   type GiftLink,
+  type PairPayload,
   ByokyError,
   ByokyErrorCode,
   decodeGiftLink,
   validateGiftLink,
+  decodePairPayload,
 } from '@byoky/core';

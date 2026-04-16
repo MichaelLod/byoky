@@ -74,6 +74,9 @@ struct MainTabView: View {
             AppStoreView()
                 .environmentObject(wallet)
         }
+        .onChange(of: wallet.pendingPairLink) { _, newValue in
+            if newValue != nil { selectedTab = 3 }
+        }
     }
 }
 

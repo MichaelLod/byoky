@@ -297,6 +297,8 @@ struct ByokyApp: App {
         // existing parser can strip the prefix.
         if url.host == "gift" {
             wallet.pendingGiftLink = url.absoluteString
+        } else if url.host == "pair" {
+            wallet.pendingPairLink = url.absoluteString
         }
     }
 }

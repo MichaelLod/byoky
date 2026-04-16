@@ -71,6 +71,20 @@ class WalletStore(context: Context) {
     private val _giftedCredentials = MutableStateFlow<List<GiftedCredential>>(emptyList())
     val giftedCredentials: StateFlow<List<GiftedCredential>> = _giftedCredentials.asStateFlow()
 
+    /** Set by MainActivity when a byoky://pair/<payload> deep link fires.
+     *  AppNavigation switches to the Connect tab, ConnectScreen forces the
+     *  Pair sub-tab, and PairContent auto-kicks off the relay handshake. */
+    private val _pendingPairLink = MutableStateFlow<String?>(null)
+    val pendingPairLink: StateFlow<String?> = _pendingPairLink.asStateFlow()
+    fun setPendingPairLink(link: String?) { _pendingPairLink.value = link }
+
+    /** Set by MainActivity when a byoky://gift/<payload> deep link fires.
+     *  AppNavigation routes to the redeem-gift screen which pre-fills the
+     *  link text from this value and clears it. */
+    private val _pendingGiftLink = MutableStateFlow<String?>(null)
+    val pendingGiftLink: StateFlow<String?> = _pendingGiftLink.asStateFlow()
+    fun setPendingGiftLink(link: String?) { _pendingGiftLink.value = link }
+
     private val _giftPreferences = MutableStateFlow<Map<String, String>>(emptyMap())
     val giftPreferences: StateFlow<Map<String, String>> = _giftPreferences.asStateFlow()
 
@@ -375,12 +389,16 @@ class WalletStore(context: Context) {
     }
 
     fun revokeGift(id: String) {
+        val mgmtToken = _gifts.value.firstOrNull { it.id == id }?.marketplaceManagementToken
         _gifts.value = _gifts.value.map {
             if (it.id == id) it.copy(active = false) else it
         }
         saveGifts()
         com.byoky.app.relay.GiftRelayHost.disconnect(id)
         vaultScope.launch { unregisterGiftFromVault(id) }
+        if (mgmtToken != null) {
+            vaultScope.launch { unlistMarketplaceGift(id, mgmtToken) }
+        }
     }
 
     fun addGiftSenderUsage(giftId: String, tokens: Int): Int? {
@@ -1966,6 +1984,22 @@ class WalletStore(context: Context) {
             } catch (_: Exception) {
                 // Network hiccup — retry on the next tick.
             }
+        }
+    }
+
+    // Best-effort: tell the marketplace the gift has been revoked so its
+    // public listing flips to "Removed" right away instead of waiting for
+    // the heartbeat to age out.
+    private fun unlistMarketplaceGift(giftId: String, mgmtToken: String) {
+        try {
+            val req = Request.Builder()
+                .url("$MARKETPLACE_URL/gifts/${java.net.URLEncoder.encode(giftId, "UTF-8")}")
+                .addHeader("Authorization", "Bearer $mgmtToken")
+                .delete()
+                .build()
+            marketplaceClient.newCall(req).execute().close()
+        } catch (_: Exception) {
+            // Gift will eventually age out via stale heartbeat.
         }
     }
 

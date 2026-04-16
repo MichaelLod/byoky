@@ -13,6 +13,11 @@ import com.byoky.app.ui.theme.*
 fun ConnectScreen(wallet: WalletStore, pairService: RelayPairService) {
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabs = listOf("Pair", "Sessions")
+    val pendingPairLink by wallet.pendingPairLink.collectAsState()
+
+    LaunchedEffect(pendingPairLink) {
+        if (pendingPairLink != null) selectedTab = 0
+    }
 
     Scaffold(
         topBar = {

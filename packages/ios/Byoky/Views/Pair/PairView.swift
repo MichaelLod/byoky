@@ -35,6 +35,29 @@ struct PairView: View {
                 pairService.reconnectIfNeeded()
             }
         }
+        .onAppear {
+            if let link = wallet.pendingPairLink {
+                handlePairLink(link)
+            }
+        }
+        .onChange(of: wallet.pendingPairLink) { _, newValue in
+            if let link = newValue {
+                handlePairLink(link)
+            }
+        }
+    }
+
+    private func handlePairLink(_ link: String) {
+        var encoded = link
+        if encoded.hasPrefix("byoky://pair/") {
+            encoded = String(encoded.dropFirst("byoky://pair/".count))
+        } else if encoded.hasPrefix("https://byoky.com/pair#") {
+            encoded = String(encoded.dropFirst("https://byoky.com/pair#".count))
+        } else if encoded.hasPrefix("https://byoky.com/pair/") {
+            encoded = String(encoded.dropFirst("https://byoky.com/pair/".count))
+        }
+        connectWithCode(encoded)
+        wallet.pendingPairLink = nil
     }
 
     private var idleSection: some View {
