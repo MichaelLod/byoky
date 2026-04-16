@@ -673,22 +673,22 @@ function Security() {
 const showcaseItems: Array<{ label: string; desc: string; scene: MockScene }> = [
   {
     label: 'Connect & Chat',
-    desc: 'One click to connect. Stream AI responses through your wallet.',
+    desc: 'One approval, then every request streams through the wallet — your keys never touch the page.',
     scene: 'connect-chat',
   },
   {
     label: 'Cross-Provider Routing',
-    desc: 'Drag an app between groups — the wallet translates on the fly.',
+    desc: 'An app written for one provider hot-swaps to any other. The translation layer rewrites the call on the fly.',
     scene: 'cross-provider',
   },
   {
     label: 'Mobile QR Pairing',
-    desc: 'No extension? Scan a QR code with the Byoky app. Keys proxy through your phone.',
+    desc: 'No extension? Scan a QR with the Byoky app — your phone becomes the relay. Same approval, same chat.',
     scene: 'mobile-qr',
   },
   {
     label: 'Token Gifts',
-    desc: 'Share AI access without sharing your key. Set a budget, generate a link, revoke anytime.',
+    desc: 'Share a budget-capped link to anyone. They redeem it in their wallet — your API key never leaves yours.',
     scene: 'token-gift',
   },
 ];
@@ -704,7 +704,7 @@ function Showcase() {
           <div className="showcase-tour">
             <ExtensionMock scene="walkthrough" size="hero" />
             <p className="showcase-tour-caption">
-              Live preview — add a credential, route between providers, share by gift, all in your browser.
+              Live preview — click Connect, approve in the wallet, watch the chat stream. Keys never leave your device.
             </p>
           </div>
         </FadeIn>
