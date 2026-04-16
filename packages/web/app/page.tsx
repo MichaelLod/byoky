@@ -4,6 +4,7 @@ import { VersionStatus } from './components/VersionStatus';
 import { ProviderMarquee } from './components/ProviderMarquee';
 import { GitHubStars } from './components/GitHubStars';
 import { GitHubStarButton } from './components/GitHubStarButton';
+import { ExtensionMock, type MockScene } from './components/ExtensionMock';
 
 export default function Home() {
   return (
@@ -669,30 +670,26 @@ function Security() {
 
 /* ─── Showcase ────────────────────────────────── */
 
-const showcaseItems = [
+const showcaseItems: Array<{ label: string; desc: string; scene: MockScene }> = [
   {
     label: 'Connect & Chat',
     desc: 'One click to connect. Stream AI responses through your wallet.',
-    mp4: '/demos/hero-demo.mp4',
-    gif: '/demos/hero-demo.gif',
+    scene: 'connect-chat',
   },
   {
     label: 'Cross-Provider Routing',
     desc: 'Drag an app between groups — the wallet translates on the fly.',
-    mp4: '/demos/cross-provider.mp4',
-    gif: '/demos/cross-provider.gif',
+    scene: 'cross-provider',
   },
   {
     label: 'Mobile QR Pairing',
     desc: 'No extension? Scan a QR code with the Byoky app. Keys proxy through your phone.',
-    mp4: '/demos/mobile-qr.mp4',
-    gif: '/demos/mobile-qr.gif',
+    scene: 'mobile-qr',
   },
   {
     label: 'Token Gifts',
     desc: 'Share AI access without sharing your key. Set a budget, generate a link, revoke anytime.',
-    mp4: '/demos/token-gift.mp4',
-    gif: '/demos/token-gift.gif',
+    scene: 'token-gift',
   },
 ];
 
@@ -705,11 +702,9 @@ function Showcase() {
         </FadeIn>
         <FadeIn delay={0.1}>
           <div className="showcase-tour">
-            <video controls playsInline preload="metadata" poster="/demos/hero-demo.gif">
-              <source src="/demos/walkthrough.mp4" type="video/mp4" />
-            </video>
+            <ExtensionMock scene="walkthrough" size="hero" />
             <p className="showcase-tour-caption">
-              Narrated 40-second tour — every provider, every device, every feature.
+              Live preview — add a credential, route between providers, share by gift, all in your browser.
             </p>
           </div>
         </FadeIn>
@@ -718,9 +713,7 @@ function Showcase() {
             <FadeIn key={item.label} delay={0.1 * i}>
               <div className="showcase-cell">
                 <div className="showcase-video">
-                  <video autoPlay loop muted playsInline poster={item.gif}>
-                    <source src={item.mp4} type="video/mp4" />
-                  </video>
+                  <ExtensionMock scene={item.scene} size="cell" />
                 </div>
                 <div className="showcase-info">
                   <h3>{item.label}</h3>
