@@ -1733,10 +1733,14 @@ export default defineBackground(() => {
         const gifts = (data.gifts ?? []) as Gift[];
         const idx = gifts.findIndex((g) => g.id === giftId);
         if (idx !== -1) {
+          const mgmtToken = gifts[idx].marketplaceManagementToken;
           gifts[idx].active = false;
           await browser.storage.local.set({ gifts });
           disconnectGiftRelay(giftId);
           unregisterGiftFromVault(giftId).catch(() => {});
+          if (mgmtToken) {
+            unlistMarketplaceGift(giftId, mgmtToken).catch(() => {});
+          }
         }
         return { success: true };
       }
@@ -4927,6 +4931,17 @@ export default defineBackground(() => {
         // Network hiccup — retry on the next tick.
       }
     }));
+  }
+
+  async function unlistMarketplaceGift(giftId: string, mgmtToken: string): Promise<void> {
+    try {
+      await fetch(`${MARKETPLACE_URL}/gifts/${encodeURIComponent(giftId)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${mgmtToken}` },
+      });
+    } catch {
+      // Best-effort: the gift will eventually age out via stale heartbeat.
+    }
   }
 
   browser.alarms.create(MARKETPLACE_HEARTBEAT_ALARM, {
