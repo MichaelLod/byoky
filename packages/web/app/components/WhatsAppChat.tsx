@@ -1,4 +1,55 @@
+import type { ReactNode } from 'react';
 import { FadeIn } from './FadeIn';
+
+type Speaker = 'marco' | 'leo';
+
+type Message = {
+  text?: ReactNode;
+  link?: boolean;
+  time: string;
+};
+
+type Run = {
+  speaker: Speaker;
+  msgs: Message[];
+};
+
+const CONVERSATION: Run[] = [
+  {
+    speaker: 'marco',
+    msgs: [
+      { text: <>yo bro, quick q 👀</>, time: '14:32' },
+      { text: <>how many tokens u got left on your anthropic sub this week?</>, time: '14:32' },
+    ],
+  },
+  {
+    speaker: 'leo',
+    msgs: [
+      { text: <>man i only used like <strong>6%</strong> this week 😎</>, time: '14:33' },
+      { text: <>what about you?</>, time: '14:33' },
+    ],
+  },
+  {
+    speaker: 'marco',
+    msgs: [
+      { text: <>dude... i already hit <strong>99%</strong> 💀</>, time: '14:34' },
+      { text: <>stuck for the rest of the week fr</>, time: '14:34' },
+    ],
+  },
+  {
+    speaker: 'leo',
+    msgs: [
+      { text: <>no problem, use mine via byoky 🤝</>, time: '14:34' },
+      { text: <>i got you covered</>, time: '14:34' },
+      { link: true, time: '14:35' },
+    ],
+  },
+];
+
+const CONTACTS: Record<Speaker, { name: string; initial: string; avatar: string }> = {
+  marco: { name: 'Marco', initial: 'M', avatar: 'linear-gradient(135deg, #ff8a3d, #FF4F00)' },
+  leo: { name: 'Leo', initial: 'L', avatar: 'linear-gradient(135deg, #4ecbd9, #0891b2)' },
+};
 
 export function WhatsAppChat() {
   return (
@@ -21,257 +72,68 @@ export function WhatsAppChat() {
           </div>
         </FadeIn>
 
-        <div className="wa-layout">
+        <div className="wa-stage">
           <FadeIn delay={0.15}>
-            <div className="wa-phone">
-              <div className="wa-phone-notch" aria-hidden />
-              <div className="wa-phone-screen">
-                <div className="wa-header">
-                  <svg className="wa-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <polyline points="15 18 9 12 15 6" />
-                  </svg>
-                  <div className="wa-avatar">
-                    <span>M</span>
-                  </div>
-                  <div className="wa-meta">
-                    <div className="wa-name">Marco</div>
-                    <div className="wa-status">online</div>
-                  </div>
-                  <div className="wa-actions">
-                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                      <path d="M15 10.5V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-3.5l5 3.5V7l-5 3.5z" />
-                    </svg>
-                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                      <path d="M20.01 15.38c-1.23 0-2.42-.2-3.53-.56a.977.977 0 0 0-1.01.24l-1.57 1.97c-2.83-1.35-5.48-3.9-6.89-6.83l1.95-1.66c.27-.28.35-.67.24-1.02-.37-1.11-.56-2.3-.56-3.53 0-.54-.45-.99-.99-.99H4.19C3.65 3 3 3.24 3 3.99 3 13.28 10.73 21 20.01 21c.71 0 .99-.63.99-1.18v-3.45c0-.54-.45-.99-.99-.99z" />
-                    </svg>
-                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                      <circle cx="12" cy="5" r="2" />
-                      <circle cx="12" cy="12" r="2" />
-                      <circle cx="12" cy="19" r="2" />
-                    </svg>
-                  </div>
-                </div>
-
-                <div className="wa-chat">
-                  <div className="wa-wallpaper" aria-hidden />
-                  <div className="wa-messages">
-                    <div className="wa-day">
-                      <span>TODAY</span>
-                    </div>
-
-                    <div className="wa-row wa-row-in">
-                      <div className="wa-bubble wa-bubble-in wa-tail-in">
-                        yo bro, quick q 👀
-                        <span className="wa-time">14:32</span>
-                      </div>
-                    </div>
-                    <div className="wa-row wa-row-in">
-                      <div className="wa-bubble wa-bubble-in">
-                        how many tokens u got left on your anthropic sub this week?
-                        <span className="wa-time">14:32</span>
-                      </div>
-                    </div>
-
-                    <div className="wa-row wa-row-out">
-                      <div className="wa-bubble wa-bubble-out wa-tail-out">
-                        man i only used like <strong>6%</strong> this week 😎
-                        <span className="wa-time">
-                          14:33
-                          <DoubleCheck />
-                        </span>
-                      </div>
-                    </div>
-                    <div className="wa-row wa-row-out">
-                      <div className="wa-bubble wa-bubble-out">
-                        what about you?
-                        <span className="wa-time">
-                          14:33
-                          <DoubleCheck />
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="wa-row wa-row-in">
-                      <div className="wa-bubble wa-bubble-in wa-tail-in">
-                        dude... i already hit <strong>99%</strong> 💀
-                        <span className="wa-time">14:34</span>
-                      </div>
-                    </div>
-                    <div className="wa-row wa-row-in">
-                      <div className="wa-bubble wa-bubble-in">
-                        stuck for the rest of the week fr
-                        <span className="wa-time">14:34</span>
-                      </div>
-                    </div>
-
-                    <div className="wa-row wa-row-out">
-                      <div className="wa-bubble wa-bubble-out wa-tail-out">
-                        no problem, use mine via byoky 🤝
-                        <span className="wa-time">
-                          14:34
-                          <DoubleCheck />
-                        </span>
-                      </div>
-                    </div>
-                    <div className="wa-row wa-row-out">
-                      <div className="wa-bubble wa-bubble-out">
-                        i got you covered
-                        <span className="wa-time">
-                          14:34
-                          <DoubleCheck />
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="wa-row wa-row-out">
-                      <div className="wa-bubble wa-bubble-out wa-bubble-link">
-                        <a
-                          href="https://byoky.com"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="wa-link-preview"
-                        >
-                          <div className="wa-link-image">
-                            <svg viewBox="0 0 24 24" fill="none" aria-hidden>
-                              <path
-                                d="M12 2 4 7v6c0 4.5 3.5 8 8 9 4.5-1 8-4.5 8-9V7l-8-5Z"
-                                fill="#FF4F00"
-                              />
-                              <path
-                                d="M9 12l2 2 4-4"
-                                stroke="#fff"
-                                strokeWidth="2.2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                fill="none"
-                              />
-                            </svg>
-                            <span className="wa-link-badge">byoky.com</span>
-                          </div>
-                          <div className="wa-link-body">
-                            <div className="wa-link-title">Byoky — The AI token network</div>
-                            <div className="wa-link-desc">
-                              Share your AI tokens with anyone, without sharing your API keys.
-                              Budget-capped, revocable, encrypted.
-                            </div>
-                            <div className="wa-link-url">byoky.com</div>
-                          </div>
-                        </a>
-                        <div className="wa-link-caption">
-                          install it, ping me, i&apos;ll send a gift 🎁
-                          <span className="wa-time">
-                            14:35
-                            <DoubleCheck />
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="wa-row wa-row-in">
-                      <div className="wa-typing" aria-label="Marco is typing">
-                        <span />
-                        <span />
-                        <span />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="wa-composer">
-                  <div className="wa-composer-input">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-                      <circle cx="12" cy="12" r="9" />
-                      <path d="M8 14s1.5 2 4 2 4-2 4-2" />
-                      <circle cx="9" cy="10" r="1" fill="currentColor" stroke="none" />
-                      <circle cx="15" cy="10" r="1" fill="currentColor" stroke="none" />
-                    </svg>
-                    <span>Message</span>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-                      <path d="m21 15-5-5L4 22" />
-                      <path d="M5 3h14a2 2 0 0 1 2 2v14" />
-                    </svg>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
-                      <path d="M14.5 9V5.5a2.5 2.5 0 0 0-5 0V12a4 4 0 0 0 8 0V7" />
-                    </svg>
-                  </div>
-                  <div className="wa-mic">
-                    <svg viewBox="0 0 24 24" fill="#fff" aria-hidden>
-                      <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3z" />
-                      <path d="M17 11a5 5 0 0 1-10 0" stroke="#fff" strokeWidth="1.8" fill="none" />
-                      <path d="M12 16v3M9 19h6" stroke="#fff" strokeWidth="1.8" fill="none" />
-                    </svg>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <Phone pov="leo" />
           </FadeIn>
-
-          <div className="wa-copy">
-            <FadeIn delay={0.25}>
-              <div className="wa-feature">
-                <div className="wa-feature-icon">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M20 12v10H4V12" />
-                    <path d="M2 7h20v5H2z" />
-                    <path d="M12 22V7" />
-                    <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z" />
-                    <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" />
-                  </svg>
-                </div>
-                <div>
-                  <h3>Send a token gift in one tap</h3>
-                  <p>
-                    Pick a provider, set a budget cap, share the link. They redeem it
-                    in their wallet — your API key never leaves yours.
-                  </p>
-                </div>
-              </div>
-            </FadeIn>
-            <FadeIn delay={0.35}>
-              <div className="wa-feature">
-                <div className="wa-feature-icon">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M3 11l18-8-8 18-2-8-8-2z" />
-                  </svg>
-                </div>
-                <div>
-                  <h3>Requests relay through you</h3>
-                  <p>
-                    Their prompts hit your wallet, which forwards them to Anthropic using
-                    your key. They get tokens. You keep control.
-                  </p>
-                </div>
-              </div>
-            </FadeIn>
-            <FadeIn delay={0.45}>
-              <div className="wa-feature">
-                <div className="wa-feature-icon">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="9" />
-                    <path d="M4.93 4.93l14.14 14.14" />
-                  </svg>
-                </div>
-                <div>
-                  <h3>Revoke any time</h3>
-                  <p>
-                    One click kills the gift. Budget caps enforce limits automatically
-                    so nobody burns through your quota by accident.
-                  </p>
-                </div>
-              </div>
-            </FadeIn>
-            <FadeIn delay={0.5}>
-              <div className="wa-cta-row">
-                <a href="/token-pool" className="btn btn-primary">
-                  Browse free gifts
-                </a>
-                <a href="/docs#gifts" className="btn btn-secondary">
-                  How gifting works
-                </a>
-              </div>
-            </FadeIn>
-          </div>
         </div>
+
+        <FadeIn delay={0.4}>
+          <div className="wa-features">
+            <div className="wa-feature">
+              <div className="wa-feature-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M20 12v10H4V12" />
+                  <path d="M2 7h20v5H2z" />
+                  <path d="M12 22V7" />
+                  <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z" />
+                  <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" />
+                </svg>
+              </div>
+              <h3>Send a token gift in one tap</h3>
+              <p>
+                Pick a provider, set a budget cap, share the link. They redeem it
+                in their wallet — your API key never leaves yours.
+              </p>
+            </div>
+            <div className="wa-feature">
+              <div className="wa-feature-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 11l18-8-8 18-2-8-8-2z" />
+                </svg>
+              </div>
+              <h3>Requests relay through you</h3>
+              <p>
+                Their prompts hit your wallet, which forwards them to Anthropic using
+                your key. They get tokens. You keep control.
+              </p>
+            </div>
+            <div className="wa-feature">
+              <div className="wa-feature-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M4.93 4.93l14.14 14.14" />
+                </svg>
+              </div>
+              <h3>Revoke any time</h3>
+              <p>
+                One click kills the gift. Budget caps enforce limits automatically
+                so nobody burns through your quota by accident.
+              </p>
+            </div>
+          </div>
+        </FadeIn>
+
+        <FadeIn delay={0.5}>
+          <div className="wa-cta-row">
+            <a href="/token-pool" className="btn btn-primary">
+              Browse free gifts
+            </a>
+            <a href="/docs#gifts" className="btn btn-secondary">
+              How gifting works
+            </a>
+          </div>
+        </FadeIn>
       </div>
 
       <style>{`
@@ -284,8 +146,8 @@ export function WhatsAppChat() {
           position: absolute;
           inset: 0;
           background:
-            radial-gradient(ellipse 60% 50% at 20% 30%, rgba(37, 211, 102, 0.10), transparent 60%),
-            radial-gradient(ellipse 60% 50% at 80% 70%, rgba(255, 79, 0, 0.07), transparent 60%);
+            radial-gradient(ellipse 60% 50% at 15% 30%, rgba(37, 211, 102, 0.10), transparent 60%),
+            radial-gradient(ellipse 60% 50% at 85% 70%, rgba(255, 79, 0, 0.07), transparent 60%);
           pointer-events: none;
           z-index: 0;
         }
@@ -336,35 +198,189 @@ export function WhatsAppChat() {
           color: var(--text-secondary);
         }
 
-        .wa-layout {
-          display: grid;
-          grid-template-columns: minmax(280px, 360px) 1fr;
-          gap: 72px;
-          align-items: center;
+        /* ─── Phone stage ────────────────────────── */
+        .wa-stage {
+          display: flex;
+          justify-content: center;
+          margin: 0 auto 72px;
         }
 
-        /* ─── Phone frame ─────────────────────────── */
+        /* ─── Features row ───────────────────────── */
+        .wa-features {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 32px;
+          max-width: 960px;
+          margin: 0 auto 36px;
+        }
+        .wa-feature {
+          padding: 28px;
+          border-radius: 16px;
+          background: var(--bg-card);
+          border: 1px solid var(--border);
+        }
+        .wa-feature-icon {
+          width: 44px;
+          height: 44px;
+          border-radius: 12px;
+          background: rgba(37, 211, 102, 0.1);
+          color: #128c4a;
+          display: grid;
+          place-items: center;
+          margin-bottom: 16px;
+          border: 1px solid rgba(37, 211, 102, 0.22);
+        }
+        .wa-feature-icon svg { width: 22px; height: 22px; }
+        .wa-feature h3 {
+          font-size: 17px;
+          font-weight: 600;
+          letter-spacing: -0.01em;
+          margin-bottom: 6px;
+          color: var(--text);
+        }
+        .wa-feature p {
+          font-size: 14.5px;
+          line-height: 1.55;
+          color: var(--text-secondary);
+          margin: 0;
+        }
+
+        .wa-cta-row {
+          display: flex;
+          gap: 12px;
+          flex-wrap: wrap;
+          justify-content: center;
+        }
+
+        @media (max-width: 820px) {
+          .wa-features { grid-template-columns: 1fr; gap: 16px; }
+          .wa-head h2 { font-size: 34px; }
+        }
+        @media (max-width: 480px) {
+          .wa-head h2 { font-size: 28px; }
+          .wa-subtitle { font-size: 15px; }
+        }
+      `}</style>
+    </section>
+  );
+}
+
+/* ─── Phone ─────────────────────────────────────── */
+
+function Phone({ pov }: { pov: Speaker }) {
+  const contact = pov === 'leo' ? CONTACTS.marco : CONTACTS.leo;
+
+  return (
+    <div className="wa-phone">
+      <div className="wa-phone-notch" aria-hidden />
+      <div className="wa-phone-screen">
+        <div className="wa-header">
+          <svg className="wa-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+          <div className="wa-avatar" style={{ background: contact.avatar }}>
+            <span>{contact.initial}</span>
+          </div>
+          <div className="wa-meta">
+            <div className="wa-name">{contact.name}</div>
+            <div className="wa-status">online</div>
+          </div>
+          <div className="wa-actions">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <path d="M15 10.5V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-3.5l5 3.5V7l-5 3.5z" />
+            </svg>
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <path d="M20.01 15.38c-1.23 0-2.42-.2-3.53-.56a.977.977 0 0 0-1.01.24l-1.57 1.97c-2.83-1.35-5.48-3.9-6.89-6.83l1.95-1.66c.27-.28.35-.67.24-1.02-.37-1.11-.56-2.3-.56-3.53 0-.54-.45-.99-.99-.99H4.19C3.65 3 3 3.24 3 3.99 3 13.28 10.73 21 20.01 21c.71 0 .99-.63.99-1.18v-3.45c0-.54-.45-.99-.99-.99z" />
+            </svg>
+          </div>
+        </div>
+
+        <div className="wa-chat">
+          <div className="wa-wallpaper" aria-hidden />
+          <div className="wa-messages">
+            <div className="wa-day">
+              <span>TODAY</span>
+            </div>
+            {CONVERSATION.map((run, runIdx) => {
+              const side = run.speaker === pov ? 'out' : 'in';
+              return (
+                <div key={runIdx} className={`wa-run wa-run-${side}`}>
+                  {run.msgs.map((msg, i) => {
+                    const isFirst = i === 0;
+                    if (msg.link) {
+                      return (
+                        <div key={i} className={`wa-bubble wa-bubble-${side} wa-bubble-link${isFirst ? ` wa-tail-${side}` : ''}`}>
+                          <ByokyLinkPreview />
+                          <div className="wa-link-caption">
+                            install it, ping me, i&apos;ll send a gift 🎁
+                            <span className="wa-time">
+                              {msg.time}
+                              {side === 'out' && <DoubleCheck />}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div key={i} className={`wa-bubble wa-bubble-${side}${isFirst ? ` wa-tail-${side}` : ''}`}>
+                        {msg.text}
+                        <span className="wa-time">
+                          {msg.time}
+                          {side === 'out' && <DoubleCheck />}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="wa-composer">
+          <div className="wa-composer-input">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+              <circle cx="12" cy="12" r="9" />
+              <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+              <circle cx="9" cy="10" r="1" fill="currentColor" stroke="none" />
+              <circle cx="15" cy="10" r="1" fill="currentColor" stroke="none" />
+            </svg>
+            <span>Message</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+              <path d="M14.5 9V5.5a2.5 2.5 0 0 0-5 0V12a4 4 0 0 0 8 0V7" />
+            </svg>
+          </div>
+          <div className="wa-mic">
+            <svg viewBox="0 0 24 24" fill="#fff" aria-hidden>
+              <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3z" />
+              <path d="M17 11a5 5 0 0 1-10 0" stroke="#fff" strokeWidth="1.8" fill="none" />
+              <path d="M12 16v3M9 19h6" stroke="#fff" strokeWidth="1.8" fill="none" />
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <style>{`
         .wa-phone {
           position: relative;
           width: 100%;
-          max-width: 360px;
-          margin: 0 auto;
-          aspect-ratio: 360 / 740;
-          border-radius: 44px;
+          max-width: 340px;
+          aspect-ratio: 340 / 700;
+          border-radius: 42px;
           background: linear-gradient(145deg, #1f1f1f, #0a0a0a);
-          padding: 12px;
+          padding: 10px;
           box-shadow:
-            0 40px 80px -20px rgba(20, 83, 45, 0.35),
+            0 40px 80px -20px rgba(20, 83, 45, 0.28),
             0 20px 40px -10px rgba(0, 0, 0, 0.25),
             inset 0 0 0 1.5px rgba(255, 255, 255, 0.08);
         }
         .wa-phone-notch {
           position: absolute;
-          top: 18px;
+          top: 16px;
           left: 50%;
           transform: translateX(-50%);
-          width: 96px;
-          height: 28px;
+          width: 88px;
+          height: 26px;
           border-radius: 16px;
           background: #000;
           z-index: 3;
@@ -372,7 +388,7 @@ export function WhatsAppChat() {
         .wa-phone-screen {
           position: relative;
           height: 100%;
-          border-radius: 34px;
+          border-radius: 32px;
           overflow: hidden;
           background: #efeae2;
           display: flex;
@@ -380,65 +396,33 @@ export function WhatsAppChat() {
           isolation: isolate;
         }
 
-        /* ─── Header ─────────────────────────────── */
         .wa-header {
           display: flex;
           align-items: center;
           gap: 10px;
-          padding: 44px 12px 10px;
+          padding: 40px 12px 8px;
           background: #008069;
           color: #fff;
           flex-shrink: 0;
         }
-        .wa-back {
-          width: 20px;
-          height: 20px;
-          flex-shrink: 0;
-          opacity: 0.95;
-        }
+        .wa-back { width: 18px; height: 18px; flex-shrink: 0; opacity: 0.95; }
         .wa-avatar {
-          width: 36px;
-          height: 36px;
+          width: 34px;
+          height: 34px;
           border-radius: 999px;
-          background: linear-gradient(135deg, #ff8a3d, #FF4F00);
           display: grid;
           place-items: center;
-          font-size: 15px;
+          font-size: 14px;
           font-weight: 700;
           flex-shrink: 0;
         }
-        .wa-meta {
-          flex: 1;
-          min-width: 0;
-          line-height: 1.2;
-        }
-        .wa-name {
-          font-size: 15px;
-          font-weight: 600;
-          letter-spacing: -0.01em;
-        }
-        .wa-status {
-          font-size: 12px;
-          opacity: 0.85;
-          margin-top: 1px;
-        }
-        .wa-actions {
-          display: inline-flex;
-          gap: 14px;
-          color: #fff;
-          opacity: 0.92;
-        }
-        .wa-actions svg {
-          width: 20px;
-          height: 20px;
-        }
+        .wa-meta { flex: 1; min-width: 0; line-height: 1.15; }
+        .wa-name { font-size: 14.5px; font-weight: 600; letter-spacing: -0.01em; }
+        .wa-status { font-size: 11.5px; opacity: 0.85; margin-top: 1px; }
+        .wa-actions { display: inline-flex; gap: 12px; color: #fff; opacity: 0.92; }
+        .wa-actions svg { width: 18px; height: 18px; }
 
-        /* ─── Chat ───────────────────────────────── */
-        .wa-chat {
-          flex: 1;
-          position: relative;
-          overflow: hidden;
-        }
+        .wa-chat { flex: 1; position: relative; overflow: hidden; }
         .wa-wallpaper {
           position: absolute;
           inset: 0;
@@ -456,15 +440,12 @@ export function WhatsAppChat() {
           z-index: 1;
           height: 100%;
           overflow-y: auto;
-          padding: 8px 8px 12px;
+          padding: 6px 8px 10px;
           scrollbar-width: none;
         }
         .wa-messages::-webkit-scrollbar { display: none; }
 
-        .wa-day {
-          text-align: center;
-          margin: 6px 0 10px;
-        }
+        .wa-day { text-align: center; margin: 6px 0 12px; }
         .wa-day span {
           display: inline-block;
           padding: 4px 10px;
@@ -476,39 +457,31 @@ export function WhatsAppChat() {
           letter-spacing: 0.06em;
         }
 
-        .wa-row {
+        .wa-run {
           display: flex;
-          margin: 2px 0;
+          flex-direction: column;
+          gap: 2px;
+          margin-bottom: 12px;
         }
-        .wa-row-in { justify-content: flex-start; }
-        .wa-row-out { justify-content: flex-end; }
+        .wa-run-in { align-items: flex-start; }
+        .wa-run-out { align-items: flex-end; }
 
         .wa-bubble {
           position: relative;
           max-width: 78%;
-          padding: 7px 10px 8px;
+          padding: 6px 9px 6px;
           border-radius: 8px;
-          font-size: 13.5px;
+          font-size: 13px;
           line-height: 1.38;
           color: #111b21;
           word-wrap: break-word;
           box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.13);
         }
-        .wa-bubble strong {
-          font-weight: 700;
-        }
-        .wa-bubble-in {
-          background: #fff;
-          border-top-left-radius: 8px;
-        }
-        .wa-bubble-out {
-          background: #d9fdd3;
-        }
+        .wa-bubble strong { font-weight: 700; }
+        .wa-bubble-in { background: #fff; }
+        .wa-bubble-out { background: #d9fdd3; }
 
-        /* Tails (first bubble in a run) */
-        .wa-tail-in {
-          border-top-left-radius: 0;
-        }
+        .wa-tail-in { border-top-left-radius: 0; }
         .wa-tail-in::before {
           content: '';
           position: absolute;
@@ -519,9 +492,7 @@ export function WhatsAppChat() {
           background: #fff;
           clip-path: polygon(100% 0, 100% 100%, 0 0);
         }
-        .wa-tail-out {
-          border-top-right-radius: 0;
-        }
+        .wa-tail-out { border-top-right-radius: 0; }
         .wa-tail-out::before {
           content: '';
           position: absolute;
@@ -541,115 +512,31 @@ export function WhatsAppChat() {
           font-size: 10.5px;
           color: #667781;
           margin-left: 8px;
-          margin-top: 4px;
+          margin-top: 3px;
           line-height: 1;
           position: relative;
           top: 4px;
+          white-space: nowrap;
         }
-        .wa-time svg {
-          width: 15px;
-          height: 15px;
-        }
+        .wa-time svg { width: 14px; height: 14px; }
 
-        /* ─── Link preview ────────────────────────── */
         .wa-bubble-link {
-          max-width: 82%;
-          padding: 4px;
+          max-width: 86%;
+          padding: 3px;
           overflow: hidden;
-        }
-        .wa-link-preview {
-          display: block;
-          border-radius: 6px;
-          overflow: hidden;
-          background: rgba(6, 95, 70, 0.06);
-          margin-bottom: 4px;
-        }
-        .wa-link-image {
-          position: relative;
-          aspect-ratio: 16 / 9;
-          background:
-            radial-gradient(circle at 30% 40%, rgba(255, 138, 61, 0.35), transparent 60%),
-            linear-gradient(135deg, #fff5ef, #ffe6d5);
-          display: grid;
-          place-items: center;
-        }
-        .wa-link-image svg {
-          width: 68px;
-          height: 68px;
-          filter: drop-shadow(0 6px 16px rgba(255, 79, 0, 0.35));
-        }
-        .wa-link-badge {
-          position: absolute;
-          bottom: 8px;
-          left: 8px;
-          padding: 3px 8px;
-          border-radius: 6px;
-          background: rgba(17, 27, 33, 0.7);
-          color: #fff;
-          font-size: 10px;
-          font-weight: 600;
-          letter-spacing: 0.02em;
-        }
-        .wa-link-body {
-          padding: 8px 10px 10px;
-        }
-        .wa-link-title {
-          font-size: 13px;
-          font-weight: 600;
-          color: #111b21;
-          margin-bottom: 2px;
-        }
-        .wa-link-desc {
-          font-size: 11.5px;
-          color: #3b4a54;
-          line-height: 1.35;
-          margin-bottom: 4px;
-        }
-        .wa-link-url {
-          font-size: 11px;
-          color: #667781;
-          text-transform: lowercase;
         }
         .wa-link-caption {
-          padding: 2px 6px 4px;
-          font-size: 13.5px;
+          padding: 3px 7px 4px;
+          font-size: 13px;
           color: #111b21;
           line-height: 1.38;
         }
 
-        /* ─── Typing indicator ────────────────────── */
-        .wa-typing {
-          display: inline-flex;
-          align-items: center;
-          gap: 4px;
-          padding: 10px 12px;
-          background: #fff;
-          border-radius: 8px;
-          border-top-left-radius: 0;
-          box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.13);
-          margin-top: 4px;
-        }
-        .wa-typing span {
-          width: 6px;
-          height: 6px;
-          border-radius: 999px;
-          background: #8696a0;
-          display: inline-block;
-          animation: wa-typing 1.3s infinite ease-in-out both;
-        }
-        .wa-typing span:nth-child(1) { animation-delay: -0.32s; }
-        .wa-typing span:nth-child(2) { animation-delay: -0.16s; }
-        @keyframes wa-typing {
-          0%, 80%, 100% { opacity: 0.35; transform: translateY(0); }
-          40% { opacity: 1; transform: translateY(-2px); }
-        }
-
-        /* ─── Composer ────────────────────────────── */
         .wa-composer {
           display: flex;
           align-items: center;
           gap: 8px;
-          padding: 8px 10px 20px;
+          padding: 8px 10px 16px;
           background: #f0f2f5;
           flex-shrink: 0;
         }
@@ -658,96 +545,245 @@ export function WhatsAppChat() {
           display: flex;
           align-items: center;
           gap: 10px;
-          padding: 8px 12px;
+          padding: 7px 12px;
           background: #fff;
           border-radius: 999px;
           color: #54656f;
-          font-size: 13px;
+          font-size: 12.5px;
         }
-        .wa-composer-input svg {
-          width: 18px;
-          height: 18px;
-          flex-shrink: 0;
-        }
-        .wa-composer-input span {
-          flex: 1;
-        }
+        .wa-composer-input svg { width: 17px; height: 17px; flex-shrink: 0; }
+        .wa-composer-input span { flex: 1; }
         .wa-mic {
-          width: 38px;
-          height: 38px;
+          width: 34px;
+          height: 34px;
           border-radius: 999px;
           background: #008069;
           display: grid;
           place-items: center;
           flex-shrink: 0;
         }
-        .wa-mic svg {
-          width: 20px;
-          height: 20px;
-        }
+        .wa-mic svg { width: 18px; height: 18px; }
+      `}</style>
+    </div>
+  );
+}
 
-        /* ─── Copy column ─────────────────────────── */
-        .wa-copy {
+/* ─── byoky.com link preview (mini hero render) ── */
+
+function ByokyLinkPreview() {
+  return (
+    <a
+      href="https://byoky.com"
+      target="_blank"
+      rel="noopener noreferrer"
+      className="wa-link"
+    >
+      <div className="wa-link-hero">
+        <div className="wa-link-glow" aria-hidden />
+        <div className="wa-link-chrome">
+          <span />
+          <span />
+          <span />
+          <div className="wa-link-url-bar">byoky.com</div>
+        </div>
+        <div className="wa-link-content">
+          <div className="wa-link-badge-pill">
+            <span className="wa-link-badge-dot" />
+            The AI token network
+          </div>
+          <div className="wa-link-headline">
+            <div className="wa-link-h-fade">One network.</div>
+            <div className="wa-link-h-grad">All your AI tokens.</div>
+          </div>
+          <div className="wa-link-buttons">
+            <span className="wa-link-btn wa-link-btn-primary">Start Building</span>
+            <span className="wa-link-btn wa-link-btn-sec">↓ Install Wallet</span>
+          </div>
+        </div>
+      </div>
+      <div className="wa-link-meta">
+        <div className="wa-link-title">Byoky — The AI token network</div>
+        <div className="wa-link-desc">
+          Share your AI tokens with friends, your team, or anyone building cool stuff —
+          without exposing your keys.
+        </div>
+        <div className="wa-link-domain">
+          <span className="wa-link-favicon">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path d="M12 2 4 7v6c0 4.5 3.5 8 8 9 4.5-1 8-4.5 8-9V7l-8-5Z" fill="#FF4F00" />
+              <path d="M9 12l2 2 4-4" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+            </svg>
+          </span>
+          byoky.com
+        </div>
+      </div>
+
+      <style>{`
+        .wa-link {
+          display: block;
+          border-radius: 6px;
+          overflow: hidden;
+          background: #fff;
+          text-decoration: none;
+          color: inherit;
+        }
+        .wa-link-hero {
+          position: relative;
+          aspect-ratio: 16 / 10;
+          background: #fafaf9;
+          border-bottom: 1px solid #e7e5e4;
+          overflow: hidden;
           display: flex;
           flex-direction: column;
-          gap: 24px;
         }
-        .wa-feature {
+        .wa-link-glow {
+          position: absolute;
+          inset: 0;
+          background:
+            radial-gradient(ellipse 60% 50% at 20% 20%, rgba(255, 79, 0, 0.18), transparent 60%),
+            radial-gradient(ellipse 60% 50% at 80% 80%, rgba(255, 138, 61, 0.15), transparent 60%);
+          pointer-events: none;
+        }
+        .wa-link-chrome {
           display: flex;
-          gap: 16px;
-          align-items: flex-start;
-        }
-        .wa-feature-icon {
-          width: 44px;
-          height: 44px;
-          border-radius: 12px;
-          background: rgba(37, 211, 102, 0.1);
-          color: #128c4a;
-          display: grid;
-          place-items: center;
+          align-items: center;
+          gap: 4px;
+          padding: 5px 7px;
+          background: #fff;
+          border-bottom: 1px solid #e7e5e4;
           flex-shrink: 0;
-          border: 1px solid rgba(37, 211, 102, 0.22);
+          position: relative;
+          z-index: 1;
         }
-        .wa-feature-icon svg {
-          width: 22px;
-          height: 22px;
+        .wa-link-chrome > span {
+          width: 6px;
+          height: 6px;
+          border-radius: 999px;
         }
-        .wa-feature h3 {
-          font-size: 18px;
-          font-weight: 600;
-          letter-spacing: -0.01em;
-          margin-bottom: 4px;
-          color: var(--text);
+        .wa-link-chrome > span:nth-child(1) { background: #ff5f57; }
+        .wa-link-chrome > span:nth-child(2) { background: #febc2e; }
+        .wa-link-chrome > span:nth-child(3) { background: #28c840; }
+        .wa-link-url-bar {
+          flex: 1;
+          margin-left: 8px;
+          padding: 2px 8px;
+          border-radius: 4px;
+          background: #f5f5f4;
+          font-size: 8.5px;
+          color: #57534e;
+          text-align: center;
+          letter-spacing: 0.01em;
         }
-        .wa-feature p {
-          font-size: 15px;
-          line-height: 1.55;
-          color: var(--text-secondary);
-          margin: 0;
-        }
-        .wa-cta-row {
+        .wa-link-content {
+          position: relative;
+          z-index: 1;
+          flex: 1;
+          padding: 10px 12px;
           display: flex;
-          gap: 12px;
-          flex-wrap: wrap;
-          margin-top: 4px;
+          flex-direction: column;
+          gap: 6px;
+          justify-content: center;
         }
-
-        @media (max-width: 860px) {
-          .wa-layout {
-            grid-template-columns: 1fr;
-            gap: 48px;
-          }
-          .wa-head h2 { font-size: 34px; }
-          .wa-phone { max-width: 320px; }
-          .wa-copy { order: 2; }
+        .wa-link-badge-pill {
+          align-self: flex-start;
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          padding: 2px 6px;
+          border-radius: 999px;
+          background: rgba(255, 79, 0, 0.1);
+          border: 1px solid rgba(255, 79, 0, 0.22);
+          color: #FF4F00;
+          font-size: 7px;
+          font-weight: 600;
+          letter-spacing: 0.05em;
+          text-transform: uppercase;
         }
-        @media (max-width: 480px) {
-          .wa-head h2 { font-size: 28px; }
-          .wa-subtitle { font-size: 15px; }
-          .wa-phone { max-width: 300px; }
+        .wa-link-badge-dot {
+          width: 3px;
+          height: 3px;
+          border-radius: 999px;
+          background: #FF4F00;
+        }
+        .wa-link-headline { line-height: 1.08; }
+        .wa-link-h-fade {
+          font-size: 12px;
+          font-weight: 700;
+          letter-spacing: -0.02em;
+          color: #1c1917;
+          opacity: 0.85;
+        }
+        .wa-link-h-grad {
+          font-size: 14px;
+          font-weight: 800;
+          letter-spacing: -0.03em;
+          background: linear-gradient(90deg, #FF4F00, #ff8a3d);
+          -webkit-background-clip: text;
+          background-clip: text;
+          color: transparent;
+        }
+        .wa-link-buttons {
+          display: inline-flex;
+          gap: 4px;
+          margin-top: 2px;
+        }
+        .wa-link-btn {
+          padding: 3px 7px;
+          border-radius: 5px;
+          font-size: 7.5px;
+          font-weight: 600;
+          letter-spacing: 0.01em;
+        }
+        .wa-link-btn-primary {
+          background: #FF4F00;
+          color: #fff;
+        }
+        .wa-link-btn-sec {
+          background: transparent;
+          border: 1px solid #e7e5e4;
+          color: #1c1917;
+        }
+        .wa-link-meta {
+          padding: 8px 10px 9px;
+        }
+        .wa-link-title {
+          font-size: 12.5px;
+          font-weight: 600;
+          color: #111b21;
+          line-height: 1.3;
+          margin-bottom: 2px;
+        }
+        .wa-link-desc {
+          font-size: 11px;
+          color: #3b4a54;
+          line-height: 1.35;
+          margin-bottom: 5px;
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+        }
+        .wa-link-domain {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          font-size: 10.5px;
+          color: #667781;
+          text-transform: lowercase;
+          font-weight: 500;
+        }
+        .wa-link-favicon {
+          display: inline-grid;
+          place-items: center;
+          width: 12px;
+          height: 12px;
+        }
+        .wa-link-favicon svg {
+          width: 12px;
+          height: 12px;
         }
       `}</style>
-    </section>
+    </a>
   );
 }
 
