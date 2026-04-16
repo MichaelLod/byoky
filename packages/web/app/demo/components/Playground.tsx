@@ -14,14 +14,15 @@ const tabs = [
   { id: 'session', label: 'Session' },
 ] as const;
 
-type TabId = (typeof tabs)[number]['id'];
+export type PlaygroundTab = (typeof tabs)[number]['id'];
 
 interface Props {
   session: ByokySession;
+  initialTab?: PlaygroundTab;
 }
 
-export function Playground({ session }: Props) {
-  const [activeTab, setActiveTab] = useState<TabId>('chat');
+export function Playground({ session, initialTab }: Props) {
+  const [activeTab, setActiveTab] = useState<PlaygroundTab>(initialTab ?? 'chat');
 
   return (
     <div className="playground">
