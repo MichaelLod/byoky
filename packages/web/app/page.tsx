@@ -5,13 +5,19 @@ import { ProviderMarquee } from './components/ProviderMarquee';
 import { GitHubStars } from './components/GitHubStars';
 import { GitHubStarButton } from './components/GitHubStarButton';
 import { ExtensionMock, type MockScene } from './components/ExtensionMock';
+import { AppsShowcase } from './components/AppsShowcase';
+import { WhatsAppChat } from './components/WhatsAppChat';
 
 export default function Home() {
   return (
     <>
       <Hero />
       <div className="divider" />
+      <WhatsAppChat />
+      <div className="divider" />
       <OpenClawCTA />
+      <div className="divider" />
+      <AppsShowcase />
       <div className="divider" />
       <ForDevelopers />
       <div className="divider" />

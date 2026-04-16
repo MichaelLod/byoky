@@ -25,10 +25,7 @@ const RAW_IOS = path.join(ROOT, 'marketing/raw/ios');
 const RAW_ANDROID = path.join(ROOT, 'marketing/raw/android');
 const OUT = path.join(ROOT, 'marketing/composites');
 const ASSETS = path.join(ROOT, 'marketing/assets');
-// Head-only raven mascot (matches the app icon). The full-body raven in
-// logos/raven-v1.svg is the brand logo, NOT the mascot.
 const LOGO = path.join(ROOT, 'packages/extension/public/icon.svg');
-const MASCOT_PNG = path.join(ROOT, 'packages/web/public/icon-512.png');
 
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -648,10 +645,10 @@ function firstExisting(paths: string[]): string | undefined {
   // Android (Google Play) slides
   const androidSlides: Slide[] = [
     { headline: 'Your AI wallet.', sub: 'On Android.', mobileFrame: '04-dashboard-with-key.png' },
-    { headline: 'Add a key.', sub: 'Encrypted on-device.', mobileFrame: '03-add-credential.png' },
-    { headline: 'Send a gift.', sub: 'Share AI access with anyone.', mobileFrame: '05-create-gift.png' },
-    { headline: 'Redeem instantly.', sub: 'Tap, redeem, use.', mobileFrame: '07-redeem-gift.png' },
-    { headline: 'Stay in control.', sub: 'Activity log, token budgets.', mobileFrame: '08-dashboard-final.png' },
+    { headline: 'Share access,\nnot keys.', sub: 'Token-budgeted gift links.', mobileFrame: '10-gifts-empty.png' },
+    { headline: 'Set a budget.', sub: 'Pick a cap. Pick a window.', mobileFrame: '05-create-gift.png' },
+    { headline: 'Apps you control.', sub: 'Approve once, revoke anytime.', mobileFrame: '12-apps.png' },
+    { headline: 'Total visibility.', sub: 'Tokens, requests, spend.', mobileFrame: '14-usage.png' },
   ];
   for (let i = 0; i < androidSlides.length; i++) {
     await mobileStoreSlide(androidSlides[i], i, 'android');
