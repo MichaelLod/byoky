@@ -1,7 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { createContext, useCallback, useContext, useState } from 'react';
 import { GitHubStarButton } from '../components/GitHubStarButton';
+import { DocsPlayground } from './DocsPlayground';
+import type { PlaygroundTab } from '../demo/components/Playground';
 
 /* ─── Navigation structure ────────────────────── */
 
@@ -119,10 +121,21 @@ const categories = [
 
 /* ─── Page ────────────────────────────────────── */
 
+const TryLiveContext = createContext<((tab: PlaygroundTab) => void) | null>(null);
+
 export default function Docs() {
   const [active, setActive] = useState('overview');
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerTab, setDrawerTab] = useState<PlaygroundTab | undefined>(undefined);
+
+  const openDrawer = useCallback((tab: PlaygroundTab) => {
+    setDrawerTab(tab);
+    setDrawerOpen(true);
+  }, []);
+  const closeDrawer = useCallback(() => setDrawerOpen(false), []);
 
   return (
+    <TryLiveContext.Provider value={openDrawer}>
     <div className="docs-layout">
       <nav className="docs-nav">
         {categories.map((cat) => (
@@ -178,6 +191,8 @@ export default function Docs() {
 
       <style>{docsStyles}</style>
     </div>
+    <DocsPlayground open={drawerOpen} tab={drawerTab} onClose={closeDrawer} />
+    </TryLiveContext.Provider>
   );
 }
 
@@ -1260,10 +1275,15 @@ type DemoSlug = 'chat' | 'structured' | 'tools' | 'relay' | 'session';
 
 function Code({ lang, demo, children }: { lang: string; demo?: DemoSlug; children: string }) {
   const html = highlightCode(children, lang);
+  const openDrawer = useContext(TryLiveContext);
   return (
     <div className="docs-code">
       {demo ? (
-        <a className="docs-code-try" href={`/demo?example=${demo}`}>
+        <button
+          type="button"
+          className="docs-code-try"
+          onClick={() => openDrawer?.(demo)}
+        >
           <span>Try it live</span>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
             <path
@@ -1274,7 +1294,7 @@ function Code({ lang, demo, children }: { lang: string; demo?: DemoSlug; childre
               strokeLinejoin="round"
             />
           </svg>
-        </a>
+        </button>
       ) : lang !== 'text' ? (
         <div className="docs-code-lang">{lang}</div>
       ) : null}
@@ -1607,11 +1627,14 @@ const docsStyles = `
   padding: 4px 10px 4px 11px;
   background: var(--teal);
   color: #fff;
+  border: none;
   border-radius: 6px;
+  font-family: inherit;
   font-size: 11.5px;
   font-weight: 600;
   letter-spacing: 0.01em;
   text-decoration: none;
+  cursor: pointer;
   transition: background 0.15s, transform 0.1s;
 }
 
@@ -1748,5 +1771,250 @@ const docsStyles = `
   .docs-cards-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* ── Drawer ── */
+
+.docs-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 15, 15, 0.38);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+  z-index: 99;
+}
+
+.docs-drawer-backdrop.docs-drawer-backdrop-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.docs-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(560px, 100vw);
+  background: #fff;
+  border-left: 1px solid var(--docs-border);
+  box-shadow: -12px 0 40px -20px rgba(0, 0, 0, 0.25);
+  transform: translateX(100%);
+  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  font-family: inherit;
+}
+
+.docs-drawer.docs-drawer-open {
+  transform: translateX(0);
+}
+
+.docs-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--docs-border);
+  flex-shrink: 0;
+}
+
+.docs-drawer-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--docs-text);
+}
+
+.docs-drawer-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #d4d4d1;
+  box-shadow: 0 0 0 3px rgba(120, 120, 120, 0.08);
+}
+
+.docs-drawer-dot[data-connected='true'] {
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18);
+}
+
+.docs-drawer-disconnect {
+  margin-left: 10px;
+  padding: 3px 10px;
+  background: transparent;
+  border: 1px solid var(--docs-border);
+  border-radius: 5px;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--docs-text-secondary);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.docs-drawer-disconnect:hover {
+  border-color: var(--docs-text-muted);
+  color: var(--docs-text);
+}
+
+.docs-drawer-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--docs-text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.docs-drawer-close:hover {
+  background: var(--docs-bg-elevated);
+  color: var(--docs-text);
+}
+
+.docs-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px;
+}
+
+.docs-drawer-body .playground {
+  border: none;
+  margin: 0;
+}
+
+/* Connect card inside drawer */
+
+.docs-drawer-connect {
+  max-width: 420px;
+  margin: 8px auto;
+  padding: 8px 4px;
+}
+
+.docs-drawer-connect h3 {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0 0 10px;
+  color: var(--docs-text);
+}
+
+.docs-drawer-connect p {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--docs-text-secondary);
+  margin: 0 0 18px;
+}
+
+.docs-drawer-connect-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 12px 18px;
+  background: var(--teal);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 14.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+}
+
+.docs-drawer-connect-btn:hover:not(:disabled) {
+  background: var(--teal-dark);
+}
+
+.docs-drawer-connect-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.docs-drawer-connect-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.docs-drawer-error {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  color: #991b1b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.docs-drawer-error button {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.docs-drawer-features {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0 24px;
+}
+
+.docs-drawer-features li {
+  position: relative;
+  padding: 5px 0 5px 22px;
+  font-size: 13.5px;
+  color: var(--docs-text-secondary);
+}
+
+.docs-drawer-features li::before {
+  content: '✓';
+  position: absolute;
+  left: 0;
+  color: var(--teal);
+  font-weight: 700;
+}
+
+.docs-drawer-install {
+  padding-top: 16px;
+  border-top: 1px solid var(--docs-border);
+  font-size: 13px;
+  color: var(--docs-text-muted);
+}
+
+.docs-drawer-install-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.docs-drawer-install-links a {
+  display: inline-block;
+  padding: 5px 10px;
+  background: var(--docs-bg-elevated);
+  border-radius: 6px;
+  color: var(--docs-text-secondary);
+  font-size: 12.5px;
+  text-decoration: none;
+  transition: background 0.15s, color 0.15s;
+}
+
+.docs-drawer-install-links a:hover {
+  background: var(--docs-border);
+  color: var(--docs-text);
 }
 `;
