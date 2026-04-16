@@ -65,6 +65,11 @@ export function VersionStatus() {
                 install from source
               </a>
             )}
+            {p.platform === 'iOS' && p.pending && (
+              <span className="version-status-source" title="Apple review typically takes 1–3 days">
+                review in progress · hang tight
+              </span>
+            )}
           </div>
         ))}
       </div>

@@ -94,6 +94,21 @@ function Hero() {
             {' · '}
             <a href="https://github.com/MichaelLod/byoky" target="_blank" rel="noopener noreferrer">GitHub</a>
           </div>
+          <div className="hero-rollout">
+            <strong>v0.7.0 rollout:</strong>{' '}
+            <span className="hero-rollout-live">Firefox &amp; Android live</span>
+            {' · '}
+            Chrome in review —{' '}
+            <a
+              href="https://github.com/MichaelLod/byoky/blob/main/INSTALL.md#chrome-install-from-source"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              build from source &amp; load unpacked
+            </a>
+            {' · '}
+            iOS in Apple review, hang tight
+          </div>
         </FadeIn>
         <FadeIn delay={0.35}>
           <div className="hero-trust-bar">
