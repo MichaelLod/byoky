@@ -2,17 +2,26 @@
 
 import { useState, useEffect } from 'react';
 import { Byoky, type ByokySession } from '@byoky/sdk';
-import { Playground } from './components/Playground';
+import { Playground, type PlaygroundTab } from './components/Playground';
 import { CodeExample } from './components/CodeExample';
 
 const byoky = new Byoky({ timeout: 120_000 });
+
+const PLAYGROUND_TABS: readonly PlaygroundTab[] = [
+  'chat', 'structured', 'tools', 'relay', 'session',
+] as const;
 
 export function DemoApp() {
   const [session, setSession] = useState<ByokySession | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(true);
+  const [initialTab, setInitialTab] = useState<PlaygroundTab | undefined>(undefined);
 
   useEffect(() => {
+    const example = new URLSearchParams(window.location.search).get('example');
+    if (example && PLAYGROUND_TABS.includes(example as PlaygroundTab)) {
+      setInitialTab(example as PlaygroundTab);
+    }
     byoky.tryReconnect().then((s) => {
       if (s) onConnected(s);
       setRestoring(false);
@@ -185,7 +194,7 @@ export function DemoApp() {
             </div>
           </div>
         ) : (
-          <Playground session={session} />
+          <Playground session={session} initialTab={initialTab} />
         )}
       </main>
 

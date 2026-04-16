@@ -89,6 +89,16 @@ const categories = [
     ],
   },
   {
+    label: 'Features',
+    items: [
+      { id: 'streaming', label: 'Streaming' },
+      { id: 'tool-use', label: 'Tool Use' },
+      { id: 'structured-output', label: 'Structured Output' },
+      { id: 'vision', label: 'Vision' },
+      { id: 'errors', label: 'Error Handling' },
+    ],
+  },
+  {
     label: 'Guides',
     items: [
       { id: 'backend-relay', label: 'Backend Relay' },
@@ -152,6 +162,11 @@ export default function Docs() {
         <SdkReference />
         <SessionApi />
         <ProvidersSection />
+        <Streaming />
+        <ToolUse />
+        <StructuredOutputSection />
+        <Vision />
+        <Errors />
         <BackendRelay />
         <Bridge />
         <TokenGifts />
@@ -240,7 +255,7 @@ function Quickstart() {
   return (
     <Section id="quickstart" title="Quickstart">
       <p>Connect and make your first request in under a minute:</p>
-      <Code lang="typescript">{`import Anthropic from '@anthropic-ai/sdk';
+      <Code lang="typescript" demo="chat">{`import Anthropic from '@anthropic-ai/sdk';
 import { Byoky } from '@byoky/sdk';
 
 const byoky = new Byoky();
@@ -282,7 +297,7 @@ const byoky = new Byoky({
 
       <h3>byoky.connect(options)</h3>
       <p>Connect to a Byoky wallet. Returns a <code>ByokySession</code>.</p>
-      <Code lang="typescript">{`const session = await byoky.connect({
+      <Code lang="typescript" demo="session">{`const session = await byoky.connect({
   // Which providers your app needs
   providers: [
     { id: 'anthropic', required: true },
@@ -321,7 +336,7 @@ const byoky = new Byoky({
         sessions, and stored extension sessions in order. Returns <code>null</code> if nothing is
         restorable.
       </p>
-      <Code lang="typescript">{`const session = await byoky.tryReconnect();
+      <Code lang="typescript" demo="session">{`const session = await byoky.tryReconnect();
 if (session) {
   // Restored — ready to make requests
 }`}</Code>
@@ -364,7 +379,7 @@ function SessionApi() {
         Returns a <code>fetch</code> function that proxies requests through the wallet for the given
         provider. Use it as a drop-in replacement with any provider SDK.
       </p>
-      <Code lang="typescript">{`// Anthropic
+      <Code lang="typescript" demo="chat">{`// Anthropic
 const client = new Anthropic({
   apiKey: session.sessionKey,
   fetch: session.createFetch('anthropic'),
@@ -398,7 +413,18 @@ const res = await fetch('https://api.anthropic.com/v1/messages', {
 
       <h3>session.getUsage()</h3>
       <p>Get token usage stats for this session.</p>
-      <Code lang="typescript">{`const usage = await session.getUsage();
+      <Code lang="typescript" demo="session">{`interface SessionUsage {
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+  byProvider: Record<string, {
+    requests: number;
+    inputTokens: number;
+    outputTokens: number;
+  }>;
+}
+
+const usage = await session.getUsage();
 // { requests: 42, inputTokens: 15000, outputTokens: 8000,
 //   byProvider: { anthropic: { requests: 42, inputTokens: 15000, outputTokens: 8000 } } }`}</Code>
 
@@ -406,12 +432,36 @@ const res = await fetch('https://api.anthropic.com/v1/messages', {
       <p>Register a callback for when the user revokes this session from the wallet.</p>
 
       <h3>session.onProvidersUpdated(callback)</h3>
-      <p>Register a callback for when provider availability changes (e.g. credential added/removed).</p>
+      <p>
+        Register a callback for when provider availability changes &mdash; e.g. the user adds a
+        credential, revokes one, or swaps the provider group bound to your app (cross-provider
+        routing). The callback receives the new <code>session.providers</code> record.
+      </p>
 
       <h3>Session properties</h3>
       <Code lang="typescript">{`session.sessionKey  // string — use as apiKey in provider SDKs
 session.proxyUrl    // string — the proxy endpoint URL
-session.providers   // Record<string, { available, authMethod }>`}</Code>
+session.providers   // Record<ProviderId, ProviderStatus>
+
+interface ProviderStatus {
+  // true: the wallet has a working credential (or gift) for this provider
+  //       and will hit the provider directly.
+  // false: your app can still call createFetch(id) — the wallet may route
+  //        it through another provider via cross-provider translation.
+  available: boolean;
+
+  // How the credential authenticates upstream.
+  authMethod: 'api_key' | 'oauth';
+
+  // Present and true when the credential came from a redeemed Token Gift.
+  // The gifter's wallet proxies every request and enforces the token budget.
+  gift?: boolean;
+}`}</Code>
+      <p>
+        Check <code>providers[id].available</code> before assuming direct access. A provider marked{' '}
+        <code>available: false</code> may still work if the user has set up cross-provider routing.
+        See <a href="#cross-provider" style={{ color: 'var(--teal-dark)' }}>Cross-Provider Routing</a>.
+      </p>
     </Section>
   );
 }
@@ -446,6 +496,399 @@ function ProvidersSection() {
   );
 }
 
+function Streaming() {
+  return (
+    <Section id="streaming" title="Streaming">
+      <p>
+        Every provider&apos;s streaming format works unchanged through <code>createFetch</code>. The
+        proxy forwards response chunks over a persistent port &mdash; no buffering, no polling, no
+        special flags on your end.
+      </p>
+
+      <h3>With a provider SDK</h3>
+      <p>The easiest path &mdash; the SDK handles SSE parsing for you:</p>
+      <Code lang="typescript">{`import Anthropic from '@anthropic-ai/sdk';
+
+const client = new Anthropic({
+  apiKey: session.sessionKey,
+  fetch: session.createFetch('anthropic'),
+});
+
+const stream = client.messages.stream({
+  model: 'claude-sonnet-4-20250514',
+  max_tokens: 1024,
+  messages: [{ role: 'user', content: 'Write a haiku.' }],
+});
+
+for await (const event of stream) {
+  if (event.type === 'content_block_delta'
+    && event.delta.type === 'text_delta') {
+    process.stdout.write(event.delta.text);
+  }
+}`}</Code>
+
+      <h3>With raw fetch</h3>
+      <p>
+        If you prefer to call the HTTP API directly, parse SSE from the returned{' '}
+        <code>response.body</code>:
+      </p>
+      <Code lang="typescript">{`const fetch = session.createFetch('anthropic');
+const res = await fetch('https://api.anthropic.com/v1/messages', {
+  method: 'POST',
+  headers: {
+    'content-type': 'application/json',
+    'anthropic-version': '2023-06-01',
+  },
+  body: JSON.stringify({
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 1024,
+    stream: true,
+    messages: [{ role: 'user', content: 'Hello!' }],
+  }),
+});
+
+const reader = res.body!.getReader();
+const decoder = new TextDecoder();
+let buf = '';
+while (true) {
+  const { done, value } = await reader.read();
+  if (done) break;
+  buf += decoder.decode(value, { stream: true });
+  const lines = buf.split('\\n');
+  buf = lines.pop() || '';
+  for (const line of lines) {
+    if (!line.startsWith('data: ')) continue;
+    const data = line.slice(6);
+    if (data === '[DONE]') return;
+    const event = JSON.parse(data);
+    if (event.type === 'content_block_delta') {
+      process.stdout.write(event.delta.text);
+    }
+  }
+}`}</Code>
+      <p>
+        OpenAI-compatible providers (OpenAI, Groq, DeepSeek, xAI, Mistral, Together, Fireworks,
+        Perplexity, OpenRouter) stream <code>choices[0].delta.content</code> in the same SSE
+        envelope. Gemini uses <code>streamGenerateContent</code>.
+      </p>
+    </Section>
+  );
+}
+
+function ToolUse() {
+  return (
+    <Section id="tool-use" title="Tool Use">
+      <p>
+        Tool use (a.k.a. function calling) works unchanged through the proxy. Define tools, let the
+        model call them, execute locally, feed results back &mdash; loop until the model stops
+        asking for tools.
+      </p>
+
+      <h3>Anthropic format</h3>
+      <Code lang="typescript">{`const fetch = session.createFetch('anthropic');
+const tools = [{
+  name: 'get_weather',
+  description: 'Get current weather for a city',
+  input_schema: {
+    type: 'object',
+    properties: { city: { type: 'string' } },
+    required: ['city'],
+  },
+}];
+
+const messages: Array<Record<string, unknown>> = [
+  { role: 'user', content: "What's the weather in Tokyo?" },
+];
+
+for (let round = 0; round < 5; round++) {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1024,
+      tools,
+      messages,
+    }),
+  });
+  const data = await res.json();
+  const toolCalls = data.content.filter((b: any) => b.type === 'tool_use');
+  if (toolCalls.length === 0) {
+    console.log(data.content.find((b: any) => b.type === 'text')?.text);
+    break;
+  }
+  const results = toolCalls.map((tc: any) => ({
+    type: 'tool_result',
+    tool_use_id: tc.id,
+    content: JSON.stringify(runTool(tc.name, tc.input)),
+  }));
+  messages.push({ role: 'assistant', content: data.content });
+  messages.push({ role: 'user', content: results });
+}`}</Code>
+
+      <h3>OpenAI-compatible format</h3>
+      <p>
+        Used by OpenAI, Groq, DeepSeek, xAI, Mistral, Together, Fireworks, Perplexity, and
+        OpenRouter. Tools are wrapped in <code>{`{ type: 'function', function: { ... } }`}</code>,
+        and the model returns <code>choices[0].message.tool_calls</code>:
+      </p>
+      <Code lang="typescript">{`const fetch = session.createFetch('openai');
+const tools = [{
+  type: 'function',
+  function: {
+    name: 'get_weather',
+    description: 'Get current weather for a city',
+    parameters: {
+      type: 'object',
+      properties: { city: { type: 'string' } },
+      required: ['city'],
+    },
+  },
+}];
+
+const messages: Array<Record<string, unknown>> = [
+  { role: 'user', content: "What's the weather in Tokyo?" },
+];
+
+for (let round = 0; round < 5; round++) {
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ model: 'gpt-4o', tools, messages }),
+  });
+  const data = await res.json();
+  const msg = data.choices[0].message;
+  if (!msg.tool_calls?.length) { console.log(msg.content); break; }
+  messages.push(msg);
+  for (const tc of msg.tool_calls) {
+    const args = JSON.parse(tc.function.arguments);
+    messages.push({
+      role: 'tool',
+      tool_call_id: tc.id,
+      content: JSON.stringify(runTool(tc.function.name, args)),
+    });
+  }
+}`}</Code>
+    </Section>
+  );
+}
+
+function StructuredOutputSection() {
+  return (
+    <Section id="structured-output" title="Structured Output">
+      <p>
+        Get typed JSON back from any OpenAI-compatible provider, plus Anthropic. Two modes exist:
+        OpenAI&apos;s strict <code>json_schema</code> (enforced by the model), and the looser{' '}
+        <code>json_object</code> mode supported by most OpenAI-compatible providers.
+      </p>
+
+      <h3>OpenAI strict schema</h3>
+      <Code lang="typescript">{`const fetch = session.createFetch('openai');
+const res = await fetch('https://api.openai.com/v1/chat/completions', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({
+    model: 'gpt-4o',
+    messages: [{ role: 'user', content: 'Extract: "Jane, jane@acme.co, Acme"' }],
+    response_format: {
+      type: 'json_schema',
+      json_schema: {
+        name: 'contact',
+        strict: true,
+        schema: {
+          type: 'object',
+          properties: {
+            name:    { type: 'string' },
+            email:   { type: 'string' },
+            company: { type: 'string' },
+          },
+          required: ['name', 'email', 'company'],
+          additionalProperties: false,
+        },
+      },
+    },
+  }),
+});
+
+const data = await res.json();
+const contact = JSON.parse(data.choices[0].message.content);`}</Code>
+
+      <h3>json_object (Groq, DeepSeek, Mistral, Together, Fireworks, OpenRouter, xAI)</h3>
+      <Code lang="typescript">{`body: JSON.stringify({
+  model: 'llama-3.3-70b-versatile',
+  messages: [{ role: 'user', content: 'Return JSON with keys name, email.' }],
+  response_format: { type: 'json_object' },
+});`}</Code>
+
+      <h3>Anthropic</h3>
+      <p>
+        Claude doesn&apos;t have a <code>response_format</code> field. Prompt it to return JSON and
+        parse the text block &mdash; or use tool use with a single tool as the forced schema:
+      </p>
+      <Code lang="typescript">{`const res = await fetch('https://api.anthropic.com/v1/messages', {
+  method: 'POST',
+  headers: {
+    'content-type': 'application/json',
+    'anthropic-version': '2023-06-01',
+  },
+  body: JSON.stringify({
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 1024,
+    messages: [{
+      role: 'user',
+      content: 'Return ONLY JSON: { "name": "...", "email": "..." } for: "Jane, jane@acme.co"',
+    }],
+  }),
+});
+const data = await res.json();
+const json = JSON.parse(data.content[0].text.match(/\\{[\\s\\S]*\\}/)![0]);`}</Code>
+    </Section>
+  );
+}
+
+function Vision() {
+  return (
+    <Section id="vision" title="Vision">
+      <p>
+        Image inputs work through the proxy just like text. Anthropic, OpenAI, and Gemini each take
+        a different wire format &mdash; the payload pattern below matches what ships in the{' '}
+        <a href="/demo" style={{ color: 'var(--teal-dark)' }}>demo</a>.
+      </p>
+
+      <h3>Convert a File to base64</h3>
+      <Code lang="typescript">{`async function fileToBase64(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}`}</Code>
+
+      <h3>Anthropic</h3>
+      <Code lang="typescript">{`body: JSON.stringify({
+  model: 'claude-sonnet-4-20250514',
+  max_tokens: 1024,
+  messages: [{
+    role: 'user',
+    content: [
+      {
+        type: 'image',
+        source: { type: 'base64', media_type: file.type, data: base64 },
+      },
+      { type: 'text', text: 'What is in this image?' },
+    ],
+  }],
+});`}</Code>
+
+      <h3>OpenAI</h3>
+      <Code lang="typescript">{`body: JSON.stringify({
+  model: 'gpt-4o',
+  messages: [{
+    role: 'user',
+    content: [
+      {
+        type: 'image_url',
+        image_url: { url: \`data:\${file.type};base64,\${base64}\` },
+      },
+      { type: 'text', text: 'What is in this image?' },
+    ],
+  }],
+});`}</Code>
+
+      <h3>Gemini</h3>
+      <Code lang="typescript">{`body: JSON.stringify({
+  contents: [{
+    role: 'user',
+    parts: [
+      { inline_data: { mime_type: file.type, data: base64 } },
+      { text: 'What is in this image?' },
+    ],
+  }],
+});`}</Code>
+    </Section>
+  );
+}
+
+function Errors() {
+  return (
+    <Section id="errors" title="Error Handling">
+      <p>
+        Errors from upstream providers surface with their original HTTP status and body &mdash; so{' '}
+        <code>response.status</code> and the usual <code>{`{ error: { message } }`}</code> body
+        shape work the same as hitting the provider directly.
+      </p>
+
+      <p>
+        The proxy layer adds its own error codes on top, signalled with an HTTP status and an{' '}
+        <code>error.code</code> field in the JSON body:
+      </p>
+
+      <div className="docs-providers-grid">
+        {[
+          ['WALLET_NOT_INSTALLED', 'Extension/app not detected during connect()'],
+          ['USER_REJECTED', 'User dismissed the connect modal'],
+          ['PROVIDER_UNAVAILABLE', 'No credential and no routing group for this provider'],
+          ['SESSION_EXPIRED', 'Session was revoked or timed out — call connect() again'],
+          ['RATE_LIMITED', 'Upstream provider rate limit (HTTP 429)'],
+          ['QUOTA_EXCEEDED', 'Gift budget or wallet-imposed limit hit (HTTP 429)'],
+          ['INVALID_KEY', 'Stored credential rejected by provider'],
+          ['TOKEN_EXPIRED', 'OAuth token expired and refresh failed'],
+          ['PROXY_ERROR', 'Generic proxy failure — retryable'],
+          ['RELAY_CONNECTION_FAILED', 'Backend relay could not reach the browser'],
+          ['RELAY_DISCONNECTED', 'Relay peer disconnected mid-request'],
+        ].map(([code, desc]) => (
+          <div key={code} className="docs-provider-row">
+            <code>{code}</code>
+            <span>{desc}</span>
+          </div>
+        ))}
+      </div>
+
+      <h3>Handling quota errors</h3>
+      <p>
+        When a user redeems a Token Gift with a limited budget, or the wallet enforces per-session
+        limits, requests fail with HTTP 429 and <code>code: 'QUOTA_EXCEEDED'</code>. Surface this to
+        the user rather than retrying:
+      </p>
+      <Code lang="typescript">{`const fetch = session.createFetch('anthropic');
+const res = await fetch(url, { method: 'POST', headers, body });
+
+if (!res.ok) {
+  const body = await res.json().catch(() => null);
+  const code = body?.error?.code;
+
+  if (res.status === 429 && code === 'QUOTA_EXCEEDED') {
+    showQuotaExhaustedUI();
+    return;
+  }
+  if (code === 'SESSION_EXPIRED') {
+    await byoky.connect({ providers: [...], modal: true });
+    return;
+  }
+  throw new Error(body?.error?.message ?? \`HTTP \${res.status}\`);
+}`}</Code>
+
+      <h3>Listening for session lifecycle</h3>
+      <Code lang="typescript">{`session.onDisconnect(() => {
+  // The user revoked access from the wallet, or the session expired.
+  // Prompt them to reconnect before the next request.
+  showReconnectBanner();
+});
+
+session.onProvidersUpdated((providers) => {
+  // A credential was added/removed, or the user changed routing.
+  // Refresh your UI's model picker.
+  setAvailable(Object.entries(providers)
+    .filter(([, v]) => v.available)
+    .map(([id]) => id));
+});`}</Code>
+    </Section>
+  );
+}
+
 function BackendRelay() {
   return (
     <Section id="backend-relay" title="Backend Relay">
@@ -457,7 +900,7 @@ function BackendRelay() {
       <Code lang="text">{`Backend ←WebSocket→ User's Frontend ←Extension→ LLM API`}</Code>
 
       <h3>Frontend</h3>
-      <Code lang="typescript">{`import { Byoky } from '@byoky/sdk';
+      <Code lang="typescript" demo="relay">{`import { Byoky } from '@byoky/sdk';
 
 const session = await new Byoky().connect({
   providers: [{ id: 'anthropic' }],
@@ -817,11 +1260,28 @@ function highlightCode(code: string, lang: string): string {
   return html;
 }
 
-function Code({ lang, children }: { lang: string; children: string }) {
+type DemoSlug = 'chat' | 'structured' | 'tools' | 'relay' | 'session';
+
+function Code({ lang, demo, children }: { lang: string; demo?: DemoSlug; children: string }) {
   const html = highlightCode(children, lang);
   return (
     <div className="docs-code">
-      {lang !== 'text' && <div className="docs-code-lang">{lang}</div>}
+      {demo ? (
+        <a className="docs-code-try" href={`/demo?example=${demo}`}>
+          <span>Try it live</span>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path
+              d="M5 12h14M13 5l7 7-7 7"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </a>
+      ) : lang !== 'text' ? (
+        <div className="docs-code-lang">{lang}</div>
+      ) : null}
       <pre><code dangerouslySetInnerHTML={{ __html: html }} /></pre>
     </div>
   );
@@ -1138,6 +1598,41 @@ const docsStyles = `
   color: var(--docs-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+.docs-code-try {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px 4px 11px;
+  background: var(--teal);
+  color: #fff;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-decoration: none;
+  transition: background 0.15s, transform 0.1s;
+}
+
+.docs-code-try:hover {
+  background: var(--teal-dark);
+}
+
+.docs-code-try:active {
+  transform: translateY(1px);
+}
+
+.docs-code-try svg {
+  transition: transform 0.15s;
+}
+
+.docs-code-try:hover svg {
+  transform: translateX(2px);
 }
 
 .docs-code pre {
