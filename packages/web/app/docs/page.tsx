@@ -121,15 +121,18 @@ const categories = [
 
 /* ─── Page ────────────────────────────────────── */
 
-const TryLiveContext = createContext<((tab: PlaygroundTab) => void) | null>(null);
+type TryLiveOpener = (tab: PlaygroundTab, provider?: string) => void;
+const TryLiveContext = createContext<TryLiveOpener | null>(null);
 
 export default function Docs() {
   const [active, setActive] = useState('overview');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerTab, setDrawerTab] = useState<PlaygroundTab | undefined>(undefined);
+  const [drawerProvider, setDrawerProvider] = useState<string | undefined>(undefined);
 
-  const openDrawer = useCallback((tab: PlaygroundTab) => {
+  const openDrawer = useCallback<TryLiveOpener>((tab, provider) => {
     setDrawerTab(tab);
+    setDrawerProvider(provider);
     setDrawerOpen(true);
   }, []);
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
@@ -191,7 +194,7 @@ export default function Docs() {
 
       <style>{docsStyles}</style>
     </div>
-    <DocsPlayground open={drawerOpen} tab={drawerTab} onClose={closeDrawer} />
+    <DocsPlayground open={drawerOpen} tab={drawerTab} provider={drawerProvider} onClose={closeDrawer} />
     </TryLiveContext.Provider>
   );
 }
@@ -270,7 +273,7 @@ function Quickstart() {
   return (
     <Section id="quickstart" title="Quickstart">
       <p>Connect and make your first request in under a minute:</p>
-      <Code lang="typescript" demo="chat">{`import Anthropic from '@anthropic-ai/sdk';
+      <Code lang="typescript" demo="chat" provider="anthropic">{`import Anthropic from '@anthropic-ai/sdk';
 import { Byoky } from '@byoky/sdk';
 
 const byoky = new Byoky();
@@ -394,7 +397,7 @@ function SessionApi() {
         Returns a <code>fetch</code> function that proxies requests through the wallet for the given
         provider. Use it as a drop-in replacement with any provider SDK.
       </p>
-      <Code lang="typescript" demo="chat">{`// Anthropic
+      <Code lang="typescript" demo="chat" provider="anthropic">{`// Anthropic
 const client = new Anthropic({
   apiKey: session.sessionKey,
   fetch: session.createFetch('anthropic'),
@@ -915,7 +918,7 @@ function BackendRelay() {
       <Code lang="text">{`Backend ←WebSocket→ User's Frontend ←Extension→ LLM API`}</Code>
 
       <h3>Frontend</h3>
-      <Code lang="typescript" demo="relay">{`import { Byoky } from '@byoky/sdk';
+      <Code lang="typescript" demo="relay" provider="anthropic">{`import { Byoky } from '@byoky/sdk';
 
 const session = await new Byoky().connect({
   providers: [{ id: 'anthropic' }],
@@ -1273,7 +1276,17 @@ function highlightCode(code: string, lang: string): string {
 
 type DemoSlug = 'chat' | 'structured' | 'tools' | 'relay' | 'session';
 
-function Code({ lang, demo, children }: { lang: string; demo?: DemoSlug; children: string }) {
+function Code({
+  lang,
+  demo,
+  provider,
+  children,
+}: {
+  lang: string;
+  demo?: DemoSlug;
+  provider?: string;
+  children: string;
+}) {
   const html = highlightCode(children, lang);
   const openDrawer = useContext(TryLiveContext);
   return (
@@ -1282,7 +1295,7 @@ function Code({ lang, demo, children }: { lang: string; demo?: DemoSlug; childre
         <button
           type="button"
           className="docs-code-try"
-          onClick={() => openDrawer?.(demo)}
+          onClick={() => openDrawer?.(demo, provider)}
         >
           <span>Try it live</span>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>

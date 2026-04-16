@@ -15,10 +15,11 @@ const PROVIDERS = [
 interface Props {
   open: boolean;
   tab?: PlaygroundTab;
+  provider?: string;
   onClose: () => void;
 }
 
-export function DocsPlayground({ open, tab, onClose }: Props) {
+export function DocsPlayground({ open, tab, provider, onClose }: Props) {
   const [session, setSession] = useState<ByokySession | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
@@ -107,7 +108,7 @@ export function DocsPlayground({ open, tab, onClose }: Props) {
         <div className="docs-drawer-body">
           {session ? (
             <div className="demo-app docs-drawer-demo">
-              <Playground session={session} initialTab={tab} />
+              <Playground session={session} initialTab={tab} initialProvider={provider} />
             </div>
           ) : (
             <ConnectCard

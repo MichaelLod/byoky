@@ -19,9 +19,10 @@ export type PlaygroundTab = (typeof tabs)[number]['id'];
 interface Props {
   session: ByokySession;
   initialTab?: PlaygroundTab;
+  initialProvider?: string;
 }
 
-export function Playground({ session, initialTab }: Props) {
+export function Playground({ session, initialTab, initialProvider }: Props) {
   const [activeTab, setActiveTab] = useState<PlaygroundTab>(initialTab ?? 'chat');
 
   useEffect(() => {
@@ -42,7 +43,7 @@ export function Playground({ session, initialTab }: Props) {
         ))}
       </div>
       <div className="playground-content">
-        {activeTab === 'chat' && <Chat session={session} />}
+        {activeTab === 'chat' && <Chat session={session} initialProvider={initialProvider} />}
         {activeTab === 'structured' && <StructuredOutput session={session} />}
         {activeTab === 'tools' && <ToolUseDemo session={session} />}
         {activeTab === 'relay' && <BackendRelay session={session} />}

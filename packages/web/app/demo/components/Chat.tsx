@@ -11,6 +11,7 @@ interface Message {
 
 interface Props {
   session: ByokySession;
+  initialProvider?: string;
 }
 
 const providers: Record<string, { url: string; model: string; name: string }> = {
@@ -241,11 +242,13 @@ async function fileToBase64(file: File): Promise<string> {
 
 /* ─── Chat Component ──────────────────────── */
 
-export function Chat({ session }: Props) {
+export function Chat({ session, initialProvider }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [selectedProvider, setSelectedProvider] = useState<string>('');
+  const [selectedProvider, setSelectedProvider] = useState<string>(
+    initialProvider && providers[initialProvider] ? initialProvider : '',
+  );
   const [attachedImage, setAttachedImage] = useState<{ file: File; preview: string } | null>(null);
   const [showCode, setShowCode] = useState(true);
   const [lastPrompt, setLastPrompt] = useState('Hello!');
@@ -261,12 +264,15 @@ export function Chat({ session }: Props) {
 
   useEffect(() => {
     if (selectedProvider) return;
-    // Prefer a directly-available provider as the default; fall back to the
-    // first in the list (so the dropdown is still populated even with zero
-    // credentials, and the user can pair the wallet first then send).
     const firstDirect = providerIds.find(id => session.providers[id]?.available === true);
     setSelectedProvider(firstDirect ?? providerIds[0]);
   }, [session.providers, selectedProvider]);
+
+  useEffect(() => {
+    if (initialProvider && providers[initialProvider]) {
+      setSelectedProvider(initialProvider);
+    }
+  }, [initialProvider]);
 
 
   function handleAttach() { fileInputRef.current?.click(); }
