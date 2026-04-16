@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ByokySession } from '@byoky/sdk';
 import { Chat } from './Chat';
 import { StructuredOutput } from './StructuredOutput';
@@ -23,6 +23,10 @@ interface Props {
 
 export function Playground({ session, initialTab }: Props) {
   const [activeTab, setActiveTab] = useState<PlaygroundTab>(initialTab ?? 'chat');
+
+  useEffect(() => {
+    if (initialTab) setActiveTab(initialTab);
+  }, [initialTab]);
 
   return (
     <div className="playground">
