@@ -333,12 +333,12 @@ private fun GiftCredentialCard(
                     modifier = Modifier
                         .size(40.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(AccentSoft),
+                        .background(Color.Black),
                     contentAlignment = Alignment.Center,
                 ) {
                     ProviderIcon(
                         providerId = gc.providerId,
-                        tint = Accent,
+                        tint = Color.White,
                         size = 20.dp,
                     )
                 }
@@ -468,12 +468,12 @@ private fun CredentialCard(
                     modifier = Modifier
                         .size(40.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(AccentSoft),
+                        .background(Color.Black),
                     contentAlignment = Alignment.Center,
                 ) {
                     ProviderIcon(
                         providerId = credential.providerId,
-                        tint = Accent,
+                        tint = Color.White,
                         size = 20.dp,
                     )
                 }
@@ -627,12 +627,12 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
                                 modifier = Modifier
                                     .size(32.dp)
                                     .clip(RoundedCornerShape(6.dp))
-                                    .background(AccentSoft),
+                                    .background(Color.Black),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 ProviderIcon(
                                     providerId = provider.id,
-                                    tint = Accent,
+                                    tint = Color.White,
                                     size = 18.dp,
                                 )
                             }
