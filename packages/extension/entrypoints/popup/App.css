@@ -239,8 +239,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: #000;
+  color: #fff;
   border-radius: 8px;
 }
 
