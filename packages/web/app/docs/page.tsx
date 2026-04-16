@@ -1231,31 +1231,27 @@ function highlightCode(code: string, lang: string): string {
 
   let html = code.replace(/</g, '&lt;');
 
+  // Two rules make these regex passes safe from self-mangling:
+  //   1. Emit via data-tk="…" (not class="tk-…") so the `class` keyword regex
+  //      can't match its own output attributes.
+  //   2. Run the string pass FIRST in every lang so later passes don't
+  //      accidentally match the quoted attribute values we just emitted
+  //      (e.g. `"comment"` in `data-tk="comment"`).
   if (lang === 'bash') {
-    // Comments
-    html = html.replace(/(#[^\n]*)/g, '<span class="tk-comment">$1</span>');
-    // $ prompt
-    html = html.replace(/^(\$)/gm, '<span class="tk-keyword">$1</span>');
-    // Flags
-    html = html.replace(/(\s)(--?\w[\w-]*)/g, '$1<span class="tk-value">$2</span>');
-    // Strings
-    html = html.replace(/(&#39;[^&#]*&#39;|"[^"]*")/g, '<span class="tk-string">$1</span>');
-    // Success markers
-    html = html.replace(/(✓)/g, '<span class="tk-value">$1</span>');
+    html = html.replace(/(&#39;[^&#]*&#39;|"[^"]*")/g, '<span data-tk="string">$1</span>');
+    html = html.replace(/(#[^\n<]*)/g, '<span data-tk="comment">$1</span>');
+    html = html.replace(/^(\$)/gm, '<span data-tk="keyword">$1</span>');
+    html = html.replace(/(\s)(--?\w[\w-]*)/g, '$1<span data-tk="value">$2</span>');
+    html = html.replace(/(✓)/g, '<span data-tk="value">$1</span>');
     return html;
   }
 
   // TypeScript / JavaScript
-  // Strings (single-quoted via html entities and double-quoted and backtick)
-  html = html.replace(/(&#39;[^&#]*&#39;|'[^']*'|"[^"]*"|`[^`]*`)/g, '<span class="tk-string">$1</span>');
-  // Comments
-  html = html.replace(/(\/\/[^\n]*)/g, '<span class="tk-comment">$1</span>');
-  // Keywords
-  html = html.replace(/\b(import|from|export|const|let|var|function|async|await|new|return|if|else|true|false|null|undefined|void|type|interface|class|extends|implements|typeof|as)\b/g, '<span class="tk-keyword">$1</span>');
-  // Types (PascalCase words)
-  html = html.replace(/\b([A-Z][a-zA-Z0-9]+)\b/g, '<span class="tk-type">$1</span>');
-  // Numbers
-  html = html.replace(/\b(\d+)\b/g, '<span class="tk-value">$1</span>');
+  html = html.replace(/(&#39;[^&#]*&#39;|'[^']*'|"[^"]*"|`[^`]*`)/g, '<span data-tk="string">$1</span>');
+  html = html.replace(/(\/\/[^\n<]*)/g, '<span data-tk="comment">$1</span>');
+  html = html.replace(/\b(import|from|export|const|let|var|function|async|await|new|return|if|else|true|false|null|undefined|void|type|interface|class|extends|implements|typeof|as)\b/g, '<span data-tk="keyword">$1</span>');
+  html = html.replace(/\b([A-Z][a-zA-Z0-9]+)\b/g, '<span data-tk="type">$1</span>');
+  html = html.replace(/\b(\d+)\b/g, '<span data-tk="value">$1</span>');
 
   return html;
 }
@@ -1653,11 +1649,11 @@ const docsStyles = `
 
 /* ── Syntax highlighting ── */
 
-.tk-keyword { color: #7c3aed; }
-.tk-string { color: #16a34a; }
-.tk-type { color: #0891b2; }
-.tk-comment { color: #a8a29e; font-style: italic; }
-.tk-value { color: #2563eb; }
+[data-tk="keyword"] { color: #7c3aed; }
+[data-tk="string"] { color: #16a34a; }
+[data-tk="type"] { color: #0891b2; }
+[data-tk="comment"] { color: #a8a29e; font-style: italic; }
+[data-tk="value"] { color: #2563eb; }
 
 /* ── Props ── */
 
