@@ -13,6 +13,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -210,12 +211,12 @@ private fun SentGiftCard(gift: Gift, wallet: WalletStore, dimmed: Boolean = fals
                     modifier = Modifier
                         .size(36.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(AccentSoft.copy(alpha = alpha)),
+                        .background(Color.Black.copy(alpha = alpha)),
                     contentAlignment = Alignment.Center,
                 ) {
                     ProviderIcon(
                         providerId = gift.providerId,
-                        tint = Accent.copy(alpha = alpha),
+                        tint = Color.White.copy(alpha = alpha),
                         size = 18.dp,
                     )
                 }

@@ -190,9 +190,9 @@ struct SentGiftRow: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
                 ProviderIcon(providerId: gift.providerId, size: 16)
-                    .foregroundStyle(Theme.accent)
+                    .foregroundStyle(Color.white)
                     .frame(width: 32, height: 32)
-                    .background(Theme.accent.opacity(0.1))
+                    .background(Color.black)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
 
                 VStack(alignment: .leading, spacing: 2) {

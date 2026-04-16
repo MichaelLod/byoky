@@ -244,9 +244,9 @@ struct CredentialRow: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 14) {
                 ProviderIcon(providerId: credential.providerId, size: 18)
-                    .foregroundStyle(Theme.accent)
+                    .foregroundStyle(Color.white)
                     .frame(width: 36, height: 36)
-                    .background(Theme.accent.opacity(0.1))
+                    .background(Color.black)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -376,9 +376,9 @@ struct GiftCredentialRow: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 14) {
                 ProviderIcon(providerId: credential.providerId, size: 18)
-                    .foregroundStyle(Theme.accent)
+                    .foregroundStyle(Color.white)
                     .frame(width: 36, height: 36)
-                    .background(Theme.accent.opacity(0.1))
+                    .background(Color.black)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
 
                 VStack(alignment: .leading, spacing: 2) {

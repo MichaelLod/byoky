@@ -14,9 +14,9 @@ struct AddCredentialView: View {
                         NavigationLink(value: provider) {
                             HStack(spacing: 12) {
                                 ProviderIcon(providerId: provider.id, size: 18)
-                                    .foregroundStyle(Theme.accent)
+                                    .foregroundStyle(Color.white)
                                     .frame(width: 32, height: 32)
-                                    .background(Theme.accent.opacity(0.1))
+                                    .background(Color.black)
                                     .clipShape(RoundedRectangle(cornerRadius: 6))
 
                                 Text(provider.name)
