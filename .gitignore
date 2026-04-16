@@ -5,6 +5,8 @@ dist/
 .next/
 *.tsbuildinfo
 .DS_Store
+/build/
+web-ext-artifacts/
 .env
 .env.local
 .env.test.local
