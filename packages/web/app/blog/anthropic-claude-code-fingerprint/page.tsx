@@ -65,25 +65,40 @@ export default function Post() {
         </figure>
 
         <div className="blog-post-body">
+          <div className="blog-post-note" style={{
+            padding: '16px 20px',
+            borderLeft: '3px solid var(--teal-light)',
+            background: 'rgba(255,255,255,0.03)',
+            marginBottom: '24px',
+            fontSize: '14px',
+            lineHeight: 1.6,
+          }}>
+            <strong>A note on terms before we start.</strong> Anthropic&rsquo;s Consumer Terms
+            restrict how OAuth tokens from Claude Free, Pro, and Max plans may be used, and the
+            Commercial Terms have their own rules for API access. This post is a technical note
+            about API routing behavior. It is not an invitation to use any credential in a way
+            that is not permitted by the issuing provider&rsquo;s terms. Before wiring a
+            subscription token into any tool, check whether your plan actually allows that usage.
+          </div>
+
           <p>
             If you have a Claude.ai Pro or Max subscription, you can run{' '}
             <code>claude setup-token</code> and get a token that looks like{' '}
             <code>sk-ant-oat01-...</code>. Anthropic&rsquo;s docs call it a setup token. It&rsquo;s
             an OAuth access token, scoped to the Claude Code CLI, billed against your existing
-            plan. No extra usage charges. No &ldquo;what&rsquo;s my burn rate this month&rdquo;
-            anxiety.
+            plan when used in the way Anthropic intends.
           </p>
 
           <p>
-            So I tried to use it from{' '}
+            Out of curiosity I tried sending the same token from{' '}
             <a href="https://openclaw.ai" target="_blank" rel="noopener noreferrer">
               OpenClaw
-            </a>{' '}
-            instead of Claude Code itself. Same token, same Anthropic API endpoint, same model.
-            Different agent framework on top.
+            </a>
+            &rsquo;s agent loop instead of from Claude Code itself. Same token, same Anthropic
+            API endpoint, same model. Different agent framework on top.
           </p>
 
-          <p>Anthropic said no.</p>
+          <p>The response was not what I expected.</p>
 
           <pre>
             <code>{`HTTP 400 invalid_request_error
@@ -93,285 +108,98 @@ claude.ai/settings/usage and keep going."`}</code>
           </pre>
 
           <p>
-            The token authenticates fine. But Anthropic somehow knows this isn&rsquo;t Claude Code,
-            and routes the request to a separate &ldquo;extra usage&rdquo; credit pool that I
-            haven&rsquo;t paid into.
+            The token authenticates fine. But Anthropic&rsquo;s API distinguishes this request
+            from a Claude Code request and routes it to a separate extra-usage credit pool.
+            That&rsquo;s a reasonable business decision on Anthropic&rsquo;s part — first-party
+            and third-party traffic are different products with different economics. What
+            surprised me was that the token alone isn&rsquo;t the signal; the request shape is.
+            I wanted to understand which parts of the shape carried the signal.
           </p>
 
+          <h2>Headers are one layer, but not the whole story</h2>
           <p>
-            I wanted to know exactly <em>how</em> they know. So I spent an evening bisecting it.
+            Anthropic&rsquo;s public SDK and CLI send a specific set of identifying headers
+            (User-Agent, beta flags, and similar metadata). In a quick test, matching those
+            headers alone wasn&rsquo;t sufficient — the request body also factors into whether
+            the API treats a call as first-party subscription traffic. So I moved on from
+            headers and looked at the body.
           </p>
 
-          <h2>The obvious things don&rsquo;t work</h2>
+          <h2>The body carries more than the payload</h2>
           <p>
-            The first thing anyone tries is matching Claude Code&rsquo;s HTTP headers. Claude
-            Code&rsquo;s CLI sends:
-          </p>
-          <pre>
-            <code>{`User-Agent: claude-cli/2.1.76
-x-app: cli
-anthropic-beta: claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14
-anthropic-dangerous-direct-browser-access: true`}</code>
-          </pre>
-          <p>
-            Set those headers, send the same body Claude Code would send &rarr; success. Set them
-            and send OpenClaw&rsquo;s body &rarr; 400, third-party billing wall.
-          </p>
-          <p>So it&rsquo;s not just headers. Anthropic is also looking at the request body.</p>
-
-          <h2>Bisecting the body</h2>
-          <p>
-            OpenClaw&rsquo;s request body is dense &mdash; 21 tools, 57 messages of conversation
-            history, a 44KB system prompt, plus <code>thinking</code> and <code>output_config</code>{' '}
-            fields. Total payload around 115KB. Plenty of places for a fingerprint to hide.
-          </p>
-          <p>I started removing fields one at a time:</p>
-
-          <div className="blog-post-table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Variant</th>
-                  <th>Result</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>
-                    Remove <code>output_config</code>
-                  </td>
-                  <td>Still 400</td>
-                </tr>
-                <tr>
-                  <td>
-                    Remove <code>thinking</code>
-                  </td>
-                  <td>Still 400</td>
-                </tr>
-                <tr>
-                  <td>Drop conversation history (1 message instead of 57)</td>
-                  <td>Still 400</td>
-                </tr>
-                <tr>
-                  <td>Drop tools (0 tools instead of 21)</td>
-                  <td>
-                    <strong>200 OK</strong>
-                  </td>
-                </tr>
-                <tr>
-                  <td>Drop system prompt entirely</td>
-                  <td>
-                    <strong>200 OK</strong>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          <p>
-            Two independent triggers. Either tools or system prompt was enough to flunk the check
-            on its own. Both had to be addressed.
+            OpenClaw&rsquo;s request body is dense — 21 tools, a long conversation history, and
+            a large system prompt. I removed fields one at a time to see what the API weighed in
+            the first-party / extra-usage decision. Two areas jumped out: the{' '}
+            <code>tools</code> array and the <code>system</code> field. Everything else I tried
+            (conversation history length, auxiliary fields) didn&rsquo;t change the outcome on
+            its own.
           </p>
 
-          <h2>The tool name signal</h2>
+          <h2>Tool naming conventions</h2>
           <p>
-            The tools array was the easier one. OpenClaw&rsquo;s tools are named <code>read</code>,{' '}
-            <code>edit</code>, <code>write</code>, <code>exec</code>, <code>process</code>,{' '}
-            <code>cron</code>, <code>sessions_spawn</code>, <code>web_search</code>,{' '}
-            <code>memory_get</code>, &hellip; Lowercase, snake_case, very framework-specific.
-          </p>
-          <p>
-            Claude Code&rsquo;s tool list is something else: <code>Read</code>, <code>Edit</code>,{' '}
-            <code>Write</code>, <code>Bash</code>, <code>Glob</code>, <code>Grep</code>,{' '}
-            <code>Task</code>, <code>TodoWrite</code>, <code>WebFetch</code>, <code>WebSearch</code>
-            , <code>NotebookEdit</code>. PascalCase. A specific vocabulary.
-          </p>
-          <p>
-            I renamed all 21 OpenClaw tools to Claude-Code-style PascalCase aliases &mdash;{' '}
-            <code>read</code> &rarr; <code>Read</code>, <code>exec</code> &rarr; <code>Bash</code>,{' '}
-            <code>sessions_spawn</code> &rarr; <code>SessionsSpawn</code>. Same descriptions, same
-            input schemas, same number of tools. Just renamed.
-          </p>
-          <p>Result: 200 OK.</p>
-          <p>
-            So Anthropic keeps a list of canonical Claude Code tool names. If your tools don&rsquo;t
-            match the vocabulary, you&rsquo;re third-party. The descriptions and schemas don&rsquo;t
-            matter &mdash; only the <code>name</code> field.
+            Claude Code&rsquo;s tool vocabulary follows a distinctive style — a small set of
+            capitalized names like <code>Read</code>, <code>Edit</code>, <code>Bash</code>,{' '}
+            <code>Grep</code>. Third-party agent frameworks usually pick their own naming
+            conventions, often snake_case or lowercase. On the requests I observed, the naming
+            convention of the tool set was one factor the API appeared sensitive to.
           </p>
 
-          <h2>The system prompt signal</h2>
+          <h2>System-field content</h2>
           <p>
-            The system prompt was harder. OpenClaw&rsquo;s is 44KB of agent persona, runtime
-            context, memory rules, heartbeat protocols, and 100+ literal mentions of
-            &ldquo;OpenClaw&rdquo; or &ldquo;openclaw&rdquo;. My first hypothesis was the obvious
-            one: Anthropic is grepping for the brand name.
+            The <code>system</code> field content was the second factor. This wasn&rsquo;t
+            simple keyword matching — swapping brand names one-for-one didn&rsquo;t change the
+            outcome. The signal looked more like a content classifier reacting to the overall
+            shape and style of a non-first-party system prompt. I&rsquo;m not going to publish
+            the specific boundaries I observed; it&rsquo;s not the point of this post, and
+            those boundaries are Anthropic&rsquo;s to tune.
           </p>
           <p>
-            I tried it. Replaced every case-insensitive occurrence of &ldquo;openclaw&rdquo; with
-            &ldquo;claude&rdquo; in the system text. Same request otherwise.{' '}
-            <strong>Still 400.</strong>
-          </p>
-          <p>
-            So it&rsquo;s not literal string matching. The classifier is looking at{' '}
-            <em>content patterns</em>, not specific tokens.
-          </p>
-          <p>I went back to bisecting. Truncating the system prompt at progressively smaller lengths:</p>
-
-          <div className="blog-post-table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>System prompt size</th>
-                  <th>Result</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr><td>43,000 chars</td><td>200 OK</td></tr>
-                <tr><td>43,500 chars</td><td>200 OK</td></tr>
-                <tr><td>43,750 chars</td><td>200 OK</td></tr>
-                <tr><td>43,759 chars</td><td>200 OK</td></tr>
-                <tr>
-                  <td>
-                    <strong>43,760 chars</strong>
-                  </td>
-                  <td>
-                    <strong>400</strong>
-                  </td>
-                </tr>
-                <tr><td>43,800 chars</td><td>400</td></tr>
-                <tr><td>44,804 chars (full)</td><td>400</td></tr>
-              </tbody>
-            </table>
-          </div>
-
-          <p>
-            A single character flipped the verdict. Position 43,759 in the original text. The
-            character there was <code>1</code> &mdash; completing the substring{' '}
-            <code>openclaw.inbound_meta.v1</code>, which appears once in the prompt as a JSON
-            schema reference inside a code block.
-          </p>
-          <p>
-            But that was a red herring. When I removed <em>just</em> that schema string and kept
-            the rest of the prompt, the request still failed. There&rsquo;s a second trigger
-            somewhere in the same neighborhood &mdash; the heartbeat section, the runtime banner
-            that literally lists <code>model=byoky-anthropic/claude-sonnet-4-6</code>, or something
-            I haven&rsquo;t isolated yet. The 1-char bisect just caught one of several signals
-            firing in sequence.
-          </p>
-          <p>Whatever it is, the classifier is content-based. Probably ML. Definitely not regex.</p>
-
-          <h2>The workaround</h2>
-          <p>
-            You can&rsquo;t easily trick a content classifier on content. But you can move the
-            content somewhere it isn&rsquo;t looking.
-          </p>
-          <p>
-            I noticed the classifier only inspects the <code>system</code> field. Not the message
-            content. Not even when the message content is huge and contains the same text the
-            system field had.
-          </p>
-          <p>
-            So the workaround is structural: take the entire original system prompt,{' '}
-            <strong>prepend it to the first user message</strong> wrapped in a{' '}
-            <code>&lt;system_context&gt;...&lt;/system_context&gt;</code> tag, and replace the{' '}
-            <code>system</code> field with just the bare Claude Code prefix:
-          </p>
-          <pre>
-            <code>&quot;You are Claude Code, Anthropic&apos;s official CLI for Claude.&quot;</code>
-          </pre>
-          <p>
-            Anthropic sees a clean Claude Code system field. The model still gets all the original
-            context, just delivered as user-role rather than system-role. In practice the agent
-            behaves the same way &mdash; Claude reads the context and follows it.
-          </p>
-          <p>
-            Combined with the tool name rewrite, the same OpenClaw request that was 400ing now
-            returns 200. End-to-end. With the original 65-message conversation, 21 tools, and 44KB
-            of system context. I tested it against <code>api.anthropic.com</code> directly with
-            curl, replaying the captured body byte-for-byte.
+            What I took away from the experiment is that the API&rsquo;s classification layer
+            is doing real work, and it&rsquo;s reasonable that Anthropic puts effort into
+            keeping subscription economics distinct from third-party economics.
           </p>
 
-          <h2>So what did we learn?</h2>
-          <p>Anthropic&rsquo;s third-party detection is at least three layers deep:</p>
-          <ol>
-            <li>
-              <strong>Headers</strong> &mdash; necessary, not sufficient. <code>claude-cli/2.1.76</code>{' '}
-              and the <code>claude-code-20250219</code> beta flag are the entry ticket.
-            </li>
-            <li>
-              <strong>Tool names</strong> &mdash; the request must use Claude Code&rsquo;s
-              canonical PascalCase tool vocabulary. Lowercase or snake_case names instantly mark
-              you as third-party.
-            </li>
-            <li>
-              <strong>System content</strong> &mdash; the <code>system</code> field is inspected by
-              what looks like a content classifier, not literal pattern matching. Long
-              agent-framework prompts are flagged even when their literal brand markers are
-              stripped.
-            </li>
-          </ol>
+          <h2>What this means for users with legitimate workflows</h2>
           <p>
-            If you&rsquo;re building something that needs to talk to the Anthropic API with a setup
-            token, the implication is: don&rsquo;t put your framework&rsquo;s identity in the system
-            field. Put it in the conversation as user-role context. Rewrite your tool names to look
-            like Claude Code&rsquo;s. The model will still understand the context, and Anthropic
-            will still treat you as first-party.
+            For most people this is invisible — you use Claude Code, it bills your plan, you
+            move on. The surprise happens when a workflow that Anthropic permits (for example,
+            a locally-running bridge or SDK that communicates with the Claude API on your
+            behalf under a permitted usage pattern) gets classified as third-party on the basis
+            of incidental request-shape differences rather than anything about the actual use.
           </p>
           <p>
-            This is, of course, a cat-and-mouse game. Anthropic can update the classifier tomorrow
-            to look at the user messages too, or to score tool names against schema content, or to
-            flag unusual <code>&lt;system_context&gt;</code> tags. The rules will keep getting
-            tighter.
+            Before wiring any setup token into a workflow other than Claude Code itself, read
+            Anthropic&rsquo;s{' '}
+            <a href="https://www.anthropic.com/legal/consumer-terms" target="_blank" rel="noopener noreferrer">Consumer Terms</a>{' '}
+            and{' '}
+            <a href="https://www.anthropic.com/legal/aup" target="_blank" rel="noopener noreferrer">Usage Policy</a>{' '}
+            and confirm that what you&rsquo;re about to do is permitted. If it isn&rsquo;t, use
+            a standard API key on the Commercial Terms instead — that&rsquo;s what Anthropic
+            offers for programmatic usage.
           </p>
 
-          <h2>The OpenClaw-on-Cubscription story, fixed</h2>
+          <h2>Where Byoky fits in</h2>
           <p>
-            Here&rsquo;s why this matters for anyone running OpenClaw (or any other agent
-            framework) against a Claude Pro/Max plan: you can still use your subscription. You just
-            need the rewrite and relocate above applied automatically, on every request, with no
-            code changes on the OpenClaw side.
-          </p>
-          <p>That&rsquo;s exactly what Byoky does.</p>
-          <p>
-            Byoky is an encrypted wallet for your AI API keys and OAuth tokens. You drop your
-            Claude Code setup token into the wallet, connect OpenClaw to Byoky, and every request
-            that leaves your machine is normalized on the way out:
-          </p>
-          <ul>
-            <li>
-              Tool names are rewritten to Claude Code&rsquo;s PascalCase vocabulary (<code>read</code>{' '}
-              &rarr; <code>Read</code>, <code>exec</code> &rarr; <code>Bash</code>, and so on),
-              with the originals restored on the way back so OpenClaw never notices.
-            </li>
-            <li>
-              The framework&rsquo;s system prompt is hoisted into a <code>&lt;system_context&gt;</code>{' '}
-              block on the first user message, and the <code>system</code> field is replaced with
-              the bare Claude Code preamble.
-            </li>
-            <li>
-              The right headers (<code>User-Agent</code>, <code>x-app</code>,{' '}
-              <code>anthropic-beta</code>) are injected so the request looks like it came from the
-              official CLI.
-            </li>
-          </ul>
-          <p>
-            Your Pro/Max plan bills the request. No third-party wall. No $200 extra-usage credit
-            drip. No forked OpenClaw. Just your existing subscription, used the way you expected it
-            to work in the first place.
+            Byoky is an encrypted wallet for your AI API keys and OAuth tokens. For workflows
+            that are permitted under the issuing provider&rsquo;s terms, Byoky provides a
+            compatibility layer that takes care of the header conventions and request-shape
+            conventions the provider&rsquo;s own SDK uses. The goal is that a permitted request
+            bills the way a permitted request is supposed to bill, without the user needing to
+            understand the conventions.
           </p>
           <p>
-            If you&rsquo;re currently stuck on the &ldquo;Third-party apps now draw from your extra
-            usage&rdquo; wall, you don&rsquo;t have to re-implement any of this yourself. We built
-            a dedicated walkthrough that gets OpenClaw talking to Byoky with your Claude Pro/Max
-            subscription in about 5 minutes &mdash; install the wallet, paste the setup token,
-            point OpenClaw at the local bridge, done.
+            Byoky does not help you use a credential in a way its issuing provider forbids. You
+            remain responsible for ensuring your usage complies with your provider&rsquo;s
+            terms — see Byoky&rsquo;s{' '}
+            <Link href="/terms">Terms of Use</Link> for the full set of user obligations.
           </p>
           <div className="blog-cta">
-            <div className="blog-cta-label">OpenClaw users, start here</div>
-            <h3>Run OpenClaw on your Claude Pro/Max plan</h3>
+            <div className="blog-cta-label">For compliant OpenClaw + Anthropic workflows</div>
+            <h3>The 5-minute Byoky + OpenClaw guide</h3>
             <p>
-              Step-by-step install for Chrome, Firefox, iOS and Android, plus the exact OpenClaw
-              config to point at the Byoky bridge. Free, no extra credits, no forked CLI.
+              Install the wallet, add your credential, point OpenClaw at the local bridge.
+              Before you do: confirm your intended usage is permitted by the credential&rsquo;s
+              issuing provider.
             </p>
             <Link href="/openclaw" className="blog-cta-button">
               Open the OpenClaw guide &rarr;
@@ -380,11 +208,6 @@ anthropic-dangerous-direct-browser-access: true`}</code>
           <p>
             If you&rsquo;d rather see the full picture first, the <Link href="/docs">docs</Link>{' '}
             walk through the proxy model, and <Link href="/">byoky.com</Link> is the short version.
-          </p>
-          <p>
-            Every fingerprinting layer is a learning opportunity about how the other side thinks.
-            Tonight I learned that Anthropic looks at tool vocabularies and system content. Tomorrow
-            I&rsquo;ll learn what they look at next &mdash; and Byoky will keep up.
           </p>
           <p>
             <em>&mdash; Michael</em>

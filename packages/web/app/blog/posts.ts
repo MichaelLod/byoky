@@ -30,18 +30,18 @@ export const posts: BlogPostMeta[] = [
   },
   {
     slug: 'anthropic-claude-code-fingerprint',
-    title: "I Spent an Evening Bisecting Anthropic's Claude Code Fingerprint",
+    title: 'Why Claude setup-token requests can route to extra-usage billing',
     description:
-      "Setup tokens are supposed to bill Pro/Max plans. So why does Anthropic reject the same token from OpenClaw with a 'third-party app' billing wall? I went looking, byte by byte — and wired the fix into Byoky so you don't have to.",
+      "A technical note on how Anthropic's API distinguishes Claude Code traffic from other clients — and how Byoky handles the compatibility layer so requests from supported workflows keep billing against your plan as intended.",
     date: '2026-04-08',
-    readTime: '6 min read',
-    tags: ['claude-code', 'anthropic', 'openclaw', 'reverse-engineering'],
+    readTime: '5 min read',
+    tags: ['claude-code', 'anthropic', 'openclaw', 'api-behavior'],
     author: 'Michael Lodzik',
     image: '/openclaw-og.png',
-    imageAlt: 'OpenClaw — your personal AI assistant, running on your own devices',
-    ogTitle: "Anthropic fingerprints OpenClaw. Here's how to stay on your Pro/Max plan.",
+    imageAlt: 'Byoky compatibility layer for Claude subscription workflows',
+    ogTitle: 'Claude setup tokens and the extra-usage routing surprise',
     ogDescription:
-      "A byte-by-byte bisect of Anthropic's third-party detection — three layers deep — and the 5-minute Byoky setup that makes OpenClaw look first-party again. No fork. No extra credits. Your existing Claude subscription.",
+      "A technical note on why the same Anthropic setup token can route to plan billing from one client and to extra-usage billing from another — and how Byoky's compatibility layer fits in.",
   },
 ];
 
