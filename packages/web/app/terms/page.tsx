@@ -25,6 +25,36 @@ export default function Terms() {
         </p>
       </Section>
 
+      <Section title="Eligibility">
+        <p>
+          You must be at least 18 years old, or the age of majority in your jurisdiction,
+          whichever is greater, to use the Service. By using the Service you represent that you
+          meet this requirement and have the legal capacity to enter into these Terms.
+        </p>
+      </Section>
+
+      <Section title="Export controls and sanctions">
+        <p>
+          The Service routes requests to LLM providers that are primarily based in the United
+          States and other jurisdictions with export-control rules. You represent that you are
+          not located in, under the control of, or a national or resident of any country or
+          region subject to comprehensive U.S., EU, or UN sanctions, and that you are not on any
+          restricted-party, denied-persons, or specially-designated-nationals list. You agree
+          not to use the Service to export, re-export, or transfer any technology or content in
+          violation of applicable export-control or sanctions law.
+        </p>
+      </Section>
+
+      <Section title="Beta and experimental features">
+        <p>
+          Certain parts of the Service — currently including the Vault sync, gifting, alias
+          groups, and any feature explicitly labelled &ldquo;beta&rdquo; or
+          &ldquo;experimental&rdquo; — are under active development. They may change,
+          regress, or be removed without notice. They are provided for testing and feedback and
+          should not be relied on for production use without additional safeguards on your side.
+        </p>
+      </Section>
+
       <Section title="What Byoky is">
         <p>
           Byoky is an open-source bring-your-own-key (BYOK) wallet for LLM API keys. You supply
@@ -134,6 +164,39 @@ export default function Terms() {
         </p>
       </Section>
 
+      <Section title="Fair use of the hosted Vault">
+        <p>
+          The hosted Vault at vault.byoky.com is offered free of charge to individual users for
+          personal and small-team use. To keep it available for everyone we may apply rate
+          limits, throttle abusive traffic, cap the number of active sessions, credentials, or
+          gifts per account, and suspend accounts whose traffic pattern is inconsistent with
+          normal wallet use (for example, sustained automated proxy traffic unrelated to an
+          interactive app). If you expect heavy or commercial traffic, self-host the open-source
+          Vault so you can size it to your own needs.
+        </p>
+      </Section>
+
+      <Section title="Indemnification">
+        <p>
+          You agree to defend, indemnify, and hold harmless Byoky, its maintainers, and
+          contributors from and against any claims, liabilities, damages, losses, and expenses
+          (including reasonable legal fees) arising out of or in any way connected with: (a)
+          your use of or access to the Service; (b) the API keys and OAuth credentials you add,
+          use, or share through the Service, including gifts you create; (c) your violation of
+          these Terms or of any law or third-party right; or (d) any content you transmit
+          through the Service.
+        </p>
+      </Section>
+
+      <Section title="Feedback">
+        <p>
+          If you send us suggestions, bug reports, feature requests, or other feedback about
+          the Service (for example, by opening a GitHub issue or pull request), you grant us a
+          worldwide, royalty-free, perpetual, irrevocable license to use and incorporate that
+          feedback into the Service and our open-source projects without obligation to you.
+        </p>
+      </Section>
+
       <Section title="Service availability">
         <p>
           The Vault is provided on a best-effort basis with no uptime guarantee. We may modify,
@@ -166,6 +229,18 @@ export default function Terms() {
           any indirect, incidental, special, consequential, or punitive damages, including loss
           of data, loss of API credits, loss of profits, or charges incurred with third-party
           LLM providers, arising from your use of the Service.
+        </p>
+      </Section>
+
+      <Section title="Severability and entire agreement">
+        <p>
+          If any provision of these Terms is held to be unenforceable or invalid, that
+          provision will be limited or eliminated to the minimum extent necessary and the
+          remaining provisions will remain in full force and effect. These Terms, together with
+          the Privacy Policy, constitute the entire agreement between you and Byoky regarding
+          the Service and supersede any prior agreements on the same subject matter. You may
+          not assign these Terms without our prior written consent; we may assign them in
+          connection with a merger, acquisition, or sale of assets.
         </p>
       </Section>
 
