@@ -64,9 +64,10 @@ export default function Terms() {
           devices with end-to-end encryption.
         </p>
         <p>
-          Byoky is not an LLM provider. We do not sell inference, tokens, or credits. All
-          billing for LLM usage happens directly between you and the provider whose key you
-          supply.
+          Byoky is not an LLM provider. We do not sell, resell, broker, or lease access to any
+          LLM provider&apos;s API or subscription. Byoky is a technical forwarding tool that
+          acts on your instructions and on your credentials. All billing for LLM usage happens
+          directly between you and the provider whose key you supply.
         </p>
       </Section>
 
@@ -85,6 +86,14 @@ export default function Terms() {
             You must not share your account credentials or use someone else&apos;s keys without
             their permission.
           </li>
+          <li>
+            You must not add to Byoky any credential whose issuing provider&apos;s terms prohibit
+            use of that credential through third-party software, including (without limitation)
+            OAuth tokens or session tokens obtained from consumer subscription plans such as
+            Claude Free / Pro / Max, ChatGPT Free / Plus / Pro, or similar plans where the
+            provider&apos;s terms restrict use to its official clients. You are solely
+            responsible for knowing whether a given credential is eligible.
+          </li>
         </ul>
       </Section>
 
@@ -96,7 +105,7 @@ export default function Terms() {
           <li>Attempt to reverse, bypass, or interfere with the encryption, authentication, or rate limits of the Vault</li>
           <li>Attempt to access accounts, credentials, or data belonging to other users</li>
           <li>Use the Service to attack, probe, or disrupt Byoky or any third-party system</li>
-          <li>Resell or rebrand the Vault service as a commercial product (you are free to self-host the open-source code under the MIT license)</li>
+          <li>Resell, rebrand, broker, or lease the hosted Vault or any LLM-provider access obtained through it as a commercial product</li>
         </ul>
       </Section>
 
@@ -116,9 +125,14 @@ export default function Terms() {
             within the token budget you granted.
           </li>
           <li>
-            <strong>You must have the right to share it.</strong> Only gift keys that you own
-            or are authorized to redistribute. Do not use gifts to circumvent a provider&apos;s
-            terms, quotas, or sharing restrictions.
+            <strong>You must have the right to share it.</strong> You represent and warrant
+            that the key you are gifting is yours to share and that permitting the recipient to
+            consume tokens against it is not prohibited by the issuing provider&apos;s terms,
+            usage policy, account-sharing policy, or any other applicable agreement between you
+            and that provider. Many providers — including Anthropic, OpenAI, Google, xAI,
+            Mistral, and Groq — restrict or forbid sharing API keys or letting other persons
+            use your account. It is your responsibility to know whether your provider permits
+            what you are doing.
           </li>
           <li>
             <strong>You control the limits.</strong> Each gift carries a token budget and
@@ -127,11 +141,13 @@ export default function Terms() {
             for upstream provider actions (rate limits, bans, billing disputes).
           </li>
           <li>
-            <strong>No monetization through Byoky.</strong> Gifting through the hosted Vault is
-            free and is intended for sharing with friends, teammates, or communities. You may
-            not resell gift access for money or use the hosted Vault as a commercial gift-card
-            platform. If you want to build a paid product on top, self-host under the MIT
-            license.
+            <strong>No resale or commercial gifting.</strong> Gifting is intended for personal,
+            team, and community sharing. You may not use gifts — whether through the hosted
+            Vault or a self-hosted deployment — to resell, lease, broker, or otherwise
+            monetize third-party LLM API access. Self-hosting Byoky under the MIT license does
+            not exempt you from the upstream provider&apos;s terms; any commercial offering
+            built on Byoky must independently comply with each provider&apos;s commercial-use
+            policy and obtain any permissions that policy requires.
           </li>
           <li>
             <strong>Recipient responsibility.</strong> When you accept a gift, you agree to use
@@ -149,10 +165,39 @@ export default function Terms() {
 
       <Section title="Third-party providers">
         <p>
-          When you use Byoky to call an LLM provider, your prompts, completions, and any other
-          data flow to that provider under its own terms of service and privacy policy. Byoky is
-          not a party to that relationship and is not responsible for provider behavior,
-          availability, billing, or content moderation decisions.
+          When you use Byoky to call an LLM provider (for example Anthropic, OpenAI, Google,
+          xAI, Mistral, DeepSeek, Groq, or any other provider you configure), your prompts,
+          completions, and any other data flow to that provider under its own terms of service,
+          usage policy, and privacy policy. Byoky is not a party to that relationship and is
+          not responsible for provider behavior, availability, billing, or content-moderation
+          decisions.
+        </p>
+        <p>
+          <strong>You agree that you will comply with all applicable terms, usage policies,
+          acceptable-use policies, and documentation of each LLM provider whose credentials you
+          use with the Service.</strong> Provider terms change over time and you are solely
+          responsible for monitoring those updates and for ensuring that your use of the Service
+          — including any keys you add, any gifts you create, and any application you build on
+          the SDK — remains in compliance with them.
+        </p>
+        <p>
+          We may add, remove, restrict, throttle, or disable support for any individual LLM
+          provider at any time and without prior notice, including in response to a request or
+          notice from that provider, a change in that provider&apos;s terms, or a good-faith
+          determination that continued support exposes Byoky or its users to legal risk.
+        </p>
+      </Section>
+
+      <Section title="Trademarks and no affiliation">
+        <p>
+          &ldquo;Anthropic,&rdquo; &ldquo;Claude,&rdquo; &ldquo;OpenAI,&rdquo;
+          &ldquo;ChatGPT,&rdquo; &ldquo;Google,&rdquo; &ldquo;Gemini,&rdquo; &ldquo;xAI,&rdquo;
+          &ldquo;Grok,&rdquo; &ldquo;Mistral,&rdquo; &ldquo;DeepSeek,&rdquo; &ldquo;Groq,&rdquo;
+          and other product and company names used in Byoky&apos;s documentation or interface
+          are trademarks of their respective owners. Byoky is not affiliated with, endorsed by,
+          sponsored by, or certified by any of these providers. Their names are used solely to
+          identify the services with which Byoky is interoperable, under the nominative-fair-use
+          doctrine.
         </p>
       </Section>
 

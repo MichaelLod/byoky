@@ -257,20 +257,21 @@ function ZeroCost() {
         <FadeIn>
           <h2 className="zero-cost-heading">
             Build AI apps.<br />
-            <span className="hero-gradient">Pay nothing for AI.</span>
+            <span className="hero-gradient">Your users bring the keys.</span>
           </h2>
           <p className="zero-cost-body">
             Stop worrying about API bills killing your project.
             Your users connect their own AI keys through Byoky — you
             get the full power of Claude, GPT-4, Gemini, and 12 more
-            providers without spending a cent on infrastructure.
+            providers without spending a cent on infrastructure. Users
+            pay their chosen provider directly.
           </p>
         </FadeIn>
         <div className="zero-cost-grid">
           <FadeIn delay={0.1}>
             <div className="zero-cost-card">
               <span className="zero-cost-stat">$0</span>
-              <span className="zero-cost-label">your AI cost — forever</span>
+              <span className="zero-cost-label">your infrastructure cost — forever</span>
             </div>
           </FadeIn>
           <FadeIn delay={0.2}>
@@ -326,12 +327,12 @@ function OpenClawCTA() {
                   <img src="https://unpkg.com/@lobehub/icons-static-svg@latest/icons/gemini.svg" alt="" width={24} height={24} />
                   Gemini
                 </span>{' '}
-                in OpenClaw — for free.
+                in OpenClaw.
               </h2>
               <p>
-                Get a free token gift from the token pool, or plug in your
-                existing <strong>Claude Pro/Max</strong> subscription. Either way,
-                zero API credits, zero card on file — just a 5-minute setup.
+                Use an existing <strong>Claude Pro/Max</strong> subscription, or
+                accept a gifted token budget from someone who&apos;s sharing theirs.
+                Either way, no new API account needed — just a 5-minute setup.
               </p>
               <div className="openclaw-cta-actions">
                 <a href="/openclaw" className="btn btn-primary">
