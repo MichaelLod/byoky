@@ -69,6 +69,14 @@ export default function Privacy() {
             <strong>Groups and sessions.</strong> If you create alias groups or authorize apps,
             we store those associations so the same policy applies across your devices.
           </li>
+          <li>
+            <strong>Gifts you create.</strong> When you share one of your keys as a gift, we
+            store the encrypted key, the relay URL used to proxy requests, the token budget and
+            expiration you set, and a running count of tokens consumed. Gifted keys are
+            encrypted before storage and are revealed in plaintext only transiently when the
+            relay forwards a request to the upstream provider. You can revoke or delete any
+            gift from the extension at any time; expired gifts are removed automatically.
+          </li>
         </ul>
         <p>
           You can delete your vault account at any time from Settings. Deleting your account
