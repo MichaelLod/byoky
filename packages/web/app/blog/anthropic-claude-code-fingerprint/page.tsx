@@ -66,20 +66,22 @@ export default function Post() {
 
         <div className="blog-post-body">
           <p>
-            I have a Claude Pro subscription. It costs me €20 a month. In exchange I get a
-            setup token — <code>claude setup-token</code>, it prints something that starts with{' '}
-            <code>sk-ant-oat01-</code> — and Anthropic&rsquo;s docs say the token is billed
-            against my existing plan.
+            If you have a Claude.ai Pro or Max subscription, you can run{' '}
+            <code>claude setup-token</code> and get a token that looks like{' '}
+            <code>sk-ant-oat01-...</code>. Anthropic&rsquo;s docs call it a setup token.
+            It&rsquo;s an OAuth access token, scoped to the Claude Code CLI, billed against
+            your existing plan. No extra usage charges. No &ldquo;what&rsquo;s my burn rate
+            this month&rdquo; anxiety.
           </p>
 
           <p>
-            So on a Tuesday evening I did the obvious thing: I took my setup token, pointed{' '}
+            So I tried to use it from{' '}
             <a href="https://openclaw.ai" target="_blank" rel="noopener noreferrer">OpenClaw</a>{' '}
-            at <code>api.anthropic.com</code>, and hit send. Same token. Same endpoint. Same
-            model. Different agent framework driving it.
+            instead of Claude Code itself. Same token, same Anthropic API endpoint, same model.
+            Different agent framework on top.
           </p>
 
-          <p>Anthropic&rsquo;s reply:</p>
+          <p>Anthropic said no.</p>
 
           <pre>
             <code>{`HTTP 400 invalid_request_error
@@ -89,37 +91,39 @@ claude.ai/settings/usage and keep going."`}</code>
           </pre>
 
           <p>
-            A $200 credit. To use my own token. On my own plan. Sent from a different binary.
+            The token authenticates fine. But Anthropic somehow knows this isn&rsquo;t Claude
+            Code, and routes the request to a separate &ldquo;extra usage&rdquo; credit pool.
           </p>
 
           <p>
-            Which is, to be clear, entirely within Anthropic&rsquo;s rights — they get to decide
-            what their subscription covers and what lives in a separate billing bucket. Honestly
-            the split makes sense as a business: running an agent loop 24/7 looks very different
-            from a human typing into Claude Code. But it still felt off that a valid token
-            routed to two totally different worlds based on something other than the token
-            itself. So I spent the evening finding out which something.
+            I wanted to know exactly <em>how</em> they know. So I spent an evening bisecting it.
           </p>
 
-          <h2>Headers get you in the door. They don&rsquo;t pay the bill.</h2>
+          <h2>The obvious things don&rsquo;t work</h2>
           <p>
-            First thing anyone tries: match Claude Code&rsquo;s HTTP headers. Set{' '}
-            <code>User-Agent</code>, the <code>anthropic-beta</code> flag, the{' '}
-            <code>x-app</code> tag — the whole observable surface a network tap would see.
+            The first thing anyone tries is matching Claude Code&rsquo;s HTTP headers. Claude
+            Code&rsquo;s CLI sends:
           </p>
+          <pre>
+            <code>{`User-Agent: claude-cli/2.1.76
+x-app: cli
+anthropic-beta: claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14
+anthropic-dangerous-direct-browser-access: true`}</code>
+          </pre>
           <p>
-            Headers alone weren&rsquo;t enough. The same headers on top of OpenClaw&rsquo;s
-            request body still got the third-party routing. Which told me Anthropic is reading
-            further into the request than the envelope. Off to the body.
+            Set those headers, send the same body Claude Code would send &rarr; success. Set
+            them and send OpenClaw&rsquo;s body &rarr; 400, third-party billing wall.
           </p>
+          <p>So it&rsquo;s not just headers. Anthropic is also looking at the request body.</p>
 
-          <h2>Bisecting 115 kilobytes of JSON</h2>
+          <h2>Bisecting the body</h2>
           <p>
-            OpenClaw&rsquo;s request body is a beast — 21 tools, 57 messages of conversation
+            OpenClaw&rsquo;s request body is dense &mdash; 21 tools, 57 messages of conversation
             history, a 44KB system prompt, plus <code>thinking</code> and{' '}
-            <code>output_config</code> for good measure. Plenty of places for a signal to hide.
+            <code>output_config</code> fields. Total payload around 115KB. Plenty of places for
+            a signal to hide.
           </p>
-          <p>I started pulling fields, one at a time, binary-search style:</p>
+          <p>I started removing fields one at a time:</p>
 
           <div className="blog-post-table-wrap">
             <table>
@@ -155,116 +159,145 @@ claude.ai/settings/usage and keep going."`}</code>
           </div>
 
           <p>
-            Two independent signals. <code>tools</code> on its own could flunk the check.{' '}
-            <code>system</code> on its own could flunk the check. Anthropic isn&rsquo;t
-            fingerprinting one thing — they&rsquo;re fingerprinting several, and any one of
-            them misfires is enough.
+            Two independent triggers. Either the tools array or the system prompt was enough
+            to flunk the check on its own. Anthropic isn&rsquo;t fingerprinting one thing —
+            they&rsquo;re fingerprinting several, and any one of them misfiring is enough.
           </p>
 
           <h2>The tools array has a vocabulary</h2>
           <p>
-            Claude Code&rsquo;s tools read like Emacs commands: <code>Read</code>,{' '}
-            <code>Edit</code>, <code>Write</code>, <code>Bash</code>, <code>Grep</code>,{' '}
-            <code>Task</code>, <code>TodoWrite</code>. PascalCase. Short. A specific dialect.
+            The tools array was the easier one to diagnose. OpenClaw&rsquo;s tools are named{' '}
+            <code>read</code>, <code>edit</code>, <code>write</code>, <code>exec</code>,{' '}
+            <code>process</code>, <code>cron</code>, <code>sessions_spawn</code>,{' '}
+            <code>web_search</code>, <code>memory_get</code>, &hellip; Lowercase, snake_case,
+            very framework-specific.
           </p>
           <p>
-            Most third-party agent frameworks don&rsquo;t talk that way. They go lowercase,
-            snake_case, descriptive — <code>read_file</code>, <code>run_shell_command</code>,{' '}
-            <code>search_codebase</code>. It&rsquo;s a perfectly reasonable style; it just
-            isn&rsquo;t Anthropic&rsquo;s style.
+            Claude Code&rsquo;s tool list is something else: <code>Read</code>, <code>Edit</code>,{' '}
+            <code>Write</code>, <code>Bash</code>, <code>Glob</code>, <code>Grep</code>,{' '}
+            <code>Task</code>, <code>TodoWrite</code>, <code>WebFetch</code>,{' '}
+            <code>WebSearch</code>, <code>NotebookEdit</code>. PascalCase. A specific
+            vocabulary.
           </p>
           <p>
-            On the traffic I tested, the naming convention of the <code>tools</code> array
-            alone was one of the signals the API reacted to. Not the descriptions, not the
-            schemas — the names themselves, as a set. A linguistic tell, effectively.
+            On the traffic I tested, the naming style of the tools array was one of the signals
+            the API reacted to — not the descriptions, not the schemas, just the names as a
+            set. A linguistic tell. Claude Code&rsquo;s tool vocabulary is small, stylistically
+            distinctive, and apparently part of the billing decision.
           </p>
 
-          <h2>The system field is read by something that isn&rsquo;t grep</h2>
+          <h2>The system prompt signal</h2>
           <p>
-            The <code>system</code> field was the weirder one. My first bet was the obvious
-            one: Anthropic is grepping for the word &ldquo;OpenClaw.&rdquo; OpenClaw&rsquo;s
-            prompt mentions its own name over a hundred times. So I did a find-and-replace,
-            swapped every &ldquo;OpenClaw&rdquo; for &ldquo;Claude,&rdquo; and hit send.
+            The system prompt was the weirder one. OpenClaw&rsquo;s is 44KB of agent persona,
+            runtime context, memory rules, heartbeat protocols, and 100+ literal mentions of
+            &ldquo;OpenClaw&rdquo; or &ldquo;openclaw.&rdquo; My first hypothesis was the
+            obvious one: Anthropic is grepping for the brand name.
           </p>
-          <p>Still 400.</p>
           <p>
-            So not string matching. Something more like a classifier, reacting to the shape
-            and register of an agent-framework system prompt even with the brand-name
-            evidence scrubbed. The truncation curve I got back was oddly sharp — the verdict
-            flipped between two prompt lengths within a handful of characters of each other —
-            but chasing the exact trigger by character count turned out to be a red herring:
-            there were several signals firing in the same neighborhood, not one tripwire.
+            I tried it. Replaced every case-insensitive occurrence of &ldquo;openclaw&rdquo;
+            with &ldquo;claude&rdquo; in the system text. Same request otherwise.{' '}
+            <strong>Still 400.</strong>
+          </p>
+          <p>
+            So it&rsquo;s not literal string matching. The classifier is looking at{' '}
+            <em>content patterns</em>, not specific tokens.
+          </p>
+          <p>
+            I went back to bisecting, truncating the system prompt at progressively smaller
+            lengths. The verdict flipped sharply between two prompt lengths a handful of
+            characters apart, which was tempting to chase by exact character position — but
+            that turned out to be a red herring. There are several signals firing in the same
+            neighborhood, not one clean tripwire. Whatever the exact machinery is, the
+            classifier is content-based. Probably ML. Definitely not regex.
           </p>
           <p>
             I&rsquo;ll stop short of publishing the exact boundaries I found. The point
-            isn&rsquo;t to draw a map for people to route around. The point is that
-            Anthropic&rsquo;s classifier is doing real work, and it&rsquo;s clearly the
-            product of someone who thought carefully about how to separate first-party
-            from third-party traffic without relying on string matches that are trivially
-            defeated.
+            isn&rsquo;t to draw a map. The point is that Anthropic&rsquo;s classifier is
+            doing real work, it&rsquo;s clearly the product of someone who thought carefully
+            about the problem, and string matches that are trivially defeated were never going
+            to be it.
           </p>
 
-          <h2>Zooming out</h2>
+          <h2>So what did we learn?</h2>
+          <p>Anthropic&rsquo;s third-party detection is at least three layers deep:</p>
+          <ol>
+            <li>
+              <strong>Headers</strong> &mdash; necessary, not sufficient.{' '}
+              <code>claude-cli/2.1.76</code> and the <code>claude-code-20250219</code> beta flag
+              are the entry ticket.
+            </li>
+            <li>
+              <strong>Tool names</strong> &mdash; Claude Code&rsquo;s canonical PascalCase tool
+              vocabulary. Lowercase or snake_case names read as third-party.
+            </li>
+            <li>
+              <strong>System content</strong> &mdash; the <code>system</code> field is inspected
+              by what looks like a content classifier, not literal pattern matching. Long
+              agent-framework prompts are flagged even when brand markers are stripped.
+            </li>
+          </ol>
           <p>
-            This is the part where a different kind of blog post would tell you how to defeat
-            the classifier. I&rsquo;m not going to do that. For two reasons.
+            This is, of course, an arms race. Anthropic can update the classifier tomorrow. The
+            rules will keep getting tighter. Which is completely their prerogative — the bits
+            on the wire belong to the owner of the API.
+          </p>
+
+          <h2>Where that leaves you, and where Byoky fits in</h2>
+          <p>
+            If you&rsquo;re running OpenClaw (or any other agent framework) and hitting the
+            third-party billing wall against your Claude plan, there are two honest paths.
           </p>
           <p>
-            One: the more you pull on this thread, the more you&rsquo;re explicitly operating
-            against Anthropic&rsquo;s billing design. Anthropic has been clear — including in
-            their{' '}
+            <strong>The boring, supported one:</strong> get a standard Anthropic API key under
+            their Commercial Terms. Third-party software is explicitly allowed there. It bills
+            per-token rather than flat-rate, but nothing in this post is trying to talk you out
+            of that — it&rsquo;s the path Anthropic built for exactly this use case, and it
+            Just Works.
+          </p>
+          <p>
+            <strong>The other one</strong> is using your subscription through a wallet that
+            handles the SDK-shaped request conventions on your behalf. That&rsquo;s what Byoky
+            does. Byoky is an encrypted wallet for your AI keys and OAuth tokens; you drop your
+            credential in, connect OpenClaw to it, and the wallet proxies every request with the
+            compatibility layer applied so your supported workflows behave the way the
+            provider&rsquo;s own SDK would behave. It&rsquo;s a wallet, not a loophole — and
+            whether your specific usage is permitted by your specific provider&rsquo;s terms is
+            on you to check.
+          </p>
+          <p>
+            Before wiring any subscription token into any tool, read Anthropic&rsquo;s{' '}
             <a href="https://www.anthropic.com/legal/consumer-terms" target="_blank" rel="noopener noreferrer">Consumer Terms</a>{' '}
             and{' '}
-            <a href="https://www.anthropic.com/legal/aup" target="_blank" rel="noopener noreferrer">Usage Policy</a>{' '}
-            — that subscription tokens aren&rsquo;t meant to power arbitrary third-party
-            software. If your use case really needs to run inside an agent framework, the
-            product Anthropic offers for that is a normal API key on their Commercial Terms.
-            Getting angry at a billing wall doesn&rsquo;t change the terms of the deal you
-            signed.
-          </p>
-          <p>
-            Two: the interesting question isn&rsquo;t how to get around this particular
-            classifier. The interesting question is why the API ecosystem is starting to look
-            like anti-cheat software. Anthropic isn&rsquo;t the first and won&rsquo;t be the
-            last. OpenAI segments keys by product. Google splits paid and free in unusual
-            ways across regions. Everyone is figuring out, in public, where &ldquo;same token,
-            different client&rdquo; stops being the same thing.
-          </p>
-          <p>
-            As a user this means one thing: the token in your hand is less and less a universal
-            bearer instrument. It&rsquo;s a context-sensitive object, and its value depends on
-            what binary is holding it when it talks to the server.
-          </p>
-
-          <h2>Where Byoky fits in (and where it doesn&rsquo;t)</h2>
-          <p>
-            Byoky is a wallet for your own LLM keys. It stores them encrypted, proxies
-            requests, and for supported workflows it handles the SDK-shaped conventions
-            (headers, tool naming, request shape) so the billing behaves the way the provider
-            intends when the usage itself is permitted.
-          </p>
-          <p>
-            What Byoky won&rsquo;t do: help you use a credential in a way the issuing provider
-            forbids. If Anthropic&rsquo;s terms don&rsquo;t permit your plan&rsquo;s token in
-            your workflow, Byoky isn&rsquo;t a loophole — it&rsquo;s a wallet. Read Byoky&rsquo;s{' '}
-            <Link href="/terms">Terms of Use</Link> and the relevant provider&rsquo;s policy
-            before you wire anything up.
+            <a href="https://www.anthropic.com/legal/aup" target="_blank" rel="noopener noreferrer">Usage Policy</a>.
+            Byoky&rsquo;s own{' '}
+            <Link href="/terms">Terms of Use</Link>{' '}
+            are explicit that you remain responsible for complying with each provider&rsquo;s
+            rules. We&rsquo;ll make the wallet work; you decide whether the workflow is one you
+            have the right to run.
           </p>
           <div className="blog-cta">
-            <div className="blog-cta-label">For supported Anthropic workflows</div>
+            <div className="blog-cta-label">OpenClaw users, start here</div>
             <h3>The 5-minute Byoky + OpenClaw guide</h3>
             <p>
-              Install the wallet, add your credential, point OpenClaw at the local bridge —
-              once you&rsquo;ve confirmed your usage is permitted by the issuing provider.
+              Step-by-step install for Chrome, Firefox, iOS and Android, plus the exact OpenClaw
+              config to point at the Byoky bridge.
             </p>
             <Link href="/openclaw" className="blog-cta-button">
               Open the OpenClaw guide &rarr;
             </Link>
           </div>
           <p>
-            If you&rsquo;d rather see the big picture first, the <Link href="/docs">docs</Link>{' '}
-            walk through the proxy model, and <Link href="/">byoky.com</Link> is the short
-            version.
+            If you&rsquo;d rather see the full picture first, the{' '}
+            <Link href="/docs">docs</Link> walk through the proxy model, and{' '}
+            <Link href="/">byoky.com</Link> is the short version.
+          </p>
+          <p>
+            Every fingerprinting layer is a learning opportunity about how a provider thinks
+            about pricing. Tonight I learned Anthropic looks at tool vocabularies and system
+            content. The broader lesson is the one this whole ecosystem is stumbling into
+            together: a token used to be a bearer instrument, and now it&rsquo;s a
+            context-sensitive object whose value depends on which binary is holding it when it
+            hits the server.
           </p>
           <p>
             <em>&mdash; Michael 🇦🇹</em>

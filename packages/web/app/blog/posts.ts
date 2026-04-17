@@ -30,18 +30,18 @@ export const posts: BlogPostMeta[] = [
   },
   {
     slug: 'anthropic-claude-code-fingerprint',
-    title: 'The $200 surprise hiding in my Claude Pro subscription',
+    title: "I Spent an Evening Bisecting Anthropic's Claude Code Fingerprint",
     description:
-      "Same token. Same API. Same model. Different client — and suddenly my Pro plan stopped paying and a $200 credit drip showed up instead. I spent an evening finding out why.",
+      "Setup tokens are supposed to bill Pro/Max plans. So why does Anthropic reject the same token from OpenClaw with a 'third-party app' billing wall? I went looking, byte by byte.",
     date: '2026-04-08',
-    readTime: '5 min read',
-    tags: ['claude-code', 'anthropic', 'openclaw', 'api-behavior'],
+    readTime: '6 min read',
+    tags: ['claude-code', 'anthropic', 'openclaw', 'reverse-engineering'],
     author: 'Michael Lodzik',
     image: '/openclaw-og.png',
-    imageAlt: 'A Claude setup token routing differently between two clients',
-    ogTitle: 'Same token, two clients, one $200 surprise',
+    imageAlt: "Bisecting Anthropic's Claude Code detection signal",
+    ogTitle: "Anthropic fingerprints OpenClaw. Here's what that means for your Pro/Max plan.",
     ogDescription:
-      "Anthropic's API treats the same Claude setup token completely differently depending on who's calling. Here's the evening I spent figuring out which part of the request carries the signal.",
+      "A byte-by-byte bisect of Anthropic's third-party detection — three layers deep — what it's really looking at, and how Byoky fits in for users with supported workflows.",
   },
 ];
 
