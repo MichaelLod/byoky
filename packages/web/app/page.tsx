@@ -119,7 +119,7 @@ function Hero() {
           <div className="hero-trust-bar">
             <div className="hero-trust-item">
               <LinkIcon />
-              <span>15 Providers</span>
+              <span>13 Providers</span>
             </div>
             <div className="hero-trust-item">
               <CheckIcon />
@@ -262,7 +262,7 @@ function ZeroCost() {
           <p className="zero-cost-body">
             Stop worrying about API bills killing your project.
             Your users connect their own AI keys through Byoky — you
-            get the full power of Claude, GPT-4, Gemini, and 12 more
+            get the full power of Claude, GPT-4, Gemini, and 10 more
             providers without spending a cent on infrastructure. Users
             pay their chosen provider directly.
           </p>
@@ -276,7 +276,7 @@ function ZeroCost() {
           </FadeIn>
           <FadeIn delay={0.2}>
             <div className="zero-cost-card">
-              <AnimatedCounter value={15} />
+              <AnimatedCounter value={13} />
               <span className="zero-cost-label">AI providers supported</span>
             </div>
           </FadeIn>
@@ -354,7 +354,7 @@ function OpenClawCTA() {
 {'\n'}    --provider <span className="ts">byoky-anthropic</span>{'\n'}
 {'\n'}
 <span className="tv">{'✓'}</span> bridge running{'\n'}
-<span className="tv">{'✓'}</span> <span className="tt">15</span> providers available
+<span className="tv">{'✓'}</span> <span className="tt">13</span> providers available
               </pre>
             </div>
           </div>
@@ -473,7 +473,7 @@ function ForDevelopers() {
                     <h4>Native SDK compatibility</h4>
                     <p>
                       Works with official SDKs from Anthropic, OpenAI, Gemini,
-                      Mistral, and 11 more providers. Just swap in Byoky&apos;s fetch.
+                      Mistral, and 9 more providers. Just swap in Byoky&apos;s fetch.
                     </p>
                   </div>
                 </div>
@@ -660,10 +660,12 @@ function Security() {
               <div className="security-icon">
                 <CloudOffIcon />
               </div>
-              <h3>Local only</h3>
+              <h3>Local by default</h3>
               <p>
-                No cloud. No telemetry. No tracking. Everything is stored on
-                your device, encrypted behind your master password.
+                Your keys stay on your device, encrypted behind your master
+                password. Cloud sync is opt-in and end-to-end encrypted — our
+                server only ever sees ciphertext. No telemetry, no prompt or
+                response logging.
               </p>
             </div>
           </FadeIn>

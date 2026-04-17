@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 export const metadata: Metadata = {
   title: 'Run OpenClaw with Byoky — free, no API credits required',
   description:
-    'Use OpenClaw — the open-source AI agent CLI — with Claude, GPT, Gemini and 12 more providers. Pair it with a free Byoky token gift or your existing Claude Pro/Max subscription and run frontier models at zero extra cost.',
+    'Use OpenClaw — the open-source AI agent CLI — with Claude, GPT, Gemini and 10 more providers. Pair it with a free Byoky token gift or your existing Claude Pro/Max subscription and run frontier models at zero extra cost.',
   alternates: {
     canonical: '/openclaw',
   },
@@ -165,7 +165,7 @@ byoky-bridge install`}
         <Step
           n={4}
           title="Install the OpenClaw plugin"
-          subtitle="One npm package adds all 15 Byoky providers to OpenClaw."
+          subtitle="One npm package adds all 13 Byoky providers to OpenClaw."
         >
           <Code>{`npm install -g @byoky/openclaw-plugin`}</Code>
         </Step>
@@ -367,7 +367,7 @@ function Providers() {
   return (
     <section className="oc-section">
       <h2>Available providers</h2>
-      <p>The plugin registers all 15 Byoky providers with OpenClaw:</p>
+      <p>The plugin registers all 13 Byoky providers with OpenClaw:</p>
       <div className="oc-table">
         <div className="oc-table-head">
           <span>Provider</span>

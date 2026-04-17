@@ -28,7 +28,7 @@ export const metadata: Metadata = {
     template: '%s — Byoky',
   },
   description:
-    'Build AI apps with zero API costs. Your users connect their own keys through Byoky — encrypted locally, proxied securely. 15 providers, 2 lines to integrate. Open source.',
+    'Build AI apps with zero API costs. Your users connect their own keys through Byoky — encrypted locally, proxied securely. 13 providers, 2 lines to integrate. Open source.',
   keywords: [
     'AI API key wallet',
     'LLM API key manager',
@@ -61,7 +61,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'Byoky — Build AI apps. Your users bring the keys.',
     description:
-      'Build AI apps with zero API costs. Your users bring their own keys — encrypted locally, proxied securely. 15 providers, 2 lines to integrate.',
+      'Build AI apps with zero API costs. Your users bring their own keys — encrypted locally, proxied securely. 13 providers, 2 lines to integrate.',
     url: 'https://byoky.com',
     siteName: 'Byoky',
     type: 'website',
@@ -78,7 +78,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'Byoky — Build AI apps. Your users bring the keys.',
     description:
-      'Build AI apps with zero API costs. 15 providers, 2 lines to integrate. Your users bring their own keys — encrypted and proxied securely.',
+      'Build AI apps with zero API costs. 13 providers, 2 lines to integrate. Your users bring their own keys — encrypted and proxied securely.',
     images: ['/og-image.png'],
   },
 };
@@ -101,7 +101,7 @@ export default function RootLayout({
               applicationCategory: 'BrowserApplication',
               operatingSystem: 'Chrome, Firefox, Safari',
               description:
-                'Build AI apps with zero API costs. Your users bring their own keys — encrypted locally with AES-256-GCM, proxied securely. 15 providers, open source.',
+                'Build AI apps with zero API costs. Your users bring their own keys — encrypted locally with AES-256-GCM, proxied securely. 13 providers, open source.',
               url: 'https://byoky.com',
               offers: {
                 '@type': 'Offer',

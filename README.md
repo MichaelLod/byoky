@@ -225,7 +225,7 @@ Use your Byoky wallet as the key provider for [OpenClaw](https://openclaw.dev). 
 OpenClaw → HTTP → Bridge (localhost) → Native Messaging → Extension → LLM API
 ```
 
-All 15 providers are available through the plugin. Install the bridge, connect your wallet, and OpenClaw uses your Byoky credentials transparently. See the [OpenClaw plugin](packages/openclaw-plugin) for setup instructions.
+All 13 providers are available through the plugin. Install the bridge, connect your wallet, and OpenClaw uses your Byoky credentials transparently. See the [OpenClaw plugin](packages/openclaw-plugin) for setup instructions.
 
 **Setup tokens too.** Since v0.4.19, OpenClaw (and any other third-party agent framework) can use a Claude.ai setup token as the byoky-anthropic credential — not just a `sk-ant-api03-...` API key. The bridge transparently rewrites tool names and relocates the framework's system prompt out of the system field on the way out, then reverses tool names on the streaming response, so Anthropic's first-party detection accepts the request without breaking the agent's behavior.
 
@@ -250,7 +250,7 @@ No environment variables. No secrets management. No leaked `.env` files. Your ke
 | **Audit log** | Every request logged — app origin, provider, status, timestamp |
 | **Spending caps** | Token allowances per app — total and per-provider limits, enforced at the proxy |
 | **Token gifts** | Share access without sharing keys — relay-backed with budget enforcement, sender-side proxy |
-| **Local only** | No cloud. No telemetry. No tracking. Your device, your keys |
+| **Local by default** | Keys stay on your device. Cloud sync is opt-in and end-to-end encrypted — the server only sees ciphertext. No telemetry, no prompt/response logging |
 
 ## Supported Providers
 
