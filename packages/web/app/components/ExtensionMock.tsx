@@ -226,7 +226,7 @@ function ConnectPanel({ pressed }: { pressed: boolean }) {
       </div>
       <h3 className="mock-connect-title">Connect your Byoky wallet</h3>
       <p className="mock-connect-sub">
-        This demo uses your own keys to chat with Claude, GPT-4o, Gemini, and 12 more providers.
+        This demo uses your own keys to chat with Claude, GPT-4o, Gemini, and 10 more providers.
       </p>
       <button className={`mock-connect-btn ${pressed ? 'pressed' : ''}`} type="button" tabIndex={-1}>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

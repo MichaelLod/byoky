@@ -39,7 +39,7 @@ curl http://127.0.0.1:19280/health
 
 ## Available Providers
 
-The plugin registers all 15 Byoky providers with OpenClaw:
+The plugin registers all 13 Byoky providers with OpenClaw:
 
 | Provider | OpenClaw ID | Models |
 |----------|-------------|--------|

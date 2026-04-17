@@ -129,7 +129,7 @@ export function DemoApp() {
               <h2>Connect your Byoky wallet</h2>
               <p>
                 This demo uses your own API keys to chat with Claude, GPT-4o, Gemini,
-                and 12 more providers. Your keys never leave your device.
+                and 10 more providers. Your keys never leave your device.
               </p>
               <button className="btn btn-primary btn-lg" onClick={handleConnect}>
                 <WalletIcon />
