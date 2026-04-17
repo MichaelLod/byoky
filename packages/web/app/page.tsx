@@ -861,6 +861,8 @@ function Footer() {
             <a href="https://github.com/MichaelLod/byoky" target="_blank" rel="noopener noreferrer">GitHub</a>
             <a href="https://github.com/MichaelLod/byoky/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a>
             <a href="/blog">Blog</a>
+            <a href="/privacy">Privacy</a>
+            <a href="/terms">Terms</a>
           </div>
           <div className="footer-col">
             <span className="footer-col-title">Install</span>
