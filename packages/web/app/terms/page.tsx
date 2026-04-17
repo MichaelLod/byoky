@@ -232,6 +232,21 @@ export default function Terms() {
         </p>
       </Section>
 
+      <Section title="Governing law and venue">
+        <p>
+          These Terms and any dispute arising out of or in connection with them or the Service
+          are governed by the laws of the Republic of Austria, excluding its conflict-of-laws
+          rules and the United Nations Convention on Contracts for the International Sale of
+          Goods (CISG). The exclusive place of jurisdiction for all disputes is Vienna,
+          Austria, to the extent permitted by law.
+        </p>
+        <p>
+          If you use the Service as a consumer (Verbraucher) resident in the European Union,
+          nothing in this section deprives you of the protection afforded by the mandatory
+          consumer-protection laws of your country of residence.
+        </p>
+      </Section>
+
       <Section title="Severability and entire agreement">
         <p>
           If any provision of these Terms is held to be unenforceable or invalid, that
