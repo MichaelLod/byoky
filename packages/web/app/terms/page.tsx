@@ -70,6 +70,53 @@ export default function Terms() {
         </ul>
       </Section>
 
+      <Section title="Gifting API keys">
+        <p>
+          Byoky lets you share access to one of your own API keys with another person by
+          creating a &ldquo;gift&rdquo; — a shareable link backed by a token budget and an
+          expiration date. When the recipient uses the gift, requests are proxied through a
+          relay and counted against the budget you set. Your underlying key is never delivered
+          to the recipient in the clear; they only get metered access to it.
+        </p>
+        <p>When you create a gift you agree that:</p>
+        <ul>
+          <li>
+            <strong>It&apos;s your key, your bill.</strong> You remain fully responsible for any
+            charges the gifted key incurs with the upstream provider, including any usage
+            within the token budget you granted.
+          </li>
+          <li>
+            <strong>You must have the right to share it.</strong> Only gift keys that you own
+            or are authorized to redistribute. Do not use gifts to circumvent a provider&apos;s
+            terms, quotas, or sharing restrictions.
+          </li>
+          <li>
+            <strong>You control the limits.</strong> Each gift carries a token budget and
+            expiration. You can revoke a gift at any time, after which the relay will stop
+            serving requests for it. Byoky enforces the limits you set but is not responsible
+            for upstream provider actions (rate limits, bans, billing disputes).
+          </li>
+          <li>
+            <strong>No monetization through Byoky.</strong> Gifting through the hosted Vault is
+            free and is intended for sharing with friends, teammates, or communities. You may
+            not resell gift access for money or use the hosted Vault as a commercial gift-card
+            platform. If you want to build a paid product on top, self-host under the MIT
+            license.
+          </li>
+          <li>
+            <strong>Recipient responsibility.</strong> When you accept a gift, you agree to use
+            it only within the budget and time window provided, and to comply with the
+            upstream provider&apos;s terms. Abuse of a gift (e.g., scraping, illegal content,
+            probing the relay) is grounds for revocation of that gift and termination of your
+            account.
+          </li>
+          <li>
+            <strong>System limits.</strong> A single user may hold at most 50 active outgoing
+            gifts at any time. Expired gifts are removed automatically.
+          </li>
+        </ul>
+      </Section>
+
       <Section title="Third-party providers">
         <p>
           When you use Byoky to call an LLM provider, your prompts, completions, and any other
