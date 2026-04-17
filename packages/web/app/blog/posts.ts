@@ -30,18 +30,18 @@ export const posts: BlogPostMeta[] = [
   },
   {
     slug: 'anthropic-claude-code-fingerprint',
-    title: 'Why Claude setup-token requests can route to extra-usage billing',
+    title: 'The $200 surprise hiding in my Claude Pro subscription',
     description:
-      "A technical note on how Anthropic's API distinguishes Claude Code traffic from other clients — and how Byoky handles the compatibility layer so requests from supported workflows keep billing against your plan as intended.",
+      "Same token. Same API. Same model. Different client — and suddenly my Pro plan stopped paying and a $200 credit drip showed up instead. I spent an evening finding out why.",
     date: '2026-04-08',
     readTime: '5 min read',
     tags: ['claude-code', 'anthropic', 'openclaw', 'api-behavior'],
     author: 'Michael Lodzik',
     image: '/openclaw-og.png',
-    imageAlt: 'Byoky compatibility layer for Claude subscription workflows',
-    ogTitle: 'Claude setup tokens and the extra-usage routing surprise',
+    imageAlt: 'A Claude setup token routing differently between two clients',
+    ogTitle: 'Same token, two clients, one $200 surprise',
     ogDescription:
-      "A technical note on why the same Anthropic setup token can route to plan billing from one client and to extra-usage billing from another — and how Byoky's compatibility layer fits in.",
+      "Anthropic's API treats the same Claude setup token completely differently depending on who's calling. Here's the evening I spent figuring out which part of the request carries the signal.",
   },
 ];
 
