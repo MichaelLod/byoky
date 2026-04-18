@@ -1,6 +1,6 @@
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import { eq, and, lt, gt, lte, desc, sql } from 'drizzle-orm';
+import { eq, and, lt, gt, gte, lte, desc, sql, isNull } from 'drizzle-orm';
 import crypto from 'node:crypto';
 import {
   users,
@@ -22,6 +22,15 @@ export function initDb(connectionString: string): Db {
   const client = postgres(connectionString);
   db = drizzle(client);
   return db;
+}
+
+// Idempotent boot-time fix for credentials rows that existed before the
+// updated_at column was added. New rows always set updated_at explicitly, so
+// after the one-time fill this becomes a zero-row no-op.
+export async function backfillCredentialUpdatedAt(): Promise<void> {
+  await getDb().execute(sql`
+    UPDATE credentials SET updated_at = created_at WHERE updated_at = 0
+  `);
 }
 
 export function getDb(): Db {
@@ -165,18 +174,33 @@ export async function createCredential(
   const id = crypto.randomUUID();
   const now = Date.now();
   const [row] = await getDb().insert(credentials).values({
-    id, userId, providerId, label, authMethod, encryptedKey, createdAt: now,
+    id, userId, providerId, label, authMethod, encryptedKey,
+    createdAt: now, updatedAt: now,
   }).returning();
   return row;
 }
 
+// Human-facing list: excludes soft-deleted rows.
 export async function getCredentialsByUser(userId: string) {
-  return getDb().select().from(credentials).where(eq(credentials.userId, userId));
+  return getDb().select().from(credentials)
+    .where(and(eq(credentials.userId, userId), isNull(credentials.deletedAt)));
+}
+
+// Sync-facing list: includes tombstones (rows with deletedAt set). Clients
+// use this to mirror deletions across devices. `since` filters by updatedAt
+// for incremental pulls.
+export async function getCredentialsForSync(userId: string, since: number = 0) {
+  return getDb().select().from(credentials)
+    .where(and(eq(credentials.userId, userId), gte(credentials.updatedAt, since)));
 }
 
 export async function getCredentialByUserAndProvider(userId: string, providerId: string) {
   const [row] = await getDb().select().from(credentials)
-    .where(and(eq(credentials.userId, userId), eq(credentials.providerId, providerId)))
+    .where(and(
+      eq(credentials.userId, userId),
+      eq(credentials.providerId, providerId),
+      isNull(credentials.deletedAt),
+    ))
     .orderBy(desc(credentials.lastUsedAt))
     .limit(1);
   return row;
@@ -184,23 +208,42 @@ export async function getCredentialByUserAndProvider(userId: string, providerId:
 
 export async function getCredentialById(userId: string, credentialId: string) {
   const [row] = await getDb().select().from(credentials)
-    .where(and(eq(credentials.id, credentialId), eq(credentials.userId, userId)))
+    .where(and(
+      eq(credentials.id, credentialId),
+      eq(credentials.userId, userId),
+      isNull(credentials.deletedAt),
+    ))
     .limit(1);
   return row;
 }
 
+// Soft-delete: mark the row as deleted so other devices can mirror the
+// deletion via the sync endpoint. The row itself stays in the table.
 export async function deleteCredential(userId: string, credentialId: string) {
-  const result = await getDb().delete(credentials)
-    .where(and(eq(credentials.id, credentialId), eq(credentials.userId, userId)));
+  const now = Date.now();
+  const result = await getDb().update(credentials)
+    .set({ deletedAt: now, updatedAt: now })
+    .where(and(
+      eq(credentials.id, credentialId),
+      eq(credentials.userId, userId),
+      isNull(credentials.deletedAt),
+    ));
   return result.length > 0;
 }
 
 export async function updateCredentialLabel(userId: string, credentialId: string, label: string) {
-  await getDb().update(credentials).set({ label })
+  await getDb().update(credentials).set({ label, updatedAt: Date.now() })
+    .where(and(eq(credentials.id, credentialId), eq(credentials.userId, userId)));
+}
+
+export async function updateCredentialKey(userId: string, credentialId: string, encryptedKey: string) {
+  await getDb().update(credentials).set({ encryptedKey, updatedAt: Date.now() })
     .where(and(eq(credentials.id, credentialId), eq(credentials.userId, userId)));
 }
 
 export async function updateCredentialLastUsed(credentialId: string) {
+  // lastUsedAt is telemetry; it does NOT bump updatedAt so devices won't
+  // fight over "I used it most recently" during sync.
   await getDb().update(credentials).set({ lastUsedAt: Date.now() }).where(eq(credentials.id, credentialId));
 }
 

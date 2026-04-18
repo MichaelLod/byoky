@@ -129,6 +129,13 @@ class WalletStore(context: Context) {
     private var vaultSessionId: String? = null
     private var vaultTokenIssuedAt: Long = 0
     private var vaultCredentialMap: ConcurrentHashMap<String, String> = ConcurrentHashMap()
+    // Parallel to vaultCredentialMap: tracks the server's updatedAt per
+    // credential so pullFromVault can do last-write-wins on merges. Both
+    // are kept in lockstep; legacy code still reads vaultCredentialMap
+    // directly (group sync in particular).
+    private data class VaultCredentialMeta(val serverId: String, val remoteUpdatedAt: Long)
+    private var vaultCredentialMeta: ConcurrentHashMap<String, VaultCredentialMeta> = ConcurrentHashMap()
+    private var vaultLastSyncAt: Long = 0L
 
     private val autoLockTimeout = 300_000L // 5 minutes
 
@@ -191,6 +198,9 @@ class WalletStore(context: Context) {
         loadTokenAllowances()
         loadCloudVaultState()
         vaultScope.launch {
+            if (_cloudVaultEnabled.value && vaultToken != null && !_cloudVaultTokenExpired.value) {
+                pullFromVault()
+            }
             syncPendingCredentials()
             syncPendingGroups()
             syncPendingGifts()
@@ -1433,6 +1443,24 @@ class WalletStore(context: Context) {
             } catch (_: Exception) { ConcurrentHashMap() }
         } else { ConcurrentHashMap() }
 
+        val metaJson = prefs.getString("cloudVault_credentialMeta", null)
+        vaultCredentialMeta = if (metaJson != null) {
+            try {
+                val obj = JSONObject(metaJson)
+                val map = ConcurrentHashMap<String, VaultCredentialMeta>()
+                obj.keys().forEach { key ->
+                    val entry = obj.getJSONObject(key)
+                    map[key] = VaultCredentialMeta(
+                        serverId = entry.getString("serverId"),
+                        remoteUpdatedAt = entry.getLong("remoteUpdatedAt"),
+                    )
+                }
+                map
+            } catch (_: Exception) { ConcurrentHashMap() }
+        } else { ConcurrentHashMap() }
+
+        vaultLastSyncAt = prefs.getLong("cloudVault_lastSyncAt", 0L)
+
         if (_cloudVaultEnabled.value && vaultTokenIssuedAt > 0 &&
             System.currentTimeMillis() - vaultTokenIssuedAt > SIX_DAYS_MS) {
             _cloudVaultTokenExpired.value = true
@@ -1457,6 +1485,20 @@ class WalletStore(context: Context) {
         val obj = JSONObject()
         vaultCredentialMap.forEach { (k, v) -> obj.put(k, v) }
         prefs.edit().putString("cloudVault_credentialMap", obj.toString()).apply()
+    }
+
+    private fun saveVaultCredentialMeta() {
+        val obj = JSONObject()
+        vaultCredentialMeta.forEach { (k, v) ->
+            obj.put(k, JSONObject()
+                .put("serverId", v.serverId)
+                .put("remoteUpdatedAt", v.remoteUpdatedAt))
+        }
+        prefs.edit().putString("cloudVault_credentialMeta", obj.toString()).apply()
+    }
+
+    private fun saveVaultLastSyncAt() {
+        prefs.edit().putLong("cloudVault_lastSyncAt", vaultLastSyncAt).apply()
     }
 
     private fun vaultRequest(
@@ -1551,9 +1593,21 @@ class WalletStore(context: Context) {
             _cloudVaultUsername.value = username
             _cloudVaultLastUsername.value = username
             _cloudVaultTokenExpired.value = false
-            vaultCredentialMap.clear()
+            // Signup creates a fresh vault — wipe any stale map/meta.
+            // Login keeps existing map/meta so we don't re-upload rows we
+            // already own; lastSyncAt reset forces a full pull for merge.
+            if (isSignup) {
+                vaultCredentialMap.clear()
+                vaultCredentialMeta.clear()
+            }
+            vaultLastSyncAt = 0L
             saveCloudVaultConfig()
+            saveVaultCredentialMeta()
+            saveVaultLastSyncAt()
 
+            if (!isSignup) {
+                pullFromVault()
+            }
             syncAllCredentialsToVault()
             syncPendingGroups()
             syncPendingGifts()
@@ -1602,6 +1656,8 @@ class WalletStore(context: Context) {
             vaultSessionId = null
             vaultTokenIssuedAt = 0
             vaultCredentialMap.clear()
+            vaultCredentialMeta.clear()
+            vaultLastSyncAt = 0L
             prefs.edit()
                 .remove("cloudVault_enabled")
                 .remove("cloudVault_username")
@@ -1610,6 +1666,8 @@ class WalletStore(context: Context) {
                 .remove("cloudVault_tokenIssuedAt")
                 .remove("cloudVault_tokenExpired")
                 .remove("cloudVault_credentialMap")
+                .remove("cloudVault_credentialMeta")
+                .remove("cloudVault_lastSyncAt")
                 .apply()
         }
     }
@@ -1642,6 +1700,7 @@ class WalletStore(context: Context) {
             _cloudVaultTokenExpired.value = false
             saveCloudVaultConfig()
 
+            pullFromVault()
             syncPendingCredentials()
             syncPendingGroups()
             syncPendingGifts()
@@ -1666,10 +1725,14 @@ class WalletStore(context: Context) {
             return
         }
         if (ok) {
-            val vaultId = data.optJSONObject("credential")?.optString("id")
-            if (vaultId != null) {
+            val cred = data.optJSONObject("credential")
+            val vaultId = cred?.optString("id")
+            if (vaultId != null && vaultId.isNotEmpty()) {
                 vaultCredentialMap[localId] = vaultId
                 saveVaultCredentialMap()
+                val updatedAt = cred.optLong("updatedAt", System.currentTimeMillis())
+                vaultCredentialMeta[localId] = VaultCredentialMeta(vaultId, updatedAt)
+                saveVaultCredentialMeta()
             }
         }
     }
@@ -1688,6 +1751,8 @@ class WalletStore(context: Context) {
         }
         vaultCredentialMap.remove(localId)
         saveVaultCredentialMap()
+        vaultCredentialMeta.remove(localId)
+        saveVaultCredentialMeta()
     }
 
     private fun syncRenameToVault(localId: String, newLabel: String) {
@@ -1696,11 +1761,17 @@ class WalletStore(context: Context) {
         val vaultId = vaultCredentialMap[localId] ?: return
 
         val body = JSONObject().put("label", newLabel)
-        val (_, status, _) = vaultRequest("/credentials/$vaultId", "PATCH", body = body, token = token)
+        val (ok, status, data) = vaultRequest("/credentials/$vaultId", "PATCH", body = body, token = token)
 
         if (status == 401) {
             _cloudVaultTokenExpired.value = true
             prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
+            return
+        }
+        if (ok) {
+            val updatedAt = data.optLong("updatedAt", System.currentTimeMillis())
+            vaultCredentialMeta[localId] = VaultCredentialMeta(vaultId, updatedAt)
+            saveVaultCredentialMeta()
         }
     }
 
@@ -1726,12 +1797,140 @@ class WalletStore(context: Context) {
     private fun syncAllCredentialsToVault() {
         val pw = masterPassword ?: return
         for (cred in _credentials.value) {
+            // Skip rows already on the server (post-pull) — mirrors the
+            // extension's behavior to prevent duplicate uploads.
+            if (vaultCredentialMap.containsKey(cred.id)) continue
             try {
                 val plainKey = CryptoService.decrypt(
                     prefs.getString("key_${cred.id}", null) ?: continue, pw,
                 )
                 syncAddToVault(cred.id, cred.providerId, cred.label, cred.authMethod.name.lowercase(), plainKey)
             } catch (_: Exception) {}
+        }
+    }
+
+    // ─── Vault pull + merge ────────────────────────────────────────────
+    //
+    // Mirrors the extension's pullFromVault: fetches /credentials/sync with
+    // vaultLastSyncAt as `since`, applies tombstones, and upserts new rows
+    // with last-write-wins on updatedAt. Credentials new to this device are
+    // re-encrypted under the local master password.
+    private fun pullFromVault() {
+        val pw = masterPassword ?: return
+        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
+        val token = vaultToken ?: return
+
+        val (ok, status, data) = vaultRequest("/credentials/sync?since=$vaultLastSyncAt", "GET", token = token)
+        if (status == 401) {
+            _cloudVaultTokenExpired.value = true
+            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
+            return
+        }
+        if (!ok) return
+
+        val serverTime = data.optLong("serverTime", System.currentTimeMillis())
+        val remoteArr = data.optJSONArray("credentials") ?: run {
+            vaultLastSyncAt = serverTime
+            saveVaultLastSyncAt()
+            return
+        }
+
+        if (remoteArr.length() == 0) {
+            vaultLastSyncAt = serverTime
+            saveVaultLastSyncAt()
+            return
+        }
+
+        // Backfill meta from legacy credentialMap so pre-sync installs still
+        // merge correctly (remoteUpdatedAt=0 lets the first pull win).
+        for ((localId, serverId) in vaultCredentialMap) {
+            if (!vaultCredentialMeta.containsKey(localId)) {
+                vaultCredentialMeta[localId] = VaultCredentialMeta(serverId, 0L)
+            }
+        }
+
+        val serverToLocal = HashMap<String, String>()
+        vaultCredentialMeta.forEach { (localId, m) -> serverToLocal[m.serverId] = localId }
+
+        val updated = _credentials.value.toMutableList()
+        var didMutate = false
+
+        for (i in 0 until remoteArr.length()) {
+            val remote = remoteArr.optJSONObject(i) ?: continue
+            val serverId = remote.optString("id", "")
+            if (serverId.isEmpty()) continue
+            val providerId = remote.optString("providerId", "")
+            val label = remote.optString("label", "")
+            val authMethodRaw = remote.optString("authMethod", "api_key")
+            val updatedAt = remote.optLong("updatedAt", 0L)
+            val deletedAt = if (remote.isNull("deletedAt")) null else remote.optLong("deletedAt")
+
+            val authMethod = try {
+                AuthMethod.valueOf(authMethodRaw.uppercase())
+            } catch (_: Exception) { AuthMethod.API_KEY }
+
+            val existingLocalId = serverToLocal[serverId]
+
+            if (deletedAt != null) {
+                if (existingLocalId != null) {
+                    prefs.edit().remove("key_$existingLocalId").apply()
+                    updated.removeAll { it.id == existingLocalId }
+                    vaultCredentialMap.remove(existingLocalId)
+                    vaultCredentialMeta.remove(existingLocalId)
+                    didMutate = true
+                }
+                continue
+            }
+
+            val apiKey = if (remote.isNull("apiKey")) null else remote.optString("apiKey", "")
+            if (apiKey.isNullOrEmpty()) continue
+
+            if (existingLocalId != null) {
+                val currentMeta = vaultCredentialMeta[existingLocalId]
+                if (currentMeta != null && updatedAt <= currentMeta.remoteUpdatedAt) continue
+                val idx = updated.indexOfFirst { it.id == existingLocalId }
+                if (idx >= 0) {
+                    val encrypted = try {
+                        CryptoService.encrypt(apiKey, pw)
+                    } catch (_: Exception) { continue }
+                    prefs.edit().putString("key_$existingLocalId", encrypted).apply()
+                    updated[idx] = updated[idx].copy(
+                        providerId = providerId,
+                        label = label,
+                        authMethod = authMethod,
+                    )
+                }
+                vaultCredentialMeta[existingLocalId] = VaultCredentialMeta(serverId, updatedAt)
+                vaultCredentialMap[existingLocalId] = serverId
+                didMutate = true
+            } else {
+                val encrypted = try {
+                    CryptoService.encrypt(apiKey, pw)
+                } catch (_: Exception) { continue }
+                val newId = java.util.UUID.randomUUID().toString()
+                prefs.edit().putString("key_$newId", encrypted).apply()
+                val createdAt = remote.optLong("createdAt", System.currentTimeMillis())
+                updated.add(Credential(
+                    id = newId,
+                    providerId = providerId,
+                    label = label,
+                    authMethod = authMethod,
+                    createdAt = createdAt,
+                ))
+                vaultCredentialMap[newId] = serverId
+                vaultCredentialMeta[newId] = VaultCredentialMeta(serverId, updatedAt)
+                didMutate = true
+            }
+        }
+
+        vaultLastSyncAt = serverTime
+        saveVaultLastSyncAt()
+
+        if (didMutate) {
+            _credentials.value = updated
+            saveCredentials()
+            saveVaultCredentialMap()
+            saveVaultCredentialMeta()
         }
     }
 

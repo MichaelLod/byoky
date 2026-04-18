@@ -1,6 +1,6 @@
 import { serve } from '@hono/node-server';
 import { app } from './app.js';
-import { initDb } from './db/index.js';
+import { initDb, backfillCredentialUpdatedAt } from './db/index.js';
 import { startIdleSweep } from './session-keys.js';
 import { startRateLimitCleanup } from './middleware/rate-limit.js';
 import { deleteExpiredUserSessions, deleteExpiredAppSessions } from './db/index.js';
@@ -19,6 +19,10 @@ initDb(DATABASE_URL);
 initUpstreamProxy();
 startIdleSweep();
 startRateLimitCleanup();
+
+await backfillCredentialUpdatedAt().catch((err) => {
+  console.error('credentials.updated_at backfill failed:', err);
+});
 
 // Clean up expired sessions periodically (both user and app sessions).
 const sessionCleanupInterval = setInterval(() => {

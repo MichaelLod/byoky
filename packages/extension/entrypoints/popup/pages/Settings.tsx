@@ -123,7 +123,7 @@ export function Settings() {
         )}
         {!cloudVaultEnabled && (
           <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            Websites can use your keys even when this device is offline.
+            Keep your keys in sync across devices and let apps use them while this device is offline.
           </p>
         )}
       </div>

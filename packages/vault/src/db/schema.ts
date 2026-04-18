@@ -20,9 +20,17 @@ export const credentials = pgTable('credentials', {
   authMethod: text('auth_method').notNull(),
   encryptedKey: text('encrypted_key').notNull(),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  // Bumped on every mutation (create, label edit, encryptedKey rotate, delete).
+  // Clients use it for last-write-wins when merging server state during sync.
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull().default(0),
   lastUsedAt: bigint('last_used_at', { mode: 'number' }),
+  // Soft-delete tombstone. Rows with deletedAt != null are hidden from normal
+  // reads but still returned by the sync endpoint so other devices can mirror
+  // the deletion.
+  deletedAt: bigint('deleted_at', { mode: 'number' }),
 }, (t) => [
   index('idx_credentials_user').on(t.userId),
+  index('idx_credentials_user_updated').on(t.userId, t.updatedAt),
 ]);
 
 // ─── User sessions ────────────────────────────────────────────────────────
