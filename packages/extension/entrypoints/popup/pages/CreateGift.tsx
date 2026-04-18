@@ -38,6 +38,12 @@ export function CreateGift() {
   const selectedCred = credentials.find((c) => c.id === credentialId);
   const provider = selectedCred ? PROVIDERS[selectedCred.providerId] : null;
 
+  // Prefill the token-pool display name with the credential label so the
+  // pool card and the redeem card show the same sender by default.
+  useEffect(() => {
+    if (selectedCred) setGifterName(selectedCred.label);
+  }, [selectedCred?.id]);
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!selectedCred) return;
