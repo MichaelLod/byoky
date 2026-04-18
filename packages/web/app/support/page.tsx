@@ -36,14 +36,15 @@ export default function Support() {
           <li>
             <strong>Which providers are supported?</strong>
             <p>
-              Byoky supports Anthropic, OpenAI, Google Gemini, Mistral, Groq, xAI, DeepSeek,
-              Cerebras, and any OpenAI-compatible endpoint.
+              Byoky supports 13 providers: Anthropic, OpenAI, Google Gemini, Mistral, Cohere,
+              xAI, DeepSeek, Perplexity, Groq, Together AI, Fireworks AI, OpenRouter, and Azure
+              OpenAI.
             </p>
           </li>
           <li>
             <strong>Which browsers are supported?</strong>
             <p>
-              Chrome, Firefox, and Safari (macOS and iOS).
+              Chrome, Firefox, and Safari on iOS. Safari on macOS is coming soon.
             </p>
           </li>
           <li>

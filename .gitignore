@@ -11,6 +11,7 @@ web-ext-artifacts/
 .env.local
 .env.test.local
 .vercel
+.mcp.json
 test-results/
 marketing/
 
