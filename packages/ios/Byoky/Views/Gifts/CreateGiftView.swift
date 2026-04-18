@@ -47,6 +47,14 @@ struct CreateGiftView: View {
             if selectedCredential == nil {
                 selectedCredential = wallet.credentials.first
             }
+            if gifterName.isEmpty, let label = selectedCredential?.label {
+                gifterName = label
+            }
+        }
+        .onChange(of: selectedCredential?.id) { _, _ in
+            // Keep the pool display name in sync with the credential label
+            // so the pool card and redeem card show the same sender.
+            if let label = selectedCredential?.label { gifterName = label }
         }
     }
 

@@ -68,6 +68,12 @@ fun CreateGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
         }
     }
 
+    // Keep the pool display name in sync with the credential label so the
+    // pool card and redeem card show the same sender by default.
+    LaunchedEffect(selectedCredential?.id) {
+        selectedCredential?.label?.let { gifterName = it }
+    }
+
     val tokenBudget = if (selectedTokenPreset >= 0) {
         tokenPresets[selectedTokenPreset].value
     } else {
