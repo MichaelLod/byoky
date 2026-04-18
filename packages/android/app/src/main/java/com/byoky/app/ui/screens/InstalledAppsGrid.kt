@@ -5,9 +5,11 @@ import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -24,6 +26,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.byoky.app.data.InstalledApp
+import com.byoky.app.data.MarketplaceApp
 import com.byoky.app.data.WalletStore
 import com.byoky.app.ui.theme.*
 
@@ -40,16 +43,51 @@ fun InstalledAppsGrid(
     val disabledApps = apps.filter { !it.enabled }
 
     if (apps.isEmpty()) {
-        Box(
-            modifier = modifier.fillMaxSize().padding(32.dp),
-            contentAlignment = Alignment.Center,
+        var popular by remember { mutableStateOf<List<MarketplaceApp>>(emptyList()) }
+        LaunchedEffect(Unit) {
+            try {
+                popular = fetchMarketplaceApps(MARKETPLACE_URL).take(10)
+            } catch (_: Throwable) {
+                // Silent — empty state still rendered above.
+            }
+        }
+        val installedIds = apps.map { it.id }.toSet()
+
+        LazyColumn(
+            modifier = modifier.fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Icon(Icons.Default.Apps, contentDescription = null, modifier = Modifier.size(48.dp), tint = TextMuted)
-                Text("No apps installed", color = TextSecondary)
-                Text("Browse the store to find apps that use your API keys.", fontSize = 13.sp, color = TextMuted, textAlign = TextAlign.Center)
-                Button(onClick = onBrowseStore, colors = ButtonDefaults.buttonColors(containerColor = Accent)) {
-                    Text("Browse Store")
+            item {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(Icons.Default.Apps, contentDescription = null, modifier = Modifier.size(48.dp), tint = TextMuted)
+                    Text("No apps installed", color = TextSecondary)
+                    Text("Browse the store to find apps that use your API keys.", fontSize = 13.sp, color = TextMuted, textAlign = TextAlign.Center)
+                    Button(onClick = onBrowseStore, colors = ButtonDefaults.buttonColors(containerColor = Accent)) {
+                        Text("Browse Store")
+                    }
+                }
+            }
+            if (popular.isNotEmpty()) {
+                item {
+                    Text(
+                        "POPULAR APPS",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextMuted,
+                        modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
+                    )
+                }
+                items(popular, key = { it.id }) { app ->
+                    StoreAppCard(
+                        app = app,
+                        installed = installedIds.contains(app.id),
+                        onInstall = { wallet.installApp(app) },
+                    )
                 }
             }
         }

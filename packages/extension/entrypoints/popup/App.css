@@ -1792,6 +1792,13 @@ body {
   margin-bottom: 10px;
 }
 
+.store-app-install {
+  width: 100%;
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
 .store-app-row {
   display: flex;
   gap: 12px;

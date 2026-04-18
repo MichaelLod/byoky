@@ -25,7 +25,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 
-private const val MARKETPLACE_URL = "https://byoky.com/api/apps"
+internal const val MARKETPLACE_URL = "https://byoky.com/api/apps"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -108,7 +108,7 @@ fun AppStoreScreen(wallet: WalletStore, onBack: () -> Unit) {
 }
 
 @Composable
-private fun StoreAppCard(app: MarketplaceApp, installed: Boolean, onInstall: () -> Unit) {
+internal fun StoreAppCard(app: MarketplaceApp, installed: Boolean, onInstall: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = BgRaised),
@@ -175,7 +175,7 @@ private fun StoreAppCard(app: MarketplaceApp, installed: Boolean, onInstall: () 
     }
 }
 
-private suspend fun fetchMarketplaceApps(url: String): List<MarketplaceApp> = withContext(Dispatchers.IO) {
+internal suspend fun fetchMarketplaceApps(url: String): List<MarketplaceApp> = withContext(Dispatchers.IO) {
     val client = OkHttpClient()
     val request = Request.Builder().url(url).build()
     val response = client.newCall(request).execute()

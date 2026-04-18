@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { decodeGiftLink, validateGiftLink, isExtensionInstalled, type GiftLink } from '@byoky/sdk';
 
 const IOS_STORE = 'https://apps.apple.com/app/byoky/id6760779919';
@@ -82,7 +82,6 @@ export function GiftRedeem() {
   const [copied, setCopied] = useState(false);
   const [staged, setStaged] = useState(false);
   const [staging, setStaging] = useState(false);
-  const autoTried = useRef(false);
 
   useEffect(() => {
     setPlatform(detectPlatform());
@@ -102,29 +101,35 @@ export function GiftRedeem() {
     return () => clearTimeout(t);
   }, []);
 
-  useEffect(() => {
-    if (!preview || !encoded || autoTried.current) return;
-    if (platform !== 'ios' && platform !== 'android') return;
-    autoTried.current = true;
-
+  function tryOpenApp() {
+    if (!encoded) return;
     if (platform === 'android') {
       const fallback = encodeURIComponent(ANDROID_STORE);
       window.location.href = `intent://gift/${encoded}#Intent;scheme=byoky;package=com.byoky.app;S.browser_fallback_url=${fallback};end`;
       return;
     }
+    if (platform !== 'ios') return;
 
     const iframe = document.createElement('iframe');
     iframe.src = `byoky://gift/${encoded}`;
     iframe.style.cssText = 'position:fixed;top:-1px;left:-1px;width:1px;height:1px;opacity:0;pointer-events:none;border:0;';
     document.body.appendChild(iframe);
-    const timer = window.setTimeout(() => {
+
+    const cleanup = () => {
       iframe.remove();
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.clearTimeout(timer);
+    };
+    const onVisibility = () => {
+      if (document.hidden) cleanup();
+    };
+    const timer = window.setTimeout(() => {
+      cleanup();
       if (document.hidden) return;
       window.location.href = IOS_STORE;
     }, 1500);
-    const onHidden = () => { if (document.hidden) window.clearTimeout(timer); };
-    document.addEventListener('visibilitychange', onHidden, { once: true });
-  }, [preview, encoded, platform]);
+    document.addEventListener('visibilitychange', onVisibility);
+  }
 
   async function handleStage() {
     if (!encoded) return;
@@ -147,14 +152,7 @@ export function GiftRedeem() {
   }
 
   function retryMobile() {
-    if (!encoded || (platform !== 'ios' && platform !== 'android')) return;
-    autoTried.current = false;
-    if (platform === 'android') {
-      const fallback = encodeURIComponent(ANDROID_STORE);
-      window.location.href = `intent://gift/${encoded}#Intent;scheme=byoky;package=com.byoky.app;S.browser_fallback_url=${fallback};end`;
-    } else {
-      window.location.href = `byoky://gift/${encoded}`;
-    }
+    tryOpenApp();
   }
 
   return (
@@ -188,23 +186,15 @@ export function GiftRedeem() {
 
           {platform === 'ios' || platform === 'android' ? (
             <div className="gift-panel">
-              <p className="gift-panel-title">Opening the Byoky app…</p>
+              <p className="gift-panel-title">Accept this gift in Byoky</p>
               <p className="gift-panel-note">
-                If nothing happens, you&apos;ll be redirected to the{' '}
-                {platform === 'ios' ? 'App Store' : 'Play Store'} to install Byoky.
+                Tap below to open it in the app. If you don&apos;t have Byoky yet,
+                you&apos;ll be taken to the {platform === 'ios' ? 'App Store' : 'Play Store'}.
               </p>
               <div className="gift-actions">
                 <button className="gift-btn gift-btn-primary" onClick={retryMobile}>
-                  Open in Byoky
+                  Accept gift in Byoky
                 </button>
-                <a
-                  className="gift-btn gift-btn-secondary"
-                  href={platform === 'ios' ? IOS_STORE : ANDROID_STORE}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Get Byoky on {platform === 'ios' ? 'App Store' : 'Play Store'}
-                </a>
               </div>
             </div>
           ) : (

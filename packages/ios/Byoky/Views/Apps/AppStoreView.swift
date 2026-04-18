@@ -1,6 +1,6 @@
 import SwiftUI
 
-private let marketplaceURL = "https://byoky.com/api/apps"
+let marketplaceURL = "https://byoky.com/api/apps"
 
 struct AppStoreView: View {
     @EnvironmentObject var wallet: WalletStore
@@ -76,7 +76,7 @@ struct AppStoreView: View {
     }
 }
 
-private struct StoreAppRow: View {
+struct StoreAppRow: View {
     let app: MarketplaceApp
     let installed: Bool
     let onInstall: () -> Void
