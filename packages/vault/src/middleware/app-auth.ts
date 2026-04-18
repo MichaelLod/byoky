@@ -8,6 +8,7 @@ declare module 'hono' {
     appSessionId: string;
     appSessionUserId: string;
     appSessionOrigin: string;
+    appSessionBrowserBound: boolean;
   }
 }
 
@@ -38,7 +39,7 @@ export async function appAuthMiddleware(c: Context, next: Next): Promise<Respons
   }
 
   const token = header.slice(7);
-  const payload = verifyJwt(token);
+  const payload = verifyJwt(token, 'app');
   if (!payload) {
     return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid or expired token' } }, 401);
   }
@@ -55,25 +56,40 @@ export async function appAuthMiddleware(c: Context, next: Next): Promise<Respons
     return c.json({ error: { code: 'UNAUTHORIZED', message: 'Token claims do not match session' } }, 401);
   }
 
-  // Origin binding. Browsers always set Origin on CORS requests and JS
-  // cannot override it, so this check is only meaningful in the browser
-  // SDK path — but that's the path we care about for XSS-stolen tokens.
-  // Node SDKs don't send Origin; we trust the value captured at handshake
-  // time (the body field is the only anchor in that path).
+  // Origin binding. Two paths:
+  //  - browserBound sessions (handshake carried a browser Origin): the
+  //    browser forces Origin on every CORS request and JS cannot forge it,
+  //    so a stolen token replayed from curl/Node (no Origin) or from a
+  //    different origin in the same browser MUST be rejected. This is the
+  //    load-bearing XSS-theft mitigation.
+  //  - non-browserBound sessions (Node SDKs that handshaked with `appOrigin`
+  //    body field): Origin is not expected. If the caller happens to send
+  //    one anyway, it must still match. We cannot demand Origin here
+  //    without breaking Node SDKs.
   //
   // Both sides go through normalizeOrigin so casing/trailing-slash variance
   // doesn't reject legitimate clients. The session.origin was already
   // normalized at handshake time, but defensive normalization here costs
   // nothing and survives migrations of older rows.
   const requestOrigin = c.req.header('origin');
+  const browserBound = session.browserBound === true;
+  if (browserBound && !requestOrigin) {
+    return c.json({ error: { code: 'UNAUTHORIZED', message: 'Origin header required for this session' } }, 401);
+  }
   if (requestOrigin && normalizeOrigin(requestOrigin) !== normalizeOrigin(session.origin)) {
     return c.json({ error: { code: 'UNAUTHORIZED', message: 'Origin does not match session' } }, 401);
   }
 
-  await updateAppSessionActivity(session.id);
+  // Fire-and-forget: this is a write on every proxied request and we don't
+  // want a slow DB to add latency. A failed activity bump just means the
+  // last-active timestamp lags slightly; it doesn't gate anything.
+  void updateAppSessionActivity(session.id).catch((err) => {
+    console.error('updateAppSessionActivity failed:', err instanceof Error ? err.message : 'unknown');
+  });
   c.set('appSessionId', session.id);
   c.set('appSessionUserId', session.userId);
   c.set('appSessionOrigin', session.origin);
+  c.set('appSessionBrowserBound', browserBound);
 
   await next();
 }

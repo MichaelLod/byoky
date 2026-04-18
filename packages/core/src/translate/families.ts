@@ -109,12 +109,19 @@ export function rewriteProxyUrl(
   dstProviderId: ProviderId,
   model: string,
   stream: boolean,
+  overrideBaseUrl?: string,
 ): string | null {
   const provider = PROVIDERS[dstProviderId];
   if (!provider) return null;
   const family = familyOf(dstProviderId);
   if (!family || !hasAdapter(family)) return null;
-  const base = provider.baseUrl.replace(/\/$/, '');
+
+  // Providers without a fixed host (Azure OpenAI) can only be targeted if
+  // the caller hands in the real tenant baseUrl from the credential row.
+  if (provider.requiresCustomBaseUrl && !overrideBaseUrl) return null;
+
+  const rawBase = overrideBaseUrl ?? provider.baseUrl;
+  const base = rawBase.replace(/\/$/, '');
   // Providers that diverge from the openai adapter's default chat path
   // (`/v1/chat/completions`) declare the real path via chatPath — e.g. groq
   // uses `/openai/v1/chat/completions`, fireworks uses `/inference/v1/...`.

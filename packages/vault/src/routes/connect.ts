@@ -14,6 +14,7 @@ import {
 } from '../db/index.js';
 import { signJwt, hashToken } from '../jwt.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { userRateLimitMiddleware } from '../middleware/rate-limit.js';
 import { normalizeOrigin } from '../origin.js';
 
 const APP_SESSION_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -21,6 +22,7 @@ const APP_SESSION_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
 const connect = new Hono();
 
 connect.use('/*', authMiddleware);
+connect.use('/*', userRateLimitMiddleware);
 
 /**
  * Per-app handshake. Authenticates with a user_session token, returns an
@@ -126,7 +128,11 @@ connect.post('/', async (c) => {
   }
 
   const appSessionId = crypto.randomUUID();
-  const token = signJwt(userId, appSessionId, APP_SESSION_DURATION_MS);
+  const token = signJwt(userId, appSessionId, APP_SESSION_DURATION_MS, 'app');
+  // browserBound = handshake carried a browser `Origin` header. Proxy
+  // requests against this session will have to match Origin too — closes
+  // the stolen-token-via-non-browser-client loophole in the middleware.
+  const browserBound = !!headerOrigin;
   // Pass appSessionId so the DB row's id matches the JWT's `sid` claim.
   // appAuthMiddleware verifies they agree.
   await createAppSession(
@@ -136,6 +142,7 @@ connect.post('/', async (c) => {
     hashToken(token),
     Date.now() + APP_SESSION_DURATION_MS,
     appSessionId,
+    browserBound,
   );
 
   return c.json({

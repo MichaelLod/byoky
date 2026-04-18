@@ -10,6 +10,7 @@ import {
 } from '../db/index.js';
 import { encryptGiftSecret } from '../gift-crypto.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { userRateLimitMiddleware } from '../middleware/rate-limit.js';
 import { connectGift, disconnectGift } from '../gift-relay.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -19,6 +20,7 @@ const MAX_STRING_LENGTH = 4096;
 const gifts = new Hono();
 
 gifts.use('/*', authMiddleware);
+gifts.use('/*', userRateLimitMiddleware);
 
 gifts.post('/', async (c) => {
   const userId = c.get('userId');

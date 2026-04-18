@@ -81,7 +81,10 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     id: 'azure_openai',
     name: 'Azure OpenAI',
     authMethods: ['api_key'],
+    // Placeholder — each tenant has its own `<resource>.openai.azure.com`.
+    // The real host is stored on the credential row and used at proxy time.
     baseUrl: 'https://YOUR_RESOURCE.openai.azure.com',
+    requiresCustomBaseUrl: true,
   },
 };
 

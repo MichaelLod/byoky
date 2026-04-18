@@ -11,10 +11,12 @@ import {
   getCredentialById,
 } from '../db/index.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { userRateLimitMiddleware } from '../middleware/rate-limit.js';
 
 const groups = new Hono();
 
 groups.use('/*', authMiddleware);
+groups.use('/*', userRateLimitMiddleware);
 
 // ─── Groups CRUD ─────────────────────────────────────────────────────────
 

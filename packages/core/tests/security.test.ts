@@ -252,10 +252,27 @@ describe('security invariants', () => {
       expect(proxyUtils).toContain('Number.isFinite');
     });
 
-    it('buildHeaders strips all auth header variants', () => {
-      expect(proxyUtils).toContain("delete headers['authorization']");
-      expect(proxyUtils).toContain("delete headers['x-api-key']");
-      expect(proxyUtils).toContain("delete headers['api-key']");
+    it('buildHeaders uses an allow-list (auth headers, host, cookie, hop-by-hop are not forwardable)', () => {
+      // The allow-list must exist and gate the forwarded set.
+      expect(proxyUtils).toContain('FORWARDABLE_HEADERS');
+      expect(proxyUtils).toMatch(/if \(!FORWARDABLE_HEADERS\.has\(lower\)\) continue;/);
+      // None of the auth-header variants may appear in the allow-list literal.
+      const allowListMatch = proxyUtils.match(/const FORWARDABLE_HEADERS = new Set\(\[([\s\S]*?)\]\);/);
+      expect(allowListMatch).not.toBeNull();
+      const allowList = allowListMatch![1];
+      expect(allowList).not.toMatch(/['"]authorization['"]/);
+      expect(allowList).not.toMatch(/['"]x-api-key['"]/);
+      expect(allowList).not.toMatch(/['"]api-key['"]/);
+      // Hop-by-hop / smuggling vectors must not be forwardable either.
+      expect(allowList).not.toMatch(/['"]host['"]/);
+      expect(allowList).not.toMatch(/['"]cookie['"]/);
+      expect(allowList).not.toMatch(/['"]transfer-encoding['"]/);
+      expect(allowList).not.toMatch(/['"]proxy-authorization['"]/);
+    });
+
+    it('buildHeaders rejects header values containing CR/LF (header-injection guard)', () => {
+      expect(proxyUtils).toContain('hasControlChars');
+      expect(proxyUtils).toMatch(/code === 0x0a \|\| code === 0x0d/);
     });
   });
 

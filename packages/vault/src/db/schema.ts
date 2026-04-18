@@ -19,6 +19,10 @@ export const credentials = pgTable('credentials', {
   label: text('label').notNull(),
   authMethod: text('auth_method').notNull(),
   encryptedKey: text('encrypted_key').notNull(),
+  // Required for providers with no fixed upstream host (e.g. Azure OpenAI,
+  // where every tenant has its own `<resource>.openai.azure.com`). Null for
+  // providers whose host is fixed in the core provider registry.
+  baseUrl: text('base_url'),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   // Bumped on every mutation (create, label edit, encryptedKey rotate, delete).
   // Clients use it for last-write-wins when merging server state during sync.
@@ -101,6 +105,14 @@ export const appSessions = pgTable('app_sessions', {
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   userSessionId: text('user_session_id').notNull().references(() => userSessions.id, { onDelete: 'cascade' }),
   origin: text('origin').notNull(),
+  // True when the `/connect` handshake carried a browser-set `Origin` header
+  // (browsers force this on CORS and JS cannot forge it). For such sessions
+  // the proxy middleware REQUIRES a matching Origin on every request — a
+  // stolen token replayed via curl/Node (which don't send Origin) is refused
+  // instead of silently bypassing the XSS mitigation. Node-SDK sessions
+  // (handshake via `appOrigin` body field, no browser Origin) are marked
+  // false and fall through to the stored-value trust path.
+  browserBound: boolean('browser_bound').notNull().default(false),
   tokenHash: text('token_hash').unique().notNull(),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),

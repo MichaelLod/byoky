@@ -12,10 +12,12 @@ import {
 import { getCachedKey, recoverCachedKey } from '../session-keys.js';
 import { decryptWithKey } from '../crypto.js';
 import { authMiddleware } from '../middleware/auth.js';
+import { userRateLimitMiddleware } from '../middleware/rate-limit.js';
 
 const credentials = new Hono();
 
 credentials.use('/*', authMiddleware);
+credentials.use('/*', userRateLimitMiddleware);
 
 credentials.get('/', async (c) => {
   const userId = c.get('userId');
@@ -38,6 +40,7 @@ credentials.get('/', async (c) => {
       providerId: row.providerId,
       label: row.label,
       authMethod: row.authMethod,
+      baseUrl: row.baseUrl ?? undefined,
       maskedKey,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
@@ -86,6 +89,7 @@ credentials.get('/sync', async (c) => {
       providerId: row.providerId,
       label: row.label,
       authMethod: row.authMethod,
+      baseUrl: row.baseUrl ?? undefined,
       encryptedApiKey: row.encryptedKey,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
@@ -103,9 +107,10 @@ credentials.post('/', async (c) => {
     label?: string;
     authMethod?: string;
     encryptedApiKey?: string;
+    baseUrl?: string;
   }>();
 
-  const { providerId, label, authMethod, encryptedApiKey } = body;
+  const { providerId, label, authMethod, encryptedApiKey, baseUrl } = body;
 
   if (!providerId || !encryptedApiKey) {
     return c.json({ error: { code: 'INVALID_INPUT', message: 'providerId and encryptedApiKey are required' } }, 400);
@@ -121,8 +126,27 @@ credentials.post('/', async (c) => {
     return c.json({ error: { code: 'INVALID_AUTH_METHOD', message: `Provider ${providerId} does not support auth method: ${method}` } }, 400);
   }
 
+  // Per-credential baseUrl. Required for providers with no fixed upstream
+  // host (e.g. Azure OpenAI). Ignored for providers whose host is fixed.
+  let normalizedBaseUrl: string | undefined;
+  if (provider.requiresCustomBaseUrl) {
+    if (!baseUrl) {
+      return c.json({ error: { code: 'BASE_URL_REQUIRED', message: `Provider ${providerId} requires a baseUrl` } }, 400);
+    }
+    try {
+      const u = new URL(baseUrl);
+      if (u.protocol !== 'https:') throw new Error('not https');
+      // Strip path/query so only origin is stored — validateProxyUrl
+      // compares origins and we don't want a baseUrl with a trailing path
+      // to silently over-permit.
+      normalizedBaseUrl = u.origin;
+    } catch {
+      return c.json({ error: { code: 'INVALID_BASE_URL', message: 'baseUrl must be an absolute https URL' } }, 400);
+    }
+  }
+
   const credLabel = label ?? `${provider.name} key`;
-  const row = await createCredential(userId, providerId, credLabel, method, encryptedApiKey);
+  const row = await createCredential(userId, providerId, credLabel, method, encryptedApiKey, normalizedBaseUrl);
 
   return c.json({
     credential: {
@@ -130,6 +154,7 @@ credentials.post('/', async (c) => {
       providerId: row.providerId,
       label: row.label,
       authMethod: row.authMethod,
+      baseUrl: row.baseUrl ?? undefined,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     },

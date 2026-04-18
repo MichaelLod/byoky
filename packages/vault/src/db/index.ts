@@ -126,6 +126,7 @@ export async function createAppSession(
   tokenHash: string,
   expiresAt: number,
   id?: string,
+  browserBound: boolean = false,
 ) {
   // Caller may supply the id when it needs the row id to match a value
   // already embedded in a JWT (the appAuthMiddleware checks payload.sid
@@ -137,6 +138,7 @@ export async function createAppSession(
     userId,
     userSessionId,
     origin,
+    browserBound,
     tokenHash,
     createdAt: now,
     expiresAt,
@@ -170,11 +172,13 @@ export async function createCredential(
   label: string,
   authMethod: string,
   encryptedKey: string,
+  baseUrl?: string,
 ) {
   const id = crypto.randomUUID();
   const now = Date.now();
   const [row] = await getDb().insert(credentials).values({
     id, userId, providerId, label, authMethod, encryptedKey,
+    baseUrl: baseUrl ?? null,
     createdAt: now, updatedAt: now,
   }).returning();
   return row;

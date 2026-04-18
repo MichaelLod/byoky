@@ -185,18 +185,25 @@ describe('validateGiftLink', () => {
     const link = makeValidGiftLink({ r: 'http://relay.byoky.com/ws' });
     const result = validateGiftLink(link);
     expect(result.valid).toBe(false);
-    expect(result.reason).toContain('ws://');
+    expect(result.reason).toContain('wss://');
   });
 
   it('rejects invalid relay URL protocol (https://)', () => {
     const link = makeValidGiftLink({ r: 'https://relay.byoky.com/ws' });
     const result = validateGiftLink(link);
     expect(result.valid).toBe(false);
-    expect(result.reason).toContain('ws://');
+    expect(result.reason).toContain('wss://');
   });
 
-  it('accepts ws:// relay URL', () => {
+  it('rejects plain ws:// against a non-loopback relay', () => {
     const link = makeValidGiftLink({ r: 'ws://relay.byoky.com/ws' });
+    const result = validateGiftLink(link);
+    expect(result.valid).toBe(false);
+    expect(result.reason).toContain('wss://');
+  });
+
+  it('accepts ws:// against localhost (dev)', () => {
+    const link = makeValidGiftLink({ r: 'ws://localhost:8787/ws' });
     expect(validateGiftLink(link).valid).toBe(true);
   });
 
