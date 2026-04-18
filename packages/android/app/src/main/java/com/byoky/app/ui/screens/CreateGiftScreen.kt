@@ -100,7 +100,9 @@ fun CreateGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            if (createdGift != null) {
+            if (credentials.isEmpty()) {
+                NoCredentialsState(onBack)
+            } else if (createdGift != null) {
                 SuccessState(createdGift!!, context, onBack)
             } else {
                 // Credential picker
@@ -338,6 +340,47 @@ fun CreateGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
                     Text("Create Gift", fontWeight = FontWeight.SemiBold)
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun NoCredentialsState(onBack: () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Spacer(Modifier.height(32.dp))
+
+        Icon(
+            Icons.Default.VpnKeyOff,
+            contentDescription = null,
+            tint = TextMuted,
+            modifier = Modifier.size(48.dp),
+        )
+
+        Text(
+            "No Credentials",
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+            color = TextPrimary,
+        )
+
+        Text(
+            "Add a credential first before you can gift tokens. Open the Wallet tab and tap the + button to add one.",
+            color = TextSecondary,
+            fontSize = 14.sp,
+            modifier = Modifier.padding(horizontal = 16.dp),
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+
+        Button(
+            onClick = onBack,
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Accent),
+        ) {
+            Text("Go back", fontWeight = FontWeight.SemiBold)
         }
     }
 }

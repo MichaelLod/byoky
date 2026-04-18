@@ -30,7 +30,9 @@ struct CreateGiftView: View {
 
     var body: some View {
         SwiftUI.Group {
-            if let gift = createdGift {
+            if wallet.credentials.isEmpty {
+                noCredentialsView
+            } else if let gift = createdGift {
                 giftCreatedView(gift: gift)
             } else {
                 formView
@@ -46,6 +48,34 @@ struct CreateGiftView: View {
                 selectedCredential = wallet.credentials.first
             }
         }
+    }
+
+    private var noCredentialsView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "key.slash")
+                .font(.system(size: 40))
+                .foregroundStyle(Color(.systemGray3))
+
+            Text("No Credentials")
+                .font(.headline)
+
+            Text("Add a credential first before you can gift tokens. Open the Wallet tab and tap the + button to add one.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+
+            Button {
+                dismiss()
+            } label: {
+                Text("Go back")
+                    .fontWeight(.semibold)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Theme.accent)
+            .padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var formView: some View {
