@@ -85,6 +85,34 @@ object CryptoService {
         return String(plaintext, Charsets.UTF_8)
     }
 
+    // Encrypt/decrypt with a pre-derived key. Format: base64(nonce || ciphertext+tag).
+    // Used for vault sync, where client and server share a key derived from
+    // (vault password, encryptionSalt) so the salt isn't embedded in each row.
+
+    fun deriveVaultKey(password: String, salt: ByteArray): SecretKeySpec = deriveKey(password, salt)
+
+    fun encryptWithKey(plaintext: String, key: SecretKeySpec): String {
+        val nonce = randomBytes(NONCE_LENGTH)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(TAG_LENGTH, nonce))
+        val ciphertextWithTag = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
+        val combined = nonce + ciphertextWithTag
+        return Base64.encodeToString(combined, Base64.NO_WRAP)
+    }
+
+    fun decryptWithKey(encoded: String, key: SecretKeySpec): String {
+        val combined = Base64.decode(encoded, Base64.NO_WRAP)
+        val minLength = NONCE_LENGTH + TAG_LENGTH / 8
+        require(combined.size >= minLength) { "Invalid encrypted data" }
+
+        val nonce = combined.copyOfRange(0, NONCE_LENGTH)
+        val ciphertextWithTag = combined.copyOfRange(NONCE_LENGTH, combined.size)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_LENGTH, nonce))
+        val plaintext = cipher.doFinal(ciphertextWithTag)
+        return String(plaintext, Charsets.UTF_8)
+    }
+
     private fun randomBytes(count: Int): ByteArray {
         val bytes = ByteArray(count)
         random.nextBytes(bytes)

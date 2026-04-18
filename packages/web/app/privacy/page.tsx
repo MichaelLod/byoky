@@ -20,11 +20,11 @@ export default function Privacy() {
       <Section title="Summary">
         <p>
           Byoky runs locally by default. Your API keys are encrypted on your device and never
-          leave it unless you explicitly opt in to cloud sync. When you do, keys are encrypted
-          with a password-derived key and stored as ciphertext in our database; the decryption
-          key is held on our server during your session so features like sync, gift relay, and
-          key previews can work. This is not end-to-end encryption — see the cloud sync section
-          below.
+          leave it unless you explicitly opt in to cloud sync. When you do, each key is
+          encrypted on your device before upload — the plaintext never crosses the network —
+          and stored as ciphertext in our database. The decryption key is held in server memory
+          during your active session so features like gift relay and key previews can work.
+          This is not end-to-end encryption — see the cloud sync section below.
         </p>
       </Section>
 
@@ -47,17 +47,17 @@ export default function Privacy() {
         <p>When cloud sync is enabled, the following applies:</p>
         <ul>
           <li>
-            <strong>Encryption model.</strong> Your encryption key is derived from your
-            password on your device using PBKDF2 (600,000 iterations) and sent to
-            vault.byoky.com on login. API keys are encrypted with that key before upload and
-            stored as ciphertext in our database. The derived key is held in server memory
-            during your session and, wrapped with a server-held secret, persisted in the
-            sessions table so you stay signed in after idle timeouts. This lets the server
-            mask keys in list views, relay gift and remote-OpenClaw traffic on your behalf,
-            and resume sessions — but it means this is <strong>not end-to-end encryption</strong>.
-            A compromise of our server or the wrapping secret while your session is active
-            could expose your credentials. Logging out evicts the key; deleting your account
-            removes it entirely.
+            <strong>Encryption model.</strong> On login, your device and our server
+            independently derive the same AES-256-GCM key from your password using PBKDF2
+            (600,000 iterations) against a per-user salt. Your device uses its copy to
+            encrypt each API key before upload, so the plaintext key never traverses the
+            network. The server uses its copy — held in memory during your session, and
+            wrapped with a server-held secret in the sessions table so you stay signed in
+            after idle timeouts — to decrypt stored ciphertext when relaying gift and
+            remote-OpenClaw traffic on your behalf. This means it is <strong>not end-to-end
+            encryption</strong>: a compromise of our server or the wrapping secret while your
+            session is active could expose your credentials. Logging out evicts the key;
+            deleting your account removes it entirely.
           </li>
           <li>
             <strong>Account data.</strong> We store a username you choose (no email required),

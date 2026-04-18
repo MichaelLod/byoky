@@ -68,6 +68,11 @@ final class WalletStore: ObservableObject {
     }
     private var vaultCredentialMeta: [String: VaultCredentialMeta] = [:]
     private var vaultLastSyncAt: Int64 = 0
+    // AES-GCM key derived from (vault password, encryptionSalt). Used to
+    // encrypt apiKey before upload and decrypt on sync pull, so plaintext
+    // never crosses the wire. Held in memory after login; raw bytes are
+    // persisted in the keychain for relock survival.
+    private var vaultKey: SymmetricKey?
 
     private let autoLockTimeout: TimeInterval = 300
     private var backgroundTime: Date?
@@ -1110,6 +1115,22 @@ final class WalletStore: ObservableObject {
         try? keychain.saveString(key: "cloudVault_lastSyncAt", value: String(vaultLastSyncAt))
     }
 
+    private func persistVaultKey(password: String, encryptionSalt: String) {
+        guard let saltBytes = Data(base64Encoded: encryptionSalt),
+              let key = crypto.deriveKey(password: password, salt: saltBytes) else { return }
+        vaultKey = key
+        let rawBytes = key.withUnsafeBytes { Data($0) }
+        try? keychain.save(key: "cloudVault_vaultKey", data: rawBytes)
+    }
+
+    private func loadVaultKey() -> SymmetricKey? {
+        if let vaultKey { return vaultKey }
+        guard let data = try? keychain.load(key: "cloudVault_vaultKey") else { return nil }
+        let key = SymmetricKey(data: data)
+        vaultKey = key
+        return key
+    }
+
     private func clearCloudVaultState(clearLastUsername: Bool = false) {
         cloudVaultEnabled = false
         cloudVaultUsername = nil
@@ -1120,9 +1141,10 @@ final class WalletStore: ObservableObject {
         vaultCredentialMap = [:]
         vaultCredentialMeta = [:]
         vaultLastSyncAt = 0
+        vaultKey = nil
         for key in ["cloudVault_enabled", "cloudVault_username", "cloudVault_token", "cloudVault_sessionId",
                      "cloudVault_tokenIssuedAt", "cloudVault_tokenExpired", "cloudVault_credentialMap",
-                     "cloudVault_credentialMeta", "cloudVault_lastSyncAt"] {
+                     "cloudVault_credentialMeta", "cloudVault_lastSyncAt", "cloudVault_vaultKey"] {
             try? keychain.delete(key: key)
         }
         if clearLastUsername {
@@ -1178,10 +1200,12 @@ final class WalletStore: ObservableObject {
             throw CloudVaultError.authFailed(err?["message"] as? String ?? (isSignup ? "Signup failed" : "Login failed"))
         }
         guard let token = result.data["token"] as? String,
-              let sessionId = result.data["sessionId"] as? String else {
+              let sessionId = result.data["sessionId"] as? String,
+              let encryptionSalt = result.data["encryptionSalt"] as? String else {
             throw CloudVaultError.authFailed("Invalid server response")
         }
 
+        persistVaultKey(password: password, encryptionSalt: encryptionSalt)
         vaultToken = token
         vaultSessionId = sessionId
         vaultTokenIssuedAt = Date()
@@ -1271,10 +1295,12 @@ final class WalletStore: ObservableObject {
             throw CloudVaultError.authFailed(err?["message"] as? String ?? "Login failed")
         }
         guard let token = result.data["token"] as? String,
-              let sessionId = result.data["sessionId"] as? String else {
+              let sessionId = result.data["sessionId"] as? String,
+              let encryptionSalt = result.data["encryptionSalt"] as? String else {
             throw CloudVaultError.authFailed("Invalid server response")
         }
 
+        persistVaultKey(password: password, encryptionSalt: encryptionSalt)
         vaultToken = token
         vaultSessionId = sessionId
         vaultTokenIssuedAt = Date()
@@ -1290,9 +1316,11 @@ final class WalletStore: ObservableObject {
 
     private func syncAddToVault(localId: String, providerId: String, label: String, authMethod: String, plainKey: String) async {
         guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
+        guard let vk = loadVaultKey(),
+              let encryptedApiKey = try? crypto.encrypt(plaintext: plainKey, key: vk) else { return }
 
         let result = await vaultRequest(path: "/credentials", method: "POST", body: [
-            "providerId": providerId, "apiKey": plainKey, "label": label, "authMethod": authMethod,
+            "providerId": providerId, "encryptedApiKey": encryptedApiKey, "label": label, "authMethod": authMethod,
         ], token: token)
 
         if result.status == 401 {
@@ -1435,7 +1463,9 @@ final class WalletStore: ObservableObject {
                 continue
             }
 
-            guard let apiKey = remote["apiKey"] as? String else { continue }
+            guard let encryptedApiKey = remote["encryptedApiKey"] as? String,
+                  let vk = loadVaultKey(),
+                  let apiKey = try? crypto.decrypt(encoded: encryptedApiKey, key: vk) else { continue }
 
             if let localId = existingLocalId {
                 let currentMeta = vaultCredentialMeta[localId]
