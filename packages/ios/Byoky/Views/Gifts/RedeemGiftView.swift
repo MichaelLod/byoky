@@ -13,6 +13,7 @@ struct RedeemGiftView: View {
     @State private var validationError: String?
     @State private var redeemError: String?
     @State private var redeemed = false
+    @State private var showScanner = false
 
     init(prefilledLink: String? = nil) {
         self.prefilledLink = prefilledLink
@@ -20,6 +21,21 @@ struct RedeemGiftView: View {
 
     var body: some View {
         Form {
+            Section {
+                Button {
+                    showScanner = true
+                } label: {
+                    HStack {
+                        Spacer()
+                        Label("Scan QR Code", systemImage: "qrcode.viewfinder")
+                            .fontWeight(.semibold)
+                        Spacer()
+                    }
+                }
+                .tint(Theme.accent)
+                .accessibilityIdentifier("redeemGift.scan")
+            }
+
             Section {
                 TextEditor(text: $linkText)
                     .font(.system(.body, design: .monospaced))
@@ -31,7 +47,7 @@ struct RedeemGiftView: View {
             } header: {
                 Text("Gift Link")
             } footer: {
-                Text("Paste the gift link or just the encoded payload.")
+                Text("Paste the gift link or scan the QR code from the token pool.")
             }
 
             if let link = previewLink {
@@ -86,6 +102,13 @@ struct RedeemGiftView: View {
         }
         .navigationTitle("Redeem Gift")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showScanner) {
+            QRScannerView { code in
+                showScanner = false
+                linkText = code
+                parseLink()
+            }
+        }
         .onAppear {
             if let prefilled = prefilledLink, linkText.isEmpty {
                 linkText = prefilled
