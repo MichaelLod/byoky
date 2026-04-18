@@ -7,6 +7,7 @@ import { GitHubStarButton } from './components/GitHubStarButton';
 import { ExtensionMock, type MockScene } from './components/ExtensionMock';
 import { AppsShowcase } from './components/AppsShowcase';
 import { WhatsAppChat } from './components/WhatsAppChat';
+import { InstallWalletButton } from './components/InstallWalletButton';
 
 export default function Home() {
   return (
@@ -81,15 +82,10 @@ function Hero() {
             >
               Start Building
             </a>
-            <a
-              href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon"
-              className="btn btn-secondary"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
+            <InstallWalletButton className="btn btn-secondary">
               <DownloadIcon />
               Install Wallet
-            </a>
+            </InstallWalletButton>
           </div>
           <div className="hero-also">
             Also on{' '}
@@ -824,14 +820,9 @@ function ClosingStrip() {
           <span className="closing-strip-label">Open source · MIT licensed</span>
           <div className="closing-strip-actions">
             <GitHubStarButton repo="MichaelLod/byoky" />
-            <a
-              href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon"
-              className="btn btn-primary btn-sm"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
+            <InstallWalletButton className="btn btn-primary btn-sm">
               Install Wallet
-            </a>
+            </InstallWalletButton>
             <a href="/docs" className="closing-strip-link">
               Read the Docs
             </a>
