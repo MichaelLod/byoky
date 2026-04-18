@@ -20,12 +20,68 @@ function isValidHttpsUrl(s: string): boolean {
   }
 }
 
+// Block private / loopback / link-local hosts so the embed-check fetch can't be
+// used to probe internal networks. Covers bare-IP hostnames; DNS-resolved
+// hostnames would need runtime resolution, which is beyond a pre-flight check.
+function isPrivateOrReservedHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.internal') || h.endsWith('.local')) return true;
+  // IPv6 loopback / link-local / ULA
+  if (h === '::1' || h === '[::1]') return true;
+  if (h.startsWith('[fe80:') || h.startsWith('fe80:') || h.startsWith('[fc') || h.startsWith('fc') || h.startsWith('[fd') || h.startsWith('fd')) return true;
+  // IPv4 literals
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
+  if (v4) {
+    const [a, b] = [parseInt(v4[1], 10), parseInt(v4[2], 10)];
+    if (a === 10) return true;                    // 10.0.0.0/8
+    if (a === 127) return true;                   // loopback
+    if (a === 0) return true;                     // 0.0.0.0/8
+    if (a === 169 && b === 254) return true;      // link-local (AWS IMDS)
+    if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+    if (a === 192 && b === 168) return true;      // 192.168.0.0/16
+    if (a >= 224) return true;                    // multicast + reserved
+  }
+  return false;
+}
+
 async function checkIframeEmbeddable(url: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { ok: false, reason: 'Invalid URL.' };
+  }
+  if (isPrivateOrReservedHost(parsed.hostname)) {
+    return { ok: false, reason: 'App URL must resolve to a public host.' };
+  }
+
   let res: Response;
   try {
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), 5000);
-    res = await fetch(url, { method: 'GET', redirect: 'follow', signal: controller.signal });
+    // manual redirect: re-validate each hop's host so redirects can't escape
+    // the private-host guard. Up to 5 hops.
+    let current = parsed.toString();
+    let hops = 0;
+    for (;;) {
+      res = await fetch(current, { method: 'GET', redirect: 'manual', signal: controller.signal });
+      if (res.status >= 300 && res.status < 400) {
+        const loc = res.headers.get('location');
+        if (!loc || hops >= 5) {
+          clearTimeout(t);
+          return { ok: false, reason: 'App URL redirects too many times or is missing a Location header.' };
+        }
+        const next = new URL(loc, current);
+        if (next.protocol !== 'https:' || isPrivateOrReservedHost(next.hostname)) {
+          clearTimeout(t);
+          return { ok: false, reason: 'App URL redirects to a non-public or non-HTTPS host.' };
+        }
+        current = next.toString();
+        hops++;
+        continue;
+      }
+      break;
+    }
     clearTimeout(t);
   } catch {
     return { ok: false, reason: 'Could not reach the app URL. Make sure it is publicly accessible.' };
@@ -71,9 +127,9 @@ export async function POST(request: Request) {
     const authorWebsite = typeof author?.website === 'string' ? author.website.trim() : undefined;
 
     // Required fields
-    if (!name || !slug || !url || !description) {
+    if (!name || !slug || !url || !description || !authorName || !authorEmail) {
       return NextResponse.json(
-        { error: 'Missing required fields: name, slug, url, description' },
+        { error: 'Missing required fields: name, slug, url, description, author.name, author.email' },
         { status: 400 },
       );
     }

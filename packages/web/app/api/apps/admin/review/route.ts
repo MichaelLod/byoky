@@ -64,7 +64,7 @@ export async function POST(request: Request) {
         name: submission.name,
         slug: submission.slug,
         url: submission.url,
-        icon: submission.icon || '/icon.png',
+        ...(submission.icon ? { icon: submission.icon } : {}),
         description: submission.description,
         category: submission.category,
         providers: submission.providers,
