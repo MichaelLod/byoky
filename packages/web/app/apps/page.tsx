@@ -22,7 +22,7 @@ export default async function Apps() {
           <div key={row.slug} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16 }}>
             <h3 style={{ fontSize: 16, marginBottom: 4 }}>{row.payload.name}</h3>
             <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 8 }}>{row.payload.description}</p>
-            <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>by {row.payload.author.name}</p>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>by {row.payload.author?.name ?? 'Unknown'}</p>
           </div>
         ))}
       </div>
