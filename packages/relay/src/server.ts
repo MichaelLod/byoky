@@ -73,6 +73,13 @@ function cleanupIdleRooms(): void {
       console.log(`[cleanup] removed idle room ${roomId.slice(0, 8)}...`);
     }
   }
+  // Drop expired auth-attempt buckets so the map can't grow unbounded
+  // across distinct roomIds.
+  for (const [key, attempts] of authAttempts) {
+    const fresh = attempts.filter((t) => now - t < AUTH_RATE_WINDOW);
+    if (fresh.length === 0) authAttempts.delete(key);
+    else if (fresh.length !== attempts.length) authAttempts.set(key, fresh);
+  }
 }
 
 const cleanupInterval = setInterval(cleanupIdleRooms, 60_000);
@@ -151,22 +158,13 @@ wss.on("connection", (ws) => {
         expected.copy(a);
         provided.copy(b);
         if (!timingSafeEqual(a, b) || expected.length !== provided.length) {
-          // If the room has no active connections, it's stale — delete it
-          // so the next connection can create a fresh room with the correct token
-          const sendersDead = room.senders.every((s) => s.ws.readyState !== WebSocket.OPEN);
-          const recipientsDead = Array.from(room.recipients.values())
-            .every((r) => r.readyState !== WebSocket.OPEN);
-          const staleMs = Date.now() - room.lastActivity;
-          if (sendersDead && recipientsDead && staleMs > IDLE_TIMEOUT_MS) {
-            rooms.delete(roomId);
-            console.log(`[auth] deleted stale room ${roomId.slice(0, 8)}... (token mismatch, idle ${Math.round(staleMs / 1000)}s, no active peers)`);
-            room = { authToken, senders: [], recipients: new Map(), lastActivity: Date.now() };
-            rooms.set(roomId, room);
-          } else {
-            console.log(`[auth] rejected: token mismatch for room ${roomId.slice(0, 8)}...`);
-            send(ws, { type: "relay:auth:result", success: false, error: "auth token mismatch" });
-            return;
-          }
+          // Never let a mismatched token recreate the room — doing so would
+          // let anyone who knows the roomId hijack it inside the window
+          // between the last peer leaving and cleanupIdleRooms running.
+          // The idle sweep is the single source of truth for eviction.
+          console.log(`[auth] rejected: token mismatch for room ${roomId.slice(0, 8)}...`);
+          send(ws, { type: "relay:auth:result", success: false, error: "auth token mismatch" });
+          return;
         }
 
         if (role === "sender") {
@@ -280,9 +278,16 @@ wss.on("connection", (ws) => {
 
       if (msg.type === "relay:usage") {
         // Usage updates apply to the whole gift — broadcast to every
-        // recipient so their wallets stay in sync.
+        // recipient so their wallets stay in sync. Also forward to the
+        // OTHER senders in the room (e.g. the vault fallback when the
+        // primary device is the one writing usage) so they can use the
+        // received value as a floor on their local counter and avoid
+        // concurrent overspend across senders.
         for (const r of room.recipients.values()) {
           if (r.readyState === WebSocket.OPEN) r.send(String(raw));
+        }
+        for (const s of room.senders) {
+          if (s.ws !== ws && s.ws.readyState === WebSocket.OPEN) s.ws.send(String(raw));
         }
         return;
       }
