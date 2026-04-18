@@ -580,7 +580,7 @@ function CloudVaultModal({ onClose }: { onClose: () => void }) {
       </h2>
 
       <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '0 0 12px', lineHeight: 1.5 }}>
-        End-to-end encrypted with your password. We can't read your keys.
+        Your keys are encrypted with your password and stored as ciphertext on our servers.
       </p>
 
       <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>

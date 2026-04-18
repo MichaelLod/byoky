@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 export const metadata: Metadata = {
   title: 'Privacy Policy',
   description:
-    'Byoky runs locally by default. Optional cloud sync uses end-to-end encryption — we never see your API keys.',
+    'Byoky runs locally by default. Optional cloud sync stores your keys encrypted with a password-derived key.',
   alternates: {
     canonical: '/privacy',
   },
@@ -21,7 +21,10 @@ export default function Privacy() {
         <p>
           Byoky runs locally by default. Your API keys are encrypted on your device and never
           leave it unless you explicitly opt in to cloud sync. When you do, keys are encrypted
-          client-side before upload — our server only ever sees ciphertext.
+          with a password-derived key and stored as ciphertext in our database; the decryption
+          key is held on our server during your session so features like sync, gift relay, and
+          key previews can work. This is not end-to-end encryption — see the cloud sync section
+          below.
         </p>
       </Section>
 
@@ -44,10 +47,17 @@ export default function Privacy() {
         <p>When cloud sync is enabled, the following applies:</p>
         <ul>
           <li>
-            <strong>End-to-end encryption.</strong> Your encryption key is derived from your
-            password on your device using PBKDF2 (600,000 iterations). API keys are encrypted
-            with that key before they are uploaded. The Byoky server stores only the ciphertext
-            and cannot decrypt it — only someone who knows your password can.
+            <strong>Encryption model.</strong> Your encryption key is derived from your
+            password on your device using PBKDF2 (600,000 iterations) and sent to
+            vault.byoky.com on login. API keys are encrypted with that key before upload and
+            stored as ciphertext in our database. The derived key is held in server memory
+            during your session and, wrapped with a server-held secret, persisted in the
+            sessions table so you stay signed in after idle timeouts. This lets the server
+            mask keys in list views, relay gift and remote-OpenClaw traffic on your behalf,
+            and resume sessions — but it means this is <strong>not end-to-end encryption</strong>.
+            A compromise of our server or the wrapping secret while your session is active
+            could expose your credentials. Logging out evicts the key; deleting your account
+            removes it entirely.
           </li>
           <li>
             <strong>Account data.</strong> We store a username you choose (no email required),
@@ -89,7 +99,6 @@ export default function Privacy() {
         <ul>
           <li>We do not collect analytics, telemetry, or tracking data</li>
           <li>We do not track your browsing activity</li>
-          <li>We do not read your API keys — not on your device, not on our server</li>
           <li>We do not log prompts, completions, IP addresses, or user agents</li>
           <li>We do not use cookies on the extension or apps</li>
           <li>We do not sell or share any data with advertisers</li>

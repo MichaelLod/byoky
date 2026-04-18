@@ -135,7 +135,7 @@ export function Setup() {
 
         <div style={{ marginTop: '24px', width: '100%' }}>
           <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '0 0 20px', lineHeight: 1.5, textAlign: 'center' }}>
-            Sync across devices, end-to-end encrypted.
+            Sync across devices. Keys encrypted with your password.
           </p>
 
           <button
@@ -317,7 +317,7 @@ export function Setup() {
           {mode === 'byok'
             ? 'This password encrypts your keys on this device. Nothing leaves your browser.'
             : isSignup
-              ? "End-to-end encrypted with your password. We can't read your keys."
+              ? 'Your keys are encrypted with your password and stored as ciphertext on our servers.'
               : 'Sign in to sync keys from your vault.'}
         </p>
 
