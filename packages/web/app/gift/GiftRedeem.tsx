@@ -103,13 +103,17 @@ export function GiftRedeem() {
 
   async function tryOpenApp() {
     if (!encoded) return;
-    // Stash the gift URL on the clipboard so that if the user is redirected
-    // to the store and installs the app, the app can pick it up on first
-    // launch (deferred deep linking). Best-effort: silently ignore failures.
-    const giftUrl = `https://byoky.com/gift#${encoded}`;
-    try { await navigator.clipboard.writeText(giftUrl); } catch { /* ignore */ }
+    // Defense in depth: encoded has already passed decodeGiftLink, but it
+    // flows into a native-scheme / intent URL below. Reject anything that
+    // isn't pure base64url so a crafted hash can't inject Intent params.
+    if (!/^[A-Za-z0-9_-]+$/.test(encoded)) return;
 
     if (platform === 'android') {
+      // Chrome handles the fallback to the Play Store itself via
+      // browser_fallback_url — we can't cleanly separate the "app opened"
+      // and "went to store" branches here, so we don't write the gift URL
+      // to the clipboard on Android. Users who install from the store can
+      // still paste the link manually (the page's "Copy gift link" button).
       const fallback = encodeURIComponent(ANDROID_STORE);
       window.location.href = `intent://gift/${encoded}#Intent;scheme=byoky;package=com.byoky.app;S.browser_fallback_url=${fallback};end`;
       return;
@@ -129,9 +133,15 @@ export function GiftRedeem() {
     const onVisibility = () => {
       if (document.hidden) cleanup();
     };
-    const timer = window.setTimeout(() => {
+    // App didn't intercept the scheme — stash the gift URL on the clipboard
+    // so a freshly-installed app can pick it up on first launch (deferred
+    // deep linking), then redirect to the store. Writing only in the
+    // fallback branch means the app-opened path never exposes the bearer
+    // token to other apps on the device.
+    const timer = window.setTimeout(async () => {
       cleanup();
       if (document.hidden) return;
+      try { await navigator.clipboard.writeText(`https://byoky.com/gift/${encoded}`); } catch { /* ignore */ }
       window.location.href = IOS_STORE;
     }, 1500);
     document.addEventListener('visibilitychange', onVisibility);
@@ -139,7 +149,7 @@ export function GiftRedeem() {
 
   async function handleStage() {
     if (!encoded) return;
-    const giftLink = `https://byoky.com/gift#${encoded}`;
+    const giftLink = `https://byoky.com/gift/${encoded}`;
     setStaging(true);
     const ok = await stageGiftInExtension(giftLink);
     setStaging(false);
@@ -149,7 +159,7 @@ export function GiftRedeem() {
   async function copyLink() {
     if (!encoded) return;
     try {
-      await navigator.clipboard.writeText(`https://byoky.com/gift#${encoded}`);
+      await navigator.clipboard.writeText(`https://byoky.com/gift/${encoded}`);
       setCopied(true);
       setTimeout(() => setCopied(false), 1800);
     } catch {

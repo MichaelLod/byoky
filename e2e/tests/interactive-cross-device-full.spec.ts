@@ -113,7 +113,7 @@ async function mintGiftForProvider(walletA: Wallet, providerId: string, maxToken
   await expect(walletA.popup.locator('text=Gift Created')).toBeVisible({ timeout: 15_000 });
 
   const link = await walletA.popup.locator('.gift-link-text').innerText();
-  expect(link).toMatch(/^https:\/\/byoky\.com\/gift#/);
+  expect(link).toMatch(/^https:\/\/byoky\.com\/gift\//);
   fs.writeFileSync(DESKTOP_GIFT_LINK_OUT, link);
   await walletA.popup.click('button:has-text("Done")');
   return link;

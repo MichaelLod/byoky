@@ -334,7 +334,7 @@ if (STAGE === 'A2') {
       await expect(walletA.popup.locator('text=Gift Created')).toBeVisible({ timeout: 15_000 });
 
       const link = await walletA.popup.locator('.gift-link-text').innerText();
-      expect(link).toMatch(/^https:\/\/byoky\.com\/gift#/);
+      expect(link).toMatch(/^https:\/\/byoky\.com\/gift\//);
       fs.writeFileSync(DESKTOP_GIFT_LINK_OUT, link);
       console.log(`[stage2/leg2] wrote desktop gift link to ${DESKTOP_GIFT_LINK_OUT} (${link.length} chars)`);
 

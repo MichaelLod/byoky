@@ -658,7 +658,7 @@ function TokenGiftScene() {
             <div className="mock-gift-success-h">Gift Created</div>
             <div className="mock-gift-success-sub">100K tokens via Anthropic</div>
             <div className="mock-gift-link">
-              <span className="mock-mono">byoky.com/gift#</span>
+              <span className="mock-mono">byoky.com/gift/</span>
               <span className="mock-mono accent">eyJzIjoiTWlja…</span>
             </div>
             <div className="mock-gift-actions">
@@ -681,9 +681,9 @@ function TokenGiftScene() {
               <label>Gift link</label>
               <div className={`mock-textarea ${linkPasted ? 'filled' : ''}`}>
                 {linkPasted ? (
-                  <span className="mock-mono small">https://byoky.com/gift#eyJzIjoiTWlja…</span>
+                  <span className="mock-mono small">https://byoky.com/gift/eyJzIjoiTWlja…</span>
                 ) : (
-                  <span className="mock-textarea-placeholder">https://byoky.com/gift#... or byoky://gift/...</span>
+                  <span className="mock-textarea-placeholder">https://byoky.com/gift/... or byoky://gift/...</span>
                 )}
               </div>
             </div>

@@ -111,7 +111,7 @@ export function decodeGiftLink(encoded: string): GiftLink | null {
 }
 
 export function giftLinkToUrl(encoded: string): string {
-  return `https://byoky.com/gift#${encoded}`;
+  return `https://byoky.com/gift/${encoded}`;
 }
 
 // --- Validation ---
@@ -127,8 +127,9 @@ export function validateGiftLink(link: GiftLink): { valid: boolean; reason?: str
 
   try {
     const url = new URL(link.r);
-    if (url.protocol !== 'ws:' && url.protocol !== 'wss:') {
-      return { valid: false, reason: 'Relay URL must use ws:// or wss://' };
+    const isLoopback = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]';
+    if (url.protocol !== 'wss:' && !(url.protocol === 'ws:' && isLoopback)) {
+      return { valid: false, reason: 'Relay URL must use wss://' };
     }
   } catch {
     return { valid: false, reason: 'Invalid relay URL' };
