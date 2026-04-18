@@ -15,6 +15,13 @@ export interface ProviderConfig {
    * When absent, the family adapter's buildChatUrl decides the path.
    */
   chatPath?: string;
+  /**
+   * Provider has no fixed upstream host (e.g. Azure OpenAI, where every
+   * tenant has its own `<resource>.openai.azure.com`). The `baseUrl` on the
+   * provider config is a placeholder only — the real host comes from the
+   * per-credential `baseUrl` field supplied at credential-creation time.
+   */
+  requiresCustomBaseUrl?: boolean;
   oauthConfig?: OAuthConfig;
 }
 

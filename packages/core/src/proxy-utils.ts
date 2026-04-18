@@ -4,18 +4,89 @@ import { PROVIDERS } from './providers.js';
 /**
  * Validate that a proxy request URL targets the registered provider's base URL.
  * Prevents API key exfiltration by rejecting requests to arbitrary domains.
+ *
+ * `overrideBaseUrl` lets the caller supply a per-credential base URL for
+ * providers whose host isn't fixed globally (e.g. Azure OpenAI, where every
+ * tenant has its own `<resource>.openai.azure.com`). Strictly honored for
+ * `requiresCustomBaseUrl` providers — absent override means reject.
  */
-export function validateProxyUrl(providerId: string, url: string): boolean {
+export function validateProxyUrl(
+  providerId: string,
+  url: string,
+  overrideBaseUrl?: string,
+): boolean {
   const provider = PROVIDERS[providerId];
   if (!provider) return false;
   try {
     const target = new URL(url);
     if (target.protocol !== 'https:') return false;
-    const base = new URL(provider.baseUrl);
+
+    if (provider.requiresCustomBaseUrl) {
+      if (!overrideBaseUrl) return false;
+      const base = new URL(overrideBaseUrl);
+      if (base.protocol !== 'https:') return false;
+      return target.origin === base.origin;
+    }
+
+    // If a trusted override is supplied for a fixed-host provider, it must
+    // still match that provider's registered origin — we refuse to trust a
+    // per-credential baseUrl that would redirect traffic elsewhere.
+    const base = new URL(overrideBaseUrl ?? provider.baseUrl);
     return target.origin === base.origin;
   } catch {
     return false;
   }
+}
+
+/**
+ * Allow-list of forwardable client header names (lowercase). Anything not on
+ * this list is dropped before we hit the upstream provider.
+ *
+ * Why an allow-list and not a deny-list:
+ *   - Hop-by-hop headers (`host`, `connection`, `transfer-encoding`, `te`,
+ *     `upgrade`, `proxy-authorization`) must never traverse a proxy — and
+ *     transfer-encoding mismatched with content-length is a classic request-
+ *     smuggling vector against any upstream that disagrees with our parser.
+ *   - `cookie` would carry session state into the provider's logs.
+ *   - SDK telemetry / browser-fetch metadata (`x-stainless-*`, `sec-fetch-*`,
+ *     `origin`, `referer`) leaks the real client environment to providers
+ *     and frequently triggers their bot-detection middleware.
+ *   - `authorization` / `x-api-key` / `api-key` are the SDK's *fake* session
+ *     keys; the real ones are injected below.
+ *
+ * Auth-related headers and content-length are added back below by the
+ * provider-specific branches and by fetch() itself.
+ */
+const FORWARDABLE_HEADERS = new Set([
+  'content-type',
+  'accept',
+  // Anthropic
+  'anthropic-version',
+  'anthropic-beta',
+  'anthropic-dangerous-direct-browser-access',
+  'x-app',
+  'user-agent',
+  // Cohere
+  'x-client-name',
+  // OpenAI
+  'openai-organization',
+  'openai-project',
+  'openai-beta',
+  // Google
+  'x-goog-api-client',
+]);
+
+/**
+ * Reject header values containing CR/LF/NUL — defense against header injection
+ * smuggled through arbitrary string values. undici already rejects these,
+ * but explicit + early is cheaper than discovering it inside fetch().
+ */
+function hasControlChars(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code === 0x0a || code === 0x0d || code === 0x00) return true;
+  }
+  return false;
 }
 
 /**
@@ -28,30 +99,19 @@ export function buildHeaders(
   apiKey: string,
   authMethod: string = 'api_key',
 ): Record<string, string> {
-  // Normalize header keys to lowercase to prevent case-sensitive bypass
+  // Allow-list: only known-safe headers are forwarded. Everything else (host,
+  // cookie, transfer-encoding, x-stainless-*, sec-fetch-*, origin, referer,
+  // proxy-authorization, content-length, ...) is dropped silently. fetch()
+  // recomputes content-length from the actual body it sends, and the auth
+  // headers are injected in the provider-specific branches below.
   const headers: Record<string, string> = {};
   for (const [key, value] of Object.entries(requestHeaders)) {
-    headers[key.toLowerCase()] = value;
+    if (typeof value !== 'string') continue;
+    const lower = key.toLowerCase();
+    if (!FORWARDABLE_HEADERS.has(lower)) continue;
+    if (hasControlChars(value)) continue;
+    headers[lower] = value;
   }
-
-  // Remove any auth headers the SDK might have set (they're fake session keys)
-  delete headers['authorization'];
-  delete headers['x-api-key'];
-  delete headers['api-key'];
-
-  // Strip browser/SDK headers that can trigger rejection from provider APIs
-  delete headers['origin'];
-  delete headers['referer'];
-  // Remove SDK telemetry headers that leak the real client environment
-  for (const key of Object.keys(headers)) {
-    if (key.startsWith('x-stainless-')) delete headers[key];
-  }
-  delete headers['sec-fetch-mode'];
-  delete headers['accept-language'];
-  delete headers['accept-encoding'];
-  // Always strip content-length — fetch() recalculates it from the actual body,
-  // and the body may have been modified (e.g. system prompt injection)
-  delete headers['content-length'];
 
   if (providerId === 'anthropic') {
     if (authMethod === 'oauth') {
