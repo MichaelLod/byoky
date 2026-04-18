@@ -18,9 +18,28 @@ export function middleware(request: NextRequest) {
     return NextResponse.rewrite(url);
   }
 
+  // api.byoky.com — public CLI-facing API. Only explicitly allowlisted
+  // endpoints are exposed; everything else 404s so internal admin routes
+  // stay on byoky.com.
+  if (hostname.startsWith('api.')) {
+    const path = request.nextUrl.pathname;
+    const target = apiSubdomainTarget(path);
+    if (!target) {
+      return new NextResponse('Not Found', { status: 404 });
+    }
+    const url = request.nextUrl.clone();
+    url.pathname = target;
+    return NextResponse.rewrite(url);
+  }
+
   return NextResponse.next();
 }
 
+function apiSubdomainTarget(path: string): string | null {
+  if (path === '/v1/apps/submit') return '/api/apps/submit';
+  return null;
+}
+
 export const config = {
-  matcher: ['/', '/((?!api|_next/static|_next/image|favicon|icon|apple-touch-icon|og-image|manifest).*)'],
+  matcher: ['/', '/((?!_next/static|_next/image|favicon|icon|apple-touch-icon|og-image|manifest).*)'],
 };
