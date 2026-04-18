@@ -14,6 +14,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.byoky.app.data.*
+import com.byoky.app.ui.components.QRScannerDialog
 import com.byoky.app.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -23,6 +24,7 @@ fun RedeemGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
     var linkText by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var redeemed by remember { mutableStateOf(false) }
+    var showScanner by remember { mutableStateOf(false) }
 
     LaunchedEffect(pendingGiftLink) {
         val link = pendingGiftLink ?: return@LaunchedEffect
@@ -75,6 +77,19 @@ fun RedeemGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
             if (redeemed) {
                 RedeemedState(preview!!, onBack)
             } else {
+                OutlinedButton(
+                    onClick = { showScanner = true },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Accent),
+                ) {
+                    Icon(Icons.Default.QrCodeScanner, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Scan QR Code", fontWeight = FontWeight.SemiBold)
+                }
+
                 Text("Gift Link", color = TextSecondary, fontSize = 12.sp)
                 OutlinedTextField(
                     value = linkText,
@@ -156,6 +171,18 @@ fun RedeemGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
                 }
             }
         }
+    }
+
+    if (showScanner) {
+        QRScannerDialog(
+            title = "Scan Gift QR",
+            onCode = { code ->
+                showScanner = false
+                linkText = code
+                error = null
+            },
+            onDismiss = { showScanner = false },
+        )
     }
 }
 
