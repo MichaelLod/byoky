@@ -21,7 +21,8 @@ export function middleware(request: NextRequest) {
   // api.byoky.com — public CLI-facing API. Only explicitly allowlisted
   // endpoints are exposed; everything else 404s so internal admin routes
   // stay on byoky.com.
-  if (hostname.startsWith('api.')) {
+  const bareHost = hostname.split(':')[0];
+  if (bareHost === 'api.byoky.com') {
     const path = request.nextUrl.pathname;
     const target = apiSubdomainTarget(path);
     if (!target) {
