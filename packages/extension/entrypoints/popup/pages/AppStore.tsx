@@ -2,9 +2,9 @@ import { useState, useEffect } from 'react';
 import { useWalletStore } from '../store';
 import type { MarketplaceApp } from '@byoky/core';
 
-const MARKETPLACE_URL = 'https://byoky.com/api/apps';
+export const MARKETPLACE_URL = 'https://byoky.com/api/apps';
 
-function resolveIcon(icon: string | undefined): string | undefined {
+export function resolveIcon(icon: string | undefined): string | undefined {
   if (!icon) return undefined;
   if (icon.startsWith('http://') || icon.startsWith('https://') || icon.startsWith('data:')) return icon;
   return `https://byoky.com${icon.startsWith('/') ? '' : '/'}${icon}`;
@@ -82,7 +82,7 @@ export function AppStore() {
   );
 }
 
-function StoreAppCard({
+export function StoreAppCard({
   app, installed, onInstall,
 }: { app: MarketplaceApp; installed: boolean; onInstall: () => void }) {
   const [iconFailed, setIconFailed] = useState(false);
@@ -117,7 +117,7 @@ function StoreAppCard({
         </div>
       </div>
       <button
-        className={`btn btn-sm ${installed ? 'btn-secondary' : 'btn-primary'}`}
+        className={`btn store-app-install ${installed ? 'btn-secondary' : 'btn-primary'}`}
         disabled={installed}
         onClick={onInstall}
       >

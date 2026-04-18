@@ -1,15 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useWalletStore } from '../store';
-import type { InstalledApp } from '@byoky/core';
-
-function resolveIcon(icon: string | undefined): string | undefined {
-  if (!icon) return undefined;
-  if (icon.startsWith('http://') || icon.startsWith('https://') || icon.startsWith('data:')) return icon;
-  return `https://byoky.com${icon.startsWith('/') ? '' : '/'}${icon}`;
-}
+import type { InstalledApp, MarketplaceApp } from '@byoky/core';
+import { MARKETPLACE_URL, StoreAppCard, resolveIcon } from './AppStore';
 
 export function Apps() {
-  const { installedApps, navigate } = useWalletStore();
+  const { installedApps, navigate, installApp } = useWalletStore();
   const enabledApps = installedApps.filter((a) => a.enabled);
   const disabledApps = installedApps.filter((a) => !a.enabled);
 
@@ -18,17 +13,7 @@ export function Apps() {
       <h2 className="page-title">Apps</h2>
 
       {installedApps.length === 0 ? (
-        <div className="empty-state">
-          <p>No apps installed</p>
-          <p>Browse the store to find apps that use your API keys.</p>
-          <button
-            className="btn btn-primary"
-            style={{ marginTop: 16, width: 'auto' }}
-            onClick={() => navigate('app-store')}
-          >
-            Browse Store
-          </button>
-        </div>
+        <EmptyAppsState onBrowse={() => navigate('app-store')} onInstall={installApp} />
       ) : (
         <>
           <div className="app-grid">
@@ -50,6 +35,60 @@ export function Apps() {
         </>
       )}
     </div>
+  );
+}
+
+function EmptyAppsState({
+  onBrowse, onInstall,
+}: { onBrowse: () => void; onInstall: (app: MarketplaceApp) => void }) {
+  const [apps, setApps] = useState<MarketplaceApp[]>([]);
+  const [installedIds, setInstalledIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(MARKETPLACE_URL)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('fetch'))))
+      .then((data) => {
+        if (cancelled) return;
+        setApps((data.apps ?? []).slice(0, 10));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  function handleInstall(app: MarketplaceApp) {
+    onInstall(app);
+    setInstalledIds((prev) => new Set(prev).add(app.id));
+  }
+
+  return (
+    <>
+      <div className="empty-state">
+        <p>No apps installed</p>
+        <p>Browse the store to find apps that use your API keys.</p>
+        <button
+          className="btn btn-primary"
+          style={{ marginTop: 16, width: 'auto' }}
+          onClick={onBrowse}
+        >
+          Browse Store
+        </button>
+      </div>
+
+      {apps.length > 0 && (
+        <div style={{ marginTop: 20 }}>
+          <p className="section-label" style={{ marginBottom: 10 }}>Popular apps</p>
+          {apps.map((app) => (
+            <StoreAppCard
+              key={app.id}
+              app={app}
+              installed={installedIds.has(app.id)}
+              onInstall={() => handleInstall(app)}
+            />
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 

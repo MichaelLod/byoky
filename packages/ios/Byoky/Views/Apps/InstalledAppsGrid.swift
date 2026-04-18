@@ -3,15 +3,20 @@ import SwiftUI
 struct InstalledAppsGrid: View {
     @EnvironmentObject var wallet: WalletStore
     let onBrowseStore: () -> Void
+    @State private var popularApps: [MarketplaceApp] = []
 
     private var enabledApps: [InstalledApp] { wallet.installedApps.filter(\.enabled) }
     private var disabledApps: [InstalledApp] { wallet.installedApps.filter { !$0.enabled } }
+    private var installedIds: Set<String> { Set(wallet.installedApps.map(\.id)) }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 if wallet.installedApps.isEmpty {
                     emptyState
+                    if !popularApps.isEmpty {
+                        popularSection
+                    }
                 } else {
                     appGrid(apps: enabledApps)
 
@@ -28,6 +33,11 @@ struct InstalledAppsGrid: View {
                 }
             }
             .padding(.top, 16)
+        }
+        .task {
+            if wallet.installedApps.isEmpty && popularApps.isEmpty {
+                await fetchPopular()
+            }
         }
     }
 
@@ -48,7 +58,36 @@ struct InstalledAppsGrid: View {
                 .padding(.top, 4)
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 60)
+        .padding(.top, 40)
+    }
+
+    private var popularSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("POPULAR APPS")
+                .font(.caption2)
+                .fontWeight(.semibold)
+                .foregroundStyle(Theme.textMuted)
+                .padding(.horizontal)
+            VStack(spacing: 8) {
+                ForEach(popularApps) { app in
+                    StoreAppRow(app: app, installed: installedIds.contains(app.id)) {
+                        wallet.installApp(app)
+                    }
+                    .padding(.horizontal)
+                }
+            }
+        }
+    }
+
+    private func fetchPopular() async {
+        do {
+            let url = URL(string: marketplaceURL)!
+            let (data, _) = try await URLSession.shared.data(from: url)
+            let response = try JSONDecoder().decode(MarketplaceResponse.self, from: data)
+            popularApps = Array(response.apps.prefix(10))
+        } catch {
+            // Silent — empty state already shown above.
+        }
     }
 
     private func appGrid(apps: [InstalledApp]) -> some View {
