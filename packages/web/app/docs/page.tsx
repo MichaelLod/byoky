@@ -1195,13 +1195,18 @@ function AppManifest() {
       </Prop>
 
       <h3>Review criteria</h3>
+      <p>
+        Submission (<code>api.byoky.com/v1/apps/submit</code>) enforces the automated checks;
+        the rest are human-review criteria applied before the listing goes public.
+      </p>
       <ul>
-        <li>App loads over HTTPS</li>
-        <li>App URL allows iframe embedding (no <code>X-Frame-Options: DENY</code> / <code>SAMEORIGIN</code>, no restrictive <code>frame-ancestors</code>)</li>
-        <li>Uses <code>@byoky/sdk</code> for all LLM access</li>
-        <li>Only requests providers it actually uses</li>
-        <li>No obfuscated JavaScript</li>
-        <li>Privacy policy exists</li>
+        <li>App loads over HTTPS <em>(automated)</em></li>
+        <li>App URL allows iframe embedding &mdash; no <code>X-Frame-Options: DENY</code> / <code>SAMEORIGIN</code>, no restrictive <code>frame-ancestors</code> <em>(automated)</em></li>
+        <li>Slug, category, and provider IDs are valid <em>(automated)</em></li>
+        <li>Uses <code>@byoky/sdk</code> for all LLM access <em>(human review)</em></li>
+        <li>Only requests providers it actually uses <em>(human review)</em></li>
+        <li>No obfuscated JavaScript <em>(human review)</em></li>
+        <li>Privacy policy exists <em>(human review)</em></li>
       </ul>
     </Section>
   );
