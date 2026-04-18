@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { InstallWithAI } from './InstallWithAI';
 
 export const metadata: Metadata = {
   title: 'Run OpenClaw with Byoky — free, no API credits required',
@@ -160,6 +161,7 @@ byoky-bridge install`}
             host so the bridge can hand requests off to your extension. You only
             run this once.
           </p>
+          <InstallWithAI />
         </Step>
 
         <Step
@@ -265,6 +267,9 @@ function Hero() {
         >
           Install Byoky wallet
         </a>
+      </div>
+      <div className="oc-hero-ai">
+        <InstallWithAI />
       </div>
     </header>
   );
@@ -528,6 +533,64 @@ const styles = `
   margin: 0 0 28px;
 }
 .oc-cta-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.oc-hero-ai {
+  margin: 24px auto 0;
+  max-width: 640px;
+  text-align: left;
+}
+
+/* ── Install with AI CTA ── */
+.oc-ai-cta {
+  margin-top: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 16px 20px;
+  background: var(--oc-bg-card);
+  border: 1px solid var(--oc-border);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+.oc-ai-cta-text { min-width: 0; }
+.oc-ai-cta-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.oc-ai-cta-spark { color: var(--teal); font-size: 14px; }
+.oc-ai-cta-subtitle {
+  font-size: 13.5px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.oc-ai-cta-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--text);
+  color: var(--oc-bg-card);
+  border: none;
+  border-radius: 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+  font-family: inherit;
+}
+.oc-ai-cta-btn:hover { background: #000; }
+.oc-ai-cta-btn:active { transform: translateY(1px); }
+.oc-ai-cta-btn.copied { background: var(--teal); color: #fff; }
+@media (max-width: 640px) {
+  .oc-ai-cta { flex-direction: column; align-items: stretch; gap: 14px; }
+  .oc-ai-cta-btn { justify-content: center; }
+}
 
 /* ── Two free paths ── */
 .oc-paths {
