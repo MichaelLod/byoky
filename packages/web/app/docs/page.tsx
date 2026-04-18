@@ -71,6 +71,29 @@ Frontend opens \`session.createRelay('wss://your-app.com/ws/relay')\`. Backend u
 - Users install one of: Chrome/Firefox extension, iOS app, or Android app. The SDK's \`modal: true\` handles extension detection, relay fallback, and QR pairing for mobile automatically.
 - Full docs: https://byoky.com/docs
 
+# Publishing to the Byoky marketplace
+
+Once the app works end-to-end, help me list it in the Byoky App Store so users can install it directly into their wallet.
+
+1. Deploy the app over HTTPS. The hosting server must allow iframe embedding — either omit \`X-Frame-Options\` or set \`Content-Security-Policy: frame-ancestors *\`. Do NOT set \`X-Frame-Options: DENY\` or \`SAMEORIGIN\`.
+2. From the project root, create the manifest: \`npx create-byoky-app init\`. This writes \`byoky.app.json\`.
+3. Submit: \`npx create-byoky-app submit\`. This POSTs the manifest to https://api.byoky.com/v1/apps/submit. The endpoint validates fields, fetches the URL, and rejects it if iframe embedding is blocked.
+4. Once approved, the app appears at https://byoky.com/apps and inside the extension / iOS / Android App Store. The author email on the manifest gets the approval notification.
+
+Manifest schema (\`byoky.app.json\`):
+- \`name\` (string, ≤100 chars) — display name
+- \`slug\` (string, lowercase a-z0-9-, 2-63 chars) — unique marketplace ID
+- \`url\` (https URL) — where the app is hosted; this is what loads in the sandboxed iframe
+- \`icon\` (https URL, optional)
+- \`description\` (string, ≤1000 chars)
+- \`category\` — one of: chat | coding | trading | productivity | research | creative | other
+- \`providers\` (string[]) — IDs from the provider list above; only request what the app actually uses
+- \`author\` — \`{ name, email, website? }\`
+
+Review criteria: HTTPS, iframe-embeddable, uses \`@byoky/sdk\` for all LLM access, only requests providers the app uses, no obfuscated JavaScript, privacy policy exists.
+
+Full publishing walkthrough: https://byoky.com/docs#submitting
+
 Now help me build: `;
 
 const categories = [
@@ -115,6 +138,7 @@ const categories = [
     items: [
       { id: 'app-ecosystem', label: 'Overview' },
       { id: 'manifest', label: 'App Manifest' },
+      { id: 'submitting', label: 'Submitting Your App' },
     ],
   },
 ];
@@ -190,6 +214,7 @@ export default function Docs() {
         <CrossProviderRouting />
         <AppEcosystem />
         <AppManifest />
+        <SubmittingYourApp />
       </main>
 
       <style>{docsStyles}</style>
@@ -1182,9 +1207,109 @@ function AppManifest() {
   );
 }
 
+function SubmittingYourApp() {
+  return (
+    <Section id="submitting" title="Submitting Your App">
+      <p>
+        Two paths get your app into the marketplace: the CLI (for developers already working in a
+        byoky project) and the web form (for everyone else). Both hit the same review queue.
+      </p>
+
+      <AiPromptCTA
+        title="Create & ship an app with AI"
+        subtitle="Copy the full prompt — it covers scaffold, SDK integration, hosting requirements, and the exact submit command. Paste into Claude, ChatGPT, or Cursor to go from idea to submitted manifest in one session."
+        buttonLabel="Copy create-app prompt"
+      />
+
+      <h3>1. Scaffold or wire up an existing project</h3>
+      <p>
+        If you&apos;re starting fresh, generate a project with a working <code>@byoky/sdk</code>{' '}
+        integration:
+      </p>
+      <Code lang="bash">{`npx create-byoky-app my-app
+cd my-app
+npm install`}</Code>
+      <p>
+        Pick a template (AI Chat / Multi-Provider / Backend Relay). The generator also drops a
+        starter <code>byoky.app.json</code> in the project root.
+      </p>
+      <p>
+        If you already have an app, skip the scaffold and jump to the manifest step &mdash; any web
+        app that uses <code>@byoky/sdk</code> and allows iframe embedding is eligible.
+      </p>
+
+      <h3>2. Create the manifest</h3>
+      <p>
+        Run the interactive generator from inside your project directory:
+      </p>
+      <Code lang="bash">{`npx create-byoky-app init`}</Code>
+      <p>
+        This writes <code>byoky.app.json</code> with your app name, slug, URL, description,
+        category, providers, and author info. See the <a href="#manifest">App Manifest</a> section
+        for the full field reference.
+      </p>
+
+      <h3>3. Host it with iframe embedding allowed</h3>
+      <p>
+        Your app URL must be HTTPS and must not block iframe embedding. The submission endpoint
+        fetches your URL and rejects it if the response headers would prevent it from loading
+        inside the wallet.
+      </p>
+      <Code lang="http">{`# Either omit X-Frame-Options entirely, or allow embedding via CSP:
+Content-Security-Policy: frame-ancestors *`}</Code>
+
+      <h3>4. Submit</h3>
+      <p>
+        From inside your project (where <code>byoky.app.json</code> lives):
+      </p>
+      <Code lang="bash">{`npx create-byoky-app submit`}</Code>
+      <p>
+        This POSTs your manifest to{' '}
+        <code>https://api.byoky.com/v1/apps/submit</code>. You&apos;ll see a confirmation line once
+        the manifest is queued.
+      </p>
+      <p>
+        Prefer a form? Fill out the same fields at{' '}
+        <a href="https://byoky.com/apps/submit">byoky.com/apps/submit</a>.
+      </p>
+
+      <h3>5. Review &amp; approval</h3>
+      <ol>
+        <li>
+          The endpoint validates field formats, checks that your URL is reachable over HTTPS, and
+          verifies iframe embedding is allowed. Failures return a 400 with an explanation &mdash;
+          fix and resubmit.
+        </li>
+        <li>
+          Approved submissions appear at <a href="https://byoky.com/apps">byoky.com/apps</a> and in
+          the App Store tab inside the extension, iOS, and Android wallets.
+        </li>
+        <li>
+          We notify you at the author email you provided in the manifest.
+        </li>
+      </ol>
+
+      <h3>Updating an approved app</h3>
+      <p>
+        Resubmit with the same <code>slug</code>. The existing listing&apos;s metadata updates on
+        approval; the app URL itself can ship new versions anytime &mdash; users always load your
+        current <code>https://</code> URL, so deploying a new build is enough.
+      </p>
+    </Section>
+  );
+}
+
 /* ─── Components ───────────────────────────────── */
 
-function AiPromptCTA() {
+function AiPromptCTA({
+  title = 'Building with an AI assistant?',
+  subtitle = 'Copy the setup prompt, paste into Claude, ChatGPT, or Cursor, and start building with a Byoky-aware model.',
+  buttonLabel = 'Copy prompt for AI',
+}: {
+  title?: string;
+  subtitle?: string;
+  buttonLabel?: string;
+} = {}) {
   const [copied, setCopied] = useState(false);
 
   const copy = async () => {
@@ -1202,12 +1327,9 @@ function AiPromptCTA() {
       <div className="docs-ai-cta-text">
         <div className="docs-ai-cta-title">
           <span className="docs-ai-cta-spark" aria-hidden>✦</span>
-          Building with an AI assistant?
+          {title}
         </div>
-        <div className="docs-ai-cta-subtitle">
-          Copy the setup prompt, paste into Claude, ChatGPT, or Cursor, and start building
-          with a Byoky-aware model.
-        </div>
+        <div className="docs-ai-cta-subtitle">{subtitle}</div>
       </div>
       <button
         type="button"
@@ -1227,7 +1349,7 @@ function AiPromptCTA() {
               <rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" strokeWidth="2" />
               <path d="M5 15V5a2 2 0 0 1 2-2h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
             </svg>
-            Copy prompt for AI
+            {buttonLabel}
           </>
         )}
       </button>

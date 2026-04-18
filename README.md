@@ -420,10 +420,10 @@ pnpm --filter @byoky/extension build:all     # Chrome + Firefox + Safari
 ```bash
 npx create-byoky-app my-app    # scaffold a new app
 npx create-byoky-app init      # create a byoky.app.json manifest
-npx create-byoky-app submit    # submit to the marketplace
+npx create-byoky-app submit    # POST manifest to api.byoky.com/v1/apps/submit
 ```
 
-Or submit via the web form at [byoky.com/apps/submit](https://byoky.com/apps/submit).
+Or submit via the web form at [byoky.com/apps/submit](https://byoky.com/apps/submit). Full walkthrough: [byoky.com/docs#submitting](https://byoky.com/docs#submitting).
 
 **Security model:**
 - Apps run in a sandboxed iframe (`allow-scripts allow-forms`) or WKWebView/WebView

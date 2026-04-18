@@ -80,7 +80,7 @@ function copyTemplateDir(srcDir: string, destDir: string, projectName: string): 
   }
 }
 
-const MARKETPLACE_URL = 'https://byoky.com/api/apps';
+const MARKETPLACE_URL = 'https://api.byoky.com/v1';
 
 interface AppManifest {
   name: string;
@@ -150,7 +150,7 @@ async function submitApp(): Promise<void> {
   console.log(`\n  Submitting "${manifest.name}" to Byoky Marketplace...\n`);
 
   try {
-    const res = await fetch(`${MARKETPLACE_URL}/api/submit`, {
+    const res = await fetch(`${MARKETPLACE_URL}/apps/submit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(manifest),
