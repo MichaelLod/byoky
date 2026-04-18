@@ -1226,6 +1226,10 @@ export default defineBackground(() => {
           await migrateGiftTokens(password);
           reconnectGiftRelays();
           enqueueVaultSync(async () => {
+            const cvState = await getCloudVaultState();
+            if (cvState.enabled && cvState.token && !cvState.tokenExpired) {
+              await pullFromVault(cvState.token);
+            }
             await syncPendingCredentials();
             await syncPendingGroups();
             await syncPendingGifts();
@@ -1621,11 +1625,18 @@ export default defineBackground(() => {
           );
           await browser.storage.local.set({ giftedCredentials: importedGifted });
         }
-        // Re-sync all imported credentials to cloud vault
+        // Re-sync all imported credentials to cloud vault. Import replaces
+        // the local vault wholesale, so we wipe sync meta and force the
+        // first post-import pull to be a full snapshot — then push any
+        // imported rows that aren't already on the server.
         const cvState = await getCloudVaultState();
         if (cvState.enabled && cvState.token && !cvState.tokenExpired) {
           await saveCloudVaultState({ credentialMap: {} });
-          enqueueVaultSync(() => syncAllCredentialsToVault(cvState.token!));
+          await browser.storage.local.remove(['cloudVault.credentialMeta', 'cloudVault.lastSyncAt']);
+          enqueueVaultSync(async () => {
+            await pullFromVault(cvState.token!);
+            await syncAllCredentialsToVault(cvState.token!);
+          });
         }
         refreshSessionProviders();
         return { success: true, count: imported.length };
@@ -1954,7 +1965,9 @@ export default defineBackground(() => {
           credentialMap: {},
         });
         await browser.storage.local.set({ 'cloudVault.lastUsername': username });
+        await browser.storage.local.remove(['cloudVault.credentialMeta', 'cloudVault.lastSyncAt']);
         enqueueVaultSync(async () => {
+          // Signup creates an empty vault account; no server rows to pull.
           await syncAllCredentialsToVault(token);
           await syncPendingGifts();
         });
@@ -1982,6 +1995,11 @@ export default defineBackground(() => {
         }
         const token = result.data.token as string;
         const sessionId = result.data.sessionId as string;
+        // Login from a different device (or after a re-install): the server
+        // may already hold credentials this device has never seen. Reset
+        // lastSyncAt so the first pull is a full snapshot, but keep any
+        // existing credentialMap / credentialMeta so we don't re-upload
+        // rows we already own. The pull step reconciles the rest.
         await saveCloudVaultState({
           enabled: true,
           username,
@@ -1989,11 +2007,12 @@ export default defineBackground(() => {
           sessionId,
           tokenIssuedAt: Date.now(),
           tokenExpired: false,
-          credentialMap: {},
         });
         await browser.storage.local.set({ 'cloudVault.lastUsername': username });
+        await browser.storage.local.remove('cloudVault.lastSyncAt');
         enqueueVaultSync(async () => {
-          await syncAllCredentialsToVault(token);
+          await pullFromVault(token);
+          await syncPendingCredentials();
           await syncPendingGifts();
         });
         return { success: true };
@@ -2061,6 +2080,7 @@ export default defineBackground(() => {
           tokenExpired: false,
         });
         enqueueVaultSync(async () => {
+          await pullFromVault(token);
           await syncPendingCredentials();
           await syncPendingGroups();
           await syncPendingGifts();
@@ -4501,6 +4521,8 @@ export default defineBackground(() => {
       'cloudVault.tokenIssuedAt',
       'cloudVault.tokenExpired',
       'cloudVault.credentialMap',
+      'cloudVault.credentialMeta',
+      'cloudVault.lastSyncAt',
     ]);
   }
 
@@ -4836,8 +4858,14 @@ export default defineBackground(() => {
 
   async function syncAllCredentialsToVault(token: string): Promise<void> {
     if (!masterPassword) return;
+    const state = await getCloudVaultState();
     const credentials = await getStoredCredentials();
     for (const cred of credentials) {
+      // Skip rows already represented on the server (either pushed earlier
+      // or just pulled in pullFromVault). syncPendingCredentials does the
+      // same check; mirrored here so a post-pull "push all" doesn't create
+      // duplicates.
+      if (state.credentialMap[cred.id]) continue;
       try {
         const plainKey = await decryptCredentialKey(cred);
         await syncCredentialToVault(

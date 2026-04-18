@@ -58,6 +58,16 @@ final class WalletStore: ObservableObject {
     private var vaultSessionId: String?
     private var vaultTokenIssuedAt: Date?
     private var vaultCredentialMap: [String: String] = [:]
+    // Per-credential sync metadata for last-write-wins merging. Parallel to
+    // vaultCredentialMap so the two stay in lockstep; group sync still reads
+    // the legacy map directly, but pullFromVault needs the remote updatedAt
+    // to decide conflicts.
+    private struct VaultCredentialMeta: Codable {
+        let serverId: String
+        let remoteUpdatedAt: Int64
+    }
+    private var vaultCredentialMeta: [String: VaultCredentialMeta] = [:]
+    private var vaultLastSyncAt: Int64 = 0
 
     private let autoLockTimeout: TimeInterval = 300
     private var backgroundTime: Date?
@@ -169,6 +179,9 @@ final class WalletStore: ObservableObject {
         try migrateCredentials(password: password)
         loadCloudVaultState()
         Task {
+            if cloudVaultEnabled, vaultToken != nil, !cloudVaultTokenExpired {
+                await pullFromVault()
+            }
             await syncPendingCredentials()
             await syncPendingGroups()
             await syncPendingGifts()
@@ -1049,6 +1062,18 @@ final class WalletStore: ObservableObject {
         } else {
             vaultCredentialMap = [:]
         }
+        if let metaJson = try? keychain.loadString(key: "cloudVault_credentialMeta"),
+           let data = metaJson.data(using: .utf8),
+           let meta = try? JSONDecoder().decode([String: VaultCredentialMeta].self, from: data) {
+            vaultCredentialMeta = meta
+        } else {
+            vaultCredentialMeta = [:]
+        }
+        if let ts = try? keychain.loadString(key: "cloudVault_lastSyncAt"), let v = Int64(ts) {
+            vaultLastSyncAt = v
+        } else {
+            vaultLastSyncAt = 0
+        }
 
         if cloudVaultEnabled, let issued = vaultTokenIssuedAt, Date().timeIntervalSince(issued) > 6 * 24 * 3600 {
             cloudVaultTokenExpired = true
@@ -1075,6 +1100,16 @@ final class WalletStore: ObservableObject {
         }
     }
 
+    private func saveVaultCredentialMeta() {
+        if let data = try? JSONEncoder().encode(vaultCredentialMeta), let json = String(data: data, encoding: .utf8) {
+            try? keychain.saveString(key: "cloudVault_credentialMeta", value: json)
+        }
+    }
+
+    private func saveVaultLastSyncAt() {
+        try? keychain.saveString(key: "cloudVault_lastSyncAt", value: String(vaultLastSyncAt))
+    }
+
     private func clearCloudVaultState(clearLastUsername: Bool = false) {
         cloudVaultEnabled = false
         cloudVaultUsername = nil
@@ -1083,8 +1118,11 @@ final class WalletStore: ObservableObject {
         vaultSessionId = nil
         vaultTokenIssuedAt = nil
         vaultCredentialMap = [:]
+        vaultCredentialMeta = [:]
+        vaultLastSyncAt = 0
         for key in ["cloudVault_enabled", "cloudVault_username", "cloudVault_token", "cloudVault_sessionId",
-                     "cloudVault_tokenIssuedAt", "cloudVault_tokenExpired", "cloudVault_credentialMap"] {
+                     "cloudVault_tokenIssuedAt", "cloudVault_tokenExpired", "cloudVault_credentialMap",
+                     "cloudVault_credentialMeta", "cloudVault_lastSyncAt"] {
             try? keychain.delete(key: key)
         }
         if clearLastUsername {
@@ -1151,9 +1189,22 @@ final class WalletStore: ObservableObject {
         cloudVaultUsername = username
         cloudVaultLastUsername = username
         cloudVaultTokenExpired = false
-        vaultCredentialMap = [:]
+        // Signup: fresh vault account, nothing to merge from — wipe meta
+        // too so there's no stale tracking. Login: keep any existing meta/
+        // map so we don't re-upload rows we already own; force a full pull
+        // by resetting only lastSyncAt.
+        if isSignup {
+            vaultCredentialMap = [:]
+            vaultCredentialMeta = [:]
+        }
+        vaultLastSyncAt = 0
         saveCloudVaultConfig()
+        saveVaultCredentialMeta()
+        saveVaultLastSyncAt()
 
+        if !isSignup {
+            await pullFromVault()
+        }
         await syncAllCredentialsToVault()
         await syncPendingGroups()
         await syncPendingGifts()
@@ -1230,6 +1281,7 @@ final class WalletStore: ObservableObject {
         cloudVaultTokenExpired = false
         saveCloudVaultConfig()
 
+        await pullFromVault()
         await syncPendingCredentials()
         await syncPendingGroups()
         await syncPendingGifts()
@@ -1251,6 +1303,9 @@ final class WalletStore: ObservableObject {
         if result.ok, let cred = result.data["credential"] as? [String: Any], let vaultId = cred["id"] as? String {
             vaultCredentialMap[localId] = vaultId
             saveVaultCredentialMap()
+            let updatedAt = (cred["updatedAt"] as? NSNumber)?.int64Value ?? Int64(Date().timeIntervalSince1970 * 1000)
+            vaultCredentialMeta[localId] = VaultCredentialMeta(serverId: vaultId, remoteUpdatedAt: updatedAt)
+            saveVaultCredentialMeta()
         }
     }
 
@@ -1267,6 +1322,8 @@ final class WalletStore: ObservableObject {
         }
         vaultCredentialMap.removeValue(forKey: localId)
         saveVaultCredentialMap()
+        vaultCredentialMeta.removeValue(forKey: localId)
+        saveVaultCredentialMeta()
     }
 
     private func syncRenameToVault(localId: String, newLabel: String) async {
@@ -1278,6 +1335,12 @@ final class WalletStore: ObservableObject {
         if result.status == 401 {
             cloudVaultTokenExpired = true
             try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
+            return
+        }
+        if result.ok {
+            let updatedAt = (result.data["updatedAt"] as? NSNumber)?.int64Value ?? Int64(Date().timeIntervalSince1970 * 1000)
+            vaultCredentialMeta[localId] = VaultCredentialMeta(serverId: vaultId, remoteUpdatedAt: updatedAt)
+            saveVaultCredentialMeta()
         }
     }
 
@@ -1299,8 +1362,129 @@ final class WalletStore: ObservableObject {
 
     private func syncAllCredentialsToVault() async {
         for credential in credentials {
+            // Skip rows already represented on the server (post-pull): the
+            // extension does the same check to avoid creating duplicates.
+            guard vaultCredentialMap[credential.id] == nil else { continue }
             guard let plainKey = try? decryptKey(for: credential) else { continue }
             await syncAddToVault(localId: credential.id, providerId: credential.providerId, label: credential.label, authMethod: credential.authMethod.rawValue, plainKey: plainKey)
+        }
+    }
+
+    // MARK: - Vault pull + merge
+    //
+    // Mirrors the extension's pullFromVault: fetches /credentials/sync with
+    // the stored lastSyncAt as `since`, applies tombstones, and upserts
+    // non-tombstone rows with last-write-wins on updatedAt. New rows from
+    // other devices land as fresh local credentials (re-encrypted under the
+    // local master key).
+    private func pullFromVault() async {
+        guard let masterKey = masterKey else { return }
+        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
+
+        let result = await vaultRequest(path: "/credentials/sync?since=\(vaultLastSyncAt)", method: "GET", token: token)
+        if result.status == 401 {
+            cloudVaultTokenExpired = true
+            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
+            return
+        }
+        guard result.ok else { return }
+
+        let serverTime = (result.data["serverTime"] as? NSNumber)?.int64Value ?? Int64(Date().timeIntervalSince1970 * 1000)
+        let remoteCreds = (result.data["credentials"] as? [[String: Any]]) ?? []
+
+        if remoteCreds.isEmpty {
+            vaultLastSyncAt = serverTime
+            saveVaultLastSyncAt()
+            return
+        }
+
+        // Backfill meta from legacy credentialMap so pre-sync installs get a
+        // well-formed LWW baseline (remoteUpdatedAt=0 → first pull wins).
+        for (localId, serverId) in vaultCredentialMap {
+            if vaultCredentialMeta[localId] == nil {
+                vaultCredentialMeta[localId] = VaultCredentialMeta(serverId: serverId, remoteUpdatedAt: 0)
+            }
+        }
+
+        var serverToLocal: [String: String] = [:]
+        for (localId, meta) in vaultCredentialMeta {
+            serverToLocal[meta.serverId] = localId
+        }
+
+        var didMutate = false
+
+        for remote in remoteCreds {
+            guard let serverId = remote["id"] as? String,
+                  let providerId = remote["providerId"] as? String,
+                  let label = remote["label"] as? String,
+                  let authMethodRaw = remote["authMethod"] as? String,
+                  let updatedAt = (remote["updatedAt"] as? NSNumber)?.int64Value else { continue }
+            let deletedAt = (remote["deletedAt"] as? NSNumber)?.int64Value
+
+            let authMethod = AuthMethod(rawValue: authMethodRaw) ?? .apiKey
+            let existingLocalId = serverToLocal[serverId]
+
+            if deletedAt != nil {
+                if let localId = existingLocalId {
+                    try? keychain.delete(key: "key_\(localId)")
+                    credentials.removeAll { $0.id == localId }
+                    vaultCredentialMap.removeValue(forKey: localId)
+                    vaultCredentialMeta.removeValue(forKey: localId)
+                    didMutate = true
+                }
+                continue
+            }
+
+            guard let apiKey = remote["apiKey"] as? String else { continue }
+
+            if let localId = existingLocalId {
+                let currentMeta = vaultCredentialMeta[localId]
+                if let m = currentMeta, updatedAt <= m.remoteUpdatedAt { continue }
+                if let idx = credentials.firstIndex(where: { $0.id == localId }) {
+                    guard let encrypted = try? crypto.encrypt(plaintext: apiKey, key: masterKey) else { continue }
+                    try? keychain.saveString(key: "key_\(localId)", value: "v2:" + encrypted)
+                    let preserved = credentials[idx].createdAt
+                    credentials[idx] = Credential(
+                        id: localId,
+                        providerId: providerId,
+                        label: label,
+                        authMethod: authMethod,
+                        createdAt: preserved
+                    )
+                }
+                vaultCredentialMeta[localId] = VaultCredentialMeta(serverId: serverId, remoteUpdatedAt: updatedAt)
+                vaultCredentialMap[localId] = serverId
+                didMutate = true
+            } else {
+                guard let encrypted = try? crypto.encrypt(plaintext: apiKey, key: masterKey) else { continue }
+                let newId = UUID().uuidString
+                try? keychain.saveString(key: "key_\(newId)", value: "v2:" + encrypted)
+                let createdAtMs = (remote["createdAt"] as? NSNumber)?.int64Value
+                let createdAt = createdAtMs.flatMap { Date(timeIntervalSince1970: TimeInterval($0) / 1000) } ?? Date()
+                credentials.append(Credential(
+                    id: newId,
+                    providerId: providerId,
+                    label: label,
+                    authMethod: authMethod,
+                    createdAt: createdAt
+                ))
+                vaultCredentialMap[newId] = serverId
+                vaultCredentialMeta[newId] = VaultCredentialMeta(serverId: serverId, remoteUpdatedAt: updatedAt)
+                didMutate = true
+            }
+        }
+
+        vaultLastSyncAt = serverTime
+        saveVaultLastSyncAt()
+
+        if didMutate {
+            try? saveCredentials()
+            saveVaultCredentialMap()
+            saveVaultCredentialMeta()
+            AppGroupSync.shared.syncWalletState(
+                isUnlocked: true,
+                providers: credentials.map(\.providerId)
+            )
         }
     }
 

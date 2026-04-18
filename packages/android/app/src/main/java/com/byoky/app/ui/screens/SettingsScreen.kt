@@ -115,7 +115,7 @@ fun SettingsScreen(wallet: WalletStore) {
                     } else {
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            "Websites can use your keys even when this device is offline.",
+                            "Keep your keys in sync across devices and let apps use them while this device is offline.",
                             color = TextSecondary,
                             fontSize = 14.sp,
                         )

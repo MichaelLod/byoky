@@ -210,7 +210,7 @@ struct SettingsView: View {
             Text("Cloud Sync")
         } footer: {
             if !wallet.cloudVaultEnabled {
-                Text("Websites can use your keys even when this device is offline. Keys are encrypted server-side with AES-256-GCM.")
+                Text("Keep your keys in sync across devices and let apps use them while this device is offline. Keys are encrypted server-side with AES-256-GCM.")
             }
         }
     }
