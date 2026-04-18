@@ -8,6 +8,19 @@ export const metadata: Metadata = {
   alternates: {
     canonical: '/gift',
   },
+  openGraph: {
+    title: 'A token gift for you — Byoky',
+    description:
+      'Someone shared a Byoky token gift with you. Open in the extension or mobile app to accept.',
+    url: 'https://byoky.com/gift',
+    type: 'website',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'A token gift for you — Byoky',
+    description:
+      'Someone shared a Byoky token gift with you. Open in the extension or mobile app to accept.',
+  },
 };
 
 export default function GiftPage() {
