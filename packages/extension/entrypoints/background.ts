@@ -1764,7 +1764,9 @@ export default defineBackground(() => {
         if (typeof giftLink !== 'string' || giftLink.length === 0 || giftLink.length > 16_000) {
           return { ok: false, error: 'Invalid gift link' };
         }
-        await browser.storage.local.set({ pendingGiftLink: giftLink });
+        await browser.storage.local.set({
+          pendingGiftLink: { link: giftLink, ts: Date.now() },
+        });
         browser.runtime.sendMessage({
           type: 'BYOKY_INTERNAL',
           action: 'giftStaged',
@@ -1774,7 +1776,25 @@ export default defineBackground(() => {
 
       case 'getPendingGift': {
         const data = await browser.storage.local.get('pendingGiftLink');
-        return { giftLink: (data.pendingGiftLink as string | undefined) ?? null };
+        const stored = data.pendingGiftLink as
+          | { link?: string; ts?: number }
+          | string
+          | undefined;
+        if (typeof stored === 'string') {
+          // Legacy shape from older builds — accept once, then upgrade on next stage.
+          return { giftLink: stored };
+        }
+        // 15 minutes — enough to bridge a tab/store roundtrip, short enough
+        // that a stale link doesn't re-prompt the user days later.
+        const PENDING_GIFT_TTL_MS = 15 * 60 * 1000;
+        if (!stored || typeof stored.link !== 'string' || typeof stored.ts !== 'number') {
+          return { giftLink: null };
+        }
+        if (Date.now() - stored.ts > PENDING_GIFT_TTL_MS) {
+          await browser.storage.local.remove('pendingGiftLink');
+          return { giftLink: null };
+        }
+        return { giftLink: stored.link };
       }
 
       case 'clearPendingGift': {
@@ -1834,33 +1854,7 @@ export default defineBackground(() => {
 
       case 'removeGiftedCredential': {
         const { id } = message.payload as { id: string };
-        const data = await browser.storage.local.get('giftedCredentials');
-        const giftedCreds = (data.giftedCredentials ?? []) as GiftedCredential[];
-        const removed = giftedCreds.find((gc) => gc.id === id);
-        await browser.storage.local.set({
-          giftedCredentials: giftedCreds.filter((gc) => gc.id !== id),
-        });
-        // Clear preference if it pointed to this gift
-        if (removed) {
-          const prefs = await getGiftPreferences();
-          if (prefs[removed.providerId] === removed.giftId) {
-            delete prefs[removed.providerId];
-            await browser.storage.local.set({ giftPreferences: prefs });
-          }
-          // Unpin any group that was bound to this gift — avoids a dangling
-          // reference that the session resolver would silently fall through.
-          const localGroups = await getGroups();
-          let groupsChanged = false;
-          for (const g of localGroups) {
-            if (g.giftId === removed.giftId) {
-              g.giftId = undefined;
-              groupsChanged = true;
-              void fireVaultGroupSave(g);
-            }
-          }
-          if (groupsChanged) await setGroups(localGroups);
-        }
-        refreshSessionProviders();
+        await removeGiftedCredentialById(id);
         return { success: true };
       }
 
@@ -2508,7 +2502,20 @@ export default defineBackground(() => {
       ws.onmessage = (event) => {
         try {
           const raw = typeof event.data === 'string' ? event.data : '';
-          if (raw.length > 10_485_760) return;
+          // Match the server's maxPayload (20 MB). If a frame arrives that
+          // is too large, fail the in-flight request loudly instead of
+          // letting it hang on the phase timeout.
+          if (raw.length > 20 * 1024 * 1024) {
+            clearActiveTimeout();
+            ws.close();
+            responsePort.postMessage({
+              type: 'BYOKY_PROXY_RESPONSE_ERROR',
+              requestId: msg.requestId,
+              status: 502,
+              error: { code: 'GIFT_RELAY_ERROR', message: 'Relay frame exceeded size limit' },
+            });
+            return;
+          }
           const data = JSON.parse(raw);
 
           if (data.type === 'relay:auth:result') {
@@ -2660,6 +2667,9 @@ export default defineBackground(() => {
               error: data.error ?? { code: 'GIFT_ERROR', message: 'Gift relay error' },
             });
             ws.close();
+            if (data.error?.code === 'GIFT_EXPIRED' && sp.giftId) {
+              void autoCleanupDeadGift(sp.giftId);
+            }
           }
 
           // Update local gifted credential usage
@@ -2692,6 +2702,50 @@ export default defineBackground(() => {
         error: { code: 'GIFT_RELAY_ERROR', message: 'Failed to connect to gift relay' },
       });
     }
+  }
+
+  async function removeGiftedCredentialById(id: string): Promise<GiftedCredential | undefined> {
+    const data = await browser.storage.local.get('giftedCredentials');
+    const giftedCreds = (data.giftedCredentials ?? []) as GiftedCredential[];
+    const removed = giftedCreds.find((gc) => gc.id === id);
+    if (!removed) return undefined;
+    await browser.storage.local.set({
+      giftedCredentials: giftedCreds.filter((gc) => gc.id !== id),
+    });
+    const prefs = await getGiftPreferences();
+    if (prefs[removed.providerId] === removed.giftId) {
+      delete prefs[removed.providerId];
+      await browser.storage.local.set({ giftPreferences: prefs });
+    }
+    const localGroups = await getGroups();
+    let groupsChanged = false;
+    for (const g of localGroups) {
+      if (g.giftId === removed.giftId) {
+        g.giftId = undefined;
+        groupsChanged = true;
+        void fireVaultGroupSave(g);
+      }
+    }
+    if (groupsChanged) await setGroups(localGroups);
+    refreshSessionProviders();
+    return removed;
+  }
+
+  // Auto-cleanup when a relay reports a gift as permanently dead. Fires after
+  // GIFT_EXPIRED from a proxy request — which is what the vault emits when
+  // the gift row is gone (sender deleted their vault account, revoked the
+  // gift, or natural expiry). Silent: recipient sees the original error for
+  // the in-flight request; subsequent wallet views just won't show the gift.
+  async function autoCleanupDeadGift(giftId: string): Promise<void> {
+    const data = await browser.storage.local.get('giftedCredentials');
+    const giftedCreds = (data.giftedCredentials ?? []) as GiftedCredential[];
+    const gc = giftedCreds.find((c) => c.giftId === giftId);
+    if (!gc) return;
+    await removeGiftedCredentialById(gc.id);
+    browser.runtime.sendMessage({
+      type: 'BYOKY_INTERNAL',
+      action: 'usageUpdated',
+    }).catch(() => {});
   }
 
   async function updateGiftedCredentialUsage(giftId: string, usedTokens: number) {
@@ -4066,7 +4120,7 @@ export default defineBackground(() => {
       ws.onmessage = async (event) => {
         try {
           const raw = typeof event.data === 'string' ? event.data : '';
-          if (raw.length > 10_485_760) return;
+          if (raw.length > 20 * 1024 * 1024) return;
           const msg = JSON.parse(raw);
 
           if (msg.type === 'relay:auth:result') {
@@ -4080,6 +4134,14 @@ export default defineBackground(() => {
           // Proxy request from recipient
           if (msg.type === 'relay:request') {
             await handleGiftProxyRequest(gift, ws, msg);
+          }
+
+          // Usage update authored by another sender in the same room
+          // (typically the vault fallback). Treat as monotonic floor on
+          // local usedTokens so the next budget check reflects spend we
+          // didn't author ourselves.
+          if (msg.type === 'relay:usage' && msg.giftId === gift.id && typeof msg.usedTokens === 'number') {
+            await applyExternalGiftUsage(gift.id, msg.usedTokens);
           }
         } catch {
           // ignore parse errors
@@ -4353,20 +4415,32 @@ export default defineBackground(() => {
         if (response.body) {
           const reader = response.body.getReader();
           const decoder = new TextDecoder();
-          for (;;) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            const text = decoder.decode(value, { stream: true });
-            chunks.push(text);
-            ws.send(JSON.stringify({
-              type: 'relay:response:chunk',
-              requestId: msg.requestId,
-              chunk: text,
-            }));
+          try {
+            for (;;) {
+              // Bail out if the relay dropped mid-stream — otherwise we
+              // keep draining the upstream for nothing and hold the fetch
+              // open well past the point the recipient could see it.
+              if (ws.readyState !== WebSocket.OPEN) {
+                controller.abort();
+                break;
+              }
+              const { done, value } = await reader.read();
+              if (done) break;
+              const text = decoder.decode(value, { stream: true });
+              chunks.push(text);
+              ws.send(JSON.stringify({
+                type: 'relay:response:chunk',
+                requestId: msg.requestId,
+                chunk: text,
+              }));
+            }
+          } finally {
+            try { reader.releaseLock(); } catch { /* already released */ }
           }
         }
 
         clearTimeout(requestTimeout);
+        if (ws.readyState !== WebSocket.OPEN) return;
 
         ws.send(JSON.stringify({
           type: 'relay:response:done',
@@ -4414,6 +4488,29 @@ export default defineBackground(() => {
       type: 'BYOKY_INTERNAL',
       action: 'usageUpdated',
     }).catch(() => {});
+  }
+
+  // Serialize under the same per-gift mutex as updateGiftUsage / budget
+  // checks so a co-sender's broadcast can't interleave with our own
+  // read-modify-write.
+  async function applyExternalGiftUsage(giftId: string, usedTokens: number) {
+    const prev = giftBudgetLocks.get(giftId) ?? Promise.resolve();
+    const next = prev.then(async () => {
+      const d = await browser.storage.local.get('gifts');
+      const gifts = (d.gifts ?? []) as Gift[];
+      const idx = gifts.findIndex((g) => g.id === giftId);
+      if (idx === -1) return;
+      const floor = Math.min(gifts[idx].maxTokens, Math.max(gifts[idx].usedTokens, usedTokens));
+      if (floor === gifts[idx].usedTokens) return;
+      gifts[idx].usedTokens = floor;
+      await browser.storage.local.set({ gifts });
+      browser.runtime.sendMessage({
+        type: 'BYOKY_INTERNAL',
+        action: 'usageUpdated',
+      }).catch(() => {});
+    });
+    giftBudgetLocks.set(giftId, next.catch(() => {}));
+    await next;
   }
 
   async function reconnectGiftRelays() {

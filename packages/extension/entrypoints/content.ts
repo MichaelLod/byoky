@@ -113,9 +113,11 @@ export default defineContentScript({
           notifyPorts.add(replyPort);
         }
       } else if (data.type === 'BYOKY_STAGE_GIFT') {
-        // Stage a gift link so the popup can auto-open the redeem modal
-        // with it pre-filled. User must still click Accept — this only
-        // saves them a copy/paste.
+        // Only accept staging requests from byoky.com — any other origin
+        // could push an attacker-controlled gift link into the user's
+        // extension and prompt them to redeem a hostile relay.
+        const host = window.location.hostname;
+        if (host !== 'byoky.com' && host !== 'www.byoky.com') return;
         if (typeof data.giftLink !== 'string' || data.giftLink.length > 16_000) return;
         browser.runtime.sendMessage({
           type: 'BYOKY_INTERNAL',
