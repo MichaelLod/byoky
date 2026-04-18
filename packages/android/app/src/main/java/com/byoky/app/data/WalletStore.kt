@@ -1569,8 +1569,11 @@ class WalletStore(context: Context) {
 
     suspend fun vaultBootstrapLogin(username: String, password: String) {
         withContext(Dispatchers.IO) {
-            createPassword(password)
+            // Validate vault credentials before creating any local wallet state.
+            // Previously createPassword ran first, which meant a wrong password
+            // silently initialized the local wallet with that password.
             enableCloudVault(username, password, isSignup = false)
+            createPassword(password)
         }
     }
 

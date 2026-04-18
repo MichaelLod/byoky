@@ -1974,7 +1974,6 @@ export default defineBackground(() => {
 
       case 'cloudVaultLogin': {
         const rlErr = checkVaultAuthRate(); if (rlErr) return rlErr;
-        if (!masterPassword) return { error: 'Wallet is locked' };
         const { username, password } = message.payload as { username: string; password: string };
         const result = await vaultFetch('/auth/login', 'POST', { username, password });
         if (!result.ok) {
@@ -4513,6 +4512,37 @@ export default defineBackground(() => {
     await saveCloudVaultState({ tokenExpired: true });
   }
 
+  // ─── Cloud Vault: per-credential sync metadata ────────────────────────
+  //
+  // credentialMeta parallels credentialMap but also remembers the server's
+  // updatedAt for each credential. pullFromVault uses it for last-write-wins
+  // when merging remote state into local. credentialMap is retained because
+  // group sync (and legacy code) reads it directly; both are updated in
+  // lockstep.
+
+  type CredentialMeta = { serverId: string; remoteUpdatedAt: number };
+
+  async function getCredentialMeta(): Promise<Record<string, CredentialMeta>> {
+    const data = await browser.storage.local.get('cloudVault.credentialMeta');
+    return (data['cloudVault.credentialMeta'] as Record<string, CredentialMeta>) ?? {};
+  }
+
+  async function setCredentialMeta(meta: Record<string, CredentialMeta>): Promise<void> {
+    await browser.storage.local.set({ 'cloudVault.credentialMeta': meta });
+  }
+
+  async function upsertCredentialMeta(localId: string, serverId: string, remoteUpdatedAt: number): Promise<void> {
+    const meta = await getCredentialMeta();
+    meta[localId] = { serverId, remoteUpdatedAt };
+    await setCredentialMeta(meta);
+  }
+
+  async function deleteCredentialMeta(localId: string): Promise<void> {
+    const meta = await getCredentialMeta();
+    delete meta[localId];
+    await setCredentialMeta(meta);
+  }
+
   async function syncCredentialToVault(
     localId: string,
     providerId: string,
@@ -4536,9 +4566,11 @@ export default defineBackground(() => {
     if (result.ok) {
       const vaultCred = result.data.credential as Record<string, unknown>;
       const vaultId = vaultCred.id as string;
+      const updatedAt = (vaultCred.updatedAt as number | undefined) ?? Date.now();
       const state = await getCloudVaultState();
       state.credentialMap[localId] = vaultId;
       await saveCloudVaultState({ credentialMap: state.credentialMap });
+      await upsertCredentialMeta(localId, vaultId, updatedAt);
     }
   }
 
@@ -4559,6 +4591,7 @@ export default defineBackground(() => {
 
     delete state.credentialMap[localId];
     await saveCloudVaultState({ credentialMap: state.credentialMap });
+    await deleteCredentialMeta(localId);
   }
 
   async function syncRenameToVault(
@@ -4574,7 +4607,141 @@ export default defineBackground(() => {
 
     if (result.status === 401) {
       await handleVaultAuthError();
+      return;
     }
+
+    if (result.ok) {
+      const updatedAt = (result.data.updatedAt as number | undefined) ?? Date.now();
+      await upsertCredentialMeta(localId, vaultId, updatedAt);
+    }
+  }
+
+  // ─── Cloud Vault: pull + merge ────────────────────────────────────────
+  //
+  // Incrementally pulls credentials from the vault and merges them into
+  // local state. Conflict resolution is last-write-wins on updatedAt.
+  // Tombstones (remote.deletedAt != null) remove the local copy.
+  //
+  // Runs on: login, relogin, wallet-unlock with an active vault session,
+  // and after initial enable. Each pull uses the server's returned
+  // serverTime as the next `since` cursor — server is the clock authority
+  // to avoid device-clock skew pitfalls.
+  async function pullFromVault(token: string): Promise<void> {
+    if (!masterPassword) return;
+    const state = await getCloudVaultState();
+    if (!state.enabled || state.tokenExpired) return;
+
+    const lastSyncData = await browser.storage.local.get('cloudVault.lastSyncAt');
+    const since = (lastSyncData['cloudVault.lastSyncAt'] as number) ?? 0;
+
+    const result = await vaultFetch(`/credentials/sync?since=${since}`, 'GET', undefined, token);
+    if (result.status === 401) {
+      await handleVaultAuthError();
+      return;
+    }
+    if (!result.ok) return;
+
+    const serverTime = result.data.serverTime as number;
+    const remoteCreds = (result.data.credentials ?? []) as Array<{
+      id: string;
+      providerId: string;
+      label: string;
+      authMethod: string;
+      apiKey?: string;
+      createdAt: number;
+      updatedAt: number;
+      deletedAt: number | null;
+    }>;
+
+    if (remoteCreds.length === 0) {
+      await browser.storage.local.set({ 'cloudVault.lastSyncAt': serverTime });
+      return;
+    }
+
+    const currentState = await getCloudVaultState();
+    const meta = await getCredentialMeta();
+
+    // Backfill meta from legacy credentialMap so devices upgrading from
+    // pre-sync versions still get LWW working (remoteUpdatedAt starts at 0
+    // so the first pull always wins).
+    for (const [localId, serverId] of Object.entries(currentState.credentialMap)) {
+      if (!meta[localId]) meta[localId] = { serverId, remoteUpdatedAt: 0 };
+    }
+
+    const serverToLocal: Record<string, string> = {};
+    for (const [localId, m] of Object.entries(meta)) {
+      serverToLocal[m.serverId] = localId;
+    }
+
+    const localData = await browser.storage.local.get('credentials');
+    const localCreds = ((localData.credentials ?? []) as Array<Record<string, unknown>>).slice();
+
+    for (const remote of remoteCreds) {
+      const existingLocalId = serverToLocal[remote.id];
+
+      if (remote.deletedAt) {
+        if (existingLocalId) {
+          const idx = localCreds.findIndex((c) => c.id === existingLocalId);
+          if (idx >= 0) localCreds.splice(idx, 1);
+          delete meta[existingLocalId];
+          delete currentState.credentialMap[existingLocalId];
+        }
+        continue;
+      }
+
+      if (!remote.apiKey) continue; // server couldn't decrypt; skip
+
+      if (existingLocalId) {
+        const currentMeta = meta[existingLocalId];
+        if (remote.updatedAt <= currentMeta.remoteUpdatedAt) continue; // local already newer
+        const idx = localCreds.findIndex((c) => c.id === existingLocalId);
+        if (idx >= 0) {
+          const encrypted = await encrypt(remote.apiKey, masterPassword);
+          const base = localCreds[idx];
+          const updated: Record<string, unknown> = {
+            ...base,
+            providerId: remote.providerId,
+            label: remote.label,
+            authMethod: remote.authMethod,
+          };
+          if (remote.authMethod === 'api_key') {
+            updated.encryptedKey = encrypted;
+            delete updated.encryptedAccessToken;
+          } else {
+            updated.encryptedAccessToken = encrypted;
+            delete updated.encryptedKey;
+          }
+          localCreds[idx] = updated;
+        }
+        meta[existingLocalId] = { serverId: remote.id, remoteUpdatedAt: remote.updatedAt };
+      } else {
+        const localId = crypto.randomUUID();
+        const encrypted = await encrypt(remote.apiKey, masterPassword);
+        const newCred: Record<string, unknown> = {
+          id: localId,
+          providerId: remote.providerId,
+          label: remote.label,
+          authMethod: remote.authMethod,
+          createdAt: remote.createdAt,
+        };
+        if (remote.authMethod === 'api_key') {
+          newCred.encryptedKey = encrypted;
+        } else {
+          newCred.encryptedAccessToken = encrypted;
+        }
+        localCreds.push(newCred);
+        meta[localId] = { serverId: remote.id, remoteUpdatedAt: remote.updatedAt };
+        currentState.credentialMap[localId] = remote.id;
+      }
+    }
+
+    await browser.storage.local.set({
+      credentials: localCreds,
+      'cloudVault.lastSyncAt': serverTime,
+    });
+    await setCredentialMeta(meta);
+    await saveCloudVaultState({ credentialMap: currentState.credentialMap });
+    refreshSessionProviders();
   }
 
   /**

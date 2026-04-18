@@ -232,15 +232,24 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   vaultBootstrapLogin: async (username: string, password: string) => {
     set({ loading: true, error: null });
     try {
-      const hash = await hashPassword(password);
-      const setupRes = await sendInternal('setupWallet', { passwordHash: hash });
-      if (setupRes.error) throw new Error(setupRes.error as string);
-
-      const unlockRes = await sendInternal('unlock', { password });
-      if (!unlockRes.success) throw new Error((unlockRes.error as string) ?? 'Failed to unlock');
-
+      // Validate vault credentials before creating any local wallet state.
+      // Previously we called setupWallet+unlock first, which meant a wrong
+      // password silently initialized the local wallet with that password.
       const vaultRes = await sendInternal('cloudVaultLogin', { username, password });
       if (vaultRes.error) throw new Error(vaultRes.error as string);
+
+      const hash = await hashPassword(password);
+      const setupRes = await sendInternal('setupWallet', { passwordHash: hash });
+      if (setupRes.error) {
+        await sendInternal('cloudVaultDisable');
+        throw new Error(setupRes.error as string);
+      }
+
+      const unlockRes = await sendInternal('unlock', { password });
+      if (!unlockRes.success) {
+        await sendInternal('cloudVaultDisable');
+        throw new Error((unlockRes.error as string) ?? 'Failed to unlock');
+      }
 
       await get().refreshData();
       set({ isInitialized: true, isUnlocked: true, currentPage: 'dashboard', loading: false });

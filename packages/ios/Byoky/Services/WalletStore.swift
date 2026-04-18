@@ -1165,8 +1165,11 @@ final class WalletStore: ObservableObject {
     }
 
     func vaultBootstrapLogin(username: String, password: String) async throws {
-        try createPassword(password)
+        // Validate vault credentials before creating any local wallet state.
+        // Previously createPassword ran first, which meant a wrong password
+        // silently initialized the local wallet with that password.
         try await enableCloudVault(username: username, password: password, isSignup: false)
+        try createPassword(password)
     }
 
     var vaultBannerDismissedAt: Date? {
