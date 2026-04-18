@@ -10,7 +10,7 @@ import {
   updateCredentialKey,
 } from '../db/index.js';
 import { getCachedKey, recoverCachedKey } from '../session-keys.js';
-import { encryptWithKey, decryptWithKey } from '../crypto.js';
+import { decryptWithKey } from '../crypto.js';
 import { authMiddleware } from '../middleware/auth.js';
 
 const credentials = new Hono();
@@ -48,16 +48,15 @@ credentials.get('/', async (c) => {
   return c.json({ credentials: result });
 });
 
-// Sync endpoint — returns plaintext keys + tombstones so clients can mirror
-// server state into their local (master-password-encrypted) store. `since`
-// (ms epoch) filters to rows whose updatedAt is >= the value; omit to get a
-// full snapshot. Includes soft-deleted rows so other devices learn about
+// Sync endpoint — returns the stored ciphertext so clients can re-encrypt
+// with their local master password for offline use. `since` (ms epoch)
+// filters to rows whose updatedAt is >= the value; omit to get a full
+// snapshot. Includes soft-deleted rows so other devices learn about
 // deletions.
 //
-// The server stores credentials encrypted with a session-cached key derived
-// from the user's vault password. Clients re-encrypt with their local
-// master password after receiving, so apiKey is returned in plaintext here
-// (over TLS) rather than as server ciphertext the client can't decrypt.
+// Both client and server derive the same AES-GCM key from
+// (vault password, encryptionSalt), so the server-stored ciphertext is
+// directly decryptable by the client without re-encryption over the wire.
 credentials.get('/sync', async (c) => {
   const userId = c.get('userId');
   const sinceParam = c.req.query('since');
@@ -66,16 +65,11 @@ credentials.get('/sync', async (c) => {
     return c.json({ error: { code: 'INVALID_INPUT', message: 'since must be a non-negative integer' } }, 400);
   }
 
-  const cryptoKey = getCachedKey(userId) ?? await recoverCachedKey(userId);
-  if (!cryptoKey) {
-    return c.json({ error: { code: 'SESSION_KEY_EXPIRED', message: 'Encryption key expired. Please log in again.' } }, 401);
-  }
-
   const rows = await getCredentialsForSync(userId, since);
   const serverTime = Date.now();
 
-  const result = await Promise.all(rows.map(async (row) => {
-    // Tombstones don't need plaintext — the client only uses id + deletedAt.
+  const result = rows.map((row) => {
+    // Tombstones don't need the key — the client only uses id + deletedAt.
     if (row.deletedAt) {
       return {
         id: row.id,
@@ -87,25 +81,17 @@ credentials.get('/sync', async (c) => {
         deletedAt: row.deletedAt,
       };
     }
-    let apiKey: string | undefined;
-    try {
-      apiKey = await decryptWithKey(row.encryptedKey, cryptoKey);
-    } catch {
-      // Corrupt row — surface id so the client can skip it without
-      // poisoning its local state.
-      apiKey = undefined;
-    }
     return {
       id: row.id,
       providerId: row.providerId,
       label: row.label,
       authMethod: row.authMethod,
-      apiKey,
+      encryptedApiKey: row.encryptedKey,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       deletedAt: null,
     };
-  }));
+  });
 
   return c.json({ serverTime, credentials: result });
 });
@@ -116,13 +102,13 @@ credentials.post('/', async (c) => {
     providerId?: string;
     label?: string;
     authMethod?: string;
-    apiKey?: string;
+    encryptedApiKey?: string;
   }>();
 
-  const { providerId, label, authMethod, apiKey } = body;
+  const { providerId, label, authMethod, encryptedApiKey } = body;
 
-  if (!providerId || !apiKey) {
-    return c.json({ error: { code: 'INVALID_INPUT', message: 'providerId and apiKey are required' } }, 400);
+  if (!providerId || !encryptedApiKey) {
+    return c.json({ error: { code: 'INVALID_INPUT', message: 'providerId and encryptedApiKey are required' } }, 400);
   }
 
   const provider = getProvider(providerId);
@@ -135,15 +121,8 @@ credentials.post('/', async (c) => {
     return c.json({ error: { code: 'INVALID_AUTH_METHOD', message: `Provider ${providerId} does not support auth method: ${method}` } }, 400);
   }
 
-  const cryptoKey = getCachedKey(userId) ?? await recoverCachedKey(userId);
-  if (!cryptoKey) {
-    return c.json({ error: { code: 'SESSION_KEY_EXPIRED', message: 'Encryption key expired. Please log in again.' } }, 401);
-  }
-
-  const encryptedKey = await encryptWithKey(apiKey, cryptoKey);
   const credLabel = label ?? `${provider.name} key`;
-
-  const row = await createCredential(userId, providerId, credLabel, method, encryptedKey);
+  const row = await createCredential(userId, providerId, credLabel, method, encryptedApiKey);
 
   return c.json({
     credential: {
@@ -151,7 +130,6 @@ credentials.post('/', async (c) => {
       providerId: row.providerId,
       label: row.label,
       authMethod: row.authMethod,
-      maskedKey: maskKey(apiKey),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     },
@@ -161,12 +139,12 @@ credentials.post('/', async (c) => {
 credentials.patch('/:id', async (c) => {
   const userId = c.get('userId');
   const credentialId = c.req.param('id');
-  const body = await c.req.json<{ label?: string; apiKey?: string }>();
+  const body = await c.req.json<{ label?: string; encryptedApiKey?: string }>();
   const label = body.label?.trim();
-  const apiKey = body.apiKey;
+  const encryptedApiKey = body.encryptedApiKey;
 
-  if (!label && !apiKey) {
-    return c.json({ error: { code: 'INVALID_INPUT', message: 'label or apiKey is required' } }, 400);
+  if (!label && !encryptedApiKey) {
+    return c.json({ error: { code: 'INVALID_INPUT', message: 'label or encryptedApiKey is required' } }, 400);
   }
 
   const credential = await getCredentialById(userId, credentialId);
@@ -177,13 +155,8 @@ credentials.patch('/:id', async (c) => {
   if (label) {
     await updateCredentialLabel(userId, credentialId, label);
   }
-  if (apiKey) {
-    const cryptoKey = getCachedKey(userId) ?? await recoverCachedKey(userId);
-    if (!cryptoKey) {
-      return c.json({ error: { code: 'SESSION_KEY_EXPIRED', message: 'Encryption key expired. Please log in again.' } }, 401);
-    }
-    const encryptedKey = await encryptWithKey(apiKey, cryptoKey);
-    await updateCredentialKey(userId, credentialId, encryptedKey);
+  if (encryptedApiKey) {
+    await updateCredentialKey(userId, credentialId, encryptedApiKey);
   }
 
   // Re-read to return the fresh updatedAt so clients can track LWW meta

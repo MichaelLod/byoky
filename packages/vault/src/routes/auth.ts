@@ -62,6 +62,7 @@ auth.post('/signup', async (c) => {
     token,
     user: { id: user.id, username: user.username },
     sessionId,
+    encryptionSalt,
   }, 201);
 });
 
@@ -99,6 +100,7 @@ auth.post('/login', async (c) => {
     token,
     user: { id: user.id, username: user.username },
     sessionId,
+    encryptionSalt: user.encryptionSalt,
   });
 });
 

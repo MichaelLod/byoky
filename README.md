@@ -250,7 +250,7 @@ No environment variables. No secrets management. No leaked `.env` files. Your ke
 | **Audit log** | Every request logged — app origin, provider, status, timestamp |
 | **Spending caps** | Token allowances per app — total and per-provider limits, enforced at the proxy |
 | **Token gifts** | Share access without sharing keys — relay-backed with budget enforcement, sender-side proxy |
-| **Local by default** | Keys stay on your device. Cloud sync is opt-in; credentials are encrypted at rest with a key derived from your password, held in server memory only for the duration of your active session. No telemetry, no prompt/response logging |
+| **Local by default** | Keys stay on your device. Cloud sync is opt-in; credentials are encrypted client-side before upload with a key derived from your password, and the vault only holds that key in memory during your active session. No telemetry, no prompt/response logging |
 
 ## Supported Providers
 

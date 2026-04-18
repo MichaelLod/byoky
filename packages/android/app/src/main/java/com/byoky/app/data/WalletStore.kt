@@ -2,6 +2,7 @@ package com.byoky.app.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Base64
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.byoky.app.crypto.CryptoService
@@ -136,6 +137,11 @@ class WalletStore(context: Context) {
     private data class VaultCredentialMeta(val serverId: String, val remoteUpdatedAt: Long)
     private var vaultCredentialMeta: ConcurrentHashMap<String, VaultCredentialMeta> = ConcurrentHashMap()
     private var vaultLastSyncAt: Long = 0L
+    // AES-GCM key derived from (vault password, encryptionSalt). Used to
+    // encrypt apiKey before upload and decrypt on sync pull so plaintext
+    // never crosses the wire. Persisted raw in SharedPreferences (already
+    // app-sandboxed); cached in memory for reuse.
+    @Volatile private var vaultKey: javax.crypto.spec.SecretKeySpec? = null
 
     private val autoLockTimeout = 300_000L // 5 minutes
 
@@ -619,6 +625,7 @@ class WalletStore(context: Context) {
         editor.remove("cloudVault_tokenIssuedAt")
         editor.remove("cloudVault_tokenExpired")
         editor.remove("cloudVault_credentialMap")
+        editor.remove("cloudVault_vaultKey")
         editor.apply()
 
         _cloudVaultEnabled.value = false
@@ -629,6 +636,7 @@ class WalletStore(context: Context) {
         vaultSessionId = null
         vaultTokenIssuedAt = 0
         vaultCredentialMap.clear()
+        vaultKey = null
 
         // Clear in-memory state
         _credentials.value = emptyList()
@@ -1501,6 +1509,23 @@ class WalletStore(context: Context) {
         prefs.edit().putLong("cloudVault_lastSyncAt", vaultLastSyncAt).apply()
     }
 
+    private fun persistVaultKey(password: String, encryptionSalt: String) {
+        val saltBytes = try { Base64.decode(encryptionSalt, Base64.NO_WRAP) } catch (_: Exception) { return }
+        val key = CryptoService.deriveVaultKey(password, saltBytes)
+        vaultKey = key
+        val rawB64 = Base64.encodeToString(key.encoded, Base64.NO_WRAP)
+        prefs.edit().putString("cloudVault_vaultKey", rawB64).apply()
+    }
+
+    private fun loadVaultKey(): javax.crypto.spec.SecretKeySpec? {
+        vaultKey?.let { return it }
+        val rawB64 = prefs.getString("cloudVault_vaultKey", null) ?: return null
+        val rawBytes = try { Base64.decode(rawB64, Base64.NO_WRAP) } catch (_: Exception) { return null }
+        val key = javax.crypto.spec.SecretKeySpec(rawBytes, "AES")
+        vaultKey = key
+        return key
+    }
+
     private fun vaultRequest(
         path: String,
         method: String,
@@ -1585,7 +1610,12 @@ class WalletStore(context: Context) {
             }
             val token = data.getString("token")
             val sessionId = data.getString("sessionId")
+            val encryptionSalt = data.optString("encryptionSalt", "")
+            if (encryptionSalt.isEmpty()) {
+                throw IllegalStateException("Invalid server response")
+            }
 
+            persistVaultKey(password, encryptionSalt)
             vaultToken = token
             vaultSessionId = sessionId
             vaultTokenIssuedAt = System.currentTimeMillis()
@@ -1658,6 +1688,7 @@ class WalletStore(context: Context) {
             vaultCredentialMap.clear()
             vaultCredentialMeta.clear()
             vaultLastSyncAt = 0L
+            vaultKey = null
             prefs.edit()
                 .remove("cloudVault_enabled")
                 .remove("cloudVault_username")
@@ -1668,6 +1699,7 @@ class WalletStore(context: Context) {
                 .remove("cloudVault_credentialMap")
                 .remove("cloudVault_credentialMeta")
                 .remove("cloudVault_lastSyncAt")
+                .remove("cloudVault_vaultKey")
                 .apply()
         }
     }
@@ -1694,6 +1726,11 @@ class WalletStore(context: Context) {
                 val err = data.optJSONObject("error")
                 throw IllegalStateException(err?.optString("message") ?: "Login failed")
             }
+            val encryptionSalt = data.optString("encryptionSalt", "")
+            if (encryptionSalt.isEmpty()) {
+                throw IllegalStateException("Invalid server response")
+            }
+            persistVaultKey(password, encryptionSalt)
             vaultToken = data.getString("token")
             vaultSessionId = data.getString("sessionId")
             vaultTokenIssuedAt = System.currentTimeMillis()
@@ -1711,10 +1748,12 @@ class WalletStore(context: Context) {
     private fun syncAddToVault(localId: String, providerId: String, label: String, authMethod: String, plainKey: String) {
         if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
         val token = vaultToken ?: return
+        val vk = loadVaultKey() ?: return
+        val encryptedApiKey = try { CryptoService.encryptWithKey(plainKey, vk) } catch (_: Exception) { return }
 
         val body = JSONObject()
             .put("providerId", providerId)
-            .put("apiKey", plainKey)
+            .put("encryptedApiKey", encryptedApiKey)
             .put("label", label)
             .put("authMethod", authMethod)
         val (ok, status, data) = vaultRequest("/credentials", "POST", body, token)
@@ -1882,8 +1921,10 @@ class WalletStore(context: Context) {
                 continue
             }
 
-            val apiKey = if (remote.isNull("apiKey")) null else remote.optString("apiKey", "")
-            if (apiKey.isNullOrEmpty()) continue
+            val encryptedApiKey = if (remote.isNull("encryptedApiKey")) null else remote.optString("encryptedApiKey", "")
+            if (encryptedApiKey.isNullOrEmpty()) continue
+            val vk = loadVaultKey() ?: continue
+            val apiKey = try { CryptoService.decryptWithKey(encryptedApiKey, vk) } catch (_: Exception) { continue }
 
             if (existingLocalId != null) {
                 val currentMeta = vaultCredentialMeta[existingLocalId]

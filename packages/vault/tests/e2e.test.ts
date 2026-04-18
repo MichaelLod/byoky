@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { deriveKey, encryptWithKey } from '@byoky/core';
 
 const VAULT_URL = process.env.VAULT_URL ?? 'https://vault.byoky.com';
 
@@ -8,6 +9,7 @@ const testPassword = 'MyStr0ng!Pass#2024';
 
 let token: string;
 let credentialId: string;
+let vaultKey: CryptoKey;
 
 async function api(path: string, init?: RequestInit) {
   return fetch(`${VAULT_URL}${path}`, init);
@@ -51,7 +53,10 @@ describe('vault e2e', () => {
       const body = await res.json();
       expect(body.token).toBeDefined();
       expect(body.user.username).toBe(testUsername);
+      expect(body.encryptionSalt).toBeDefined();
       token = body.token;
+      const saltBytes = Uint8Array.from(Buffer.from(body.encryptionSalt, 'base64'));
+      vaultKey = await deriveKey(testPassword, saltBytes, true);
     });
 
     it('rejects duplicate signup', async () => {
@@ -85,7 +90,10 @@ describe('vault e2e', () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.token).toBeDefined();
+      expect(body.encryptionSalt).toBeDefined();
       token = body.token;
+      const saltBytes = Uint8Array.from(Buffer.from(body.encryptionSalt, 'base64'));
+      vaultKey = await deriveKey(testPassword, saltBytes, true);
     });
   });
 
@@ -104,14 +112,13 @@ describe('vault e2e', () => {
         method: 'POST',
         body: JSON.stringify({
           providerId: 'openai',
-          apiKey: 'sk-e2e-test-1234567890ab',
+          encryptedApiKey: await encryptWithKey('sk-e2e-test-1234567890ab', vaultKey),
           label: 'E2E Test Key',
         }),
       });
       expect(res.status).toBe(201);
       const body = await res.json();
       expect(body.credential.providerId).toBe('openai');
-      expect(body.credential.maskedKey).toBe('sk-e...90ab');
       expect(body.credential.label).toBe('E2E Test Key');
       credentialId = body.credential.id;
     });
@@ -128,7 +135,7 @@ describe('vault e2e', () => {
     it('rejects unknown provider', async () => {
       const res = await authApi('/credentials', {
         method: 'POST',
-        body: JSON.stringify({ providerId: 'nonexistent', apiKey: 'key' }),
+        body: JSON.stringify({ providerId: 'nonexistent', encryptedApiKey: await encryptWithKey('key', vaultKey) }),
       });
       expect(res.status).toBe(400);
     });

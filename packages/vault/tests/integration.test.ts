@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { sql } from 'drizzle-orm';
+import { deriveKey } from '@byoky/core';
 import { app } from '../src/app.js';
 import { initDb, getDb } from '../src/db/index.js';
 import { startIdleSweep, stopIdleSweep, evictAll } from '../src/session-keys.js';
+import { encryptWithKey } from '../src/crypto.js';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 
@@ -14,6 +16,16 @@ const testOrigin = 'https://test-app.example.com';
 let userToken: string;
 let appSessionToken: string;
 let credentialId: string;
+let vaultKey: CryptoKey;
+
+async function encryptForVault(plaintext: string): Promise<string> {
+  return encryptWithKey(plaintext, vaultKey);
+}
+
+async function deriveTestKey(encryptionSalt: string): Promise<CryptoKey> {
+  const saltBytes = Uint8Array.from(Buffer.from(encryptionSalt, 'base64'));
+  return deriveKey(testPassword, saltBytes, true);
+}
 
 function req(path: string, init?: RequestInit) {
   return app.request(path, init);
@@ -86,7 +98,9 @@ describe.skipIf(!DATABASE_URL)('vault integration', () => {
       const body = await res.json();
       expect(body.token).toBeDefined();
       expect(body.user.username).toBe(testUsername);
+      expect(body.encryptionSalt).toBeDefined();
       userToken = body.token;
+      vaultKey = await deriveTestKey(body.encryptionSalt);
     });
 
     it('rejects duplicate username', async () => {
@@ -108,7 +122,9 @@ describe.skipIf(!DATABASE_URL)('vault integration', () => {
       });
       expect(res.status).toBe(200);
       const body = await res.json();
+      expect(body.encryptionSalt).toBeDefined();
       userToken = body.token;
+      vaultKey = await deriveTestKey(body.encryptionSalt);
     });
   });
 
@@ -130,7 +146,7 @@ describe.skipIf(!DATABASE_URL)('vault integration', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           providerId: 'openai',
-          apiKey: 'sk-test-1234567890abcdef',
+          encryptedApiKey: await encryptForVault('sk-test-1234567890abcdef'),
           label: 'Test OpenAI key',
         }),
       });
@@ -342,13 +358,20 @@ describe.skipIf(!DATABASE_URL)('vault integration', () => {
         body: JSON.stringify({ username: deleteUsername, password: deletePassword }),
       });
       expect(signupRes.status).toBe(201);
-      deleteToken = (await signupRes.json()).token;
+      const signupBody = await signupRes.json();
+      deleteToken = signupBody.token;
+      const saltBytes = Uint8Array.from(Buffer.from(signupBody.encryptionSalt, 'base64'));
+      const deleteVaultKey = await deriveKey(deletePassword, saltBytes, true);
 
       // Add a credential to verify cascade works
       const credRes = await req('/credentials', {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${deleteToken}` },
-        body: JSON.stringify({ providerId: 'openai', apiKey: 'sk-test-delete-me', label: 'cascade test' }),
+        body: JSON.stringify({
+          providerId: 'openai',
+          encryptedApiKey: await encryptWithKey('sk-test-delete-me', deleteVaultKey),
+          label: 'cascade test',
+        }),
       });
       expect(credRes.status).toBe(201);
 

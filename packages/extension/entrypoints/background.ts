@@ -25,6 +25,9 @@ import {
   DEFAULT_GROUP_ID,
   decrypt,
   encrypt,
+  deriveKey,
+  encryptWithKey,
+  decryptWithKey,
   verifyPassword,
   PROVIDERS,
   buildHeaders,
@@ -1955,6 +1958,8 @@ export default defineBackground(() => {
         }
         const token = result.data.token as string;
         const sessionId = result.data.sessionId as string;
+        const encryptionSalt = result.data.encryptionSalt as string;
+        await persistVaultKey(password, encryptionSalt);
         await saveCloudVaultState({
           enabled: true,
           username,
@@ -1995,6 +2000,8 @@ export default defineBackground(() => {
         }
         const token = result.data.token as string;
         const sessionId = result.data.sessionId as string;
+        const encryptionSalt = result.data.encryptionSalt as string;
+        await persistVaultKey(password, encryptionSalt);
         // Login from a different device (or after a re-install): the server
         // may already hold credentials this device has never seen. Reset
         // lastSyncAt so the first pull is a full snapshot, but keep any
@@ -2073,6 +2080,8 @@ export default defineBackground(() => {
         }
         const token = result.data.token as string;
         const sessionId = result.data.sessionId as string;
+        const encryptionSalt = result.data.encryptionSalt as string;
+        await persistVaultKey(password, encryptionSalt);
         await saveCloudVaultState({
           token,
           sessionId,
@@ -4523,7 +4532,36 @@ export default defineBackground(() => {
       'cloudVault.credentialMap',
       'cloudVault.credentialMeta',
       'cloudVault.lastSyncAt',
+      'cloudVault.vaultKey',
     ]);
+  }
+
+  // Derive the vault's AES-GCM key from (vault password, server-returned
+  // encryptionSalt) and persist it — encrypted at rest with the local
+  // masterPassword — so later credential uploads/pulls can encrypt/decrypt
+  // without needing the vault password again.
+  async function persistVaultKey(vaultPassword: string, encryptionSalt: string): Promise<void> {
+    if (!masterPassword) return;
+    const saltBytes = Uint8Array.from(atob(encryptionSalt), (c) => c.charCodeAt(0));
+    const key = await deriveKey(vaultPassword, saltBytes, true);
+    const rawBytes = new Uint8Array(await crypto.subtle.exportKey('raw', key));
+    const rawB64 = btoa(String.fromCharCode(...rawBytes));
+    const wrapped = await encrypt(rawB64, masterPassword);
+    await browser.storage.local.set({ 'cloudVault.vaultKey': wrapped });
+  }
+
+  async function getVaultKey(): Promise<CryptoKey | null> {
+    if (!masterPassword) return null;
+    const data = await browser.storage.local.get('cloudVault.vaultKey');
+    const wrapped = data['cloudVault.vaultKey'] as string | undefined;
+    if (!wrapped) return null;
+    try {
+      const rawB64 = await decrypt(wrapped, masterPassword);
+      const rawBytes = Uint8Array.from(atob(rawB64), (c) => c.charCodeAt(0));
+      return await crypto.subtle.importKey('raw', rawBytes, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+    } catch {
+      return null;
+    }
   }
 
   function isVaultTokenExpired(tokenIssuedAt: number): boolean {
@@ -4573,9 +4611,12 @@ export default defineBackground(() => {
     plainKey: string,
     token: string,
   ): Promise<void> {
+    const vaultKey = await getVaultKey();
+    if (!vaultKey) return;
+    const encryptedApiKey = await encryptWithKey(plainKey, vaultKey);
     const result = await vaultFetch('/credentials', 'POST', {
       providerId,
-      apiKey: plainKey,
+      encryptedApiKey,
       label,
       authMethod,
     }, token);
@@ -4669,7 +4710,7 @@ export default defineBackground(() => {
       providerId: string;
       label: string;
       authMethod: string;
-      apiKey?: string;
+      encryptedApiKey?: string;
       createdAt: number;
       updatedAt: number;
       deletedAt: number | null;
@@ -4679,6 +4720,9 @@ export default defineBackground(() => {
       await browser.storage.local.set({ 'cloudVault.lastSyncAt': serverTime });
       return;
     }
+
+    const vaultKey = await getVaultKey();
+    if (!vaultKey) return;
 
     const currentState = await getCloudVaultState();
     const meta = await getCredentialMeta();
@@ -4711,14 +4755,21 @@ export default defineBackground(() => {
         continue;
       }
 
-      if (!remote.apiKey) continue; // server couldn't decrypt; skip
+      if (!remote.encryptedApiKey) continue; // corrupt/missing; skip
+
+      let remoteApiKey: string;
+      try {
+        remoteApiKey = await decryptWithKey(remote.encryptedApiKey, vaultKey);
+      } catch {
+        continue; // can't decrypt this row; skip without poisoning local state
+      }
 
       if (existingLocalId) {
         const currentMeta = meta[existingLocalId];
         if (remote.updatedAt <= currentMeta.remoteUpdatedAt) continue; // local already newer
         const idx = localCreds.findIndex((c) => c.id === existingLocalId);
         if (idx >= 0) {
-          const encrypted = await encrypt(remote.apiKey, masterPassword);
+          const encrypted = await encrypt(remoteApiKey, masterPassword);
           const base = localCreds[idx];
           const updated: Record<string, unknown> = {
             ...base,
@@ -4738,7 +4789,7 @@ export default defineBackground(() => {
         meta[existingLocalId] = { serverId: remote.id, remoteUpdatedAt: remote.updatedAt };
       } else {
         const localId = crypto.randomUUID();
-        const encrypted = await encrypt(remote.apiKey, masterPassword);
+        const encrypted = await encrypt(remoteApiKey, masterPassword);
         const newCred: Record<string, unknown> = {
           id: localId,
           providerId: remote.providerId,

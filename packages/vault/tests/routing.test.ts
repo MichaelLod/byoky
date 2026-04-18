@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { sql } from 'drizzle-orm';
+import { deriveKey } from '@byoky/core';
 import { app } from '../src/app.js';
 import { initDb, getDb } from '../src/db/index.js';
 import { startIdleSweep, stopIdleSweep, evictAll } from '../src/session-keys.js';
+import { encryptWithKey } from '../src/crypto.js';
 
 const DATABASE_URL = process.env.DATABASE_URL;
 
@@ -74,7 +76,10 @@ describe.skipIf(!DATABASE_URL)('vault routing', () => {
       body: JSON.stringify({ username: testUsername, password: testPassword }),
     });
     expect(signup.status).toBe(201);
-    userToken = (await signup.json()).token;
+    const signupBody = await signup.json();
+    userToken = signupBody.token;
+    const saltBytes = Uint8Array.from(Buffer.from(signupBody.encryptionSalt, 'base64'));
+    const vaultKey = await deriveKey(testPassword, saltBytes, true);
 
     // Add an OpenAI credential and an Anthropic credential. Different
     // routing branches need different combinations of these.
@@ -83,7 +88,7 @@ describe.skipIf(!DATABASE_URL)('vault routing', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         providerId: 'openai',
-        apiKey: 'sk-openai-test-1234567890',
+        encryptedApiKey: await encryptWithKey('sk-openai-test-1234567890', vaultKey),
         label: 'openai',
       }),
     });
@@ -94,7 +99,7 @@ describe.skipIf(!DATABASE_URL)('vault routing', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         providerId: 'anthropic',
-        apiKey: 'sk-ant-test-1234567890',
+        encryptedApiKey: await encryptWithKey('sk-ant-test-1234567890', vaultKey),
         label: 'anthropic',
       }),
     });
@@ -319,7 +324,10 @@ describe.skipIf(!DATABASE_URL)('vault routing', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ username, password: testPassword }),
       });
-      const soloToken = (await signup.json()).token;
+      const soloSignup = await signup.json();
+      const soloToken = soloSignup.token;
+      const soloSaltBytes = Uint8Array.from(Buffer.from(soloSignup.encryptionSalt, 'base64'));
+      const soloVaultKey = await deriveKey(testPassword, soloSaltBytes, true);
 
       // Add a Gemini credential (something unrelated to the request) and
       // a group bound to Anthropic with model. Request will be for OpenAI.
@@ -330,7 +338,11 @@ describe.skipIf(!DATABASE_URL)('vault routing', () => {
       await app.request('/credentials', {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${soloToken}` },
-        body: JSON.stringify({ providerId: 'gemini', apiKey: 'AIza-solo-key', label: 'solo' }),
+        body: JSON.stringify({
+          providerId: 'gemini',
+          encryptedApiKey: await encryptWithKey('AIza-solo-key', soloVaultKey),
+          label: 'solo',
+        }),
       });
       await app.request('/groups/g-cross', {
         method: 'PUT',
