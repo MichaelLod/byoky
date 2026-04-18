@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export function middleware(request: NextRequest) {
   const hostname = request.headers.get('host') ?? '';
+  const bareHost = hostname.split(':')[0];
 
   // Redirect demo.byoky.com to byoky.com/demo
   if (hostname.startsWith('demo.')) {
@@ -19,9 +20,8 @@ export function middleware(request: NextRequest) {
   }
 
   // api.byoky.com — public CLI-facing API. Only explicitly allowlisted
-  // endpoints are exposed; everything else 404s so internal admin routes
-  // stay on byoky.com.
-  const bareHost = hostname.split(':')[0];
+  // endpoints under /v1/* are exposed; anything else 404s so internal
+  // admin routes stay on byoky.com.
   if (bareHost === 'api.byoky.com') {
     const path = request.nextUrl.pathname;
     const target = apiSubdomainTarget(path);
@@ -37,14 +37,13 @@ export function middleware(request: NextRequest) {
 }
 
 function apiSubdomainTarget(path: string): string | null {
-  if (path === '/v1/apps/submit') return '/api/apps/submit';
+  // /v1 is the public API prefix; internally everything lives under /api.
+  // Admin endpoints intentionally not exposed here.
+  if (path === '/v1/apps' || path === '/v1/apps/submit') return path.replace('/v1', '/api');
+  if (/^\/v1\/apps\/[a-z0-9-]+$/.test(path)) return path.replace('/v1', '/api');
   return null;
 }
 
 export const config = {
-  // api.byoky.com's paths don't start with /api/, so the byoky.com /api/*
-  // exclusion still holds. Host-based routing above runs at edge before
-  // hitting these, so api.byoky.com traffic reaches the middleware via
-  // non-/api paths (/v1/...).
   matcher: ['/', '/((?!api|_next/static|_next/image|favicon|icon|apple-touch-icon|og-image|manifest).*)'],
 };
