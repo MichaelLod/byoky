@@ -35,7 +35,7 @@ export default function SubmitPage() {
           name: form.name,
           slug: form.slug,
           url: form.url,
-          icon: form.icon || '/icon.png',
+          ...(form.icon ? { icon: form.icon } : {}),
           description: form.description,
           category: form.category,
           providers: form.providers.split(',').map((p) => p.trim()).filter(Boolean),

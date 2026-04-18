@@ -86,7 +86,7 @@ interface AppManifest {
   name: string;
   slug: string;
   url: string;
-  icon: string;
+  icon?: string;
   description: string;
   category: string;
   providers: string[];
@@ -114,6 +114,7 @@ async function initManifest(rl: readline.Interface): Promise<void> {
   const category = await ask(rl, '  Category (chat/coding/trading/productivity/research/creative/other): ') || 'other';
   const providersRaw = await ask(rl, '  Providers (comma-separated, e.g. anthropic,openai): ');
   const providers = providersRaw.split(',').map((p) => p.trim()).filter(Boolean);
+  const icon = await ask(rl, '  Icon URL (https://..., optional): ');
   const authorName = await ask(rl, '  Author name: ');
   const authorEmail = await ask(rl, '  Author email: ');
   const authorWebsite = await ask(rl, '  Author website (optional): ');
@@ -122,7 +123,7 @@ async function initManifest(rl: readline.Interface): Promise<void> {
     name,
     slug,
     url,
-    icon: '/icon.png',
+    ...(icon ? { icon } : {}),
     description,
     category,
     providers,
@@ -253,12 +254,12 @@ async function main(): Promise<void> {
       throw err;
     }
 
-    // Generate a starter byoky.app.json manifest
+    // Generate a starter byoky.app.json manifest. Icon is optional and
+    // omitted here — developers fill in an HTTPS URL before submitting.
     const manifest: AppManifest = {
       name: projectName,
       slug: projectName.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
       url: `https://${projectName}.example.com`,
-      icon: '/icon.png',
       description: `${projectName} — a Byoky-powered app`,
       category: 'other',
       providers: ['anthropic', 'openai'],

@@ -41,5 +41,9 @@ function apiSubdomainTarget(path: string): string | null {
 }
 
 export const config = {
-  matcher: ['/', '/((?!_next/static|_next/image|favicon|icon|apple-touch-icon|og-image|manifest).*)'],
+  // api.byoky.com's paths don't start with /api/, so the byoky.com /api/*
+  // exclusion still holds. Host-based routing above runs at edge before
+  // hitting these, so api.byoky.com traffic reaches the middleware via
+  // non-/api paths (/v1/...).
+  matcher: ['/', '/((?!api|_next/static|_next/image|favicon|icon|apple-touch-icon|og-image|manifest).*)'],
 };
