@@ -101,8 +101,14 @@ export function GiftRedeem() {
     return () => clearTimeout(t);
   }, []);
 
-  function tryOpenApp() {
+  async function tryOpenApp() {
     if (!encoded) return;
+    // Stash the gift URL on the clipboard so that if the user is redirected
+    // to the store and installs the app, the app can pick it up on first
+    // launch (deferred deep linking). Best-effort: silently ignore failures.
+    const giftUrl = `https://byoky.com/gift#${encoded}`;
+    try { await navigator.clipboard.writeText(giftUrl); } catch { /* ignore */ }
+
     if (platform === 'android') {
       const fallback = encodeURIComponent(ANDROID_STORE);
       window.location.href = `intent://gift/${encoded}#Intent;scheme=byoky;package=com.byoky.app;S.browser_fallback_url=${fallback};end`;

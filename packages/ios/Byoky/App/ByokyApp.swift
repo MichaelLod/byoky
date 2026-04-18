@@ -3,6 +3,8 @@ import SwiftUI
 @main
 struct ByokyApp: App {
     @StateObject private var wallet: WalletStore
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var hasCheckedClipboardForGift = false
 
     init() {
         let args = CommandLine.arguments
@@ -287,6 +289,12 @@ struct ByokyApp: App {
                 .onOpenURL { url in
                     handleIncomingURL(url)
                 }
+                .onAppear {
+                    checkClipboardForDeferredGift()
+                }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { checkClipboardForDeferredGift() }
         }
     }
 
@@ -299,6 +307,22 @@ struct ByokyApp: App {
             wallet.pendingGiftLink = url.absoluteString
         } else if url.host == "pair" {
             wallet.pendingPairLink = url.absoluteString
+        }
+    }
+
+    // Deferred deep linking: if the web redeem page was opened, it copied the
+    // gift URL to the clipboard before redirecting to the App Store. When the
+    // user installs Byoky and foregrounds it for the first time, we pick up
+    // the pasted URL so the gift isn't lost. Runs at most once per launch.
+    private func checkClipboardForDeferredGift() {
+        guard !hasCheckedClipboardForGift else { return }
+        hasCheckedClipboardForGift = true
+        guard wallet.pendingGiftLink == nil else { return }
+        guard UIPasteboard.general.hasStrings else { return }
+        guard let text = UIPasteboard.general.string else { return }
+        if text.hasPrefix("https://byoky.com/gift") || text.hasPrefix("byoky://gift") {
+            wallet.pendingGiftLink = text
+            UIPasteboard.general.string = ""
         }
     }
 }

@@ -1,5 +1,8 @@
 package com.byoky.app
 
+import android.content.ClipboardManager
+import android.content.ClipData
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -15,6 +18,7 @@ import com.byoky.app.ui.theme.ByokyTheme
 
 class MainActivity : ComponentActivity() {
     private lateinit var lifecycleObserver: DefaultLifecycleObserver
+    private var hasCheckedClipboardForGift = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
@@ -29,6 +33,7 @@ class MainActivity : ComponentActivity() {
         TestSupport.autoSetupIfNeeded(applicationContext, wallet, intent?.extras)
 
         handleDeepLinkIntent(intent, wallet)
+        checkClipboardForDeferredGift(wallet)
 
         lifecycleObserver = object : DefaultLifecycleObserver {
             override fun onStop(owner: LifecycleOwner) {
@@ -68,6 +73,24 @@ class MainActivity : ComponentActivity() {
         when (uri.host) {
             "pair" -> wallet.setPendingPairLink(uri.toString())
             "gift" -> wallet.setPendingGiftLink(uri.toString())
+        }
+    }
+
+    // Deferred deep linking: the web redeem page stashes the gift URL on the
+    // clipboard before sending the user to the Play Store. If the user just
+    // installed the app and opened it without tapping the deep link, pick
+    // the URL up from the clipboard here. Runs at most once per process.
+    private fun checkClipboardForDeferredGift(wallet: WalletStore) {
+        if (hasCheckedClipboardForGift) return
+        hasCheckedClipboardForGift = true
+        if (wallet.pendingGiftLink.value != null) return
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
+        val clip = clipboard.primaryClip ?: return
+        if (clip.itemCount == 0) return
+        val text = clip.getItemAt(0).text?.toString() ?: return
+        if (text.startsWith("https://byoky.com/gift") || text.startsWith("byoky://gift")) {
+            wallet.setPendingGiftLink(text)
+            clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
         }
     }
 
