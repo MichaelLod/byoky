@@ -505,7 +505,7 @@ test.describe('Byoky live end-to-end flow', () => {
     await walletA.popup.click('button:has-text("Create Gift")');
     await expect(walletA.popup.locator('text=Gift Created')).toBeVisible({ timeout: 15_000 });
     giftLink = await walletA.popup.locator('.gift-link-text').innerText();
-    expect(giftLink).toMatch(/^https:\/\/byoky\.com\/gift#/);
+    expect(giftLink).toMatch(/^https:\/\/byoky\.com\/gift\//);
     await walletA.popup.click('button:has-text("Done")');
   });
 

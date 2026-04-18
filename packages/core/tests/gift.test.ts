@@ -321,11 +321,11 @@ describe('createGiftLink', () => {
 });
 
 describe('giftLinkToUrl', () => {
-  it('returns an https://byoky.com/gift# URL', () => {
+  it('returns an https://byoky.com/gift/ URL', () => {
     const link = makeValidGiftLink();
     const encoded = encodeGiftLink(link);
     const url = giftLinkToUrl(encoded);
-    expect(url).toBe(`https://byoky.com/gift#${encoded}`);
+    expect(url).toBe(`https://byoky.com/gift/${encoded}`);
   });
 
   it('produces a URL that decodeGiftLink can parse', () => {

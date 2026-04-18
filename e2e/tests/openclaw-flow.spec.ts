@@ -423,7 +423,7 @@ test.describe('OpenClaw + byoky extension + bridge full flow', () => {
     await expect(wallet.popup.locator('text=Gift Created')).toBeVisible({ timeout: 15_000 });
 
     giftLink = await wallet.popup.locator('.gift-link-text').innerText();
-    expect(giftLink).toMatch(/^https:\/\/byoky\.com\/gift#/);
+    expect(giftLink).toMatch(/^https:\/\/byoky\.com\/gift\//);
     await wallet.popup.click('button:has-text("Done")');
   });
 

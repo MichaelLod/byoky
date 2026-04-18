@@ -95,7 +95,7 @@ export function RedeemGift() {
             id="gift-link"
             value={linkInput}
             onChange={(e) => handleParse(e.target.value)}
-            placeholder="https://byoky.com/gift#... or byoky://gift/..."
+            placeholder="https://byoky.com/gift/... or byoky://gift/..."
             rows={3}
           />
         </div>
