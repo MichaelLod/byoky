@@ -61,7 +61,7 @@ export default function Terms() {
           your own keys to providers such as Anthropic, OpenAI, and Google. Byoky stores them
           encrypted on your device and proxies requests to those providers on your behalf. An
           optional cloud sync feature (the &ldquo;Vault&rdquo;) lets you use the same keys across
-          devices with end-to-end encryption.
+          devices, with keys stored encrypted using a password-derived key.
         </p>
         <p>
           Byoky is not an LLM provider. We do not sell, resell, broker, or lease access to any

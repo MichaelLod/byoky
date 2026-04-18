@@ -47,7 +47,7 @@ export function OfflineUpgradeBanner() {
         Sync across devices
       </div>
       <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
-        Turn on Cloud Sync to access your keys on any device, end-to-end encrypted.
+        Turn on Cloud Sync to access your keys on any device. Encrypted with your password.
       </div>
 
       <button

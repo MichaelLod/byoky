@@ -663,9 +663,9 @@ function Security() {
               <h3>Local by default</h3>
               <p>
                 Your keys stay on your device, encrypted behind your master
-                password. Cloud sync is opt-in and end-to-end encrypted — our
-                server only ever sees ciphertext. No telemetry, no prompt or
-                response logging.
+                password. Cloud sync is opt-in; keys are stored encrypted with
+                a password-derived key, with ciphertext at rest in our
+                database. No telemetry, no prompt or response logging.
               </p>
             </div>
           </FadeIn>
