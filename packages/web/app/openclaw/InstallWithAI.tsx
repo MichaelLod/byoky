@@ -11,8 +11,8 @@ Context:
 
 Your job — run these commands on my machine and report each step:
 
-1. Install the OpenClaw plugin globally. It declares @byoky/bridge as a dependency so npm pulls both in one step:
-     npm install -g @byoky/openclaw-plugin
+1. Install the OpenClaw plugin. OpenClaw loads plugins from ~/.openclaw/extensions (not the global npm prefix), so use OpenClaw's own installer — it declares @byoky/bridge as a dependency, so both are pulled in one step:
+     openclaw plugins install @byoky/openclaw-plugin
 
 2. Authenticate OpenClaw against Byoky. The default \`byoky\` meta-provider connects every provider I already have in the wallet (Anthropic, OpenAI, Gemini, etc.) in one shot:
      openclaw models auth login --provider byoky
@@ -27,7 +27,7 @@ Your job — run these commands on my machine and report each step:
 
 Rules:
 - Run one command at a time and show me the output before moving on.
-- If npm install fails with EACCES, suggest a per-user npm prefix fix — do NOT auto-sudo.
+- If the plugin install fails with EACCES, suggest a per-user npm prefix fix — do NOT auto-sudo.
 - Do not edit any files in my repo. This is an install task, not a code change.
 - If a step errors, stop and ask me — do not keep retrying.
 `;

@@ -8,20 +8,15 @@ OpenClaw → HTTP → Bridge (localhost) → Native Messaging → Extension → 
 
 ## Setup
 
-**1. Install the bridge** (one-time):
+**1. Install the plugin**:
 
 ```bash
-npm install -g @byoky/bridge
-byoky-bridge install
+openclaw plugins install @byoky/openclaw-plugin
 ```
 
-**2. Install the plugin**:
+OpenClaw loads plugins from `~/.openclaw/extensions` (not the global npm prefix), so use OpenClaw's own installer. It pulls `@byoky/bridge` in automatically, and the plugin registers the native messaging host on first `auth login`.
 
-```bash
-npm install -g @byoky/openclaw-plugin
-```
-
-**3. Connect your wallet**:
+**2. Connect your wallet**:
 
 ```bash
 openclaw models auth login --provider byoky-anthropic
@@ -29,7 +24,7 @@ openclaw models auth login --provider byoky-anthropic
 
 This opens your browser. Unlock your Byoky wallet and approve the connection. The bridge starts automatically.
 
-**4. Done.** OpenClaw now routes API calls through your wallet:
+**3. Done.** OpenClaw now routes API calls through your wallet:
 
 ```bash
 # Verify the bridge is running
