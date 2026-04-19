@@ -1010,14 +1010,18 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
                         }
                         "relay:response:error" -> {
                             if (json.optString("requestId") == requestId) {
+                                val upstream = json.optJSONObject("error")
                                 sendJSON(JSONObject().apply {
                                     put("type", "relay:response:error")
                                     put("requestId", requestId)
-                                    put("error", json.optJSONObject("error") ?: JSONObject().apply {
+                                    put("error", upstream ?: JSONObject().apply {
                                         put("code", "GIFT_ERROR")
                                         put("message", "Gift relay error")
                                     })
                                 })
+                                if (upstream?.optString("code") == "GIFT_EXPIRED") {
+                                    wallet?.removeGiftedCredential(gc.id)
+                                }
                                 ws.close(1000, null)
                             }
                         }
@@ -1257,14 +1261,18 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
                         }
                         "relay:response:error" -> {
                             if (json.optString("requestId") == requestId) {
+                                val upstream = json.optJSONObject("error")
                                 sendJSON(JSONObject().apply {
                                     put("type", "relay:response:error")
                                     put("requestId", requestId)
-                                    put("error", json.optJSONObject("error") ?: JSONObject().apply {
+                                    put("error", upstream ?: JSONObject().apply {
                                         put("code", "GIFT_ERROR")
                                         put("message", "Gift relay error")
                                     })
                                 })
+                                if (upstream?.optString("code") == "GIFT_EXPIRED") {
+                                    wallet.removeGiftedCredential(gc.id)
+                                }
                                 releaseHandle()
                                 ws.close(1000, null)
                             }

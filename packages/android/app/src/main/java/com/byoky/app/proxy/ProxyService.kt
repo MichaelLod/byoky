@@ -271,7 +271,11 @@ class ProxyService(
                             }
                             "relay:response:error" -> {
                                 if (json.optString("requestId") == requestId) {
-                                    val msg = json.optJSONObject("error")?.optString("message") ?: "Gift relay error"
+                                    val errObj = json.optJSONObject("error")
+                                    val msg = errObj?.optString("message").takeUnless { it.isNullOrEmpty() } ?: "Gift relay error"
+                                    if (errObj?.optString("code") == "GIFT_EXPIRED") {
+                                        wallet.removeGiftedCredential(gc.id)
+                                    }
                                     close(Exception(msg))
                                 }
                             }
@@ -996,7 +1000,10 @@ class ProxyService(
                         "relay:response:error" -> {
                             if (json.optString("requestId") == requestId) {
                                 val errObj = json.optJSONObject("error")
-                                error = Exception(errObj?.optString("message") ?: "Gift relay error")
+                                error = Exception(errObj?.optString("message").takeUnless { it.isNullOrEmpty() } ?: "Gift relay error")
+                                if (errObj?.optString("code") == "GIFT_EXPIRED") {
+                                    wallet.removeGiftedCredential(gc.id)
+                                }
                                 latch.countDown()
                             }
                         }
@@ -1196,7 +1203,10 @@ class ProxyService(
                         "relay:response:error" -> {
                             if (json.optString("requestId") == requestId) {
                                 val errObj = json.optJSONObject("error")
-                                error = Exception(errObj?.optString("message") ?: "Gift relay error")
+                                error = Exception(errObj?.optString("message").takeUnless { it.isNullOrEmpty() } ?: "Gift relay error")
+                                if (errObj?.optString("code") == "GIFT_EXPIRED") {
+                                    wallet.removeGiftedCredential(gc.id)
+                                }
                                 releaseHandle()
                                 latch.countDown()
                             }
@@ -1406,7 +1416,11 @@ class ProxyService(
                         }
                         "relay:response:error" -> {
                             if (json.optString("requestId") == requestId) {
-                                val msg = json.optJSONObject("error")?.optString("message") ?: "Gift relay error"
+                                val errObj = json.optJSONObject("error")
+                                val msg = errObj?.optString("message").takeUnless { it.isNullOrEmpty() } ?: "Gift relay error"
+                                if (errObj?.optString("code") == "GIFT_EXPIRED") {
+                                    wallet.removeGiftedCredential(gc.id)
+                                }
                                 releaseHandle()
                                 onClose(Exception(msg))
                                 ws.close(1000, null)

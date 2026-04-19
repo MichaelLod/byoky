@@ -477,6 +477,10 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
                 responseBody: nil
             )
         } catch {
+            if case .relayError(let code, _) = error as? GiftRelayError ?? .invalidRelayUrl,
+               code == "GIFT_EXPIRED" {
+                await MainActor.run { wallet.removeGiftedCredential(id: gift.id) }
+            }
             deliverProxyError(requestId: requestId, code: "PROXY_ERROR", message: error.localizedDescription)
         }
     }

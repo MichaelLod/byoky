@@ -12,7 +12,7 @@ enum GiftRelayError: LocalizedError {
     case timeout(String)
     case authFailed(String)
     case senderOffline
-    case relayError(String)
+    case relayError(code: String?, message: String)
 
     var errorDescription: String? {
         switch self {
@@ -20,7 +20,7 @@ enum GiftRelayError: LocalizedError {
         case .timeout(let msg): return msg
         case .authFailed(let msg): return "Gift auth failed: \(msg)"
         case .senderOffline: return "Gift sender is not online"
-        case .relayError(let msg): return msg
+        case .relayError(_, let msg): return msg
         }
     }
 }
@@ -162,9 +162,10 @@ func proxyViaGiftRelay(
                         guard json["requestId"] as? String == requestId else { listen(); return }
                         requestTimeout?.cancel()
                         let errorObj = json["error"] as? [String: Any]
+                        let code = errorObj?["code"] as? String
                         let message = errorObj?["message"] as? String ?? "Gift relay error"
                         ws.cancel(with: .normalClosure, reason: nil)
-                        complete(throwing: GiftRelayError.relayError(message))
+                        complete(throwing: GiftRelayError.relayError(code: code, message: message))
 
                     case "relay:usage":
                         if let giftId = json["giftId"] as? String,

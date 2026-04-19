@@ -302,6 +302,9 @@ final class RelayPairService: ObservableObject {
                 return
             }
 
+            // Hoisted out of the do-block so the catch handler can auto-
+            // cleanup the local gift when the relay reports GIFT_EXPIRED.
+            var failedGiftLocalId: String? = nil
             do {
                 // Resolve routing FIRST. The routing resolver inspects the
                 // group for this origin and decides between: cross-family
@@ -379,6 +382,7 @@ final class RelayPairService: ObservableObject {
                 }
 
                 if let gc = useGift {
+                    failedGiftLocalId = gc.id
                     let filteredHeaders = headers.filter {
                         !["host", "authorization", "x-api-key"].contains($0.key.lowercased())
                     }
@@ -548,6 +552,11 @@ final class RelayPairService: ObservableObject {
                 }
 
             } catch {
+                if let id = failedGiftLocalId,
+                   case .relayError(let code, _) = error as? GiftRelayError ?? .invalidRelayUrl,
+                   code == "GIFT_EXPIRED" {
+                    await MainActor.run { wallet.removeGiftedCredential(id: id) }
+                }
                 sendRelayError(requestId: requestId, code: "PROXY_ERROR", message: error.localizedDescription)
             }
         }
@@ -906,6 +915,10 @@ final class RelayPairService: ObservableObject {
                 )
             }
         } catch {
+            if case .relayError(let code, _) = error as? GiftRelayError ?? .invalidRelayUrl,
+               code == "GIFT_EXPIRED" {
+                await MainActor.run { wallet.removeGiftedCredential(id: gc.id) }
+            }
             sendRelayError(requestId: requestId, code: "TRANSLATION_FAILED", message: error.localizedDescription)
         }
     }
