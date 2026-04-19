@@ -1148,6 +1148,10 @@ final class RelayPairService: ObservableObject {
                     "type": "relay:vault:offer",
                     "vaultUrl": result.vaultUrl,
                     "appSessionToken": result.appSessionToken,
+                    // Forward vault's view of provider availability so the web
+                    // SDK doesn't conflate phone-side (pair:hello) providers
+                    // with what the vault can actually serve.
+                    "providers": result.providers,
                 ])
             }
         }

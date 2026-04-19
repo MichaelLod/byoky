@@ -1171,7 +1171,7 @@ final class WalletStore: ObservableObject {
         }
     }
 
-    func createVaultAppSession(appOrigin: String, providerIds: [String]) async -> (vaultUrl: String, appSessionToken: String)? {
+    func createVaultAppSession(appOrigin: String, providerIds: [String]) async -> (vaultUrl: String, appSessionToken: String, providers: [String: [String: Any]])? {
         guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return nil }
         let providers = providerIds.map { ["id": $0] }
         let body: [String: Any] = ["appOrigin": appOrigin, "providers": providers]
@@ -1181,7 +1181,8 @@ final class WalletStore: ObservableObject {
             return nil
         }
         guard result.ok, let ast = result.data["appSessionToken"] as? String else { return nil }
-        return (Self.vaultURL, ast)
+        let providersMap = (result.data["providers"] as? [String: [String: Any]]) ?? [:]
+        return (Self.vaultURL, ast, providersMap)
     }
 
     func checkUsernameAvailability(_ username: String) async -> (available: Bool, reason: String?) {

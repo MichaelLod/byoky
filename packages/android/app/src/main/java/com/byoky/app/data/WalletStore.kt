@@ -1566,7 +1566,9 @@ class WalletStore(context: Context) {
     // thread misuse silently reports "operation failed" rather than crashing.
     // Enforcing IO dispatch here makes call sites impossible to get wrong.
 
-    suspend fun createVaultAppSession(appOrigin: String, providerIds: List<String>): Pair<String, String>? =
+    data class VaultAppSession(val vaultUrl: String, val appSessionToken: String, val providers: JSONObject)
+
+    suspend fun createVaultAppSession(appOrigin: String, providerIds: List<String>): VaultAppSession? =
         withContext(Dispatchers.IO) {
             if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return@withContext null
             val token = vaultToken ?: return@withContext null
@@ -1586,7 +1588,8 @@ class WalletStore(context: Context) {
             if (!ok) return@withContext null
             val ast = data.optString("appSessionToken", "")
             if (ast.isEmpty()) return@withContext null
-            Pair(VAULT_URL, ast)
+            val providersMap = data.optJSONObject("providers") ?: JSONObject()
+            VaultAppSession(VAULT_URL, ast, providersMap)
         }
 
     suspend fun checkUsernameAvailability(username: String): Pair<Boolean, String?> =

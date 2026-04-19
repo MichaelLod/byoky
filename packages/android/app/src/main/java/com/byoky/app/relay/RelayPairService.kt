@@ -1387,8 +1387,9 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
             }
             sendJSON(JSONObject().apply {
                 put("type", "relay:vault:offer")
-                put("vaultUrl", result.first)
-                put("appSessionToken", result.second)
+                put("vaultUrl", result.vaultUrl)
+                put("appSessionToken", result.appSessionToken)
+                put("providers", result.providers)
             })
         }
     }
