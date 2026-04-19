@@ -567,6 +567,28 @@ export default function Marketplace() {
           font-size: 14px;
         }
 
+        /* ── Share button (card header) ── */
+        .mp-btn-share {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 32px;
+          height: 32px;
+          flex-shrink: 0;
+          background: transparent;
+          color: var(--text-muted, #888);
+          border: 1px solid var(--border, #e5e5e5);
+          border-radius: 8px;
+          cursor: pointer;
+          transition: all 0.2s;
+          padding: 0;
+        }
+        .mp-btn-share:hover {
+          background: rgba(255, 79, 0, 0.08);
+          border-color: rgba(255, 79, 0, 0.3);
+          color: #FF4F00;
+        }
+
         /* ── Redeem modal ── */
         .mp-modal-backdrop {
           position: fixed;
@@ -681,6 +703,29 @@ function GiftCard({ gift, variant = 'active', onRedeem, redeeming }: {
   const barColor = status !== 'online' && status !== 'unavailable' ? '#999' : pct > 20 ? '#FF4F00' : '#f43f5e';
   const { bg: statusBg, color: statusColor, label: statusText } = STATUS_STYLES[status];
   const expired = variant === 'expired' || variant === 'removed';
+  const [shared, setShared] = useState(false);
+
+  async function handleShare() {
+    if (typeof window === 'undefined') return;
+    const url = `${window.location.origin}/token-pool`;
+    const title = `Free ${gift.providerId} tokens on Byoky`;
+    const text = `${gift.gifterName} is gifting ${formatTokens(gift.tokensRemaining)} free ${gift.providerId} tokens on Byoky. Grab them before they're gone:`;
+    try {
+      if (typeof navigator !== 'undefined' && 'share' in navigator) {
+        await navigator.share({ title, text, url });
+        return;
+      }
+    } catch {
+      /* user cancelled or share failed — fall through to clipboard */
+    }
+    try {
+      await navigator.clipboard.writeText(`${text} ${url}`);
+      setShared(true);
+      setTimeout(() => setShared(false), 1800);
+    } catch {
+      /* clipboard blocked */
+    }
+  }
 
   return (
     <div className="mp-card">
@@ -699,6 +744,28 @@ function GiftCard({ gift, variant = 'active', onRedeem, redeeming }: {
             Gifted by {gift.gifterName}
           </div>
         </div>
+        {!expired && (
+          <button
+            className="mp-btn-share"
+            onClick={handleShare}
+            title={shared ? 'Link copied' : 'Share with a friend'}
+            aria-label="Share gift"
+          >
+            {shared ? (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="18" cy="5" r="3" />
+                <circle cx="6" cy="12" r="3" />
+                <circle cx="18" cy="19" r="3" />
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+              </svg>
+            )}
+          </button>
+        )}
       </div>
 
       <div className="mp-card-tokens">
