@@ -118,16 +118,17 @@ const STYLES = /* css */ `
   .qr svg { display: block; width: 100%; height: 100%; }
 
   .code-box {
-    display: flex; align-items: center; gap: 8px;
+    display: flex; align-items: flex-start; gap: 8px;
     background: var(--byoky-bg-elevated); border: 1px solid var(--byoky-border);
     border-radius: 8px;
-    padding: 8px 12px; margin-bottom: 16px;
+    padding: 10px 12px; margin-bottom: 16px;
   }
   .code-box code {
-    flex: 1; font-size: 12px; color: var(--byoky-text-secondary);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    flex: 1; font-size: 11px; line-height: 1.5; color: var(--byoky-text-secondary);
     font-family: 'SF Mono', Menlo, Consolas, monospace;
     text-align: left;
+    word-break: break-all;
+    max-height: 4.5em; overflow: hidden;
   }
   .copy-btn {
     background: none; border: 1px solid var(--byoky-border-strong);

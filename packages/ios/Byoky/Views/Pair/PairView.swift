@@ -48,16 +48,21 @@ struct PairView: View {
     }
 
     private func handlePairLink(_ link: String) {
-        var encoded = link
-        if encoded.hasPrefix("byoky://pair/") {
-            encoded = String(encoded.dropFirst("byoky://pair/".count))
-        } else if encoded.hasPrefix("https://byoky.com/pair#") {
-            encoded = String(encoded.dropFirst("https://byoky.com/pair#".count))
-        } else if encoded.hasPrefix("https://byoky.com/pair/") {
-            encoded = String(encoded.dropFirst("https://byoky.com/pair/".count))
-        }
-        connectWithCode(encoded)
+        connectWithCode(link)
         wallet.pendingPairLink = nil
+    }
+
+    private func stripPairPrefix(_ input: String) -> String {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prefixes = [
+            "byoky://pair/",
+            "https://byoky.com/pair#",
+            "https://byoky.com/pair/",
+        ]
+        for prefix in prefixes where trimmed.hasPrefix(prefix) {
+            return String(trimmed.dropFirst(prefix.count))
+        }
+        return trimmed
     }
 
     private var idleSection: some View {
@@ -205,7 +210,7 @@ struct PairView: View {
     }
 
     private func connectWithCode(_ code: String) {
-        let cleaned = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleaned = stripPairPrefix(code)
         guard let payload = PairPayload.decode(from: cleaned) else {
             pairService.status = .error("Invalid pairing code")
             return
@@ -271,21 +276,49 @@ struct QRScannerView: UIViewControllerRepresentable {
 class QRScannerController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
     var onCode: ((String) -> Void)?
     private var captureSession: AVCaptureSession?
+    private var previewLayer: AVCaptureVideoPreviewLayer?
+    private var messageLabel: UILabel?
+    private let sessionQueue = DispatchQueue(label: "com.byoky.qrscanner.session")
     private var found = false
 
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
 
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            setupSession()
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+                DispatchQueue.main.async {
+                    if granted { self?.setupSession() }
+                    else { self?.showMessage("Camera access denied. Enable it in Settings to scan QR codes.") }
+                }
+            }
+        default:
+            showMessage("Camera access denied. Enable it in Settings to scan QR codes.")
+        }
+    }
+
+    private func setupSession() {
         let session = AVCaptureSession()
         guard let device = AVCaptureDevice.default(for: .video),
               let input = try? AVCaptureDeviceInput(device: device) else {
+            showMessage("Unable to access the camera.")
             return
         }
 
+        guard session.canAddInput(input) else {
+            showMessage("Unable to attach the camera.")
+            return
+        }
         session.addInput(input)
 
         let output = AVCaptureMetadataOutput()
+        guard session.canAddOutput(output) else {
+            showMessage("Unable to start QR detection.")
+            return
+        }
         session.addOutput(output)
         output.setMetadataObjectsDelegate(self, queue: .main)
         output.metadataObjectTypes = [.qr]
@@ -296,10 +329,35 @@ class QRScannerController: UIViewController, AVCaptureMetadataOutputObjectsDeleg
         view.layer.addSublayer(preview)
 
         captureSession = session
+        previewLayer = preview
 
-        Task {
-            session.startRunning()
+        // startRunning blocks — Apple warns it must not run on the main thread.
+        sessionQueue.async { session.startRunning() }
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        previewLayer?.frame = view.bounds
+    }
+
+    private func showMessage(_ text: String) {
+        if messageLabel == nil {
+            let label = UILabel()
+            label.textColor = .white
+            label.numberOfLines = 0
+            label.textAlignment = .center
+            label.font = .systemFont(ofSize: 15, weight: .medium)
+            label.translatesAutoresizingMaskIntoConstraints = false
+            view.addSubview(label)
+            NSLayoutConstraint.activate([
+                label.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+                label.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+                label.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 24),
+                label.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -24),
+            ])
+            messageLabel = label
         }
+        messageLabel?.text = text
     }
 
     func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput metadataObjects: [AVMetadataObject], from connection: AVCaptureConnection) {
@@ -307,12 +365,16 @@ class QRScannerController: UIViewController, AVCaptureMetadataOutputObjectsDeleg
               let object = metadataObjects.first as? AVMetadataMachineReadableCodeObject,
               let code = object.stringValue else { return }
         found = true
-        captureSession?.stopRunning()
+        if let session = captureSession {
+            sessionQueue.async { session.stopRunning() }
+        }
         onCode?(code)
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        captureSession?.stopRunning()
+        if let session = captureSession {
+            sessionQueue.async { session.stopRunning() }
+        }
     }
 }
