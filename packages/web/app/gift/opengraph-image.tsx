@@ -12,135 +12,171 @@ export default function Image() {
           width: '100%',
           height: '100%',
           display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: '#0b0b0c',
-          color: '#ffffff',
+          position: 'relative',
+          background: '#fafaf9',
+          color: '#1c1917',
           fontFamily: 'sans-serif',
         }}
       >
         <div
           style={{
             position: 'absolute',
-            top: -200,
-            left: -200,
-            width: 800,
-            height: 800,
+            top: -260,
+            right: -220,
+            width: 780,
+            height: 780,
             borderRadius: '50%',
             background: 'rgba(255, 79, 0, 0.22)',
-            filter: 'blur(120px)',
+            filter: 'blur(140px)',
             display: 'flex',
           }}
         />
         <div
           style={{
             position: 'absolute',
-            bottom: -200,
-            right: -200,
-            width: 700,
-            height: 700,
+            bottom: -240,
+            left: -200,
+            width: 680,
+            height: 680,
             borderRadius: '50%',
-            background: 'rgba(255, 106, 42, 0.18)',
-            filter: 'blur(120px)',
+            background: 'rgba(255, 106, 42, 0.14)',
+            filter: 'blur(140px)',
             display: 'flex',
           }}
         />
 
         <div
           style={{
-            position: 'relative',
-            width: 220,
-            height: 220,
+            position: 'absolute',
+            inset: 0,
             display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginBottom: 52,
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+            padding: '72px 80px',
           }}
         >
-          <div
-            style={{
-              position: 'absolute',
-              inset: 0,
-              borderRadius: 44,
-              background: 'rgba(255, 79, 0, 0.14)',
-              border: '2px solid rgba(255, 79, 0, 0.55)',
-              display: 'flex',
-            }}
-          />
-          <div
-            style={{
-              position: 'relative',
-              width: 150,
-              height: 120,
-              display: 'flex',
-              flexDirection: 'column',
-            }}
-          >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
             <div
               style={{
-                height: 28,
+                width: 72,
+                height: 72,
+                borderRadius: 16,
                 background: '#FF4F00',
-                borderRadius: 6,
-                marginBottom: 6,
-                display: 'flex',
-              }}
-            />
-            <div
-              style={{
-                flex: 1,
-                background: '#FF4F00',
-                borderRadius: 6,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
+                color: '#ffffff',
+                fontSize: 52,
+                fontWeight: 800,
+                letterSpacing: '-0.04em',
+              }}
+            >
+              b
+            </div>
+            <div
+              style={{
+                fontSize: 40,
+                fontWeight: 700,
+                letterSpacing: '-0.02em',
+                color: '#1c1917',
+                display: 'flex',
+              }}
+            >
+              byoky
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                marginLeft: 20,
+                padding: '10px 20px',
+                borderRadius: 999,
+                background: 'rgba(255, 79, 0, 0.1)',
+                border: '1px solid rgba(255, 79, 0, 0.35)',
+                fontSize: 22,
+                fontWeight: 600,
+                color: '#FF4F00',
+                letterSpacing: '0.04em',
+                textTransform: 'uppercase',
               }}
             >
               <div
                 style={{
-                  width: 18,
-                  height: '100%',
-                  background: '#0b0b0c',
+                  width: 9,
+                  height: 9,
+                  borderRadius: '50%',
+                  background: '#FF4F00',
+                  boxShadow: '0 0 10px #FF4F00',
                   display: 'flex',
                 }}
               />
+              <div style={{ display: 'flex' }}>Token gift</div>
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 96,
+                fontWeight: 800,
+                letterSpacing: '-0.04em',
+                lineHeight: 1.02,
+                color: '#1c1917',
+                display: 'flex',
+              }}
+            >
+              A token gift
             </div>
             <div
               style={{
-                position: 'absolute',
-                top: 0,
-                left: '50%',
-                transform: 'translateX(-50%)',
-                width: 18,
-                height: '100%',
-                background: '#0b0b0c',
+                fontSize: 96,
+                fontWeight: 800,
+                letterSpacing: '-0.04em',
+                lineHeight: 1.02,
+                color: '#FF4F00',
                 display: 'flex',
               }}
-            />
+            >
+              for you.
+            </div>
           </div>
-        </div>
 
-        <div
-          style={{
-            fontSize: 92,
-            fontWeight: 800,
-            letterSpacing: '-0.03em',
-            display: 'flex',
-          }}
-        >
-          A token gift for you
-        </div>
-        <div
-          style={{
-            fontSize: 34,
-            fontWeight: 500,
-            color: 'rgba(255, 255, 255, 0.7)',
-            marginTop: 22,
-            letterSpacing: '-0.01em',
-            display: 'flex',
-          }}
-        >
-          Open in Byoky to accept · byoky.com
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'flex-end',
+            }}
+          >
+            <div
+              style={{
+                fontSize: 28,
+                fontWeight: 500,
+                color: '#57534e',
+                display: 'flex',
+              }}
+            >
+              Open in Byoky to accept
+            </div>
+            <div
+              style={{
+                fontSize: 28,
+                fontWeight: 600,
+                color: '#1c1917',
+                display: 'flex',
+                letterSpacing: '-0.01em',
+              }}
+            >
+              byoky.com
+            </div>
+          </div>
         </div>
       </div>
     ),
