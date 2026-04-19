@@ -152,7 +152,7 @@ export default function OpenClawTutorial() {
           title="Install Byoky for OpenClaw"
           subtitle="One command installs the plugin and its bridge dependency."
         >
-          <Code>{`npm install -g @byoky/openclaw-plugin`}</Code>
+          <Code>{`openclaw plugins install @byoky/openclaw-plugin`}</Code>
           <p className="oc-note">
             The plugin registers all 13 Byoky providers with OpenClaw and
             pulls in <code>@byoky/bridge</code>, the tiny local HTTP proxy
