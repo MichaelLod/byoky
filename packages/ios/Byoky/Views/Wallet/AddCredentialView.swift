@@ -100,6 +100,13 @@ struct CredentialEntryView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Run `claude setup-token` in your terminal to get a token.")
                         Text("Setup tokens use your Claude Pro/Max subscription. API requests route through the app with native networking.")
+                        Label {
+                            Text("Online only — setup tokens require the Byoky app to be open. Apps using this credential will fail if the phone is closed or asleep, even with the cloud vault enabled.")
+                        } icon: {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                        }
+                        .foregroundStyle(.orange)
+                        .padding(.top, 4)
                     }
                 } else {
                     Text("Your key will be encrypted with AES-256-GCM and stored in the iOS Keychain. It never leaves this device.")

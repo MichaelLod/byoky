@@ -720,6 +720,22 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
                         color = TextSecondary,
                         fontSize = 12.sp,
                     )
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.Top) {
+                        Icon(
+                            Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = Color(0xFFFF8A00),
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "Online only — setup tokens require the Byoky app to be open. Apps using this credential will fail if the phone is closed or asleep, even with the cloud vault enabled.",
+                            color = Color(0xFFFF8A00),
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp,
+                        )
+                    }
                 } else {
                     Spacer(Modifier.height(8.dp))
                     Text(
