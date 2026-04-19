@@ -207,7 +207,16 @@ export class Byoky {
     // 1. Try restoring a vault session (no extension needed)
     const vaultData = loadVaultSession();
     if (vaultData) {
-      return this.buildVaultSession(vaultData);
+      // Drop the session if the vault has nothing it can actually serve. The
+      // relay path saves what the vault *reported*; if every provider came
+      // back unavailable, restoring would present a fake "connected" state
+      // and the first fetch would 404 on NO_CREDENTIAL.
+      const anyAvailable = Object.values(vaultData.providers ?? {}).some((p) => p?.available);
+      if (!anyAvailable) {
+        clearVaultSession();
+      } else {
+        return this.buildVaultSession(vaultData);
+      }
     }
 
     if (!isExtensionInstalled()) return null;
@@ -504,12 +513,20 @@ export class Byoky {
         if (msg.type === 'relay:vault:offer') {
           if (typeof msg.vaultUrl === 'string' && typeof msg.appSessionToken === 'string') {
             vaultFallback = { vaultUrl: msg.vaultUrl, appSessionToken: msg.appSessionToken };
+            // Prefer the vault's own view of provider availability over the
+            // phone's pair:hello map. The phone's map advertises everything it
+            // *could* serve (incl. oauth), while the vault's map reflects what
+            // *it* can actually route. Using the former here is what caused
+            // refresh-restored sessions to silently 404 on every request.
+            const vaultProviders = (msg.providers && typeof msg.providers === 'object')
+              ? msg.providers as ConnectResponse['providers']
+              : providers;
             saveVaultSession({
               appSessionToken: msg.appSessionToken,
               vaultUrl: msg.vaultUrl,
               sessionKey: `relay_vault_${roomId}`,
               proxyUrl: `${msg.vaultUrl.replace(/\/$/, '')}/proxy`,
-              providers,
+              providers: vaultProviders,
               expiresAt: decodeJwtExp(msg.appSessionToken),
             });
           }
