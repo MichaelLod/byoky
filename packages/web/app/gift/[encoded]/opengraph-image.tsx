@@ -145,45 +145,40 @@ export default async function Image({ params }: { params: Params }) {
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
-                gap: 18,
+                width: '100%',
+                gap: 10,
               }}
             >
               <div
                 style={{
-                  display: 'flex',
-                  alignItems: 'baseline',
-                  gap: 24,
+                  fontSize: 200,
+                  fontWeight: 800,
+                  letterSpacing: '-0.05em',
+                  color: '#FF4F00',
                   lineHeight: 1,
+                  display: 'flex',
                 }}
               >
-                <div
-                  style={{
-                    fontSize: 176,
-                    fontWeight: 800,
-                    letterSpacing: '-0.05em',
-                    color: '#FF4F00',
-                    display: 'flex',
-                  }}
-                >
-                  {formatTokens(gift.m)}
-                </div>
-                <div
-                  style={{
-                    fontSize: 72,
-                    fontWeight: 800,
-                    letterSpacing: '-0.03em',
-                    color: '#1c1917',
-                    display: 'flex',
-                  }}
-                >
-                  {gift.n} tokens
-                </div>
+                {formatTokens(gift.m)}
               </div>
               <div
                 style={{
-                  fontSize: 40,
+                  fontSize: 68,
+                  fontWeight: 800,
+                  letterSpacing: '-0.03em',
+                  color: '#1c1917',
+                  lineHeight: 1.1,
+                  display: 'flex',
+                }}
+              >
+                {gift.n} tokens
+              </div>
+              <div
+                style={{
+                  fontSize: 36,
                   fontWeight: 500,
                   color: '#57534e',
+                  marginTop: 6,
                   display: 'flex',
                 }}
               >
