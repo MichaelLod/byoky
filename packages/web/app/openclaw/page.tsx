@@ -38,7 +38,6 @@ export default function OpenClawTutorial() {
       <div className="container oc-container">
         <Hero />
         <FreeCallout />
-        <Overview />
         <Step
           n={1}
           title="Install the Byoky wallet"
@@ -52,8 +51,8 @@ export default function OpenClawTutorial() {
               target="_blank"
               rel="noopener noreferrer"
             >
+              <svg width="20" height="20" viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="#fff" stroke="#ddd" strokeWidth="1"/><path d="M24 8a16 16 0 0 1 13.86 8H24v0z" fill="#EA4335"/><path d="M37.86 16A16 16 0 0 1 24 40l6.93-12z" fill="#FBBC05"/><path d="M24 40A16 16 0 0 1 10.14 16l6.93 12z" fill="#34A853"/><path d="M10.14 16A16 16 0 0 1 24 8v8z" fill="#4285F4"/><circle cx="24" cy="24" r="6" fill="#fff"/><circle cx="24" cy="24" r="4" fill="#4285F4"/></svg>
               <span>Chrome</span>
-              <small>chromewebstore</small>
             </a>
             <a
               className="oc-install-card"
@@ -61,8 +60,8 @@ export default function OpenClawTutorial() {
               target="_blank"
               rel="noopener noreferrer"
             >
+              <svg width="20" height="20" viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="#fff" stroke="#ddd" strokeWidth="1"/><path d="M38 18c-1-4-4-7-8-9 2 2 3 5 3 7 0 3-2 6-5 7-4 1-7-1-7-1s1 5 6 6c4 1 8-1 10-4 1-1 1-3 1-6z" fill="#FF4F00"/><path d="M14 30c-1-3 0-6 2-9 1-2 3-3 5-4-2 2-3 4-2 7 0 2 2 4 4 5 3 1 6 0 7-2-1 3-4 6-8 6-3 1-6-1-8-3z" fill="#FF9500"/></svg>
               <span>Firefox</span>
-              <small>addons.mozilla.org</small>
             </a>
             <a
               className="oc-install-card"
@@ -70,8 +69,8 @@ export default function OpenClawTutorial() {
               target="_blank"
               rel="noopener noreferrer"
             >
-              <span>iOS / Safari</span>
-              <small>App Store</small>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="#999"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+              <span>iOS</span>
             </a>
             <a
               className="oc-install-card"
@@ -79,8 +78,8 @@ export default function OpenClawTutorial() {
               target="_blank"
               rel="noopener noreferrer"
             >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="#3DDC84"><path d="M17.523 15.341a.91.91 0 0 0 .916-.907V9.478a.91.91 0 0 0-.916-.907.91.91 0 0 0-.917.907v4.956a.91.91 0 0 0 .917.907zm-11.046 0a.91.91 0 0 0 .917-.907V9.478a.91.91 0 0 0-.917-.907.91.91 0 0 0-.916.907v4.956a.91.91 0 0 0 .916.907zm1.48 5.178c0 .504.41.912.916.912h.95v2.66a.91.91 0 0 0 .916.909.91.91 0 0 0 .917-.908v-2.66h1.688v2.66a.91.91 0 0 0 .916.909.91.91 0 0 0 .917-.908v-2.66h.95a.914.914 0 0 0 .916-.913V8.879H7.957v11.64zM15.4 3.11l1.124-1.727a.235.235 0 0 0-.073-.324.237.237 0 0 0-.326.072l-1.14 1.75A6.813 6.813 0 0 0 12 2.321c-1.07 0-2.08.195-3.003.56L7.857 1.13a.236.236 0 0 0-.325-.072.235.235 0 0 0-.073.324L8.583 3.11C6.572 4.12 5.204 6.071 5.204 8.338h13.592c0-2.267-1.368-4.219-3.396-5.228z"/></svg>
               <span>Android</span>
-              <small>Play Store</small>
             </a>
           </div>
           <p className="oc-note">
@@ -90,60 +89,20 @@ export default function OpenClawTutorial() {
 
         <Step
           n={2}
-          title="Grab a free token gift"
-          subtitle="Don't have an API key yet? Don't need one. The community shares free token gifts on the Byoky token pool."
-          highlight
+          title="Add a credential"
+          subtitle="Three options — pick whichever fits."
         >
-          <ol className="oc-list">
-            <li>
-              Open the{' '}
-              <a className="oc-link" href="/token-pool">
-                Token Pool
-              </a>
-              .
-            </li>
-            <li>
-              Find a gift with the provider you want — look for the{' '}
-              <span className="oc-dot oc-dot-online" /> green dot (gifter is
-              online) and tokens remaining.
-            </li>
-            <li>Click <strong>Redeem</strong> and copy the gift link.</li>
-            <li>
-              Open your Byoky wallet → <strong>Gifts</strong> →{' '}
-              <strong>Redeem Gift</strong> → paste the link → accept.
-            </li>
-          </ol>
-          <p className="oc-note">
-            That&apos;s it. Your wallet now has a credential backed by someone
-            else&apos;s API key — capped to a token budget the gifter set. The
-            real key never reaches you, and OpenClaw never sees it either.
-          </p>
-          <p className="oc-note oc-note-muted">
-            Already have your own API key? Skip the token pool and add the
-            credential directly in the wallet.
-          </p>
-
-          <div className="oc-sub-card">
-            <div className="oc-sub-card-head">
-              Or: connect your Claude Pro/Max subscription
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div className="oc-option-card">
+              <strong>Free token gift</strong> — grab one from the{' '}
+              <a className="oc-link" href="/token-pool">Token Pool</a>. No API key needed.
             </div>
-            <p>
-              If you already pay for Claude Pro or Max, you can use those
-              subscription credits inside OpenClaw — no API key, no extra
-              spend. In the wallet, add an Anthropic credential and choose{' '}
-              <strong>Setup Token</strong>:
-            </p>
-            <Code>{`claude setup-token`}</Code>
-            <p>
-              That command (from the Claude Code CLI) prints a token starting
-              with <code>sk-ant-oat01-...</code>. Paste it into Byoky and the
-              wallet routes OpenClaw&apos;s requests through your{' '}
-              <code>claude.ai</code> subscription instead of the API.
-            </p>
-            <p className="oc-note oc-note-muted">
-              Setup-token requests route through the Byoky bridge (next step),
-              so the bridge install is required for this path.
-            </p>
+            <div className="oc-option-card">
+              <strong>Claude Pro/Max setup token</strong> — run <code>claude setup-token</code> in your terminal and paste it into Byoky.
+            </div>
+            <div className="oc-option-card">
+              <strong>Your own API key</strong> — add it directly in the wallet.
+            </div>
           </div>
         </Step>
 
@@ -240,13 +199,11 @@ function Hero() {
       }}>
         {products.map((p) => (
           <div key={p.name} style={{
-            display: 'flex', alignItems: 'center', gap: '10px',
-            padding: '12px 20px', borderRadius: '12px',
-            background: 'var(--bg-card, #fff)',
-            border: '1px solid var(--border, #e5e5e5)',
+            display: 'flex', alignItems: 'center', gap: '8px',
             fontSize: '15px', fontWeight: 600,
+            color: 'var(--text)',
           }}>
-            <img src={p.icon} alt="" width={24} height={24} />
+            <img src={p.icon} alt="" width={22} height={22} />
             {p.name}
           </div>
         ))}
@@ -255,20 +212,11 @@ function Hero() {
         Grab a free token gift or use your Claude Pro/Max subscription.<br />
         Zero extra cost. Keys never exposed.
       </p>
-      <div className="oc-cta-row" style={{ justifyContent: 'center' }}>
-        <a className="btn btn-primary" href="/token-pool">
-          Browse free gifts
+      <div className="oc-cta-row" style={{ justifyContent: 'center', alignItems: 'center' }}>
+        <a className="btn btn-primary" href="#step-1" style={{ minWidth: '220px', textAlign: 'center', justifyContent: 'center' }}>
+          Start Setup
         </a>
-        <a
-          className="btn btn-secondary"
-          href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Install Byoky wallet
-        </a>
-      </div>
-      <div className="oc-hero-ai">
+        <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>or</span>
         <InstallWithAI />
       </div>
     </header>
@@ -354,20 +302,20 @@ function Overview() {
 }
 
 function Providers() {
-  const rows: [string, string, string][] = [
-    ['Anthropic', 'byoky-anthropic', 'Claude Opus 4, Sonnet 4, Haiku 4.5'],
-    ['OpenAI', 'byoky-openai', 'GPT-4.1, o3, o4-mini, GPT-4.1 Mini'],
-    ['Google Gemini', 'byoky-gemini', 'Gemini 2.5 Pro, 2.5 Flash'],
-    ['xAI', 'byoky-xai', 'Grok 3, Grok 3 Mini'],
-    ['DeepSeek', 'byoky-deepseek', 'DeepSeek V3, R1'],
-    ['Mistral', 'byoky-mistral', 'Mistral Large'],
-    ['Groq', 'byoky-groq', 'Llama 3.3 70B'],
-    ['Cohere', 'byoky-cohere', 'Set model manually'],
-    ['Perplexity', 'byoky-perplexity', 'Set model manually'],
-    ['Together AI', 'byoky-together', 'Set model manually'],
-    ['Fireworks AI', 'byoky-fireworks', 'Set model manually'],
-    ['OpenRouter', 'byoky-openrouter', 'Set model manually'],
-    ['Azure OpenAI', 'byoky-azure_openai', 'Set model manually'],
+  const rows: [string, string, string, string][] = [
+    ['Anthropic', 'byoky-anthropic', 'Claude Opus 4, Sonnet 4, Haiku 4.5', 'claude'],
+    ['OpenAI', 'byoky-openai', 'GPT-4.1, o3, o4-mini, GPT-4.1 Mini', 'openai'],
+    ['Google Gemini', 'byoky-gemini', 'Gemini 2.5 Pro, 2.5 Flash', 'gemini'],
+    ['xAI', 'byoky-xai', 'Grok 3, Grok 3 Mini', 'grok'],
+    ['DeepSeek', 'byoky-deepseek', 'DeepSeek V3, R1', 'deepseek'],
+    ['Mistral', 'byoky-mistral', 'Mistral Large', 'mistral'],
+    ['Groq', 'byoky-groq', 'Llama 3.3 70B', 'groq'],
+    ['Cohere', 'byoky-cohere', 'Set model manually', 'cohere'],
+    ['Perplexity', 'byoky-perplexity', 'Set model manually', 'perplexity'],
+    ['Together AI', 'byoky-together', 'Set model manually', 'together'],
+    ['Fireworks AI', 'byoky-fireworks', 'Set model manually', 'fireworks'],
+    ['OpenRouter', 'byoky-openrouter', 'Set model manually', 'openrouter'],
+    ['Azure OpenAI', 'byoky-azure_openai', 'Set model manually', 'azureai'],
   ];
   return (
     <section className="oc-section">
@@ -379,9 +327,12 @@ function Providers() {
           <span>OpenClaw ID</span>
           <span>Models</span>
         </div>
-        {rows.map(([name, id, models]) => (
+        {rows.map(([name, id, models, icon]) => (
           <div className="oc-table-row" key={id}>
-            <span>{name}</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <img src={`https://unpkg.com/@lobehub/icons-static-svg@latest/icons/${icon}.svg`} alt="" width={16} height={16} />
+              {name}
+            </span>
             <code>{id}</code>
             <span className="oc-table-models">{models}</span>
           </div>
@@ -458,7 +409,7 @@ function Step({
   children: React.ReactNode;
 }) {
   return (
-    <section className={`oc-step ${highlight ? 'oc-step-highlight' : ''}`}>
+    <section id={`step-${n}`} className={`oc-step ${highlight ? 'oc-step-highlight' : ''}`}>
       <div className="oc-step-head">
         <span className="oc-step-num">{n}</span>
         <div>
@@ -658,6 +609,23 @@ const styles = `
 }
 
 /* ── Sub-card (alternative inside a step) ── */
+.oc-option-card {
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: var(--bg-card, #fff);
+  border: 1px solid var(--border, #e5e5e5);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.oc-option-card strong { color: var(--text); }
+.oc-option-card code {
+  background: var(--bg-elevated, #f5f5f4);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
 .oc-sub-card {
   margin-top: 22px;
   padding: 18px 20px 14px;
@@ -722,7 +690,7 @@ const styles = `
 
 /* ── Steps ── */
 .oc-step {
-  margin-bottom: 48px;
+  margin-bottom: 12px;
   padding: 28px 28px 24px;
   border: 1px solid var(--oc-border);
   border-radius: 16px;
@@ -786,22 +754,22 @@ const styles = `
 
 /* ── Install card grid (step 1) ── */
 .oc-install-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  display: flex;
   gap: 10px;
   margin: 14px 0 6px;
+  flex-wrap: wrap;
 }
 .oc-install-card {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 14px 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
   border: 1px solid var(--oc-border);
   background: var(--oc-bg-elevated);
-  border-radius: 10px;
+  border-radius: 8px;
   text-decoration: none;
   color: var(--text);
-  transition: border-color 0.15s, transform 0.15s;
+  transition: border-color 0.15s;
 }
 .oc-install-card:hover {
   border-color: var(--teal);
@@ -809,7 +777,7 @@ const styles = `
 }
 .oc-install-card span {
   font-weight: 600;
-  font-size: 14px;
+  font-size: 13px;
 }
 .oc-install-card small {
   color: var(--text-muted);
@@ -854,24 +822,24 @@ const styles = `
 
 /* ── Code blocks ── */
 .oc-code {
-  background: #ffffff;
-  border: 1px solid var(--oc-border);
+  background: #1e1e2e !important;
+  border: 1px solid #2a2a3e !important;
   border-radius: 10px;
   padding: 16px 18px;
   font-family: var(--font-mono), monospace;
   font-size: 13px;
   line-height: 1.7;
-  color: var(--text);
+  color: #e0e0e0 !important;
   overflow-x: auto;
   margin: 14px 0;
-  box-shadow: 0 4px 12px rgba(28, 25, 23, 0.03);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
-.oc-code code { background: none; padding: 0; color: inherit; font-size: inherit; }
+.oc-code code { background: none !important; padding: 0; color: inherit !important; font-size: inherit; }
 
 /* ── Generic section ── */
 .oc-section {
-  margin-top: 64px;
-  margin-bottom: 24px;
+  margin-top: 16px;
+  margin-bottom: 8px;
 }
 .oc-section h2 {
   font-size: 24px;
@@ -937,7 +905,7 @@ const styles = `
 
 /* ── Closing ── */
 .oc-closing {
-  margin-top: 72px;
+  margin-top: 12px;
   padding: 36px 32px;
   border: 1px solid var(--oc-border);
   border-radius: 16px;

@@ -17,13 +17,7 @@ type App = {
 function ByokyPill() {
   return (
     <button className="byoky-pill" type="button">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-        <path
-          d="M12 2 4 7v6c0 4.5 3.5 8 8 9 4.5-1 8-4.5 8-9V7l-8-5Z"
-          fill="currentColor"
-        />
-        <path d="M9 12l2 2 4-4" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-      </svg>
+      <img src="/byoky_logo.svg" alt="" width={16} height={16} style={{ borderRadius: '3px' }} />
       Connect Byoky wallet
       <style jsx>{`
         .byoky-pill {
@@ -31,7 +25,7 @@ function ByokyPill() {
           align-items: center;
           gap: 8px;
           padding: 8px 14px;
-          border-radius: 999px;
+          border-radius: 10px;
           background: #FF4F00;
           color: #fff;
           font-size: 12.5px;
