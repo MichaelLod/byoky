@@ -119,6 +119,7 @@ export default function Image() {
             style={{
               display: 'flex',
               flexDirection: 'column',
+              alignItems: 'center',
               gap: 8,
             }}
           >

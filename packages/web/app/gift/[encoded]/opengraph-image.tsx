@@ -144,7 +144,8 @@ export default async function Image({ params }: { params: Params }) {
               style={{
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 14,
+                alignItems: 'center',
+                gap: 18,
               }}
             >
               <div
@@ -157,7 +158,7 @@ export default async function Image({ params }: { params: Params }) {
               >
                 <div
                   style={{
-                    fontSize: 168,
+                    fontSize: 176,
                     fontWeight: 800,
                     letterSpacing: '-0.05em',
                     color: '#FF4F00',
@@ -180,7 +181,7 @@ export default async function Image({ params }: { params: Params }) {
               </div>
               <div
                 style={{
-                  fontSize: 38,
+                  fontSize: 40,
                   fontWeight: 500,
                   color: '#57534e',
                   display: 'flex',
@@ -194,6 +195,7 @@ export default async function Image({ params }: { params: Params }) {
               style={{
                 display: 'flex',
                 flexDirection: 'column',
+                alignItems: 'center',
                 gap: 8,
               }}
             >
@@ -228,37 +230,44 @@ export default async function Image({ params }: { params: Params }) {
             style={{
               display: 'flex',
               justifyContent: 'space-between',
-              alignItems: 'flex-end',
+              alignItems: 'center',
             }}
           >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 20,
-                fontSize: 28,
-                fontWeight: 500,
-                color: '#57534e',
-              }}
-            >
-              {gift ? (
-                <>
-                  <div style={{ display: 'flex' }}>{formatExpiry(gift.e)}</div>
-                  <div
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: '50%',
-                      background: '#a8a29e',
-                      display: 'flex',
-                    }}
-                  />
-                  <div style={{ display: 'flex' }}>Open in Byoky to accept</div>
-                </>
-              ) : (
+            {gift ? (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 20,
+                  fontSize: 28,
+                  fontWeight: 500,
+                  color: '#57534e',
+                }}
+              >
+                <div style={{ display: 'flex' }}>{formatExpiry(gift.e)}</div>
+                <div
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: '50%',
+                    background: '#a8a29e',
+                    display: 'flex',
+                  }}
+                />
                 <div style={{ display: 'flex' }}>Open in Byoky to accept</div>
-              )}
-            </div>
+              </div>
+            ) : (
+              <div
+                style={{
+                  fontSize: 28,
+                  fontWeight: 500,
+                  color: '#57534e',
+                  display: 'flex',
+                }}
+              >
+                Open in Byoky to accept
+              </div>
+            )}
             <div
               style={{
                 fontSize: 28,
