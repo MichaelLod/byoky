@@ -2,9 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { decodeGiftLink, validateGiftLink, isExtensionInstalled, type GiftLink } from '@byoky/sdk';
+import { openGiftInApp } from './openInApp';
 
-const IOS_STORE = 'https://apps.apple.com/app/byoky/id6760779919';
-const ANDROID_STORE = 'https://play.google.com/store/apps/details?id=com.byoky.app';
 const CHROME_STORE = 'https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon';
 const FIREFOX_STORE = 'https://addons.mozilla.org/en-US/firefox/addon/byoky/';
 
@@ -101,39 +100,9 @@ export function GiftRedeem() {
     return () => clearTimeout(t);
   }, []);
 
-  async function tryOpenApp() {
+  function tryOpenApp() {
     if (!encoded) return;
-    // Defense in depth: encoded has already passed decodeGiftLink, but it
-    // flows into a native-scheme / intent URL below. Reject anything that
-    // isn't pure base64url so a crafted hash can't inject Intent params.
-    if (!/^[A-Za-z0-9_-]+$/.test(encoded)) return;
-
-    if (platform === 'android') {
-      // Chrome handles the fallback to the Play Store itself via
-      // browser_fallback_url — we can't cleanly separate the "app opened"
-      // and "went to store" branches here, so we don't write the gift URL
-      // to the clipboard on Android. Users who install from the store can
-      // still paste the link manually (the page's "Copy gift link" button).
-      const fallback = encodeURIComponent(ANDROID_STORE);
-      window.location.href = `intent://gift/${encoded}#Intent;scheme=byoky;package=com.byoky.app;S.browser_fallback_url=${fallback};end`;
-      return;
-    }
-    if (platform !== 'ios') return;
-
-    const cleanup = () => {
-      document.removeEventListener('visibilitychange', onVisibility);
-      window.clearTimeout(timer);
-    };
-    const onVisibility = () => {
-      if (document.hidden) cleanup();
-    };
-    const timer = window.setTimeout(() => {
-      cleanup();
-      if (document.hidden) return;
-      window.location.href = IOS_STORE;
-    }, 1500);
-    document.addEventListener('visibilitychange', onVisibility);
-    window.location.href = `byoky://gift/${encoded}`;
+    openGiftInApp(`https://byoky.com/gift/${encoded}`);
   }
 
   async function handleStage() {

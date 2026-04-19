@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { isExtensionInstalled, encodeQr, qrToSvg } from '@byoky/sdk';
+import { detectMobilePlatform, openGiftInApp } from '../gift/openInApp';
 
 const MARKETPLACE_API = process.env.NEXT_PUBLIC_MARKETPLACE_URL ?? 'https://marketplace.byoky.com';
 
@@ -212,6 +213,10 @@ export default function Marketplace() {
       }
       const data = await res.json();
       const giftLink = data.giftLink as string;
+
+      if (detectMobilePlatform()) {
+        if (openGiftInApp(giftLink)) return;
+      }
 
       if (hasExtension) {
         const ok = await stageGiftInExtension(giftLink);
