@@ -146,6 +146,23 @@
   font-size: 18px;
 }
 
+.demo-app .empty-wallet-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 28px;
+  background: rgba(255, 138, 0, 0.08);
+  border-bottom: 1px solid rgba(255, 138, 0, 0.2);
+  color: #b45c00;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.demo-app .empty-wallet-banner strong {
+  color: #8a4400;
+}
+
 /* ── Layout ── */
 
 .demo-app .main {

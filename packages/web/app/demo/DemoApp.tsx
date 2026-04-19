@@ -83,6 +83,15 @@ export function DemoApp() {
         </div>
       )}
 
+      {session && Object.values(session.providers).every((p) => !p?.available) && (
+        <div className="empty-wallet-banner">
+          <strong>Your wallet has no API keys yet.</strong>
+          <span>
+            Add one in the Byoky extension or mobile app to start using the demo.
+          </span>
+        </div>
+      )}
+
       {error && (
         <div className="error-banner">
           <span>{error}</span>
