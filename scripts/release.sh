@@ -128,23 +128,27 @@ fi
 # --- Parse args ---
 DRY_RUN=false
 SKIP_MOBILE=false
+SKIP_STORE_UPLOADS=false
 NEW_VERSION=""
 
 for arg in "$@"; do
   case "$arg" in
     --dry)     DRY_RUN=true ;;
     --skip-mobile) SKIP_MOBILE=true ;;
+    --skip-store-uploads) SKIP_STORE_UPLOADS=true ;;
     *)         NEW_VERSION="$arg" ;;
   esac
 done
 
 if [ -z "$NEW_VERSION" ]; then
   CURRENT=$(node -p "require('./package.json').version")
-  echo "Usage: ./scripts/release.sh <new-version> [--dry] [--skip-mobile]"
+  echo "Usage: ./scripts/release.sh <new-version> [--dry] [--skip-mobile] [--skip-store-uploads]"
   echo "       ./scripts/release.sh status"
   echo ""
-  echo "  --dry          Print what would happen without executing"
-  echo "  --skip-mobile  Skip iOS/macOS/Android builds and uploads"
+  echo "  --dry                  Print what would happen without executing"
+  echo "  --skip-mobile          Skip iOS/macOS/Android builds and uploads"
+  echo "  --skip-store-uploads   Build + npm publish + GitHub release, but skip"
+  echo "                         Chrome/Firefox/App Store/Play uploads"
   echo ""
   echo "Current version: $CURRENT"
   exit 1
@@ -533,7 +537,9 @@ done
 # ============================================================
 step "Upload to extension stores"
 
-if [ -n "${CHROME_EXTENSION_ID:-}" ] && [ -n "${CHROME_CLIENT_ID:-}" ]; then
+if [ "$SKIP_STORE_UPLOADS" = true ]; then
+  echo "  Skipping Chrome Web Store (--skip-store-uploads)"
+elif [ -n "${CHROME_EXTENSION_ID:-}" ] && [ -n "${CHROME_CLIENT_ID:-}" ]; then
   echo "  Uploading to Chrome Web Store..."
   npx chrome-webstore-upload upload \
     --source "dist/byoky-chrome-v${NEW_VERSION}.zip" \
@@ -549,7 +555,9 @@ fi
 # ============================================================
 # 8. Firefox Add-ons (AMO)
 # ============================================================
-if [ -n "${AMO_API_KEY:-}" ] && [ -n "${AMO_API_SECRET:-}" ]; then
+if [ "$SKIP_STORE_UPLOADS" = true ]; then
+  echo "  Skipping Firefox Add-ons (--skip-store-uploads)"
+elif [ -n "${AMO_API_KEY:-}" ] && [ -n "${AMO_API_SECRET:-}" ]; then
   echo "  Uploading to Firefox Add-ons..."
   npx web-ext sign \
     --source-dir packages/extension/.output/firefox-mv2 \
@@ -566,7 +574,9 @@ fi
 # ============================================================
 step "Upload to App Store"
 
-if [ "$SKIP_IOS" = false ] && [ -n "${ASC_KEY_ID:-}" ] && [ -n "${ASC_ISSUER_ID:-}" ]; then
+if [ "$SKIP_STORE_UPLOADS" = true ]; then
+  echo "  Skipping App Store (--skip-store-uploads)"
+elif [ "$SKIP_IOS" = false ] && [ -n "${ASC_KEY_ID:-}" ] && [ -n "${ASC_ISSUER_ID:-}" ]; then
   # Upload iOS
   IPA_FILE="dist/byoky-ios-v${NEW_VERSION}.ipa"
   if [ -f "$IPA_FILE" ]; then
@@ -617,7 +627,9 @@ fi
 # ============================================================
 step "Upload to Google Play"
 
-if [ "$SKIP_ANDROID" = false ] && [ -n "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ]; then
+if [ "$SKIP_STORE_UPLOADS" = true ]; then
+  echo "  Skipping Google Play (--skip-store-uploads)"
+elif [ "$SKIP_ANDROID" = false ] && [ -n "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ]; then
   node scripts/upload-google-play.mjs "dist/byoky-android-v${NEW_VERSION}.aab" production "$STORE_NOTES_FILE"
 else
   echo "  Skipping Google Play (${SKIP_ANDROID:+android build skipped}${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:+}${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-credentials not configured})"
@@ -703,10 +715,15 @@ done
 echo "    create-byoky-app@${NEW_VERSION}"
 echo ""
 echo "  Stores:"
-[ -n "${CHROME_EXTENSION_ID:-}" ] && echo "    Chrome Web Store: uploaded + auto-published"
-[ -n "${AMO_API_KEY:-}" ] && echo "    Firefox AMO: submitted for review"
-[ "$SKIP_IOS" = false ] && [ -n "${ASC_KEY_ID:-}" ] && echo "    App Store (iOS + macOS): uploaded + submitted for review"
-[ "$SKIP_ANDROID" = false ] && [ -n "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ] && echo "    Google Play: uploaded to production track"
+if [ "$SKIP_STORE_UPLOADS" = true ]; then
+  echo "    Chrome / Firefox / App Store / Play: skipped (--skip-store-uploads)"
+  echo "    Upload artifacts from dist/ manually when ready."
+else
+  [ -n "${CHROME_EXTENSION_ID:-}" ] && echo "    Chrome Web Store: uploaded + auto-published"
+  [ -n "${AMO_API_KEY:-}" ] && echo "    Firefox AMO: submitted for review"
+  [ "$SKIP_IOS" = false ] && [ -n "${ASC_KEY_ID:-}" ] && echo "    App Store (iOS + macOS): uploaded + submitted for review"
+  [ "$SKIP_ANDROID" = false ] && [ -n "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ] && echo "    Google Play: uploaded to production track"
+fi
 [ -n "${DISCORD_WEBHOOK_URL:-}" ] && echo "    Discord: release announcement posted"
 echo ""
 echo "  GitHub: https://github.com/MichaelLod/byoky/releases/tag/v${NEW_VERSION}"
