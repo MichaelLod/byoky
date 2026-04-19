@@ -223,10 +223,15 @@ export async function upsertApp(row: {
   `;
 }
 
+// postgres.js occasionally returns JSONB as a raw string on Vercel serverless — parse defensively so `{...payload}` can't produce char-indexed garbage.
+function parsePayload(value: unknown): AppPayload {
+  return typeof value === 'string' ? (JSON.parse(value) as AppPayload) : (value as AppPayload);
+}
+
 function toSubmissionRow(row: Record<string, unknown>): AppSubmissionRow {
   return {
     slug: row.slug as string,
-    payload: row.payload as AppPayload,
+    payload: parsePayload(row.payload),
     status: row.status as AppSubmissionRow['status'],
     submittedAt: Number(row.submitted_at),
     reviewedAt: row.reviewed_at === null ? null : Number(row.reviewed_at),
@@ -236,7 +241,7 @@ function toSubmissionRow(row: Record<string, unknown>): AppSubmissionRow {
 function toAppRow(row: Record<string, unknown>): AppRow {
   return {
     slug: row.slug as string,
-    payload: row.payload as AppPayload,
+    payload: parsePayload(row.payload),
     verified: row.verified === true,
     featured: row.featured === true,
     createdAt: Number(row.created_at),
