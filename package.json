@@ -13,8 +13,6 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:security": "vitest run packages/core/tests/security.test.ts",
-    "test:vault": "vitest run packages/vault/tests/integration.test.ts",
-    "test:vault:e2e": "vitest run packages/vault/tests/e2e.test.ts",
     "test:live": "vitest run --config vitest.config.live.ts",
     "typecheck": "pnpm -r typecheck",
     "clean": "pnpm -r clean",

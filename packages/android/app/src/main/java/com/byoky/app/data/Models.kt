@@ -221,8 +221,8 @@ data class Group(
         // The default group is a sentinel bucket for apps with no explicit
         // binding. It carries no routing (empty providerId), so unbound apps
         // fall through to direct credential lookup for the provider they
-        // actually request. Mirrors the vault seeding at
-        // packages/vault/src/db/index.ts and the extension's ensureDefaultGroup.
+        // actually request. Mirrors the vault's default group seeding and
+        // the extension's ensureDefaultGroup.
         fun makeDefault() = Group(
             id = DEFAULT_GROUP_ID,
             name = "Default",

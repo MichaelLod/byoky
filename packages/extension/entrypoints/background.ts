@@ -3869,8 +3869,8 @@ export default defineBackground(() => {
   // Ensures the default group exists. The default group is a sentinel bucket
   // for apps with no explicit binding — it carries no routing (empty
   // providerId), so unbound apps fall through to direct credential lookup
-  // for the provider they actually request. Mirrors the vault seeding at
-  // packages/vault/src/db/index.ts.
+  // for the provider they actually request. Mirrors the vault's default
+  // group seeding.
   async function ensureDefaultGroup(): Promise<Group> {
     const groups = await getGroups();
     const existing = groups.find((g) => g.id === DEFAULT_GROUP_ID);

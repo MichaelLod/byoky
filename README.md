@@ -60,7 +60,7 @@
 | iOS | ![npm version](https://img.shields.io/npm/v/@byoky/sdk?style=flat&color=FF4F00&label=) | [App Store](https://apps.apple.com/app/byoky/id6760779919) — v1.0.16 in Apple review, v1.0.12 live |
 | Android | ![npm version](https://img.shields.io/npm/v/@byoky/sdk?style=flat&color=FF4F00&label=) | [Google Play](https://play.google.com/store/apps/details?id=com.byoky.app) — **v1.0.17 live** |
 | Safari (macOS) | Coming soon | — |
-| npm | ![npm version](https://img.shields.io/npm/v/@byoky/sdk?style=flat&color=FF4F00&label=) | [`@byoky/sdk`](https://www.npmjs.com/package/@byoky/sdk) · [`@byoky/core`](https://www.npmjs.com/package/@byoky/core) · [`@byoky/bridge`](https://www.npmjs.com/package/@byoky/bridge) · [`@byoky/relay`](https://www.npmjs.com/package/@byoky/relay) |
+| npm | ![npm version](https://img.shields.io/npm/v/@byoky/sdk?style=flat&color=FF4F00&label=) | [`@byoky/sdk`](https://www.npmjs.com/package/@byoky/sdk) · [`@byoky/core`](https://www.npmjs.com/package/@byoky/core) · [`@byoky/bridge`](https://www.npmjs.com/package/@byoky/bridge) |
 
 > **v0.7.0 rollout status:** Firefox and Android are live (v0.7.0 / v1.0.17). Chrome v0.7.0 is still in Google's review queue — in the meantime, [build from source and load unpacked](INSTALL.md#chrome-install-from-source) to get the new features today. iOS v1.0.16 is in Apple's queue (v1.0.12 still live) — hang tight, or use the Firefox/Android wallet while you wait. Live version status at [byoky.com](https://byoky.com).
 
@@ -197,12 +197,6 @@ Sender's Extension ←WebSocket→ Relay Server ←WebSocket→ Recipient's Exte
 1. Open the wallet → click "Redeem Gift"
 2. Paste the gift link → accept
 
-**Self-host the relay:**
-```bash
-npm install -g @byoky/relay
-byoky-relay  # default port 8787
-```
-
 > **Privacy guarantee:** The recipient never receives your API key. Every request is relayed through the sender's running extension, which enforces the token budget and can revoke access at any time.
 
 ### Token Pool
@@ -297,11 +291,9 @@ byoky/
 │   ├── sdk/           # @byoky/sdk (+ @byoky/sdk/server for backend relay)
 │   ├── extension/     # Browser extension (Chrome, Firefox, Safari) — WXT
 │   ├── bridge/        # @byoky/bridge — HTTP proxy + native messaging for CLI/desktop apps
-│   ├── relay/         # @byoky/relay — WebSocket relay server
 │   ├── ios/           # iOS app (wallet + Safari extension)
 │   ├── openclaw-plugin/ # OpenClaw provider plugin
 │   ├── create-byoky-app/ # CLI scaffolder — npx create-byoky-app
-│   ├── vault/         # Encrypted cloud vault backup server
 │   └── web/           # Landing page (byoky.com) + MiniApps + Developer Hub
 ├── e2e/               # Playwright cross-device tests (Chrome + iOS + Android)
 └── marketing/         # Screenshot + composite + video pipeline (gitignored outputs)

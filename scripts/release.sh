@@ -323,8 +323,6 @@ PACKAGE_JSONS=(
   packages/sdk/package.json
   packages/extension/package.json
   packages/bridge/package.json
-  packages/relay/package.json
-  packages/vault/package.json
   packages/web/package.json
   packages/openclaw-plugin/package.json
   packages/create-byoky-app/package.json
@@ -522,7 +520,6 @@ NPM_PACKAGES=(
   packages/core
   packages/sdk
   packages/bridge
-  packages/relay
   packages/openclaw-plugin
   packages/create-byoky-app
 )

@@ -1026,10 +1026,6 @@ function TokenGifts() {
         <li>Paste the gift link &rarr; accept</li>
       </ol>
 
-      <h3>Self-host the relay</h3>
-      <Code lang="bash">{`npm install -g @byoky/relay
-byoky-relay  # default port 8787`}</Code>
-
       <p>
         The recipient never receives your API key. Every request is relayed through the
         sender&apos;s running extension, which enforces the token budget and can revoke access

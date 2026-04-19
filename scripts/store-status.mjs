@@ -208,7 +208,6 @@ const NPM_PACKAGES = [
   '@byoky/core',
   '@byoky/sdk',
   '@byoky/bridge',
-  '@byoky/relay',
   '@byoky/openclaw-plugin',
   'create-byoky-app',
 ]
