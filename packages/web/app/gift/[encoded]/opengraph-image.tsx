@@ -119,20 +119,16 @@ export default async function Image({ params }: { params: Params }) {
           </div>
         </div>
 
-        {gift ? (
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 10,
-            }}
-          >
+        {gift ? (() => {
+          const label = `${gift.n} tokens`;
+          const labelSize = label.length > 18 ? 56 : label.length > 14 ? 68 : 84;
+          return (
             <div
               style={{
                 display: 'flex',
-                alignItems: 'baseline',
-                gap: 28,
-                lineHeight: 1,
+                flexDirection: 'column',
+                alignItems: 'flex-start',
+                gap: 4,
               }}
             >
               <div
@@ -141,6 +137,7 @@ export default async function Image({ params }: { params: Params }) {
                   fontWeight: 800,
                   letterSpacing: '-0.05em',
                   color: '#FF4F00',
+                  lineHeight: 1,
                   display: 'flex',
                 }}
               >
@@ -148,29 +145,30 @@ export default async function Image({ params }: { params: Params }) {
               </div>
               <div
                 style={{
-                  fontSize: 84,
+                  fontSize: labelSize,
                   fontWeight: 800,
                   letterSpacing: '-0.03em',
                   color: '#1c1917',
+                  lineHeight: 1.05,
                   display: 'flex',
                 }}
               >
-                {gift.n} tokens
+                {label}
+              </div>
+              <div
+                style={{
+                  fontSize: 36,
+                  fontWeight: 500,
+                  color: '#57534e',
+                  marginTop: 14,
+                  display: 'flex',
+                }}
+              >
+                from {gift.s}
               </div>
             </div>
-            <div
-              style={{
-                fontSize: 40,
-                fontWeight: 500,
-                color: '#57534e',
-                marginTop: 6,
-                display: 'flex',
-              }}
-            >
-              from {gift.s}
-            </div>
-          </div>
-        ) : (
+          );
+        })() : (
           <div
             style={{
               display: 'flex',
