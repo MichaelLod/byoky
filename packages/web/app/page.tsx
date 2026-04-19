@@ -27,9 +27,129 @@ export default function Home() {
       <div className="divider" />
       <Security />
       <div className="divider" />
+      <ShippingNow />
+      <div className="divider" />
       <ClosingStrip />
       <Footer />
     </>
+  );
+}
+
+/* ─── Shipping now ─────────────────────────────── */
+
+function ShippingNow() {
+  return (
+    <section className="shipping-now-section">
+      <div className="container">
+        <FadeIn>
+          <div className="shipping-now-inner">
+            <div className="shipping-now-head">
+              <span className="shipping-now-eyebrow">Work in progress</span>
+              <h2>Byoky improves continuously.</h2>
+              <p className="shipping-now-sub">
+                A few things are mid-flight between repo and the stores. You can follow along on GitHub.
+              </p>
+            </div>
+            <ul className="shipping-now-list">
+              <li>
+                <a href="https://github.com/MichaelLod/byoky/issues/14" target="_blank" rel="noopener noreferrer">
+                  Mobile v0.7.3
+                </a>
+                <span> — refresh-rejoin, QR scanner fix, pair-URL paste, honest vault providers map. Landed on main, awaiting the next App Store / Play Store release.</span>
+              </li>
+              <li>
+                <a href="https://github.com/MichaelLod/byoky/issues/15" target="_blank" rel="noopener noreferrer">
+                  Setup tokens via cloud vault
+                </a>
+                <span> — Claude Pro/Max setup tokens today only proxy while the phone is live. Porting the CLI request shape into the vault so they keep working when the phone's asleep.</span>
+              </li>
+              <li>
+                <a href="https://github.com/MichaelLod/byoky/issues/16" target="_blank" rel="noopener noreferrer">
+                  Graceful rejoin against older phone builds
+                </a>
+                <span> — gate the new SDK rejoin on a capability flag advertised by v0.7.3+ so refreshes against older apps fall straight to the reconnect screen instead of hanging.</span>
+              </li>
+            </ul>
+            <a
+              href="https://github.com/MichaelLod/byoky/issues"
+              className="shipping-now-more"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              All open issues &rarr;
+            </a>
+          </div>
+        </FadeIn>
+      </div>
+      <style>{`
+        .shipping-now-section { padding: 80px 0; }
+        .shipping-now-inner {
+          max-width: 780px;
+          margin: 0 auto;
+          text-align: left;
+        }
+        .shipping-now-head { text-align: center; margin-bottom: 32px; }
+        .shipping-now-eyebrow {
+          display: inline-block;
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.14em;
+          text-transform: uppercase;
+          color: var(--accent, #FF4F00);
+          margin-bottom: 10px;
+        }
+        .shipping-now-head h2 {
+          font-size: 28px;
+          font-weight: 800;
+          letter-spacing: -0.02em;
+          margin: 0 0 8px;
+        }
+        .shipping-now-sub {
+          color: var(--text-secondary);
+          font-size: 14px;
+          margin: 0;
+        }
+        .shipping-now-list {
+          list-style: none;
+          padding: 0;
+          margin: 0 0 24px;
+          display: flex;
+          flex-direction: column;
+          gap: 14px;
+        }
+        .shipping-now-list li {
+          padding: 14px 18px;
+          background: var(--bg-card, #fff);
+          border: 1px solid var(--border, #e5e5e5);
+          border-radius: 10px;
+          font-size: 13px;
+          line-height: 1.55;
+          color: var(--text-secondary);
+        }
+        .shipping-now-list a {
+          color: var(--text, #1a1a1a);
+          font-weight: 700;
+          text-decoration: none;
+          border-bottom: 1px dashed var(--border-strong, #d1d1d1);
+        }
+        .shipping-now-list a:hover {
+          color: var(--accent, #FF4F00);
+          border-bottom-color: var(--accent, #FF4F00);
+        }
+        .shipping-now-more {
+          display: inline-block;
+          font-size: 13px;
+          font-weight: 600;
+          color: var(--text-muted);
+          text-decoration: none;
+        }
+        .shipping-now-more:hover { color: var(--accent, #FF4F00); }
+        @media (max-width: 640px) {
+          .shipping-now-section { padding: 56px 0; }
+          .shipping-now-head h2 { font-size: 22px; }
+        }
+      `}</style>
+    </section>
   );
 }
 
