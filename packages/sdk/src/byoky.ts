@@ -11,6 +11,12 @@ import { createVaultFetch } from './vault-fetch.js';
 
 const EXT_SESSION_KEY = 'byoky:session';
 const VAULT_SESSION_KEY = 'byoky:vault-session';
+const RELAY_SESSION_KEY = 'byoky:relay-session';
+// Cap relay-rejoin freshness so a stolen authToken can't be replayed forever.
+// Relay rooms idle out after 5 min server-side; keeping the client window at
+// 10 min makes "refresh within a minute" work reliably while still bounding
+// the attack window for an exfiltrated token.
+const RELAY_SESSION_TTL_MS = 10 * 60 * 1000;
 
 interface VaultSessionData {
   appSessionToken: string;
@@ -19,6 +25,14 @@ interface VaultSessionData {
   proxyUrl: string;
   providers: ConnectResponse['providers'];
   expiresAt: number;
+}
+
+interface RelaySessionData {
+  relayUrl: string;
+  roomId: string;
+  authToken: string;
+  providers: ConnectResponse['providers'];
+  savedAt: number;
 }
 
 function hasSessionStorage(): boolean {
@@ -75,6 +89,28 @@ function loadVaultSession(): VaultSessionData | null {
 function clearVaultSession(): void {
   if (!hasSessionStorage()) return;
   try { sessionStorage.removeItem(VAULT_SESSION_KEY); } catch {}
+}
+
+function saveRelaySession(data: RelaySessionData): void {
+  if (!hasSessionStorage()) return;
+  try { sessionStorage.setItem(RELAY_SESSION_KEY, JSON.stringify(data)); } catch {}
+}
+
+function loadRelaySession(): RelaySessionData | null {
+  if (!hasSessionStorage()) return null;
+  try {
+    const raw = sessionStorage.getItem(RELAY_SESSION_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as RelaySessionData;
+    if (!data.relayUrl || !data.roomId || !data.authToken) return null;
+    if (typeof data.savedAt !== 'number' || Date.now() - data.savedAt > RELAY_SESSION_TTL_MS) return null;
+    return data;
+  } catch { return null; }
+}
+
+function clearRelaySession(): void {
+  if (!hasSessionStorage()) return;
+  try { sessionStorage.removeItem(RELAY_SESSION_KEY); } catch {}
 }
 
 export interface VaultConnectOptions {
@@ -198,13 +234,25 @@ export class Byoky {
 
   /**
    * Silently reconnect to an existing session for the current origin.
-   * Checks (in order): persisted vault session, extension live session,
-   * persisted extension session. Returns null if nothing is restorable.
+   * Checks (in order): persisted relay pairing (phone still open), vault
+   * session, extension live session, persisted extension session. Returns
+   * null if nothing is restorable.
    */
   async tryReconnect(): Promise<ByokySession | null> {
     if (typeof window === 'undefined') return null;
 
-    // 1. Try restoring a vault session (no extension needed)
+    // 1. Try rejoining a persisted relay room. Works as long as the phone
+    //    stayed connected to the relay — room + authToken still valid, phone
+    //    gets a peer:status:online on the server side and keeps proxying.
+    const relayData = loadRelaySession();
+    if (relayData) {
+      const relaySession = await this.rejoinRelaySession(relayData);
+      if (relaySession) return relaySession;
+      // Rejoin failed (phone offline, room gone, or auth rejected). The
+      // helper already cleared the stored session; fall through.
+    }
+
+    // 2. Try restoring a vault session (no extension needed)
     const vaultData = loadVaultSession();
     if (vaultData) {
       // Drop the session if the vault has nothing it can actually serve. The
@@ -221,7 +269,7 @@ export class Byoky {
 
     if (!isExtensionInstalled()) return null;
 
-    // 2. Try extension's live session (covers SW still running)
+    // 3. Try extension's live session (covers SW still running)
     try {
       const response = await this.sendConnectRequest({ reconnectOnly: true });
       saveExtSession(response);
@@ -230,7 +278,7 @@ export class Byoky {
       // No live session — fall through
     }
 
-    // 3. Try persisted extension session (covers SW restart + page reload)
+    // 4. Try persisted extension session (covers SW restart + page reload)
     const saved = loadExtSession();
     if (saved) {
       try {
@@ -377,6 +425,78 @@ export class Byoky {
     };
   }
 
+  // --- Relay rejoin (refresh survival) ---
+
+  private rejoinRelaySession(data: RelaySessionData): Promise<ByokySession | null> {
+    return new Promise<ByokySession | null>((resolve) => {
+      let settled = false;
+      const settle = (value: ByokySession | null) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+
+      let ws: WebSocket;
+      try {
+        ws = new WebSocket(data.relayUrl);
+      } catch {
+        clearRelaySession();
+        settle(null);
+        return;
+      }
+
+      // Hard ceiling on the rejoin attempt itself — don't block page startup
+      // on a misbehaving relay.
+      const timeout = setTimeout(() => {
+        try { ws.close(); } catch {}
+        clearRelaySession();
+        settle(null);
+      }, 5_000);
+
+      ws.onopen = () => {
+        ws.send(JSON.stringify({
+          type: 'relay:auth',
+          roomId: data.roomId,
+          authToken: data.authToken,
+          role: 'recipient',
+        }));
+      };
+
+      ws.onmessage = (event) => {
+        let msg: { type: string; success?: boolean; peerOnline?: boolean; online?: boolean };
+        try { msg = JSON.parse(event.data); } catch { return; }
+
+        if (msg.type === 'relay:auth:result') {
+          if (!msg.success) {
+            clearTimeout(timeout);
+            try { ws.close(); } catch {}
+            clearRelaySession();
+            settle(null);
+            return;
+          }
+          if (msg.peerOnline === false) {
+            // Auth passed but the phone is gone. Drop the session so the next
+            // reconnect attempt doesn't uselessly retry the same dead room.
+            clearTimeout(timeout);
+            try { ws.close(); } catch {}
+            clearRelaySession();
+            settle(null);
+            return;
+          }
+          // Phone is alive in the room — resume on the existing provider list.
+          clearTimeout(timeout);
+          settle(this.buildRelaySession(ws, data.relayUrl, data.roomId, data.authToken, data.providers));
+        }
+      };
+
+      ws.onerror = () => {
+        clearTimeout(timeout);
+        clearRelaySession();
+        settle(null);
+      };
+    });
+  }
+
   // --- Relay pairing ---
 
   private connectViaRelay(
@@ -452,7 +572,14 @@ export class Byoky {
             }
 
             ws.send(JSON.stringify({ type: 'relay:pair:ack' }));
-            resolve(this.buildRelaySession(ws, roomId, providers));
+            saveRelaySession({
+              relayUrl: this.relayUrl,
+              roomId,
+              authToken,
+              providers,
+              savedAt: Date.now(),
+            });
+            resolve(this.buildRelaySession(ws, this.relayUrl, roomId, authToken, providers));
             break;
           }
 
@@ -475,10 +602,16 @@ export class Byoky {
 
   private buildRelaySession(
     ws: WebSocket,
+    relayUrl: string,
     roomId: string,
+    authToken: string,
     providers: Record<string, { available: boolean; authMethod: AuthMethod }>,
   ): ByokySession {
     const sessionKey = `relay_${roomId}`;
+    // Refresh the persisted pair payload whenever the session is (re)built —
+    // both the initial pairing and a successful rejoin land here. This keeps
+    // the TTL rolling as long as the tab stays active.
+    saveRelaySession({ relayUrl, roomId, authToken, providers, savedAt: Date.now() });
     const disconnectCallbacks = new Set<() => void>();
 
     let vaultFallback: { vaultUrl: string; appSessionToken: string } | null = null;
@@ -574,6 +707,7 @@ export class Byoky {
       disconnect: () => {
         clearInterval(pingInterval);
         clearVaultSession();
+        clearRelaySession();
         ws.close(1000, 'Client disconnected');
       },
       isConnected: async () => {
