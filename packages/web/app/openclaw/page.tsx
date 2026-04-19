@@ -150,14 +150,15 @@ export default function OpenClawTutorial() {
         <Step
           n={3}
           title="Install Byoky for OpenClaw"
-          subtitle="One npm package installs the OpenClaw plugin and the Byoky bridge together."
+          subtitle="One command installs the plugin and its bridge dependency."
         >
           <Code>{`npm install -g @byoky/openclaw-plugin`}</Code>
           <p className="oc-note">
             The plugin registers all 13 Byoky providers with OpenClaw and
-            bundles <code>@byoky/bridge</code>, the tiny local HTTP proxy that
-            lets OpenClaw talk to your wallet. The native messaging host gets
-            registered on the next step — no extra command.
+            pulls in <code>@byoky/bridge</code>, the tiny local HTTP proxy
+            that lets OpenClaw talk to your wallet. The native messaging host
+            is registered on the next step when you first connect — no extra
+            command.
           </p>
           <InstallWithAI />
         </Step>

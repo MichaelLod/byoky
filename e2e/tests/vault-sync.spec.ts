@@ -80,7 +80,8 @@ async function vaultLogin(w: Wallet, username: string) {
 async function addCredentialUI(w: Wallet, providerId: string, label: string, apiKey: string) {
   await w.popup.bringToFront();
   await w.popup.click('button[title="Wallet"]');
-  await w.popup.click('button:has-text("Add credential")');
+  await w.popup.click('button.fab-button');
+  await w.popup.click('.fab-menu button:has-text("Add credential")');
   await w.popup.waitForSelector('#provider');
   await w.popup.selectOption('#provider', providerId);
   await w.popup.fill('#label', label);

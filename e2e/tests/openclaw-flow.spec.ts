@@ -46,7 +46,8 @@ async function setupWallet(w: Wallet) {
 async function addCredential(w: Wallet, providerId: string, label: string, apiKey: string) {
   await w.popup.bringToFront();
   await w.popup.click('button[title="Wallet"]');
-  await w.popup.click('button:has-text("Add credential")');
+  await w.popup.click('button.fab-button');
+  await w.popup.click('.fab-menu button:has-text("Add credential")');
   await w.popup.waitForSelector('#provider');
   await w.popup.selectOption('#provider', providerId);
   const isSetupToken = providerId === 'anthropic' && apiKey.startsWith('sk-ant-oat01-');
@@ -220,6 +221,13 @@ test.describe('OpenClaw + byoky extension + bridge full flow', () => {
     openclawHome = fs.mkdtempSync(path.join(os.tmpdir(), 'byoky-openclaw-e2e-'));
     fs.mkdirSync(path.join(openclawHome, '.openclaw'), { recursive: true });
     fs.mkdirSync(path.join(openclawHome, 'ws'), { recursive: true });
+
+    // Register the native-messaging manifest inside the isolated HOME so
+    // openclaw's preflight doesn't hit the interactive "register?" prompt.
+    execSync('byoky-bridge install', {
+      env: { ...process.env, HOME: openclawHome },
+      stdio: 'inherit',
+    });
 
     // Install @byoky/openclaw-plugin into the isolated openclaw config.
     // --force makes the step idempotent across reruns.

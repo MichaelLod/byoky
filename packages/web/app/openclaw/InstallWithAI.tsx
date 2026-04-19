@@ -11,7 +11,7 @@ Context:
 
 Your job — run these commands on my machine and report each step:
 
-1. Install the OpenClaw plugin globally. This package bundles @byoky/bridge, so it installs the plugin AND the bridge in one step:
+1. Install the OpenClaw plugin globally. It declares @byoky/bridge as a dependency so npm pulls both in one step:
      npm install -g @byoky/openclaw-plugin
 
 2. Authenticate OpenClaw against Byoky. The default \`byoky\` meta-provider connects every provider I already have in the wallet (Anthropic, OpenAI, Gemini, etc.) in one shot:
