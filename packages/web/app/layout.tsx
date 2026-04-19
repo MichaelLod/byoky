@@ -50,36 +50,30 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
+      { url: '/favicon-v2.ico', sizes: 'any' },
       { url: '/favicon-16x16.png', sizes: '16x16', type: 'image/png' },
+      { url: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
+      { url: '/favicon-96x96.png', sizes: '96x96', type: 'image/png' },
       { url: '/icon-192.png', sizes: '192x192', type: 'image/png' },
       { url: '/icon-512.png', sizes: '512x512', type: 'image/png' },
       { url: '/icon.svg', type: 'image/svg+xml' },
     ],
+    shortcut: '/favicon-v2.ico',
     apple: '/apple-touch-icon.png',
   },
   openGraph: {
-    title: 'Byoky — Build AI apps. Your users bring the keys.',
+    title: 'Byoky — Share your AI budget without sharing your keys',
     description:
-      'Build AI apps with zero API costs. Your users bring their own keys — encrypted locally, proxied securely. 13 providers, 2 lines to integrate.',
+      'Send a friend tokens from your Claude, OpenAI, or Gemini plan. One network for all your AI tokens — open source, end-to-end encrypted.',
     url: 'https://byoky.com',
     siteName: 'Byoky',
     type: 'website',
-    images: [
-      {
-        url: '/og-image.png',
-        width: 1200,
-        height: 630,
-        alt: 'Byoky — Build AI apps with zero API costs',
-      },
-    ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Byoky — Build AI apps. Your users bring the keys.',
+    title: 'Byoky — Share your AI budget without sharing your keys',
     description:
-      'Build AI apps with zero API costs. 13 providers, 2 lines to integrate. Your users bring their own keys — encrypted and proxied securely.',
-    images: ['/og-image.png'],
+      'Send a friend tokens from your Claude, OpenAI, or Gemini plan. One network for all your AI tokens — open source, end-to-end encrypted.',
   },
 };
 
