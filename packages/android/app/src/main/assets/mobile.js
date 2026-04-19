@@ -3225,7 +3225,10 @@ data: [DONE]
       id: "azure_openai",
       name: "Azure OpenAI",
       authMethods: ["api_key"],
-      baseUrl: "https://YOUR_RESOURCE.openai.azure.com"
+      // Placeholder — each tenant has its own `<resource>.openai.azure.com`.
+      // The real host is stored on the credential row and used at proxy time.
+      baseUrl: "https://YOUR_RESOURCE.openai.azure.com",
+      requiresCustomBaseUrl: true
     }
   };
 
@@ -3265,12 +3268,14 @@ data: [DONE]
     if (!src) return false;
     return src === familyOf(dstProviderId);
   }
-  function rewriteProxyUrl(dstProviderId, model, stream) {
+  function rewriteProxyUrl(dstProviderId, model, stream, overrideBaseUrl) {
     const provider = PROVIDERS[dstProviderId];
     if (!provider) return null;
     const family = familyOf(dstProviderId);
     if (!family || !hasAdapter(family)) return null;
-    const base = provider.baseUrl.replace(/\/$/, "");
+    if (provider.requiresCustomBaseUrl && !overrideBaseUrl) return null;
+    const rawBase = overrideBaseUrl ?? provider.baseUrl;
+    const base = rawBase.replace(/\/$/, "");
     if (provider.chatPath) {
       return `${base}${provider.chatPath}`;
     }
