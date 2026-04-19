@@ -202,6 +202,11 @@ export function AddCredential() {
                 Requires Claude Code CLI and an active Claude Pro or Max subscription.
               </p>
             </div>
+            <div className="warning-note" style={{ marginTop: '10px' }}>
+              <strong>Online only.</strong> Setup tokens proxy through this
+              extension and the local Byoky Bridge. If the browser or bridge
+              isn't running, apps using this credential will get 401.
+            </div>
             {bridgeOnline === false && (
               <div className="warning-note" style={{ marginTop: '10px' }}>
                 <strong>Byoky Bridge required.</strong> Setup tokens route through
