@@ -199,11 +199,11 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
             }
             "relay:request" -> handleRelayRequest(json)
             "relay:peer:status" -> {
-                if (!json.optBoolean("online", true) && _status.value == PairStatus.PAIRED) {
-                    pairedOrigin = null
-                    _status.value = PairStatus.IDLE
-                    _requestCount.value = 0
-                }
+                // Intentionally no-op on offline. The relay keeps the room
+                // alive for 5 min of idle and the browser rejoins with the
+                // same authToken on refresh. Resetting to IDLE here broke the
+                // first request after refresh because handleRelayRequest
+                // guards on PAIRED.
             }
         }
     }
