@@ -46,15 +46,15 @@ openclaw plugins list --json 2>/dev/null | grep -qi byoky \
 step "'openclaw plugins doctor' reports no load errors"
 openclaw plugins doctor || fail "plugins doctor reported errors"
 
-step "Run auth flow (xdg-open is faked, no real browser)"
+step "Run auth flow via meta-provider 'byoky' (fast path — bridge is already healthy, no browser)"
 export BYOKY_TEST_PROVIDER=anthropic
-openclaw models auth login --provider byoky-anthropic \
-  || fail "auth login command exited non-zero"
+openclaw models auth login --provider byoky \
+  || fail "auth login --provider byoky exited non-zero"
 
-step "byoky-anthropic provider is registered in 'openclaw models list'"
+step "Every provider the bridge reports is registered in 'openclaw models list'"
 openclaw models list --json 2>/dev/null | grep -q 'byoky-anthropic' \
   || openclaw models list 2>/dev/null | grep -q 'byoky-anthropic' \
-  || fail "byoky-anthropic not listed after auth login"
+  || fail "byoky-anthropic not listed after 'auth login --provider byoky'"
 
 step "Create an agent bound to $MODEL_ID"
 mkdir -p "$WORKSPACE"

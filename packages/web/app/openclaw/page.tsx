@@ -149,58 +149,57 @@ export default function OpenClawTutorial() {
 
         <Step
           n={3}
-          title="Install the Byoky bridge"
-          subtitle="The bridge is a tiny local HTTP proxy. OpenClaw talks to it instead of the LLM provider directly."
+          title="Install Byoky for OpenClaw"
+          subtitle="One npm package installs the OpenClaw plugin and the Byoky bridge together."
         >
-          <Code>
-            {`npm install -g @byoky/bridge
-byoky-bridge install`}
-          </Code>
+          <Code>{`npm install -g @byoky/openclaw-plugin`}</Code>
           <p className="oc-note">
-            <code>byoky-bridge install</code> registers the native messaging
-            host so the bridge can hand requests off to your extension. You only
-            run this once.
+            The plugin registers all 13 Byoky providers with OpenClaw and
+            bundles <code>@byoky/bridge</code>, the tiny local HTTP proxy that
+            lets OpenClaw talk to your wallet. The native messaging host gets
+            registered on the next step — no extra command.
           </p>
           <InstallWithAI />
         </Step>
 
         <Step
           n={4}
-          title="Install the OpenClaw plugin"
-          subtitle="One npm package adds all 13 Byoky providers to OpenClaw."
+          title="Connect OpenClaw to your wallet"
+          subtitle="One command connects every provider you have in the wallet."
         >
-          <Code>{`npm install -g @byoky/openclaw-plugin`}</Code>
+          <Code>{`openclaw models auth login --provider byoky`}</Code>
+          <p>
+            First run: OpenClaw asks to register the native messaging host
+            (press <strong>Enter</strong> to accept), then opens your browser
+            so the wallet can approve the connection. Every provider you have
+            in the wallet — Anthropic, OpenAI, Gemini, whatever — gets
+            configured in one shot.
+          </p>
+          <p className="oc-note">
+            Want just one provider? Use{' '}
+            <code>--provider byoky-anthropic</code> (or{' '}
+            <code>byoky-openai</code>, <code>byoky-gemini</code>,{' '}
+            <code>byoky-xai</code>, etc.) instead.
+          </p>
+          <p>Verify the bridge:</p>
+          <Code>
+            {`curl http://127.0.0.1:19280/health
+# → {"status":"ok","providers":["anthropic","openai",...]}`}
+          </Code>
+          <p className="oc-note oc-note-muted">
+            Subsequent runs skip the browser tab if the bridge is already live
+            — they just re-use the session.
+          </p>
         </Step>
 
         <Step
           n={5}
-          title="Connect OpenClaw to your wallet"
-          subtitle="Pick a provider and log in. OpenClaw will open your browser so the wallet can approve the connection."
-        >
-          <Code>{`openclaw models auth login --provider byoky-anthropic`}</Code>
-          <p>
-            Unlock your wallet, approve the request, and the bridge starts
-            automatically. Verify it&apos;s running:
-          </p>
-          <Code>
-            {`curl http://127.0.0.1:19280/health
-# → {"status":"ok","providers":["anthropic"]}`}
-          </Code>
-          <p className="oc-note">
-            Want a different provider? Re-run the command with another id —{' '}
-            <code>byoky-openai</code>, <code>byoky-gemini</code>,{' '}
-            <code>byoky-xai</code>, etc.
-          </p>
-        </Step>
-
-        <Step
-          n={6}
           title="Use OpenClaw"
           subtitle="That's the whole setup. Run OpenClaw as you normally would — every LLM call routes through your wallet."
         >
           <p>
-            Inside OpenClaw, the <code>/byoky</code> command shows the bridge
-            status and which providers are connected:
+            Inside OpenClaw, the <code>/byoky</code> command shows bridge
+            status and lists every connected provider:
           </p>
           <Code>{`/byoky`}</Code>
           <p>
@@ -340,8 +339,8 @@ function Overview() {
         </div>
         <div className="oc-overview-card">
           <span className="oc-overview-num">3</span>
-          <h3>Install bridge + plugin</h3>
-          <p>Two npm installs — the bridge and the OpenClaw plugin.</p>
+          <h3>Install the plugin</h3>
+          <p>One npm install — plugin + bridge ship together.</p>
         </div>
         <div className="oc-overview-card">
           <span className="oc-overview-num">4</span>

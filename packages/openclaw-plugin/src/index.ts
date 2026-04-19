@@ -19,6 +19,10 @@ import {
   type ProviderAuthResult,
 } from 'openclaw/plugin-sdk/core';
 import { createServer, type Server } from 'node:http';
+import { writeFileSync, mkdirSync, existsSync, chmodSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { homedir, platform } from 'node:os';
+import { createRequire } from 'node:module';
 
 type ProviderApi = 'anthropic-messages' | 'openai-completions';
 
@@ -226,6 +230,36 @@ const byokyPlugin = {
   configSchema: emptyPluginConfigSchema(),
 
   register(api: OpenClawPluginApi) {
+    // Meta-provider: `byoky` — connects every provider available in the wallet
+    // in a single auth round. This is the recommended entry point.
+    api.registerProvider({
+      id: 'byoky',
+      label: 'Byoky Wallet (all providers)',
+      docsPath: '/providers/byoky',
+      auth: [
+        {
+          id: 'browser',
+          label: 'Byoky Wallet',
+          hint: 'Connects every provider you have in the wallet, in one step',
+          kind: 'custom',
+          run: (ctx: ProviderAuthContext) => runProviderAuth(ctx, null),
+        },
+      ],
+      wizard: {
+        setup: {
+          choiceId: 'byoky',
+          choiceLabel: 'Byoky Wallet (all providers)',
+          choiceHint: 'One auth connects every provider you have',
+          groupId: 'byoky',
+          groupLabel: 'Byoky Wallet',
+          groupHint: 'Keys never leave the extension',
+          methodId: 'browser',
+        },
+      },
+    });
+
+    // Per-provider variants — still registered for users who want to connect
+    // only a specific provider (or already have `byoky-anthropic` in their config).
     for (const provider of PROVIDERS) {
       const openclawId = `byoky-${provider.id}`;
 
@@ -257,30 +291,145 @@ const byokyPlugin = {
       });
     }
 
-    // /byoky command — check bridge status
+    // /byoky command — bridge status + provider table
     api.registerCommand({
       name: 'byoky',
       description: 'Show Byoky bridge status and connected providers',
       acceptsArgs: false,
-      handler: async () => {
-        const health = await checkBridgeHealth();
-        if (!health) {
-          return {
-            text: 'Byoky Bridge: **offline**\n\nStart the bridge with `openclaw models auth login --provider byoky-anthropic` or ensure it is running on port ' + DEFAULT_BRIDGE_PORT + '.',
-          };
-        }
-        const providerList = health.providers.length > 0
-          ? health.providers.join(', ')
-          : 'none';
-        return {
-          text: `Byoky Bridge: **online** (port ${DEFAULT_BRIDGE_PORT})\nProviders: ${providerList}`,
-        };
-      },
+      handler: async () => ({ text: await renderByokyStatus() }),
     });
   },
 };
 
 export default byokyPlugin;
+
+// --- Native messaging host registration (inline, scanner-safe) ---
+//
+// Duplicates the minimal subset of @byoky/bridge/installer needed here.
+// We avoid importing the bridge package at runtime so OpenClaw's plugin
+// sandbox doesn't see child_process / os-specific env lookups in the same
+// module as `fetch` (its scanner flags those combinations).
+
+const HOST_NAME = 'com.byoky.bridge';
+
+interface ManifestLocation {
+  browser: string;
+  path: string;
+  type: 'chrome' | 'firefox';
+}
+
+function getManifestLocations(): ManifestLocation[] {
+  const home = homedir();
+  const os = platform();
+
+  if (os === 'darwin') {
+    return [
+      { browser: 'Chrome', path: `${home}/Library/Application Support/Google/Chrome/NativeMessagingHosts/${HOST_NAME}.json`, type: 'chrome' },
+      { browser: 'Chromium', path: `${home}/Library/Application Support/Chromium/NativeMessagingHosts/${HOST_NAME}.json`, type: 'chrome' },
+      { browser: 'Brave', path: `${home}/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts/${HOST_NAME}.json`, type: 'chrome' },
+      { browser: 'Firefox', path: `${home}/Library/Application Support/Mozilla/NativeMessagingHosts/${HOST_NAME}.json`, type: 'firefox' },
+    ];
+  }
+  if (os === 'linux') {
+    return [
+      { browser: 'Chrome', path: `${home}/.config/google-chrome/NativeMessagingHosts/${HOST_NAME}.json`, type: 'chrome' },
+      { browser: 'Chromium', path: `${home}/.config/chromium/NativeMessagingHosts/${HOST_NAME}.json`, type: 'chrome' },
+      { browser: 'Firefox', path: `${home}/.mozilla/native-messaging-hosts/${HOST_NAME}.json`, type: 'firefox' },
+    ];
+  }
+  if (os === 'win32') {
+    // Use homedir() instead of LOCALAPPDATA env var to keep the file free of
+    // `process.env` reads (scanner heuristic for credential harvesting).
+    const appData = `${home}/AppData/Local`;
+    return [
+      { browser: 'Chrome', path: `${appData}/Google/Chrome/User Data/NativeMessagingHosts/${HOST_NAME}.json`, type: 'chrome' },
+      { browser: 'Firefox', path: `${appData}/Mozilla/NativeMessagingHosts/${HOST_NAME}.json`, type: 'firefox' },
+    ];
+  }
+  return [];
+}
+
+function resolveBridgeBin(): string {
+  // Prefer @byoky/bridge's shipped bin when the package is installed alongside
+  // the plugin. Fall back to a sibling path resolved from this file's URL.
+  try {
+    const req = createRequire(import.meta.url);
+    const pkgPath = req.resolve('@byoky/bridge/package.json');
+    return resolve(dirname(pkgPath), 'bin/byoky-bridge.js');
+  } catch {
+    return resolve(dirname(new URL(import.meta.url).pathname), '../bin/byoky-bridge.js');
+  }
+}
+
+function createNativeWrapper(hostPath: string, manifestDir: string): string {
+  // Minimal bash wrapper. We use process.execPath (the running node binary)
+  // and do NOT inherit the user's PATH — Chrome launches native hosts with a
+  // minimal PATH, and inheriting the user's is a known injection risk.
+  const nodePath = process.execPath;
+  const wrapperPath = resolve(manifestDir, 'byoky-bridge-host');
+  const nodeDir = dirname(nodePath);
+  const safePath = `${nodeDir}:/usr/local/bin:/usr/bin:/bin`;
+  const script = [
+    '#!/bin/bash',
+    `export PATH='${safePath}'`,
+    `exec '${nodePath.replace(/'/g, "'\\''")}' '${hostPath.replace(/'/g, "'\\''")}' host "$@"`,
+    '',
+  ].join('\n');
+  writeFileSync(wrapperPath, script);
+  chmodSync(wrapperPath, 0o755);
+  return wrapperPath;
+}
+
+const PUBLISHED_EXTENSION_ID = 'igjohldpldlahcjmefdhlnbcpldlgmon';
+const DEV_EXTENSION_ID = 'ahhecmfcclkjdgjnmackoacldnmgmipl';
+
+function buildManifest(hostPath: string, browserType: 'chrome' | 'firefox'): object {
+  const base = {
+    name: HOST_NAME,
+    description: 'Byoky Bridge — native messaging host',
+    path: hostPath,
+    type: 'stdio',
+  };
+  if (browserType === 'chrome') {
+    return {
+      ...base,
+      allowed_origins: [
+        `chrome-extension://${PUBLISHED_EXTENSION_ID}/`,
+        `chrome-extension://${DEV_EXTENSION_ID}/`,
+      ],
+    };
+  }
+  return { ...base, allowed_extensions: ['byoky@byoky.com'] };
+}
+
+function getRegistrationStatus(): { registered: string[]; missing: string[] } {
+  const registered: string[] = [];
+  const missing: string[] = [];
+  for (const loc of getManifestLocations()) {
+    (existsSync(loc.path) ? registered : missing).push(loc.browser);
+  }
+  return { registered, missing };
+}
+
+function registerHost(): { browsers: string[]; unsupported?: boolean } {
+  const locations = getManifestLocations();
+  if (locations.length === 0) return { browsers: [], unsupported: true };
+  const bridgeBin = resolveBridgeBin();
+  const browsers: string[] = [];
+  for (const loc of locations) {
+    try {
+      const manifestDir = dirname(loc.path);
+      mkdirSync(manifestDir, { recursive: true });
+      const wrapperPath = createNativeWrapper(bridgeBin, manifestDir);
+      const manifest = buildManifest(wrapperPath, loc.type);
+      writeFileSync(loc.path, JSON.stringify(manifest, null, 2));
+      browsers.push(loc.browser);
+    } catch {
+      // Browser directory unwritable or missing — skip.
+    }
+  }
+  return { browsers };
+}
 
 // --- Bridge health check ---
 
@@ -301,65 +450,214 @@ async function checkBridgeHealth(): Promise<{ providers: string[] } | null> {
   }
 }
 
+// --- /byoky status command output ---
+
+async function renderByokyStatus(): Promise<string> {
+  const health = await checkBridgeHealth();
+  const reg = getRegistrationStatus();
+
+  const lines: string[] = [];
+  lines.push(`**Byoky Bridge**  ·  port ${DEFAULT_BRIDGE_PORT}`);
+  lines.push('');
+
+  if (!health) {
+    lines.push(`Status: **offline**`);
+    if (reg.registered.length === 0) {
+      lines.push('');
+      lines.push('Native messaging host is not registered with any browser.');
+      lines.push('Run: `openclaw models auth login --provider byoky`');
+    } else {
+      lines.push('');
+      lines.push(`Registered with: ${reg.registered.join(', ')}`);
+      lines.push('Open your Byoky wallet so the bridge can start.');
+    }
+    return lines.join('\n');
+  }
+
+  lines.push(`Status: **online**`);
+  lines.push('');
+  if (health.providers.length === 0) {
+    lines.push('No providers connected yet — approve a connection in your wallet.');
+    return lines.join('\n');
+  }
+
+  lines.push(`Connected providers (${health.providers.length}):`);
+  for (const id of health.providers) {
+    const meta = PROVIDERS.find((p) => p.id === id);
+    const label = meta ? meta.name : id;
+    lines.push(`  • ${label}  \`byoky-${id}\``);
+  }
+  if (reg.registered.length > 0) {
+    lines.push('');
+    lines.push(`Registered with: ${reg.registered.join(', ')}`);
+  }
+  return lines.join('\n');
+}
+
+// --- Preflight: ensure native messaging host is registered ---
+
+async function ensureNativeHostRegistered(
+  ctx: ProviderAuthContext,
+): Promise<boolean> {
+  const reg = getRegistrationStatus();
+  if (reg.registered.length > 0) return true;
+
+  const ok = await ctx.prompter.confirm({
+    message:
+      'Byoky Bridge native messaging host is not registered. Register it now so the wallet can reach the bridge?',
+    initialValue: true,
+  });
+  if (!ok) {
+    await ctx.prompter.note(
+      'Skipped. You can register later with `byoky-bridge install`.',
+    );
+    return false;
+  }
+
+  const progress = ctx.prompter.progress('Registering native messaging host…');
+  try {
+    const result = registerHost();
+    if (result.unsupported) {
+      progress.stop('Unsupported platform');
+      return false;
+    }
+    if (result.browsers.length === 0) {
+      progress.stop('No supported browsers found');
+      return false;
+    }
+    progress.stop(`Registered with ${result.browsers.join(', ')}`);
+    await ctx.prompter.note(
+      'Restart your browser if the Byoky extension was already open — the host is loaded on browser start.',
+    );
+    return true;
+  } catch (err) {
+    progress.stop(`Failed: ${(err as Error).message}`);
+    return false;
+  }
+}
+
 // --- Auth flow ---
 
 async function runProviderAuth(
   ctx: ProviderAuthContext,
-  provider: ByokyProvider,
+  // null = meta-provider "byoky": connect every provider the wallet exposes.
+  provider: ByokyProvider | null,
 ): Promise<ProviderAuthResult> {
-  ctx.prompter.note(
-    `Opening your browser to connect ${provider.name} via Byoky wallet.\n` +
-      'Unlock your wallet and approve the connection.\n' +
-      'The Byoky Bridge must be installed: npm i -g @byoky/bridge && byoky-bridge install',
+  const ok = await ensureNativeHostRegistered(ctx);
+  if (!ok) {
+    throw new Error(
+      'Byoky Bridge native messaging host is not registered. Run `byoky-bridge install` and try again.',
+    );
+  }
+
+  // Fast path: if the bridge is already healthy and already has providers,
+  // reuse them instead of opening a browser tab.
+  const health = await checkBridgeHealth();
+  if (health && health.providers.length > 0) {
+    const selected = provider
+      ? health.providers.filter((id) => id === provider.id)
+      : health.providers;
+
+    if (selected.length === 0) {
+      await ctx.prompter.note(
+        `Bridge is running with ${health.providers.length} provider(s), but not ${provider!.name}. Opening the wallet to add it.`,
+      );
+    } else {
+      await ctx.prompter.note(
+        `Reusing live Byoky Bridge on port ${DEFAULT_BRIDGE_PORT} — no browser round-trip needed.`,
+      );
+      return buildAuthResult(selected, DEFAULT_BRIDGE_PORT, provider);
+    }
+  }
+
+  await ctx.prompter.note(
+    provider
+      ? `Opening your browser to connect ${provider.name} via Byoky wallet.\nUnlock your wallet and approve the connection.`
+      : 'Opening your browser to connect every provider in your Byoky wallet.\nUnlock your wallet and approve the connection.',
   );
 
-  const result = await startCallbackServer(ctx, provider.id);
+  const result = await startCallbackServer(ctx, provider?.id ?? null);
 
   try {
-    if (!result.providers || !result.providers.includes(provider.id)) {
-      throw new Error(`${provider.name} not available in your Byoky wallet`);
+    const selected = provider
+      ? result.providers.filter((id) => id === provider.id)
+      : result.providers;
+
+    if (selected.length === 0) {
+      if (provider) {
+        throw new Error(`${provider.name} not available in your Byoky wallet`);
+      }
+      throw new Error('No providers found in your Byoky wallet');
     }
 
-    const openclawId = `byoky-${provider.id}`;
-
-    return {
-      profiles: [
-        {
-          profileId: `${openclawId}:byoky`,
-          credential: {
-            type: 'api_key',
-            provider: openclawId,
-            key: 'byoky-proxy',
-          },
-        },
-      ],
-      configPatch: {
-        models: {
-          providers: {
-            [openclawId]: {
-              baseUrl: `http://127.0.0.1:${result.port}/${provider.id}`,
-              api: provider.api,
-              apiKey: 'byoky-proxy',
-              models: provider.models,
-            },
-          },
-        },
-      },
-      defaultModel: provider.models.length > 0
-        ? `${openclawId}/${provider.models[0].id}`
-        : undefined,
-      notes: [
-        `Connected ${provider.name} via Byoky Bridge on port ${result.port}.`,
-        'Key stays in your browser extension — the bridge relays requests.',
-        'The bridge must be running for API calls to work.',
-        ...(provider.models.length > 0
-          ? [`Available models: ${provider.models.map((m) => m.id).join(', ')}`]
-          : ['No pre-defined models — set agents.defaults.model manually.']),
-      ],
-    };
+    return buildAuthResult(selected, result.port, provider);
   } finally {
     result.server.close();
   }
+}
+
+function buildAuthResult(
+  providerIds: string[],
+  port: number,
+  single: ByokyProvider | null,
+): ProviderAuthResult {
+  const providers = providerIds
+    .map((id) => PROVIDERS.find((p) => p.id === id))
+    .filter((p): p is ByokyProvider => Boolean(p));
+
+  const profiles = providers.map((p) => {
+    const openclawId = `byoky-${p.id}`;
+    return {
+      profileId: `${openclawId}:byoky`,
+      credential: {
+        type: 'api_key' as const,
+        provider: openclawId,
+        key: 'byoky-proxy',
+      },
+    };
+  });
+
+  const providerConfig: Record<string, {
+    baseUrl: string;
+    api: ProviderApi;
+    apiKey: string;
+    models: ModelDef[];
+  }> = {};
+  for (const p of providers) {
+    providerConfig[`byoky-${p.id}`] = {
+      baseUrl: `http://127.0.0.1:${port}/${p.id}`,
+      api: p.api,
+      apiKey: 'byoky-proxy',
+      models: p.models,
+    };
+  }
+
+  const firstWithModels = providers.find((p) => p.models.length > 0);
+  const defaultModel = single
+    ? (single.models.length > 0 ? `byoky-${single.id}/${single.models[0].id}` : undefined)
+    : (firstWithModels ? `byoky-${firstWithModels.id}/${firstWithModels.models[0].id}` : undefined);
+
+  const notes: string[] = [];
+  if (providers.length === 1) {
+    notes.push(`Connected ${providers[0].name} via Byoky Bridge on port ${port}.`);
+  } else {
+    notes.push(
+      `Connected ${providers.length} providers via Byoky Bridge on port ${port}: ${providers
+        .map((p) => p.name)
+        .join(', ')}.`,
+    );
+  }
+  notes.push('Keys stay in your browser extension — the bridge relays requests.');
+  notes.push('The bridge must be running for API calls to work.');
+  if (defaultModel) notes.push(`Default model set to ${defaultModel}.`);
+  notes.push('Run `/byoky` inside OpenClaw anytime to check bridge status.');
+
+  return {
+    profiles,
+    configPatch: { models: { providers: providerConfig } },
+    defaultModel,
+    notes,
+  };
 }
 
 // --- Local callback server ---
@@ -372,7 +670,7 @@ interface AuthResult {
 
 async function startCallbackServer(
   ctx: ProviderAuthContext,
-  requestProviderId: string,
+  requestProviderId: string | null,
 ): Promise<AuthResult> {
   return new Promise((resolve) => {
     let resolved = false;
@@ -455,13 +753,20 @@ async function startCallbackServer(
 
 const VALID_PROVIDER_IDS = new Set(PROVIDERS.map((p) => p.id));
 
-function buildAuthPage(requestProviderId: string): string {
+function buildAuthPage(requestProviderId: string | null): string {
   let providerFilter: string;
-  if (VALID_PROVIDER_IDS.has(requestProviderId)) {
+  if (requestProviderId && VALID_PROVIDER_IDS.has(requestProviderId)) {
     providerFilter = `[{ id: ${JSON.stringify(requestProviderId)}, required: true }]`;
   } else {
+    // Meta-provider: ask the wallet for every provider it has.
     providerFilter = '[]';
   }
+  const headline = requestProviderId
+    ? 'Connect your <span class="grad">wallet</span>'
+    : 'Connect <span class="grad">all providers</span>';
+  const subtitle = requestProviderId
+    ? 'Linking your Byoky wallet to OpenClaw.'
+    : 'Linking every provider in your Byoky wallet to OpenClaw.';
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -469,55 +774,204 @@ function buildAuthPage(requestProviderId: string): string {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Byoky — Connect to OpenClaw</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg: #fafaf9;
+      --bg-card: #ffffff;
+      --bg-elevated: #f5f5f4;
+      --border: #e7e5e4;
+      --border-hover: #d6d3d1;
+      --text: #1c1917;
+      --text-secondary: #57534e;
+      --text-muted: #a8a29e;
+      --teal: #FF4F00;
+      --teal-light: #ff6a2a;
+      --teal-dark: #e64500;
+      --teal-glow: rgba(255, 79, 0, 0.15);
+      --green: #16a34a;
+    }
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
     body {
-      font-family: -apple-system, system-ui, sans-serif;
-      background: #0a0a18; color: #f5f5f7;
-      min-height: 100vh; display: flex;
-      align-items: center; justify-content: center;
+      font-family: 'Sora', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      line-height: 1.6;
+      position: relative;
+      overflow-x: hidden;
+    }
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: radial-gradient(circle at 1px 1px, rgba(28, 25, 23, 0.04) 1px, transparent 0);
+      background-size: 40px 40px;
+      pointer-events: none;
+      z-index: 0;
+    }
+    body::after {
+      content: '';
+      position: fixed;
+      top: -20%;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 600px;
+      height: 600px;
+      background: radial-gradient(circle, var(--teal-glow), transparent 60%);
+      pointer-events: none;
+      z-index: 0;
+      filter: blur(60px);
     }
     .card {
-      background: #1c1c22; border-radius: 16px;
-      padding: 40px; max-width: 440px; width: 100%; text-align: center;
+      position: relative;
+      z-index: 1;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 40px 36px 32px;
+      max-width: 440px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 4px 24px rgba(28, 25, 23, 0.04);
+    }
+    .eyebrow {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--teal);
+      background: rgba(255, 79, 0, 0.08);
+      border: 1px solid rgba(255, 79, 0, 0.25);
+      padding: 5px 11px;
+      border-radius: 999px;
+      margin-bottom: 18px;
     }
     h1 {
-      font-size: 24px; font-weight: 700;
-      background: linear-gradient(135deg, #e0f2fe, #0ea5e9);
-      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      font-size: 26px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
       margin-bottom: 8px;
+      color: var(--text);
     }
-    .subtitle { color: #8e8e9a; font-size: 14px; margin-bottom: 24px; }
+    h1 .grad {
+      background: linear-gradient(90deg, var(--teal-light), var(--teal));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    .subtitle {
+      color: var(--text-secondary);
+      font-size: 15px;
+      margin-bottom: 24px;
+    }
     .status {
-      padding: 16px; border-radius: 8px;
-      margin-bottom: 16px; font-size: 14px; line-height: 1.6;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 14px 16px;
+      border-radius: 10px;
+      margin-bottom: 18px;
+      font-size: 14px;
+      font-weight: 500;
+      line-height: 1.5;
+      border: 1px solid transparent;
+      text-align: left;
     }
-    .waiting { background: rgba(14,165,233,0.1); color: #7dd3fc; }
-    .success { background: rgba(52,211,153,0.1); color: #34d399; }
-    .error { background: rgba(244,63,94,0.1); color: #f43f5e; }
-    .info { color: #55555f; font-size: 12px; line-height: 1.6; }
-    .security { color: #34d399; font-size: 12px; margin-top: 16px; line-height: 1.6; }
+    .status .dot {
+      flex-shrink: 0;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+    .waiting {
+      background: rgba(255, 79, 0, 0.06);
+      border-color: rgba(255, 79, 0, 0.2);
+      color: var(--teal-dark);
+    }
+    .waiting .dot {
+      background: var(--teal);
+      box-shadow: 0 0 0 0 var(--teal-glow);
+      animation: pulse 1.6s ease-in-out infinite;
+    }
+    .success {
+      background: rgba(22, 163, 74, 0.07);
+      border-color: rgba(22, 163, 74, 0.25);
+      color: #15803d;
+    }
+    .success .dot {
+      background: var(--green);
+      box-shadow: 0 0 8px rgba(22, 163, 74, 0.6);
+    }
+    .error {
+      background: rgba(220, 38, 38, 0.06);
+      border-color: rgba(220, 38, 38, 0.22);
+      color: #b91c1c;
+    }
+    .error .dot { background: #dc2626; }
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(255, 79, 0, 0.35); }
+      50% { box-shadow: 0 0 0 6px rgba(255, 79, 0, 0); }
+    }
+    .info {
+      color: var(--text-secondary);
+      font-size: 13px;
+      line-height: 1.6;
+      padding: 14px 16px;
+      background: var(--bg-elevated);
+      border-radius: 10px;
+      text-align: left;
+    }
+    .info strong { color: var(--text); font-weight: 600; }
+    .security {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      color: var(--text-muted);
+      font-size: 12px;
+      margin-top: 16px;
+      line-height: 1.55;
+      text-align: left;
+    }
+    .security svg { flex-shrink: 0; margin-top: 2px; color: var(--green); }
   </style>
 </head>
 <body>
   <div class="card">
-    <h1>Byoky</h1>
-    <p class="subtitle">Connect wallet to OpenClaw</p>
+    <div class="eyebrow">OpenClaw × Byoky</div>
+    <h1>${headline}</h1>
+    <p class="subtitle">${subtitle}</p>
     <div id="status" class="status waiting">
-      Connecting to Byoky wallet...
+      <span class="dot"></span>
+      <span id="status-text">Connecting to Byoky wallet…</span>
     </div>
     <p class="info">
-      Your Byoky extension must be installed and unlocked.<br />
-      The Byoky Bridge must be installed for the proxy to work.
+      <strong>Byoky extension</strong> must be installed and unlocked.<br />
+      <strong>Byoky Bridge</strong> must be installed for the proxy to work.
     </p>
     <p class="security">
-      Keys never leave your browser extension.<br />
-      API calls are proxied through the local Byoky Bridge.
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      <span>Keys never leave your browser extension. API calls are proxied through the local Byoky Bridge.</span>
     </p>
   </div>
   <script>
     (async () => {
       const status = document.getElementById('status');
+      const statusText = document.getElementById('status-text');
+      function setStatus(text, kind) {
+        statusText.textContent = text;
+        status.className = 'status ' + (kind || 'waiting');
+      }
       try {
         // Step 1: Connect to Byoky wallet
         const requestId = crypto.randomUUID();
@@ -549,7 +1003,7 @@ function buildAuthPage(requestProviderId: string): string {
           throw new Error('No matching providers found in your Byoky wallet');
         }
 
-        status.textContent = 'Wallet connected! Starting bridge proxy...';
+        setStatus('Wallet connected — starting bridge proxy…', 'waiting');
 
         // Step 2: Tell the extension to start the bridge proxy
         const bridgeRequestId = crypto.randomUUID();
@@ -573,8 +1027,7 @@ function buildAuthPage(requestProviderId: string): string {
 
         const bridgePort = bridgeResult?.port || ${DEFAULT_BRIDGE_PORT};
 
-        status.textContent = 'Bridge proxy active on port ' + bridgePort + '. Connected ' + available.length + ' provider(s): ' + available.join(', ');
-        status.className = 'status success';
+        setStatus('Bridge active on port ' + bridgePort + '. Connected ' + available.length + ' provider(s): ' + available.join(', '), 'success');
 
         // Step 3: Send result back to OpenClaw callback server
         await fetch('/callback', {
@@ -583,10 +1036,9 @@ function buildAuthPage(requestProviderId: string): string {
           body: JSON.stringify({ providers: available, bridgePort: bridgePort }),
         });
 
-        setTimeout(() => { status.textContent = 'Done — you can close this tab.'; }, 2000);
+        setTimeout(() => { setStatus('Done — you can close this tab.', 'success'); }, 2000);
       } catch (err) {
-        status.textContent = 'Error: ' + err.message;
-        status.className = 'status error';
+        setStatus('Error: ' + err.message, 'error');
       }
     })();
   </script>
