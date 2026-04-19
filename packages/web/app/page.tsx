@@ -341,9 +341,8 @@ function OpenClawCTA() {
             </div>
             <div className="openclaw-cta-visual" aria-hidden>
               <pre className="openclaw-cta-code">
-<span className="tc">{'# Install the bridge + plugin'}</span>{'\n'}
-<span className="tk">$</span> npm install -g <span className="ts">@byoky/bridge</span>{'\n'}
-<span className="tk">$</span> npm install -g <span className="ts">@byoky/openclaw-plugin</span>{'\n'}
+<span className="tc">{'# Install the plugin (bridge bundled)'}</span>{'\n'}
+<span className="tk">$</span> openclaw plugins install <span className="ts">@byoky/openclaw-plugin</span>{'\n'}
 {'\n'}
 <span className="tc">{'# Connect your wallet'}</span>{'\n'}
 <span className="tk">$</span> openclaw models auth login {'\\'}
