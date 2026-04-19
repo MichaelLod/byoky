@@ -158,6 +158,7 @@ export default function Marketplace() {
   const [redeemResult, setRedeemResult] = useState<RedeemResult | null>(null);
   const [hasExtension, setHasExtension] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [highlightedGiftId, setHighlightedGiftId] = useState<string | null>(null);
 
   useEffect(() => {
     setHasExtension(isExtensionInstalled());
@@ -200,6 +201,18 @@ export default function Marketplace() {
     const interval = setInterval(load, 30_000);
     return () => clearInterval(interval);
   }, [load]);
+
+  useEffect(() => {
+    if (loading || typeof window === 'undefined') return;
+    const giftId = new URLSearchParams(window.location.search).get('gift');
+    if (!giftId) return;
+    const el = document.getElementById(`gift-${giftId}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlightedGiftId(giftId);
+    const t = setTimeout(() => setHighlightedGiftId(null), 2400);
+    return () => clearTimeout(t);
+  }, [loading]);
 
   async function handleRedeem(id: string) {
     setRedeeming(id);
@@ -297,7 +310,7 @@ export default function Marketplace() {
           </h2>
           <div className="mp-grid">
             {onlineGifts.map((gift) => (
-              <GiftCard key={gift.id} gift={gift} onRedeem={handleRedeem} redeeming={redeeming === gift.id} />
+              <GiftCard key={gift.id} gift={gift} onRedeem={handleRedeem} redeeming={redeeming === gift.id} highlighted={highlightedGiftId === gift.id} />
             ))}
           </div>
         </div>
@@ -313,7 +326,7 @@ export default function Marketplace() {
           <p className="mp-section-sub">The gifter is offline right now. These may come back online later.</p>
           <div className="mp-grid">
             {offlineGifts.map((gift) => (
-              <GiftCard key={gift.id} gift={gift} onRedeem={handleRedeem} redeeming={redeeming === gift.id} />
+              <GiftCard key={gift.id} gift={gift} onRedeem={handleRedeem} redeeming={redeeming === gift.id} highlighted={highlightedGiftId === gift.id} />
             ))}
           </div>
         </div>
@@ -328,10 +341,10 @@ export default function Marketplace() {
           </h2>
           <div className="mp-grid">
             {removed.map((gift) => (
-              <GiftCard key={gift.id} gift={gift} variant="removed" />
+              <GiftCard key={gift.id} gift={gift} variant="removed" highlighted={highlightedGiftId === gift.id} />
             ))}
             {expired.map((gift) => (
-              <GiftCard key={gift.id} gift={gift} variant="expired" />
+              <GiftCard key={gift.id} gift={gift} variant="expired" highlighted={highlightedGiftId === gift.id} />
             ))}
           </div>
         </div>
@@ -464,6 +477,16 @@ export default function Marketplace() {
           border-color: rgba(255, 79, 0, 0.3);
           box-shadow: 0 4px 20px rgba(255, 79, 0, 0.06);
           transform: translateY(-1px);
+        }
+        .mp-card-highlighted {
+          border-color: #FF4F00;
+          box-shadow: 0 0 0 3px rgba(255, 79, 0, 0.25), 0 8px 32px rgba(255, 79, 0, 0.15);
+          animation: mp-card-pulse 1.4s ease-out;
+        }
+        @keyframes mp-card-pulse {
+          0% { box-shadow: 0 0 0 0 rgba(255, 79, 0, 0.5); }
+          60% { box-shadow: 0 0 0 12px rgba(255, 79, 0, 0); }
+          100% { box-shadow: 0 0 0 3px rgba(255, 79, 0, 0.25), 0 8px 32px rgba(255, 79, 0, 0.15); }
         }
         .mp-card-header {
           display: flex;
@@ -692,11 +715,12 @@ export default function Marketplace() {
   );
 }
 
-function GiftCard({ gift, variant = 'active', onRedeem, redeeming }: {
+function GiftCard({ gift, variant = 'active', onRedeem, redeeming, highlighted }: {
   gift: Gift;
   variant?: 'active' | 'expired' | 'removed';
   onRedeem?: (id: string) => void;
   redeeming?: boolean;
+  highlighted?: boolean;
 }) {
   const status = deriveGiftStatus(gift, variant);
   const pct = gift.tokenBudget > 0 ? ((gift.tokenBudget - gift.tokensUsed) / gift.tokenBudget) * 100 : 0;
@@ -707,7 +731,7 @@ function GiftCard({ gift, variant = 'active', onRedeem, redeeming }: {
 
   async function handleShare() {
     if (typeof window === 'undefined') return;
-    const url = `${window.location.origin}/token-pool`;
+    const url = `${window.location.origin}/token-pool?gift=${gift.id}`;
     const title = `Free ${gift.providerId} tokens on Byoky`;
     const text = `${gift.gifterName} is gifting ${formatTokens(gift.tokensRemaining)} free ${gift.providerId} tokens on Byoky. Grab them before they're gone:`;
     try {
@@ -728,7 +752,7 @@ function GiftCard({ gift, variant = 'active', onRedeem, redeeming }: {
   }
 
   return (
-    <div className="mp-card">
+    <div id={`gift-${gift.id}`} className={`mp-card${highlighted ? ' mp-card-highlighted' : ''}`}>
       <div className="mp-card-header">
         <div className="mp-card-provider-icon">
           <ProviderLogo providerId={gift.providerId} size={28} />
