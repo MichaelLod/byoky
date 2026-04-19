@@ -279,11 +279,12 @@ export class ConnectModal {
     this.card.innerHTML = '';
     this.addIcon(ICON_PHONE);
     this.addHeading('Scan to connect');
-    this.addText('Scan with your phone to pair the Byoky mobile app. No app yet? You\'ll be sent to the App Store or Play Store.');
+    this.addText('Scan the QR with your phone\'s Camera app, or paste the code below into Byoky on your phone.');
 
-    const qrUrl = this.pairingCode ? `${PAIR_URL_BASE}#${this.pairingCode}` : null;
+    const pairingCode = this.pairingCode;
+    const qrUrl = pairingCode ? `${PAIR_URL_BASE}#${pairingCode}` : null;
 
-    if (qrUrl) {
+    if (pairingCode && qrUrl) {
       const qrDiv = document.createElement('div');
       qrDiv.className = 'qr';
       try {
@@ -294,15 +295,16 @@ export class ConnectModal {
       }
       this.card.appendChild(qrDiv);
 
+      // Display/copy the raw code (not the URL): App Store builds of the mobile app only accept the raw code in manual entry.
       const codeBox = document.createElement('div');
       codeBox.className = 'code-box';
       const code = document.createElement('code');
-      code.textContent = qrUrl;
+      code.textContent = pairingCode;
       const copyBtn = document.createElement('button');
       copyBtn.className = 'copy-btn';
       copyBtn.textContent = 'Copy';
       copyBtn.addEventListener('click', () => {
-        navigator.clipboard.writeText(qrUrl);
+        navigator.clipboard.writeText(pairingCode);
         copyBtn.textContent = 'Copied!';
         setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
       });
