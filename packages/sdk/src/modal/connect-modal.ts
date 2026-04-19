@@ -138,6 +138,11 @@ const STYLES = /* css */ `
   }
   .copy-btn:hover { color: var(--byoky-accent); border-color: var(--byoky-accent); }
 
+  .hint {
+    font-size: 11px; color: var(--byoky-text-muted);
+    text-align: center; line-height: 1.5; margin: -4px 0 12px;
+  }
+
   .status {
     display: flex; align-items: center; justify-content: center; gap: 8px;
     font-size: 13px; color: var(--byoky-text-muted); margin-bottom: 16px;
@@ -311,6 +316,11 @@ export class ConnectModal {
       codeBox.appendChild(code);
       codeBox.appendChild(copyBtn);
       this.card.appendChild(codeBox);
+
+      const hint = document.createElement('p');
+      hint.className = 'hint';
+      hint.textContent = 'Tip: scan the QR with your phone\'s Camera app. The in-app QR scanner is getting an upgrade in the next Byoky release.';
+      this.card.appendChild(hint);
     }
 
     this.addStatus('Waiting for phone...');
