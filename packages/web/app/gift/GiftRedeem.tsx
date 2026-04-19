@@ -120,13 +120,7 @@ export function GiftRedeem() {
     }
     if (platform !== 'ios') return;
 
-    const iframe = document.createElement('iframe');
-    iframe.src = `byoky://gift/${encoded}`;
-    iframe.style.cssText = 'position:fixed;top:-1px;left:-1px;width:1px;height:1px;opacity:0;pointer-events:none;border:0;';
-    document.body.appendChild(iframe);
-
     const cleanup = () => {
-      iframe.remove();
       document.removeEventListener('visibilitychange', onVisibility);
       window.clearTimeout(timer);
     };
@@ -139,6 +133,7 @@ export function GiftRedeem() {
       window.location.href = IOS_STORE;
     }, 1500);
     document.addEventListener('visibilitychange', onVisibility);
+    window.location.href = `byoky://gift/${encoded}`;
   }
 
   async function handleStage() {
