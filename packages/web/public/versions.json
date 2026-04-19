@@ -10,9 +10,8 @@
     },
     {
       "platform": "Firefox",
-      "version": "0.7.3",
-      "status": "live",
-      "pending": "0.7.4"
+      "version": "0.7.4",
+      "status": "live"
     },
     {
       "platform": "iOS",
@@ -31,5 +30,5 @@
       "status": "live"
     }
   ],
-  "generatedAt": "2026-04-19T19:31:48.261Z"
+  "generatedAt": "2026-04-19T19:36:01.385Z"
 }
