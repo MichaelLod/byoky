@@ -14,21 +14,12 @@ export const metadata: Metadata = {
       'Use OpenClaw with Claude, GPT, and Gemini for free. Grab a token gift from the Byoky token pool, or sign in with your Claude Pro/Max subscription. Up in 5 minutes.',
     url: 'https://byoky.com/openclaw',
     type: 'article',
-    images: [
-      {
-        url: '/openclaw-og.png',
-        width: 1200,
-        height: 630,
-        alt: 'OpenClaw',
-      },
-    ],
   },
   twitter: {
     card: 'summary_large_image',
     title: 'Run OpenClaw with Byoky — free, no API credits required',
     description:
       'Use OpenClaw with Claude, GPT, and Gemini for free. Grab a token gift from the token pool, or sign in with your Claude Pro/Max subscription.',
-    images: ['/openclaw-og.png'],
   },
 };
 

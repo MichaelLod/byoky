@@ -37,7 +37,7 @@ export const posts: BlogPostMeta[] = [
     readTime: '6 min read',
     tags: ['claude-code', 'anthropic', 'openclaw', 'reverse-engineering'],
     author: 'Michael Lodzik',
-    image: '/openclaw-og.png',
+    image: '/openclaw/opengraph-image',
     imageAlt: "Bisecting Anthropic's Claude Code detection signal",
     ogTitle: "Anthropic fingerprints OpenClaw. Here's what that means for your Pro/Max plan.",
     ogDescription:
