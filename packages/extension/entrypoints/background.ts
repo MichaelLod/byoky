@@ -1737,8 +1737,8 @@ export default defineBackground(() => {
       }
 
       case 'getGifts': {
-        const data = await browser.storage.local.get('gifts');
-        return { gifts: (data.gifts ?? []) as Gift[] };
+        const gifts = await getGiftsFromStorage();
+        return { gifts };
       }
 
       case 'revokeGift': {
