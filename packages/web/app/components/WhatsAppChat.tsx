@@ -477,7 +477,7 @@ function Phone({ pov }: { pov: Speaker }) {
         </div>
       </div>
 
-      <style jsx>{`
+      <style>{`
         .wa-phone {
           position: relative;
           width: 100%;
@@ -597,7 +597,7 @@ function Phone({ pov }: { pov: Speaker }) {
           word-wrap: break-word;
           box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.13);
         }
-        .wa-bubble :global(strong) { font-weight: 700; }
+        .wa-bubble strong { font-weight: 700; }
         .wa-bubble-in { background: #fff; }
         .wa-bubble-out { background: #d9fdd3; }
 
@@ -650,7 +650,7 @@ function Phone({ pov }: { pov: Speaker }) {
           top: 4px;
           white-space: nowrap;
         }
-        .wa-time :global(svg) { width: 14px; height: 14px; }
+        .wa-time svg { width: 14px; height: 14px; }
 
         .wa-bubble-link {
           max-width: 86%;
@@ -716,7 +716,7 @@ function Phone({ pov }: { pov: Speaker }) {
           color: #54656f;
           font-size: 12.5px;
         }
-        .wa-composer-input :global(svg) { width: 17px; height: 17px; flex-shrink: 0; }
+        .wa-composer-input svg { width: 17px; height: 17px; flex-shrink: 0; }
         .wa-composer-input span { flex: 1; }
         .wa-mic {
           width: 34px;
@@ -727,7 +727,7 @@ function Phone({ pov }: { pov: Speaker }) {
           place-items: center;
           flex-shrink: 0;
         }
-        .wa-mic :global(svg) { width: 18px; height: 18px; }
+        .wa-mic svg { width: 18px; height: 18px; }
       `}</style>
     </div>
   );
@@ -783,7 +783,7 @@ function ByokyLinkPreview() {
         </div>
       </div>
 
-      <style jsx>{`
+      <style>{`
         .wa-link {
           display: block;
           border-radius: 6px;
@@ -943,7 +943,7 @@ function ByokyLinkPreview() {
           width: 12px;
           height: 12px;
         }
-        .wa-link-favicon :global(svg) {
+        .wa-link-favicon svg {
           width: 12px;
           height: 12px;
         }
