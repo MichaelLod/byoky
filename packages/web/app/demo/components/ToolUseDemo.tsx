@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { ByokySession } from '@byoky/sdk';
 
 interface Step {
@@ -102,9 +102,10 @@ const openaiCompatible: Record<string, { url: string; model: string; name: strin
   openrouter:   { url: 'https://openrouter.ai/api/v1/chat/completions',    model: 'anthropic/claude-sonnet-4',     name: 'Claude Sonnet' },
 };
 
-// Static list of providers the tool-use tab knows how to call. The dropdown
-// shows all of them — even when the wallet has no credential — so the user
-// can exercise cross-family routing via the bound group.
+// Static list of providers the tool-use tab knows how to call. Filtered at
+// render time to the subset the connected wallet can actually route (direct
+// key or cross-family translation via a group), so the user never sees an
+// option that would 404 on NO_CREDENTIAL.
 const dropdownProviders: string[] = ['anthropic', ...Object.keys(openaiCompatible)];
 
 interface Props {
@@ -117,12 +118,15 @@ export function ToolUseDemo({ session }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Default to anthropic if directly available, else first directly-available,
-  // else just anthropic so the dropdown is populated even with zero credentials.
-  const firstDirect = dropdownProviders.find(id => session.providers[id]?.available === true);
+  const availableProviders = dropdownProviders.filter(id => session.providers[id]?.available === true);
   const [selectedProvider, setSelectedProvider] = useState(
-    session.providers['anthropic']?.available ? 'anthropic' : firstDirect ?? 'anthropic',
+    session.providers['anthropic']?.available ? 'anthropic' : availableProviders[0] ?? '',
   );
+
+  useEffect(() => {
+    if (selectedProvider && availableProviders.includes(selectedProvider)) return;
+    setSelectedProvider(availableProviders[0] ?? '');
+  }, [availableProviders, selectedProvider]);
 
   const providerLabel = selectedProvider === 'anthropic'
     ? 'Claude'
@@ -247,11 +251,12 @@ export function ToolUseDemo({ session }: Props) {
           value={selectedProvider}
           onChange={(e) => setSelectedProvider(e.target.value)}
         >
-          {dropdownProviders.map((id) => {
+          {availableProviders.length === 0 && (
+            <option value="" disabled>No keys in wallet</option>
+          )}
+          {availableProviders.map((id) => {
             const meta = session.providers[id];
-            const direct = meta?.available === true;
-            const isGift = meta?.gift;
-            const suffix = isGift ? ' (Gift)' : direct ? '' : ' (via routing)';
+            const suffix = meta?.gift ? ' (Gift)' : '';
             const label = id === 'anthropic' ? 'Anthropic (Claude)' : openaiCompatible[id]?.name ?? id;
             return (
               <option key={id} value={id}>{label}{suffix}</option>

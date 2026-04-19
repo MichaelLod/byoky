@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { ByokySession } from '@byoky/sdk';
 
 const sampleTexts = [
@@ -41,11 +41,14 @@ export function StructuredOutput({ session }: Props) {
     openrouter: { url: 'https://openrouter.ai/api/v1/chat/completions',    model: 'anthropic/claude-sonnet-4', name: 'OpenRouter' },
   };
 
-  // Default to first directly-available provider; fall back to openai (so the
-  // user always sees something selected, even with no credentials yet).
-  const firstDirect = dropdownProviders.find(id => session.providers[id]?.available === true);
-  const [selectedProvider, setSelectedProvider] = useState(firstDirect ?? 'openai');
+  const availableProviders = dropdownProviders.filter(id => session.providers[id]?.available === true);
+  const [selectedProvider, setSelectedProvider] = useState(availableProviders[0] ?? '');
   const provider = selectedProvider;
+
+  useEffect(() => {
+    if (selectedProvider && availableProviders.includes(selectedProvider)) return;
+    setSelectedProvider(availableProviders[0] ?? '');
+  }, [availableProviders, selectedProvider]);
 
   async function handleExtract() {
     if (!input.trim() || loading || !provider) return;
@@ -149,11 +152,12 @@ export function StructuredOutput({ session }: Props) {
           value={selectedProvider}
           onChange={(e) => setSelectedProvider(e.target.value)}
         >
-          {dropdownProviders.map((id) => {
+          {availableProviders.length === 0 && (
+            <option value="" disabled>No keys in wallet</option>
+          )}
+          {availableProviders.map((id) => {
             const meta = session.providers[id];
-            const direct = meta?.available === true;
-            const isGift = meta?.gift;
-            const suffix = isGift ? ' (Gift)' : direct ? '' : ' (via routing)';
+            const suffix = meta?.gift ? ' (Gift)' : '';
             const label = id === 'anthropic' ? 'Anthropic (Claude)' : openaiCompat[id]?.name ?? id;
             return (
               <option key={id} value={id}>{label}{suffix}</option>
