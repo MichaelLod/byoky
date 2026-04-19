@@ -341,7 +341,7 @@ function Overview() {
         <div className="oc-overview-card">
           <span className="oc-overview-num">3</span>
           <h3>Install the plugin</h3>
-          <p>One npm install — plugin + bridge ship together.</p>
+          <p>One npm install. Plugin pulls in the bridge.</p>
         </div>
         <div className="oc-overview-card">
           <span className="oc-overview-num">4</span>
