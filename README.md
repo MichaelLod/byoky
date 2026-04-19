@@ -1,16 +1,5 @@
 <p align="center">
   <br />
-  <a href="https://byoky.com">
-    <img src="https://github.com/MichaelLod/byoky/raw/main/.github/icon.svg?v=3" alt="Byoky" width="96" />
-  </a>
-  <br />
-  <a href="https://byoky.com">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://github.com/MichaelLod/byoky/raw/main/.github/banner-dark.svg?v=3">
-      <img alt="Byoky" src="https://github.com/MichaelLod/byoky/raw/main/.github/banner-dark.svg?v=3" width="480">
-    </picture>
-  </a>
-  <br />
   <strong>Your AI budget is going to waste.</strong>
   <br />
   Byoky lets you share your token budget with friends, your team, or anyone building cool stuff — without exposing your keys.
@@ -38,10 +27,6 @@
 - **Groups** — Bucket connected apps by purpose (e.g. "Personal", "Work"). Pin each group to a specific credential, then drag apps between groups to switch which key they use. Live sessions reroute automatically — no code changes in any app.
 - **Cross-provider routing** — Drag an app from a Claude group into a GPT group and the wallet transparently translates the request. Anthropic ↔ OpenAI ↔ Gemini ↔ Cohere — request body, response body, and SSE streams are rewritten on the fly. Apps keep calling their preferred SDK; the wallet picks the upstream.
 - **Token gifts** — Share token access with friends or teammates without sharing your API key. Set budgets and expiration. All requests relay through your wallet.
-
-<p align="center">
-  <img src="https://github.com/MichaelLod/byoky/raw/main/.github/screenshots/screenshot-1.png?v=2" alt="Byoky Wallet" width="400" height="1051" />&nbsp;&nbsp;<img src="https://github.com/MichaelLod/byoky/raw/main/.github/screenshots/screenshot-2.png?v=2" alt="Byoky Unlock" width="400" height="1051" />
-</p>
 
 ### How it works
 
