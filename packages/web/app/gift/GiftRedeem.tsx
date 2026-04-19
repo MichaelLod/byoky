@@ -133,15 +133,9 @@ export function GiftRedeem() {
     const onVisibility = () => {
       if (document.hidden) cleanup();
     };
-    // App didn't intercept the scheme — stash the gift URL on the clipboard
-    // so a freshly-installed app can pick it up on first launch (deferred
-    // deep linking), then redirect to the store. Writing only in the
-    // fallback branch means the app-opened path never exposes the bearer
-    // token to other apps on the device.
-    const timer = window.setTimeout(async () => {
+    const timer = window.setTimeout(() => {
       cleanup();
       if (document.hidden) return;
-      try { await navigator.clipboard.writeText(`https://byoky.com/gift/${encoded}`); } catch { /* ignore */ }
       window.location.href = IOS_STORE;
     }, 1500);
     document.addEventListener('visibilitychange', onVisibility);
