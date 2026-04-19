@@ -35,8 +35,7 @@ fun PairContent(wallet: WalletStore, pairService: RelayPairService) {
 
     LaunchedEffect(pendingPairLink) {
         val link = pendingPairLink ?: return@LaunchedEffect
-        val encoded = stripPairLinkPrefix(link)
-        connectWithCode(encoded, pairService, wallet)
+        connectWithCode(link, pairService, wallet)
         wallet.setPendingPairLink(null)
     }
 
@@ -83,11 +82,10 @@ fun PairContent(wallet: WalletStore, pairService: RelayPairService) {
 }
 
 private fun connectWithCode(code: String, pairService: RelayPairService, wallet: WalletStore) {
-    val cleaned = code.trim()
+    val cleaned = stripPairLinkPrefix(code.trim())
     val payload = PairPayload.decode(cleaned)
     if (payload == null) {
         pairService.disconnect()
-        // Set error state
         return
     }
     pairService.connect(payload, wallet)
