@@ -18,7 +18,7 @@ export const metadata: Metadata = {
       {
         url: '/openclaw-og.png',
         width: 1200,
-        height: 541,
+        height: 630,
         alt: 'Run Claude Code, Codex, and Gemini in OpenClaw — with Byoky',
       },
     ],
