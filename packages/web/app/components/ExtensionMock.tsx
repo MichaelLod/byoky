@@ -7,7 +7,9 @@ export type MockScene =
   | 'connect-chat'
   | 'cross-provider'
   | 'mobile-qr'
-  | 'token-gift';
+  | 'token-gift'
+  | 'approval'
+  | 'wallet';
 
 const ICON: Record<string, string> = {
   anthropic: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/anthropic.svg',
@@ -99,11 +101,13 @@ function MockShell({
   badge,
   children,
   overlay,
+  footer,
 }: {
   active: ActiveNav;
   badge?: number;
   children: ReactNode;
   overlay?: ReactNode;
+  footer?: ReactNode;
 }) {
   const items: Array<{ k: ActiveNav; Icon: () => ReactNode }> = [
     { k: 'wallet', Icon: NavWallet },
@@ -134,6 +138,7 @@ function MockShell({
         </nav>
       </div>
       <div className="mock-content">{children}</div>
+      {footer && <div className="mock-footer-pinned">{footer}</div>}
       {overlay}
     </div>
   );
@@ -157,13 +162,9 @@ function CredentialCard({
           <img src={ICON[providerId]} alt="" />
         </div>
         <span className="mock-card-title">{label}</span>
-        <span className="mock-icon-btn" aria-hidden>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 20h9" />
-            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
-          </svg>
+        <span className="mock-card-rm-circle" aria-hidden>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><line x1="5" y1="12" x2="19" y2="12" /></svg>
         </span>
-        <span className="mock-card-rm">Remove</span>
       </div>
       <div className="mock-badges">
         <span className="mock-badge mock-badge-prov">{providerName}</span>
@@ -416,40 +417,112 @@ function WalkthroughScene() {
 /* ── Connect & Chat (cell) ─────────────────────────────────── */
 
 function ConnectChatScene() {
+  const STREAM = "I'd recommend spinach, kale, and an iron supplement with vitamin C for absorption.";
+  const LOOP_MS = 12000;
   const ref = useRef<HTMLDivElement>(null);
-  const step = useStepCycle(ref, 4, 1500);
-  const lines = [
-    'Sure — three quick options:',
-    '1. Stream chunks via fetch()',
-    '2. Use Server-Sent Events',
-    '3. Open a WebSocket relay',
-  ];
+  const chatRef = useRef<HTMLDivElement>(null);
+  const [phase, setPhase] = useState(0);
+  const [streamIdx, setStreamIdx] = useState(0);
+  const [streaming, setStreaming] = useState(false);
+
+  // Phase: 0=idle, 1=user msg, 2=typing, 3=streaming, 4=done
+  useEffect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const d = (fn: () => void, ms: number) => { timers.push(setTimeout(fn, ms)); };
+
+    setPhase(0); setStreamIdx(0); setStreaming(false);
+    d(() => setPhase(1), 1500);
+    d(() => setPhase(2), 2500);
+    d(() => { setPhase(3); setStreaming(true); setStreamIdx(0); }, 3500);
+    d(() => { setPhase(4); setStreaming(false); }, 10000);
+    d(() => { setPhase(0); setStreamIdx(0); }, 11500);
+
+    const interval = setInterval(() => {
+      setPhase(0); setStreamIdx(0); setStreaming(false);
+      d(() => setPhase(1), 1500);
+      d(() => setPhase(2), 2500);
+      d(() => { setPhase(3); setStreaming(true); setStreamIdx(0); }, 3500);
+      d(() => { setPhase(4); setStreaming(false); }, 10000);
+      d(() => { setPhase(0); setStreamIdx(0); }, 11500);
+    }, LOOP_MS);
+
+    return () => { timers.forEach(clearTimeout); clearInterval(interval); };
+  }, []);
+
+  useEffect(() => {
+    if (!streaming) return;
+    if (streamIdx >= STREAM.length) { setStreaming(false); return; }
+    const t = setTimeout(() => {
+      setStreamIdx(i => i + 1);
+      chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight, behavior: 'smooth' });
+    }, 40);
+    return () => clearTimeout(t);
+  }, [streaming, streamIdx]);
+
+  const tokens = ((streamIdx * 3) / 1000).toFixed(1);
 
   return (
     <div ref={ref} className="mock-stage">
-      <MockShell active="connect" badge={1}>
-        <h2 className="mock-page-title">Connected</h2>
-        <div className="mock-card">
+      <MockShell active="connect" badge={1} footer={
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '6px 10px', borderTop: '1px solid var(--mp-border, #e7e5e4)' }}>
+          {phase >= 3 && streaming ? (
+            <>
+              <span style={{ display: 'flex', gap: '2px', alignItems: 'center' }}>
+                <span className="mock-typing-dot" style={{ width: '3px', height: '3px', animationDelay: '0ms' }} />
+                <span className="mock-typing-dot" style={{ width: '3px', height: '3px', animationDelay: '150ms' }} />
+                <span className="mock-typing-dot" style={{ width: '3px', height: '3px', animationDelay: '300ms' }} />
+              </span>
+              <span style={{ fontSize: '8px', color: 'var(--mp-text-3, #a8a29e)', flex: 1, marginLeft: '2px' }}>Streaming via Byoky</span>
+              <span style={{ fontSize: '8px', fontFamily: 'monospace', color: 'var(--mp-text-3, #a8a29e)' }}>{tokens}K</span>
+            </>
+          ) : (
+            <>
+              <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#34d399' }} />
+              <span style={{ fontSize: '8px', color: 'var(--mp-text-3, #a8a29e)', flex: 1, marginLeft: '2px' }}>Connected via Byoky</span>
+              <span style={{ fontSize: '8px', fontFamily: 'monospace', color: 'var(--mp-text-3, #a8a29e)' }}>Claude 4</span>
+            </>
+          )}
+        </div>
+      }>
+        {/* App header */}
+        <div className="mock-card" style={{ marginBottom: '6px' }}>
           <div className="mock-card-row">
             <div className="mock-app-fav">D</div>
             <div className="mock-card-text">
               <div className="mock-card-title">demo.byoky.com</div>
-              <div className="mock-card-sub-tight">streaming · claude-sonnet-4</div>
+              <div className="mock-card-sub-tight">via Claude</div>
             </div>
             <span className="mock-status-dot mock-status-ok" />
           </div>
         </div>
-        <div className="mock-section-label">Live request</div>
-        <div className="mock-chat-mini">
-          <div className="mock-chat-bubble user small">Explain streaming chat.</div>
-          <div className="mock-chat-bubble bot small">
-            {lines.slice(0, step + 1).map((l, i) => (
-              <div key={i}>
-                {l}
-                {i === step && <span className="mock-caret-inline" />}
-              </div>
-            ))}
-          </div>
+
+        {/* Chat area */}
+        <div ref={chatRef} style={{ flex: 1, overflowY: 'auto', scrollbarWidth: 'none', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+          <div className="mock-chat-bubble user small">Analyze my blood work</div>
+          <div className="mock-chat-bubble bot small">Your iron is at 45 µg/dL. B12 looks healthy.</div>
+
+          {phase >= 1 && (
+            <div className="mock-chat-bubble user small" style={{ animation: 'mock-fade-in 0.2s ease-out' }}>
+              What should I eat to improve?
+            </div>
+          )}
+
+          {phase === 2 && (
+            <div className="mock-chat-bubble bot small" style={{ animation: 'mock-fade-in 0.15s ease-out' }}>
+              <span style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
+                <span className="mock-typing-dot" style={{ animationDelay: '0ms' }} />
+                <span className="mock-typing-dot" style={{ animationDelay: '150ms' }} />
+                <span className="mock-typing-dot" style={{ animationDelay: '300ms' }} />
+              </span>
+            </div>
+          )}
+
+          {phase >= 3 && (
+            <div className="mock-chat-bubble bot small" style={{ animation: 'mock-fade-in 0.15s ease-out' }}>
+              {STREAM.slice(0, streamIdx)}
+              {streaming && <span className="mock-caret-inline" />}
+            </div>
+          )}
         </div>
       </MockShell>
     </div>
@@ -732,6 +805,114 @@ function TokenGiftScene() {
   );
 }
 
+/* ── Wallet dashboard (standalone popup) ──────────────────── */
+
+function WalletScene() {
+  return (
+    <div className="mock-stage">
+      <MockShell active="wallet">
+        <div className="mock-page-title-row">
+          <h2 className="mock-page-title">Credentials</h2>
+          <span className="mock-text-link">Lock</span>
+        </div>
+        <CredentialCard
+          providerId="anthropic"
+          providerName="Anthropic"
+          label="My Anthropic key"
+          method="Setup Token"
+          added="4/16/2026"
+        />
+        <CredentialCard
+          providerId="openai"
+          providerName="OpenAI"
+          label="My OpenAI key"
+          method="API Key"
+          added="4/16/2026"
+        />
+        <CredentialCard
+          providerId="gemini"
+          providerName="Google Gemini"
+          label="My Gemini key"
+          method="API Key"
+          added="4/16/2026"
+        />
+        <button className="mock-btn mock-btn-primary" type="button" tabIndex={-1} style={{ width: '100%', marginTop: '8px', opacity: 1 }}>+ Add API Key</button>
+      </MockShell>
+    </div>
+  );
+}
+
+/* ── Approval (standalone popup) ──────────────────────────── */
+
+function ApprovalScene() {
+  const ref = useRef<HTMLDivElement>(null);
+  const step = useStepCycle(ref, 3, 2500);
+  // 0: approval request visible
+  // 1: approve button pressed
+  // 2: connected overlay with blur
+
+  const overlay = step === 2 ? (
+    <div style={{
+      position: 'absolute', inset: 0, zIndex: 10,
+      background: 'rgba(255,255,255,0.7)',
+      backdropFilter: 'blur(4px)',
+      WebkitBackdropFilter: 'blur(4px)',
+      display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center', gap: '6px',
+      animation: 'mock-fade-in 0.2s ease-out',
+    }}>
+      <div style={{
+        width: '36px', height: '36px', borderRadius: '50%',
+        background: 'rgba(34,197,94,0.1)', border: '2px solid #22c55e',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+      </div>
+      <div style={{ fontSize: '14px', fontWeight: 700, color: '#1c1917' }}>Connected!</div>
+      <div style={{ fontSize: '10px', color: '#57534e' }}>demo.byoky.com</div>
+      <div style={{ display: 'flex', gap: '6px', marginTop: '2px' }}>
+        <img src={ICON.anthropic} alt="" style={{ width: '16px', height: '16px' }} />
+        <img src={ICON.openai} alt="" style={{ width: '16px', height: '16px' }} />
+        <img src={ICON.gemini} alt="" style={{ width: '16px', height: '16px' }} />
+      </div>
+    </div>
+  ) : undefined;
+
+  return (
+    <div ref={ref} className="mock-stage">
+      <MockShell active="connect" badge={step === 0 ? 1 : undefined} overlay={overlay} footer={
+        <div style={{ padding: '8px 10px', borderTop: '1px solid var(--mp-border, #e7e5e4)' }}>
+          <div className="mock-approval-actions" style={{ gap: '8px', display: 'flex' }}>
+            <button className="mock-btn mock-btn-secondary" type="button" tabIndex={-1} style={{ flex: 1, padding: '8px', fontSize: '11px' }}>Reject</button>
+            <button className={`mock-btn mock-btn-primary ${step >= 1 ? 'pressed' : ''}`} type="button" tabIndex={-1} style={{ flex: 1, padding: '8px', fontSize: '11px' }}>Approve</button>
+          </div>
+          <div className="mock-approval-full" style={{ marginTop: '6px', textAlign: 'center' }}>https://demo.byoky.com</div>
+        </div>
+      }>
+        <h2 className="mock-page-title">Connection Request</h2>
+        <div className="mock-approval-card">
+          <div className="mock-approval-icon">D</div>
+          <div className="mock-approval-origin">demo.byoky.com</div>
+          <div className="mock-approval-subtitle">wants to connect to your wallet</div>
+        </div>
+        <div className="mock-approval-section">
+          <div className="mock-approval-section-label">Requesting access to:</div>
+          <div className="mock-approval-list">
+            <ApprovalRow providerId="anthropic" providerName="Anthropic" state="ok" />
+            <ApprovalRow providerId="openai" providerName="OpenAI" state="ok" />
+            <ApprovalRow providerId="gemini" providerName="Google Gemini" state="ok" />
+            <ApprovalRow providerId="groq" providerName="Groq" state="missing" />
+          </div>
+        </div>
+        <label className="mock-trust">
+          <span className="mock-checkbox" />
+          <span>Trust this site (auto-approve future connections)</span>
+        </label>
+      </MockShell>
+    </div>
+  );
+}
+
 /* ── Public component ───────────────────────────────────────── */
 
 export function ExtensionMock({
@@ -748,6 +929,8 @@ export function ExtensionMock({
       {scene === 'cross-provider' && <CrossProviderScene />}
       {scene === 'mobile-qr' && <MobileQRScene />}
       {scene === 'token-gift' && <TokenGiftScene />}
+      {scene === 'approval' && <ApprovalScene />}
+      {scene === 'wallet' && <WalletScene />}
     </div>
   );
 }

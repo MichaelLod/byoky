@@ -20,26 +20,12 @@ export default function Home() {
       <div className="divider" />
       <AppsShowcase />
       <div className="divider" />
-      <ForDevelopers />
-      <div className="divider" />
-      <ZeroCost />
-      <div className="divider" />
-      <Showcase />
-      <div className="divider" />
       <HowItWorks />
-      <div className="divider" />
       <Providers />
       <div className="divider" />
-      <Security />
+      <ForDevelopers />
       <div className="divider" />
-      <section className="side-by-side-section">
-        <div className="container">
-          <div className="side-by-side-grid">
-            <CrossProviderRouting />
-            <MobileWallet />
-          </div>
-        </div>
-      </section>
+      <Security />
       <div className="divider" />
       <ClosingStrip />
       <Footer />
@@ -146,7 +132,29 @@ function HowItWorks() {
     <section className="steps-section">
       <div className="container">
         <FadeIn>
-          <h2>How it works</h2>
+          <h2>Install once. Use everywhere.</h2>
+          <div style={{ display: 'flex', gap: '20px', justifyContent: 'center', alignItems: 'center', marginBottom: '24px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 500 }}>
+              <svg width="18" height="18" viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="#fff" stroke="#ddd" strokeWidth="1"/><path d="M24 8a16 16 0 0 1 13.86 8H24v0z" fill="#EA4335"/><path d="M37.86 16A16 16 0 0 1 24 40l6.93-12z" fill="#FBBC05"/><path d="M24 40A16 16 0 0 1 10.14 16l6.93 12z" fill="#34A853"/><path d="M10.14 16A16 16 0 0 1 24 8v8z" fill="#4285F4"/><circle cx="24" cy="24" r="6" fill="#fff"/><circle cx="24" cy="24" r="4" fill="#4285F4"/></svg>
+              Chrome
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 500 }}>
+              <svg width="18" height="18" viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="#fff" stroke="#ddd" strokeWidth="1"/><path d="M38 18c-1-4-4-7-8-9 2 2 3 5 3 7 0 3-2 6-5 7-4 1-7-1-7-1s1 5 6 6c4 1 8-1 10-4 1-1 1-3 1-6z" fill="#FF4F00"/><path d="M14 30c-1-3 0-6 2-9 1-2 3-3 5-4-2 2-3 4-2 7 0 2 2 4 4 5 3 1 6 0 7-2-1 3-4 6-8 6-3 1-6-1-8-3z" fill="#FF9500"/></svg>
+              Firefox
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 500 }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="#999"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+              iOS
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 500 }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="#3DDC84"><path d="M17.523 15.341a.91.91 0 0 0 .916-.907V9.478a.91.91 0 0 0-.916-.907.91.91 0 0 0-.917.907v4.956a.91.91 0 0 0 .917.907zm-11.046 0a.91.91 0 0 0 .917-.907V9.478a.91.91 0 0 0-.917-.907.91.91 0 0 0-.916.907v4.956a.91.91 0 0 0 .916.907zm1.48 5.178c0 .504.41.912.916.912h.95v2.66a.91.91 0 0 0 .916.909.91.91 0 0 0 .917-.908v-2.66h1.688v2.66a.91.91 0 0 0 .916.909.91.91 0 0 0 .917-.908v-2.66h.95a.914.914 0 0 0 .916-.913V8.879H7.957v11.64zM15.4 3.11l1.124-1.727a.235.235 0 0 0-.073-.324.237.237 0 0 0-.326.072l-1.14 1.75A6.813 6.813 0 0 0 12 2.321c-1.07 0-2.08.195-3.003.56L7.857 1.13a.236.236 0 0 0-.325-.072.235.235 0 0 0-.073.324L8.583 3.11C6.572 4.12 5.204 6.071 5.204 8.338h13.592c0-2.267-1.368-4.219-3.396-5.228z"/></svg>
+              Android
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 500 }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#999" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+              Web
+            </div>
+          </div>
         </FadeIn>
         <div className="steps-grid">
           <FadeIn delay={0.1}>
@@ -156,34 +164,42 @@ function HowItWorks() {
               </div>
               <h3>Install the wallet</h3>
               <p>
-                Add the Byoky extension to Chrome or Firefox — or
-                grab the iOS or Android app. Set a master password to
-                encrypt your vault.
+                Add the Byoky extension to Chrome or Firefox, or
+                grab the iOS or Android app.
               </p>
+              <div className="step-mock-wrap">
+                <ExtensionMock scene="wallet" size="cell" />
+              </div>
             </div>
           </FadeIn>
           <FadeIn delay={0.2}>
-            <div className="step">
-              <div className="step-number">
-                <KeyIcon />
-              </div>
-              <h3>Add your keys</h3>
-              <p>
-                Paste API keys or add a Claude setup token. Everything is
-                encrypted locally with AES-256-GCM. Multiple keys per provider.
-              </p>
-            </div>
-          </FadeIn>
-          <FadeIn delay={0.3}>
             <div className="step">
               <div className="step-number">
                 <LinkIcon />
               </div>
               <h3>Connect to any app</h3>
               <p>
-                Visit any Byoky-enabled app. Approve access in one click. Your
-                keys stay in the vault — always.
+                Visit any Byoky-enabled app. Approve access in one click.
+                Keys never leave your device.
               </p>
+              <div className="step-mock-wrap">
+                <ExtensionMock scene="approval" size="cell" />
+              </div>
+            </div>
+          </FadeIn>
+          <FadeIn delay={0.3}>
+            <div className="step">
+              <div className="step-number">
+                <CheckIcon />
+              </div>
+              <h3>AI just works</h3>
+              <p>
+                Your keys are proxied securely. Switch models or providers
+                anytime. The app never sees your credentials.
+              </p>
+              <div className="step-mock-wrap">
+                <ExtensionMock scene="connect-chat" size="cell" />
+              </div>
             </div>
           </FadeIn>
         </div>
@@ -446,7 +462,7 @@ function ForDevelopers() {
     <section className="dev-section">
       <div className="container">
         <FadeIn>
-          <h2>Two lines of code. Full AI power.</h2>
+          <h2>Build AI apps.<br />Your users bring the keys.</h2>
           <p className="subtitle">
             Integrate with any AI provider using their native SDK.
             Just swap in Byoky&apos;s fetch — keys never touch your app.
@@ -568,104 +584,34 @@ function CodeBlock() {
 /* ─── Security ─────────────────────────────────── */
 
 function Security() {
+  const items = [
+    { icon: <LockIcon />, title: 'AES-256-GCM', desc: 'PBKDF2 600K iterations. Web Crypto API.' },
+    { icon: <ShieldIcon />, title: 'Zero key exposure', desc: 'Keys never leave your device. Apps get session tokens.' },
+    { icon: <EyeIcon />, title: 'Full audit log', desc: 'Every request logged with origin, provider, and status.' },
+    { icon: <GaugeIcon />, title: 'Spending caps', desc: 'Token allowances per app. Proxy enforces limits.' },
+    { icon: <GiftIcon />, title: 'Relay gifting', desc: 'Share tokens without sharing keys. Budget-capped.' },
+    { icon: <CloudOffIcon />, title: 'Local by default', desc: 'Opt-in cloud sync. No telemetry. No logging.' },
+  ];
+
   return (
     <section className="security-section">
       <div className="container">
         <FadeIn>
-          <h2>Built for paranoia.</h2>
-          <p className="subtitle">
-            Security isn&apos;t a feature — it&apos;s the entire point.
-          </p>
+          <h2>Security isn&apos;t a feature. It&apos;s the architecture.</h2>
         </FadeIn>
-        <div className="security-grid">
-          <FadeIn delay={0.05}>
-            <div className="security-card">
-              <div className="security-icon">
-                <LockIcon />
+        <FadeIn delay={0.1}>
+          <div className="security-strip">
+            {items.map((item) => (
+              <div key={item.title} className="security-strip-item">
+                <div className="security-strip-icon">{item.icon}</div>
+                <div>
+                  <div className="security-strip-title">{item.title}</div>
+                  <div className="security-strip-desc">{item.desc}</div>
+                </div>
               </div>
-              <h3>AES-256-GCM encryption</h3>
-              <p>
-                Keys encrypted with PBKDF2 (600K iterations). 12-character minimum
-                with real-time strength meter. Web Crypto API — no dependencies.
-              </p>
-            </div>
-          </FadeIn>
-          <FadeIn delay={0.1}>
-            <div className="security-card">
-              <div className="security-icon">
-                <ShieldIcon />
-              </div>
-              <h3>Zero key exposure</h3>
-              <p>
-                API keys never leave the extension process. Apps receive
-                temporary session tokens. The extension proxies every request.
-              </p>
-            </div>
-          </FadeIn>
-          <FadeIn delay={0.15}>
-            <div className="security-card">
-              <div className="security-icon">
-                <EyeIcon />
-              </div>
-              <h3>Full audit log</h3>
-              <p>
-                Every API request is logged with the app origin, provider,
-                status, and timestamp. Complete visibility into credential usage.
-              </p>
-            </div>
-          </FadeIn>
-          <FadeIn delay={0.17}>
-            <div className="security-card">
-              <div className="security-icon">
-                <GaugeIcon />
-              </div>
-              <h3>Spending caps</h3>
-              <p>
-                Set token allowances per app — total or per provider.
-                The proxy enforces limits so no app can overspend.
-              </p>
-            </div>
-          </FadeIn>
-          <FadeIn delay={0.19}>
-            <div className="security-card">
-              <div className="security-icon">
-                <GiftIcon />
-              </div>
-              <h3>Relay-backed gifting</h3>
-              <p>
-                Share token access with anyone — your API key stays in your wallet.
-                Requests relay through you. Budget-capped with instant revocation.
-              </p>
-            </div>
-          </FadeIn>
-          <FadeIn delay={0.2}>
-            <div className="security-card">
-              <div className="security-icon">
-                <ArchiveIcon />
-              </div>
-              <h3>Encrypted vault backup</h3>
-              <p>
-                Export your vault as an encrypted .byoky file with a separate
-                backup password. Import on any device.
-              </p>
-            </div>
-          </FadeIn>
-          <FadeIn delay={0.25}>
-            <div className="security-card">
-              <div className="security-icon">
-                <CloudOffIcon />
-              </div>
-              <h3>Local by default</h3>
-              <p>
-                Your keys stay on your device, encrypted behind your master
-                password. Cloud sync is opt-in; keys are encrypted client-side
-                before upload — plaintext never crosses the network — and
-                stored as ciphertext in our database. No telemetry, no prompt
-                or response logging.
-              </p>
-            </div>
-          </FadeIn>
-        </div>
+            ))}
+          </div>
+        </FadeIn>
       </div>
     </section>
   );

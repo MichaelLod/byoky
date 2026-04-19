@@ -46,40 +46,14 @@ export function InstallWithAI() {
   };
 
   return (
-    <div className="oc-ai-cta">
-      <div className="oc-ai-cta-text">
-        <div className="oc-ai-cta-title">
-          <span className="oc-ai-cta-spark" aria-hidden>✦</span>
-          Install with AI
-        </div>
-        <div className="oc-ai-cta-subtitle">
-          Copy a ready-made prompt, paste it into Claude Code, Codex, Cursor,
-          or OpenClaw itself, and let the assistant run the bridge + plugin
-          install for you.
-        </div>
-      </div>
-      <button
-        type="button"
-        className={`oc-ai-cta-btn ${copied ? 'copied' : ''}`}
-        onClick={copy}
-      >
-        {copied ? (
-          <>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            Copied
-          </>
-        ) : (
-          <>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" strokeWidth="2" />
-              <path d="M5 15V5a2 2 0 0 1 2-2h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-            </svg>
-            Copy install prompt
-          </>
-        )}
-      </button>
-    </div>
+    <button
+      type="button"
+      className="btn"
+      onClick={copy}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', background: '#1c1917', color: '#fff', border: 'none', minWidth: '220px', justifyContent: 'center' }}
+    >
+      <span style={{ fontSize: '14px' }}>✦</span>
+      {copied ? 'Copied!' : 'Copy AI install prompt'}
+    </button>
   );
 }

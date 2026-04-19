@@ -59,12 +59,12 @@ export function Navbar() {
           Byoky
         </a>
         <div className="navbar-links">
-          <a href="/">Home</a>
-          <a href="/docs">Docs</a>
-          <a href="/openclaw">OpenClaw</a>
-          <a href="/demo">Demo</a>
-          <a href="/token-pool">Token Pool</a>
-          <a href="/blog">Blog</a>
+          <a href="/" className={pathname === '/' ? 'nav-active' : ''}>Home</a>
+          <a href="/token-pool" className={pathname.startsWith('/token-pool') || pathname.startsWith('/marketplace') ? 'nav-active' : ''}>Token Pool</a>
+          <a href="/demo" className={pathname.startsWith('/demo') ? 'nav-active' : ''}>Demo</a>
+          <a href="/openclaw" className={pathname.startsWith('/openclaw') ? 'nav-active' : ''}>OpenClaw</a>
+          <a href="/blog" className={pathname.startsWith('/blog') ? 'nav-active' : ''}>Blog</a>
+          <a href="/docs" className={pathname.startsWith('/docs') ? 'nav-active' : ''}>Docs</a>
         </div>
         <div className="navbar-right">
           <a
