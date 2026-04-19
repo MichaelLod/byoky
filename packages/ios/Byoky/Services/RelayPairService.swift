@@ -181,11 +181,12 @@ final class RelayPairService: ObservableObject {
             handleRelayRequest(json)
 
         case "relay:peer:status":
-            if json["online"] as? Bool == false, case .paired = status {
-                pairedOrigin = nil
-                status = .idle
-                requestCount = 0
-            }
+            // Don't reset the session on offline — the web side may be mid-
+            // refresh. The relay keeps the room alive for 5 min of idle, and
+            // the browser rejoins with the same authToken on page load.
+            // Tearing paired state down here caused the first request after
+            // a refresh to hang because handleRelayRequest guards on .paired.
+            break
 
         default:
             break
