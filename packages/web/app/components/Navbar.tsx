@@ -31,6 +31,7 @@ const installOptions = [
 export function Navbar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [embedded, setEmbedded] = useState(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -49,7 +50,18 @@ export function Navbar() {
     if (window.self !== window.top || w.__byokyBridge) setEmbedded(true);
   }, []);
 
+  useEffect(() => { setMobileOpen(false); }, [pathname]);
+
   if (pathname === '/chat' || embedded) return null;
+
+  const navLinks: Array<{ href: string; label: string; match: (p: string) => boolean }> = [
+    { href: '/', label: 'Home', match: (p) => p === '/' },
+    { href: '/token-pool', label: 'Token Pool', match: (p) => p.startsWith('/token-pool') || p.startsWith('/marketplace') },
+    { href: '/demo', label: 'Demo', match: (p) => p.startsWith('/demo') },
+    { href: '/openclaw', label: 'OpenClaw', match: (p) => p.startsWith('/openclaw') },
+    { href: '/blog', label: 'Blog', match: (p) => p.startsWith('/blog') },
+    { href: '/docs', label: 'Docs', match: (p) => p.startsWith('/docs') },
+  ];
 
   return (
     <nav className="navbar">
@@ -59,14 +71,26 @@ export function Navbar() {
           Byoky
         </a>
         <div className="navbar-links">
-          <a href="/" className={pathname === '/' ? 'nav-active' : ''}>Home</a>
-          <a href="/token-pool" className={pathname.startsWith('/token-pool') || pathname.startsWith('/marketplace') ? 'nav-active' : ''}>Token Pool</a>
-          <a href="/demo" className={pathname.startsWith('/demo') ? 'nav-active' : ''}>Demo</a>
-          <a href="/openclaw" className={pathname.startsWith('/openclaw') ? 'nav-active' : ''}>OpenClaw</a>
-          <a href="/blog" className={pathname.startsWith('/blog') ? 'nav-active' : ''}>Blog</a>
-          <a href="/docs" className={pathname.startsWith('/docs') ? 'nav-active' : ''}>Docs</a>
+          {navLinks.map((l) => (
+            <a key={l.href} href={l.href} className={l.match(pathname) ? 'nav-active' : ''}>{l.label}</a>
+          ))}
         </div>
         <div className="navbar-right">
+          <button
+            type="button"
+            className="navbar-menu-btn"
+            aria-label="Menu"
+            aria-expanded={mobileOpen}
+            onClick={() => setMobileOpen((v) => !v)}
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              {mobileOpen ? (
+                <><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></>
+              ) : (
+                <><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></>
+              )}
+            </svg>
+          </button>
           <a
             href="https://github.com/MichaelLod/byoky"
             className="navbar-icon"
@@ -106,6 +130,20 @@ export function Navbar() {
           </div>
         </div>
       </div>
+      {mobileOpen && (
+        <div className="navbar-mobile-menu">
+          {navLinks.map((l) => (
+            <a
+              key={l.href}
+              href={l.href}
+              className={l.match(pathname) ? 'nav-active' : ''}
+              onClick={() => setMobileOpen(false)}
+            >
+              {l.label}
+            </a>
+          ))}
+        </div>
+      )}
     </nav>
   );
 }

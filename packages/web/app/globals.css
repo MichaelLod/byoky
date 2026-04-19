@@ -310,6 +310,29 @@ section {
   color: var(--text);
 }
 
+.navbar-menu-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s;
+}
+
+.navbar-menu-btn:hover {
+  color: var(--text);
+  background: var(--bg-elevated);
+}
+
+.navbar-mobile-menu {
+  display: none;
+}
+
 /* =============================================
    Hero Section
    ============================================= */
@@ -2339,6 +2362,40 @@ section {
 
   .navbar-links {
     display: none;
+  }
+
+  .navbar-menu-btn {
+    display: inline-flex;
+  }
+
+  .navbar-mobile-menu {
+    display: flex;
+    flex-direction: column;
+    padding: 8px 24px 16px;
+    gap: 2px;
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .navbar-mobile-menu a {
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    padding: 12px 8px;
+    border-radius: 6px;
+    transition: color 0.15s, background 0.15s;
+  }
+
+  .navbar-mobile-menu a:hover {
+    color: var(--text);
+    background: var(--bg-elevated);
+  }
+
+  .navbar-mobile-menu a.nav-active {
+    color: #FF4F00;
+    font-weight: 600;
   }
 
   .built-with-hero h1 {
