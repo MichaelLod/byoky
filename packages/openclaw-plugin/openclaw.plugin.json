@@ -2,6 +2,7 @@
   "id": "byoky",
   "enabledByDefault": false,
   "providers": [
+    "byoky",
     "byoky-anthropic",
     "byoky-openai",
     "byoky-gemini",

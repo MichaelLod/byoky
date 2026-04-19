@@ -151,16 +151,23 @@ function getManifestLocations(): ManifestLocation[] {
   return [];
 }
 
-export function install(extensionId?: string): void {
-  const hostPath = getHostPath();
+export interface RegisterResult {
+  browsers: string[];
+  unsupported?: boolean;
+}
+
+export interface RegistrationStatus {
+  registered: string[];
+  missing: string[];
+}
+
+/** Programmatic install — returns registered browser names, no stdout. */
+export function registerHost(extensionId?: string): RegisterResult {
   const locations = getManifestLocations();
+  if (locations.length === 0) return { browsers: [], unsupported: true };
 
-  if (locations.length === 0) {
-    console.error('Unsupported platform');
-    process.exit(1);
-  }
-
-  let installed = 0;
+  const hostPath = getHostPath();
+  const browsers: string[] = [];
 
   for (const loc of locations) {
     try {
@@ -169,15 +176,40 @@ export function install(extensionId?: string): void {
       const wrapperPath = createNativeWrapper(hostPath, manifestDir);
       const manifest = buildManifest(wrapperPath, loc.type, extensionId);
       writeFileSync(loc.path, JSON.stringify(manifest, null, 2));
-      console.log(`  Registered with ${loc.browser}`);
-      installed++;
+      browsers.push(loc.browser);
     } catch {
       // Browser not installed, skip
     }
   }
 
-  if (installed > 0) {
-    console.log(`\nByoky Bridge installed for ${installed} browser(s).`);
+  return { browsers };
+}
+
+/** Programmatic status check — returns which browsers have the host registered. */
+export function getRegistrationStatus(): RegistrationStatus {
+  const locations = getManifestLocations();
+  const registered: string[] = [];
+  const missing: string[] = [];
+  for (const loc of locations) {
+    (existsSync(loc.path) ? registered : missing).push(loc.browser);
+  }
+  return { registered, missing };
+}
+
+export function install(extensionId?: string): void {
+  const result = registerHost(extensionId);
+
+  if (result.unsupported) {
+    console.error('Unsupported platform');
+    process.exit(1);
+  }
+
+  for (const browser of result.browsers) {
+    console.log(`  Registered with ${browser}`);
+  }
+
+  if (result.browsers.length > 0) {
+    console.log(`\nByoky Bridge installed for ${result.browsers.length} browser(s).`);
     console.log('Restart your browser for changes to take effect.');
   } else {
     console.error('No supported browsers found.');
@@ -202,11 +234,11 @@ export function uninstall(): void {
 }
 
 export function status(): void {
-  const locations = getManifestLocations();
-
-  for (const loc of locations) {
-    const exists = existsSync(loc.path);
-    const icon = exists ? '\u2713' : '\u2717';
-    console.log(`  ${icon} ${loc.browser}: ${exists ? 'registered' : 'not registered'}`);
+  const { registered, missing } = getRegistrationStatus();
+  for (const browser of registered) {
+    console.log(`  \u2713 ${browser}: registered`);
+  }
+  for (const browser of missing) {
+    console.log(`  \u2717 ${browser}: not registered`);
   }
 }

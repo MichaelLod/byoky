@@ -146,6 +146,10 @@ importers:
       typescript:
         specifier: ^5.5.0
         version: 5.9.3
+    optionalDependencies:
+      '@byoky/bridge':
+        specifier: workspace:*
+        version: link:../bridge
 
   packages/relay:
     dependencies:

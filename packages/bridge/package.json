@@ -4,6 +4,13 @@
   "description": "Native messaging bridge for Byoky — routes setup token requests through Claude Code CLI",
   "type": "module",
   "main": "dist/host.js",
+  "exports": {
+    ".": "./dist/host.js",
+    "./installer": {
+      "types": "./dist/installer.d.ts",
+      "import": "./dist/installer.js"
+    }
+  },
   "bin": {
     "byoky-bridge": "./bin/byoky-bridge.js"
   },
