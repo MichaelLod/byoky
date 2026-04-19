@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, Fragment } from 'react';
+import { useState, useEffect, useMemo, useRef, Fragment } from 'react';
 import type { ByokySession } from '@byoky/sdk';
 
 interface Message {
@@ -257,16 +257,23 @@ export function Chat({ session, initialProvider }: Props) {
 
   const supportsVision = visionProviders.has(selectedProvider);
 
+  const availableProviderIds = useMemo(
+    () => providerIds.filter(id => session.providers[id]?.available === true),
+    [session.providers],
+  );
+
   useEffect(() => {
     const el = chatMessagesRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
   useEffect(() => {
-    if (selectedProvider) return;
-    const firstDirect = providerIds.find(id => session.providers[id]?.available === true);
-    setSelectedProvider(firstDirect ?? providerIds[0]);
-  }, [session.providers, selectedProvider]);
+    // Keep the selection in sync with what's actually usable. Drop a stale
+    // choice when its key disappears (e.g. relay → vault handoff drops
+    // providers the vault can't serve).
+    if (selectedProvider && availableProviderIds.includes(selectedProvider)) return;
+    setSelectedProvider(availableProviderIds[0] ?? '');
+  }, [availableProviderIds, selectedProvider]);
 
   useEffect(() => {
     if (initialProvider && providers[initialProvider]) {
@@ -481,7 +488,10 @@ export function Chat({ session, initialProvider }: Props) {
         <div className="provider-select">
           <label>Provider:</label>
           <select value={selectedProvider} onChange={e => setSelectedProvider(e.target.value)}>
-            {providerIds.map(id => (
+            {availableProviderIds.length === 0 && (
+              <option value="" disabled>No keys in wallet</option>
+            )}
+            {availableProviderIds.map(id => (
               <option key={id} value={id}>
                 {getProviderLabel(id)}
               </option>
@@ -582,7 +592,7 @@ export function Chat({ session, initialProvider }: Props) {
           disabled={loading}
           autoFocus
         />
-        <button type="submit" className="btn btn-primary" disabled={loading || (!input.trim() && !attachedImage)}>Send</button>
+        <button type="submit" className="btn btn-primary" disabled={loading || !selectedProvider || (!input.trim() && !attachedImage)}>Send</button>
       </form>
     </div>
   );
