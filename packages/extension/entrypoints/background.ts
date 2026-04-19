@@ -5291,9 +5291,20 @@ export default defineBackground(() => {
     periodInMinutes: 4,
     delayInMinutes: 0,
   });
+
+  // Wake the SW every minute to re-open any relay WS that MV3 idle-killed,
+  // so recipients don't see "sender offline" for most of each 4-min cycle.
+  const RELAY_RECONNECT_ALARM = 'byoky:relay-reconnect';
+  browser.alarms.create(RELAY_RECONNECT_ALARM, {
+    periodInMinutes: 1,
+    delayInMinutes: 0,
+  });
+
   browser.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === MARKETPLACE_HEARTBEAT_ALARM) {
       runMarketplaceHeartbeat().catch(() => {});
+    } else if (alarm.name === RELAY_RECONNECT_ALARM) {
+      reconnectGiftRelays().catch(() => {});
     }
   });
   // Fire once on startup so gifts flip to online without waiting 4 min.
