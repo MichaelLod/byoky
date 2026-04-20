@@ -302,7 +302,7 @@ export default defineBackground(() => {
         const ALLOWED_CONTENT_ACTIONS = ['startBridgeProxy', 'checkBridge', 'startOAuth', 'stagePendingGift'];
         if (!ALLOWED_CONTENT_ACTIONS.includes((message as { action: string }).action)) return;
       }
-      return handleInternal(message as { action: string; payload?: unknown });
+      return handleInternal(message as { action: string; payload?: unknown }, senderInfo);
     }
   });
 
@@ -1205,10 +1205,10 @@ export default defineBackground(() => {
     };
   }
 
-  async function handleInternal(message: {
-    action: string;
-    payload?: unknown;
-  }): Promise<unknown> {
+  async function handleInternal(
+    message: { action: string; payload?: unknown },
+    sender?: Runtime.MessageSender,
+  ): Promise<unknown> {
     switch (message.action) {
       case 'unlock': {
         if (Date.now() < unlockLockedUntil) {
@@ -1771,6 +1771,7 @@ export default defineBackground(() => {
           type: 'BYOKY_INTERNAL',
           action: 'giftStaged',
         }).catch(() => {});
+        openWalletUI(sender?.tab?.id);
         return { ok: true };
       }
 
