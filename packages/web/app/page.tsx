@@ -205,16 +205,7 @@ function Hero() {
           </div>
           <div className="hero-rollout">
             <strong>v0.7.4 rollout:</strong>{' '}
-            <span className="hero-rollout-live">Firefox live</span>
-            {' · '}
-            Chrome in review —{' '}
-            <a
-              href="https://github.com/MichaelLod/byoky/blob/main/INSTALL.md#chrome-install-from-source"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              build from source &amp; load unpacked
-            </a>
+            <span className="hero-rollout-live">Chrome, Firefox, iOS &amp; Android all live</span>
           </div>
         </FadeIn>
         <FadeIn delay={0.35}>

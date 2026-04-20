@@ -4,9 +4,8 @@
   "platforms": [
     {
       "platform": "Chrome",
-      "version": "0.5.4",
-      "status": "live",
-      "pending": "0.7.4"
+      "version": "0.7.4",
+      "status": "live"
     },
     {
       "platform": "Firefox",
@@ -15,9 +14,8 @@
     },
     {
       "platform": "iOS",
-      "version": "1.0.17",
-      "status": "live",
-      "pending": "1.0.18"
+      "version": "1.0.18",
+      "status": "live"
     },
     {
       "platform": "Android",
@@ -30,5 +28,5 @@
       "status": "live"
     }
   ],
-  "generatedAt": "2026-04-19T19:36:01.385Z"
+  "generatedAt": "2026-04-20T11:08:29.737Z"
 }
