@@ -7,7 +7,6 @@ import { AddCredential } from './pages/AddCredential';
 import { Connect } from './pages/Connect';
 import { ConnectedApps } from './pages/ConnectedApps';
 import { ApprovalRequest } from './pages/ApprovalRequest';
-import { Usage } from './pages/Usage';
 import { RequestHistory } from './pages/RequestHistory';
 import { Settings } from './pages/Settings';
 import { Gifts } from './pages/Gifts';
@@ -136,17 +135,6 @@ export default function App() {
               )}
             </button>
             <button
-              className={currentPage === 'usage' ? 'active' : ''}
-              onClick={() => useWalletStore.getState().navigate('usage')}
-              title="Usage"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18 20V10" />
-                <path d="M12 20V4" />
-                <path d="M6 20v-6" />
-              </svg>
-            </button>
-            <button
               className={currentPage === 'settings' ? 'active' : ''}
               onClick={() => useWalletStore.getState().navigate('settings')}
               title="Settings"
@@ -167,7 +155,6 @@ export default function App() {
           {currentPage === 'connect' && <Connect />}
           {currentPage === 'connected-apps' && <ConnectedApps />}
           {currentPage === 'approval' && <ApprovalRequest />}
-          {currentPage === 'usage' && <Usage />}
           {currentPage === 'request-history' && <RequestHistory />}
           {currentPage === 'settings' && <Settings />}
           {currentPage === 'gifts' && <Gifts />}

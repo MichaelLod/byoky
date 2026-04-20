@@ -91,9 +91,11 @@ body:has(.chat-app) > nav { display: none; }
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 12px 0;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  flex-wrap: wrap;
 }
 
 .chat-app .provider-select {
@@ -102,7 +104,12 @@ body:has(.chat-app) > nav { display: none; }
   gap: 8px;
   font-size: 13px;
   color: var(--text-secondary);
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: wrap;
 }
+
+.chat-app .provider-select label { flex-shrink: 0; }
 
 .chat-app .provider-select select {
   background: var(--bg-card);
@@ -112,12 +119,16 @@ body:has(.chat-app) > nav { display: none; }
   padding: 6px 10px;
   font-family: var(--font-sans);
   font-size: 13px;
+  min-width: 0;
+  max-width: 100%;
+  flex: 0 1 auto;
 }
 
 .chat-app .header-actions {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .chat-app .btn-ghost {

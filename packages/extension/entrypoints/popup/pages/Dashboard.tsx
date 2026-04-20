@@ -7,6 +7,8 @@ import {
   giftBudgetPercent,
   type RequestLogEntry,
   type CredentialMeta,
+  type Gift,
+  type GiftedCredential,
 } from '@byoky/core';
 import { OfflineUpgradeBanner } from '../components/OfflineUpgradeBanner';
 import { ProviderIcon } from '../components/ProviderIcon';
@@ -26,16 +28,23 @@ function formatExpiry(ms: number): string {
   return `${hours}h`;
 }
 
+function formatHostname(origin: string): string {
+  try {
+    return new URL(origin).hostname;
+  } catch {
+    return origin;
+  }
+}
+
 interface ProviderUsage {
   requests: number;
   inputTokens: number;
   outputTokens: number;
 }
 
-// Aggregate the last 7 days of successful requests per provider. Per-credential
-// granularity isn't possible (request log only carries providerId, not a
-// credentialId), so multiple credentials of the same provider share these
-// numbers — acceptable for an at-a-glance card.
+// Aggregate last 7 days of successful requests per provider. Per-credential
+// granularity isn't possible (request log carries providerId only), so
+// multiple credentials of the same provider share these numbers.
 function computeUsageByProvider(log: RequestLogEntry[]): Map<string, ProviderUsage> {
   const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
   const byProvider = new Map<string, ProviderUsage>();
@@ -51,9 +60,13 @@ function computeUsageByProvider(log: RequestLogEntry[]): Map<string, ProviderUsa
   return byProvider;
 }
 
+type StatsTarget =
+  | { kind: 'credential'; credentialId: string }
+  | { kind: 'gift'; giftedId: string };
+
 export function Dashboard() {
   const {
-    credentials, giftedCredentials, giftPreferences, giftPeerOnline, requestLog,
+    credentials, gifts, giftedCredentials, giftPreferences, giftPeerOnline, requestLog,
     navigate, lock, removeCredential, removeGiftedCredential,
     setGiftPreference, cloudVaultEnabled, disableCloudVault,
   } = useWalletStore();
@@ -61,12 +74,18 @@ export function Dashboard() {
   const ownProviderIds = new Set(credentials.map((c) => c.providerId));
   const hasAny = credentials.length > 0 || activeGifts.length > 0;
   const usageByProvider = useMemo(() => computeUsageByProvider(requestLog), [requestLog]);
+  const giftedByCredential = useMemo(() => {
+    const map = new Map<string, { count: number; used: number }>();
+    for (const g of gifts) {
+      const entry = map.get(g.credentialId) ?? { count: 0, used: 0 };
+      entry.count++;
+      entry.used += g.usedTokens;
+      map.set(g.credentialId, entry);
+    }
+    return map;
+  }, [gifts]);
 
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-
-  function toggleExpand(id: string) {
-    setExpandedId((prev) => (prev === id ? null : id));
-  }
+  const [stats, setStats] = useState<StatsTarget | null>(null);
 
   return (
     <div>
@@ -109,8 +128,8 @@ export function Dashboard() {
               key={cred.id}
               cred={cred}
               usage={usageByProvider.get(cred.providerId)}
-              expanded={expandedId === cred.id}
-              onToggle={() => toggleExpand(cred.id)}
+              gifted={giftedByCredential.get(cred.id)}
+              onOpenStats={() => setStats({ kind: 'credential', credentialId: cred.id })}
               onRemove={() => removeCredential(cred.id)}
             />
           ))}
@@ -132,7 +151,19 @@ export function Dashboard() {
                 ? 'Sender offline — gift will fail until sender reconnects'
                 : 'Checking sender status…';
             return (
-              <div key={gc.id} className="card gift-card">
+              <div
+                key={gc.id}
+                className="card gift-card tappable"
+                role="button"
+                tabIndex={0}
+                onClick={() => setStats({ kind: 'gift', giftedId: gc.id })}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setStats({ kind: 'gift', giftedId: gc.id });
+                  }
+                }}
+              >
                 <div className="card-header">
                   <div className="credential-card-heading">
                     <div className="provider-icon-box provider-icon-box-sm">
@@ -143,12 +174,14 @@ export function Dashboard() {
                       {gc.providerName}
                     </span>
                   </div>
-                  <button
-                    className="btn btn-danger btn-sm"
-                    onClick={() => removeGiftedCredential(gc.id)}
-                  >
-                    Remove
-                  </button>
+                  <div className="card-actions" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      className="btn btn-danger btn-sm"
+                      onClick={() => removeGiftedCredential(gc.id)}
+                    >
+                      Remove
+                    </button>
+                  </div>
                 </div>
                 <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
                   <span className="badge badge-provider">
@@ -169,7 +202,10 @@ export function Dashboard() {
                   </div>
                 </div>
                 {hasOwnKey && (
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px', cursor: 'pointer', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                  <label
+                    style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px', cursor: 'pointer', fontSize: '12px', color: 'var(--text-secondary)' }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <input
                       type="checkbox"
                       checked={isPreferred}
@@ -187,6 +223,18 @@ export function Dashboard() {
           })}
         </>
       )}
+
+      {stats && (
+        <StatsSheet
+          target={stats}
+          credentials={credentials}
+          gifts={gifts}
+          giftedCredentials={giftedCredentials}
+          requestLog={requestLog}
+          giftPeerOnline={giftPeerOnline}
+          onClose={() => setStats(null)}
+        />
+      )}
     </div>
   );
 }
@@ -194,12 +242,12 @@ export function Dashboard() {
 interface CredentialCardProps {
   cred: CredentialMeta;
   usage: ProviderUsage | undefined;
-  expanded: boolean;
-  onToggle: () => void;
+  gifted: { count: number; used: number } | undefined;
+  onOpenStats: () => void;
   onRemove: () => void;
 }
 
-function CredentialCard({ cred, usage, expanded, onToggle, onRemove }: CredentialCardProps) {
+function CredentialCard({ cred, usage, gifted, onOpenStats, onRemove }: CredentialCardProps) {
   const { renameCredential } = useWalletStore();
   const provider = PROVIDERS[cred.providerId];
   const [editing, setEditing] = useState(false);
@@ -248,17 +296,20 @@ function CredentialCard({ cred, usage, expanded, onToggle, onRemove }: Credentia
     setEditing(true);
   }
 
+  const hasUsage = usage && usage.requests > 0;
+  const hasGifted = gifted && gifted.used > 0;
+
   return (
     <div
-      className={`card credential-card ${expanded ? 'expanded' : ''}`}
-      onClick={editing ? undefined : onToggle}
+      className="card credential-card tappable"
+      onClick={editing ? undefined : onOpenStats}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
         if (editing) return;
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          onToggle();
+          onOpenStats();
         }
       }}
     >
@@ -314,31 +365,293 @@ function CredentialCard({ cred, usage, expanded, onToggle, onRemove }: Credentia
         Added {new Date(cred.createdAt).toLocaleDateString()}
       </div>
 
-      <div className={`credential-usage ${expanded ? 'open' : ''}`}>
-        <div className="credential-usage-inner">
-          {usage && usage.requests > 0 ? (
-            <>
-              <div className="usage-mini-label">Last 7 days</div>
-              <div className="usage-mini-grid">
-                <div>
-                  <div className="usage-mini-value">{usage.requests}</div>
-                  <div className="usage-mini-tag">requests</div>
-                </div>
-                <div>
-                  <div className="usage-mini-value">{formatTokens(usage.inputTokens)}</div>
-                  <div className="usage-mini-tag">input</div>
-                </div>
-                <div>
-                  <div className="usage-mini-value">{formatTokens(usage.outputTokens)}</div>
-                  <div className="usage-mini-tag">output</div>
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="usage-mini-empty">No usage in the last 7 days.</div>
-          )}
+      <div className="credential-usage-open">
+        <div className="usage-mini-label">Last 7 days</div>
+        <div className="usage-mini-grid">
+          <div>
+            <div className="usage-mini-value">{hasUsage ? usage!.requests : 0}</div>
+            <div className="usage-mini-tag">requests</div>
+          </div>
+          <div>
+            <div className="usage-mini-value">{formatTokens(hasUsage ? usage!.inputTokens : 0)}</div>
+            <div className="usage-mini-tag">input</div>
+          </div>
+          <div>
+            <div className="usage-mini-value">{formatTokens(hasUsage ? usage!.outputTokens : 0)}</div>
+            <div className="usage-mini-tag">output</div>
+          </div>
+        </div>
+        <div className="credential-gifted-row">
+          <span className="usage-mini-tag">Spent on gifts</span>
+          <span className="credential-gifted-value">
+            {hasGifted ? `${formatTokens(gifted!.used)} · ${gifted!.count} gift${gifted!.count !== 1 ? 's' : ''}` : 'None'}
+          </span>
         </div>
       </div>
     </div>
+  );
+}
+
+// ─── Stats bottom sheet ──────────────────────────────────────────────
+
+type TimeRange = '24h' | '7d' | '30d' | 'all';
+
+function filterByTime(log: RequestLogEntry[], range: TimeRange): RequestLogEntry[] {
+  if (range === 'all') return log;
+  const ms = range === '24h' ? 86400000 : range === '7d' ? 604800000 : 2592000000;
+  const cutoff = Date.now() - ms;
+  return log.filter((e) => e.timestamp >= cutoff);
+}
+
+interface StatsSheetProps {
+  target: StatsTarget;
+  credentials: CredentialMeta[];
+  gifts: Gift[];
+  giftedCredentials: GiftedCredential[];
+  requestLog: RequestLogEntry[];
+  giftPeerOnline: Record<string, boolean>;
+  onClose: () => void;
+}
+
+function StatsSheet({ target, credentials, gifts, giftedCredentials, requestLog, giftPeerOnline, onClose }: StatsSheetProps) {
+  useEffect(() => {
+    function onKey(e: globalThis.KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  let title = 'Stats';
+  let body: React.ReactNode = null;
+  if (target.kind === 'credential') {
+    const cred = credentials.find((c) => c.id === target.credentialId);
+    if (cred) {
+      title = cred.label;
+      body = (
+        <CredentialStats
+          cred={cred}
+          gifts={gifts.filter((g) => g.credentialId === cred.id)}
+          requestLog={requestLog}
+        />
+      );
+    }
+  } else {
+    const gc = giftedCredentials.find((g) => g.id === target.giftedId);
+    if (gc) {
+      title = `Gift from ${gc.senderLabel}`;
+      body = <GiftStats gc={gc} online={giftPeerOnline[gc.giftId]} />;
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <div className="modal-sheet" onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title}>
+        <div className="modal-header">
+          <span className="modal-title">{title}</span>
+          <button className="icon-btn" onClick={onClose} aria-label="Close">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+        <div className="modal-body">{body}</div>
+      </div>
+    </div>
+  );
+}
+
+function CredentialStats({ cred, gifts, requestLog }: { cred: CredentialMeta; gifts: Gift[]; requestLog: RequestLogEntry[] }) {
+  const [range, setRange] = useState<TimeRange>('7d');
+  const provider = PROVIDERS[cred.providerId];
+  const filtered = useMemo(
+    () => filterByTime(requestLog, range).filter((e) => e.providerId === cred.providerId && e.status < 400),
+    [requestLog, range, cred.providerId],
+  );
+
+  const byModel = new Map<string, { requests: number; inputTokens: number; outputTokens: number }>();
+  const byApp = new Map<string, { origin: string; requests: number; inputTokens: number; outputTokens: number }>();
+  let totalInput = 0;
+  let totalOutput = 0;
+  for (const e of filtered) {
+    totalInput += e.inputTokens ?? 0;
+    totalOutput += e.outputTokens ?? 0;
+    if (e.model) {
+      const m = byModel.get(e.model) ?? { requests: 0, inputTokens: 0, outputTokens: 0 };
+      m.requests++;
+      m.inputTokens += e.inputTokens ?? 0;
+      m.outputTokens += e.outputTokens ?? 0;
+      byModel.set(e.model, m);
+    }
+    const a = byApp.get(e.appOrigin) ?? { origin: e.appOrigin, requests: 0, inputTokens: 0, outputTokens: 0 };
+    a.requests++;
+    a.inputTokens += e.inputTokens ?? 0;
+    a.outputTokens += e.outputTokens ?? 0;
+    byApp.set(e.appOrigin, a);
+  }
+  const apps = [...byApp.values()].sort((a, b) => (b.inputTokens + b.outputTokens) - (a.inputTokens + a.outputTokens));
+  const models = [...byModel.entries()].sort((a, b) => (b[1].inputTokens + b[1].outputTokens) - (a[1].inputTokens + a[1].outputTokens));
+  const giftUsedTotal = gifts.reduce((s, g) => s + g.usedTokens, 0);
+
+  return (
+    <>
+      <p className="card-subtitle" style={{ marginBottom: '12px' }}>
+        {provider?.name ?? cred.providerId} · shared across all credentials of this provider
+      </p>
+
+      <div className="usage-range-toggle">
+        {(['24h', '7d', '30d', 'all'] as TimeRange[]).map((r) => (
+          <button
+            key={r}
+            className={`usage-range-btn ${range === r ? 'active' : ''}`}
+            onClick={() => setRange(r)}
+          >
+            {r === 'all' ? 'All' : r}
+          </button>
+        ))}
+      </div>
+
+      <div className="usage-totals">
+        <div className="usage-stat-card">
+          <div className="usage-stat-value">{filtered.length}</div>
+          <div className="usage-stat-label">Requests</div>
+        </div>
+        <div className="usage-stat-card">
+          <div className="usage-stat-value">{formatTokens(totalInput)}</div>
+          <div className="usage-stat-label">Input tokens</div>
+        </div>
+        <div className="usage-stat-card">
+          <div className="usage-stat-value">{formatTokens(totalOutput)}</div>
+          <div className="usage-stat-label">Output tokens</div>
+        </div>
+      </div>
+
+      {filtered.length === 0 && <div className="empty-state"><p>No usage in this period.</p></div>}
+
+      {models.length > 0 && (
+        <>
+          <h3 className="usage-section-title">By Model</h3>
+          <div className="card usage-card">
+            <div className="usage-models" style={{ marginTop: 0, paddingTop: 0, borderTop: 'none' }}>
+              {models.map(([model, m]) => (
+                <div key={model} className="usage-model-row">
+                  <span className="usage-model-name">{model}</span>
+                  <span className="usage-model-tokens">{formatTokens(m.inputTokens + m.outputTokens)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
+      {apps.length > 0 && (
+        <>
+          <h3 className="usage-section-title">By App</h3>
+          {apps.map((a) => (
+            <div key={a.origin} className="card usage-card">
+              <div className="card-header" style={{ marginBottom: '0' }}>
+                <div style={{ minWidth: 0 }}>
+                  <span className="card-title" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {formatHostname(a.origin)}
+                  </span>
+                  <div className="card-subtitle">{a.requests} request{a.requests !== 1 ? 's' : ''}</div>
+                </div>
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <div style={{ fontSize: '14px', fontWeight: 600 }}>{formatTokens(a.inputTokens + a.outputTokens)}</div>
+                  <div className="card-subtitle">tokens</div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+
+      <h3 className="usage-section-title">Gifts from this credential</h3>
+      {gifts.length === 0 ? (
+        <div className="empty-state"><p>No gifts created from this credential.</p></div>
+      ) : (
+        <>
+          <p className="card-subtitle" style={{ marginBottom: '8px' }}>
+            {formatTokens(giftUsedTotal)} tokens redeemed across {gifts.length} gift{gifts.length !== 1 ? 's' : ''}
+          </p>
+          {gifts.map((g) => {
+            const pct = g.maxTokens > 0 ? Math.min(100, (g.usedTokens / g.maxTokens) * 100) : 0;
+            const expired = g.expiresAt <= Date.now() || !g.active;
+            return (
+              <div key={g.id} className="card usage-card">
+                <div className="card-header" style={{ marginBottom: '6px' }}>
+                  <span className="card-title">{g.label || 'Unnamed gift'}</span>
+                  <span className="card-subtitle">{expired ? 'Inactive' : `Expires in ${formatExpiry(g.expiresAt)}`}</span>
+                </div>
+                <div className="gift-budget">
+                  <div className="gift-budget-text">
+                    <span>{formatTokens(g.usedTokens)} used</span>
+                    <span className="gift-budget-total">/ {formatTokens(g.maxTokens)}</span>
+                  </div>
+                  <div className="allowance-bar">
+                    <div className={`allowance-bar-fill ${pct >= 90 ? 'over' : ''}`} style={{ width: `${pct}%` }} />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </>
+      )}
+    </>
+  );
+}
+
+function GiftStats({ gc, online }: { gc: GiftedCredential; online: boolean | undefined }) {
+  const remaining = giftBudgetRemaining(gc);
+  const pct = giftBudgetPercent(gc);
+  const provider = PROVIDERS[gc.providerId];
+  const status = online === true ? 'Online' : online === false ? 'Offline' : 'Checking…';
+  const statusClass = online === true ? 'success' : online === false ? 'error' : 'warning';
+
+  return (
+    <>
+      <p className="card-subtitle" style={{ marginBottom: '12px' }}>
+        {provider?.name ?? gc.providerId} · from {gc.senderLabel}
+      </p>
+
+      <div className="usage-totals">
+        <div className="usage-stat-card">
+          <div className="usage-stat-value">{formatTokens(gc.usedTokens)}</div>
+          <div className="usage-stat-label">Used</div>
+        </div>
+        <div className="usage-stat-card">
+          <div className="usage-stat-value">{formatTokens(remaining)}</div>
+          <div className="usage-stat-label">Remaining</div>
+        </div>
+        <div className="usage-stat-card">
+          <div className="usage-stat-value">{formatTokens(gc.maxTokens)}</div>
+          <div className="usage-stat-label">Budget</div>
+        </div>
+      </div>
+
+      <div className="gift-budget" style={{ marginTop: '4px', marginBottom: '16px' }}>
+        <div className="allowance-bar">
+          <div className={`allowance-bar-fill ${pct >= 90 ? 'over' : ''}`} style={{ width: `${pct}%` }} />
+        </div>
+      </div>
+
+      <div className="card usage-card">
+        <div className="usage-model-row">
+          <span className="usage-model-name" style={{ fontFamily: 'inherit', fontSize: '12px' }}>Sender</span>
+          <span className="usage-model-tokens" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span className={`status-dot ${statusClass}`} />{status}
+          </span>
+        </div>
+        <div className="usage-model-row">
+          <span className="usage-model-name" style={{ fontFamily: 'inherit', fontSize: '12px' }}>Expires</span>
+          <span className="usage-model-tokens">{formatExpiry(gc.expiresAt)}</span>
+        </div>
+        <div className="usage-model-row">
+          <span className="usage-model-name" style={{ fontFamily: 'inherit', fontSize: '12px' }}>Received</span>
+          <span className="usage-model-tokens">{new Date(gc.createdAt).toLocaleDateString()}</span>
+        </div>
+      </div>
+    </>
   );
 }

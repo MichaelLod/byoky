@@ -1933,26 +1933,38 @@ body {
   font-family: inherit;
 }
 
-.credential-usage {
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows 0.22s ease;
-  margin-top: 0;
-}
-
-.credential-usage.open {
-  grid-template-rows: 1fr;
+.credential-usage-open {
   margin-top: 12px;
-}
-
-.credential-usage-inner {
-  overflow: hidden;
-  min-height: 0;
-}
-
-.credential-usage.open .credential-usage-inner {
-  border-top: 1px solid var(--border);
   padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.credential-gifted-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+
+.credential-gifted-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.card.tappable {
+  cursor: pointer;
+  transition: background 0.12s ease, transform 0.12s ease;
+}
+
+.card.tappable:hover {
+  background: var(--bg-hover);
+}
+
+.card.tappable:active {
+  transform: scale(0.995);
 }
 
 .usage-mini-label {

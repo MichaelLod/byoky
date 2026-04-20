@@ -1,12 +1,24 @@
 import SwiftUI
 
+enum WalletStatsTarget: Identifiable, Equatable {
+    case credential(String)
+    case gift(String)
+
+    var id: String {
+        switch self {
+        case .credential(let id): return "cred:\(id)"
+        case .gift(let id): return "gift:\(id)"
+        }
+    }
+}
+
 struct WalletView: View {
     @EnvironmentObject var wallet: WalletStore
     @State private var showAddCredential = false
     @State private var showSettings = false
     @State private var showCloudVaultSetup = false
     @State private var showRedeemGift = false
-    @State private var expandedCredentialId: String?
+    @State private var statsTarget: WalletStatsTarget?
     @State private var renamingCredential: Credential?
     @State private var renameDraft: String = ""
 
@@ -78,8 +90,6 @@ struct WalletView: View {
                 AddCredentialView()
             }
             .sheet(isPresented: $showRedeemGift, onDismiss: {
-                // Clear the deep-link trigger so the sheet doesn't re-open
-                // on the next state tick.
                 wallet.pendingGiftLink = nil
             }) {
                 NavigationStack {
@@ -99,6 +109,13 @@ struct WalletView: View {
                 CloudVaultSetupView(lastUsername: wallet.cloudVaultLastUsername)
                     .environmentObject(wallet)
             }
+            .sheet(item: $statsTarget) { target in
+                NavigationStack {
+                    WalletStatsSheet(target: target)
+                        .environmentObject(wallet)
+                }
+                .presentationDetents([.medium, .large])
+            }
             .alert("Rename credential", isPresented: Binding(
                 get: { renamingCredential != nil },
                 set: { if !$0 { renamingCredential = nil } }
@@ -114,10 +131,6 @@ struct WalletView: View {
                 }
             }
             .task {
-                // Re-probe every 15s while the Wallet is visible so the dot
-                // self-heals if the sender WS briefly blinks. A single
-                // on-appear probe would latch offline if it happened to land
-                // in a reconnect gap. Auto-cancels on view disappear.
                 while !Task.isCancelled {
                     wallet.probeGiftPeers()
                     try? await Task.sleep(for: .seconds(15))
@@ -169,13 +182,9 @@ struct WalletView: View {
             ForEach(wallet.credentials) { credential in
                 CredentialRow(
                     credential: credential,
-                    isExpanded: expandedCredentialId == credential.id,
                     usage: providerUsage(for: credential.providerId),
-                    onToggle: {
-                        withAnimation(.easeInOut(duration: 0.22)) {
-                            expandedCredentialId = expandedCredentialId == credential.id ? nil : credential.id
-                        }
-                    },
+                    gifted: giftedSpend(for: credential.id),
+                    onOpenStats: { statsTarget = .credential(credential.id) },
                     onRename: {
                         renameDraft = credential.label
                         renamingCredential = credential
@@ -192,10 +201,9 @@ struct WalletView: View {
         }
     }
 
-    /// Aggregate the last 7 days of successful requests for a provider. Returned
-    /// per-credential by querying providerId — multiple credentials of the same
-    /// provider will share these numbers (the request log doesn't carry a
-    /// credentialId), which is acceptable for an at-a-glance card.
+    /// Aggregate the last 7 days of successful requests for a provider.
+    /// Multiple credentials of the same provider share these numbers —
+    /// the request log carries `providerId` only.
     private func providerUsage(for providerId: String) -> CredentialUsage {
         let cutoff = Date().addingTimeInterval(-7 * 24 * 60 * 60)
         var usage = CredentialUsage(requests: 0, inputTokens: 0, outputTokens: 0)
@@ -210,10 +218,22 @@ struct WalletView: View {
         return usage
     }
 
+    private func giftedSpend(for credentialId: String) -> GiftedSpend {
+        var spend = GiftedSpend(count: 0, used: 0)
+        for g in wallet.gifts where g.credentialId == credentialId {
+            spend.count += 1
+            spend.used += g.usedTokens
+        }
+        return spend
+    }
+
     private var giftsSection: some View {
         Section {
             ForEach(activeGifts) { gc in
-                GiftCredentialRow(credential: gc)
+                GiftCredentialRow(
+                    credential: gc,
+                    onOpenStats: { statsTarget = .gift(gc.id) }
+                )
             }
             .onDelete { offsets in
                 let items = activeGifts
@@ -233,15 +253,20 @@ struct CredentialUsage {
     var outputTokens: Int
 }
 
+struct GiftedSpend {
+    var count: Int
+    var used: Int
+}
+
 struct CredentialRow: View {
     let credential: Credential
-    let isExpanded: Bool
     let usage: CredentialUsage
-    let onToggle: () -> Void
+    let gifted: GiftedSpend
+    let onOpenStats: () -> Void
     let onRename: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 14) {
                 ProviderIcon(providerId: credential.providerId, size: 18)
                     .foregroundStyle(Color.white)
@@ -277,50 +302,41 @@ struct CredentialRow: View {
                     .padding(.vertical, 4)
                     .background(Color(.systemGray5))
                     .clipShape(Capsule())
+            }
 
-                Image(systemName: "chevron.down")
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("LAST 7 DAYS")
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
-            }
-            .padding(.vertical, 4)
-            .contentShape(Rectangle())
-            .onTapGesture { onToggle() }
-
-            if isExpanded {
-                Divider().padding(.top, 8)
-                CredentialUsagePanel(usage: usage)
-                    .padding(.top, 10)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-        }
-    }
-}
-
-private struct CredentialUsagePanel: View {
-    let usage: CredentialUsage
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("LAST 7 DAYS")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-            if usage.requests == 0 {
-                Text("No usage in the last 7 days.")
-                    .font(.caption)
                     .foregroundStyle(.secondary)
-                    .italic()
-            } else {
+
                 HStack(spacing: 16) {
                     statColumn(value: "\(usage.requests)", label: "requests")
                     statColumn(value: formatWalletTokens(usage.inputTokens), label: "input")
                     statColumn(value: formatWalletTokens(usage.outputTokens), label: "output")
                 }
+
+                HStack {
+                    Text("Spent on gifts")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    if gifted.used > 0 {
+                        Text("\(formatWalletTokens(gifted.used)) · \(gifted.count) gift\(gifted.count == 1 ? "" : "s")")
+                            .font(.caption.weight(.semibold))
+                    } else {
+                        Text("None")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.top, 4)
             }
         }
-        .padding(.bottom, 4)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .onTapGesture { onOpenStats() }
     }
 
     private func statColumn(value: String, label: String) -> some View {
@@ -332,25 +348,20 @@ private struct CredentialUsagePanel: View {
     }
 }
 
-/// Inline row that renders a received gift as a wallet credential. Same
-/// structural shape as `CredentialRow` plus a sender label, peer online dot,
-/// tokens-remaining progress bar, and a gift badge instead of API Key/OAuth.
+/// Inline row for a received gift. Same shape as `CredentialRow` plus a sender
+/// label, peer online dot, tokens-remaining bar, and a gift badge. Tapping
+/// opens the gift stats sheet.
 struct GiftCredentialRow: View {
     @EnvironmentObject var wallet: WalletStore
     let credential: GiftedCredential
+    let onOpenStats: () -> Void
 
     private var providerName: String {
         Provider.find(credential.providerId)?.name ?? credential.providerName
     }
 
-
-    private var remaining: Int {
-        giftedBudgetRemaining(credential)
-    }
-
-    private var percent: Double {
-        giftedBudgetPercent(credential)
-    }
+    private var remaining: Int { giftedBudgetRemaining(credential) }
+    private var percent: Double { giftedBudgetPercent(credential) }
 
     private var expiryText: String {
         if isGiftedCredentialExpired(credential) { return "Expired" }
@@ -359,18 +370,9 @@ struct GiftCredentialRow: View {
         return formatter.localizedString(for: credential.expiresAt, relativeTo: Date())
     }
 
-    /// nil = not yet probed (checking). true = sender online. false = offline.
-    private var onlineState: Bool? {
-        wallet.giftPeerOnline[credential.giftId]
-    }
-
-    private var hasOwnKey: Bool {
-        wallet.credentials.contains { $0.providerId == credential.providerId }
-    }
-
-    private var isPreferred: Bool {
-        wallet.giftPreferences[credential.providerId] == credential.giftId
-    }
+    private var onlineState: Bool? { wallet.giftPeerOnline[credential.giftId] }
+    private var hasOwnKey: Bool { wallet.credentials.contains { $0.providerId == credential.providerId } }
+    private var isPreferred: Bool { wallet.giftPreferences[credential.providerId] == credential.giftId }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -426,9 +428,12 @@ struct GiftCredentialRow: View {
                 ))
                 .font(.caption)
                 .tint(Theme.accent)
+                .onTapGesture { /* swallow taps so row onTapGesture doesn't fire */ }
             }
         }
         .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .onTapGesture { onOpenStats() }
     }
 
     private var onlineColor: Color {
@@ -448,7 +453,7 @@ struct GiftCredentialRow: View {
     }
 }
 
-private func formatWalletTokens(_ n: Int) -> String {
+func formatWalletTokens(_ n: Int) -> String {
     if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
     if n >= 1_000 { return String(format: "%.1fK", Double(n) / 1_000) }
     return "\(n)"

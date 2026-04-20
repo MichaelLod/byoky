@@ -8,6 +8,7 @@ struct MainTabView: View {
     @State private var showAppStore = false
 
     private static let appsTabIndex = 2
+    private static let connectTabIndex = 3
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -38,14 +39,7 @@ struct MainTabView: View {
                         Label("Connect", systemImage: "antenna.radiowaves.left.and.right")
                     }
                     .accessibilityIdentifier("tab.connect")
-                    .tag(3)
-
-                UsageView()
-                    .tabItem {
-                        Label("Usage", systemImage: "chart.bar")
-                    }
-                    .accessibilityIdentifier("tab.usage")
-                    .tag(4)
+                    .tag(MainTabView.connectTabIndex)
             }
             .tint(Theme.accent)
 
@@ -75,7 +69,7 @@ struct MainTabView: View {
                 .environmentObject(wallet)
         }
         .onChange(of: wallet.pendingPairLink) { _, newValue in
-            if newValue != nil { selectedTab = 3 }
+            if newValue != nil { selectedTab = MainTabView.connectTabIndex }
         }
     }
 }

@@ -53,7 +53,6 @@ private fun MainScreen(wallet: WalletStore) {
         Triple("Gifts", Icons.Default.CardGiftcard, "gifts"),
         Triple("Apps", Icons.Default.Apps, "apps"),
         Triple("Connect", Icons.Default.CellTower, "connect"),
-        Triple("Usage", Icons.Default.BarChart, "usage"),
     )
 
     // Hide FAB on routes where the global "+" actions don't make sense (the
@@ -194,7 +193,6 @@ private fun MainScreen(wallet: WalletStore) {
                 RedeemGiftScreen(wallet = wallet, onBack = { navController.popBackStack() })
             }
             composable("connect") { ConnectScreen(wallet, pairService) }
-            composable("usage") { UsageScreen(wallet) }
             composable("apps") {
                 MarketplaceTabScreen(
                     wallet = wallet,

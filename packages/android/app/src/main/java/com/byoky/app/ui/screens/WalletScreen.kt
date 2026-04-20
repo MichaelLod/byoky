@@ -25,8 +25,10 @@ import androidx.compose.ui.unit.sp
 import com.byoky.app.data.AuthMethod
 import com.byoky.app.data.Credential
 import com.byoky.app.data.CredentialUsageStats
+import com.byoky.app.data.Gift
 import com.byoky.app.data.GiftedCredential
 import com.byoky.app.data.Provider
+import com.byoky.app.data.RequestLog
 import com.byoky.app.data.WalletStore
 import com.byoky.app.data.formatTokens
 import com.byoky.app.data.giftBudgetPercent
@@ -49,10 +51,11 @@ fun WalletScreen(
     val giftedCredentials by wallet.giftedCredentials.collectAsState()
     val giftPeerOnline by wallet.giftPeerOnline.collectAsState()
     val requestLogs by wallet.requestLogs.collectAsState()
+    val gifts by wallet.gifts.collectAsState()
     val cloudVaultEnabled by wallet.cloudVaultEnabled.collectAsState()
     var showAddSheet by remember { mutableStateOf(false) }
     var showCloudVaultSetup by remember { mutableStateOf(false) }
-    var expandedCredentialId by remember { mutableStateOf<String?>(null) }
+    var statsTarget by remember { mutableStateOf<WalletStatsTarget?>(null) }
     var renameTarget by remember { mutableStateOf<Credential?>(null) }
     val scope = rememberCoroutineScope()
 
@@ -71,6 +74,17 @@ fun WalletScreen(
             arr[2] += log.outputTokens ?: 0
         }
         acc.mapValues { CredentialUsageStats(it.value[0], it.value[1], it.value[2]) }
+    }
+
+    // Sum tokens redeemed via gifts, keyed by the sender credential.
+    val giftedByCredential = remember(gifts) {
+        val acc = mutableMapOf<String, IntArray>() // [count, used]
+        for (g in gifts) {
+            val arr = acc.getOrPut(g.credentialId) { IntArray(2) }
+            arr[0] += 1
+            arr[1] += g.usedTokens
+        }
+        acc.mapValues { GiftedSpend(it.value[0], it.value[1]) }
     }
 
     val activeGifts = remember(giftedCredentials) {
@@ -162,10 +176,8 @@ fun WalletScreen(
                         CredentialCard(
                             credential = credential,
                             usage = usageByProvider[credential.providerId],
-                            isExpanded = expandedCredentialId == credential.id,
-                            onToggle = {
-                                expandedCredentialId = if (expandedCredentialId == credential.id) null else credential.id
-                            },
+                            gifted = giftedByCredential[credential.id],
+                            onOpenStats = { statsTarget = WalletStatsTarget.Credential(credential.id) },
                             onRename = { renameTarget = credential },
                             onDelete = { wallet.removeCredential(credential) },
                         )
@@ -190,6 +202,7 @@ fun WalletScreen(
                             onPreferredChange = { preferred ->
                                 wallet.setGiftPreference(gc.providerId, if (preferred) gc.giftId else null)
                             },
+                            onOpenStats = { statsTarget = WalletStatsTarget.Gift(gc.id) },
                             onRemove = { wallet.removeGiftedCredential(gc.id) },
                         )
                     }
@@ -216,6 +229,18 @@ fun WalletScreen(
                     wallet.updateCredentialLabel(target.id, newLabel)
                     renameTarget = null
                 },
+            )
+        }
+
+        statsTarget?.let { target ->
+            WalletStatsSheet(
+                target = target,
+                credentials = credentials,
+                gifts = gifts,
+                giftedCredentials = giftedCredentials,
+                requestLogs = requestLogs,
+                giftPeerOnline = giftPeerOnline,
+                onDismiss = { statsTarget = null },
             )
         }
     }
@@ -312,6 +337,7 @@ private fun GiftCredentialCard(
     hasOwnKey: Boolean,
     isPreferred: Boolean,
     onPreferredChange: (Boolean) -> Unit,
+    onOpenStats: () -> Unit,
     onRemove: () -> Unit,
 ) {
     val provider = Provider.find(gc.providerId)
@@ -326,6 +352,7 @@ private fun GiftCredentialCard(
     Card(
         colors = CardDefaults.cardColors(containerColor = BgCard),
         shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.clickable { onOpenStats() },
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -446,21 +473,25 @@ private fun formatGiftExpiry(expiresAt: Long): String {
     }
 }
 
+data class GiftedSpend(val count: Int, val used: Int)
+
 @Composable
 private fun CredentialCard(
     credential: Credential,
     usage: CredentialUsageStats?,
-    isExpanded: Boolean,
-    onToggle: () -> Unit,
+    gifted: GiftedSpend?,
+    onOpenStats: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val provider = Provider.find(credential.providerId)
+    val hasUsage = usage != null && usage.requests > 0
+    val hasGifted = gifted != null && gifted.used > 0
 
     Card(
         colors = CardDefaults.cardColors(containerColor = BgCard),
         shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.clickable { onToggle() },
+        modifier = Modifier.clickable { onOpenStats() },
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -510,46 +541,61 @@ private fun CredentialCard(
                 IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
                     Icon(Icons.Default.Delete, "Remove", tint = TextMuted, modifier = Modifier.size(18.dp))
                 }
+            }
 
-                Icon(
-                    if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    null,
-                    tint = TextMuted,
-                    modifier = Modifier.size(20.dp),
+            Spacer(Modifier.height(12.dp))
+            HorizontalDivider(color = BgHover)
+            Spacer(Modifier.height(10.dp))
+
+            Text(
+                "LAST 7 DAYS",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = TextMuted,
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                UsageStat(
+                    value = if (hasUsage) usage!!.requests.toString() else "0",
+                    label = "requests",
+                )
+                UsageStat(
+                    value = formatUsageTokens(if (hasUsage) usage!!.inputTokens else 0),
+                    label = "input",
+                )
+                UsageStat(
+                    value = formatUsageTokens(if (hasUsage) usage!!.outputTokens else 0),
+                    label = "output",
                 )
             }
 
-            if (isExpanded) {
-                Spacer(Modifier.height(12.dp))
-                HorizontalDivider(color = BgHover)
-                Spacer(Modifier.height(10.dp))
-                CredentialUsagePanel(usage = usage)
-            }
-        }
-    }
-}
-
-@Composable
-private fun CredentialUsagePanel(usage: CredentialUsageStats?) {
-    Column {
-        Text(
-            "LAST 7 DAYS",
-            fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = TextMuted,
-        )
-        Spacer(Modifier.height(8.dp))
-        if (usage == null || usage.requests == 0) {
-            Text(
-                "No usage in the last 7 days.",
-                fontSize = 12.sp,
-                color = TextSecondary,
-            )
-        } else {
-            Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                UsageStat(value = usage.requests.toString(), label = "requests")
-                UsageStat(value = formatUsageTokens(usage.inputTokens), label = "input")
-                UsageStat(value = formatUsageTokens(usage.outputTokens), label = "output")
+            Spacer(Modifier.height(10.dp))
+            HorizontalDivider(color = BgHover.copy(alpha = 0.5f))
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Spent on gifts",
+                    fontSize = 12.sp,
+                    color = TextSecondary,
+                )
+                if (hasGifted) {
+                    Text(
+                        "${formatTokens(gifted!!.used)} · ${gifted.count} gift${if (gifted.count == 1) "" else "s"}",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextPrimary,
+                    )
+                } else {
+                    Text(
+                        "None",
+                        fontSize = 12.sp,
+                        color = TextMuted,
+                    )
+                }
             }
         }
     }

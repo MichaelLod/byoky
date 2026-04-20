@@ -23,7 +23,6 @@ type Page =
   | 'add-credential'
   | 'connect'
   | 'connected-apps'
-  | 'usage'
   | 'request-history'
   | 'approval'
   | 'settings'
