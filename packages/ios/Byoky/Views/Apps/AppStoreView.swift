@@ -135,7 +135,8 @@ struct StoreAppRow: View {
                 .buttonStyle(.borderedProminent)
                 .tint(installed ? Theme.bgCard : Theme.accent)
                 .disabled(installed)
-                .font(.caption)
+                .controlSize(.large)
+                .font(.subheadline.weight(.semibold))
         }
         .padding(.vertical, 4)
     }

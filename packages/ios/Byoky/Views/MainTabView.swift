@@ -104,7 +104,7 @@ struct FloatingActionMenu: View {
             Button {
                 onAddApp()
             } label: {
-                Label("Add app", systemImage: "square.grid.2x2.fill")
+                Label("Install app", systemImage: "square.grid.2x2.fill")
             }
             .accessibilityIdentifier("fab.menu.addApp")
         } label: {

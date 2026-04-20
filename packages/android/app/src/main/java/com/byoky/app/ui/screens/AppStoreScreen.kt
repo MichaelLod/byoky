@@ -164,12 +164,16 @@ internal fun StoreAppCard(app: MarketplaceApp, installed: Boolean, onInstall: ()
             Button(
                 onClick = onInstall,
                 enabled = !installed,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().height(52.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (installed) BgCard else Accent,
                 ),
             ) {
-                Text(if (installed) "Installed" else "Install")
+                Text(
+                    if (installed) "Installed" else "Install",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
             }
         }
     }

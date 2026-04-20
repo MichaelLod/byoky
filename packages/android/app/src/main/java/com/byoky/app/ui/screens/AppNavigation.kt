@@ -122,7 +122,7 @@ private fun MainScreen(wallet: WalletStore) {
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text("Add app") },
+                            text = { Text("Install app") },
                             leadingIcon = { Icon(Icons.Default.Apps, null, tint = Accent) },
                             onClick = {
                                 fabMenuOpen = false
