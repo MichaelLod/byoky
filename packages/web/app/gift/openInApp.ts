@@ -34,6 +34,14 @@ export function openGiftInApp(giftLink: string): boolean {
   const encoded = extractGiftEncoded(giftLink);
   if (!encoded || !/^[A-Za-z0-9_-]+$/.test(encoded)) return false;
 
+  // Best-effort clipboard stash so the app's clipboard fallback can recover
+  // the link if the deep-link redirect doesn't auto-foreground the app
+  // (common on repeat redeems — iOS/Android throttle custom-scheme launches).
+  const canonical = `byoky://gift/${encoded}`;
+  if (typeof navigator !== 'undefined' && navigator.clipboard) {
+    navigator.clipboard.writeText(canonical).catch(() => { /* clipboard blocked */ });
+  }
+
   if (platform === 'android') {
     const fallback = encodeURIComponent(ANDROID_STORE);
     window.location.href = `intent://gift/${encoded}#Intent;scheme=byoky;package=com.byoky.app;S.browser_fallback_url=${fallback};end`;

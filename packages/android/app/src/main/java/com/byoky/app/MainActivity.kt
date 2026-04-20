@@ -18,7 +18,6 @@ import com.byoky.app.ui.theme.ByokyTheme
 
 class MainActivity : ComponentActivity() {
     private lateinit var lifecycleObserver: DefaultLifecycleObserver
-    private var hasCheckedClipboardForGift = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
@@ -49,6 +48,7 @@ class MainActivity : ComponentActivity() {
                     wallet.reconcileGiftUsageOnForeground()
                     wallet.startMarketplaceHeartbeat()
                 }
+                checkClipboardForDeferredGift(wallet)
             }
         }
 
@@ -76,13 +76,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // Deferred deep linking: the web redeem page stashes the gift URL on the
-    // clipboard before sending the user to the Play Store. If the user just
-    // installed the app and opened it without tapping the deep link, pick
-    // the URL up from the clipboard here. Runs at most once per process.
+    // Fallback for when the web redeem page's intent:// redirect doesn't
+    // auto-foreground the app. The web page stashes the gift URL on the
+    // clipboard before firing the deep link, so we can pick it up whenever
+    // the user manually returns to the app.
     private fun checkClipboardForDeferredGift(wallet: WalletStore) {
-        if (hasCheckedClipboardForGift) return
-        hasCheckedClipboardForGift = true
         if (wallet.pendingGiftLink.value != null) return
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
         val clip = clipboard.primaryClip ?: return
