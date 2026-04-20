@@ -69,6 +69,7 @@ fun GiftsScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 item {
+                    val context = LocalContext.current
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -94,6 +95,23 @@ fun GiftsScreen(
                             Spacer(Modifier.width(6.dp))
                             Text("Redeem Gift")
                         }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = {
+                            val intent = Intent(
+                                Intent.ACTION_VIEW,
+                                android.net.Uri.parse("https://byoky.com/token-pool"),
+                            )
+                            context.startActivity(intent)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Accent),
+                    ) {
+                        Icon(Icons.Default.Search, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Browse free gifts")
                     }
                     if (!hasCredentials) {
                         Spacer(Modifier.height(6.dp))
@@ -139,6 +157,7 @@ private fun EmptyGifts(
     onRedeemGift: () -> Unit,
     hasCredentials: Boolean,
 ) {
+    val context = LocalContext.current
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -184,6 +203,22 @@ private fun EmptyGifts(
             Icon(Icons.Default.Redeem, null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
             Text("Redeem Gift")
+        }
+        Spacer(Modifier.height(12.dp))
+        OutlinedButton(
+            onClick = {
+                val intent = Intent(
+                    Intent.ACTION_VIEW,
+                    android.net.Uri.parse("https://byoky.com/token-pool"),
+                )
+                context.startActivity(intent)
+            },
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = Accent),
+        ) {
+            Icon(Icons.Default.Search, null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Browse free gifts")
         }
     }
 }

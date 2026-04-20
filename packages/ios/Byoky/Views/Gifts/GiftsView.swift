@@ -88,6 +88,13 @@ struct GiftsView: View {
                 .tint(Theme.accent)
                 .accessibilityIdentifier("gifts.redeemGift")
             }
+
+            Link(destination: URL(string: "https://byoky.com/token-pool")!) {
+                Label("Browse free gifts", systemImage: "magnifyingglass")
+            }
+            .buttonStyle(.bordered)
+            .tint(Theme.accent)
+            .accessibilityIdentifier("gifts.browseFreeGifts")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -116,6 +123,12 @@ struct GiftsView: View {
                     .foregroundStyle(Theme.accent)
             }
             .accessibilityIdentifier("gifts.redeemGift")
+
+            Link(destination: URL(string: "https://byoky.com/token-pool")!) {
+                Label("Browse free gifts", systemImage: "magnifyingglass.circle.fill")
+                    .foregroundStyle(Theme.accent)
+            }
+            .accessibilityIdentifier("gifts.browseFreeGifts")
         }
     }
 

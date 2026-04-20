@@ -105,6 +105,19 @@ export function Gifts() {
           Redeem Gift
         </button>
       </div>
+      <a
+        className="btn btn-secondary"
+        href="https://byoky.com/token-pool"
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{ display: 'flex', width: '100%', marginTop: '8px', textDecoration: 'none' }}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="11" cy="11" r="8" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+        Browse free gifts
+      </a>
 
       {activeGifts.length === 0 && expiredGifts.length === 0 && expiredReceived.length === 0 && (
         <div className="empty-state" style={{ marginTop: '16px' }}>
