@@ -483,6 +483,18 @@ body {
   position: relative;
 }
 
+.center-page .unlock-username {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  position: relative;
+}
+
+.center-page .unlock-username + .tagline {
+  margin-bottom: 36px;
+}
+
 .center-page form {
   width: 100%;
   max-width: 300px;

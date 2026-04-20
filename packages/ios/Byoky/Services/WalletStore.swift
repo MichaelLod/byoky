@@ -74,7 +74,7 @@ final class WalletStore: ObservableObject {
     // persisted in the keychain for relock survival.
     private var vaultKey: SymmetricKey?
 
-    private let autoLockTimeout: TimeInterval = 300
+    private let autoLockTimeout: TimeInterval = 900
     private var backgroundTime: Date?
 
     private var failedAttempts: Int {
@@ -86,6 +86,11 @@ final class WalletStore: ObservableObject {
         checkInitialized()
         restoreLockoutState()
         loadInstalledApps()
+        // Read username from keychain at init so UnlockView can show it
+        // before the wallet is unlocked. Full cloud-vault state (tokens,
+        // credential maps) still loads in loadCloudVaultState() on unlock.
+        cloudVaultUsername = try? keychain.loadString(key: "cloudVault_username")
+        cloudVaultLastUsername = try? keychain.loadString(key: "cloudVault_lastUsername")
     }
 
     // MARK: - Initialization

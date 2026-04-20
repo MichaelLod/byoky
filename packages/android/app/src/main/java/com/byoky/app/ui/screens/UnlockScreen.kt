@@ -30,6 +30,9 @@ fun UnlockScreen(wallet: WalletStore) {
     var error by remember { mutableStateOf<String?>(null) }
     var shakeOffset by remember { mutableFloatStateOf(0f) }
     val lockoutEndTime by wallet.lockoutEndTime.collectAsState()
+    val cloudVaultUsername by wallet.cloudVaultUsername.collectAsState()
+    val cloudVaultLastUsername by wallet.cloudVaultLastUsername.collectAsState()
+    val displayUsername = cloudVaultUsername ?: cloudVaultLastUsername
     var lockoutRemaining by remember { mutableIntStateOf(0) }
     var showResetDialog by remember { mutableStateOf(false) }
 
@@ -85,6 +88,15 @@ fun UnlockScreen(wallet: WalletStore) {
         )
 
         Spacer(Modifier.height(8.dp))
+
+        if (displayUsername != null) {
+            Text(
+                displayUsername,
+                fontWeight = FontWeight.SemiBold,
+                color = TextPrimary,
+            )
+            Spacer(Modifier.height(4.dp))
+        }
 
         Text(
             "Enter your master password to unlock",

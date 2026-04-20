@@ -158,6 +158,11 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     const bannerResult = await sendInternal('getVaultBannerDismissedAt');
     const bannerDismissedAt = (bannerResult.dismissedAt as number | null) ?? null;
 
+    // Fetch vault username up-front so the Unlock screen can show which
+    // account is being asked to unlock. cloudVaultStatus doesn't require
+    // unlock — lastUsername lives in plain storage.local.
+    const vaultStatus = await sendInternal('cloudVaultStatus');
+
     let page: Page = 'unlock';
     if (!initialized) page = 'setup';
     else if (unlocked) page = 'dashboard';
@@ -167,6 +172,9 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       isUnlocked: unlocked,
       currentPage: page,
       vaultBannerDismissedAt: bannerDismissedAt,
+      cloudVaultEnabled: (vaultStatus.enabled as boolean) ?? false,
+      cloudVaultUsername: (vaultStatus.username as string | null) ?? null,
+      cloudVaultLastUsername: (vaultStatus.lastUsername as string | null) ?? null,
       loading: false,
     });
 

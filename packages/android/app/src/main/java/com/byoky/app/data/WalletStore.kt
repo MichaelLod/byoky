@@ -143,7 +143,7 @@ class WalletStore(context: Context) {
     // app-sandboxed); cached in memory for reuse.
     @Volatile private var vaultKey: javax.crypto.spec.SecretKeySpec? = null
 
-    private val autoLockTimeout = 300_000L // 5 minutes
+    private val autoLockTimeout = 900_000L // 15 minutes
 
     private val vaultClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -157,6 +157,11 @@ class WalletStore(context: Context) {
         _status.value = if (prefs.contains("password_hash")) WalletStatus.LOCKED else WalletStatus.UNINITIALIZED
         restoreLockoutState()
         loadInstalledApps()
+        // Read username from prefs at init so UnlockScreen can show it
+        // before the wallet is unlocked. Full cloud-vault state (tokens,
+        // credential maps) still loads in loadCloudVaultState() on unlock.
+        _cloudVaultUsername.value = prefs.getString("cloudVault_username", null)
+        _cloudVaultLastUsername.value = prefs.getString("cloudVault_lastUsername", null)
     }
 
     val isUnlocked: Boolean get() = _status.value == WalletStatus.UNLOCKED
