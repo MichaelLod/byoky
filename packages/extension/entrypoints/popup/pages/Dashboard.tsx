@@ -100,7 +100,9 @@ export function Dashboard() {
               checked={cloudVaultEnabled}
               onChange={() => {
                 if (cloudVaultEnabled) {
-                  disableCloudVault();
+                  if (confirm('Turn off Cloud Sync? Your keys stay on this device and remain on the server under your account — sign back in anytime to restore sync.')) {
+                    disableCloudVault();
+                  }
                 } else {
                   navigate('settings');
                 }

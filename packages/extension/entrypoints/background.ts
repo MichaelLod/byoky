@@ -1720,7 +1720,26 @@ export default defineBackground(() => {
         // Register with Cloud Vault as fallback sender
         registerGiftWithVault(gift, credentialId).catch(() => {});
 
-        return { success: true, giftLink: encoded, giftId: gift.id };
+        // Try to allocate a short link. Requires vault auth; silent no-op if
+        // the user isn't signed into cloud vault. Recipients with old clients
+        // still get a working long URL because we also return `giftLink`.
+        let shortId: string | undefined;
+        try {
+          const cv = await getCloudVaultState();
+          if (cv.enabled && cv.token && !cv.tokenExpired) {
+            const res = await vaultFetch('/gift-links', 'POST', {
+              encoded,
+              expiresAt: gift.expiresAt,
+            }, cv.token);
+            if (res.ok && typeof res.data.shortId === 'string') {
+              shortId = res.data.shortId;
+            }
+          }
+        } catch {
+          // Network error — fall back to long URL silently.
+        }
+
+        return { success: true, giftLink: encoded, giftId: gift.id, shortId };
       }
 
       case 'setGiftMarketplaceToken': {
@@ -1757,6 +1776,23 @@ export default defineBackground(() => {
           }
         }
         return { success: true };
+      }
+
+      case 'resolveGiftShortLink': {
+        const { shortId } = (message.payload ?? {}) as { shortId?: string };
+        if (typeof shortId !== 'string' || !/^[A-Za-z0-9]{8,32}$/.test(shortId)) {
+          return { error: 'Invalid short id' };
+        }
+        try {
+          const res = await vaultFetch(`/gift-links/${encodeURIComponent(shortId)}`, 'GET');
+          if (res.status === 404 || res.status === 410) return { error: 'Gift link not found or expired' };
+          if (!res.ok) return { error: 'Could not resolve gift link' };
+          const encoded = typeof res.data.encoded === 'string' ? res.data.encoded : null;
+          if (!encoded) return { error: 'Could not resolve gift link' };
+          return { success: true, encoded };
+        } catch {
+          return { error: 'Network error resolving gift link' };
+        }
       }
 
       case 'stagePendingGift': {
@@ -4840,6 +4876,28 @@ export default defineBackground(() => {
     const localData = await browser.storage.local.get('credentials');
     const localCreds = ((localData.credentials ?? []) as Array<Record<string, unknown>>).slice();
 
+    // Content-based adoption index for locals not claimed by meta. When
+    // meta was wiped (e.g. disable/re-enable of Cloud Sync) the server
+    // would otherwise send back rows we already own and we'd create
+    // duplicates. Matching providerId + plaintext key adopts the local.
+    const localByContent: Record<string, string> = {};
+    for (const cred of localCreds) {
+      const localId = cred.id as string;
+      if (meta[localId]) continue;
+      const encrypted =
+        (cred.authMethod === 'api_key'
+          ? (cred.encryptedKey as string | undefined)
+          : (cred.encryptedAccessToken as string | undefined)) ?? undefined;
+      if (!encrypted) continue;
+      let plain: string;
+      try {
+        plain = await decrypt(encrypted, masterPassword);
+      } catch {
+        continue;
+      }
+      localByContent[`${cred.providerId}|${plain}`] = localId;
+    }
+
     for (const remote of remoteCreds) {
       const existingLocalId = serverToLocal[remote.id];
 
@@ -4886,23 +4944,52 @@ export default defineBackground(() => {
         }
         meta[existingLocalId] = { serverId: remote.id, remoteUpdatedAt: remote.updatedAt };
       } else {
-        const localId = crypto.randomUUID();
-        const encrypted = await encrypt(remoteApiKey, masterPassword);
-        const newCred: Record<string, unknown> = {
-          id: localId,
-          providerId: remote.providerId,
-          label: remote.label,
-          authMethod: remote.authMethod,
-          createdAt: remote.createdAt,
-        };
-        if (remote.authMethod === 'api_key') {
-          newCred.encryptedKey = encrypted;
+        const adoptKey = `${remote.providerId}|${remoteApiKey}`;
+        const adoptId = localByContent[adoptKey];
+        if (adoptId) {
+          const idx = localCreds.findIndex((c) => c.id === adoptId);
+          if (idx >= 0) {
+            const encrypted = await encrypt(remoteApiKey, masterPassword);
+            const base = localCreds[idx];
+            const updated: Record<string, unknown> = {
+              ...base,
+              providerId: remote.providerId,
+              label: remote.label,
+              authMethod: remote.authMethod,
+            };
+            if (remote.authMethod === 'api_key') {
+              updated.encryptedKey = encrypted;
+              delete updated.encryptedAccessToken;
+            } else {
+              updated.encryptedAccessToken = encrypted;
+              delete updated.encryptedKey;
+            }
+            localCreds[idx] = updated;
+          }
+          meta[adoptId] = { serverId: remote.id, remoteUpdatedAt: remote.updatedAt };
+          currentState.credentialMap[adoptId] = remote.id;
+          serverToLocal[remote.id] = adoptId;
+          delete localByContent[adoptKey];
         } else {
-          newCred.encryptedAccessToken = encrypted;
+          const localId = crypto.randomUUID();
+          const encrypted = await encrypt(remoteApiKey, masterPassword);
+          const newCred: Record<string, unknown> = {
+            id: localId,
+            providerId: remote.providerId,
+            label: remote.label,
+            authMethod: remote.authMethod,
+            createdAt: remote.createdAt,
+          };
+          if (remote.authMethod === 'api_key') {
+            newCred.encryptedKey = encrypted;
+          } else {
+            newCred.encryptedAccessToken = encrypted;
+          }
+          localCreds.push(newCred);
+          meta[localId] = { serverId: remote.id, remoteUpdatedAt: remote.updatedAt };
+          currentState.credentialMap[localId] = remote.id;
+          serverToLocal[remote.id] = localId;
         }
-        localCreds.push(newCred);
-        meta[localId] = { serverId: remote.id, remoteUpdatedAt: remote.updatedAt };
-        currentState.credentialMap[localId] = remote.id;
       }
     }
 

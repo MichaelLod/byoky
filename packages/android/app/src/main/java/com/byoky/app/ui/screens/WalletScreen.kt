@@ -55,6 +55,7 @@ fun WalletScreen(
     val cloudVaultEnabled by wallet.cloudVaultEnabled.collectAsState()
     var showAddSheet by remember { mutableStateOf(false) }
     var showCloudVaultSetup by remember { mutableStateOf(false) }
+    var showDisableCloudVaultConfirm by remember { mutableStateOf(false) }
     var statsTarget by remember { mutableStateOf<WalletStatsTarget?>(null) }
     var renameTarget by remember { mutableStateOf<Credential?>(null) }
     val scope = rememberCoroutineScope()
@@ -112,7 +113,7 @@ fun WalletScreen(
                 actions = {
                     TextButton(onClick = {
                         if (cloudVaultEnabled) {
-                            scope.launch { wallet.disableCloudVault() }
+                            showDisableCloudVaultConfirm = true
                         } else {
                             showCloudVaultSetup = true
                         }
@@ -218,6 +219,29 @@ fun WalletScreen(
             CloudVaultSetupDialog(
                 wallet = wallet,
                 onDismiss = { showCloudVaultSetup = false },
+            )
+        }
+
+        if (showDisableCloudVaultConfirm) {
+            AlertDialog(
+                onDismissRequest = { showDisableCloudVaultConfirm = false },
+                title = { Text("Turn off Cloud Sync?") },
+                text = {
+                    Text(
+                        "Your keys stay on this device. They remain on the " +
+                            "server under your account — sign back in anytime to restore sync.",
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showDisableCloudVaultConfirm = false
+                        scope.launch { wallet.disableCloudVault() }
+                    }) { Text("Turn off Cloud Sync") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDisableCloudVaultConfirm = false }) { Text("Cancel") }
+                },
+                containerColor = BgCard,
             )
         }
 

@@ -17,6 +17,7 @@ struct WalletView: View {
     @State private var showAddCredential = false
     @State private var showSettings = false
     @State private var showCloudVaultSetup = false
+    @State private var showDisableCloudVaultConfirm = false
     @State private var showRedeemGift = false
     @State private var statsTarget: WalletStatsTarget?
     @State private var renamingCredential: Credential?
@@ -71,7 +72,7 @@ struct WalletView: View {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         if wallet.cloudVaultEnabled {
-                            Task { await wallet.disableCloudVault() }
+                            showDisableCloudVaultConfirm = true
                         } else {
                             showCloudVaultSetup = true
                         }
@@ -108,6 +109,18 @@ struct WalletView: View {
             .sheet(isPresented: $showCloudVaultSetup) {
                 CloudVaultSetupView(lastUsername: wallet.cloudVaultLastUsername)
                     .environmentObject(wallet)
+            }
+            .confirmationDialog(
+                "Turn off Cloud Sync?",
+                isPresented: $showDisableCloudVaultConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Turn off Cloud Sync", role: .destructive) {
+                    Task { await wallet.disableCloudVault() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Your keys stay on this device. They remain on the server under your account — sign back in anytime to restore sync.")
             }
             .sheet(item: $statsTarget) { target in
                 NavigationStack {

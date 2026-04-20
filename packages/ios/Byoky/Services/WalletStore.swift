@@ -1445,6 +1445,17 @@ final class WalletStore: ObservableObject {
             serverToLocal[meta.serverId] = localId
         }
 
+        // Content-based adoption index: when meta has been wiped (e.g. after
+        // a disable/re-enable cycle) the server row won't match by serverId
+        // but an identical local row likely still exists. Match by provider
+        // + plaintext key to adopt it instead of creating a duplicate.
+        var localByContent: [String: String] = [:]
+        let claimedLocalIds = Set(vaultCredentialMeta.keys)
+        for cred in credentials where !claimedLocalIds.contains(cred.id) {
+            guard let plain = try? decryptKey(for: cred) else { continue }
+            localByContent["\(cred.providerId)|\(plain)"] = cred.id
+        }
+
         var didMutate = false
 
         for remote in remoteCreds {
@@ -1491,6 +1502,23 @@ final class WalletStore: ObservableObject {
                 vaultCredentialMeta[localId] = VaultCredentialMeta(serverId: serverId, remoteUpdatedAt: updatedAt)
                 vaultCredentialMap[localId] = serverId
                 didMutate = true
+            } else if let adoptId = localByContent["\(providerId)|\(apiKey)"] {
+                // Same provider + same plaintext key already exists locally.
+                // Adopt that row under this serverId instead of duplicating.
+                if let idx = credentials.firstIndex(where: { $0.id == adoptId }) {
+                    credentials[idx] = Credential(
+                        id: adoptId,
+                        providerId: providerId,
+                        label: label,
+                        authMethod: authMethod,
+                        createdAt: credentials[idx].createdAt
+                    )
+                }
+                vaultCredentialMap[adoptId] = serverId
+                vaultCredentialMeta[adoptId] = VaultCredentialMeta(serverId: serverId, remoteUpdatedAt: updatedAt)
+                serverToLocal[serverId] = adoptId
+                localByContent.removeValue(forKey: "\(providerId)|\(apiKey)")
+                didMutate = true
             } else {
                 guard let encrypted = try? crypto.encrypt(plaintext: apiKey, key: masterKey) else { continue }
                 let newId = UUID().uuidString
@@ -1506,6 +1534,7 @@ final class WalletStore: ObservableObject {
                 ))
                 vaultCredentialMap[newId] = serverId
                 vaultCredentialMeta[newId] = VaultCredentialMeta(serverId: serverId, remoteUpdatedAt: updatedAt)
+                serverToLocal[serverId] = newId
                 didMutate = true
             }
         }
@@ -1669,6 +1698,41 @@ final class WalletStore: ObservableObject {
         gifts[idx].marketplaceManagementToken = marketplaceToken
         saveGifts()
         Task { await uploadMarketplaceTokenToVault(giftId: giftId, token: marketplaceToken) }
+    }
+
+    /// Allocate a short link on the vault for an encoded gift blob. Returns
+    /// the short id on success, or nil if the user isn't signed into cloud
+    /// vault, the token is expired, or the vault is unreachable — in every
+    /// such case the caller should fall back to the long URL so gift
+    /// creation never fails.
+    func createGiftShortLink(encoded: String, expiresAt: Date) async -> String? {
+        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return nil }
+        let body: [String: Any] = [
+            "encoded": encoded,
+            "expiresAt": Int(expiresAt.timeIntervalSince1970 * 1000),
+        ]
+        let result = await vaultRequest(path: "/gift-links", method: "POST", body: body, token: token)
+        if result.status == 401 {
+            cloudVaultTokenExpired = true
+            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
+            return nil
+        }
+        guard result.ok, let shortId = result.data["shortId"] as? String else { return nil }
+        return shortId
+    }
+
+    /// Resolve a short id to its encoded blob via the vault. Returns nil for
+    /// 404/410 (unknown/expired) and throws on transport failures so the UI
+    /// can distinguish "gift gone" from "network down".
+    func resolveGiftShortLink(shortId: String) async throws -> String? {
+        let result = await vaultRequest(path: "/gift-links/\(shortId)", method: "GET")
+        if result.status == 404 || result.status == 410 { return nil }
+        guard result.ok else {
+            throw NSError(domain: "ByokyShortLink", code: result.status, userInfo: [
+                NSLocalizedDescriptionKey: "Could not reach vault to resolve gift link",
+            ])
+        }
+        return result.data["encoded"] as? String
     }
 
     func unregisterGiftFromVault(giftId: String) async {

@@ -1899,6 +1899,22 @@ class WalletStore(context: Context) {
         val serverToLocal = HashMap<String, String>()
         vaultCredentialMeta.forEach { (localId, m) -> serverToLocal[m.serverId] = localId }
 
+        // Content-based adoption index for rows the server sends us that
+        // aren't in meta (e.g. after a disable/re-enable cycle wiped it).
+        // Match by providerId + plaintext key so we adopt the existing
+        // local row instead of creating a duplicate.
+        val localByContent = HashMap<String, String>()
+        val claimed = vaultCredentialMeta.keys
+        for (cred in _credentials.value) {
+            if (claimed.contains(cred.id)) continue
+            val plain = try {
+                CryptoService.decrypt(
+                    prefs.getString("key_${cred.id}", null) ?: continue, pw,
+                )
+            } catch (_: Exception) { continue }
+            localByContent["${cred.providerId}|$plain"] = cred.id
+        }
+
         val updated = _credentials.value.toMutableList()
         var didMutate = false
 
@@ -1953,22 +1969,40 @@ class WalletStore(context: Context) {
                 vaultCredentialMap[existingLocalId] = serverId
                 didMutate = true
             } else {
-                val encrypted = try {
-                    CryptoService.encrypt(apiKey, pw)
-                } catch (_: Exception) { continue }
-                val newId = java.util.UUID.randomUUID().toString()
-                prefs.edit().putString("key_$newId", encrypted).apply()
-                val createdAt = remote.optLong("createdAt", System.currentTimeMillis())
-                updated.add(Credential(
-                    id = newId,
-                    providerId = providerId,
-                    label = label,
-                    authMethod = authMethod,
-                    createdAt = createdAt,
-                ))
-                vaultCredentialMap[newId] = serverId
-                vaultCredentialMeta[newId] = VaultCredentialMeta(serverId, updatedAt)
-                didMutate = true
+                val adoptId = localByContent["$providerId|$apiKey"]
+                if (adoptId != null) {
+                    val idx = updated.indexOfFirst { it.id == adoptId }
+                    if (idx >= 0) {
+                        updated[idx] = updated[idx].copy(
+                            providerId = providerId,
+                            label = label,
+                            authMethod = authMethod,
+                        )
+                    }
+                    vaultCredentialMap[adoptId] = serverId
+                    vaultCredentialMeta[adoptId] = VaultCredentialMeta(serverId, updatedAt)
+                    serverToLocal[serverId] = adoptId
+                    localByContent.remove("$providerId|$apiKey")
+                    didMutate = true
+                } else {
+                    val encrypted = try {
+                        CryptoService.encrypt(apiKey, pw)
+                    } catch (_: Exception) { continue }
+                    val newId = java.util.UUID.randomUUID().toString()
+                    prefs.edit().putString("key_$newId", encrypted).apply()
+                    val createdAt = remote.optLong("createdAt", System.currentTimeMillis())
+                    updated.add(Credential(
+                        id = newId,
+                        providerId = providerId,
+                        label = label,
+                        authMethod = authMethod,
+                        createdAt = createdAt,
+                    ))
+                    vaultCredentialMap[newId] = serverId
+                    vaultCredentialMeta[newId] = VaultCredentialMeta(serverId, updatedAt)
+                    serverToLocal[serverId] = newId
+                    didMutate = true
+                }
             }
         }
 

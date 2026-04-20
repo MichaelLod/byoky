@@ -89,7 +89,9 @@ export function Settings() {
               checked={cloudVaultEnabled}
               onChange={() => {
                 if (cloudVaultEnabled) {
-                  disableCloudVault();
+                  if (window.confirm('Turn off Cloud Sync? Your keys stay on this device and remain on the server under your account — sign back in anytime to restore sync.')) {
+                    disableCloudVault();
+                  }
                 } else {
                   setModal('cloud-vault');
                 }
