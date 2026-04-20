@@ -11,19 +11,19 @@ interface Message {
   provider?: string;
 }
 
-const providers: Record<string, { url: string; model: string; name: string }> = {
-  anthropic:  { url: 'https://api.anthropic.com/v1/messages',                                              model: 'claude-sonnet-4-20250514',                                    name: 'Claude' },
-  openai:     { url: 'https://api.openai.com/v1/chat/completions',                                         model: 'gpt-4o',                                                      name: 'GPT-4o' },
-  gemini:     { url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent', model: 'gemini-2.0-flash',                                       name: 'Gemini' },
-  groq:       { url: 'https://api.groq.com/openai/v1/chat/completions',                                    model: 'llama-3.3-70b-versatile',                                     name: 'Llama 3.3 (Groq)' },
-  deepseek:   { url: 'https://api.deepseek.com/chat/completions',                                          model: 'deepseek-chat',                                               name: 'DeepSeek' },
-  xai:        { url: 'https://api.x.ai/v1/chat/completions',                                               model: 'grok-3-mini',                                                 name: 'Grok' },
-  mistral:    { url: 'https://api.mistral.ai/v1/chat/completions',                                         model: 'mistral-large-latest',                                        name: 'Mistral' },
-  together:   { url: 'https://api.together.xyz/v1/chat/completions',                                       model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo',                     name: 'Together AI' },
-  fireworks:  { url: 'https://api.fireworks.ai/inference/v1/chat/completions',                              model: 'accounts/fireworks/models/llama-v3p3-70b-instruct',            name: 'Fireworks' },
-  perplexity: { url: 'https://api.perplexity.ai/chat/completions',                                         model: 'sonar',                                                       name: 'Perplexity' },
-  openrouter: { url: 'https://openrouter.ai/api/v1/chat/completions',                                      model: 'anthropic/claude-sonnet-4',                                   name: 'OpenRouter' },
-  cohere:     { url: 'https://api.cohere.com/v2/chat',                                                     model: 'command-r-plus',                                              name: 'Cohere' },
+const providers: Record<string, { url: string; models: string[]; name: string }> = {
+  anthropic:  { url: 'https://api.anthropic.com/v1/messages',                 models: ['claude-sonnet-4-6', 'claude-opus-4-7', 'claude-haiku-4-5'],                                                                                               name: 'Claude' },
+  openai:     { url: 'https://api.openai.com/v1/chat/completions',            models: ['gpt-5.4-mini', 'gpt-5.4', 'gpt-5.4-nano', 'gpt-5-mini', 'gpt-4o', 'gpt-4o-mini'],                                                                       name: 'OpenAI' },
+  gemini:     { url: 'https://generativelanguage.googleapis.com/v1beta/models', models: ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-pro', 'gemini-2.5-flash-lite', 'gemini-3.1-pro-preview', 'gemini-3.1-flash-lite-preview'],    name: 'Gemini' },
+  groq:       { url: 'https://api.groq.com/openai/v1/chat/completions',       models: ['llama-3.3-70b-versatile', 'meta-llama/llama-4-scout-17b-16e-instruct', 'llama-3.1-8b-instant'],                                                        name: 'Groq' },
+  deepseek:   { url: 'https://api.deepseek.com/chat/completions',             models: ['deepseek-chat', 'deepseek-reasoner'],                                                                                                                  name: 'DeepSeek' },
+  xai:        { url: 'https://api.x.ai/v1/chat/completions',                  models: ['grok-4-fast-non-reasoning', 'grok-4-fast-reasoning', 'grok-4', 'grok-3-mini'],                                                                         name: 'Grok' },
+  mistral:    { url: 'https://api.mistral.ai/v1/chat/completions',            models: ['mistral-large-latest', 'mistral-small-latest'],                                                                                                        name: 'Mistral' },
+  together:   { url: 'https://api.together.xyz/v1/chat/completions',          models: ['meta-llama/Llama-3.3-70B-Instruct-Turbo', 'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8', 'Qwen/Qwen2.5-72B-Instruct-Turbo'],                     name: 'Together AI' },
+  fireworks:  { url: 'https://api.fireworks.ai/inference/v1/chat/completions', models: ['accounts/fireworks/models/llama4-maverick-instruct-basic', 'accounts/fireworks/models/llama-v3p3-70b-instruct'],                                     name: 'Fireworks' },
+  perplexity: { url: 'https://api.perplexity.ai/chat/completions',            models: ['sonar', 'sonar-pro', 'sonar-deep-research'],                                                                                                           name: 'Perplexity' },
+  openrouter: { url: 'https://openrouter.ai/api/v1/chat/completions',         models: ['anthropic/claude-sonnet-4.6', 'openai/gpt-5.4-mini', 'google/gemini-2.5-flash', 'meta-llama/llama-3.3-70b-instruct'],                                  name: 'OpenRouter' },
+  cohere:     { url: 'https://api.cohere.com/v2/chat',                        models: ['command-a-03-2025', 'command-r-plus', 'command-r7b-12-2024'],                                                                                         name: 'Cohere' },
 };
 
 const visionProviders = new Set(['anthropic', 'openai', 'gemini']);
@@ -203,12 +203,21 @@ function ChatView({ session, onDisconnect }: { session: ByokySession; onDisconne
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState('');
+  const [selectedModels, setSelectedModels] = useState<Record<string, string>>(() => {
+    if (typeof window === 'undefined') return {};
+    try { return JSON.parse(localStorage.getItem('byoky-chat-models') || '{}'); } catch { return {}; }
+  });
   const [attachedImage, setAttachedImage] = useState<{ file: File; preview: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const supportsVision = visionProviders.has(selectedProvider);
+  const currentModel = selectedProvider ? (selectedModels[selectedProvider] ?? providers[selectedProvider].models[0]) : '';
 
   useEffect(() => { const el = messagesRef.current; if (el) el.scrollTop = el.scrollHeight; }, [messages]);
+
+  useEffect(() => {
+    try { localStorage.setItem('byoky-chat-models', JSON.stringify(selectedModels)); } catch {}
+  }, [selectedModels]);
 
   useEffect(() => {
     if (selectedProvider) return;
@@ -252,7 +261,7 @@ function ChatView({ session, onDisconnect }: { session: ByokySession; onDisconne
         content.push({ type: 'text', text: userMessage.content });
         const apiMessages: Array<{ role: string; content: string | CB[] }> = prevMessages.filter(m => m.role === 'user' || m.role === 'assistant').map(m => m.image ? { role: m.role, content: [{ type: 'image', source: { type: 'base64', media_type: m.image.mediaType, data: m.image.base64 } }, { type: 'text', text: m.content }] as CB[] } : { role: m.role, content: m.content });
         apiMessages.push({ role: 'user', content });
-        const response = await proxyFetch(providers.anthropic.url, { method: 'POST', headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' }, body: JSON.stringify({ model: providers.anthropic.model, max_tokens: 4096, stream: true, messages: apiMessages }) });
+        const response = await proxyFetch(providers.anthropic.url, { method: 'POST', headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' }, body: JSON.stringify({ model: currentModel, max_tokens: 4096, stream: true, messages: apiMessages }) });
         if (!response.ok) { const errText = await response.text(); let errMsg = `API error ${response.status}`; try { const parsed = JSON.parse(errText); const err = parsed.error; errMsg = [typeof err === 'string' ? err : err?.message, err?.type ? `(${err.type})` : '', `[${response.status}]`].filter(Boolean).join(' '); } catch { if (errText) errMsg += `: ${errText.slice(0, 200)}`; } throw new Error(errMsg); }
         if (response.body) { for await (const event of parseSSE(response)) { const e = event as { type?: string; delta?: { text?: string } }; if (e.type === 'content_block_delta' && e.delta?.text) appendToken(e.delta.text); } }
 
@@ -263,7 +272,7 @@ function ChatView({ session, onDisconnect }: { session: ByokySession; onDisconne
         parts.push({ text: userMessage.content });
         const apiContents = prevMessages.filter(m => m.role === 'user' || m.role === 'assistant').map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: m.image ? [{ inline_data: { mime_type: m.image.mediaType, data: m.image.base64 } } as GP, { text: m.content }] : [{ text: m.content }] }));
         apiContents.push({ role: 'user', parts });
-        const response = await proxyFetch(providers.gemini.url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ contents: apiContents }) });
+        const response = await proxyFetch(`${providers.gemini.url}/${currentModel}:generateContent`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ contents: apiContents }) });
         if (!response.ok) { const err = (await response.json()).error; throw new Error(err?.message || `API error: ${response.status}`); }
         const data = await response.json();
         appendToken(data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response.');
@@ -275,14 +284,14 @@ function ChatView({ session, onDisconnect }: { session: ByokySession; onDisconne
         content.push({ type: 'text', text: userMessage.content });
         const apiMessages: Array<{ role: string; content: string | OB[] }> = prevMessages.filter(m => m.role === 'user' || m.role === 'assistant').map(m => m.image ? { role: m.role, content: [{ type: 'image_url', image_url: { url: `data:${m.image.mediaType};base64,${m.image.base64}` } }, { type: 'text', text: m.content }] as OB[] } : { role: m.role, content: m.content });
         apiMessages.push({ role: 'user', content });
-        const response = await proxyFetch(providers.openai.url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: providers.openai.model, messages: apiMessages, max_completion_tokens: 4096, stream: true }) });
+        const response = await proxyFetch(providers.openai.url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: currentModel, messages: apiMessages, max_completion_tokens: 4096, stream: true }) });
         if (!response.ok) { const err = (await response.json()).error; throw new Error(err?.message || `API error: ${response.status}`); }
         if (response.body) { for await (const event of parseSSE(response)) { const e = event as { choices?: Array<{ delta?: { content?: string } }> }; if (e.choices?.[0]?.delta?.content) appendToken(e.choices[0].delta.content); } }
 
       } else if (selectedProvider in providers) {
         const allMessages = [...prevMessages, userMessage].map(m => ({ role: m.role, content: m.content }));
         const config = providers[selectedProvider];
-        const response = await proxyFetch(config.url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: config.model, messages: allMessages, max_completion_tokens: 4096, stream: true }) });
+        const response = await proxyFetch(config.url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: currentModel, messages: allMessages, max_completion_tokens: 4096, stream: true }) });
         if (!response.ok) { const err = (await response.json()).error; throw new Error(err?.message || `API error: ${response.status}`); }
         if (response.body) { for await (const event of parseSSE(response)) { const e = event as { choices?: Array<{ delta?: { content?: string } }> }; if (e.choices?.[0]?.delta?.content) appendToken(e.choices[0].delta.content); } }
       }
@@ -302,6 +311,11 @@ function ChatView({ session, onDisconnect }: { session: ByokySession; onDisconne
           <select value={selectedProvider} onChange={e => setSelectedProvider(e.target.value)}>
             {providerIds.filter(id => session.providers[id]?.available).map(id => <option key={id} value={id}>{providers[id].name}</option>)}
           </select>
+          {selectedProvider && (
+            <select value={currentModel} onChange={e => setSelectedModels(prev => ({ ...prev, [selectedProvider]: e.target.value }))}>
+              {providers[selectedProvider].models.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          )}
         </div>
         <div className="header-actions">
           {messages.length > 0 && <button className="btn-ghost" onClick={() => setMessages([])}>Clear</button>}
