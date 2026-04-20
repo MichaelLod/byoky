@@ -417,6 +417,23 @@ section {
   letter-spacing: 0.02em;
 }
 
+.hero-producthunt {
+  display: inline-block;
+  margin-bottom: 24px;
+  line-height: 0;
+  transition: transform 0.2s ease;
+}
+
+.hero-producthunt:hover {
+  transform: translateY(-2px);
+}
+
+.hero-producthunt img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
 .hero-mascot {
   position: relative;
   display: inline-block;
