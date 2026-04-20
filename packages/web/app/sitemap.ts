@@ -27,6 +27,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.8,
     },
     {
+      url: 'https://byoky.com/blog/v0-6-0-gifts-everywhere',
+      lastModified: new Date('2026-04-14'),
+      changeFrequency: 'monthly',
+      priority: 0.7,
+    },
+    {
       url: 'https://byoky.com/blog/anthropic-claude-code-fingerprint',
       lastModified: new Date('2026-04-08'),
       changeFrequency: 'monthly',
@@ -51,10 +57,22 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.8,
     },
     {
+      url: 'https://byoky.com/chat',
+      lastModified: new Date(),
+      changeFrequency: 'monthly',
+      priority: 0.7,
+    },
+    {
       url: 'https://byoky.com/demo',
       lastModified: new Date(),
       changeFrequency: 'monthly',
       priority: 0.7,
+    },
+    {
+      url: 'https://byoky.com/support',
+      lastModified: new Date(),
+      changeFrequency: 'monthly',
+      priority: 0.6,
     },
     {
       url: 'https://byoky.com/privacy',
