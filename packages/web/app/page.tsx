@@ -163,21 +163,6 @@ function Hero() {
       <div className="hero-glow-tertiary" aria-hidden />
       <div className="container">
         <FadeIn>
-          <a
-            href="https://www.producthunt.com/products/byoky?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-byoky"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hero-producthunt"
-          >
-            <img
-              src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1126291&theme=light&t=1776698477634"
-              alt="Byoky - Share your AI budget without sharing your keys | Product Hunt"
-              width={250}
-              height={54}
-            />
-          </a>
-        </FadeIn>
-        <FadeIn>
           <div className="hero-badge">
             <span className="hero-badge-dot" />
             The AI token network

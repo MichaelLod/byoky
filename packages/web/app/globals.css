@@ -417,21 +417,99 @@ section {
   letter-spacing: 0.02em;
 }
 
-.hero-producthunt {
-  display: inline-block;
-  margin-bottom: 24px;
-  line-height: 0;
-  transition: transform 0.2s ease;
+.ph-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 110;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  height: 40px;
+  padding: 0 40px 0 16px;
+  background: #fff4e8;
+  border-bottom: 1px solid rgba(218, 85, 47, 0.18);
+  font-size: 13px;
+  color: #3a2a1f;
+  letter-spacing: 0.01em;
 }
 
-.hero-producthunt:hover {
-  transform: translateY(-2px);
+.ph-banner-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: inherit;
+  text-decoration: none;
+  min-width: 0;
 }
 
-.hero-producthunt img {
-  display: block;
-  max-width: 100%;
-  height: auto;
+.ph-banner-link:hover .ph-banner-cta {
+  text-decoration: underline;
+}
+
+.ph-banner-logo {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.ph-banner-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ph-banner-text strong {
+  font-weight: 600;
+}
+
+.ph-banner-cta {
+  color: #da552f;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.ph-banner-close {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  color: #6b4a36;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.15s ease;
+}
+
+.ph-banner-close:hover {
+  background: rgba(218, 85, 47, 0.1);
+  color: #3a2a1f;
+}
+
+body.has-ph-banner .navbar {
+  top: 40px;
+}
+
+@media (max-width: 560px) {
+  .ph-banner {
+    font-size: 12px;
+    gap: 10px;
+    padding: 0 36px 0 12px;
+  }
+  .ph-banner-link {
+    gap: 8px;
+  }
+  .ph-banner-text strong {
+    display: inline;
+  }
 }
 
 .hero-mascot {
