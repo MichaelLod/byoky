@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useWalletStore } from '../store';
-import { PROVIDERS, giftLinkToUrl } from '@byoky/core';
+import { PROVIDERS, giftLinkToUrl, giftShortLinkToUrl } from '@byoky/core';
 
 const EXPIRY_OPTIONS = [
   { label: '1 hour', ms: 60 * 60 * 1000 },
@@ -58,8 +58,8 @@ export function CreateGift() {
     );
     setSubmitting(false);
     if (result) {
-      const { giftLink: encoded, giftId } = result;
-      const link = giftLinkToUrl(encoded);
+      const { giftLink: encoded, giftId, shortId } = result;
+      const link = shortId ? giftShortLinkToUrl(shortId) : giftLinkToUrl(encoded);
       setGiftLink(link);
       if (listPublicly) {
         try {

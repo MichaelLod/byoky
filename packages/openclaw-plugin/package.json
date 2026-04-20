@@ -1,14 +1,13 @@
 {
   "name": "@byoky/openclaw-plugin",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "description": "Byoky wallet provider plugin for OpenClaw — manage AI API keys from your browser wallet",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
     "dist",
-    "openclaw.plugin.json",
-    "auth-page"
+    "openclaw.plugin.json"
   ],
   "scripts": {
     "build": "tsup",
@@ -37,7 +36,8 @@
     "directory": "packages/openclaw-plugin"
   },
   "dependencies": {
-    "@byoky/bridge": "workspace:*"
+    "@byoky/bridge": "workspace:*",
+    "@byoky/sdk": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "25.5.0",

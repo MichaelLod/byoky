@@ -10,9 +10,14 @@ struct RedeemGiftView: View {
 
     @State private var linkText = ""
     @State private var previewLink: GiftLink?
+    // Encoded blob ready to hand to `wallet.redeemGift`. Always populated
+    // alongside `previewLink` — for long URLs it's the trimmed path, for
+    // short URLs it's the blob the vault handed back.
+    @State private var resolvedEncoded: String?
     @State private var validationError: String?
     @State private var redeemError: String?
     @State private var redeemed = false
+    @State private var resolving = false
     @State private var showScanner = false
 
     init(prefilledLink: String? = nil) {
@@ -41,13 +46,20 @@ struct RedeemGiftView: View {
                     .font(.system(.body, design: .monospaced))
                     .frame(minHeight: 80)
                     .onChange(of: linkText) { _ in
-                        parseLink()
+                        Task { await parseLink() }
                     }
                     .accessibilityIdentifier("redeemGift.link")
             } header: {
                 Text("Gift Link")
             } footer: {
                 Text("Paste the gift link or scan the QR code from the token pool.")
+            }
+
+            if resolving {
+                Section {
+                    Label("Resolving short link…", systemImage: "arrow.triangle.2.circlepath")
+                        .foregroundStyle(.secondary)
+                }
             }
 
             if let link = previewLink {
@@ -106,13 +118,13 @@ struct RedeemGiftView: View {
             QRScannerView { code in
                 showScanner = false
                 linkText = code
-                parseLink()
+                Task { await parseLink() }
             }
         }
         .onAppear {
             if let prefilled = prefilledLink, linkText.isEmpty {
                 linkText = prefilled
-                parseLink()
+                Task { await parseLink() }
             }
         }
     }
@@ -127,42 +139,65 @@ struct RedeemGiftView: View {
         }
     }
 
-    private func parseLink() {
+    private func isShortUrl(_ input: String) -> Bool {
+        input.hasPrefix("https://byoky.com/g/")
+            || input.hasPrefix("http://byoky.com/g/")
+            || input.hasPrefix("byoky://g/")
+    }
+
+    @MainActor
+    private func parseLink() async {
         previewLink = nil
+        resolvedEncoded = nil
         validationError = nil
         redeemError = nil
         redeemed = false
 
-        var encoded = linkText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if encoded.isEmpty { return }
+        let trimmed = linkText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return }
 
-        if encoded.hasPrefix("https://byoky.com/gift#") {
-            encoded = String(encoded.dropFirst("https://byoky.com/gift#".count))
-        } else if encoded.hasPrefix("https://byoky.com/gift/") {
-            encoded = String(encoded.dropFirst("https://byoky.com/gift/".count))
-        } else if encoded.hasPrefix("byoky://gift/") {
-            encoded = String(encoded.dropFirst("byoky://gift/".count))
+        var encoded: String
+        if isShortUrl(trimmed) {
+            guard let shortId = extractGiftShortId(from: trimmed) else {
+                validationError = "Invalid gift link format"
+                return
+            }
+            resolving = true
+            defer { resolving = false }
+            do {
+                guard let blob = try await wallet.resolveGiftShortLink(shortId: shortId) else {
+                    validationError = "Gift link not found or expired"
+                    return
+                }
+                encoded = blob
+            } catch {
+                validationError = "Could not reach vault to resolve gift link"
+                return
+            }
+        } else {
+            var stripped = trimmed
+            if stripped.hasPrefix("https://byoky.com/gift#") {
+                stripped = String(stripped.dropFirst("https://byoky.com/gift#".count))
+            } else if stripped.hasPrefix("https://byoky.com/gift/") {
+                stripped = String(stripped.dropFirst("https://byoky.com/gift/".count))
+            } else if stripped.hasPrefix("byoky://gift/") {
+                stripped = String(stripped.dropFirst("byoky://gift/".count))
+            }
+            encoded = stripped
         }
 
         do {
             let link = try decodeGiftLink(encoded)
             try validateGiftLink(link)
             previewLink = link
+            resolvedEncoded = encoded
         } catch {
             validationError = error.localizedDescription
         }
     }
 
     private func redeem() {
-        var encoded = linkText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if encoded.hasPrefix("https://byoky.com/gift#") {
-            encoded = String(encoded.dropFirst("https://byoky.com/gift#".count))
-        } else if encoded.hasPrefix("https://byoky.com/gift/") {
-            encoded = String(encoded.dropFirst("https://byoky.com/gift/".count))
-        } else if encoded.hasPrefix("byoky://gift/") {
-            encoded = String(encoded.dropFirst("byoky://gift/".count))
-        }
-
+        guard let encoded = resolvedEncoded else { return }
         do {
             try wallet.redeemGift(encoded: encoded)
             redeemed = true

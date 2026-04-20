@@ -1,35 +1,60 @@
 import { useState, useEffect, type FormEvent } from 'react';
 import { useWalletStore } from '../store';
-import { decodeGiftLink, validateGiftLink, type GiftLink } from '@byoky/core';
+import { decodeGiftLink, validateGiftLink, extractGiftShortId, type GiftLink } from '@byoky/core';
 
 export function RedeemGift() {
-  const { redeemGift, closeModal, dismissPendingGift, pendingGiftLink, error, loading } = useWalletStore();
+  const { redeemGift, resolveGiftShortLink, closeModal, dismissPendingGift, pendingGiftLink, error, loading } = useWalletStore();
   const [linkInput, setLinkInput] = useState('');
   const [preview, setPreview] = useState<GiftLink | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
+  const [resolving, setResolving] = useState(false);
+  // Holds the fully-decoded encoded blob once we've resolved the input.
+  // Populated for both long URLs (immediate strip) and short URLs (after
+  // vault lookup) so handleSubmit doesn't have to redo the work.
+  const [resolvedEncoded, setResolvedEncoded] = useState<string | null>(null);
 
   useEffect(() => {
     if (pendingGiftLink && !linkInput) {
-      handleParse(pendingGiftLink);
+      void handleParse(pendingGiftLink);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingGiftLink]);
 
-  function handleParse(value: string) {
-    setLinkInput(value);
-    setParseError(null);
-    setPreview(null);
-
-    if (!value.trim()) return;
-
-    // Extract encoded part from URL or raw base64
-    let encoded = value.trim();
+  function stripLongUrlPrefix(input: string): string {
+    let encoded = input.trim();
     if (encoded.startsWith('https://byoky.com/gift#')) {
       encoded = encoded.replace('https://byoky.com/gift#', '');
     } else if (encoded.startsWith('https://byoky.com/gift/')) {
       encoded = encoded.replace('https://byoky.com/gift/', '');
     } else if (encoded.startsWith('byoky://gift/')) {
       encoded = encoded.replace('byoky://gift/', '');
+    }
+    return encoded;
+  }
+
+  async function handleParse(value: string) {
+    setLinkInput(value);
+    setParseError(null);
+    setPreview(null);
+    setResolvedEncoded(null);
+
+    const trimmed = value.trim();
+    if (!trimmed) return;
+
+    let encoded: string;
+    const shortId = extractGiftShortId(trimmed);
+    const looksShort = shortId && /^(https?:\/\/|byoky:\/\/)/.test(trimmed);
+    if (looksShort) {
+      setResolving(true);
+      const res = await resolveGiftShortLink(shortId!);
+      setResolving(false);
+      if (res.error || !res.encoded) {
+        setParseError(res.error ?? 'Could not resolve gift link');
+        return;
+      }
+      encoded = res.encoded;
+    } else {
+      encoded = stripLongUrlPrefix(trimmed);
     }
 
     const link = decodeGiftLink(encoded);
@@ -45,22 +70,13 @@ export function RedeemGift() {
     }
 
     setPreview(link);
+    setResolvedEncoded(encoded);
   }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!preview) return;
-
-    let encoded = linkInput.trim();
-    if (encoded.startsWith('https://byoky.com/gift#')) {
-      encoded = encoded.replace('https://byoky.com/gift#', '');
-    } else if (encoded.startsWith('https://byoky.com/gift/')) {
-      encoded = encoded.replace('https://byoky.com/gift/', '');
-    } else if (encoded.startsWith('byoky://gift/')) {
-      encoded = encoded.replace('byoky://gift/', '');
-    }
-
-    await redeemGift(encoded);
+    if (!preview || !resolvedEncoded) return;
+    await redeemGift(resolvedEncoded);
   }
 
   function formatTokens(n: number): string {
@@ -87,6 +103,7 @@ export function RedeemGift() {
       </p>
 
       {(error || parseError) && <div className="error">{error || parseError}</div>}
+      {resolving && <div className="form-hint">Resolving short link…</div>}
 
       <form onSubmit={handleSubmit}>
         <div className="form-group">
@@ -94,8 +111,8 @@ export function RedeemGift() {
           <textarea
             id="gift-link"
             value={linkInput}
-            onChange={(e) => handleParse(e.target.value)}
-            placeholder="https://byoky.com/gift/... or byoky://gift/..."
+            onChange={(e) => void handleParse(e.target.value)}
+            placeholder="https://byoky.com/g/... or https://byoky.com/gift/..."
             rows={3}
           />
         </div>

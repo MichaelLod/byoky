@@ -63,6 +63,27 @@ func giftLinkToUrl(_ encoded: String) -> String {
     "https://byoky.com/gift/\(encoded)"
 }
 
+func giftShortLinkToUrl(_ shortId: String) -> String {
+    "https://byoky.com/g/\(shortId)"
+}
+
+/// Extract a short id from a pasted https://byoky.com/g/<id> or byoky://g/<id>
+/// URL, or return the input itself if it already looks like a bare short id.
+/// Returns nil for anything that isn't a short-link shape.
+func extractGiftShortId(from input: String) -> String? {
+    let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+    let shortIdPattern = #"^[A-Za-z0-9]{8,32}$"#
+
+    for prefix in ["https://byoky.com/g/", "http://byoky.com/g/", "byoky://g/"] {
+        if trimmed.hasPrefix(prefix) {
+            let id = String(trimmed.dropFirst(prefix.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            return id.range(of: shortIdPattern, options: .regularExpression) != nil ? id : nil
+        }
+    }
+    return trimmed.range(of: shortIdPattern, options: .regularExpression) != nil ? trimmed : nil
+}
+
 func validateGiftLink(_ link: GiftLink) throws {
     guard link.v == 1 else { throw GiftError.unsupportedVersion }
     guard !link.id.isEmpty else { throw GiftError.missingField("id") }

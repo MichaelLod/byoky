@@ -114,6 +114,66 @@ export function giftLinkToUrl(encoded: string): string {
   return `https://byoky.com/gift/${encoded}`;
 }
 
+// --- Short gift links ---
+// A short URL form (https://byoky.com/g/<shortId> and byoky://g/<shortId>)
+// that resolves via the vault to the encoded blob. Needed because some
+// messaging clients (notably WhatsApp) stop auto-linkifying very long URLs
+// on the recipient's device.
+
+const SHORT_ID_RE = /^[A-Za-z0-9]{8,32}$/;
+
+export function giftShortLinkToUrl(shortId: string): string {
+  return `https://byoky.com/g/${shortId}`;
+}
+
+export function giftShortLinkToDeepUrl(shortId: string): string {
+  return `byoky://g/${shortId}`;
+}
+
+/**
+ * Extract the short id from any of: `https://byoky.com/g/<id>`,
+ * `http(s)://.../g/<id>` (any host — used by UI's paste box tolerance),
+ * `byoky://g/<id>`, or a bare `<id>`. Returns null if the input doesn't
+ * match a short-link shape.
+ */
+export function extractGiftShortId(input: string): string | null {
+  if (!input) return null;
+  const trimmed = input.trim();
+
+  const webMatch = trimmed.match(/^https?:\/\/[^/]+\/g\/([A-Za-z0-9]+)\/?$/);
+  if (webMatch) return SHORT_ID_RE.test(webMatch[1]!) ? webMatch[1]! : null;
+
+  const deepMatch = trimmed.match(/^byoky:\/\/g\/([A-Za-z0-9]+)\/?$/);
+  if (deepMatch) return SHORT_ID_RE.test(deepMatch[1]!) ? deepMatch[1]! : null;
+
+  if (SHORT_ID_RE.test(trimmed)) return trimmed;
+
+  return null;
+}
+
+export function isGiftShortUrl(input: string): boolean {
+  return extractGiftShortId(input) !== null && /^(https?:|byoky:)/.test(input.trim());
+}
+
+/**
+ * Fetch the encoded gift payload for a short id from the vault. Returns the
+ * encoded string on success, or null if the short id is unknown/expired.
+ * Throws on transport/server errors so callers can distinguish "gift gone"
+ * from "network down" (which should fall back to retry or manual paste).
+ */
+export async function resolveGiftShortLink(
+  vaultBaseUrl: string,
+  shortId: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string | null> {
+  const base = vaultBaseUrl.replace(/\/+$/, '');
+  const res = await fetchImpl(`${base}/gift-links/${encodeURIComponent(shortId)}`);
+  if (res.status === 404 || res.status === 410) return null;
+  if (!res.ok) throw new Error(`Gift short-link lookup failed: ${res.status}`);
+  const body = await res.json() as { encoded?: unknown };
+  return typeof body.encoded === 'string' ? body.encoded : null;
+}
+
 // --- Validation ---
 
 export function validateGiftLink(link: GiftLink): { valid: boolean; reason?: string } {

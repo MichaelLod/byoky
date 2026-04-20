@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.byoky.app.data.*
 import com.byoky.app.ui.theme.*
+import kotlinx.coroutines.launch
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 
@@ -56,7 +57,9 @@ fun CreateGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
     var listPublicly by remember { mutableStateOf(false) }
     var gifterName by remember { mutableStateOf("") }
     var createdGift by remember { mutableStateOf<Gift?>(null) }
+    var giftShortId by remember { mutableStateOf<String?>(null) }
     var dropdownExpanded by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
 
     // Keep the selection in sync with the credentials list: fall back to
     // the first credential whenever the current pick is nil or no longer
@@ -109,7 +112,7 @@ fun CreateGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
             if (credentials.isEmpty()) {
                 NoCredentialsState(onBack)
             } else if (createdGift != null) {
-                SuccessState(createdGift!!, context, onBack)
+                SuccessState(createdGift!!, giftShortId, context, onBack)
             } else {
                 // Credential picker
                 Text("Credential", color = TextSecondary, fontSize = 12.sp)
@@ -300,6 +303,15 @@ fun CreateGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
                             relayUrl = relayUrl,
                         )
                         createdGift = gift
+                        giftShortId = null
+                        if (gift != null) {
+                            val (encoded, _) = createGiftLink(gift)
+                            coroutineScope.launch {
+                                // Silent fallback to the long URL if the vault is unreachable
+                                // or the user isn't signed into cloud sync.
+                                giftShortId = wallet.createGiftShortLink(encoded, gift.expiresAt)
+                            }
+                        }
                         if (listPublicly && gift != null) {
                             val (encoded, _) = createGiftLink(gift)
                             val link = giftLinkToUrl(encoded)
@@ -392,9 +404,11 @@ private fun NoCredentialsState(onBack: () -> Unit) {
 }
 
 @Composable
-private fun SuccessState(gift: Gift, context: Context, onBack: () -> Unit) {
+private fun SuccessState(gift: Gift, shortId: String?, context: Context, onBack: () -> Unit) {
     val (encoded, _) = createGiftLink(gift)
-    val url = giftLinkToUrl(encoded)
+    // Prefer the short URL once allocated; fall back to the long URL while
+    // the vault POST is in flight or if it failed.
+    val url = shortId?.let { giftShortLinkToUrl(it) } ?: giftLinkToUrl(encoded)
     val provider = Provider.find(gift.providerId)
 
     Column(

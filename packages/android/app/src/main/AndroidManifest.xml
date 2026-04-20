@@ -37,6 +37,12 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="byoky" android:host="gift" />
             </intent-filter>
+            <intent-filter android:label="Redeem Byoky gift">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="byoky" android:host="g" />
+            </intent-filter>
         </activity>
     </application>
 

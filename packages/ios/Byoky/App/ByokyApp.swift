@@ -299,10 +299,10 @@ struct ByokyApp: App {
 
     private func handleIncomingURL(_ url: URL) {
         guard url.scheme == "byoky" else { return }
-        // byoky://gift/<encoded> — host is "gift", path holds the payload.
-        // Absolute fallback: stash the whole URL string so RedeemGiftView's
-        // existing parser can strip the prefix.
-        if url.host == "gift" {
+        // byoky://gift/<encoded> (long) or byoky://g/<shortId> (short) — in
+        // both cases RedeemGiftView's parser handles the prefix, including
+        // the vault resolve step when it detects a short link.
+        if url.host == "gift" || url.host == "g" {
             wallet.pendingGiftLink = url.absoluteString
         } else if url.host == "pair" {
             wallet.pendingPairLink = url.absoluteString
@@ -317,7 +317,10 @@ struct ByokyApp: App {
         guard wallet.pendingGiftLink == nil else { return }
         guard UIPasteboard.general.hasStrings else { return }
         guard let text = UIPasteboard.general.string else { return }
-        if text.hasPrefix("https://byoky.com/gift") || text.hasPrefix("byoky://gift") {
+        if text.hasPrefix("https://byoky.com/gift")
+            || text.hasPrefix("https://byoky.com/g/")
+            || text.hasPrefix("byoky://gift")
+            || text.hasPrefix("byoky://g/") {
             wallet.pendingGiftLink = text
             UIPasteboard.general.string = ""
         }

@@ -92,6 +92,26 @@ fun decodeGiftLink(encoded: String): GiftLink? {
 
 fun giftLinkToUrl(encoded: String): String = "https://byoky.com/gift/$encoded"
 
+fun giftShortLinkToUrl(shortId: String): String = "https://byoky.com/g/$shortId"
+
+private val SHORT_ID_RE = Regex("^[A-Za-z0-9]{8,32}$")
+
+/**
+ * Parse https://byoky.com/g/<id>, byoky://g/<id>, or a bare short id. Returns
+ * null for anything that doesn't look like a short link.
+ */
+fun extractGiftShortId(input: String): String? {
+    val trimmed = input.trim()
+    if (trimmed.isEmpty()) return null
+    for (prefix in listOf("https://byoky.com/g/", "http://byoky.com/g/", "byoky://g/")) {
+        if (trimmed.startsWith(prefix)) {
+            val id = trimmed.removePrefix(prefix).trimEnd('/')
+            return if (SHORT_ID_RE.matches(id)) id else null
+        }
+    }
+    return if (SHORT_ID_RE.matches(trimmed)) trimmed else null
+}
+
 fun validateGiftLink(link: GiftLink): Pair<Boolean, String?> {
     if (link.v != 1) return Pair(false, "Unsupported gift version")
     if (link.id.isBlank()) return Pair(false, "Missing gift ID")

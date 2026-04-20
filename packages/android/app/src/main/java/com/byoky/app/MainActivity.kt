@@ -72,7 +72,10 @@ class MainActivity : ComponentActivity() {
         if (uri.scheme != "byoky") return
         when (uri.host) {
             "pair" -> wallet.setPendingPairLink(uri.toString())
-            "gift" -> wallet.setPendingGiftLink(uri.toString())
+            // Both long (byoky://gift/<encoded>) and short (byoky://g/<id>)
+            // shapes route to the redeem screen — RedeemGiftScreen resolves
+            // short ids via the vault before decoding.
+            "gift", "g" -> wallet.setPendingGiftLink(uri.toString())
         }
     }
 
@@ -86,7 +89,10 @@ class MainActivity : ComponentActivity() {
         val clip = clipboard.primaryClip ?: return
         if (clip.itemCount == 0) return
         val text = clip.getItemAt(0).text?.toString() ?: return
-        if (text.startsWith("https://byoky.com/gift") || text.startsWith("byoky://gift")) {
+        if (text.startsWith("https://byoky.com/gift")
+            || text.startsWith("https://byoky.com/g/")
+            || text.startsWith("byoky://gift")
+            || text.startsWith("byoky://g/")) {
             wallet.setPendingGiftLink(text)
             clipboard.setPrimaryClip(ClipData.newPlainText("", ""))
         }

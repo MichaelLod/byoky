@@ -86,10 +86,11 @@ interface WalletState {
   removeTrustedSite: (origin: string) => Promise<void>;
   setAllowance: (allowance: TokenAllowance) => Promise<void>;
   removeAllowance: (origin: string) => Promise<void>;
-  createGift: (credentialId: string, providerId: string, label: string, maxTokens: number, expiresInMs: number, relayUrl: string) => Promise<{ giftLink: string; giftId: string } | null>;
+  createGift: (credentialId: string, providerId: string, label: string, maxTokens: number, expiresInMs: number, relayUrl: string) => Promise<{ giftLink: string; giftId: string; shortId?: string } | null>;
   setGiftMarketplaceToken: (giftId: string, token: string) => Promise<void>;
   revokeGift: (giftId: string) => Promise<void>;
   redeemGift: (giftLinkEncoded: string) => Promise<void>;
+  resolveGiftShortLink: (shortId: string) => Promise<{ encoded?: string; error?: string }>;
   loadPendingGift: () => Promise<void>;
   dismissPendingGift: () => Promise<void>;
   removeGiftedCredential: (id: string) => Promise<void>;
@@ -440,7 +441,11 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       });
       if (result.error) throw new Error(result.error as string);
       await get().refreshData();
-      return { giftLink: result.giftLink as string, giftId: result.giftId as string };
+      return {
+        giftLink: result.giftLink as string,
+        giftId: result.giftId as string,
+        shortId: (result.shortId as string | undefined) ?? undefined,
+      };
     } catch (e) {
       set({ error: (e as Error).message });
       return null;
@@ -454,6 +459,12 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   revokeGift: async (giftId: string) => {
     await sendInternal('revokeGift', { giftId });
     await get().refreshData();
+  },
+
+  resolveGiftShortLink: async (shortId: string) => {
+    const result = await sendInternal('resolveGiftShortLink', { shortId });
+    if (result.error) return { error: result.error as string };
+    return { encoded: result.encoded as string };
   },
 
   redeemGift: async (giftLinkEncoded: string) => {

@@ -14,13 +14,15 @@
 
 import {
   emptyPluginConfigSchema,
+  type OpenClawConfig,
   type OpenClawPluginApi,
   type ProviderAuthContext,
   type ProviderAuthResult,
 } from 'openclaw/plugin-sdk/core';
 import { createServer, type Server } from 'node:http';
-import { writeFileSync, mkdirSync, existsSync, chmodSync } from 'node:fs';
+import { writeFileSync, mkdirSync, existsSync, chmodSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { homedir, platform } from 'node:os';
 import { createRequire } from 'node:module';
 
@@ -623,6 +625,7 @@ function buildAuthResult(
     apiKey: string;
     models: ModelDef[];
   }> = {};
+  const agentModels: Record<string, Record<string, never>> = {};
   for (const p of providers) {
     providerConfig[`byoky-${p.id}`] = {
       baseUrl: `http://127.0.0.1:${port}/${p.id}`,
@@ -630,6 +633,9 @@ function buildAuthResult(
       apiKey: 'byoky-proxy',
       models: p.models,
     };
+    for (const m of p.models) {
+      agentModels[`byoky-${p.id}/${m.id}`] = {};
+    }
   }
 
   const firstWithModels = providers.find((p) => p.models.length > 0);
@@ -652,9 +658,16 @@ function buildAuthResult(
   if (defaultModel) notes.push(`Default model set to ${defaultModel}.`);
   notes.push('Run `/byoky` inside OpenClaw anytime to check bridge status.');
 
+  const configPatch: Partial<OpenClawConfig> = {
+    models: { providers: providerConfig },
+  };
+  if (Object.keys(agentModels).length > 0) {
+    configPatch.agents = { defaults: { models: agentModels } };
+  }
+
   return {
     profiles,
-    configPatch: { models: { providers: providerConfig } },
+    configPatch,
     defaultModel,
     notes,
   };
@@ -723,6 +736,21 @@ async function startCallbackServer(
         return;
       }
 
+      if (req.method === 'GET' && req.url === '/auth-sdk.js') {
+        try {
+          const js = readAuthSdkBundle();
+          res.writeHead(200, {
+            'Content-Type': 'application/javascript; charset=utf-8',
+            'Cache-Control': 'no-cache',
+          });
+          res.end(js);
+        } catch {
+          res.writeHead(500);
+          res.end('SDK bundle missing');
+        }
+        return;
+      }
+
       if (req.method === 'GET') {
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end(buildAuthPage(requestProviderId));
@@ -749,17 +777,32 @@ async function startCallbackServer(
   });
 }
 
+// --- Browser SDK bundle (served to the auth page) ---
+
+let authSdkCache: string | null = null;
+
+function readAuthSdkBundle(): string {
+  if (authSdkCache !== null) return authSdkCache;
+  // The IIFE bundle ships next to this file in dist/ (see tsup.config.ts).
+  const here = dirname(fileURLToPath(import.meta.url));
+  const bundlePath = resolve(here, 'auth-sdk.js');
+  authSdkCache = readFileSync(bundlePath, 'utf8');
+  return authSdkCache;
+}
+
 // --- Auth page served to the browser ---
 
 const VALID_PROVIDER_IDS = new Set(PROVIDERS.map((p) => p.id));
 
 function buildAuthPage(requestProviderId: string | null): string {
-  let providerFilter: string;
+  let providersJson: string;
   if (requestProviderId && VALID_PROVIDER_IDS.has(requestProviderId)) {
-    providerFilter = `[{ id: ${JSON.stringify(requestProviderId)}, required: true }]`;
+    providersJson = JSON.stringify([{ id: requestProviderId, required: true }]);
   } else {
     // Meta-provider: ask the wallet for every provider it has.
-    providerFilter = '[]';
+    providersJson = JSON.stringify(
+      PROVIDERS.map((p) => ({ id: p.id, required: false })),
+    );
   }
   const headline = requestProviderId
     ? 'Connect your <span class="grad">wallet</span>'
@@ -944,6 +987,24 @@ function buildAuthPage(requestProviderId: string | null): string {
       text-align: left;
     }
     .security svg { flex-shrink: 0; margin-top: 2px; color: var(--green); }
+    .connect-btn {
+      display: block;
+      width: 100%;
+      margin-bottom: 16px;
+      padding: 13px 20px;
+      border: none;
+      border-radius: 10px;
+      background: var(--teal);
+      color: #fff;
+      font-family: inherit;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      cursor: pointer;
+      transition: background 0.15s ease, transform 0.15s ease;
+    }
+    .connect-btn:hover { background: var(--teal-dark); transform: translateY(-1px); }
+    .connect-btn:disabled { opacity: 0.6; cursor: default; transform: none; }
   </style>
 </head>
 <body>
@@ -953,68 +1014,32 @@ function buildAuthPage(requestProviderId: string | null): string {
     <p class="subtitle">${subtitle}</p>
     <div id="status" class="status waiting">
       <span class="dot"></span>
-      <span id="status-text">Connecting to Byoky wallet…</span>
+      <span id="status-text">Click connect to link your wallet.</span>
     </div>
+    <button id="connect-btn" class="connect-btn" type="button">Connect wallet</button>
     <p class="info">
-      <strong>Byoky extension</strong> must be installed and unlocked.<br />
-      <strong>Byoky Bridge</strong> must be installed for the proxy to work.
+      Connect via the <strong>Byoky extension</strong> (auto-detected) or scan a QR with the <strong>Byoky mobile app</strong>.<br />
+      The <strong>Byoky Bridge</strong> must be installed for the OpenClaw proxy to work.
     </p>
     <p class="security">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-      <span>Keys never leave your browser extension. API calls are proxied through the local Byoky Bridge.</span>
+      <span>Keys never leave your wallet. API calls are proxied through the local Byoky Bridge.</span>
     </p>
   </div>
+  <script src="/auth-sdk.js"></script>
   <script>
-    (async () => {
+    (() => {
       const status = document.getElementById('status');
       const statusText = document.getElementById('status-text');
+      const btn = document.getElementById('connect-btn');
       function setStatus(text, kind) {
         statusText.textContent = text;
         status.className = 'status ' + (kind || 'waiting');
       }
-      try {
-        // Step 1: Connect to Byoky wallet
-        const requestId = crypto.randomUUID();
-        window.postMessage({
-          type: 'BYOKY_CONNECT_REQUEST',
-          id: requestId,
-          requestId,
-          payload: { providers: ${providerFilter} },
-        }, window.location.origin);
 
-        const response = await new Promise((resolve, reject) => {
-          function handler(event) {
-            const msg = event.detail;
-            if (!msg || msg.requestId !== requestId) return;
-            document.removeEventListener('byoky-message', handler);
-            if (msg.type === 'BYOKY_CONNECT_RESPONSE') resolve(msg.payload);
-            else reject(new Error(msg.payload?.message || 'Connection failed'));
-          }
-          document.addEventListener('byoky-message', handler);
-          setTimeout(() => reject(new Error('Timeout — is Byoky installed and unlocked?')), 30000);
-        });
-
-        const providers = response.providers || {};
-        const available = Object.entries(providers)
-          .filter(([, v]) => v.available)
-          .map(([id]) => id);
-
-        if (available.length === 0) {
-          throw new Error('No matching providers found in your Byoky wallet');
-        }
-
-        setStatus('Wallet connected — starting bridge proxy…', 'waiting');
-
-        // Step 2: Tell the extension to start the bridge proxy
-        const bridgeRequestId = crypto.randomUUID();
-        window.postMessage({
-          type: 'BYOKY_INTERNAL_FROM_PAGE',
-          requestId: bridgeRequestId,
-          action: 'startBridgeProxy',
-          payload: { sessionKey: response.sessionKey, port: ${DEFAULT_BRIDGE_PORT} },
-        }, window.location.origin);
-
-        const bridgeResult = await new Promise((resolve, reject) => {
+      async function startBridge(sessionKey) {
+        return new Promise((resolve, reject) => {
+          const bridgeRequestId = crypto.randomUUID();
           function handler(event) {
             const msg = event.detail;
             if (!msg || msg.requestId !== bridgeRequestId) return;
@@ -1022,24 +1047,82 @@ function buildAuthPage(requestProviderId: string | null): string {
             resolve(msg.payload);
           }
           document.addEventListener('byoky-message', handler);
-          setTimeout(() => reject(new Error('Bridge proxy start timed out')), 15000);
+          window.postMessage({
+            type: 'BYOKY_INTERNAL_FROM_PAGE',
+            requestId: bridgeRequestId,
+            action: 'startBridgeProxy',
+            payload: { sessionKey, port: ${DEFAULT_BRIDGE_PORT} },
+          }, window.location.origin);
+          setTimeout(() => {
+            document.removeEventListener('byoky-message', handler);
+            reject(new Error('Bridge proxy start timed out'));
+          }, 15000);
         });
-
-        const bridgePort = bridgeResult?.port || ${DEFAULT_BRIDGE_PORT};
-
-        setStatus('Bridge active on port ' + bridgePort + '. Connected ' + available.length + ' provider(s): ' + available.join(', '), 'success');
-
-        // Step 3: Send result back to OpenClaw callback server
-        await fetch('/callback', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ providers: available, bridgePort: bridgePort }),
-        });
-
-        setTimeout(() => { setStatus('Done — you can close this tab.', 'success'); }, 2000);
-      } catch (err) {
-        setStatus('Error: ' + err.message, 'error');
       }
+
+      async function runConnect() {
+        btn.disabled = true;
+        btn.textContent = 'Connecting…';
+        setStatus('Opening wallet…', 'waiting');
+        try {
+          if (!window.ByokySDK || !window.ByokySDK.Byoky) {
+            throw new Error('SDK failed to load');
+          }
+          const byoky = new window.ByokySDK.Byoky({ timeout: 120000 });
+          const session = await byoky.connect({
+            providers: ${providersJson},
+            modal: true,
+          });
+
+          const providers = session.providers || {};
+          const available = Object.entries(providers)
+            .filter(([, v]) => v && v.available)
+            .map(([id]) => id);
+
+          if (available.length === 0) {
+            throw new Error('No matching providers in your wallet');
+          }
+
+          const sessionKey = session.sessionKey || '';
+          const isRelay = sessionKey.startsWith('relay_') || sessionKey.startsWith('vault_');
+          if (isRelay) {
+            throw new Error(
+              'OpenClaw needs the Byoky browser extension + Bridge to run its local proxy. ' +
+              'Mobile-only pairing isn\\'t supported yet — please install the extension.',
+            );
+          }
+
+          setStatus('Wallet connected — starting bridge proxy…', 'waiting');
+          const bridgeResult = await startBridge(sessionKey);
+          const bridgePort = (bridgeResult && bridgeResult.port) || ${DEFAULT_BRIDGE_PORT};
+
+          setStatus(
+            'Bridge active on port ' + bridgePort + '. Connected ' + available.length +
+              ' provider(s): ' + available.join(', '),
+            'success',
+          );
+
+          await fetch('/callback', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ providers: available, bridgePort }),
+          });
+
+          btn.style.display = 'none';
+          setTimeout(() => { setStatus('Done — you can close this tab.', 'success'); }, 1500);
+        } catch (err) {
+          const msg = err && err.message ? err.message : String(err);
+          if (msg === 'User cancelled') {
+            setStatus('Cancelled. Click connect to try again.', 'waiting');
+          } else {
+            setStatus('Error: ' + msg, 'error');
+          }
+          btn.disabled = false;
+          btn.textContent = 'Try again';
+        }
+      }
+
+      btn.addEventListener('click', runConnect);
     })();
   </script>
 </body>

@@ -18,4 +18,8 @@ export {
   decodeGiftLink,
   validateGiftLink,
   decodePairPayload,
+  extractGiftShortId,
+  isGiftShortUrl,
+  resolveGiftShortLink,
+  giftShortLinkToUrl,
 } from '@byoky/core';

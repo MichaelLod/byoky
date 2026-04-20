@@ -9,6 +9,11 @@ import {
   giftBudgetRemaining,
   giftBudgetPercent,
   createGiftLink,
+  giftShortLinkToUrl,
+  giftShortLinkToDeepUrl,
+  extractGiftShortId,
+  isGiftShortUrl,
+  resolveGiftShortLink,
 } from '../src/gift.js';
 import type { Gift, GiftLink } from '../src/gift.js';
 
@@ -341,5 +346,101 @@ describe('giftLinkToUrl', () => {
     const url = giftLinkToUrl(encoded);
     const decoded = decodeGiftLink(url);
     expect(decoded).toEqual(link);
+  });
+});
+
+describe('giftShortLinkToUrl / giftShortLinkToDeepUrl', () => {
+  it('builds the web and deep-link forms', () => {
+    expect(giftShortLinkToUrl('AbC123dEf456')).toBe('https://byoky.com/g/AbC123dEf456');
+    expect(giftShortLinkToDeepUrl('AbC123dEf456')).toBe('byoky://g/AbC123dEf456');
+  });
+});
+
+describe('extractGiftShortId', () => {
+  it('pulls the id out of an https URL', () => {
+    expect(extractGiftShortId('https://byoky.com/g/AbC123dEf456')).toBe('AbC123dEf456');
+  });
+
+  it('pulls the id out of a byoky:// deep link', () => {
+    expect(extractGiftShortId('byoky://g/AbC123dEf456')).toBe('AbC123dEf456');
+  });
+
+  it('tolerates a trailing slash', () => {
+    expect(extractGiftShortId('https://byoky.com/g/AbC123dEf456/')).toBe('AbC123dEf456');
+  });
+
+  it('tolerates surrounding whitespace', () => {
+    expect(extractGiftShortId('  https://byoky.com/g/AbC123dEf456  ')).toBe('AbC123dEf456');
+  });
+
+  it('accepts a bare id', () => {
+    expect(extractGiftShortId('AbC123dEf456')).toBe('AbC123dEf456');
+  });
+
+  it('rejects long-form gift URLs', () => {
+    expect(extractGiftShortId('https://byoky.com/gift/eyJ2IjoxfQ')).toBeNull();
+  });
+
+  it('rejects ids that are too short or too long', () => {
+    expect(extractGiftShortId('https://byoky.com/g/abc')).toBeNull();
+    expect(extractGiftShortId('https://byoky.com/g/' + 'a'.repeat(33))).toBeNull();
+  });
+
+  it('rejects ids with invalid characters', () => {
+    expect(extractGiftShortId('https://byoky.com/g/abc!def@ghij')).toBeNull();
+  });
+});
+
+describe('isGiftShortUrl', () => {
+  it('returns true for web and deep-link short URLs', () => {
+    expect(isGiftShortUrl('https://byoky.com/g/AbC123dEf456')).toBe(true);
+    expect(isGiftShortUrl('byoky://g/AbC123dEf456')).toBe(true);
+  });
+
+  it('returns false for bare ids (they look the same but aren\'t "URLs")', () => {
+    expect(isGiftShortUrl('AbC123dEf456')).toBe(false);
+  });
+
+  it('returns false for long-form URLs', () => {
+    expect(isGiftShortUrl('https://byoky.com/gift/eyJ2IjoxfQ')).toBe(false);
+  });
+});
+
+describe('resolveGiftShortLink', () => {
+  it('returns the encoded blob on 200', async () => {
+    const mockFetch = async () => new Response(JSON.stringify({ encoded: 'abc.blob' }), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    });
+    const result = await resolveGiftShortLink('https://vault.byoky.com', 'AbC123dEf456', mockFetch as unknown as typeof fetch);
+    expect(result).toBe('abc.blob');
+  });
+
+  it('returns null on 404', async () => {
+    const mockFetch = async () => new Response('{}', { status: 404 });
+    const result = await resolveGiftShortLink('https://vault.byoky.com', 'AbC123dEf456', mockFetch as unknown as typeof fetch);
+    expect(result).toBeNull();
+  });
+
+  it('returns null on 410 (expired)', async () => {
+    const mockFetch = async () => new Response('{}', { status: 410 });
+    const result = await resolveGiftShortLink('https://vault.byoky.com', 'AbC123dEf456', mockFetch as unknown as typeof fetch);
+    expect(result).toBeNull();
+  });
+
+  it('throws on other errors so callers can distinguish transport failures', async () => {
+    const mockFetch = async () => new Response('{}', { status: 500 });
+    await expect(
+      resolveGiftShortLink('https://vault.byoky.com', 'AbC123dEf456', mockFetch as unknown as typeof fetch),
+    ).rejects.toThrow(/500/);
+  });
+
+  it('strips trailing slashes from the base URL', async () => {
+    let capturedUrl = '';
+    const mockFetch = async (url: string) => {
+      capturedUrl = url;
+      return new Response(JSON.stringify({ encoded: 'x' }), { status: 200 });
+    };
+    await resolveGiftShortLink('https://vault.byoky.com/', 'AbC123dEf456', mockFetch as unknown as typeof fetch);
+    expect(capturedUrl).toBe('https://vault.byoky.com/gift-links/AbC123dEf456');
   });
 });

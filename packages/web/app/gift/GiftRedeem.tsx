@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { decodeGiftLink, validateGiftLink, isExtensionInstalled, type GiftLink } from '@byoky/sdk';
+import { decodeGiftLink, validateGiftLink, isExtensionInstalled, resolveGiftShortLink, type GiftLink } from '@byoky/sdk';
 import { openGiftInApp } from './openInApp';
+
+const VAULT_URL = 'https://vault.byoky.com';
 
 const CHROME_STORE = 'https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon';
 const FIREFOX_STORE = 'https://addons.mozilla.org/en-US/firefox/addon/byoky/';
@@ -17,14 +19,25 @@ function detectPlatform(): Platform {
   return 'desktop';
 }
 
-function extractEncoded(): string | null {
+type Source =
+  | { kind: 'encoded'; encoded: string }
+  | { kind: 'short'; shortId: string }
+  | null;
+
+function extractSource(): Source {
   if (typeof window === 'undefined') return null;
   const hash = window.location.hash;
-  if (hash.startsWith('#') && hash.length > 1) return decodeURIComponent(hash.slice(1));
+  if (hash.startsWith('#') && hash.length > 1) {
+    return { kind: 'encoded', encoded: decodeURIComponent(hash.slice(1)) };
+  }
   const p = window.location.pathname.replace(/\/+$/, '');
   if (p.startsWith('/gift/')) {
     const seg = p.slice('/gift/'.length);
-    if (seg) return decodeURIComponent(seg);
+    if (seg) return { kind: 'encoded', encoded: decodeURIComponent(seg) };
+  }
+  if (p.startsWith('/g/')) {
+    const seg = p.slice('/g/'.length);
+    if (seg && /^[A-Za-z0-9]{8,32}$/.test(seg)) return { kind: 'short', shortId: seg };
   }
   return null;
 }
@@ -86,18 +99,38 @@ export function GiftRedeem() {
     setPlatform(detectPlatform());
     setExtDetected(isExtensionInstalled());
     const t = setTimeout(() => setExtDetected(isExtensionInstalled()), 400);
-    const enc = extractEncoded();
-    if (!enc) {
+    const source = extractSource();
+    if (!source) {
       setError('No gift link provided');
       return () => clearTimeout(t);
     }
-    setEncoded(enc);
-    const link = decodeGiftLink(enc);
-    if (!link) { setError('Invalid gift link'); return () => clearTimeout(t); }
-    const val = validateGiftLink(link);
-    if (!val.valid) { setError(val.reason ?? 'Invalid gift'); return () => clearTimeout(t); }
-    setPreview(link);
-    return () => clearTimeout(t);
+
+    let cancelled = false;
+    void (async () => {
+      let enc: string;
+      if (source.kind === 'short') {
+        try {
+          const resolved = await resolveGiftShortLink(VAULT_URL, source.shortId);
+          if (cancelled) return;
+          if (!resolved) { setError('Gift link not found or expired'); return; }
+          enc = resolved;
+        } catch {
+          if (!cancelled) setError('Could not reach vault to resolve gift');
+          return;
+        }
+      } else {
+        enc = source.encoded;
+      }
+      if (cancelled) return;
+      setEncoded(enc);
+      const link = decodeGiftLink(enc);
+      if (!link) { setError('Invalid gift link'); return; }
+      const val = validateGiftLink(link);
+      if (!val.valid) { setError(val.reason ?? 'Invalid gift'); return; }
+      setPreview(link);
+    })();
+
+    return () => { cancelled = true; clearTimeout(t); };
   }, []);
 
   function tryOpenApp() {

@@ -2143,6 +2143,43 @@ class WalletStore(context: Context) {
     }
 
     /**
+     * Ask the vault to allocate a short id for an encoded gift blob.
+     * Returns the short id, or null if the user isn't signed into cloud
+     * vault or the request fails — caller falls back to the long URL.
+     */
+    suspend fun createGiftShortLink(encoded: String, expiresAt: Long): String? =
+        withContext(Dispatchers.IO) {
+            if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) {
+                return@withContext null
+            }
+            val token = vaultToken ?: return@withContext null
+            val body = JSONObject()
+                .put("encoded", encoded)
+                .put("expiresAt", expiresAt)
+            val (ok, status, data) = vaultRequest("/gift-links", "POST", body, token)
+            if (status == 401) {
+                _cloudVaultTokenExpired.value = true
+                prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
+                return@withContext null
+            }
+            if (!ok) return@withContext null
+            data.optString("shortId", "").takeIf { it.isNotEmpty() }
+        }
+
+    /**
+     * Resolve a short id to its encoded payload. Returns null for
+     * 404/410 (unknown/expired). Throws on transport errors so the UI can
+     * distinguish "gift gone" from "network down".
+     */
+    suspend fun resolveGiftShortLink(shortId: String): String? =
+        withContext(Dispatchers.IO) {
+            val (ok, status, data) = vaultRequest("/gift-links/$shortId", "GET")
+            if (status == 404 || status == 410) return@withContext null
+            if (!ok) throw java.io.IOException("Vault unreachable (status=$status)")
+            data.optString("encoded", "").takeIf { it.isNotEmpty() }
+        }
+
+    /**
      * Upload the marketplace management token to the vault so its heartbeat
      * worker can keep the marketplace badge "online" on our behalf. Called
      * after CreateGiftScreen receives the token from marketplace listing.

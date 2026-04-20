@@ -13,6 +13,7 @@ struct CreateGiftView: View {
     @State private var listPublicly = false
     @State private var gifterName = ""
     @State private var createdGift: Gift?
+    @State private var shortId: String?
     @State private var error: String?
 
     private let tokenPresets = [10_000, 50_000, 100_000, 500_000, 1_000_000]
@@ -242,7 +243,10 @@ struct CreateGiftView: View {
 
     private func giftCreatedView(gift: Gift) -> some View {
         let (encoded, _) = createGiftLink(from: gift)
-        let urlString = giftLinkToUrl(encoded)
+        // Prefer the short URL once the vault has handed one back. Until then
+        // (and if the vault is unreachable / user isn't signed in) we keep
+        // showing the long URL so the UI is never empty.
+        let urlString = shortId.map { giftShortLinkToUrl($0) } ?? giftLinkToUrl(encoded)
         let providerName = Provider.find(gift.providerId)?.name ?? gift.providerId
         let shareText = "I'm sharing \(formatPreset(gift.maxTokens)) tokens of \(providerName) via Byoky!"
 
@@ -323,7 +327,17 @@ struct CreateGiftView: View {
             relayUrl: relayUrl
         )
         createdGift = gift
+        shortId = nil
         error = nil
+
+        // Kick off a short-link allocation in the background. Silent fallback
+        // to the long URL (already shown) if the user isn't signed into the
+        // cloud vault or the request fails.
+        let (encoded, _) = createGiftLink(from: gift)
+        Task { @MainActor in
+            let allocated = await wallet.createGiftShortLink(encoded: encoded, expiresAt: gift.expiresAt)
+            if let allocated { self.shortId = allocated }
+        }
 
         if listPublicly, let gift = createdGift {
             let (encoded, _) = createGiftLink(from: gift)

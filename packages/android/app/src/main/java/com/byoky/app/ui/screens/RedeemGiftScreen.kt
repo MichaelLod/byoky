@@ -25,6 +25,10 @@ fun RedeemGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var redeemed by remember { mutableStateOf(false) }
     var showScanner by remember { mutableStateOf(false) }
+    // Resolved encoded blob — populated synchronously for long URLs, or
+    // asynchronously after a vault lookup for short URLs.
+    var rawPayload by remember { mutableStateOf("") }
+    var resolving by remember { mutableStateOf(false) }
 
     LaunchedEffect(pendingGiftLink) {
         val link = pendingGiftLink ?: return@LaunchedEffect
@@ -32,9 +36,39 @@ fun RedeemGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
         wallet.setPendingGiftLink(null)
     }
 
-    val rawPayload = remember(linkText) {
+    LaunchedEffect(linkText) {
+        error = null
         val trimmed = linkText.trim()
-        when {
+        if (trimmed.isBlank()) { rawPayload = ""; resolving = false; return@LaunchedEffect }
+
+        val isShort = trimmed.startsWith("https://byoky.com/g/")
+            || trimmed.startsWith("http://byoky.com/g/")
+            || trimmed.startsWith("byoky://g/")
+        if (isShort) {
+            val shortId = extractGiftShortId(trimmed)
+            if (shortId == null) {
+                rawPayload = ""
+                error = "Invalid gift link format"
+                return@LaunchedEffect
+            }
+            resolving = true
+            rawPayload = ""
+            try {
+                val encoded = wallet.resolveGiftShortLink(shortId)
+                if (encoded == null) {
+                    error = "Gift link not found or expired"
+                } else {
+                    rawPayload = encoded
+                }
+            } catch (_: Exception) {
+                error = "Could not reach vault to resolve gift link"
+            } finally {
+                resolving = false
+            }
+            return@LaunchedEffect
+        }
+
+        rawPayload = when {
             trimmed.startsWith("https://byoky.com/gift#") -> trimmed.removePrefix("https://byoky.com/gift#")
             trimmed.startsWith("https://byoky.com/gift/") -> trimmed.removePrefix("https://byoky.com/gift/")
             trimmed.startsWith("byoky://gift/") -> trimmed.removePrefix("byoky://gift/")
@@ -111,7 +145,11 @@ fun RedeemGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
                     maxLines = 5,
                 )
 
-                if (rawPayload.isNotBlank() && preview == null) {
+                if (resolving) {
+                    Text("Resolving short link…", color = TextSecondary, fontSize = 12.sp)
+                }
+
+                if (rawPayload.isNotBlank() && preview == null && !resolving) {
                     Text("Could not decode gift link", color = Danger, fontSize = 12.sp)
                 }
 
