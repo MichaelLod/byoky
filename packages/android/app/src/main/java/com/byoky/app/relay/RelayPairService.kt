@@ -1446,7 +1446,16 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
 
     private fun sendVaultOffer(appOrigin: String) {
         val w = wallet ?: return
-        val providerIds = w.credentials.value.map { it.providerId }.distinct()
+        // Include provider ids from both own credentials AND usable gifts.
+        // The vault session is scoped to the providers declared here; if we
+        // omit gift providers, the vault-fallback path will reject requests
+        // for those providers even when the vault has a matching gift
+        // credential (own or redeemed) on the user's account.
+        val own = w.credentials.value.map { it.providerId }
+        val gifted = w.giftedCredentials.value
+            .filter { !isGiftExpired(it.expiresAt) && it.usedTokens < it.maxTokens }
+            .map { it.providerId }
+        val providerIds = (own + gifted).distinct()
         scope.launch {
             val result = w.createVaultAppSession(appOrigin, providerIds)
             if (result == null) {

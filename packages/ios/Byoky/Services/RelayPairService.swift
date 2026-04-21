@@ -1219,7 +1219,17 @@ final class RelayPairService: ObservableObject {
 
     private func sendVaultOffer(appOrigin: String) {
         guard let wallet else { return }
-        let providerIds = Array(Set(wallet.credentials.map { $0.providerId }))
+        // Include provider ids from both own credentials AND usable gifts.
+        // The vault session is scoped to the providers declared here; if we
+        // omit gift providers, the vault-fallback path will reject requests
+        // for those providers even when the vault has a matching gift
+        // credential (own or redeemed) on the user's account.
+        var ids = Set(wallet.credentials.map { $0.providerId })
+        for gc in wallet.giftedCredentials
+            where !isGiftedCredentialExpired(gc) && gc.usedTokens < gc.maxTokens {
+            ids.insert(gc.providerId)
+        }
+        let providerIds = Array(ids)
         Task {
             guard let result = await wallet.createVaultAppSession(
                 appOrigin: appOrigin,
