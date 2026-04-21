@@ -614,6 +614,54 @@ body.has-ph-banner .navbar {
   font-weight: 500;
 }
 
+.install-wallet-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.install-wallet-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  min-width: 260px;
+  background: var(--bg-card, #fff);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+  padding: 6px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.install-wallet-menu a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: var(--text);
+  text-decoration: none;
+  font-size: 14px;
+  transition: background 0.15s ease;
+}
+
+.install-wallet-menu a:hover {
+  background: var(--bg-muted, rgba(0, 0, 0, 0.04));
+}
+
+.install-wallet-menu-name {
+  font-weight: 500;
+}
+
+.install-wallet-menu-version {
+  color: var(--text-muted, #6b7280);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
 .hero-rollout a {
   color: var(--teal-light);
   text-decoration: underline;
