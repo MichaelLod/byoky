@@ -20,6 +20,13 @@
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
-    "properties": {}
+    "properties": {
+      "anthropicMaxTokens": {
+        "type": "integer",
+        "minimum": 1,
+        "default": 4096,
+        "description": "Per-request max_tokens cap for all byoky-anthropic models. Default 4096 stays under Anthropic's Tier-1 / gift-tier output-tokens-per-minute gate. Raise (e.g. 32000) if you're on a higher-tier API key."
+      }
+    }
   }
 }
