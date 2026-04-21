@@ -14,11 +14,14 @@ export interface Gift {
   createdAt: number;
   active: boolean;
   relayUrl: string;
-  /** Marketplace management token — only set if the gift was listed publicly.
-   * Clients send it with `/gifts/:id/heartbeat` so the marketplace shows the
-   * gift as online; the vault holds an encrypted copy so it can heartbeat
-   * while every device is backgrounded. */
-  marketplaceManagementToken?: string;
+  /** Opt-in flag — true if the gift is listed on /token-pool. */
+  listed?: boolean;
+  /** Display name shown on the public pool card. Defaults to the gifter's
+   * account username if omitted. */
+  gifterName?: string;
+  /** Short-link id for pool redemption. Populated when the vault allocated
+   * a short link for the gift. */
+  giftShortId?: string;
 }
 
 // --- Gift link (shareable payload) ---

@@ -1,10 +1,10 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { isExtensionInstalled, encodeQr, qrToSvg } from '@byoky/sdk';
+import { isExtensionInstalled, encodeQr, qrToSvg, giftShortLinkToUrl, resolveGiftShortLink } from '@byoky/sdk';
 import { detectMobilePlatform, openGiftInApp } from '../gift/openInApp';
 
-const MARKETPLACE_API = process.env.NEXT_PUBLIC_MARKETPLACE_URL ?? 'https://marketplace.byoky.com';
+const VAULT_URL = process.env.NEXT_PUBLIC_VAULT_URL ?? 'https://vault.byoky.com';
 
 const CHROME_STORE = 'https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon';
 const FIREFOX_STORE = 'https://addons.mozilla.org/en-US/firefox/addon/byoky/';
@@ -97,15 +97,13 @@ interface Gift {
   id: string;
   providerId: string;
   gifterName: string;
-  relayUrl: string;
+  giftShortId: string | null;
   tokenBudget: number;
   tokensUsed: number;
   tokensRemaining: number;
   expiresAt: number;
   listedAt: number;
-  lastSeenAt: number;
   online: boolean;
-  unlisted?: boolean;
 }
 
 function timeUntil(ts: number): string {
@@ -117,19 +115,15 @@ function timeUntil(ts: number): string {
   return `${Math.floor(hours / 24)}d left`;
 }
 
-type GiftStatus = 'online' | 'unavailable' | 'removed' | 'expired';
+type GiftStatus = 'online' | 'unavailable';
 
-function deriveGiftStatus(gift: Gift, variant: 'active' | 'expired' | 'removed'): GiftStatus {
-  if (variant === 'removed' || gift.unlisted) return 'removed';
-  if (variant === 'expired') return 'expired';
+function deriveGiftStatus(gift: Gift): GiftStatus {
   return gift.online ? 'online' : 'unavailable';
 }
 
 const STATUS_STYLES: Record<GiftStatus, { bg: string; color: string; label: string }> = {
   online: { bg: 'rgba(52,211,153,0.12)', color: '#34d399', label: 'Online' },
   unavailable: { bg: 'rgba(244,63,94,0.1)', color: '#f43f5e', label: 'Unavailable' },
-  removed: { bg: 'rgba(85,85,95,0.15)', color: '#6b7280', label: 'Removed' },
-  expired: { bg: 'rgba(85,85,95,0.15)', color: '#999', label: 'Expired' },
 };
 
 function formatTokens(n: number): string {
@@ -140,18 +134,15 @@ function formatTokens(n: number): string {
 
 /* ── Mock data for local dev ── */
 const MOCK_GIFTS: Gift[] = [
-  { id: '1', providerId: 'anthropic', gifterName: 'Marino', relayUrl: '', tokenBudget: 500000, tokensUsed: 120000, tokensRemaining: 380000, expiresAt: Date.now() + 86400000 * 3, listedAt: Date.now() - 3600000, lastSeenAt: Date.now(), online: true },
-  { id: '2', providerId: 'openai', gifterName: 'Michael', relayUrl: '', tokenBudget: 1000000, tokensUsed: 250000, tokensRemaining: 750000, expiresAt: Date.now() + 86400000 * 7, listedAt: Date.now() - 7200000, lastSeenAt: Date.now(), online: true },
-  { id: '3', providerId: 'gemini', gifterName: 'Alex', relayUrl: '', tokenBudget: 200000, tokensUsed: 50000, tokensRemaining: 150000, expiresAt: Date.now() + 86400000 * 2, listedAt: Date.now() - 1800000, lastSeenAt: Date.now() - 300000, online: true },
-  { id: '4', providerId: 'mistral', gifterName: 'Nikita', relayUrl: '', tokenBudget: 300000, tokensUsed: 280000, tokensRemaining: 20000, expiresAt: Date.now() + 86400000, listedAt: Date.now() - 14400000, lastSeenAt: Date.now() - 600000, online: false },
-  { id: '5', providerId: 'groq', gifterName: 'Sarah', relayUrl: '', tokenBudget: 800000, tokensUsed: 100000, tokensRemaining: 700000, expiresAt: Date.now() + 86400000 * 5, listedAt: Date.now() - 900000, lastSeenAt: Date.now(), online: true },
-  { id: '6', providerId: 'deepseek', gifterName: 'James', relayUrl: '', tokenBudget: 400000, tokensUsed: 390000, tokensRemaining: 10000, expiresAt: Date.now() - 3600000, listedAt: Date.now() - 86400000, lastSeenAt: Date.now() - 86400000, online: false },
+  { id: '1', providerId: 'anthropic', gifterName: 'Marino', giftShortId: null, tokenBudget: 500000, tokensUsed: 120000, tokensRemaining: 380000, expiresAt: Date.now() + 86400000 * 3, listedAt: Date.now() - 3600000, online: true },
+  { id: '2', providerId: 'openai', gifterName: 'Michael', giftShortId: null, tokenBudget: 1000000, tokensUsed: 250000, tokensRemaining: 750000, expiresAt: Date.now() + 86400000 * 7, listedAt: Date.now() - 7200000, online: true },
+  { id: '3', providerId: 'gemini', gifterName: 'Alex', giftShortId: null, tokenBudget: 200000, tokensUsed: 50000, tokensRemaining: 150000, expiresAt: Date.now() + 86400000 * 2, listedAt: Date.now() - 1800000, online: true },
+  { id: '4', providerId: 'mistral', gifterName: 'Nikita', giftShortId: null, tokenBudget: 300000, tokensUsed: 280000, tokensRemaining: 20000, expiresAt: Date.now() + 86400000, listedAt: Date.now() - 14400000, online: false },
+  { id: '5', providerId: 'groq', gifterName: 'Sarah', giftShortId: null, tokenBudget: 800000, tokensUsed: 100000, tokensRemaining: 700000, expiresAt: Date.now() + 86400000 * 5, listedAt: Date.now() - 900000, online: true },
 ];
 
 export default function Marketplace() {
   const [active, setActive] = useState<Gift[]>([]);
-  const [expired, setExpired] = useState<Gift[]>([]);
-  const [removed, setRemoved] = useState<Gift[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [redeeming, setRedeeming] = useState<string | null>(null);
@@ -168,28 +159,16 @@ export default function Marketplace() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(`${MARKETPLACE_API}/gifts`);
+      const res = await fetch(`${VAULT_URL}/pool`);
       if (!res.ok) throw new Error('Failed to load gifts');
-      const data = await res.json();
-      const a = data.active ?? [];
-      const e = data.expired ?? [];
-      const r = data.removed ?? [];
-      // Fall back to mock data if API returns empty (local dev)
-      if (a.length === 0 && e.length === 0 && r.length === 0) {
-        setActive(MOCK_GIFTS.filter(g => g.expiresAt > Date.now()));
-        setExpired(MOCK_GIFTS.filter(g => g.expiresAt <= Date.now()));
-        setRemoved([]);
-      } else {
-        setActive(a);
-        setExpired(e);
-        setRemoved(r);
-      }
+      const data = await res.json() as { gifts?: Gift[] };
+      const list = data.gifts ?? [];
+      // Fall back to mock data if API returns empty (local dev).
+      setActive(list.length > 0 ? list : MOCK_GIFTS.filter(g => g.expiresAt > Date.now()));
       setError(null);
     } catch {
       // API unreachable — use mock data
       setActive(MOCK_GIFTS.filter(g => g.expiresAt > Date.now()));
-      setExpired(MOCK_GIFTS.filter(g => g.expiresAt <= Date.now()));
-      setRemoved([]);
       setError(null);
     } finally {
       setLoading(false);
@@ -215,25 +194,33 @@ export default function Marketplace() {
   }, [loading]);
 
   async function handleRedeem(id: string) {
+    const gift = active.find((g) => g.id === id);
+    if (!gift?.giftShortId) {
+      alert('This gift is missing its short link — ask the gifter to re-list it.');
+      return;
+    }
     setRedeeming(id);
     setCopied(false);
     try {
-      const res = await fetch(`${MARKETPLACE_API}/gifts/${id}/redeem`);
-      if (!res.ok) {
-        const data = await res.json();
-        alert(data.error || 'Failed to redeem');
-        return;
-      }
-      const data = await res.json();
-      const giftLink = data.giftLink as string;
+      // Build the short-link URL client-side. Mobile/extension handoff uses
+      // the full encoded blob, which we resolve on demand via the vault.
+      const giftLink = giftShortLinkToUrl(gift.giftShortId);
 
       if (detectMobilePlatform()) {
         if (openGiftInApp(giftLink)) return;
       }
 
       if (hasExtension) {
-        const ok = await stageGiftInExtension(giftLink);
-        setRedeemResult({ status: ok ? 'sent-to-extension' : 'show-qr', giftLink });
+        // Staging in the extension needs the encoded blob, not just the short
+        // URL — resolve it once and hand off. Falls back to QR on failure.
+        let stageOk = false;
+        try {
+          const encoded = await resolveGiftShortLink(VAULT_URL, gift.giftShortId);
+          if (encoded) stageOk = await stageGiftInExtension(encoded);
+        } catch {
+          // Network error — fall through to QR
+        }
+        setRedeemResult({ status: stageOk ? 'sent-to-extension' : 'show-qr', giftLink });
       } else {
         setRedeemResult({ status: 'show-qr', giftLink });
       }
@@ -332,26 +319,8 @@ export default function Marketplace() {
         </div>
       )}
 
-      {/* ── No longer available (expired + removed) ── */}
-      {!loading && (expired.length > 0 || removed.length > 0) && (
-        <div className="mp-section" style={{ opacity: 0.5 }}>
-          <h2 className="mp-section-title" style={{ color: 'var(--text-muted)' }}>
-            <span className="mp-section-dot" style={{ background: '#999' }} />
-            No longer available
-          </h2>
-          <div className="mp-grid">
-            {removed.map((gift) => (
-              <GiftCard key={gift.id} gift={gift} variant="removed" highlighted={highlightedGiftId === gift.id} />
-            ))}
-            {expired.map((gift) => (
-              <GiftCard key={gift.id} gift={gift} variant="expired" highlighted={highlightedGiftId === gift.id} />
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* ── Empty state ── */}
-      {!loading && active.length === 0 && expired.length === 0 && removed.length === 0 && (
+      {!loading && active.length === 0 && (
         <div className="mp-empty">
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
             <path d="M20 12v10H4V12" /><path d="M2 7h20v5H2z" /><path d="M12 22V7" />
@@ -715,18 +684,16 @@ export default function Marketplace() {
   );
 }
 
-function GiftCard({ gift, variant = 'active', onRedeem, redeeming, highlighted }: {
+function GiftCard({ gift, onRedeem, redeeming, highlighted }: {
   gift: Gift;
-  variant?: 'active' | 'expired' | 'removed';
   onRedeem?: (id: string) => void;
   redeeming?: boolean;
   highlighted?: boolean;
 }) {
-  const status = deriveGiftStatus(gift, variant);
+  const status = deriveGiftStatus(gift);
   const pct = gift.tokenBudget > 0 ? ((gift.tokenBudget - gift.tokensUsed) / gift.tokenBudget) * 100 : 0;
-  const barColor = status !== 'online' && status !== 'unavailable' ? '#999' : pct > 20 ? '#FF4F00' : '#f43f5e';
+  const barColor = pct > 20 ? '#FF4F00' : '#f43f5e';
   const { bg: statusBg, color: statusColor, label: statusText } = STATUS_STYLES[status];
-  const expired = variant === 'expired' || variant === 'removed';
   const [shared, setShared] = useState(false);
 
   async function handleShare() {
@@ -768,8 +735,7 @@ function GiftCard({ gift, variant = 'active', onRedeem, redeeming, highlighted }
             Gifted by {gift.gifterName}
           </div>
         </div>
-        {!expired && (
-          <button
+        <button
             className="mp-btn-share"
             onClick={handleShare}
             title={shared ? 'Link copied' : 'Share with a friend'}
@@ -789,7 +755,6 @@ function GiftCard({ gift, variant = 'active', onRedeem, redeeming, highlighted }
               </svg>
             )}
           </button>
-        )}
       </div>
 
       <div className="mp-card-tokens">
@@ -805,11 +770,11 @@ function GiftCard({ gift, variant = 'active', onRedeem, redeeming, highlighted }
         <span>{timeUntil(gift.expiresAt)}</span>
       </div>
 
-      {!expired && onRedeem && (
+      {onRedeem && (
         <button
           className="mp-btn mp-btn-full"
           onClick={() => onRedeem(gift.id)}
-          disabled={redeeming || !gift.online}
+          disabled={redeeming || !gift.online || !gift.giftShortId}
           style={{ marginTop: 14 }}
         >
           {redeeming ? 'Getting tokens...' : 'Get Free Tokens'}

@@ -875,8 +875,11 @@ final class WalletStore: ObservableObject {
         label: String,
         maxTokens: Int,
         expiresInMs: TimeInterval,
-        relayUrl: String
+        relayUrl: String,
+        listPublicly: Bool = false,
+        gifterName: String? = nil
     ) -> Gift {
+        let trimmedName = gifterName?.trimmingCharacters(in: .whitespacesAndNewlines)
         let gift = Gift(
             id: UUID().uuidString,
             credentialId: credentialId,
@@ -888,7 +891,9 @@ final class WalletStore: ObservableObject {
             expiresAt: Date(timeIntervalSinceNow: expiresInMs / 1000),
             createdAt: Date(),
             active: true,
-            relayUrl: relayUrl
+            relayUrl: relayUrl,
+            listed: listPublicly,
+            gifterName: (trimmedName?.isEmpty == false) ? trimmedName : nil
         )
         gifts.append(gift)
         saveGifts()
@@ -899,14 +904,10 @@ final class WalletStore: ObservableObject {
 
     func revokeGift(id: String) {
         guard let index = gifts.firstIndex(where: { $0.id == id }) else { return }
-        let mgmtToken = gifts[index].marketplaceManagementToken
         gifts[index].active = false
         saveGifts()
         GiftRelayHost.shared.disconnect(giftId: id)
         Task { await unregisterGiftFromVault(giftId: id) }
-        if let mgmtToken {
-            Task { await unlistMarketplaceGift(giftId: id, token: mgmtToken) }
-        }
     }
 
     /// Increment `gifts[giftId].usedTokens` from the sender-side gift relay
@@ -1662,9 +1663,13 @@ final class WalletStore: ObservableObject {
             "maxTokens": gift.maxTokens,
             "usedTokens": gift.usedTokens,
             "expiresAt": Int(gift.expiresAt.timeIntervalSince1970 * 1000),
+            "listed": gift.listed ?? false,
         ]
-        if let mgmtToken = gift.marketplaceManagementToken {
-            body["marketplaceManagementToken"] = mgmtToken
+        if let gifterName = gift.gifterName {
+            body["gifterName"] = gifterName
+        }
+        if let giftShortId = gift.giftShortId {
+            body["giftShortId"] = giftShortId
         }
         let result = await vaultRequest(path: "/gifts", method: "POST", body: body, token: token)
         if result.status == 401 {
@@ -1673,31 +1678,32 @@ final class WalletStore: ObservableObject {
         }
     }
 
-    /// Upload the marketplace management token to the vault so its heartbeat
-    /// worker can keep the marketplace badge "online" on our behalf. Called
-    /// after we successfully list a gift and receive the token.
-    func uploadMarketplaceTokenToVault(giftId: String, token marketplaceToken: String) async {
-        guard cloudVaultEnabled, let vaultBearer = vaultToken, !cloudVaultTokenExpired else { return }
-        let result = await vaultRequest(
-            path: "/gifts/\(giftId)/marketplace-token",
-            method: "PATCH",
-            body: ["marketplaceManagementToken": marketplaceToken],
-            token: vaultBearer,
-        )
-        if result.status == 401 {
-            cloudVaultTokenExpired = true
-            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
-        }
-    }
-
-    /// Persist a marketplace management token on a local gift and upload a
-    /// copy to the vault. Called by `CreateGiftView` right after the gift
-    /// was listed publicly and the marketplace returned a mgmt token.
-    func setGiftMarketplaceToken(giftId: String, token marketplaceToken: String) {
+    /// Persist a short-link id on the local gift and send the same value to
+    /// the vault so /pool can expose it. Called once `createGiftShortLink`
+    /// succeeds after gift creation.
+    func setGiftShortId(giftId: String, shortId: String) {
         guard let idx = gifts.firstIndex(where: { $0.id == giftId }) else { return }
-        gifts[idx].marketplaceManagementToken = marketplaceToken
+        gifts[idx].giftShortId = shortId
         saveGifts()
-        Task { await uploadMarketplaceTokenToVault(giftId: giftId, token: marketplaceToken) }
+        Task {
+            guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
+            let gift = gifts[idx]
+            let body: [String: Any] = [
+                "listed": gift.listed ?? false,
+                "gifterName": gift.gifterName as Any,
+                "giftShortId": shortId,
+            ]
+            let result = await vaultRequest(
+                path: "/gifts/\(giftId)/listing",
+                method: "PATCH",
+                body: body,
+                token: token
+            )
+            if result.status == 401 {
+                cloudVaultTokenExpired = true
+                try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
+            }
+        }
     }
 
     /// Allocate a short link on the vault for an encoded gift blob. Returns
@@ -1785,37 +1791,6 @@ final class WalletStore: ObservableObject {
         }
     }
 
-    // MARK: - Marketplace heartbeat
-    //
-    // Clients-side heartbeat that mirrors the vault's worker: while this app
-    // is in the foreground, we POST /gifts/:id/heartbeat every 4 min so the
-    // marketplace "online" badge stays green. The vault covers the phone-in-
-    // pocket case.
-
-    private static let marketplaceUrl = "https://marketplace.byoky.com"
-
-    func heartbeatMarketplace() async {
-        let now = Date()
-        for gift in gifts where gift.active && now < gift.expiresAt {
-            guard let mgmtToken = gift.marketplaceManagementToken else { continue }
-            guard let url = URL(string: "\(Self.marketplaceUrl)/gifts/\(gift.id)/heartbeat") else { continue }
-            var request = URLRequest(url: url, timeoutInterval: 10)
-            request.httpMethod = "POST"
-            request.setValue("Bearer \(mgmtToken)", forHTTPHeaderField: "Authorization")
-            _ = try? await URLSession.shared.data(for: request)
-        }
-    }
-
-    /// Best-effort: tell the marketplace the gift has been revoked so its
-    /// public listing flips to "Removed" right away instead of waiting for
-    /// the heartbeat to age out.
-    func unlistMarketplaceGift(giftId: String, token mgmtToken: String) async {
-        guard let url = URL(string: "\(Self.marketplaceUrl)/gifts/\(giftId)") else { return }
-        var request = URLRequest(url: url, timeoutInterval: 10)
-        request.httpMethod = "DELETE"
-        request.setValue("Bearer \(mgmtToken)", forHTTPHeaderField: "Authorization")
-        _ = try? await URLSession.shared.data(for: request)
-    }
 }
 
 enum WalletError: LocalizedError {

@@ -21,8 +21,6 @@ import androidx.compose.ui.unit.sp
 import com.byoky.app.data.*
 import com.byoky.app.ui.theme.*
 import kotlinx.coroutines.launch
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
 
 private data class TokenPreset(val label: String, val value: Int)
 private data class ExpiryPreset(val label: String, val millis: Long)
@@ -301,6 +299,8 @@ fun CreateGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
                             maxTokens = tokenBudget,
                             expiresInMs = expiryPresets[selectedExpiryIndex].millis,
                             relayUrl = relayUrl,
+                            listPublicly = listPublicly,
+                            gifterName = if (listPublicly) gifterName.ifBlank { null } else null,
                         )
                         createdGift = gift
                         giftShortId = null
@@ -309,40 +309,12 @@ fun CreateGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
                             coroutineScope.launch {
                                 // Silent fallback to the long URL if the vault is unreachable
                                 // or the user isn't signed into cloud sync.
-                                giftShortId = wallet.createGiftShortLink(encoded, gift.expiresAt)
+                                val allocated = wallet.createGiftShortLink(encoded, gift.expiresAt)
+                                giftShortId = allocated
+                                if (allocated != null) {
+                                    wallet.setGiftShortId(gift.id, allocated)
+                                }
                             }
-                        }
-                        if (listPublicly && gift != null) {
-                            val (encoded, _) = createGiftLink(gift)
-                            val link = giftLinkToUrl(encoded)
-                            Thread {
-                                try {
-                                    val body = org.json.JSONObject().apply {
-                                        put("id", gift.id)
-                                        put("providerId", gift.providerId)
-                                        put("gifterName", gifterName.ifBlank { "Anonymous" })
-                                        put("giftLink", link)
-                                        put("relayUrl", relayUrl)
-                                        put("tokenBudget", gift.maxTokens)
-                                        put("expiresAt", gift.expiresAt)
-                                    }
-                                    val req = okhttp3.Request.Builder()
-                                        .url("https://marketplace.byoky.com/gifts")
-                                        .post(body.toString().toRequestBody("application/json".toMediaType()))
-                                        .build()
-                                    okhttp3.OkHttpClient().newCall(req).execute().use { resp ->
-                                        if (resp.isSuccessful) {
-                                            val text = resp.body?.string() ?: ""
-                                            val mgmtToken = try {
-                                                org.json.JSONObject(text).optString("managementToken", "").takeIf { it.isNotEmpty() }
-                                            } catch (_: Exception) { null }
-                                            if (mgmtToken != null) {
-                                                wallet.setGiftMarketplaceToken(gift.id, mgmtToken)
-                                            }
-                                        }
-                                    }
-                                } catch (_: Exception) {}
-                            }.start()
                         }
                     },
                     enabled = isValid,

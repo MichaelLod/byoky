@@ -324,43 +324,24 @@ struct CreateGiftView: View {
             label: credential.label,
             maxTokens: effectiveTokens,
             expiresInMs: expiryOption.milliseconds,
-            relayUrl: relayUrl
+            relayUrl: relayUrl,
+            listPublicly: listPublicly,
+            gifterName: listPublicly ? (gifterName.isEmpty ? nil : gifterName) : nil
         )
         createdGift = gift
         shortId = nil
         error = nil
 
-        // Kick off a short-link allocation in the background. Silent fallback
-        // to the long URL (already shown) if the user isn't signed into the
-        // cloud vault or the request fails.
+        // Allocate a short link in the background. Silent fallback to the
+        // long URL if the user isn't signed into the cloud vault or the
+        // request fails. The short id also gets pushed back to the vault so
+        // /pool can surface it for redemption.
         let (encoded, _) = createGiftLink(from: gift)
         Task { @MainActor in
             let allocated = await wallet.createGiftShortLink(encoded: encoded, expiresAt: gift.expiresAt)
-            if let allocated { self.shortId = allocated }
-        }
-
-        if listPublicly, let gift = createdGift {
-            let (encoded, _) = createGiftLink(from: gift)
-            let link = giftLinkToUrl(encoded)
-            Task { @MainActor in
-                var request = URLRequest(url: URL(string: "https://marketplace.byoky.com/gifts")!)
-                request.httpMethod = "POST"
-                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                let body: [String: Any] = [
-                    "id": gift.id,
-                    "providerId": gift.providerId,
-                    "gifterName": gifterName.isEmpty ? "Anonymous" : gifterName,
-                    "giftLink": link,
-                    "relayUrl": relayUrl,
-                    "tokenBudget": gift.maxTokens,
-                    "expiresAt": Int(gift.expiresAt.timeIntervalSince1970 * 1000),
-                ]
-                request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-                guard let (data, response) = try? await URLSession.shared.data(for: request) else { return }
-                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return }
-                guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let mgmtToken = json["managementToken"] as? String else { return }
-                wallet.setGiftMarketplaceToken(giftId: gift.id, token: mgmtToken)
+            if let allocated {
+                self.shortId = allocated
+                wallet.setGiftShortId(giftId: gift.id, shortId: allocated)
             }
         }
     }

@@ -12,7 +12,7 @@ const EXPIRY_OPTIONS = [
 const BUDGET_PRESETS = [10_000, 50_000, 100_000, 500_000, 1_000_000];
 
 export function CreateGift() {
-  const { credentials, createGift, setGiftMarketplaceToken, navigate, error, cloudVaultEnabled } = useWalletStore();
+  const { credentials, createGift, navigate, error, cloudVaultEnabled } = useWalletStore();
   const [credentialId, setCredentialId] = useState(credentials[0]?.id ?? '');
   const [maxTokens, setMaxTokens] = useState(100_000);
   const [expiryMs, setExpiryMs] = useState(EXPIRY_OPTIONS[1].ms);
@@ -55,37 +55,13 @@ export function CreateGift() {
       maxTokens,
       expiryMs,
       relayUrl,
+      listPublicly,
+      listPublicly ? (gifterName.trim() || undefined) : undefined,
     );
     setSubmitting(false);
     if (result) {
-      const { giftLink: encoded, giftId, shortId } = result;
-      const link = shortId ? giftShortLinkToUrl(shortId) : giftLinkToUrl(encoded);
-      setGiftLink(link);
-      if (listPublicly) {
-        try {
-          const resp = await fetch('https://marketplace.byoky.com/gifts', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              id: giftId,
-              providerId: selectedCred.providerId,
-              gifterName: gifterName.trim() || 'Anonymous',
-              giftLink: link,
-              relayUrl,
-              tokenBudget: maxTokens,
-              expiresAt: Date.now() + expiryMs,
-            }),
-          });
-          if (resp.ok) {
-            const body = await resp.json() as { managementToken?: string };
-            if (body.managementToken) {
-              await setGiftMarketplaceToken(giftId, body.managementToken);
-            }
-          }
-        } catch {
-          // Marketplace listing failed silently — gift still works
-        }
-      }
+      const { giftLink: encoded, shortId } = result;
+      setGiftLink(shortId ? giftShortLinkToUrl(shortId) : giftLinkToUrl(encoded));
     }
   }
 

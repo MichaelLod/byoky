@@ -38,7 +38,6 @@ class MainActivity : ComponentActivity() {
             override fun onStop(owner: LifecycleOwner) {
                 wallet.recordBackgroundTime()
                 com.byoky.app.relay.GiftRelayHost.disconnectAll()
-                wallet.stopMarketplaceHeartbeat()
             }
 
             override fun onStart(owner: LifecycleOwner) {
@@ -46,7 +45,6 @@ class MainActivity : ComponentActivity() {
                 if (wallet.status.value == com.byoky.app.data.WalletStatus.UNLOCKED) {
                     com.byoky.app.relay.GiftRelayHost.reconnectAll()
                     wallet.reconcileGiftUsageOnForeground()
-                    wallet.startMarketplaceHeartbeat()
                 }
                 checkClipboardForDeferredGift(wallet)
             }

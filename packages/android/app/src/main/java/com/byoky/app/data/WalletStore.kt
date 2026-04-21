@@ -392,7 +392,10 @@ class WalletStore(context: Context) {
         maxTokens: Int,
         expiresInMs: Long,
         relayUrl: String,
+        listPublicly: Boolean = false,
+        gifterName: String? = null,
     ): Gift {
+        val trimmedName = gifterName?.trim()?.takeIf { it.isNotEmpty() }
         val gift = Gift(
             credentialId = credentialId,
             providerId = providerId,
@@ -401,6 +404,8 @@ class WalletStore(context: Context) {
             maxTokens = maxTokens,
             expiresAt = System.currentTimeMillis() + expiresInMs,
             relayUrl = relayUrl,
+            listed = listPublicly,
+            gifterName = trimmedName,
         )
         _gifts.value = _gifts.value + gift
         saveGifts()
@@ -410,16 +415,12 @@ class WalletStore(context: Context) {
     }
 
     fun revokeGift(id: String) {
-        val mgmtToken = _gifts.value.firstOrNull { it.id == id }?.marketplaceManagementToken
         _gifts.value = _gifts.value.map {
             if (it.id == id) it.copy(active = false) else it
         }
         saveGifts()
         com.byoky.app.relay.GiftRelayHost.disconnect(id)
         vaultScope.launch { unregisterGiftFromVault(id) }
-        if (mgmtToken != null) {
-            vaultScope.launch { unlistMarketplaceGift(id, mgmtToken) }
-        }
     }
 
     fun addGiftSenderUsage(giftId: String, tokens: Int): Int? {
@@ -1434,7 +1435,6 @@ class WalletStore(context: Context) {
         private const val VAULT_URL = "https://vault.byoky.com"
         private val JSON_MEDIA = "application/json".toMediaType()
         private const val SIX_DAYS_MS = 6L * 24 * 60 * 60 * 1000
-        private const val MARKETPLACE_URL = "https://marketplace.byoky.com"
     }
 
     private fun loadCloudVaultState() {
@@ -2131,8 +2131,12 @@ class WalletStore(context: Context) {
             .put("maxTokens", gift.maxTokens)
             .put("usedTokens", gift.usedTokens)
             .put("expiresAt", gift.expiresAt)
-        if (gift.marketplaceManagementToken != null) {
-            body.put("marketplaceManagementToken", gift.marketplaceManagementToken)
+            .put("listed", gift.listed)
+        if (gift.gifterName != null) {
+            body.put("gifterName", gift.gifterName)
+        }
+        if (gift.giftShortId != null) {
+            body.put("giftShortId", gift.giftShortId)
         }
 
         val (_, status, _) = vaultRequest("/gifts", "POST", body, token)
@@ -2180,35 +2184,31 @@ class WalletStore(context: Context) {
         }
 
     /**
-     * Upload the marketplace management token to the vault so its heartbeat
-     * worker can keep the marketplace badge "online" on our behalf. Called
-     * after CreateGiftScreen receives the token from marketplace listing.
+     * Persist a short-link id on the local gift and push the new listing
+     * payload to the vault so /pool can surface it for redemption.
      */
-    private fun uploadMarketplaceTokenToVault(giftId: String, marketplaceToken: String) {
-        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
-        val token = vaultToken ?: return
-        val body = JSONObject().put("marketplaceManagementToken", marketplaceToken)
-        val encoded = java.net.URLEncoder.encode(giftId, "UTF-8")
-        val (_, status, _) = vaultRequest("/gifts/$encoded/marketplace-token", "PATCH", body, token)
-        if (status == 401) {
-            _cloudVaultTokenExpired.value = true
-            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
-        }
-    }
-
-    /**
-     * Persist the marketplace management token on a local gift and upload it
-     * to the vault. Called by CreateGiftScreen after a successful public
-     * listing returns a mgmt token.
-     */
-    fun setGiftMarketplaceToken(giftId: String, marketplaceToken: String) {
+    fun setGiftShortId(giftId: String, shortId: String) {
         val list = _gifts.value.toMutableList()
         val idx = list.indexOfFirst { it.id == giftId }
         if (idx < 0) return
-        list[idx] = list[idx].copy(marketplaceManagementToken = marketplaceToken)
+        val updated = list[idx].copy(giftShortId = shortId)
+        list[idx] = updated
         _gifts.value = list
         saveGifts()
-        vaultScope.launch { uploadMarketplaceTokenToVault(giftId, marketplaceToken) }
+        vaultScope.launch {
+            if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return@launch
+            val token = vaultToken ?: return@launch
+            val body = JSONObject()
+                .put("listed", updated.listed)
+                .put("giftShortId", shortId)
+            if (updated.gifterName != null) body.put("gifterName", updated.gifterName)
+            val encoded = java.net.URLEncoder.encode(giftId, "UTF-8")
+            val (_, status, _) = vaultRequest("/gifts/$encoded/listing", "PATCH", body, token)
+            if (status == 401) {
+                _cloudVaultTokenExpired.value = true
+                prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
+            }
+        }
     }
 
     private fun unregisterGiftFromVault(giftId: String) {
@@ -2280,65 +2280,4 @@ class WalletStore(context: Context) {
         vaultScope.launch { reconcileGiftUsageWithVault() }
     }
 
-    // ─── Marketplace heartbeat ───────────────────────────────────────────
-    //
-    // While the app is foregrounded, we ping /gifts/:id/heartbeat every 4
-    // min so the marketplace badge stays "online". The vault covers the
-    // backgrounded case once the user enables Cloud Sync.
-
-    private val marketplaceClient = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
-        .build()
-
-    private fun heartbeatMarketplace() {
-        val now = System.currentTimeMillis()
-        for (gift in _gifts.value) {
-            if (!gift.active || gift.expiresAt <= now) continue
-            val mgmtToken = gift.marketplaceManagementToken ?: continue
-            try {
-                val req = Request.Builder()
-                    .url("$MARKETPLACE_URL/gifts/${java.net.URLEncoder.encode(gift.id, "UTF-8")}/heartbeat")
-                    .addHeader("Authorization", "Bearer $mgmtToken")
-                    .post("".toRequestBody(null))
-                    .build()
-                marketplaceClient.newCall(req).execute().close()
-            } catch (_: Exception) {
-                // Network hiccup — retry on the next tick.
-            }
-        }
-    }
-
-    // Best-effort: tell the marketplace the gift has been revoked so its
-    // public listing flips to "Removed" right away instead of waiting for
-    // the heartbeat to age out.
-    private fun unlistMarketplaceGift(giftId: String, mgmtToken: String) {
-        try {
-            val req = Request.Builder()
-                .url("$MARKETPLACE_URL/gifts/${java.net.URLEncoder.encode(giftId, "UTF-8")}")
-                .addHeader("Authorization", "Bearer $mgmtToken")
-                .delete()
-                .build()
-            marketplaceClient.newCall(req).execute().close()
-        } catch (_: Exception) {
-            // Gift will eventually age out via stale heartbeat.
-        }
-    }
-
-    private var marketplaceHeartbeatJob: Job? = null
-
-    fun startMarketplaceHeartbeat() {
-        if (marketplaceHeartbeatJob?.isActive == true) return
-        marketplaceHeartbeatJob = vaultScope.launch {
-            while (true) {
-                heartbeatMarketplace()
-                kotlinx.coroutines.delay(4 * 60 * 1000)
-            }
-        }
-    }
-
-    fun stopMarketplaceHeartbeat() {
-        marketplaceHeartbeatJob?.cancel()
-        marketplaceHeartbeatJob = null
-    }
 }

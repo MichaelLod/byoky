@@ -1729,8 +1729,9 @@ export default defineBackground(() => {
 
       case 'createGift': {
         if (!masterPassword) return { error: 'Wallet is locked' };
-        const { credentialId, providerId, label, maxTokens, expiresInMs, relayUrl } = message.payload as {
+        const { credentialId, providerId, label, maxTokens, expiresInMs, relayUrl, listPublicly, gifterName } = message.payload as {
           credentialId: string; providerId: string; label: string; maxTokens: number; expiresInMs: number; relayUrl: string;
+          listPublicly?: boolean; gifterName?: string;
         };
         if (!PROVIDERS[providerId]) return { error: 'Invalid provider' };
         if (!label || label.length > 200) return { error: 'Label must be 1-200 characters' };
@@ -1741,6 +1742,7 @@ export default defineBackground(() => {
           if (parsed.protocol !== 'wss:' && parsed.protocol !== 'ws:') return { error: 'Relay URL must use ws:// or wss://' };
         } catch { return { error: 'Invalid relay URL' }; }
         const authToken = `gft_${crypto.randomUUID().replace(/-/g, '')}`;
+        const trimmedGifterName = gifterName?.trim() || undefined;
         const gift: Gift = {
           id: crypto.randomUUID(),
           credentialId,
@@ -1753,23 +1755,18 @@ export default defineBackground(() => {
           createdAt: Date.now(),
           active: true,
           relayUrl,
+          listed: listPublicly === true,
+          gifterName: trimmedGifterName,
         };
         // Encrypt authToken at rest for defense-in-depth (protects against local storage exfiltration)
         const encryptedAuthToken = await encrypt(authToken, masterPassword!);
-        const storageGift = { ...gift, authToken: encryptedAuthToken };
-        const data = await browser.storage.local.get('gifts');
-        const gifts = (data.gifts ?? []) as Gift[];
-        gifts.push(storageGift);
-        await browser.storage.local.set({ gifts });
         const { encoded } = createGiftLink(gift);
         connectGiftRelay(gift);
 
-        // Register with Cloud Vault as fallback sender
-        registerGiftWithVault(gift, credentialId).catch(() => {});
-
-        // Try to allocate a short link. Requires vault auth; silent no-op if
-        // the user isn't signed into cloud vault. Recipients with old clients
-        // still get a working long URL because we also return `giftLink`.
+        // Allocate a short link first so we can pass its id to the vault when
+        // registering the gift — the pool endpoint needs it for redemption.
+        // Requires vault auth; silent no-op if the user isn't signed in, in
+        // which case the long URL is still returned.
         let shortId: string | undefined;
         try {
           const cv = await getCloudVaultState();
@@ -1785,21 +1782,19 @@ export default defineBackground(() => {
         } catch {
           // Network error — fall back to long URL silently.
         }
+        if (shortId) gift.giftShortId = shortId;
+
+        const storageGift = { ...gift, authToken: encryptedAuthToken };
+        const data = await browser.storage.local.get('gifts');
+        const gifts = (data.gifts ?? []) as Gift[];
+        gifts.push(storageGift);
+        await browser.storage.local.set({ gifts });
+
+        // Register with Cloud Vault as fallback sender (and, when listed,
+        // make the gift visible on /token-pool).
+        registerGiftWithVault(gift, credentialId).catch(() => {});
 
         return { success: true, giftLink: encoded, giftId: gift.id, shortId };
-      }
-
-      case 'setGiftMarketplaceToken': {
-        const { giftId, token } = message.payload as { giftId: string; token: string };
-        if (!giftId || typeof token !== 'string' || !token) return { error: 'Invalid input' };
-        const gData = await browser.storage.local.get('gifts');
-        const gList = (gData.gifts ?? []) as Gift[];
-        const idx = gList.findIndex((g) => g.id === giftId);
-        if (idx === -1) return { error: 'Gift not found' };
-        gList[idx].marketplaceManagementToken = token;
-        await browser.storage.local.set({ gifts: gList });
-        uploadMarketplaceTokenToVault(giftId, token).catch(() => {});
-        return { success: true };
       }
 
       case 'getGifts': {
@@ -1813,14 +1808,10 @@ export default defineBackground(() => {
         const gifts = (data.gifts ?? []) as Gift[];
         const idx = gifts.findIndex((g) => g.id === giftId);
         if (idx !== -1) {
-          const mgmtToken = gifts[idx].marketplaceManagementToken;
           gifts[idx].active = false;
           await browser.storage.local.set({ gifts });
           disconnectGiftRelay(giftId);
           unregisterGiftFromVault(giftId).catch(() => {});
-          if (mgmtToken) {
-            unlistMarketplaceGift(giftId, mgmtToken).catch(() => {});
-          }
         }
         return { success: true };
       }
@@ -5308,29 +5299,11 @@ export default defineBackground(() => {
         maxTokens: gift.maxTokens,
         usedTokens: gift.usedTokens,
         expiresAt: gift.expiresAt,
-        marketplaceManagementToken: gift.marketplaceManagementToken,
+        listed: gift.listed === true,
+        gifterName: gift.gifterName,
+        giftShortId: gift.giftShortId,
       }, state.token!);
 
-      if (result.status === 401) {
-        await handleVaultAuthError();
-      }
-    });
-  }
-
-  async function uploadMarketplaceTokenToVault(giftId: string, token: string): Promise<void> {
-    const state = await getCloudVaultState();
-    if (!state.enabled || !state.token || state.tokenExpired) return;
-    if (isVaultTokenExpired(state.tokenIssuedAt)) {
-      await handleVaultAuthError();
-      return;
-    }
-    enqueueVaultSync(async () => {
-      const result = await vaultFetch(
-        `/gifts/${encodeURIComponent(giftId)}/marketplace-token`,
-        'PATCH',
-        { marketplaceManagementToken: token },
-        state.token!,
-      );
       if (result.status === 401) {
         await handleVaultAuthError();
       }
@@ -5401,53 +5374,9 @@ export default defineBackground(() => {
     }
   }
 
-  // --- Marketplace heartbeat ---
-  //
-  // Mirrors the vault's heartbeat worker: every 4 min, for each active gift
-  // with a stored management token, POST /gifts/:id/heartbeat so the
-  // marketplace badge stays "online" while the user's browser is running.
-  // chrome.alarms survives MV3 service-worker shutdowns; setInterval would
-  // be dropped every 30s idle.
-
-  const MARKETPLACE_URL = 'https://marketplace.byoky.com';
-  const MARKETPLACE_HEARTBEAT_ALARM = 'byoky:marketplace-heartbeat';
-
-  async function runMarketplaceHeartbeat(): Promise<void> {
-    const data = await browser.storage.local.get('gifts');
-    const gifts = (data.gifts ?? []) as Gift[];
-    const now = Date.now();
-    await Promise.all(gifts.map(async (gift) => {
-      if (!gift.active || gift.expiresAt <= now) return;
-      if (!gift.marketplaceManagementToken) return;
-      try {
-        await fetch(`${MARKETPLACE_URL}/gifts/${encodeURIComponent(gift.id)}/heartbeat`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${gift.marketplaceManagementToken}` },
-        });
-      } catch {
-        // Network hiccup — retry on the next tick.
-      }
-    }));
-  }
-
-  async function unlistMarketplaceGift(giftId: string, mgmtToken: string): Promise<void> {
-    try {
-      await fetch(`${MARKETPLACE_URL}/gifts/${encodeURIComponent(giftId)}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${mgmtToken}` },
-      });
-    } catch {
-      // Best-effort: the gift will eventually age out via stale heartbeat.
-    }
-  }
-
-  browser.alarms.create(MARKETPLACE_HEARTBEAT_ALARM, {
-    periodInMinutes: 4,
-    delayInMinutes: 0,
-  });
-
-  // Wake the SW every minute to re-open any relay WS that MV3 idle-killed,
-  // so recipients don't see "sender offline" for most of each 4-min cycle.
+  // Wake the SW every minute to re-open any relay WS that MV3 idle-killed —
+  // without this the vault fallback would be the only live sender for most
+  // of the idle window.
   const RELAY_RECONNECT_ALARM = 'byoky:relay-reconnect';
   browser.alarms.create(RELAY_RECONNECT_ALARM, {
     periodInMinutes: 1,
@@ -5455,12 +5384,8 @@ export default defineBackground(() => {
   });
 
   browser.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name === MARKETPLACE_HEARTBEAT_ALARM) {
-      runMarketplaceHeartbeat().catch(() => {});
-    } else if (alarm.name === RELAY_RECONNECT_ALARM) {
+    if (alarm.name === RELAY_RECONNECT_ALARM) {
       reconnectGiftRelays().catch(() => {});
     }
   });
-  // Fire once on startup so gifts flip to online without waiting 4 min.
-  runMarketplaceHeartbeat().catch(() => {});
 });

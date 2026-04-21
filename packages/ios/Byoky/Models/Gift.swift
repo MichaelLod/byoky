@@ -13,10 +13,12 @@ struct Gift: Identifiable, Codable {
     let createdAt: Date
     var active: Bool
     let relayUrl: String
-    /// Marketplace management token — only set when the gift was listed
-    /// publicly. Used by the app + vault to keep the marketplace online badge
-    /// fresh via POST /gifts/:id/heartbeat.
-    var marketplaceManagementToken: String?
+    /// Opt-in flag — true if the gift is listed on /token-pool.
+    var listed: Bool?
+    /// Display name shown on the public pool card.
+    var gifterName: String?
+    /// Short-link id for pool redemption.
+    var giftShortId: String?
 }
 
 struct GiftLink: Codable {

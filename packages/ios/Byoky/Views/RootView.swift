@@ -3,10 +3,6 @@ import SwiftUI
 struct RootView: View {
     @EnvironmentObject var wallet: WalletStore
     @Environment(\.scenePhase) private var scenePhase
-    /// Fires every 4 min while the app is in the foreground so the
-    /// marketplace "online" badge stays fresh. The vault covers the
-    /// backgrounded case.
-    private let marketplaceHeartbeatTimer = Timer.publish(every: 240, on: .main, in: .common).autoconnect()
 
     var body: some View {
         SwiftUI.Group {
@@ -33,15 +29,9 @@ struct RootView: View {
                 if wallet.status == .unlocked {
                     GiftRelayHost.shared.reconnectAll()
                     Task { await wallet.reconcileGiftUsageWithVault() }
-                    Task { await wallet.heartbeatMarketplace() }
                 }
             default:
                 break
-            }
-        }
-        .onReceive(marketplaceHeartbeatTimer) { _ in
-            if wallet.status == .unlocked {
-                Task { await wallet.heartbeatMarketplace() }
             }
         }
     }
