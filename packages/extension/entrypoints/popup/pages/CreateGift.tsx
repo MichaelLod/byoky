@@ -10,13 +10,13 @@ const EXPIRY_OPTIONS = [
 ];
 
 const BUDGET_PRESETS = [10_000, 50_000, 100_000, 500_000, 1_000_000];
+const RELAY_URL = 'wss://relay.byoky.com';
 
 export function CreateGift() {
   const { credentials, createGift, navigate, error, cloudVaultEnabled } = useWalletStore();
   const [credentialId, setCredentialId] = useState(credentials[0]?.id ?? '');
   const [maxTokens, setMaxTokens] = useState(100_000);
   const [expiryMs, setExpiryMs] = useState(EXPIRY_OPTIONS[1].ms);
-  const [relayUrl, setRelayUrl] = useState('wss://relay.byoky.com');
   const [listPublicly, setListPublicly] = useState(false);
   const [gifterName, setGifterName] = useState('');
   const [giftLink, setGiftLink] = useState<string | null>(null);
@@ -54,7 +54,7 @@ export function CreateGift() {
       selectedCred.label,
       maxTokens,
       expiryMs,
-      relayUrl,
+      RELAY_URL,
       listPublicly,
       listPublicly ? (gifterName.trim() || undefined) : undefined,
     );
@@ -223,21 +223,6 @@ export function CreateGift() {
                 </option>
               ))}
             </select>
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="gift-relay">Relay server</label>
-            <input
-              id="gift-relay"
-              type="text"
-              value={relayUrl}
-              onChange={(e) => setRelayUrl(e.target.value)}
-              placeholder="wss://relay.byoky.com"
-            />
-            <p className="form-hint">
-              WebSocket relay that connects sender and recipient.
-              Self-host or use the default.
-            </p>
           </div>
 
           <div className="form-group">

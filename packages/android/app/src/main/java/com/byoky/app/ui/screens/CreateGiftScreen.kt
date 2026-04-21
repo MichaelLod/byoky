@@ -40,6 +40,8 @@ private val expiryPresets = listOf(
     ExpiryPreset("30 days", 2_592_000_000L),
 )
 
+private const val RELAY_URL = "wss://relay.byoky.com"
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CreateGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
@@ -51,7 +53,6 @@ fun CreateGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
     var selectedTokenPreset by remember { mutableIntStateOf(-1) }
     var customTokens by remember { mutableStateOf("") }
     var selectedExpiryIndex by remember { mutableIntStateOf(1) }
-    var relayUrl by remember { mutableStateOf("wss://relay.byoky.com") }
     var listPublicly by remember { mutableStateOf(false) }
     var gifterName by remember { mutableStateOf("") }
     var createdGift by remember { mutableStateOf<Gift?>(null) }
@@ -81,7 +82,7 @@ fun CreateGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
         customTokens.toIntOrNull() ?: 0
     }
 
-    val isValid = selectedCredential != null && tokenBudget > 0 && relayUrl.startsWith("wss://")
+    val isValid = selectedCredential != null && tokenBudget > 0
 
     Scaffold(
         topBar = {
@@ -223,22 +224,6 @@ fun CreateGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
                     }
                 }
 
-                // Relay URL
-                Text("Relay URL", color = TextSecondary, fontSize = 12.sp)
-                OutlinedTextField(
-                    value = relayUrl,
-                    onValueChange = { relayUrl = it },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Accent,
-                        unfocusedBorderColor = Border,
-                        focusedContainerColor = BgCard,
-                        unfocusedContainerColor = BgCard,
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                )
-
                 if (!cloudVaultEnabled) {
                     Spacer(Modifier.height(8.dp))
                     Card(
@@ -298,7 +283,7 @@ fun CreateGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
                             label = cred.label,
                             maxTokens = tokenBudget,
                             expiresInMs = expiryPresets[selectedExpiryIndex].millis,
-                            relayUrl = relayUrl,
+                            relayUrl = RELAY_URL,
                             listPublicly = listPublicly,
                             gifterName = if (listPublicly) gifterName.ifBlank { null } else null,
                         )

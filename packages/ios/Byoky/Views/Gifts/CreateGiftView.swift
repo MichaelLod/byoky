@@ -9,7 +9,6 @@ struct CreateGiftView: View {
     @State private var customTokens = ""
     @State private var useCustomTokens = false
     @State private var expiryOption: ExpiryOption = .days7
-    @State private var relayUrl = "wss://relay.byoky.com"
     @State private var listPublicly = false
     @State private var gifterName = ""
     @State private var createdGift: Gift?
@@ -17,6 +16,7 @@ struct CreateGiftView: View {
     @State private var error: String?
 
     private let tokenPresets = [10_000, 50_000, 100_000, 500_000, 1_000_000]
+    private static let relayUrl = "wss://relay.byoky.com"
 
     private var effectiveTokens: Int {
         if useCustomTokens, let custom = Int(customTokens), custom > 0 {
@@ -26,7 +26,7 @@ struct CreateGiftView: View {
     }
 
     private var isValid: Bool {
-        selectedCredential != nil && effectiveTokens > 0 && !relayUrl.isEmpty
+        selectedCredential != nil && effectiveTokens > 0
     }
 
     var body: some View {
@@ -183,17 +183,6 @@ struct CreateGiftView: View {
             }
 
             Section {
-                TextField("Relay URL", text: $relayUrl)
-                    .keyboardType(.URL)
-                    .textContentType(.URL)
-                    .autocapitalization(.none)
-            } header: {
-                Text("Relay")
-            } footer: {
-                Text("The WebSocket relay that proxies gift requests.")
-            }
-
-            Section {
                 Toggle("List on Token Pool", isOn: $listPublicly)
                     .tint(Theme.accent)
                 if listPublicly {
@@ -324,7 +313,7 @@ struct CreateGiftView: View {
             label: credential.label,
             maxTokens: effectiveTokens,
             expiresInMs: expiryOption.milliseconds,
-            relayUrl: relayUrl,
+            relayUrl: Self.relayUrl,
             listPublicly: listPublicly,
             gifterName: listPublicly ? (gifterName.isEmpty ? nil : gifterName) : nil
         )
