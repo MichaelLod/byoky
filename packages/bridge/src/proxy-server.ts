@@ -135,6 +135,18 @@ export function startProxyServer(config: ProxyConfig): Server {
       return;
     }
 
+    // Graceful shutdown — used by the OpenClaw plugin to replace a stale
+    // bridge bound to an old relay room. Only reachable on 127.0.0.1 (the
+    // Host-header check above already enforces that), so there is no remote
+    // exposure. POST only — avoids link-preview fetches tripping it.
+    if (req.method === 'POST' && req.url === '/_shutdown') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+      // Let the response flush before exiting.
+      setTimeout(() => process.exit(0), 50);
+      return;
+    }
+
     // Reject excessively long URIs to prevent resource exhaustion
     if ((req.url?.length ?? 0) > MAX_URI_LENGTH) {
       res.writeHead(414, { 'Content-Type': 'application/json' });

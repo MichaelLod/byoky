@@ -672,17 +672,32 @@ async function startBridgeRelayMode(
   ctx: ProviderAuthContext,
   cfg: RelaySpawnConfig,
 ): Promise<void> {
-  // If the bridge is already running on the port (e.g. a previous relay
-  // session we spawned), /health will succeed — but its WS peer is the old
-  // mobile, not the freshly paired one. Best path is to fail-loud and ask
-  // the user to kill the stale bridge. Users rarely hit this (same port,
-  // different pairing, within a single session).
+  // If a bridge is already running on the port, it is almost certainly a
+  // stale one we spawned in a previous session, bound to an old relay room.
+  // Replace it: ask it to shut down cleanly (POST /_shutdown — 127.0.0.1-
+  // only, enforced by the bridge's Host-header check), wait for the socket
+  // to actually release, then spawn the fresh one.
   const existing = await checkBridgeHealth();
   if (existing) {
-    await ctx.prompter.note(
-      `Port ${cfg.port} is already serving another Byoky Bridge — close any running bridge (or run \`openclaw gateway restart\`) and retry this command.`,
-    );
-    throw new Error('Bridge port already in use');
+    try {
+      await fetch(`http://127.0.0.1:${cfg.port}/_shutdown`, { method: 'POST' });
+    } catch {
+      // Older bridges without /_shutdown — best-effort; the wait below will
+      // still time out loudly if the port does not free.
+    }
+    const shutdownStart = Date.now();
+    while (Date.now() - shutdownStart < 5_000) {
+      const still = await checkBridgeHealth();
+      if (!still) break;
+      await sleep(100);
+    }
+    const stillAlive = await checkBridgeHealth();
+    if (stillAlive) {
+      await ctx.prompter.note(
+        `Port ${cfg.port} is still held by an older Byoky Bridge that does not honour /_shutdown. Upgrade with \`openclaw plugins install @byoky/openclaw-plugin\` and retry, or kill the stale process manually.`,
+      );
+      throw new Error('Bridge port still in use after shutdown request');
+    }
   }
 
   const progress = ctx.prompter.progress('Starting Byoky Bridge in relay mode…');
