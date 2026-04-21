@@ -480,7 +480,31 @@ final class RelayPairService: ObservableObject {
                 } else {
                     forwardedBody = bodyString
                 }
-                let finalBody = injectStreamUsageOptions(providerId: providerId, body: forwardedBody)
+
+                // Claude-Code request-shape compatibility transforms (Anthropic
+                // OAuth setup tokens only). Rewrites non-PascalCase tool names
+                // to Claude-Code aliases and relocates the framework's system
+                // prompt into a <system_context> block inside the first user
+                // message. The returned toolNameMap drives the response-path
+                // rewriter so the upstream framework sees its original names.
+                var ccToolNameMap: [String: String] = [:]
+                let preparedBody: String?
+                if providerId == "anthropic" && credential.authMethod == .oauth, let raw = forwardedBody {
+                    do {
+                        let prepared = try TranslationEngine.shared.prepareClaudeCodeBody(raw)
+                        ccToolNameMap = prepared.toolNameMap
+                        preparedBody = prepared.body
+                    } catch {
+                        // JS bridge unavailable — fall through with unchanged
+                        // body. Credential.applyAuth will still do the
+                        // prefix-only injection as a safety net.
+                        preparedBody = raw
+                    }
+                } else {
+                    preparedBody = forwardedBody
+                }
+
+                let finalBody = injectStreamUsageOptions(providerId: providerId, body: preparedBody)
                 if let finalBody {
                     request.httpBody = finalBody.data(using: .utf8)
                 }
@@ -514,6 +538,18 @@ final class RelayPairService: ObservableObject {
                     "headers": responseHeaders,
                 ])
 
+                // If Claude-Code tool name rewriting was applied to the
+                // request, translate tool_use.name back in the SSE response
+                // before forwarding to the upstream framework. JSON responses
+                // go through unchanged on this path — OpenClaw-style clients
+                // always stream.
+                let contentType = (responseHeaders["content-type"] ?? "").lowercased()
+                let isSSE = contentType.contains("text/event-stream")
+                let sseHandle: Int? = {
+                    guard !ccToolNameMap.isEmpty, isSSE else { return nil }
+                    return try? TranslationEngine.shared.createClaudeCodeSSERewriter(toolNameMap: ccToolNameMap)
+                }()
+
                 var buffer = Data()
                 var fullResponseData = Data()
                 for try await byte in bytes {
@@ -521,22 +557,48 @@ final class RelayPairService: ObservableObject {
                     fullResponseData.append(byte)
                     if buffer.count >= 4096 || byte == 0x0A {
                         if let chunk = String(data: buffer, encoding: .utf8) {
-                            sendJSON([
-                                "type": "relay:response:chunk",
-                                "requestId": requestId,
-                                "chunk": chunk,
-                            ])
+                            let out: String
+                            if let h = sseHandle {
+                                out = (try? TranslationEngine.shared.processClaudeCodeSSE(handle: h, chunk: chunk)) ?? chunk
+                            } else {
+                                out = chunk
+                            }
+                            if !out.isEmpty {
+                                sendJSON([
+                                    "type": "relay:response:chunk",
+                                    "requestId": requestId,
+                                    "chunk": out,
+                                ])
+                            }
                         }
                         buffer.removeAll()
                     }
                 }
 
                 if !buffer.isEmpty, let chunk = String(data: buffer, encoding: .utf8) {
-                    sendJSON([
-                        "type": "relay:response:chunk",
-                        "requestId": requestId,
-                        "chunk": chunk,
-                    ])
+                    let out: String
+                    if let h = sseHandle {
+                        out = (try? TranslationEngine.shared.processClaudeCodeSSE(handle: h, chunk: chunk)) ?? chunk
+                    } else {
+                        out = chunk
+                    }
+                    if !out.isEmpty {
+                        sendJSON([
+                            "type": "relay:response:chunk",
+                            "requestId": requestId,
+                            "chunk": out,
+                        ])
+                    }
+                }
+
+                if let h = sseHandle {
+                    if let tail = try? TranslationEngine.shared.flushClaudeCodeSSE(handle: h), !tail.isEmpty {
+                        sendJSON([
+                            "type": "relay:response:chunk",
+                            "requestId": requestId,
+                            "chunk": tail,
+                        ])
+                    }
                 }
 
                 sendJSON([

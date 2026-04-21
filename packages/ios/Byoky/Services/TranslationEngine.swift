@@ -285,6 +285,73 @@ final class TranslationEngine {
         }
     }
 
+    /// Apply Claude-Code request-shape compatibility transforms to an
+    /// Anthropic OAuth request body. Returns the rewritten body and the
+    /// alias→original tool name map (empty if no rewriting was needed).
+    ///
+    /// The body prefix/system relocation always fires when the credential is
+    /// an Anthropic setup token; tool-name rewriting only fires when tools[]
+    /// contains non-PascalCase names. The caller must thread `toolNameMap`
+    /// through to the response path (SSE rewriter or JSON body rewriter) so
+    /// upstream frameworks see their original tool names.
+    func prepareClaudeCodeBody(_ body: String) throws -> (body: String, toolNameMap: [String: String]) {
+        let json = try invokeString("prepareClaudeCodeBody", args: [body])
+        guard let data = json.data(using: .utf8),
+              let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw EngineError.invalidResult
+        }
+        let rewrittenBody = parsed["body"] as? String ?? body
+        let map = parsed["toolNameMap"] as? [String: String] ?? [:]
+        return (rewrittenBody, map)
+    }
+
+    /// Open a stateful Claude-Code SSE rewriter. Empty `toolNameMap` → the
+    /// rewriter is a no-op passthrough. Returns a handle that must be passed
+    /// to `processClaudeCodeSSE` / `flushClaudeCodeSSE` and eventually
+    /// released via flush or `releaseClaudeCodeSSE`.
+    func createClaudeCodeSSERewriter(toolNameMap: [String: String]) throws -> Int {
+        let data = try JSONSerialization.data(withJSONObject: toolNameMap)
+        let mapJson = String(data: data, encoding: .utf8) ?? "{}"
+        return try queue.sync {
+            try ensureLoadedLocked()
+            guard let bridge = self.bridge else { throw EngineError.bridgeNotInitialized }
+            guard let result = bridge.invokeMethod("createClaudeCodeSSERewriter", withArguments: [mapJson]),
+                  result.isNumber else {
+                throw EngineError.invalidResult
+            }
+            if let err = pendingException() { throw EngineError.translationFailed(err) }
+            return Int(result.toInt32())
+        }
+    }
+
+    /// Process one upstream SSE chunk through a Claude Code rewriter handle.
+    func processClaudeCodeSSE(handle: Int, chunk: String) throws -> String {
+        try invokeString("processClaudeCodeSSE", args: [handle, chunk])
+    }
+
+    /// Flush any buffered output for a Claude Code rewriter handle and
+    /// release it.
+    func flushClaudeCodeSSE(handle: Int) throws -> String {
+        try invokeString("flushClaudeCodeSSE", args: [handle])
+    }
+
+    /// Release a Claude Code rewriter handle without flushing.
+    func releaseClaudeCodeSSE(handle: Int) {
+        queue.sync {
+            try? ensureLoadedLocked()
+            bridge?.invokeMethod("releaseClaudeCodeSSE", withArguments: [handle])
+        }
+    }
+
+    /// Rewrite `tool_use.name` in a non-streaming Anthropic Messages JSON
+    /// response body using the alias→original map. Empty map or unparseable
+    /// JSON → body returned unchanged.
+    func rewriteClaudeCodeJSONBody(toolNameMap: [String: String], body: String) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: toolNameMap)
+        let mapJson = String(data: data, encoding: .utf8) ?? "{}"
+        return try invokeString("rewriteClaudeCodeJSONBody", args: [mapJson, body])
+    }
+
     /// Rewrite an upstream URL when routing cross-family. The SDK built the
     /// source URL against the source provider's base + path; we replace it
     /// with the destination provider's canonical chat endpoint, which may

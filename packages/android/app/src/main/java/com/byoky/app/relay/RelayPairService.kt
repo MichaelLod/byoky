@@ -36,23 +36,6 @@ data class PairPayload(
     val appOrigin: String,
 ) {
     companion object {
-        /** Process-wide instance. Acts as a singleton so MainActivity can
-         *  reach it on foreground to reconnect the pair socket — without
-         *  this, recipients see the phone as offline forever after the
-         *  app is backgrounded once. */
-        @Volatile private var sharedInstance: RelayPairService? = null
-        fun shared(appContext: android.content.Context): RelayPairService {
-            val existing = sharedInstance
-            if (existing != null) return existing
-            return synchronized(this) {
-                val again = sharedInstance
-                if (again != null) return@synchronized again
-                val created = RelayPairService(appContext.applicationContext)
-                sharedInstance = created
-                created
-            }
-        }
-
         fun decode(encoded: String): PairPayload? {
             return try {
                 val base64 = encoded
@@ -459,15 +442,31 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
                     rewriteModelInJsonBody(bodyString, override)
                 } ?: bodyString
 
-                val finalBody = if (providerId == "anthropic" && ownCred.authMethod == com.byoky.app.data.AuthMethod.OAUTH && bodyWithModel != null) {
-                    try {
-                        val parsed = JSONObject(bodyWithModel)
-                        val prefix = "You are Claude Code, Anthropic's official CLI for Claude."
-                        val existing = parsed.optString("system", "").takeIf { it.isNotEmpty() }
-                        if (existing == null) parsed.put("system", prefix)
-                        else parsed.put("system", "$prefix\n\n$existing")
-                        parsed.toString()
-                    } catch (_: Exception) { bodyWithModel }
+                // Claude-Code request-shape compatibility transforms (Anthropic
+                // OAuth setup tokens only). Rewrites non-PascalCase tool names
+                // to Claude-Code aliases and relocates the framework's system
+                // prompt into a <system_context> block inside the first user
+                // message. The returned toolNameMap drives the response-path
+                // rewriter so the upstream framework sees its original names.
+                // Falls back to the plain prefix prepend if the JS bridge is
+                // unavailable (e.g. older Android with no WebView sandbox).
+                var ccToolNameMap: Map<String, String> = emptyMap()
+                val finalBody = if (providerId == "anthropic" &&
+                        ownCred.authMethod == com.byoky.app.data.AuthMethod.OAUTH &&
+                        bodyWithModel != null) {
+                    val engine = translationEngine
+                    if (engine != null && engine.isSupported) {
+                        try {
+                            val prepared = engine.prepareClaudeCodeBody(bodyWithModel)
+                            ccToolNameMap = prepared.toolNameMap
+                            prepared.body
+                        } catch (_: Throwable) {
+                            // JS bridge failure — fall back to prefix prepend.
+                            applyPrefixFallback(bodyWithModel)
+                        }
+                    } else {
+                        applyPrefixFallback(bodyWithModel)
+                    }
                 } else {
                     bodyWithModel
                 }
@@ -507,6 +506,18 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
                     put("headers", responseHeaders)
                 })
 
+                // If Claude-Code tool name rewriting was applied to the
+                // request, we need to translate tool_use.name back in the
+                // response before forwarding to OpenClaw. SSE streams go
+                // through a stateful rewriter (chunk-by-chunk); JSON
+                // responses are buffered and rewritten at the end.
+                val contentType = response.headers["content-type"]?.lowercase() ?: ""
+                val isSSE = contentType.contains("text/event-stream")
+                val rewriteEngine = translationEngine
+                val sseHandle = if (ccToolNameMap.isNotEmpty() && isSSE && rewriteEngine != null) {
+                    try { rewriteEngine.createClaudeCodeSSERewriter(ccToolNameMap) } catch (_: Throwable) { null }
+                } else null
+
                 val body = response.body
                 val fullResponse = StringBuilder()
                 if (body != null) {
@@ -518,20 +529,47 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
                         buffer.append(char)
                         fullResponse.append(char)
                         if (buffer.length >= 4096 || char == '\n') {
-                            sendJSON(JSONObject().apply {
-                                put("type", "relay:response:chunk")
-                                put("requestId", requestId)
-                                put("chunk", buffer.toString())
-                            })
+                            val outChunk = if (sseHandle != null && rewriteEngine != null) {
+                                try { rewriteEngine.processClaudeCodeSSE(sseHandle, buffer.toString()) }
+                                catch (_: Throwable) { buffer.toString() }
+                            } else {
+                                buffer.toString()
+                            }
+                            if (outChunk.isNotEmpty()) {
+                                sendJSON(JSONObject().apply {
+                                    put("type", "relay:response:chunk")
+                                    put("requestId", requestId)
+                                    put("chunk", outChunk)
+                                })
+                            }
                             buffer.clear()
                         }
                     }
                     if (buffer.isNotEmpty()) {
-                        sendJSON(JSONObject().apply {
-                            put("type", "relay:response:chunk")
-                            put("requestId", requestId)
-                            put("chunk", buffer.toString())
-                        })
+                        val outChunk = if (sseHandle != null && rewriteEngine != null) {
+                            try { rewriteEngine.processClaudeCodeSSE(sseHandle, buffer.toString()) }
+                            catch (_: Throwable) { buffer.toString() }
+                        } else {
+                            buffer.toString()
+                        }
+                        if (outChunk.isNotEmpty()) {
+                            sendJSON(JSONObject().apply {
+                                put("type", "relay:response:chunk")
+                                put("requestId", requestId)
+                                put("chunk", outChunk)
+                            })
+                        }
+                    }
+                    // Flush any trailing SSE buffer (leftover partial frame) and release the handle.
+                    if (sseHandle != null && rewriteEngine != null) {
+                        val tail = try { rewriteEngine.flushClaudeCodeSSE(sseHandle) } catch (_: Throwable) { "" }
+                        if (tail.isNotEmpty()) {
+                            sendJSON(JSONObject().apply {
+                                put("type", "relay:response:chunk")
+                                put("requestId", requestId)
+                                put("chunk", tail)
+                            })
+                        }
                     }
                     body.close()
                 }
@@ -930,6 +968,20 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
         } catch (_: Exception) {
             body
         }
+    }
+
+    /** Fallback when the JS bridge isn't available: prepend the bare Claude
+     *  Code prefix to the system field. Older behavior — good enough for
+     *  requests that don't carry framework-specific tool vocabularies. */
+    private fun applyPrefixFallback(body: String): String {
+        return try {
+            val parsed = JSONObject(body)
+            val prefix = "You are Claude Code, Anthropic's official CLI for Claude."
+            val existing = parsed.optString("system", "").takeIf { it.isNotEmpty() }
+            if (existing == null) parsed.put("system", prefix)
+            else parsed.put("system", "$prefix\n\n$existing")
+            parsed.toString()
+        } catch (_: Exception) { body }
     }
 
     private fun proxyRelayRequestViaGift(
@@ -1417,6 +1469,22 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
 
     companion object {
         private val STREAM_USAGE_PROVIDERS = setOf("openai", "azure-openai", "together", "deepseek")
+
+        /** Process-wide singleton so MainActivity can reach the pair socket
+         *  on foreground to reconnect — without this, recipients see the
+         *  phone as offline forever after the app is backgrounded once. */
+        @Volatile private var sharedInstance: RelayPairService? = null
+        fun shared(appContext: android.content.Context): RelayPairService {
+            val existing = sharedInstance
+            if (existing != null) return existing
+            return synchronized(this) {
+                val again = sharedInstance
+                if (again != null) return@synchronized again
+                val created = RelayPairService(appContext.applicationContext)
+                sharedInstance = created
+                created
+            }
+        }
 
         /**
          * Compose a human-readable, actionable error message for the

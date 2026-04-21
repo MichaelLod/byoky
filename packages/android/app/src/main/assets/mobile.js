@@ -3361,9 +3361,199 @@ data: [DONE]
     }
     return out;
   }
+  var CLAUDE_CODE_SYSTEM_PREFIX = "You are Claude Code, Anthropic's official CLI for Claude.";
+  function injectClaudeCodeSystemPrompt(body, options) {
+    if (!body) return body;
+    try {
+      const parsed = JSON.parse(body);
+      const relocate = options?.relocateExisting === true;
+      if (relocate) {
+        const originalSystem = extractSystemText(parsed.system);
+        parsed.system = CLAUDE_CODE_SYSTEM_PREFIX;
+        if (originalSystem && Array.isArray(parsed.messages) && parsed.messages.length > 0) {
+          parsed.messages = relocateSystemToFirstUserMessage(
+            parsed.messages,
+            originalSystem
+          );
+        }
+      } else {
+        if (!parsed.system) {
+          parsed.system = CLAUDE_CODE_SYSTEM_PREFIX;
+        } else if (typeof parsed.system === "string") {
+          parsed.system = `${CLAUDE_CODE_SYSTEM_PREFIX}
+
+${parsed.system}`;
+        } else if (Array.isArray(parsed.system)) {
+          parsed.system = [{ type: "text", text: CLAUDE_CODE_SYSTEM_PREFIX }, ...parsed.system];
+        }
+      }
+      return JSON.stringify(parsed);
+    } catch {
+      return body;
+    }
+  }
+  function extractSystemText(system) {
+    if (!system) return "";
+    if (typeof system === "string") return system;
+    if (Array.isArray(system)) {
+      return system.map((block) => {
+        if (typeof block === "string") return block;
+        if (block && typeof block === "object" && block.type === "text") {
+          return String(block.text ?? "");
+        }
+        return "";
+      }).filter((s) => s.length > 0).join("\n\n");
+    }
+    return "";
+  }
+  function relocateSystemToFirstUserMessage(messages, systemText) {
+    const wrapped = `<system_context>
+${systemText}
+</system_context>
+
+`;
+    const out = [...messages];
+    const first = out[0];
+    if (!first || first.role !== "user") return out;
+    if (typeof first.content === "string") {
+      out[0] = { ...first, content: `${wrapped}${first.content}` };
+    } else if (Array.isArray(first.content)) {
+      out[0] = {
+        ...first,
+        content: [{ type: "text", text: wrapped }, ...first.content]
+      };
+    }
+    return out;
+  }
+  function rewriteToolNamesForClaudeCode(body) {
+    if (!body) return { body, toolNameMap: {} };
+    let parsed;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      return { body, toolNameMap: {} };
+    }
+    const tools = parsed.tools;
+    if (!Array.isArray(tools) || tools.length === 0) {
+      return { body, toolNameMap: {} };
+    }
+    const needsRewrite = tools.some((t) => {
+      const name = t?.name;
+      return typeof name === "string" && !/^[A-Z][A-Za-z0-9]*$/.test(name);
+    });
+    if (!needsRewrite) return { body, toolNameMap: {} };
+    const forward = {};
+    const reverse = {};
+    for (const t of tools) {
+      const name = t?.name;
+      if (typeof name !== "string") continue;
+      if (forward[name]) continue;
+      const alias = toClaudeCodeToolName(name, new Set(Object.values(forward)));
+      forward[name] = alias;
+      reverse[alias] = name;
+    }
+    parsed.tools = tools.map((t) => {
+      const tt = t;
+      if (typeof tt.name === "string" && forward[tt.name]) {
+        return { ...t, name: forward[tt.name] };
+      }
+      return t;
+    });
+    const messages = parsed.messages;
+    if (Array.isArray(messages)) {
+      for (const msg of messages) {
+        const content = msg?.content;
+        if (!Array.isArray(content)) continue;
+        for (const block of content) {
+          const b = block;
+          if (b.type === "tool_use" && typeof b.name === "string" && forward[b.name]) {
+            b.name = forward[b.name];
+          }
+        }
+      }
+    }
+    return { body: JSON.stringify(parsed), toolNameMap: reverse };
+  }
+  function toClaudeCodeToolName(name, taken) {
+    let pascal = name.split(/[_\-]/).filter((p) => p.length > 0).map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join("");
+    if (pascal === name && name.length > 0) {
+      pascal = name.charAt(0).toUpperCase() + name.slice(1);
+    }
+    let candidate = pascal;
+    let n = 2;
+    while (taken.has(candidate)) {
+      candidate = `${pascal}${n}`;
+      n++;
+    }
+    return candidate;
+  }
+  function rewriteToolNamesInJSONBody(body, toolNameMap) {
+    if (Object.keys(toolNameMap).length === 0) return body;
+    let parsed;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      return body;
+    }
+    const content = parsed.content;
+    if (!Array.isArray(content)) return body;
+    let mutated = false;
+    for (const block of content) {
+      if (!block || typeof block !== "object") continue;
+      const b = block;
+      if (b.type === "tool_use" && typeof b.name === "string" && toolNameMap[b.name]) {
+        b.name = toolNameMap[b.name];
+        mutated = true;
+      }
+    }
+    return mutated ? JSON.stringify(parsed) : body;
+  }
+  function createToolNameSSERewriter(toolNameMap) {
+    if (Object.keys(toolNameMap).length === 0) {
+      return {
+        process: (chunk) => chunk,
+        flush: () => ""
+      };
+    }
+    let buffer = "";
+    return {
+      process: (chunk) => {
+        buffer += chunk;
+        let out = "";
+        let idx;
+        while ((idx = buffer.indexOf("\n\n")) !== -1) {
+          const frame = buffer.slice(0, idx + 2);
+          buffer = buffer.slice(idx + 2);
+          out += rewriteSSEFrame(frame, toolNameMap);
+        }
+        return out;
+      },
+      flush: () => {
+        const leftover = buffer;
+        buffer = "";
+        return leftover;
+      }
+    };
+  }
+  function rewriteSSEFrame(frame, toolNameMap) {
+    const dataMatch = /^data: (.+)$/m.exec(frame);
+    if (!dataMatch) return frame;
+    const dataLine = dataMatch[1];
+    try {
+      const data = JSON.parse(dataLine);
+      if (data?.type === "content_block_start" && data?.content_block?.type === "tool_use" && typeof data.content_block.name === "string" && toolNameMap[data.content_block.name]) {
+        data.content_block.name = toolNameMap[data.content_block.name];
+        const rewrittenData = JSON.stringify(data);
+        return frame.replace(dataLine, rewrittenData);
+      }
+    } catch {
+    }
+    return frame;
+  }
 
   // src/translate/mobile-entry.ts
   var streams = /* @__PURE__ */ new Map();
+  var ccRewriters = /* @__PURE__ */ new Map();
   var nextHandle = 1;
   var bridge = {
     translateRequest(ctxJson, body) {
@@ -3445,7 +3635,37 @@ data: [DONE]
     detectRequestCapabilities(body) {
       return JSON.stringify(detectRequestCapabilities(body));
     },
-    version: "0.5.1"
+    prepareClaudeCodeBody(body) {
+      const { body: rewritten, toolNameMap } = rewriteToolNamesForClaudeCode(body);
+      const withSystem = injectClaudeCodeSystemPrompt(rewritten, { relocateExisting: true });
+      return JSON.stringify({ body: withSystem ?? "", toolNameMap });
+    },
+    createClaudeCodeSSERewriter(mapJson) {
+      const map = JSON.parse(mapJson);
+      const handle = nextHandle++;
+      ccRewriters.set(handle, createToolNameSSERewriter(map));
+      return handle;
+    },
+    processClaudeCodeSSE(handle, chunk) {
+      const r = ccRewriters.get(handle);
+      if (!r) throw new Error(`byoky: unknown Claude Code SSE handle ${handle}`);
+      return r.process(chunk);
+    },
+    flushClaudeCodeSSE(handle) {
+      const r = ccRewriters.get(handle);
+      if (!r) throw new Error(`byoky: unknown Claude Code SSE handle ${handle}`);
+      const out = r.flush();
+      ccRewriters.delete(handle);
+      return out;
+    },
+    releaseClaudeCodeSSE(handle) {
+      ccRewriters.delete(handle);
+    },
+    rewriteClaudeCodeJSONBody(mapJson, body) {
+      const map = JSON.parse(mapJson);
+      return rewriteToolNamesInJSONBody(body, map);
+    },
+    version: "0.5.2"
   };
   globalThis.BYOKY_TRANSLATE = bridge;
 })();

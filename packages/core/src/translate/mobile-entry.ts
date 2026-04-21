@@ -30,7 +30,13 @@ import {
   rewriteProxyUrl as _rewriteProxyUrl,
 } from './families.js';
 import { modelsForProvider, getModel } from '../models.js';
-import { detectRequestCapabilities as _detectRequestCapabilities } from '../proxy-utils.js';
+import {
+  detectRequestCapabilities as _detectRequestCapabilities,
+  rewriteToolNamesForClaudeCode as _rewriteToolNamesForClaudeCode,
+  injectClaudeCodeSystemPrompt as _injectClaudeCodeSystemPrompt,
+  createToolNameSSERewriter as _createToolNameSSERewriter,
+  rewriteToolNamesInJSONBody as _rewriteToolNamesInJSONBody,
+} from '../proxy-utils.js';
 import type { TranslationContext } from './types.js';
 
 interface StreamHandle {
@@ -39,6 +45,7 @@ interface StreamHandle {
 }
 
 const streams = new Map<number, StreamHandle>();
+const ccRewriters = new Map<number, StreamHandle>();
 let nextHandle = 1;
 
 interface MobileBridge {
@@ -127,6 +134,52 @@ interface MobileBridge {
    */
   detectRequestCapabilities(body: string): string;
 
+  /**
+   * Apply Claude-Code request-shape compatibility transforms to an Anthropic
+   * OAuth request body: rewrite non-PascalCase tool names to Claude-Code
+   * aliases, replace the system field with the bare Claude Code prefix, and
+   * relocate the original system text into the first user message wrapped in
+   * <system_context>. This aligns an arbitrary framework's request shape
+   * with what Claude.ai subscription setup tokens are designed to handle.
+   *
+   * Input: the raw request body (string). Output: JSON `{body, toolNameMap}`
+   * where `toolNameMap` is the alias → original-name map that must be used
+   * to rewrite tool_use.name in the response (SSE or JSON) so the upstream
+   * framework sees its original names.
+   *
+   * Safe to call for any body: if no tools array or tools are already
+   * PascalCase, toolNameMap is empty and the body is returned unchanged
+   * (modulo the system prefix injection, which always fires).
+   */
+  prepareClaudeCodeBody(body: string): string;
+
+  /**
+   * Open a stateful SSE rewriter that translates `tool_use` block names in
+   * `content_block_start` events back from Claude-Code aliases to the
+   * upstream framework's original names. `mapJson` is the toolNameMap
+   * returned by `prepareClaudeCodeBody`. Empty map → identity passthrough.
+   * Returns an integer handle passed to `processClaudeCodeSSE` /
+   * `flushClaudeCodeSSE` / `releaseClaudeCodeSSE`.
+   */
+  createClaudeCodeSSERewriter(mapJson: string): number;
+
+  /** Process one upstream SSE chunk through a Claude Code rewriter handle. */
+  processClaudeCodeSSE(handle: number, chunk: string): string;
+
+  /** Flush any buffered output for a Claude Code rewriter handle and release it. */
+  flushClaudeCodeSSE(handle: number): string;
+
+  /** Release a Claude Code rewriter handle without flushing (e.g. on cancel). */
+  releaseClaudeCodeSSE(handle: number): void;
+
+  /**
+   * Rewrite `tool_use.name` in a non-streaming Anthropic Messages JSON
+   * response body using the alias → original map. Used when Content-Type
+   * is application/json rather than text/event-stream. Empty map → body
+   * returned unchanged. Unparseable JSON → body returned unchanged.
+   */
+  rewriteClaudeCodeJSONBody(mapJson: string, body: string): string;
+
   /** Bundle version, for native side to assert against expected core version. */
   readonly version: string;
 }
@@ -211,7 +264,37 @@ const bridge: MobileBridge = {
   detectRequestCapabilities(body) {
     return JSON.stringify(_detectRequestCapabilities(body));
   },
-  version: '0.5.1',
+  prepareClaudeCodeBody(body) {
+    const { body: rewritten, toolNameMap } = _rewriteToolNamesForClaudeCode(body);
+    const withSystem = _injectClaudeCodeSystemPrompt(rewritten, { relocateExisting: true });
+    return JSON.stringify({ body: withSystem ?? '', toolNameMap });
+  },
+  createClaudeCodeSSERewriter(mapJson) {
+    const map = JSON.parse(mapJson) as Record<string, string>;
+    const handle = nextHandle++;
+    ccRewriters.set(handle, _createToolNameSSERewriter(map));
+    return handle;
+  },
+  processClaudeCodeSSE(handle, chunk) {
+    const r = ccRewriters.get(handle);
+    if (!r) throw new Error(`byoky: unknown Claude Code SSE handle ${handle}`);
+    return r.process(chunk);
+  },
+  flushClaudeCodeSSE(handle) {
+    const r = ccRewriters.get(handle);
+    if (!r) throw new Error(`byoky: unknown Claude Code SSE handle ${handle}`);
+    const out = r.flush();
+    ccRewriters.delete(handle);
+    return out;
+  },
+  releaseClaudeCodeSSE(handle) {
+    ccRewriters.delete(handle);
+  },
+  rewriteClaudeCodeJSONBody(mapJson, body) {
+    const map = JSON.parse(mapJson) as Record<string, string>;
+    return _rewriteToolNamesInJSONBody(body, map);
+  },
+  version: '0.5.2',
 };
 
 (globalThis as Record<string, unknown>).BYOKY_TRANSLATE = bridge;

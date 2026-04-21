@@ -285,6 +285,79 @@ class TranslationEngine private constructor(private val appContext: Context) {
     }
 
     /**
+     * Apply Claude-Code request-shape compatibility transforms to an
+     * Anthropic OAuth request body. Returns the rewritten body and the
+     * alias → original-name map (empty when no tool-name rewriting was
+     * needed). The caller must thread the map through the response path
+     * (SSE rewriter or JSON body rewriter) so upstream frameworks see their
+     * original tool names.
+     */
+    data class ClaudeCodeBody(val body: String, val toolNameMap: Map<String, String>)
+
+    fun prepareClaudeCodeBody(body: String): ClaudeCodeBody {
+        val raw = evalSync("BYOKY_TRANSLATE.prepareClaudeCodeBody(${jsLiteral(body)})")
+        return try {
+            val obj = org.json.JSONObject(raw)
+            val rewritten = obj.optString("body", body)
+            val mapObj = obj.optJSONObject("toolNameMap")
+            val map = mutableMapOf<String, String>()
+            if (mapObj != null) {
+                val keys = mapObj.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    map[k] = mapObj.optString(k, "")
+                }
+            }
+            ClaudeCodeBody(rewritten, map)
+        } catch (_: Throwable) {
+            ClaudeCodeBody(body, emptyMap())
+        }
+    }
+
+    /**
+     * Open a stateful Claude-Code SSE rewriter. Empty `toolNameMap` → the
+     * rewriter is a no-op passthrough. Returns a handle passed to
+     * [processClaudeCodeSSE] / [flushClaudeCodeSSE] and released via flush
+     * or [releaseClaudeCodeSSE].
+     */
+    fun createClaudeCodeSSERewriter(toolNameMap: Map<String, String>): Int {
+        val mapJson = org.json.JSONObject(toolNameMap as Map<*, *>).toString()
+        val expr = "String(BYOKY_TRANSLATE.createClaudeCodeSSERewriter(${jsLiteral(mapJson)}))"
+        val result = evalSync(expr)
+        return result.toIntOrNull() ?: throw EngineException.InvalidResult()
+    }
+
+    /** Process one upstream SSE chunk through a Claude Code rewriter handle. */
+    fun processClaudeCodeSSE(handle: Int, chunk: String): String {
+        val expr = "BYOKY_TRANSLATE.processClaudeCodeSSE($handle, ${jsLiteral(chunk)})"
+        return evalSync(expr)
+    }
+
+    /** Flush any buffered output for a Claude Code rewriter handle and release it. */
+    fun flushClaudeCodeSSE(handle: Int): String {
+        val expr = "BYOKY_TRANSLATE.flushClaudeCodeSSE($handle)"
+        return evalSync(expr)
+    }
+
+    /** Release a Claude Code rewriter handle without flushing. */
+    fun releaseClaudeCodeSSE(handle: Int) {
+        val expr = "(BYOKY_TRANSLATE.releaseClaudeCodeSSE($handle), '')"
+        try { evalSync(expr) } catch (_: Throwable) { /* best-effort */ }
+    }
+
+    /**
+     * Rewrite `tool_use.name` in a non-streaming Anthropic Messages JSON
+     * response body using the alias → original map. Empty map or unparseable
+     * body → input returned unchanged.
+     */
+    fun rewriteClaudeCodeJSONBody(toolNameMap: Map<String, String>, body: String): String {
+        val mapJson = org.json.JSONObject(toolNameMap as Map<*, *>).toString()
+        return evalSync(
+            "BYOKY_TRANSLATE.rewriteClaudeCodeJSONBody(${jsLiteral(mapJson)}, ${jsLiteral(body)})"
+        )
+    }
+
+    /**
      * Rewrite an upstream URL when routing cross-family. Returns null when
      * the destination has no adapter or can't build a URL.
      */
