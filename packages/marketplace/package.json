@@ -9,14 +9,12 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "dev": "tsx src/server.ts",
-    "seed": "tsx src/seed.ts",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
   "dependencies": {
     "hono": "^4.0.0",
-    "@hono/node-server": "^1.19.0",
-    "postgres": "^3.4.0"
+    "@hono/node-server": "^1.19.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
