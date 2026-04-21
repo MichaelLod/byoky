@@ -1064,14 +1064,17 @@ function TokenPoolSection() {
 
       <h3>API endpoints</h3>
       <p>
-        The marketplace runs at <code>marketplace.byoky.com</code> with these endpoints:
+        Pool listings live on the vault at <code>vault.byoky.com</code>. Online status is tracked
+        live via the relay&apos;s WebSocket, and token usage updates flow through the proxy — neither
+        needs a separate REST endpoint.
       </p>
-      <Code lang="text">{`GET    /gifts              — list active + expired gifts
-GET    /gifts/:id/redeem   — get gift link for redemption
-POST   /gifts              — list a gift publicly (called by wallet)
-DELETE /gifts/:id          — unlist a gift
-PATCH  /gifts/:id/usage    — update token usage
-POST   /gifts/:id/heartbeat — online status ping`}</Code>
+      <Code lang="text">{`GET    /pool          — list currently-listed gifts (public)
+POST   /pool/list     — list a gift publicly (bearer: gift authToken)
+POST   /pool/unlist   — remove a listing (bearer: gift authToken)`}</Code>
+      <p>
+        Redemption goes through the short-link flow at <code>byoky.com/g/:shortId</code>, which
+        resolves to the full gift link and opens the wallet&apos;s redeem view.
+      </p>
     </Section>
   );
 }

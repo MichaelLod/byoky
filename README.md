@@ -40,26 +40,26 @@
 
 | Platform | Version | Link |
 |----------|---------|------|
-| Chrome | ![Chrome version](https://img.shields.io/chrome-web-store/v/igjohldpldlahcjmefdhlnbcpldlgmon?style=flat&color=FF4F00&label=) | [Chrome Web Store](https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon) — **v0.7.4 live** |
-| Firefox | ![Firefox version](https://img.shields.io/amo/v/byoky?style=flat&color=FF4F00&label=) | [Mozilla Add-ons](https://addons.mozilla.org/en-US/firefox/addon/byoky/) — **v0.7.4 live** |
-| iOS | ![npm version](https://img.shields.io/npm/v/@byoky/sdk?style=flat&color=FF4F00&label=) | [App Store](https://apps.apple.com/app/byoky/id6760779919) — **v1.0.18 live** |
-| Android | ![npm version](https://img.shields.io/npm/v/@byoky/sdk?style=flat&color=FF4F00&label=) | [Google Play](https://play.google.com/store/apps/details?id=com.byoky.app) — **v1.0.18 live** |
+| Chrome | ![Chrome version](https://img.shields.io/chrome-web-store/v/igjohldpldlahcjmefdhlnbcpldlgmon?style=flat&color=FF4F00&label=) | [Chrome Web Store](https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon) |
+| Firefox | ![Firefox version](https://img.shields.io/amo/v/byoky?style=flat&color=FF4F00&label=) | [Mozilla Add-ons](https://addons.mozilla.org/en-US/firefox/addon/byoky/) |
+| iOS | — | [App Store](https://apps.apple.com/app/byoky/id6760779919) |
+| Android | — | [Google Play](https://play.google.com/store/apps/details?id=com.byoky.app) |
 | Safari (macOS) | Coming soon | — |
 | npm | ![npm version](https://img.shields.io/npm/v/@byoky/sdk?style=flat&color=FF4F00&label=) | [`@byoky/sdk`](https://www.npmjs.com/package/@byoky/sdk) · [`@byoky/core`](https://www.npmjs.com/package/@byoky/core) · [`@byoky/bridge`](https://www.npmjs.com/package/@byoky/bridge) |
 
-> **All platforms live:** Chrome & Firefox on v0.7.4, iOS & Android on v1.0.18. Live version status at [byoky.com](https://byoky.com).
+> Live version status (current + pending store reviews) at [byoky.com](https://byoky.com).
 
 ## Quick Start
 
 ### For Users
 
-**Chrome:** [Install from Chrome Web Store](https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon) — **v0.7.4 live now**
+**Chrome:** [Install from Chrome Web Store](https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon)
 
-**Firefox:** [Install from Mozilla Add-ons](https://addons.mozilla.org/en-US/firefox/addon/byoky/) — **v0.7.4 live now**
+**Firefox:** [Install from Mozilla Add-ons](https://addons.mozilla.org/en-US/firefox/addon/byoky/)
 
-**iOS:** [Install from App Store](https://apps.apple.com/app/byoky/id6760779919) — **v1.0.18 live now** (wallet + Safari extension in one app)
+**iOS:** [Install from App Store](https://apps.apple.com/app/byoky/id6760779919) (wallet + Safari extension in one app)
 
-**Android:** [Install from Google Play](https://play.google.com/store/apps/details?id=com.byoky.app) — **v1.0.18 live now** (standalone wallet. Chrome Android has no extension support; pair via QR or relay)
+**Android:** [Install from Google Play](https://play.google.com/store/apps/details?id=com.byoky.app) (standalone wallet. Chrome Android has no extension support; pair via QR or relay)
 
 ### For Developers
 
