@@ -828,7 +828,8 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
             Button(
                 onClick = {
                     try {
-                        wallet.addCredential(selectedProvider!!.id, label, apiKey, authMethod)
+                        val cleanKey = apiKey.filter { !it.isWhitespace() }
+                        wallet.addCredential(selectedProvider!!.id, label, cleanKey, authMethod)
                         onDismiss()
                     } catch (e: Exception) {
                         error = e.message

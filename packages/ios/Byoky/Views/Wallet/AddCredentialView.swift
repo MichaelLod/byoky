@@ -136,11 +136,12 @@ struct CredentialEntryView: View {
     }
 
     private func save() {
+        let cleanKey = apiKey.filter { !$0.isWhitespace && !$0.isNewline }
         do {
             try wallet.addCredential(
                 providerId: provider.id,
                 label: label,
-                apiKey: apiKey,
+                apiKey: cleanKey,
                 authMethod: authMethod
             )
             onSaved()

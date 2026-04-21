@@ -48,16 +48,18 @@ export function AddCredential() {
     e.preventDefault();
     if (!label.trim()) return;
 
+    const cleanKey = apiKey.replace(/\s+/g, '');
+
     if (authMethod === 'oauth') {
       if (hasOAuthConfig) {
         startOAuth(providerId, label.trim());
       } else {
-        if (!apiKey.trim()) return;
-        addSetupToken(providerId, label.trim(), apiKey.trim());
+        if (!cleanKey) return;
+        addSetupToken(providerId, label.trim(), cleanKey);
       }
     } else {
-      if (!apiKey.trim()) return;
-      addApiKey(providerId, label.trim(), apiKey.trim());
+      if (!cleanKey) return;
+      addApiKey(providerId, label.trim(), cleanKey);
     }
   }
 
