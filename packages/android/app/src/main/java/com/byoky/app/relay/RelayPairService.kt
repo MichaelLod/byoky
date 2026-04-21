@@ -409,11 +409,16 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
                 }
 
                 if (ownCred == null) {
-                    // No direct credential AND no routing rule fired. Build
-                    // an actionable message — see buildNoCredentialMessage
-                    // for the three cases (misconfigured group, partial
-                    // credentials, empty wallet).
+                    // No direct credential AND no routing rule fired AND no
+                    // usable gift picked up. Build an actionable message
+                    // listing own credentials + gifts so it's clear whether
+                    // a gift is present but not being used (bug) vs. missing.
                     val uniqueCreds = wallet.credentials.value
+                        .map { it.providerId }
+                        .distinct()
+                        .sorted()
+                    val giftedIds = wallet.giftedCredentials.value
+                        .filter { !isGiftExpired(it.expiresAt) && it.usedTokens < it.maxTokens }
                         .map { it.providerId }
                         .distinct()
                         .sorted()
@@ -422,6 +427,7 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
                     val message = buildNoCredentialMessage(
                         requestedProviderId = providerId,
                         userCredentialProviderIds = uniqueCreds,
+                        giftedProviderIds = giftedIds,
                         group = group,
                     )
                     sendRelayError(requestId, "NO_CREDENTIAL", message)
@@ -1502,6 +1508,7 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
         fun buildNoCredentialMessage(
             requestedProviderId: String,
             userCredentialProviderIds: List<String>,
+            giftedProviderIds: List<String> = emptyList(),
             group: com.byoky.app.data.Group?,
         ): String {
             val req = requestedProviderId
@@ -1512,10 +1519,26 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
             if (groupBinding != null && groupBinding != req) {
                 return "No $groupBinding API key found. Add a $groupBinding key to your wallet, or assign this app to a provider you already have a key for."
             }
+            // Case 2a: gift exists for requested provider but fell through —
+            // this is a bug on our side (expired / exhausted / state sync).
+            // Surface it so it's diagnosable rather than hidden behind a
+            // generic "no key" message.
+            if (req in giftedProviderIds) {
+                return "Gift for $req is present but not being used. Try backgrounding and foregrounding the app, or re-redeem the gift."
+            }
             // Case 2: user has other credentials but not for the requested provider.
             if (userCredentialProviderIds.isNotEmpty()) {
                 val list = userCredentialProviderIds.joinToString(", ")
-                return "No $req API key found. You have keys for: $list. Add a $req key, or assign this app to one of those providers."
+                var base = "No $req API key found. You have keys for: $list."
+                if (giftedProviderIds.isNotEmpty()) {
+                    base += " Gifts: ${giftedProviderIds.joinToString(", ")}."
+                }
+                base += " Add a $req key, or assign this app to one of those providers."
+                return base
+            }
+            // Case 2b: only gifts, no own credentials.
+            if (giftedProviderIds.isNotEmpty()) {
+                return "No $req API key found. Your gifts cover: ${giftedProviderIds.joinToString(", ")}. Redeem or add a $req key."
             }
             // Case 3: wallet is empty.
             return "No API keys in your wallet. Add a key for any provider to get started."

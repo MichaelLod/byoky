@@ -446,18 +446,25 @@ final class RelayPairService: ObservableObject {
                 }
 
                 guard let credential = ownCred else {
-                    // No direct credential AND no routing rule fired. Build
-                    // an actionable message that tells the user exactly
-                    // what's wrong and what to do about it: which provider
-                    // the app asked for, what credentials they have (if
-                    // any), and which group is currently routing this app.
+                    // No direct credential AND no routing rule fired AND no
+                    // usable gift picked up. Build an actionable message: list
+                    // what the wallet has (own + gifted) and what the current
+                    // group routes to. If a gift is present for the requested
+                    // provider, the message flags it — that path should have
+                    // been taken above and not getting there is a bug.
                     let allCreds = await MainActor.run { wallet.credentials.map { $0.providerId } }
                     let uniqueCreds = Array(Set(allCreds)).sorted()
+                    let giftedIds: [String] = await MainActor.run {
+                        Array(Set(wallet.giftedCredentials
+                            .filter { !isGiftedCredentialExpired($0) && $0.usedTokens < $0.maxTokens }
+                            .map { $0.providerId })).sorted()
+                    }
                     let originForLookup = await MainActor.run { self.pairedOrigin } ?? "relay"
                     let group = await MainActor.run { wallet.groupForOrigin(originForLookup) }
                     let message = Self.buildNoCredentialMessage(
                         requestedProviderId: providerId,
                         userCredentialProviderIds: uniqueCreds,
+                        giftedProviderIds: giftedIds,
                         group: group
                     )
                     sendRelayError(requestId: requestId, code: "NO_CREDENTIAL", message: message)
@@ -1164,6 +1171,7 @@ final class RelayPairService: ObservableObject {
     static func buildNoCredentialMessage(
         requestedProviderId: String,
         userCredentialProviderIds: [String],
+        giftedProviderIds: [String] = [],
         group: Group?
     ) -> String {
         let req = requestedProviderId
@@ -1174,10 +1182,25 @@ final class RelayPairService: ObservableObject {
         if let groupBinding, groupBinding != req {
             return "No \(groupBinding) API key found. Add a \(groupBinding) key to your wallet, or assign this app to a provider you already have a key for."
         }
+        // Case 2a: gift exists for the requested provider but wasn't usable —
+        // if the routing fell through to NO_CREDENTIAL while a matching gift
+        // is in the wallet, that's a bug on our side (expired / exhausted /
+        // state sync). Surface the state so it's diagnosable in the field.
+        if giftedProviderIds.contains(req) {
+            return "Gift for \(req) is present but not being used. Try backgrounding and foregrounding the app, or re-redeem the gift."
+        }
         // Case 2: user has other credentials but not for the requested provider.
         if !userCredentialProviderIds.isEmpty {
-            let list = userCredentialProviderIds.joined(separator: ", ")
-            return "No \(req) API key found. You have keys for: \(list). Add a \(req) key, or assign this app to one of those providers."
+            var base = "No \(req) API key found. You have keys for: \(userCredentialProviderIds.joined(separator: ", "))."
+            if !giftedProviderIds.isEmpty {
+                base += " Gifts: \(giftedProviderIds.joined(separator: ", "))."
+            }
+            base += " Add a \(req) key, or assign this app to one of those providers."
+            return base
+        }
+        // Case 2b: only gifts, no own credentials.
+        if !giftedProviderIds.isEmpty {
+            return "No \(req) API key found. Your gifts cover: \(giftedProviderIds.joined(separator: ", ")). Redeem or add a \(req) key."
         }
         // Case 3: user has no credentials at all.
         return "No API keys in your wallet. Add a key for any provider to get started."
