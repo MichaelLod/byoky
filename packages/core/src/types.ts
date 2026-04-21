@@ -66,6 +66,15 @@ export interface CredentialMeta {
   createdAt: number;
   lastUsedAt?: number;
   maskedKey?: string;
+  /**
+   * True when this is an `oauth` credential that carries a refresh token —
+   * i.e. a real browser-OAuth access token that expires in hours and can only
+   * be refreshed by the extension (the Bridge holds the refresh call).
+   * False/absent for Anthropic setup tokens (sk-ant-oat01-…), which are
+   * static ~1-year Bearer tokens and can be served by any Node process with
+   * residential egress (e.g. the vault gift-relay).
+   */
+  hasRefreshToken?: boolean;
 }
 
 // --- Sessions ---

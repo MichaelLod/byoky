@@ -708,6 +708,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
         createdAt: c.createdAt as number,
         lastUsedAt: c.lastUsedAt as number | undefined,
         maskedKey: c.authMethod === 'api_key' ? '••••••••' : c.authMethod === 'oauth' ? 'Setup Token' : undefined,
+        hasRefreshToken: typeof c.encryptedRefreshToken === 'string' && c.encryptedRefreshToken.length > 0,
       }),
     );
 

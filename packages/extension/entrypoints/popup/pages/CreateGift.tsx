@@ -299,23 +299,24 @@ export function CreateGift() {
             </span>
           </div>
 
-          {selectedCred?.authMethod === 'oauth' && (
+          {selectedCred?.authMethod === 'oauth' && selectedCred?.hasRefreshToken && (
             <div className="warning-box">
-              <strong>Browser and Bridge must stay online.</strong> This credential
-              is a setup token that requires the Byoky Bridge. Gift recipients can
-              only use this gift while your browser is running, the extension is
+              <strong>Browser and Bridge must stay online.</strong> This is an
+              OAuth credential whose access token refreshes every hour — only
+              your extension holds the refresh token, so gift recipients can
+              only use it while your browser is running, the extension is
               active, and the Bridge is installed — even with Cloud Sync enabled.
             </div>
           )}
 
-          {cloudVaultEnabled && selectedCred?.authMethod !== 'oauth' && (
+          {cloudVaultEnabled && !(selectedCred?.authMethod === 'oauth' && selectedCred?.hasRefreshToken) && (
             <div className="info-box">
               <strong>Cloud Sync fallback enabled.</strong> When your browser
               is closed, the Cloud Sync server will handle gift requests automatically.
             </div>
           )}
 
-          {!cloudVaultEnabled && selectedCred?.authMethod !== 'oauth' && (
+          {!cloudVaultEnabled && !(selectedCred?.authMethod === 'oauth' && selectedCred?.hasRefreshToken) && (
             <div className="warning-box">
               <strong>Device must stay online.</strong> Since Cloud Sync is off,
               gift recipients can only use this gift while your browser is running
