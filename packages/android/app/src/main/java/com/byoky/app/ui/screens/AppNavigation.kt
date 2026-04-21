@@ -46,7 +46,7 @@ private fun MainScreen(wallet: WalletStore) {
     var fabMenuOpen by remember { mutableStateOf(false) }
     var showAddCredentialFromFab by remember { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
-    val pairService = remember { RelayPairService(context.applicationContext) }
+    val pairService = remember { RelayPairService.shared(context.applicationContext) }
 
     val tabs = listOf(
         Triple("Wallet", Icons.Default.Wallet, "wallet"),

@@ -36,6 +36,23 @@ data class PairPayload(
     val appOrigin: String,
 ) {
     companion object {
+        /** Process-wide instance. Acts as a singleton so MainActivity can
+         *  reach it on foreground to reconnect the pair socket — without
+         *  this, recipients see the phone as offline forever after the
+         *  app is backgrounded once. */
+        @Volatile private var sharedInstance: RelayPairService? = null
+        fun shared(appContext: android.content.Context): RelayPairService {
+            val existing = sharedInstance
+            if (existing != null) return existing
+            return synchronized(this) {
+                val again = sharedInstance
+                if (again != null) return@synchronized again
+                val created = RelayPairService(appContext.applicationContext)
+                sharedInstance = created
+                created
+            }
+        }
+
         fun decode(encoded: String): PairPayload? {
             return try {
                 val base64 = encoded

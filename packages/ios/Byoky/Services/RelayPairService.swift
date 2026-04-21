@@ -36,6 +36,13 @@ struct PairPayload {
 
 @MainActor
 final class RelayPairService: ObservableObject {
+    /// Singleton — there is only ever one active pair session per app
+    /// lifetime, and `RootView.onChange(scenePhase)` needs access to it to
+    /// reconnect after the app has been backgrounded (iOS suspends the WS
+    /// and without a reconnect the recipient side sees the phone as offline
+    /// forever after the first background event).
+    static let shared = RelayPairService()
+
     @Published var status: PairStatus = .idle
     @Published var requestCount: Int = 0
 

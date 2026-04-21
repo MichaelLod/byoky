@@ -477,6 +477,16 @@ async function probeBridgeSession(port: number, providerId: string): Promise<boo
         return false;
       }
     }
+    // Relay-mode bridge returns 500 with a NO_SENDER body when the mobile
+    // wallet sender is offline. Treat that as a stale session so we force a
+    // fresh pairing flow (opening the app so the user can re-connect) rather
+    // than silently reusing the dead bridge.
+    if (res.status === 500) {
+      const text = await res.text().catch(() => '');
+      if (text.includes('NO_SENDER') || text.includes('No wallet sender')) {
+        return false;
+      }
+    }
     return true;
   } catch {
     return true;
@@ -799,7 +809,7 @@ function buildAuthResult(
         .join(', ')}.`,
     );
   }
-  notes.push('Keys stay in your browser extension — the bridge relays requests.');
+  notes.push('Keys stay in your Byoky wallet (extension or mobile app) — the bridge only relays requests.');
   notes.push('The bridge must be running for API calls to work.');
   if (defaultModel) notes.push(`Default model set to ${defaultModel}.`);
   notes.push('Run `/byoky` inside OpenClaw anytime to check bridge status.');

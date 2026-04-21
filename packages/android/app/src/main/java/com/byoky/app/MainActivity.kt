@@ -44,6 +44,12 @@ class MainActivity : ComponentActivity() {
                 wallet.checkAutoLock()
                 if (wallet.status.value == com.byoky.app.data.WalletStatus.UNLOCKED) {
                     com.byoky.app.relay.GiftRelayHost.reconnectAll()
+                    // Reconnect the shared pair service too — without this,
+                    // recipients (SDK clients, OpenClaw bridge) see the
+                    // phone as offline forever after the first background.
+                    com.byoky.app.relay.RelayPairService
+                        .shared(applicationContext)
+                        .reconnectIfNeeded()
                     wallet.reconcileGiftUsageOnForeground()
                 }
                 checkClipboardForDeferredGift(wallet)

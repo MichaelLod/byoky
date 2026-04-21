@@ -4,7 +4,7 @@ import Combine
 
 struct PairView: View {
     @EnvironmentObject var wallet: WalletStore
-    @StateObject private var pairService = RelayPairService()
+    @ObservedObject private var pairService = RelayPairService.shared
     @State private var manualCode = ""
     @State private var showScanner = false
     @Environment(\.scenePhase) private var scenePhase

@@ -28,6 +28,10 @@ struct RootView: View {
                 wallet.checkAutoLock()
                 if wallet.status == .unlocked {
                     GiftRelayHost.shared.reconnectAll()
+                    // Also reconnect any active pair session — without this,
+                    // recipients (browser SDKs, the OpenClaw bridge) see the
+                    // phone as offline forever after the first background.
+                    RelayPairService.shared.reconnectIfNeeded()
                     Task { await wallet.reconcileGiftUsageWithVault() }
                 }
             default:

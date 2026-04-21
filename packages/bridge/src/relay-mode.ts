@@ -65,6 +65,16 @@ export function startRelayMode(config: RelayModeConfig): void {
 
   const pendingByRequestId = new Map<string, PendingRelayRequest>();
 
+  // Vault fallback state — populated when the mobile sender announces
+  // `relay:vault:offer` over the WS. While the phone is online we keep
+  // routing through the relay (lower latency, hits the phone's credentials
+  // directly). When the phone goes offline (`relay:peer:status { online:
+  // false }`) we route straight to the vault's /proxy endpoint using the
+  // app session token. This mirrors the browser SDK's buildRelaySession
+  // behavior so the bridge keeps serving even with the phone asleep.
+  let vaultFallback: { vaultUrl: string; appSessionToken: string } | null = null;
+  let peerOnline = false;
+
   // A single ws ref that swaps across reconnects. Outbound sends queue while
   // it's not OPEN so in-flight HTTP calls don't fail on a momentary blip.
   let ws: WebSocket | null = null;
@@ -141,13 +151,14 @@ export function startRelayMode(config: RelayModeConfig): void {
       if (msg.type === 'relay:auth:result') {
         if (msg.success) {
           authed = true;
+          peerOnline = msg.peerOnline === true;
           reconnectDelay = RECONNECT_MIN_MS;
           if (connectTimeoutTimer) {
             clearTimeout(connectTimeoutTimer);
             connectTimeoutTimer = null;
           }
           process.stderr.write(
-            `Byoky relay: authenticated (peerOnline=${msg.peerOnline === true ? 'yes' : 'no'})\n`,
+            `Byoky relay: authenticated (peerOnline=${peerOnline ? 'yes' : 'no'})\n`,
           );
           drainQueue();
         } else {
@@ -159,6 +170,32 @@ export function startRelayMode(config: RelayModeConfig): void {
           // reconnecting with the same creds will keep failing. Exit so the
           // user re-runs `openclaw models auth login` to repair.
           process.exit(2);
+        }
+        return;
+      }
+
+      if (msg.type === 'relay:vault:offer') {
+        const vaultUrl = typeof msg.vaultUrl === 'string' ? msg.vaultUrl : '';
+        const appSessionToken = typeof msg.appSessionToken === 'string' ? msg.appSessionToken : '';
+        if (vaultUrl && appSessionToken) {
+          vaultFallback = { vaultUrl, appSessionToken };
+          process.stderr.write(`Byoky relay: vault fallback armed (${vaultUrl})\n`);
+        }
+        return;
+      }
+
+      if (msg.type === 'relay:vault:offer:failed') {
+        process.stderr.write(`Byoky relay: vault fallback unavailable — ${String(msg.reason ?? 'unknown')}\n`);
+        return;
+      }
+
+      if (msg.type === 'relay:peer:status') {
+        const next = msg.online === true;
+        if (next !== peerOnline) {
+          peerOnline = next;
+          process.stderr.write(
+            `Byoky relay: peer ${peerOnline ? 'online' : 'offline'}${!peerOnline && vaultFallback ? ' — routing via vault' : ''}\n`,
+          );
         }
         return;
       }
@@ -288,8 +325,15 @@ export function startRelayMode(config: RelayModeConfig): void {
 
   // Forward proxy_http requests out as relay:request frames. The field
   // shape is a near-match — we drop `sessionKey` (not used for relay auth)
-  // and add `providerId` front-and-center.
+  // and add `providerId` front-and-center. If the mobile peer is offline
+  // and we've been armed with a vault fallback, route via the vault's
+  // /proxy HTTP endpoint instead.
   function sendToRelay(msg: ProxyRequestOut): void {
+    if (!peerOnline && vaultFallback) {
+      forwardToVault(msg, vaultFallback);
+      return;
+    }
+
     pendingByRequestId.set(msg.requestId, {
       providerId: msg.providerId,
       metaSeen: false,
@@ -315,6 +359,63 @@ export function startRelayMode(config: RelayModeConfig): void {
         requestId: msg.requestId,
         error: 'Relay outbound queue full — mobile wallet unreachable',
       });
+    }
+  }
+
+  async function forwardToVault(
+    msg: ProxyRequestOut,
+    vault: { vaultUrl: string; appSessionToken: string },
+  ): Promise<void> {
+    const proxyUrl = `${vault.vaultUrl.replace(/\/$/, '')}/proxy`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 120_000);
+
+    try {
+      const res = await fetch(proxyUrl, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'authorization': `Bearer ${vault.appSessionToken}`,
+        },
+        body: JSON.stringify({
+          providerId: msg.providerId,
+          url: msg.url,
+          method: msg.method,
+          headers: msg.headers,
+          body: msg.body,
+        }),
+        signal: controller.signal,
+      });
+
+      const headers: Record<string, string> = {};
+      res.headers.forEach((v, k) => { headers[k] = v; });
+      deliver({
+        type: 'proxy_http_response_meta',
+        requestId: msg.requestId,
+        status: res.status,
+        headers,
+      });
+
+      if (res.body) {
+        const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+        const decoder = new TextDecoder();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
+          if (chunk) deliver({ type: 'proxy_http_response_chunk', requestId: msg.requestId, chunk });
+        }
+      }
+
+      deliver({ type: 'proxy_http_response_done', requestId: msg.requestId });
+    } catch (e) {
+      deliver({
+        type: 'proxy_http_error',
+        requestId: msg.requestId,
+        error: `Vault fallback request failed: ${(e as Error).message}`,
+      });
+    } finally {
+      clearTimeout(timeout);
     }
   }
 
