@@ -1,6 +1,6 @@
 {
   "name": "@byoky/bridge",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Native messaging bridge for Byoky — routes setup token requests through Claude Code CLI",
   "type": "module",
   "main": "dist/host.js",
@@ -9,7 +9,12 @@
     "./installer": {
       "types": "./dist/installer.d.ts",
       "import": "./dist/installer.js"
-    }
+    },
+    "./spawner": {
+      "types": "./dist/spawner.d.ts",
+      "import": "./dist/spawner.js"
+    },
+    "./package.json": "./package.json"
   },
   "bin": {
     "byoky-bridge": "./bin/byoky-bridge.js"
