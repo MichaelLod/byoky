@@ -25,6 +25,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir, platform } from 'node:os';
 import { createRequire } from 'node:module';
+import { spawn } from 'node:child_process';
 
 type ProviderApi = 'anthropic-messages' | 'openai-completions';
 
@@ -632,10 +633,89 @@ async function runProviderAuth(
       throw new Error('No providers found in your Byoky wallet');
     }
 
+    if (result.relay) {
+      await startBridgeRelayMode(ctx, {
+        port: result.port,
+        relayUrl: result.relay.url,
+        roomId: result.relay.roomId,
+        authToken: result.relay.authToken,
+        providers: selected,
+      });
+    }
+
     return buildAuthResult(selected, result.port, provider, overrides);
   } finally {
     result.server.close();
   }
+}
+
+// --- Bridge relay-mode spawner ---
+
+interface RelaySpawnConfig {
+  port: number;
+  relayUrl: string;
+  roomId: string;
+  authToken: string;
+  providers: string[];
+}
+
+async function startBridgeRelayMode(
+  ctx: ProviderAuthContext,
+  cfg: RelaySpawnConfig,
+): Promise<void> {
+  // If the bridge is already running on the port (e.g. a previous relay
+  // session we spawned), /health will succeed — but its WS peer is the old
+  // mobile, not the freshly paired one. Best path is to fail-loud and ask
+  // the user to kill the stale bridge. Users rarely hit this (same port,
+  // different pairing, within a single session).
+  const existing = await checkBridgeHealth();
+  if (existing) {
+    await ctx.prompter.note(
+      `Port ${cfg.port} is already serving another Byoky Bridge — close any running bridge (or run \`openclaw gateway restart\`) and retry this command.`,
+    );
+    throw new Error('Bridge port already in use');
+  }
+
+  const bridgeBin = resolveBridgeBin();
+  const args = [
+    bridgeBin,
+    'relay',
+    '--port', String(cfg.port),
+    '--relay-url', cfg.relayUrl,
+    '--room-id', cfg.roomId,
+    '--auth-token', cfg.authToken,
+    '--providers', cfg.providers.join(','),
+  ];
+
+  const progress = ctx.prompter.progress('Starting Byoky Bridge in relay mode…');
+
+  // Detached + stdio:ignore so the bridge outlives the `openclaw models auth
+  // login` process. The child's stdin/stdout/stderr are closed so we don't
+  // block on pipe buffers filling up.
+  const child = spawn(process.execPath, args, {
+    detached: true,
+    stdio: 'ignore',
+  });
+  child.unref();
+
+  // Poll /health until the HTTP proxy is listening. The WS to the relay may
+  // still be warming up at that point — we just need the local port open.
+  const start = Date.now();
+  while (Date.now() - start < 10_000) {
+    const health = await checkBridgeHealth();
+    if (health) {
+      progress.stop(`Bridge ready on port ${cfg.port}`);
+      return;
+    }
+    await sleep(200);
+  }
+
+  progress.stop('Bridge failed to start within 10s');
+  throw new Error('Byoky Bridge (relay-mode) did not become healthy within 10s');
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 interface PluginOverrides {
@@ -752,6 +832,12 @@ interface AuthResult {
   providers: string[];
   port: number;
   server: Server;
+  /**
+   * Populated only when the browser paired via QR to the mobile app (no
+   * extension detected). The plugin starts the bridge in relay-mode itself
+   * with these coordinates — there is no extension to delegate to.
+   */
+  relay?: { url: string; roomId: string; authToken: string };
 }
 
 async function startCallbackServer(
@@ -795,10 +881,18 @@ async function startCallbackServer(
             res.end(JSON.stringify({ ok: true }));
             if (!resolved) {
               resolved = true;
+              const relayRaw = data.relay;
+              const relay = (relayRaw && typeof relayRaw === 'object' &&
+                  typeof relayRaw.url === 'string' &&
+                  typeof relayRaw.roomId === 'string' &&
+                  typeof relayRaw.authToken === 'string')
+                ? { url: relayRaw.url as string, roomId: relayRaw.roomId as string, authToken: relayRaw.authToken as string }
+                : undefined;
               resolve({
                 providers: Array.isArray(data.providers) ? data.providers : [],
                 port: typeof data.bridgePort === 'number' ? data.bridgePort : DEFAULT_BRIDGE_PORT,
                 server,
+                relay,
               });
             }
           } catch {
@@ -1157,17 +1251,35 @@ function buildAuthPage(requestProviderId: string | null): string {
           }
 
           const sessionKey = session.sessionKey || '';
-          const isRelay = sessionKey.startsWith('relay_') || sessionKey.startsWith('vault_');
-          if (isRelay) {
+          const relay = session.relay || null;
+          const isRelay = !!relay || sessionKey.startsWith('relay_');
+          const isVault = sessionKey.startsWith('vault_');
+          if (isVault) {
             throw new Error(
-              'OpenClaw needs the Byoky browser extension + Bridge to run its local proxy. ' +
-              'Mobile-only pairing isn\\'t supported yet — please install the extension.',
+              'Vault-mode sessions aren\\'t supported by OpenClaw yet — ' +
+              'please pair with the Byoky extension or mobile app.',
             );
           }
 
-          setStatus('Wallet connected — starting bridge proxy…', 'waiting');
-          const bridgeResult = await startBridge(sessionKey);
-          const bridgePort = (bridgeResult && bridgeResult.port) || ${DEFAULT_BRIDGE_PORT};
+          let bridgePort = ${DEFAULT_BRIDGE_PORT};
+          let callbackBody;
+
+          if (isRelay) {
+            if (!relay) {
+              throw new Error('Relay session missing coordinates — update your Byoky SDK');
+            }
+            setStatus('Mobile wallet paired — starting local bridge…', 'waiting');
+            callbackBody = {
+              providers: available,
+              bridgePort,
+              relay: { url: relay.url, roomId: relay.roomId, authToken: relay.authToken },
+            };
+          } else {
+            setStatus('Wallet connected — starting bridge proxy…', 'waiting');
+            const bridgeResult = await startBridge(sessionKey);
+            bridgePort = (bridgeResult && bridgeResult.port) || ${DEFAULT_BRIDGE_PORT};
+            callbackBody = { providers: available, bridgePort };
+          }
 
           setStatus(
             'Bridge active on port ' + bridgePort + '. Connected ' + available.length +
@@ -1178,7 +1290,7 @@ function buildAuthPage(requestProviderId: string | null): string {
           await fetch('/callback', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ providers: available, bridgePort }),
+            body: JSON.stringify(callbackBody),
           });
 
           btn.style.display = 'none';

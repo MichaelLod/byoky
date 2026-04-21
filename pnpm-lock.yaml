@@ -47,10 +47,16 @@ importers:
       '@byoky/core':
         specifier: workspace:*
         version: link:../core
+      ws:
+        specifier: ^8.18.0
+        version: 8.20.0
     devDependencies:
       '@types/node':
         specifier: 25.5.0
         version: 25.5.0
+      '@types/ws':
+        specifier: ^8.5.12
+        version: 8.18.1
       tsup:
         specifier: ^8.0.0
         version: 8.5.1(jiti@2.6.1)(postcss@8.5.8)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.3)

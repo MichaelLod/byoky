@@ -62,6 +62,12 @@ interface ProxyConfig {
   sessionKey: string;
   providers: string[];
   sendToExtension: (msg: ProxyRequestOut) => void;
+  /**
+   * Optional request validator. Receives the outbound provider URL and can
+   * return a string error to reject the request with 400. Used by relay-mode
+   * to apply the same URL hygiene the SDK enforces on the browser side.
+   */
+  validateUrl?: (providerId: string, url: string) => string | null;
 }
 
 type PendingResponse = {
@@ -104,7 +110,7 @@ export function handleProxyResponse(msg: ProxyResponseMessage): void {
 }
 
 export function startProxyServer(config: ProxyConfig): Server {
-  const { port, sessionKey, providers, sendToExtension } = config;
+  const { port, sessionKey, providers, sendToExtension, validateUrl } = config;
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     // Reject DNS rebinding: only accept requests with a localhost Host header
@@ -189,6 +195,16 @@ export function startProxyServer(config: ProxyConfig): Server {
     }
 
     const realUrl = `${baseUrl}${path}`;
+
+    if (validateUrl) {
+      const err = validateUrl(providerId, realUrl);
+      if (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err }));
+        return;
+      }
+    }
+
     const requestId = `proxy-${crypto.randomUUID()}`;
 
     // Forward headers, stripping hop-by-hop and auth headers (defense-in-depth;

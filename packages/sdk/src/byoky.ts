@@ -134,6 +134,14 @@ export interface VaultConnectOptions {
 }
 
 export interface ByokySession extends ConnectResponse {
+  /**
+   * Relay coordinates, present only when the session was paired via mobile
+   * wallet (i.e. no extension was found and the user scanned a QR). Consumers
+   * that need to open their own recipient WebSocket to the relay — like the
+   * OpenClaw bridge running in relay-mode — read these. Undefined for the
+   * extension path and for vault sessions.
+   */
+  relay?: { url: string; roomId: string; authToken: string };
   /** Create a fetch function that proxies requests through the wallet for the given provider. */
   createFetch(providerId: string): typeof fetch;
   /** Open a relay channel so a backend server can make LLM calls through this session. */
@@ -694,6 +702,7 @@ export class Byoky {
       sessionKey,
       proxyUrl: '',
       providers,
+      relay: { url: relayUrl, roomId, authToken },
       createFetch: (providerId: string) => {
         const relayFetch = createRelayFetch(ws, providerId);
         return (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {

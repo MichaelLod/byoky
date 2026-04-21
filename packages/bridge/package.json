@@ -35,10 +35,12 @@
     "directory": "packages/bridge"
   },
   "dependencies": {
-    "@byoky/core": "workspace:*"
+    "@byoky/core": "workspace:*",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/node": "25.5.0",
+    "@types/ws": "^8.5.12",
     "tsup": "^8.0.0",
     "typescript": "^5.5.0"
   }
