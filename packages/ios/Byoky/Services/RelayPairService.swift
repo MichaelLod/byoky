@@ -1190,13 +1190,12 @@ final class RelayPairService: ObservableObject {
             return "Gift for \(req) is present but not being used. Try backgrounding and foregrounding the app, or re-redeem the gift."
         }
         // Case 2: user has other credentials but not for the requested provider.
+        // Always include a "Gifts: …" suffix (even "none") so the message makes
+        // it obvious when the wallet has no usable gifted credentials — the
+        // relay path otherwise looks identical to the legacy error.
         if !userCredentialProviderIds.isEmpty {
-            var base = "No \(req) API key found. You have keys for: \(userCredentialProviderIds.joined(separator: ", "))."
-            if !giftedProviderIds.isEmpty {
-                base += " Gifts: \(giftedProviderIds.joined(separator: ", "))."
-            }
-            base += " Add a \(req) key, or assign this app to one of those providers."
-            return base
+            let giftsPart = giftedProviderIds.isEmpty ? "none" : giftedProviderIds.joined(separator: ", ")
+            return "No \(req) API key found. Keys: \(userCredentialProviderIds.joined(separator: ", ")). Gifts: \(giftsPart). Add a \(req) key, or assign this app to one of those providers."
         }
         // Case 2b: only gifts, no own credentials.
         if !giftedProviderIds.isEmpty {

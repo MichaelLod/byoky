@@ -1527,14 +1527,13 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
                 return "Gift for $req is present but not being used. Try backgrounding and foregrounding the app, or re-redeem the gift."
             }
             // Case 2: user has other credentials but not for the requested provider.
+            // Always include a "Gifts: …" suffix (even "none") so the message
+            // makes it obvious when the wallet has no usable gifted credentials
+            // — the relay path otherwise looks identical to the legacy error.
             if (userCredentialProviderIds.isNotEmpty()) {
-                val list = userCredentialProviderIds.joinToString(", ")
-                var base = "No $req API key found. You have keys for: $list."
-                if (giftedProviderIds.isNotEmpty()) {
-                    base += " Gifts: ${giftedProviderIds.joinToString(", ")}."
-                }
-                base += " Add a $req key, or assign this app to one of those providers."
-                return base
+                val keys = userCredentialProviderIds.joinToString(", ")
+                val giftsPart = if (giftedProviderIds.isEmpty()) "none" else giftedProviderIds.joinToString(", ")
+                return "No $req API key found. Keys: $keys. Gifts: $giftsPart. Add a $req key, or assign this app to one of those providers."
             }
             // Case 2b: only gifts, no own credentials.
             if (giftedProviderIds.isNotEmpty()) {
