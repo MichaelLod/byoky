@@ -95,6 +95,11 @@ app.post('/gifts', async (c) => {
     body: JSON.stringify({
       giftId: body.id,
       authToken,
+      // Old clients sent gifterName; the vault now stores it as
+      // description (the pool card gets the gifter name from the
+      // account username). Forward either field under both names so
+      // whichever the vault version accepts wins.
+      description: body.gifterName,
       gifterName: body.gifterName,
     }),
   });

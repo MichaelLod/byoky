@@ -877,9 +877,9 @@ final class WalletStore: ObservableObject {
         expiresInMs: TimeInterval,
         relayUrl: String,
         listPublicly: Bool = false,
-        gifterName: String? = nil
+        description: String? = nil
     ) -> Gift {
-        let trimmedName = gifterName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = description?.trimmingCharacters(in: .whitespacesAndNewlines)
         let gift = Gift(
             id: UUID().uuidString,
             credentialId: credentialId,
@@ -893,7 +893,7 @@ final class WalletStore: ObservableObject {
             active: true,
             relayUrl: relayUrl,
             listed: listPublicly,
-            gifterName: (trimmedName?.isEmpty == false) ? trimmedName : nil
+            description: (trimmed?.isEmpty == false) ? trimmed : nil
         )
         gifts.append(gift)
         saveGifts()
@@ -1665,8 +1665,8 @@ final class WalletStore: ObservableObject {
             "expiresAt": Int(gift.expiresAt.timeIntervalSince1970 * 1000),
             "listed": gift.listed ?? false,
         ]
-        if let gifterName = gift.gifterName {
-            body["gifterName"] = gifterName
+        if let description = gift.description {
+            body["description"] = description
         }
         if let giftShortId = gift.giftShortId {
             body["giftShortId"] = giftShortId
@@ -1688,11 +1688,13 @@ final class WalletStore: ObservableObject {
         Task {
             guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
             let gift = gifts[idx]
-            let body: [String: Any] = [
+            var body: [String: Any] = [
                 "listed": gift.listed ?? false,
-                "gifterName": gift.gifterName as Any,
                 "giftShortId": shortId,
             ]
+            if let description = gift.description {
+                body["description"] = description
+            }
             let result = await vaultRequest(
                 path: "/gifts/\(giftId)/listing",
                 method: "PATCH",

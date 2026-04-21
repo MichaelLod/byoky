@@ -54,7 +54,7 @@ fun CreateGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
     var customTokens by remember { mutableStateOf("") }
     var selectedExpiryIndex by remember { mutableIntStateOf(1) }
     var listPublicly by remember { mutableStateOf(false) }
-    var gifterName by remember { mutableStateOf("") }
+    var description by remember { mutableStateOf("") }
     var createdGift by remember { mutableStateOf<Gift?>(null) }
     var giftShortId by remember { mutableStateOf<String?>(null) }
     var dropdownExpanded by remember { mutableStateOf(false) }
@@ -70,11 +70,6 @@ fun CreateGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
         }
     }
 
-    // Keep the pool display name in sync with the credential label so the
-    // pool card and redeem card show the same sender by default.
-    LaunchedEffect(selectedCredential?.id) {
-        selectedCredential?.label?.let { gifterName = it }
-    }
 
     val tokenBudget = if (selectedTokenPreset >= 0) {
         tokenPresets[selectedTokenPreset].value
@@ -264,11 +259,11 @@ fun CreateGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
                 if (listPublicly) {
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
-                        value = gifterName,
-                        onValueChange = { gifterName = it },
-                        label = { Text("Display name (optional)") },
+                        value = description,
+                        onValueChange = { if (it.length <= 280) description = it },
+                        label = { Text("Description (optional)") },
                         modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
+                        maxLines = 3,
                     )
                 }
 
@@ -285,7 +280,7 @@ fun CreateGiftScreen(wallet: WalletStore, onBack: () -> Unit) {
                             expiresInMs = expiryPresets[selectedExpiryIndex].millis,
                             relayUrl = RELAY_URL,
                             listPublicly = listPublicly,
-                            gifterName = if (listPublicly) gifterName.ifBlank { null } else null,
+                            description = if (listPublicly) description.ifBlank { null } else null,
                         )
                         createdGift = gift
                         giftShortId = null

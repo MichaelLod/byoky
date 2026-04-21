@@ -19,8 +19,9 @@ data class Gift(
     val relayUrl: String,
     /** Opt-in flag — true if the gift is listed on /token-pool. */
     val listed: Boolean = false,
-    /** Display name shown on the public pool card. */
-    val gifterName: String? = null,
+    /** Free-form description shown under the gifter's username on the
+     *  public pool card. */
+    val description: String? = null,
     /** Short-link id for pool redemption. */
     val giftShortId: String? = null,
 )

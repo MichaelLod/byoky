@@ -18,7 +18,7 @@ export function CreateGift() {
   const [maxTokens, setMaxTokens] = useState(100_000);
   const [expiryMs, setExpiryMs] = useState(EXPIRY_OPTIONS[1].ms);
   const [listPublicly, setListPublicly] = useState(false);
-  const [gifterName, setGifterName] = useState('');
+  const [description, setDescription] = useState('');
   const [giftLink, setGiftLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -38,11 +38,6 @@ export function CreateGift() {
   const selectedCred = credentials.find((c) => c.id === credentialId);
   const provider = selectedCred ? PROVIDERS[selectedCred.providerId] : null;
 
-  // Prefill the token-pool display name with the credential label so the
-  // pool card and the redeem card show the same sender by default.
-  useEffect(() => {
-    if (selectedCred) setGifterName(selectedCred.label);
-  }, [selectedCred?.id]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -56,7 +51,7 @@ export function CreateGift() {
       expiryMs,
       RELAY_URL,
       listPublicly,
-      listPublicly ? (gifterName.trim() || undefined) : undefined,
+      listPublicly ? (description.trim() || undefined) : undefined,
     );
     setSubmitting(false);
     if (result) {
@@ -241,9 +236,10 @@ export function CreateGift() {
             {listPublicly && (
               <input
                 type="text"
-                placeholder="Display name (optional)"
-                value={gifterName}
-                onChange={(e) => setGifterName(e.target.value)}
+                placeholder="Description (optional) — e.g. what this key is for"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                maxLength={280}
                 style={{ marginTop: 8 }}
               />
             )}

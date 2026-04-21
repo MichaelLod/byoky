@@ -97,6 +97,7 @@ interface Gift {
   id: string;
   providerId: string;
   gifterName: string;
+  description: string | null;
   giftShortId: string | null;
   tokenBudget: number;
   tokensUsed: number;
@@ -482,6 +483,14 @@ export default function Marketplace() {
           color: var(--text-muted);
           margin-top: 2px;
         }
+        .mp-card-description {
+          font-size: 13px;
+          color: var(--text-muted);
+          margin: 10px 0 0;
+          line-height: 1.45;
+          white-space: pre-wrap;
+          word-break: break-word;
+        }
         .mp-card-tokens {
           display: flex;
           justify-content: space-between;
@@ -757,6 +766,10 @@ function GiftCard({ gift, onRedeem, redeeming, highlighted }: {
       <div className="mp-card-meta">
         <span>{timeUntil(gift.expiresAt)}</span>
       </div>
+
+      {gift.description && (
+        <p className="mp-card-description">{gift.description}</p>
+      )}
 
       {onRedeem && (
         <button

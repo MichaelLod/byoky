@@ -10,7 +10,7 @@ struct CreateGiftView: View {
     @State private var useCustomTokens = false
     @State private var expiryOption: ExpiryOption = .days7
     @State private var listPublicly = false
-    @State private var gifterName = ""
+    @State private var descriptionText = ""
     @State private var createdGift: Gift?
     @State private var shortId: String?
     @State private var error: String?
@@ -48,14 +48,6 @@ struct CreateGiftView: View {
             if selectedCredential == nil {
                 selectedCredential = wallet.credentials.first
             }
-            if gifterName.isEmpty, let label = selectedCredential?.label {
-                gifterName = label
-            }
-        }
-        .onChange(of: selectedCredential?.id) { _, _ in
-            // Keep the pool display name in sync with the credential label
-            // so the pool card and redeem card show the same sender.
-            if let label = selectedCredential?.label { gifterName = label }
         }
     }
 
@@ -186,13 +178,13 @@ struct CreateGiftView: View {
                 Toggle("List on Token Pool", isOn: $listPublicly)
                     .tint(Theme.accent)
                 if listPublicly {
-                    TextField("Display name", text: $gifterName)
-                        .textContentType(.name)
+                    TextField("Description (optional)", text: $descriptionText, axis: .vertical)
+                        .lineLimit(2...4)
                 }
             } header: {
                 Text("Token Pool")
             } footer: {
-                Text("Make this gift public so anyone can redeem it from byoky.com/token-pool.")
+                Text("Make this gift public on byoky.com/token-pool. Your account username shows as the gifter.")
             }
 
             if let error {
@@ -315,7 +307,7 @@ struct CreateGiftView: View {
             expiresInMs: expiryOption.milliseconds,
             relayUrl: Self.relayUrl,
             listPublicly: listPublicly,
-            gifterName: listPublicly ? (gifterName.isEmpty ? nil : gifterName) : nil
+            description: listPublicly ? (descriptionText.isEmpty ? nil : descriptionText) : nil
         )
         createdGift = gift
         shortId = nil

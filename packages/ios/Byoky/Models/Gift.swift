@@ -15,8 +15,9 @@ struct Gift: Identifiable, Codable {
     let relayUrl: String
     /// Opt-in flag — true if the gift is listed on /token-pool.
     var listed: Bool?
-    /// Display name shown on the public pool card.
-    var gifterName: String?
+    /// Free-form description shown under the gifter's username on the
+    /// public pool card.
+    var description: String?
     /// Short-link id for pool redemption.
     var giftShortId: String?
 }

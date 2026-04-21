@@ -16,9 +16,9 @@ export interface Gift {
   relayUrl: string;
   /** Opt-in flag — true if the gift is listed on /token-pool. */
   listed?: boolean;
-  /** Display name shown on the public pool card. Defaults to the gifter's
-   * account username if omitted. */
-  gifterName?: string;
+  /** Free-form description shown under the gifter on the public pool card.
+   * The pool card's headline always uses the gifter's account username. */
+  description?: string;
   /** Short-link id for pool redemption. Populated when the vault allocated
    * a short link for the gift. */
   giftShortId?: string;

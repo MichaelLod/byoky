@@ -86,7 +86,7 @@ interface WalletState {
   removeTrustedSite: (origin: string) => Promise<void>;
   setAllowance: (allowance: TokenAllowance) => Promise<void>;
   removeAllowance: (origin: string) => Promise<void>;
-  createGift: (credentialId: string, providerId: string, label: string, maxTokens: number, expiresInMs: number, relayUrl: string, listPublicly?: boolean, gifterName?: string) => Promise<{ giftLink: string; giftId: string; shortId?: string } | null>;
+  createGift: (credentialId: string, providerId: string, label: string, maxTokens: number, expiresInMs: number, relayUrl: string, listPublicly?: boolean, description?: string) => Promise<{ giftLink: string; giftId: string; shortId?: string } | null>;
   revokeGift: (giftId: string) => Promise<void>;
   redeemGift: (giftLinkEncoded: string) => Promise<void>;
   resolveGiftShortLink: (shortId: string) => Promise<{ encoded?: string; error?: string }>;
@@ -432,11 +432,11 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     await get().refreshData();
   },
 
-  createGift: async (credentialId, providerId, label, maxTokens, expiresInMs, relayUrl, listPublicly, gifterName) => {
+  createGift: async (credentialId, providerId, label, maxTokens, expiresInMs, relayUrl, listPublicly, description) => {
     set({ error: null });
     try {
       const result = await sendInternal('createGift', {
-        credentialId, providerId, label, maxTokens, expiresInMs, relayUrl, listPublicly, gifterName,
+        credentialId, providerId, label, maxTokens, expiresInMs, relayUrl, listPublicly, description,
       });
       if (result.error) throw new Error(result.error as string);
       await get().refreshData();

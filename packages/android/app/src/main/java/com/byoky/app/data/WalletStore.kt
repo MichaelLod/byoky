@@ -393,9 +393,9 @@ class WalletStore(context: Context) {
         expiresInMs: Long,
         relayUrl: String,
         listPublicly: Boolean = false,
-        gifterName: String? = null,
+        description: String? = null,
     ): Gift {
-        val trimmedName = gifterName?.trim()?.takeIf { it.isNotEmpty() }
+        val trimmedDescription = description?.trim()?.takeIf { it.isNotEmpty() }
         val gift = Gift(
             credentialId = credentialId,
             providerId = providerId,
@@ -405,7 +405,7 @@ class WalletStore(context: Context) {
             expiresAt = System.currentTimeMillis() + expiresInMs,
             relayUrl = relayUrl,
             listed = listPublicly,
-            gifterName = trimmedName,
+            description = trimmedDescription,
         )
         _gifts.value = _gifts.value + gift
         saveGifts()
@@ -2132,8 +2132,8 @@ class WalletStore(context: Context) {
             .put("usedTokens", gift.usedTokens)
             .put("expiresAt", gift.expiresAt)
             .put("listed", gift.listed)
-        if (gift.gifterName != null) {
-            body.put("gifterName", gift.gifterName)
+        if (gift.description != null) {
+            body.put("description", gift.description)
         }
         if (gift.giftShortId != null) {
             body.put("giftShortId", gift.giftShortId)
@@ -2201,7 +2201,7 @@ class WalletStore(context: Context) {
             val body = JSONObject()
                 .put("listed", updated.listed)
                 .put("giftShortId", shortId)
-            if (updated.gifterName != null) body.put("gifterName", updated.gifterName)
+            if (updated.description != null) body.put("description", updated.description)
             val encoded = java.net.URLEncoder.encode(giftId, "UTF-8")
             val (_, status, _) = vaultRequest("/gifts/$encoded/listing", "PATCH", body, token)
             if (status == 401) {
