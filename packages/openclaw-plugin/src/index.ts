@@ -49,6 +49,9 @@ const DEFAULT_BRIDGE_PORT = 19280;
 
 // --- Model catalogs per provider ---
 
+// Native max_tokens per model. Overwritten at auth time by
+// `plugins.entries.byoky.config.anthropicMaxTokens` (default 4096) so
+// gift-tier keys aren't pre-rejected by Anthropic's OTPM gate.
 const ANTHROPIC_MODELS: ModelDef[] = [
   {
     id: 'claude-opus-4-6',
@@ -452,6 +455,34 @@ async function checkBridgeHealth(): Promise<{ providers: string[] } | null> {
   }
 }
 
+// Probes whether the bridge's current session key is still authorized by the
+// extension. /health is not enough — it only confirms the bridge process is up,
+// not that its sessionKey still matches the extension's authorizedBridgeSessionKey
+// (which gets rotated on extension reload, wallet unlock, or a newer auth).
+// Returns true if the bridge can actually relay to the extension, false if the
+// session is stale and re-pairing is required.
+async function probeBridgeSession(port: number, providerId: string): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch(`http://127.0.0.1:${port}/${providerId}/v1/models`, {
+      method: 'GET',
+      headers: { authorization: 'Bearer byoky-proxy' },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (res.status === 502) {
+      const text = await res.text().catch(() => '');
+      if (text.includes('Unauthorized session key') || text.includes('Session not found')) {
+        return false;
+      }
+    }
+    return true;
+  } catch {
+    return true;
+  }
+}
+
 // --- /byoky status command output ---
 
 async function renderByokyStatus(): Promise<string> {
@@ -552,6 +583,8 @@ async function runProviderAuth(
     );
   }
 
+  const overrides = readPluginOverrides(ctx.config);
+
   // Fast path: if the bridge is already healthy and already has providers,
   // reuse them instead of opening a browser tab.
   const health = await checkBridgeHealth();
@@ -565,10 +598,17 @@ async function runProviderAuth(
         `Bridge is running with ${health.providers.length} provider(s), but not ${provider!.name}. Opening the wallet to add it.`,
       );
     } else {
+      const probeProviderId = selected[0];
+      const sessionOk = await probeBridgeSession(DEFAULT_BRIDGE_PORT, probeProviderId);
+      if (sessionOk) {
+        await ctx.prompter.note(
+          `Reusing live Byoky Bridge on port ${DEFAULT_BRIDGE_PORT} — no browser round-trip needed.`,
+        );
+        return buildAuthResult(selected, DEFAULT_BRIDGE_PORT, provider, overrides);
+      }
       await ctx.prompter.note(
-        `Reusing live Byoky Bridge on port ${DEFAULT_BRIDGE_PORT} — no browser round-trip needed.`,
+        'Byoky Bridge is running but its session key no longer matches the extension (the extension was reloaded or the wallet was re-locked). Opening the wallet to re-pair.',
       );
-      return buildAuthResult(selected, DEFAULT_BRIDGE_PORT, provider);
     }
   }
 
@@ -592,20 +632,53 @@ async function runProviderAuth(
       throw new Error('No providers found in your Byoky wallet');
     }
 
-    return buildAuthResult(selected, result.port, provider);
+    return buildAuthResult(selected, result.port, provider, overrides);
   } finally {
     result.server.close();
   }
+}
+
+interface PluginOverrides {
+  // Cap max_tokens for every Anthropic model. Default 4096 — low enough to
+  // stay under Tier-1/gift OTPM gates (Anthropic pre-rejects requests whose
+  // declared max_tokens exceed the remaining output-tokens-per-minute budget).
+  // Users on Tier 3+ keys can raise it via
+  //   plugins.entries.byoky.config.anthropicMaxTokens
+  anthropicMaxTokens: number;
+}
+
+function readPluginOverrides(config: OpenClawConfig): PluginOverrides {
+  const raw = config.plugins?.entries?.byoky?.config as
+    | { anthropicMaxTokens?: unknown }
+    | undefined;
+  const override = typeof raw?.anthropicMaxTokens === 'number' ? raw.anthropicMaxTokens : undefined;
+  return {
+    anthropicMaxTokens: override && override > 0 ? override : 4096,
+  };
+}
+
+function applyOverrides(providers: ByokyProvider[], overrides: PluginOverrides): ByokyProvider[] {
+  return providers.map((p) => {
+    if (p.api !== 'anthropic-messages') return p;
+    return {
+      ...p,
+      models: p.models.map((m) => ({ ...m, maxTokens: overrides.anthropicMaxTokens })),
+    };
+  });
 }
 
 function buildAuthResult(
   providerIds: string[],
   port: number,
   single: ByokyProvider | null,
+  overrides: PluginOverrides,
 ): ProviderAuthResult {
-  const providers = providerIds
-    .map((id) => PROVIDERS.find((p) => p.id === id))
-    .filter((p): p is ByokyProvider => Boolean(p));
+  const providers = applyOverrides(
+    providerIds
+      .map((id) => PROVIDERS.find((p) => p.id === id))
+      .filter((p): p is ByokyProvider => Boolean(p)),
+    overrides,
+  );
 
   const profiles = providers.map((p) => {
     const openclawId = `byoky-${p.id}`;

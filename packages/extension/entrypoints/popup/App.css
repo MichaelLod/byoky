@@ -1297,7 +1297,7 @@ body {
 }
 
 .page-enter {
-  animation: page-enter 0.18s ease-out both;
+  animation: page-enter 0.18s ease-out backwards;
 }
 
 /* Card staggered entrance */
