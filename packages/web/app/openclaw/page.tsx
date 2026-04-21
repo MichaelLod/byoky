@@ -207,7 +207,7 @@ function Hero() {
   return (
     <header className="oc-hero">
       <div className="oc-eyebrow">OpenClaw × Byoky</div>
-      <h1>Run AI agents in OpenClaw — for free.</h1>
+      <h1>Run Claude Code in OpenClaw — for free.</h1>
       <div style={{
         display: 'flex', gap: '16px', justifyContent: 'center',
         flexWrap: 'wrap', margin: '24px 0',
