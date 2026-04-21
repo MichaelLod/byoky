@@ -14,19 +14,19 @@ interface Props {
   initialProvider?: string;
 }
 
-const providers: Record<string, { url: string; model: string; name: string }> = {
-  anthropic:    { url: 'https://api.anthropic.com/v1/messages',                                    model: 'claude-sonnet-4-20250514',       name: 'Anthropic (Claude)' },
-  openai:       { url: 'https://api.openai.com/v1/chat/completions',                               model: 'gpt-4o',                         name: 'OpenAI (GPT-4o)' },
-  gemini:       { url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent', model: 'gemini-2.0-flash', name: 'Google (Gemini)' },
-  groq:         { url: 'https://api.groq.com/openai/v1/chat/completions',                          model: 'llama-3.3-70b-versatile',        name: 'Groq (Llama 3.3)' },
-  deepseek:     { url: 'https://api.deepseek.com/chat/completions',                                model: 'deepseek-chat',                  name: 'DeepSeek' },
-  xai:          { url: 'https://api.x.ai/v1/chat/completions',                                    model: 'grok-3-mini',                    name: 'xAI (Grok)' },
-  mistral:      { url: 'https://api.mistral.ai/v1/chat/completions',                               model: 'mistral-large-latest',           name: 'Mistral' },
-  together:     { url: 'https://api.together.xyz/v1/chat/completions',                              model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', name: 'Together AI' },
-  fireworks:    { url: 'https://api.fireworks.ai/inference/v1/chat/completions',                    model: 'accounts/fireworks/models/llama-v3p3-70b-instruct', name: 'Fireworks AI' },
-  perplexity:   { url: 'https://api.perplexity.ai/chat/completions',                               model: 'sonar',                          name: 'Perplexity' },
-  openrouter:   { url: 'https://openrouter.ai/api/v1/chat/completions',                            model: 'anthropic/claude-sonnet-4',      name: 'OpenRouter' },
-  cohere:       { url: 'https://api.cohere.com/v2/chat',                                           model: 'command-r-plus',                 name: 'Cohere' },
+const providers: Record<string, { url: string; models: string[]; name: string }> = {
+  anthropic:  { url: 'https://api.anthropic.com/v1/messages',                    models: ['claude-sonnet-4-6', 'claude-opus-4-7', 'claude-haiku-4-5'],                                                                                            name: 'Anthropic (Claude)' },
+  openai:     { url: 'https://api.openai.com/v1/chat/completions',               models: ['gpt-5.4-mini', 'gpt-5.4', 'gpt-5.4-nano', 'gpt-5-mini', 'gpt-4o', 'gpt-4o-mini'],                                                                     name: 'OpenAI (GPT)' },
+  gemini:     { url: 'https://generativelanguage.googleapis.com/v1beta/models', models: ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-pro', 'gemini-2.5-flash-lite', 'gemini-3.1-pro-preview', 'gemini-3.1-flash-lite-preview'],      name: 'Google (Gemini)' },
+  groq:       { url: 'https://api.groq.com/openai/v1/chat/completions',          models: ['llama-3.3-70b-versatile', 'meta-llama/llama-4-scout-17b-16e-instruct', 'llama-3.1-8b-instant'],                                                      name: 'Groq (Llama)' },
+  deepseek:   { url: 'https://api.deepseek.com/chat/completions',                models: ['deepseek-chat', 'deepseek-reasoner'],                                                                                                                 name: 'DeepSeek' },
+  xai:        { url: 'https://api.x.ai/v1/chat/completions',                     models: ['grok-4-fast-non-reasoning', 'grok-4-fast-reasoning', 'grok-4', 'grok-3-mini'],                                                                       name: 'xAI (Grok)' },
+  mistral:    { url: 'https://api.mistral.ai/v1/chat/completions',               models: ['mistral-large-latest', 'mistral-small-latest'],                                                                                                       name: 'Mistral' },
+  together:   { url: 'https://api.together.xyz/v1/chat/completions',             models: ['meta-llama/Llama-3.3-70B-Instruct-Turbo', 'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8', 'Qwen/Qwen2.5-72B-Instruct-Turbo'],                    name: 'Together AI' },
+  fireworks:  { url: 'https://api.fireworks.ai/inference/v1/chat/completions',   models: ['accounts/fireworks/models/llama4-maverick-instruct-basic', 'accounts/fireworks/models/llama-v3p3-70b-instruct'],                                     name: 'Fireworks AI' },
+  perplexity: { url: 'https://api.perplexity.ai/chat/completions',               models: ['sonar', 'sonar-pro', 'sonar-deep-research'],                                                                                                          name: 'Perplexity' },
+  openrouter: { url: 'https://openrouter.ai/api/v1/chat/completions',            models: ['anthropic/claude-sonnet-4.6', 'openai/gpt-5.4-mini', 'google/gemini-2.5-flash', 'meta-llama/llama-3.3-70b-instruct'],                                 name: 'OpenRouter' },
+  cohere:     { url: 'https://api.cohere.com/v2/chat',                           models: ['command-a-03-2025', 'command-r-plus', 'command-r7b-12-2024'],                                                                                        name: 'Cohere' },
 };
 
 const visionProviders = new Set(['anthropic', 'openai', 'gemini']);
@@ -45,7 +45,7 @@ function getProviderLabel(id: string): string {
   return providers[id]?.name ?? id;
 }
 
-function buildCodeSnippet(providerId: string, prompt: string): string {
+function buildCodeSnippet(providerId: string, prompt: string, model: string): string {
   const p = providers[providerId];
   if (!p) return '';
   const msg = prompt || 'Hello!';
@@ -60,7 +60,7 @@ const response = await fetch('${p.url}', {
     'anthropic-version': '2023-06-01',
   },
   body: JSON.stringify({
-    model: '${p.model}',
+    model: '${model}',
     max_tokens: 1024,
     stream: true,
     messages: [{ role: 'user', content: '${msg}' }],
@@ -72,7 +72,7 @@ const response = await fetch('${p.url}', {
     return `const fetch = session.createFetch('gemini');
 
 const response = await fetch(
-  '${p.url}',
+  '${p.url}/${model}:generateContent',
   {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -90,7 +90,7 @@ const response = await fetch('${p.url}', {
   method: 'POST',
   headers: { 'content-type': 'application/json' },
   body: JSON.stringify({
-    model: '${p.model}',
+    model: '${model}',
     messages: [{ role: 'user', content: '${msg}' }],
     max_completion_tokens: 1024,
     stream: true,
@@ -249,9 +249,19 @@ export function Chat({ session, initialProvider }: Props) {
   const [selectedProvider, setSelectedProvider] = useState<string>(
     initialProvider && providers[initialProvider] ? initialProvider : '',
   );
+  const [selectedModels, setSelectedModels] = useState<Record<string, string>>(() => {
+    if (typeof window === 'undefined') return {};
+    try { return JSON.parse(localStorage.getItem('byoky-demo-models') || '{}'); } catch { return {}; }
+  });
   const [attachedImage, setAttachedImage] = useState<{ file: File; preview: string } | null>(null);
   const [showCode, setShowCode] = useState(true);
   const [lastPrompt, setLastPrompt] = useState('Hello!');
+
+  const currentModel = selectedProvider ? (selectedModels[selectedProvider] ?? providers[selectedProvider].models[0]) : '';
+
+  useEffect(() => {
+    try { localStorage.setItem('byoky-demo-models', JSON.stringify(selectedModels)); } catch {}
+  }, [selectedModels]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatMessagesRef = useRef<HTMLDivElement>(null);
 
@@ -345,7 +355,7 @@ export function Chat({ session, initialProvider }: Props) {
         const response = await proxyFetch(providers.anthropic.url, {
           method: 'POST',
           headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' },
-          body: JSON.stringify({ model: providers.anthropic.model, max_tokens: 1024, ...(useStream && { stream: true }), messages: apiMessages }),
+          body: JSON.stringify({ model: currentModel, max_tokens: 1024, ...(useStream && { stream: true }), messages: apiMessages }),
         });
 
         if (!response.ok) {
@@ -386,7 +396,7 @@ export function Chat({ session, initialProvider }: Props) {
         apiContents.push({ role: 'user', parts });
 
         const response = await proxyFetch(
-          providers.gemini.url,
+          `${providers.gemini.url}/${currentModel}:generateContent`,
           { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ contents: apiContents }) },
         );
         if (!response.ok) {
@@ -414,7 +424,7 @@ export function Chat({ session, initialProvider }: Props) {
         const response = await proxyFetch(config.url, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ model: config.model, messages: apiMessages, max_completion_tokens: 1024, ...(useStream && { stream: true }) }),
+          body: JSON.stringify({ model: currentModel, messages: apiMessages, max_completion_tokens: 1024, ...(useStream && { stream: true }) }),
         });
         if (!response.ok) {
           const err = (await response.json()).error;
@@ -437,7 +447,7 @@ export function Chat({ session, initialProvider }: Props) {
         const response = await proxyFetch(config.url, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ model: config.model, messages: allMessages, max_completion_tokens: 1024, ...(useStream && { stream: true }) }),
+          body: JSON.stringify({ model: currentModel, messages: allMessages, max_completion_tokens: 1024, ...(useStream && { stream: true }) }),
         });
         if (!response.ok) {
           const err = (await response.json()).error;
@@ -497,6 +507,13 @@ export function Chat({ session, initialProvider }: Props) {
               </option>
             ))}
           </select>
+          {selectedProvider && (
+            <select value={currentModel} onChange={e => setSelectedModels(prev => ({ ...prev, [selectedProvider]: e.target.value }))}>
+              {providers[selectedProvider].models.map(m => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          )}
         </div>
         <div className="chat-header-actions">
           {messages.length > 0 && (
@@ -516,7 +533,7 @@ export function Chat({ session, initialProvider }: Props) {
           {showCode ? 'Hide code' : 'Show code'}
         </button>
         {showCode && (
-          <pre className="chat-code-snippet"><code>{highlightCode(buildCodeSnippet(selectedProvider, lastPrompt))}</code></pre>
+          <pre className="chat-code-snippet"><code>{highlightCode(buildCodeSnippet(selectedProvider, lastPrompt, currentModel))}</code></pre>
         )}
       </div>
 

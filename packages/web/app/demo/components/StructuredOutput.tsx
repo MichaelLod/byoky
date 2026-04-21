@@ -23,32 +23,48 @@ interface Props {
   session: ByokySession;
 }
 
+// All OpenAI-compatible providers support JSON mode
+const openaiCompat: Record<string, { url: string; models: string[]; name: string }> = {
+  openai:     { url: 'https://api.openai.com/v1/chat/completions',             models: ['gpt-5.4-mini', 'gpt-5.4', 'gpt-5.4-nano', 'gpt-5-mini', 'gpt-4o', 'gpt-4o-mini'],                                                name: 'OpenAI (GPT)' },
+  groq:       { url: 'https://api.groq.com/openai/v1/chat/completions',        models: ['llama-3.3-70b-versatile', 'meta-llama/llama-4-scout-17b-16e-instruct', 'llama-3.1-8b-instant'],                                name: 'Groq (Llama)' },
+  deepseek:   { url: 'https://api.deepseek.com/chat/completions',              models: ['deepseek-chat', 'deepseek-reasoner'],                                                                                         name: 'DeepSeek' },
+  xai:        { url: 'https://api.x.ai/v1/chat/completions',                   models: ['grok-4-fast-non-reasoning', 'grok-4-fast-reasoning', 'grok-4', 'grok-3-mini'],                                                 name: 'xAI (Grok)' },
+  mistral:    { url: 'https://api.mistral.ai/v1/chat/completions',             models: ['mistral-large-latest', 'mistral-small-latest'],                                                                                name: 'Mistral' },
+  together:   { url: 'https://api.together.xyz/v1/chat/completions',           models: ['meta-llama/Llama-3.3-70B-Instruct-Turbo', 'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8', 'Qwen/Qwen2.5-72B-Instruct-Turbo'], name: 'Together AI' },
+  fireworks:  { url: 'https://api.fireworks.ai/inference/v1/chat/completions', models: ['accounts/fireworks/models/llama4-maverick-instruct-basic', 'accounts/fireworks/models/llama-v3p3-70b-instruct'],               name: 'Fireworks AI' },
+  openrouter: { url: 'https://openrouter.ai/api/v1/chat/completions',          models: ['anthropic/claude-sonnet-4.6', 'openai/gpt-5.4-mini', 'google/gemini-2.5-flash', 'meta-llama/llama-3.3-70b-instruct'],           name: 'OpenRouter' },
+};
+
+const anthropicModels = ['claude-sonnet-4-6', 'claude-opus-4-7', 'claude-haiku-4-5'];
+
+function modelsFor(id: string): string[] {
+  if (id === 'anthropic') return anthropicModels;
+  return openaiCompat[id]?.models ?? [];
+}
+
 export function StructuredOutput({ session }: Props) {
   const [input, setInput] = useState(sampleTexts[0]);
   const [result, setResult] = useState<ExtractedData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // All OpenAI-compatible providers support JSON mode
-  const openaiCompat: Record<string, { url: string; model: string; name: string }> = {
-    openai:     { url: 'https://api.openai.com/v1/chat/completions',       model: 'gpt-4o',                  name: 'OpenAI (GPT-4o)' },
-    groq:       { url: 'https://api.groq.com/openai/v1/chat/completions',  model: 'llama-3.3-70b-versatile', name: 'Groq (Llama 3.3)' },
-    deepseek:   { url: 'https://api.deepseek.com/chat/completions',        model: 'deepseek-chat',           name: 'DeepSeek' },
-    xai:        { url: 'https://api.x.ai/v1/chat/completions',             model: 'grok-3-mini',             name: 'xAI (Grok)' },
-    mistral:    { url: 'https://api.mistral.ai/v1/chat/completions',       model: 'mistral-large-latest',    name: 'Mistral' },
-    together:   { url: 'https://api.together.xyz/v1/chat/completions',     model: 'meta-llama/Llama-3.3-70B-Instruct-Turbo', name: 'Together AI' },
-    fireworks:  { url: 'https://api.fireworks.ai/inference/v1/chat/completions', model: 'accounts/fireworks/models/llama-v3p3-70b-instruct', name: 'Fireworks AI' },
-    openrouter: { url: 'https://openrouter.ai/api/v1/chat/completions',    model: 'anthropic/claude-sonnet-4', name: 'OpenRouter' },
-  };
-
   const availableProviders = dropdownProviders.filter(id => session.providers[id]?.available === true);
   const [selectedProvider, setSelectedProvider] = useState(availableProviders[0] ?? '');
+  const [selectedModels, setSelectedModels] = useState<Record<string, string>>(() => {
+    if (typeof window === 'undefined') return {};
+    try { return JSON.parse(localStorage.getItem('byoky-demo-models-structured') || '{}'); } catch { return {}; }
+  });
   const provider = selectedProvider;
+  const currentModel = provider ? (selectedModels[provider] ?? modelsFor(provider)[0] ?? '') : '';
 
   useEffect(() => {
     if (selectedProvider && availableProviders.includes(selectedProvider)) return;
     setSelectedProvider(availableProviders[0] ?? '');
   }, [availableProviders, selectedProvider]);
+
+  useEffect(() => {
+    try { localStorage.setItem('byoky-demo-models-structured', JSON.stringify(selectedModels)); } catch {}
+  }, [selectedModels]);
 
   async function handleExtract() {
     if (!input.trim() || loading || !provider) return;
@@ -64,7 +80,7 @@ export function StructuredOutput({ session }: Props) {
       if (provider in openaiCompat) {
         const config = openaiCompat[provider];
         const body: Record<string, unknown> = {
-          model: config.model,
+          model: currentModel,
           messages: [{ role: 'user', content: jsonPrompt }],
         };
         // OpenAI supports strict json_schema; others use json_object mode
@@ -111,7 +127,7 @@ export function StructuredOutput({ session }: Props) {
             'anthropic-version': '2023-06-01',
           },
           body: JSON.stringify({
-            model: 'claude-sonnet-4-20250514',
+            model: currentModel,
             max_tokens: 1024,
             messages: [{
               role: 'user',
@@ -164,6 +180,17 @@ export function StructuredOutput({ session }: Props) {
             );
           })}
         </select>
+        {selectedProvider && modelsFor(selectedProvider).length > 0 && (
+          <select
+            className="demo-provider-select"
+            value={currentModel}
+            onChange={(e) => setSelectedModels(prev => ({ ...prev, [selectedProvider]: e.target.value }))}
+          >
+            {modelsFor(selectedProvider).map(m => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+        )}
       </div>
       <p className="demo-desc">
         Extract typed data from unstructured text. Paste any text and get back clean JSON.

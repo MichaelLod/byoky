@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import type { ByokySession } from '@byoky/sdk';
 import { ByokyServer } from '@byoky/sdk/server';
 import { createMockWebSocketPair } from './mock-ws';
@@ -7,6 +7,18 @@ const PROVIDER_NAMES: Record<string, string> = {
   anthropic: 'Anthropic', openai: 'OpenAI', gemini: 'Google Gemini',
   mistral: 'Mistral', cohere: 'Cohere', xai: 'xAI (Grok)',
   deepseek: 'DeepSeek', groq: 'Groq', perplexity: 'Perplexity',
+};
+
+const PROVIDER_MODELS: Record<string, string[]> = {
+  anthropic:  ['claude-sonnet-4-6', 'claude-opus-4-7', 'claude-haiku-4-5'],
+  openai:     ['gpt-5.4-mini', 'gpt-5.4', 'gpt-5.4-nano', 'gpt-5-mini', 'gpt-4o', 'gpt-4o-mini'],
+  gemini:     ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-pro', 'gemini-2.5-flash-lite', 'gemini-3.1-pro-preview', 'gemini-3.1-flash-lite-preview'],
+  mistral:    ['mistral-large-latest', 'mistral-small-latest'],
+  cohere:     ['command-a-03-2025', 'command-r-plus', 'command-r7b-12-2024'],
+  xai:        ['grok-4-fast-non-reasoning', 'grok-4-fast-reasoning', 'grok-4', 'grok-3-mini'],
+  deepseek:   ['deepseek-chat', 'deepseek-reasoner'],
+  groq:       ['llama-3.3-70b-versatile', 'meta-llama/llama-4-scout-17b-16e-instruct', 'llama-3.1-8b-instant'],
+  perplexity: ['sonar', 'sonar-pro', 'sonar-deep-research'],
 };
 
 // Static list of providers the backend-relay tab knows how to call. The
@@ -33,7 +45,16 @@ export function BackendRelay({ session }: Props) {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState('');
   const [provider, setProvider] = useState('anthropic');
+  const [selectedModels, setSelectedModels] = useState<Record<string, string>>(() => {
+    if (typeof window === 'undefined') return {};
+    try { return JSON.parse(localStorage.getItem('byoky-demo-models-relay') || '{}'); } catch { return {}; }
+  });
+  const currentModel = selectedModels[provider] ?? PROVIDER_MODELS[provider]?.[0] ?? '';
   const counter = useRef(0);
+
+  useEffect(() => {
+    try { localStorage.setItem('byoky-demo-models-relay', JSON.stringify(selectedModels)); } catch {}
+  }, [selectedModels]);
 
   async function run() {
     setRunning(true);
@@ -141,12 +162,12 @@ export function BackendRelay({ session }: Props) {
         : provider === 'openai'
         ? 'https://api.openai.com/v1/chat/completions'
         : provider === 'gemini'
-        ? `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`
+        ? `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent`
         : `https://api.${provider}.com/v1/chat/completions`;
 
       const reqBody = provider === 'anthropic'
         ? {
-            model: 'claude-sonnet-4-20250514',
+            model: currentModel,
             max_tokens: 512,
             messages: [{ role: 'user', content: prompt }],
           }
@@ -155,7 +176,7 @@ export function BackendRelay({ session }: Props) {
             contents: [{ parts: [{ text: prompt }] }],
           }
         : {
-            model: provider === 'openai' ? 'gpt-4o-mini' : undefined,
+            model: currentModel,
             messages: [{ role: 'user', content: prompt }],
             max_tokens: 512,
           };
@@ -216,6 +237,17 @@ export function BackendRelay({ session }: Props) {
             );
           })}
         </select>
+        {PROVIDER_MODELS[provider] && (
+          <select
+            className="demo-provider-select"
+            value={currentModel}
+            onChange={(e) => setSelectedModels(prev => ({ ...prev, [provider]: e.target.value }))}
+          >
+            {PROVIDER_MODELS[provider].map(m => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       <p className="demo-desc">
