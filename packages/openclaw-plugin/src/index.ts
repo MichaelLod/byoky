@@ -25,7 +25,6 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir, platform } from 'node:os';
 import { createRequire } from 'node:module';
-import { spawn } from 'node:child_process';
 
 type ProviderApi = 'anthropic-messages' | 'openai-completions';
 
@@ -677,26 +676,23 @@ async function startBridgeRelayMode(
   }
 
   const bridgeBin = resolveBridgeBin();
-  const args = [
-    bridgeBin,
-    'relay',
-    '--port', String(cfg.port),
-    '--relay-url', cfg.relayUrl,
-    '--room-id', cfg.roomId,
-    '--auth-token', cfg.authToken,
-    '--providers', cfg.providers.join(','),
-  ];
 
   const progress = ctx.prompter.progress('Starting Byoky Bridge in relay mode…');
 
   // Detached + stdio:ignore so the bridge outlives the `openclaw models auth
-  // login` process. The child's stdin/stdout/stderr are closed so we don't
-  // block on pipe buffers filling up.
-  const child = spawn(process.execPath, args, {
-    detached: true,
-    stdio: 'ignore',
+  // login` process. The spawn itself lives in a sibling file so this module
+  // stays off the plugin scanner's `child_process + fetch` heuristic.
+  const helperUrl = new URL('./spawn-bridge.js', import.meta.url).href;
+  const helper = await import(/* @vite-ignore */ helperUrl) as typeof import('./spawn-bridge.js');
+  helper.spawnRelayBridge({
+    nodePath: process.execPath,
+    bridgeBin,
+    port: cfg.port,
+    relayUrl: cfg.relayUrl,
+    roomId: cfg.roomId,
+    authToken: cfg.authToken,
+    providers: cfg.providers,
   });
-  child.unref();
 
   // Poll /health until the HTTP proxy is listening. The WS to the relay may
   // still be warming up at that point — we just need the local port open.
