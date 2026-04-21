@@ -1729,9 +1729,9 @@ export default defineBackground(() => {
 
       case 'createGift': {
         if (!masterPassword) return { error: 'Wallet is locked' };
-        const { credentialId, providerId, label, maxTokens, expiresInMs, relayUrl, listPublicly, gifterName } = message.payload as {
+        const { credentialId, providerId, label, maxTokens, expiresInMs, relayUrl, listPublicly, description } = message.payload as {
           credentialId: string; providerId: string; label: string; maxTokens: number; expiresInMs: number; relayUrl: string;
-          listPublicly?: boolean; gifterName?: string;
+          listPublicly?: boolean; description?: string;
         };
         if (!PROVIDERS[providerId]) return { error: 'Invalid provider' };
         if (!label || label.length > 200) return { error: 'Label must be 1-200 characters' };
@@ -1742,7 +1742,7 @@ export default defineBackground(() => {
           if (parsed.protocol !== 'wss:' && parsed.protocol !== 'ws:') return { error: 'Relay URL must use ws:// or wss://' };
         } catch { return { error: 'Invalid relay URL' }; }
         const authToken = `gft_${crypto.randomUUID().replace(/-/g, '')}`;
-        const trimmedGifterName = gifterName?.trim() || undefined;
+        const trimmedDescription = description?.trim() || undefined;
         const gift: Gift = {
           id: crypto.randomUUID(),
           credentialId,
@@ -1756,7 +1756,7 @@ export default defineBackground(() => {
           active: true,
           relayUrl,
           listed: listPublicly === true,
-          gifterName: trimmedGifterName,
+          description: trimmedDescription,
         };
         // Encrypt authToken at rest for defense-in-depth (protects against local storage exfiltration)
         const encryptedAuthToken = await encrypt(authToken, masterPassword!);
@@ -4175,7 +4175,7 @@ export default defineBackground(() => {
 
   const giftRelayConnections = new Map<string, WebSocket>();
 
-  function connectGiftRelay(gift: Gift) {
+  async function connectGiftRelay(gift: Gift) {
     if (giftRelayConnections.has(gift.id)) return;
     if (!gift.active || gift.expiresAt <= Date.now()) return;
 
@@ -4188,6 +4188,31 @@ export default defineBackground(() => {
       if (!isSecure && !isLocalWs) return;
     } catch {
       return;
+    }
+
+    // Setup-token gifts can't be served from the extension without a running
+    // Bridge (Chrome fetch is fingerprinted; the Bridge routes through Node).
+    // If Cloud Vault is enabled the vault's priority-0 socket already covers
+    // this gift via the residential proxy — so don't connect here, otherwise
+    // we'd claim priority-1 and drop every request with BRIDGE_UNAVAILABLE.
+    // With no vault fallback we still connect at priority 1 so recipients see
+    // a loud error instead of a silent black hole.
+    if (masterPassword) {
+      try {
+        const credentials = await getStoredCredentials();
+        const credential = credentials.find((c) => c.id === gift.credentialId);
+        if (credential?.authMethod === 'oauth') {
+          const bridgeOk = await checkBridgeAvailable();
+          if (!bridgeOk) {
+            const vault = await getCloudVaultState();
+            const vaultServing = vault.enabled && !!vault.token && !vault.tokenExpired;
+            if (vaultServing) return;
+          }
+        }
+      } catch {
+        // If the preflight fails we fall through and connect — safer to
+        // surface errors than to silently skip.
+      }
     }
 
     try {
@@ -4389,6 +4414,16 @@ export default defineBackground(() => {
         if (credential.authMethod === 'oauth') {
           const bridgeOk = await checkBridgeAvailable();
           if (!bridgeOk) {
+            // Bridge died since we opened this socket. If the vault can cover
+            // this gift, drop our connection so the relay's priority-0 vault
+            // sender takes over on the next retry. Otherwise tell the
+            // recipient loudly — there's nothing else that can serve them.
+            const vault = await getCloudVaultState();
+            const vaultServing = vault.enabled && !!vault.token && !vault.tokenExpired;
+            if (vaultServing) {
+              ws.close();
+              return;
+            }
             ws.send(JSON.stringify({
               type: 'relay:response:error',
               requestId: msg.requestId,
@@ -5300,7 +5335,7 @@ export default defineBackground(() => {
         usedTokens: gift.usedTokens,
         expiresAt: gift.expiresAt,
         listed: gift.listed === true,
-        gifterName: gift.gifterName,
+        description: gift.description,
         giftShortId: gift.giftShortId,
       }, state.token!);
 
