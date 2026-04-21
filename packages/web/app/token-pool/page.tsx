@@ -132,15 +132,6 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
-/* ── Mock data for local dev ── */
-const MOCK_GIFTS: Gift[] = [
-  { id: '1', providerId: 'anthropic', gifterName: 'Marino', giftShortId: null, tokenBudget: 500000, tokensUsed: 120000, tokensRemaining: 380000, expiresAt: Date.now() + 86400000 * 3, listedAt: Date.now() - 3600000, online: true },
-  { id: '2', providerId: 'openai', gifterName: 'Michael', giftShortId: null, tokenBudget: 1000000, tokensUsed: 250000, tokensRemaining: 750000, expiresAt: Date.now() + 86400000 * 7, listedAt: Date.now() - 7200000, online: true },
-  { id: '3', providerId: 'gemini', gifterName: 'Alex', giftShortId: null, tokenBudget: 200000, tokensUsed: 50000, tokensRemaining: 150000, expiresAt: Date.now() + 86400000 * 2, listedAt: Date.now() - 1800000, online: true },
-  { id: '4', providerId: 'mistral', gifterName: 'Nikita', giftShortId: null, tokenBudget: 300000, tokensUsed: 280000, tokensRemaining: 20000, expiresAt: Date.now() + 86400000, listedAt: Date.now() - 14400000, online: false },
-  { id: '5', providerId: 'groq', gifterName: 'Sarah', giftShortId: null, tokenBudget: 800000, tokensUsed: 100000, tokensRemaining: 700000, expiresAt: Date.now() + 86400000 * 5, listedAt: Date.now() - 900000, online: true },
-];
-
 export default function Marketplace() {
   const [active, setActive] = useState<Gift[]>([]);
   const [loading, setLoading] = useState(true);
@@ -162,14 +153,11 @@ export default function Marketplace() {
       const res = await fetch(`${VAULT_URL}/pool`);
       if (!res.ok) throw new Error('Failed to load gifts');
       const data = await res.json() as { gifts?: Gift[] };
-      const list = data.gifts ?? [];
-      // Fall back to mock data if API returns empty (local dev).
-      setActive(list.length > 0 ? list : MOCK_GIFTS.filter(g => g.expiresAt > Date.now()));
+      setActive(data.gifts ?? []);
       setError(null);
     } catch {
-      // API unreachable — use mock data
-      setActive(MOCK_GIFTS.filter(g => g.expiresAt > Date.now()));
-      setError(null);
+      setActive([]);
+      setError('Could not load the token pool. Try again shortly.');
     } finally {
       setLoading(false);
     }
