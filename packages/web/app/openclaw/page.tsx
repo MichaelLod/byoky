@@ -353,6 +353,24 @@ function Troubleshooting() {
         the session with the updated provider list.
       </>,
     ],
+    [
+      'Fixed the bad credential, but OpenClaw still won\u2019t use that provider',
+      <>
+        After a credential fails (bad key, expired gift, rate limit), OpenClaw
+        puts the provider profile in an in-memory cooldown that persists until
+        the gateway restarts. Restart it with{' '}
+        <code>openclaw gateway restart</code> and try again.
+      </>,
+    ],
+    [
+      'Anthropic keeps returning 429 rate_limit_error on a gift',
+      <>
+        The gifter\u2019s upstream key is being throttled by Anthropic (the
+        limit is on their account, not yours). Try a different Anthropic gift,
+        switch the chat model to a non-Anthropic byoky provider, or wait for
+        the window to clear (usually 1 hour).
+      </>,
+    ],
   ];
   return (
     <section className="oc-section">
