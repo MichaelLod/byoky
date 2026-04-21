@@ -647,6 +647,7 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
     var apiKey by remember { mutableStateOf("") }
     var authMethod by remember { mutableStateOf(AuthMethod.API_KEY) }
     var error by remember { mutableStateOf<String?>(null) }
+    val cloudVaultEnabled by wallet.cloudVaultEnabled.collectAsState()
 
     val supportsSetupToken = selectedProvider?.id == "anthropic"
 
@@ -791,20 +792,38 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
                         fontSize = 12.sp,
                     )
                     Spacer(Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.Top) {
-                        Icon(
-                            Icons.Default.Warning,
-                            contentDescription = null,
-                            tint = Color(0xFFFF8A00),
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            "Online only — setup tokens require the Byoky app to be open. Apps using this credential will fail if the phone is closed or asleep, even with the cloud vault enabled.",
-                            color = Color(0xFFFF8A00),
-                            fontSize = 12.sp,
-                            lineHeight = 16.sp,
-                        )
+                    if (cloudVaultEnabled) {
+                        Row(verticalAlignment = Alignment.Top) {
+                            Icon(
+                                Icons.Default.Cloud,
+                                contentDescription = null,
+                                tint = Accent,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                "Cloud Sync enabled — setup-token requests are served by Byoky's residential-proxy gateway when your phone is closed or asleep.",
+                                color = Accent,
+                                fontSize = 12.sp,
+                                lineHeight = 16.sp,
+                            )
+                        }
+                    } else {
+                        Row(verticalAlignment = Alignment.Top) {
+                            Icon(
+                                Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = Color(0xFFFF8A00),
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                "Online only — without Cloud Sync, setup tokens require the Byoky app to be open. Apps using this credential will fail if the phone is closed or asleep.",
+                                color = Color(0xFFFF8A00),
+                                fontSize = 12.sp,
+                                lineHeight = 16.sp,
+                            )
+                        }
                     }
                 } else {
                     Spacer(Modifier.height(8.dp))
