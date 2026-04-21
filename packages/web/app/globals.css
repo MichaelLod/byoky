@@ -609,6 +609,11 @@ body.has-ph-banner .navbar {
   font-weight: 500;
 }
 
+.hero-rollout-pending {
+  color: #f59e0b;
+  font-weight: 500;
+}
+
 .hero-rollout a {
   color: var(--teal-light);
   text-decoration: underline;

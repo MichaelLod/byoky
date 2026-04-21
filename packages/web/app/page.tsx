@@ -8,6 +8,7 @@ import { ExtensionMock, type MockScene } from './components/ExtensionMock';
 import { AppsShowcase } from './components/AppsShowcase';
 import { WhatsAppChat } from './components/WhatsAppChat';
 import { InstallWalletButton } from './components/InstallWalletButton';
+import { HeroRollout } from './components/HeroRollout';
 
 export default function Home() {
   return (
@@ -203,10 +204,7 @@ function Hero() {
             {' · '}
             <a href="https://github.com/MichaelLod/byoky" target="_blank" rel="noopener noreferrer">GitHub</a>
           </div>
-          <div className="hero-rollout">
-            <strong>v0.7.4 rollout:</strong>{' '}
-            <span className="hero-rollout-live">Chrome, Firefox, iOS &amp; Android all live</span>
-          </div>
+          <HeroRollout />
         </FadeIn>
         <FadeIn delay={0.35}>
           <div className="hero-trust-bar">
