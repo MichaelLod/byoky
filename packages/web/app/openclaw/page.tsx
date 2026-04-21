@@ -154,6 +154,20 @@ export default function OpenClawTutorial() {
 
         <Step
           n={5}
+          title="Pick your default model"
+          subtitle="OpenClaw's onboarding picks a non-byoky default. Point it at a byoky model so chat works out of the box."
+        >
+          <Code>{`openclaw models set byoky-anthropic/claude-sonnet-4-6`}</Code>
+          <p>
+            Swap the model for whichever you actually have a key or gift for:{' '}
+            <code>byoky-openai/gpt-4.1</code>, <code>byoky-gemini/gemini-2.5-pro</code>,{' '}
+            <code>byoky-xai/grok-3</code>, etc. <code>openclaw models list --all</code>{' '}
+            shows every option.
+          </p>
+        </Step>
+
+        <Step
+          n={6}
           title="Use OpenClaw"
           subtitle="That's the whole setup. Run OpenClaw as you normally would — every LLM call routes through your wallet."
         >
@@ -170,6 +184,7 @@ export default function OpenClawTutorial() {
           </p>
         </Step>
 
+        <Troubleshooting />
         <Providers />
         <HowItWorks />
         <Closing />
@@ -297,6 +312,63 @@ function Overview() {
           <p>One auth command and you&apos;re calling Claude / GPT / Gemini.</p>
         </div>
       </div>
+    </section>
+  );
+}
+
+function Troubleshooting() {
+  const items: [string, React.ReactNode][] = [
+    [
+      'Chat hangs on "..." forever',
+      <>
+        The bridge session got out of sync with the extension (happens after a
+        browser restart or wallet re-lock). Re-run{' '}
+        <code>openclaw models auth login --provider byoky</code> — plugin 0.7.7+
+        detects this and forces a fresh wallet re-pair.
+      </>,
+    ],
+    [
+      '"No API key found for provider \\"openai\\""',
+      <>
+        OpenClaw is still pointing at the direct <code>openai</code> plugin's
+        default. Run <code>openclaw models set byoky-anthropic/claude-sonnet-4-6</code>{' '}
+        (or another byoky model) to fix. Optionally{' '}
+        <code>openclaw plugins disable openai</code> if you never plan to use
+        it directly.
+      </>,
+    ],
+    [
+      '"invalid x-api-key" from Anthropic (or OpenAI)',
+      <>
+        The key saved in your wallet is wrong or revoked. Grab a fresh one from{' '}
+        the provider's console and paste it in, or use a free gift from the{' '}
+        <a className="oc-link" href="/token-pool">token pool</a> instead.
+      </>,
+    ],
+    [
+      'I added a key to the wallet but the chat still says "provider not available"',
+      <>
+        The bridge snapshotted your providers before you added the key. Re-run{' '}
+        <code>openclaw models auth login --provider byoky</code> to refresh
+        the session with the updated provider list.
+      </>,
+    ],
+  ];
+  return (
+    <section className="oc-section">
+      <h2>If something doesn&apos;t work</h2>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        {items.map(([q, a], i) => (
+          <div className="oc-option-card" key={i}>
+            <strong>{q}</strong>
+            <p style={{ margin: '6px 0 0', fontSize: '14px', lineHeight: 1.55 }}>{a}</p>
+          </div>
+        ))}
+      </div>
+      <p className="oc-note oc-note-muted">
+        Inside OpenClaw, <code>/byoky</code> prints bridge status and connected providers.
+        <code>openclaw logs --follow</code> shows the raw errors if you need to dig deeper.
+      </p>
     </section>
   );
 }
