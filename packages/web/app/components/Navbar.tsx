@@ -22,18 +22,38 @@ function DropdownIcon({ name }: { name: string }) {
 }
 
 const installOptions = [
-  { label: 'Chrome', href: 'https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon', icon: 'chrome' },
-  { label: 'Firefox', href: 'https://addons.mozilla.org/en-US/firefox/addon/byoky/', icon: 'firefox' },
-  { label: 'iOS', href: 'https://apps.apple.com/app/byoky/id6760779919', icon: 'apple' },
-  { label: 'Android', href: 'https://play.google.com/store/apps/details?id=com.byoky.app', icon: 'android' },
+  { label: 'Chrome', href: 'https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon', icon: 'chrome', key: 'Chrome' },
+  { label: 'Firefox', href: 'https://addons.mozilla.org/en-US/firefox/addon/byoky/', icon: 'firefox', key: 'Firefox' },
+  { label: 'iOS', href: 'https://apps.apple.com/app/byoky/id6760779919', icon: 'apple', key: 'iOS' },
+  { label: 'Android', href: 'https://play.google.com/store/apps/details?id=com.byoky.app', icon: 'android', key: 'Android' },
 ];
+
+interface VersionPlatform {
+  platform: string;
+  version: string | null;
+  status: string;
+  pending?: string;
+}
+
+interface VersionData {
+  local: string;
+  platforms: VersionPlatform[];
+}
 
 export function Navbar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [embedded, setEmbedded] = useState(false);
+  const [versions, setVersions] = useState<VersionData | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    fetch('/versions.json')
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setVersions)
+      .catch(() => {});
+  }, []);
 
   function handleEnter() {
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
@@ -98,18 +118,42 @@ export function Navbar() {
             </button>
             {open && (
               <div className="install-dropdown-menu">
-                {installOptions.map((opt) => (
+                {installOptions.map((opt) => {
+                  const p = versions?.platforms.find((x) => x.platform === opt.key);
+                  const versionLabel = p?.pending
+                    ? `v${p.pending} pending`
+                    : p?.version
+                      ? `v${p.version}`
+                      : '';
+                  return (
+                    <a
+                      key={opt.label}
+                      href={opt.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="install-dropdown-item"
+                    >
+                      <DropdownIcon name={opt.icon} />
+                      <span className="install-dropdown-item-label">{opt.label}</span>
+                      {versionLabel && (
+                        <span className="install-dropdown-item-version">{versionLabel}</span>
+                      )}
+                    </a>
+                  );
+                })}
+                {versions && versions.platforms.find((p) => p.platform === 'Chrome')?.pending === versions.local && (
                   <a
-                    key={opt.label}
-                    href={opt.href}
+                    href={`https://github.com/MichaelLod/byoky/releases/download/v${versions.local}/byoky-chrome-v${versions.local}.zip`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="install-dropdown-item"
+                    title="Download unpacked build — load via chrome://extensions → Load unpacked"
                   >
-                    <DropdownIcon name={opt.icon} />
-                    {opt.label}
+                    <DropdownIcon name="chrome" />
+                    <span className="install-dropdown-item-label">Chrome (load unpacked)</span>
+                    <span className="install-dropdown-item-version">v{versions.local}</span>
                   </a>
-                ))}
+                )}
               </div>
             )}
           </div>
