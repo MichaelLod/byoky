@@ -43,6 +43,8 @@ export function HeroRollout() {
     return `${list.slice(0, -1).join(', ')} & ${list[list.length - 1]}`;
   };
 
+  const chromePending = pendingOn.includes('Chrome');
+
   return (
     <div className="hero-rollout">
       <strong>v{rollout} rollout:</strong>{' '}
@@ -52,6 +54,19 @@ export function HeroRollout() {
       {liveOn.length > 0 && pendingOn.length > 0 && <span>{' · '}</span>}
       {pendingOn.length > 0 && (
         <span className="hero-rollout-pending">{fmt(pendingOn)} inbound</span>
+      )}
+      {chromePending && (
+        <>
+          {' '}
+          <a
+            href={`https://github.com/MichaelLod/byoky/releases/download/v${rollout}/byoky-chrome-v${rollout}.zip`}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Download the unpacked Chrome build and load it via chrome://extensions → Load unpacked"
+          >
+            load unpacked
+          </a>
+        </>
       )}
     </div>
   );
