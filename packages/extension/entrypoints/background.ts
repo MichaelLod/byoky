@@ -132,6 +132,22 @@ export default defineBackground(() => {
   let unlockFailures = 0;
   let unlockLockedUntil = 0;
 
+  // Bootstrap-login stash. `vaultBootstrapLogin` in the popup validates the
+  // vault password against the server BEFORE creating local wallet state, so
+  // `cloudVaultLogin` runs while `masterPassword` is still null. In that
+  // window we can't wrap the vault AES key or the session token with
+  // masterPassword, so instead of silently no-opping (or worse, writing the
+  // token to storage in plaintext) we hold the materials in memory and drain
+  // them during the subsequent `unlock`. Memory-only: if the service worker
+  // dies between login and unlock the binding is lost and the user retries.
+  let pendingVaultBinding: {
+    username: string;
+    password: string;
+    encryptionSalt: string;
+    token: string;
+    sessionId: string;
+  } | null = null;
+
   // Persist masterPassword across MV3 service worker restarts using session storage.
   // session storage is memory-only (not written to disk) and cleared when the browser closes.
   // Firefox (MV2) doesn't support storage.session, so we guard all access.
@@ -209,6 +225,7 @@ export default defineBackground(() => {
   function autoLock() {
     if (!masterPassword) return;
     masterPassword = null;
+    pendingVaultBinding = null;
     sessions.clear();
     clearPersistedSessions();
     authorizedBridgeSessionKey = null;
@@ -1228,6 +1245,34 @@ export default defineBackground(() => {
           processPendingAfterUnlock();
           await migrateGiftTokens(password);
           reconnectGiftRelays();
+
+          // Drain any bootstrap-login stash. The popup flow uses one
+          // password for both vault and local wallet so the passwords must
+          // match; reject otherwise as defense-in-depth against a diverging
+          // caller (a mismatch means the stashed vault session was
+          // validated with a different password than this unlock, so we
+          // must not persist a vault key that can't decrypt the user's
+          // later-encrypted rows).
+          if (pendingVaultBinding) {
+            if (pendingVaultBinding.password === password) {
+              const p = pendingVaultBinding;
+              pendingVaultBinding = null;
+              await persistVaultKey(p.password, p.encryptionSalt);
+              await saveCloudVaultState({
+                enabled: true,
+                username: p.username,
+                token: p.token,
+                sessionId: p.sessionId,
+                tokenIssuedAt: Date.now(),
+                tokenExpired: false,
+              });
+              await browser.storage.local.set({ 'cloudVault.lastUsername': p.username });
+              await browser.storage.local.remove('cloudVault.lastSyncAt');
+            } else {
+              pendingVaultBinding = null;
+            }
+          }
+
           enqueueVaultSync(async () => {
             const cvState = await getCloudVaultState();
             if (cvState.enabled && cvState.token && !cvState.tokenExpired) {
@@ -1250,6 +1295,7 @@ export default defineBackground(() => {
 
       case 'lock':
         masterPassword = null;
+        pendingVaultBinding = null;
         sessions.clear();
         clearPersistedSessions();
         authorizedBridgeSessionKey = null;
@@ -1369,6 +1415,7 @@ export default defineBackground(() => {
 
       case 'resetWallet': {
         masterPassword = null;
+        pendingVaultBinding = null;
         sessions.clear();
         clearPersistedSessions();
         authorizedBridgeSessionKey = null;
@@ -2032,6 +2079,19 @@ export default defineBackground(() => {
         const token = result.data.token as string;
         const sessionId = result.data.sessionId as string;
         const encryptionSalt = result.data.encryptionSalt as string;
+
+        // Bootstrap-login (fresh install with existing vault account): the
+        // popup validates the vault password before calling `setupWallet` +
+        // `unlock`, so `masterPassword` is null here. persistVaultKey and
+        // the token encryption in saveCloudVaultState both depend on
+        // masterPassword — without this guard persistVaultKey silently
+        // no-ops and saveCloudVaultState writes the bearer token in
+        // plaintext. Stash in memory; `unlock` drains it.
+        if (!masterPassword) {
+          pendingVaultBinding = { username, password, encryptionSalt, token, sessionId };
+          return { success: true };
+        }
+
         await persistVaultKey(password, encryptionSalt);
         // Login from a different device (or after a re-install): the server
         // may already hold credentials this device has never seen. Reset
@@ -2057,9 +2117,15 @@ export default defineBackground(() => {
       }
 
       case 'cloudVaultDisable': {
+        // Rollback path for the bootstrap-login flow: if the popup aborts
+        // after cloudVaultLogin succeeded but before unlock, the session
+        // still lives only in memory — log it out from here too.
+        const stashedToken = pendingVaultBinding?.token ?? null;
+        pendingVaultBinding = null;
         const state = await getCloudVaultState();
-        if (state.token && !state.tokenExpired) {
-          vaultFetch('/auth/logout', 'POST', undefined, state.token).catch(() => {});
+        const logoutToken = state.token && !state.tokenExpired ? state.token : stashedToken;
+        if (logoutToken) {
+          vaultFetch('/auth/logout', 'POST', undefined, logoutToken).catch(() => {});
         }
         await clearCloudVaultState();
         return { success: true };
