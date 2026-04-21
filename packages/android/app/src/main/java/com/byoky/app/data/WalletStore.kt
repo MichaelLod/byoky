@@ -457,12 +457,19 @@ class WalletStore(context: Context) {
         )
         _giftedCredentials.value = _giftedCredentials.value + credential
         saveGiftedCredentials()
+        // Fire-and-forget: register the redemption with the vault so the
+        // bridge→vault fallback path (phone offline) can still serve this
+        // gift's provider. Failure is non-fatal — the local gift works
+        // regardless; only the remote fallback requires the vault record.
+        vaultScope.launch { syncRedeemedGiftToVault(link.id) }
         return Pair(true, null)
     }
 
     fun removeGiftedCredential(id: String) {
+        var removedGiftId: String? = null
         val gc = _giftedCredentials.value.find { it.id == id }
         if (gc != null) {
+            removedGiftId = gc.giftId
             if (_giftPreferences.value[gc.providerId] == gc.giftId) {
                 _giftPreferences.value = _giftPreferences.value - gc.providerId
                 saveGiftPreferences()
@@ -487,6 +494,29 @@ class WalletStore(context: Context) {
         }
         _giftedCredentials.value = _giftedCredentials.value.filter { it.id != id }
         saveGiftedCredentials()
+        if (removedGiftId != null) {
+            val giftIdToDelete = removedGiftId
+            vaultScope.launch { syncRedeemedGiftDeleteToVault(giftIdToDelete) }
+        }
+    }
+
+    private suspend fun syncRedeemedGiftToVault(giftId: String) {
+        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
+        val (_, status, _) = vaultRequest("/gifts/redeemed", "POST", org.json.JSONObject().put("giftId", giftId), vaultToken)
+        if (status == 401) {
+            _cloudVaultTokenExpired.value = true
+            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
+        }
+    }
+
+    private suspend fun syncRedeemedGiftDeleteToVault(giftId: String) {
+        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
+        val encoded = java.net.URLEncoder.encode(giftId, "UTF-8")
+        val (_, status, _) = vaultRequest("/gifts/redeemed/$encoded", "DELETE", null, vaultToken)
+        if (status == 401) {
+            _cloudVaultTokenExpired.value = true
+            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
+        }
     }
 
     fun setGiftPreference(providerId: String, giftId: String?) {

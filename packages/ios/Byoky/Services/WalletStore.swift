@@ -950,10 +950,50 @@ final class WalletStore: ObservableObject {
         )
         giftedCredentials.append(credential)
         saveGiftedCredentials()
+        // Fire-and-forget: register the redemption with the vault so the
+        // bridge→vault fallback path (phone offline) can still serve this
+        // gift's provider. Failure is non-fatal — the local gift works
+        // regardless; only the remote fallback requires the vault record.
+        let giftIdForSync = link.id
+        Task { await self.syncRedeemedGiftToVault(giftId: giftIdForSync) }
+    }
+
+    private func syncRedeemedGiftToVault(giftId: String) async {
+        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
+        let result = await vaultRequest(
+            path: "/gifts/redeemed",
+            method: "POST",
+            body: ["giftId": giftId],
+            token: token
+        )
+        if result.status == 401 {
+            await MainActor.run {
+                self.cloudVaultTokenExpired = true
+                try? self.keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
+            }
+        }
+    }
+
+    private func syncRedeemedGiftDeleteToVault(giftId: String) async {
+        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
+        let encoded = giftId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? giftId
+        let result = await vaultRequest(
+            path: "/gifts/redeemed/\(encoded)",
+            method: "DELETE",
+            token: token
+        )
+        if result.status == 401 {
+            await MainActor.run {
+                self.cloudVaultTokenExpired = true
+                try? self.keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
+            }
+        }
     }
 
     func removeGiftedCredential(id: String) {
+        var removedGiftId: String? = nil
         if let gc = giftedCredentials.first(where: { $0.id == id }) {
+            removedGiftId = gc.giftId
             if giftPreferences[gc.providerId] == gc.giftId {
                 giftPreferences.removeValue(forKey: gc.providerId)
                 saveGiftPreferences()
@@ -973,6 +1013,9 @@ final class WalletStore: ObservableObject {
         }
         giftedCredentials.removeAll { $0.id == id }
         saveGiftedCredentials()
+        if let removedGiftId {
+            Task { await self.syncRedeemedGiftDeleteToVault(giftId: removedGiftId) }
+        }
     }
 
     func setGiftPreference(providerId: String, giftId: String?) {
