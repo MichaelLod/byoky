@@ -494,8 +494,72 @@ section {
   color: #3a2a1f;
 }
 
+.server-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 109;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 16px;
+  background: linear-gradient(90deg, #ff8a2b 0%, #ff6a1a 50%, #ff8a2b 100%);
+  background-size: 200% 100%;
+  animation: server-banner-shimmer 6s linear infinite;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  text-align: center;
+}
+
+.server-banner-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.8);
+  animation: server-banner-pulse 1.6s ease-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes server-banner-shimmer {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+
+@keyframes server-banner-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.8); }
+  70%  { box-shadow: 0 0 0 8px rgba(255, 255, 255, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
+}
+
 body.has-ph-banner .navbar {
   top: 40px;
+}
+
+body.has-server-banner .navbar {
+  top: 36px;
+}
+
+body.has-ph-banner.has-server-banner .server-banner {
+  top: 40px;
+}
+
+body.has-ph-banner.has-server-banner .navbar {
+  top: 76px;
+}
+
+body.has-server-banner .hero {
+  padding-top: 156px;
+}
+
+body.has-ph-banner.has-server-banner .hero {
+  padding-top: 196px;
 }
 
 @media (max-width: 560px) {
@@ -509,6 +573,10 @@ body.has-ph-banner .navbar {
   }
   .ph-banner-text strong {
     display: inline;
+  }
+  .server-banner {
+    font-size: 12px;
+    padding: 0 12px;
   }
 }
 
