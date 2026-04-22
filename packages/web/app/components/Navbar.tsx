@@ -203,6 +203,25 @@ export function Navbar() {
               {l.label}
             </a>
           ))}
+          <div className="navbar-mobile-menu-divider" />
+          <a
+            href="https://github.com/MichaelLod/byoky"
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => setMobileOpen(false)}
+          >
+            <GitHubIcon />
+            GitHub
+          </a>
+          <a
+            href="https://discord.gg/gRs8S9fxcT"
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => setMobileOpen(false)}
+          >
+            <DiscordIcon />
+            Discord
+          </a>
         </div>
       )}
     </nav>

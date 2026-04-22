@@ -2526,6 +2526,10 @@ body.has-ph-banner .navbar {
     display: none;
   }
 
+  .navbar-right > .navbar-icon {
+    display: none;
+  }
+
   .navbar-menu-btn {
     display: inline-flex;
   }
@@ -2548,6 +2552,9 @@ body.has-ph-banner .navbar {
     padding: 12px 8px;
     border-radius: 6px;
     transition: color 0.15s, background 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 10px;
   }
 
   .navbar-mobile-menu a:hover {
@@ -2558,6 +2565,17 @@ body.has-ph-banner .navbar {
   .navbar-mobile-menu a.nav-active {
     color: #FF4F00;
     font-weight: 600;
+  }
+
+  .navbar-mobile-menu-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 8px 0;
+  }
+
+  .navbar-mobile-menu svg {
+    width: 18px;
+    height: 18px;
   }
 
   .built-with-hero h1 {
