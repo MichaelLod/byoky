@@ -430,7 +430,10 @@ export default function Marketplace() {
           transition: all 0.2s;
           position: relative;
           overflow: hidden;
+          display: flex;
+          flex-direction: column;
         }
+        .mp-card-spacer { flex: 1; min-height: 14px; }
         .mp-card:hover {
           border-color: rgba(255, 79, 0, 0.3);
           box-shadow: 0 4px 20px rgba(255, 79, 0, 0.06);
@@ -771,12 +774,13 @@ function GiftCard({ gift, onRedeem, redeeming, highlighted }: {
         <p className="mp-card-description">{gift.description}</p>
       )}
 
+      <div className="mp-card-spacer" aria-hidden="true" />
+
       {onRedeem && (
         <button
           className="mp-btn mp-btn-full"
           onClick={() => onRedeem(gift.id)}
           disabled={redeeming || !gift.online || !gift.giftShortId}
-          style={{ marginTop: 14 }}
         >
           {redeeming ? 'Getting tokens...' : 'Get Free Tokens'}
         </button>
