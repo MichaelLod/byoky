@@ -31,6 +31,9 @@ object RoutingResolver {
      *   2. Same-family swap (group binds to a different openai-family
      *      provider with the same wire format)
      *   3. Direct credential for the provider the SDK called
+     *   4. Auto cross-family translation — opportunistic fallback when the
+     *      user holds credentials only in other families and the app has no
+     *      group binding. Skipped when a group is set (group intent wins).
      *
      * Returns null (signaling "no credential available") only when none of
      * the above yields a usable credential.
@@ -62,7 +65,91 @@ object RoutingResolver {
             return RoutingDecision(direct, translation = null, modelOverride = override)
         }
 
+        // 4. Auto cross-family translation. Fires only when the app has no
+        //    explicit group binding — the default sentinel group (empty
+        //    providerId) counts as "no binding" because the user hasn't
+        //    expressed routing intent. When the user HAS set a group, we
+        //    never silently route around it; returning null here surfaces
+        //    NO_CREDENTIAL so the stale config gets noticed.
+        val hasExplicitGroup = group != null && group.providerId.isNotEmpty()
+        if (!hasExplicitGroup) {
+            val auto = tryAutoCrossFamily(requestedProviderId, requestedModel, credentials, engine)
+            if (auto != null) return auto
+        }
+
         return null
+    }
+
+    /**
+     * Auto cross-family fallback — mirrors `resolveAutoCrossFamilyRoute` in
+     * `packages/core/src/routing.ts`. Picks a translatable credential from
+     * the user's wallet when the app asks for a provider they don't hold.
+     *
+     * Candidate ordering (`Credential` on Android has no `lastUsedAt` yet, so
+     * MRU degrades to family order + createdAt):
+     *   1. Family preference: anthropic > openai > gemini > cohere > other
+     *   2. Tiebreak by `createdAt` desc (newest credential first)
+     *
+     * Uses `defaultFlagshipModel` to pick the family flagship as the
+     * destination model. `srcModel` is taken from the inbound request body.
+     */
+    private fun tryAutoCrossFamily(
+        requestedProviderId: String,
+        requestedModel: String?,
+        credentials: List<Credential>,
+        engine: TranslationEngine,
+    ): RoutingDecision? {
+        // Defensive: the direct-match branch above would have taken it, but
+        // guard for callers invoking this method in isolation.
+        if (credentials.any { it.providerId == requestedProviderId }) return null
+        if (requestedModel.isNullOrEmpty()) return null
+
+        val sorted = credentials.sortedWith(
+            compareBy<Credential> { familyOrder(it.providerId) }
+                .thenByDescending { it.createdAt }
+        )
+
+        for (cred in sorted) {
+            if (!engine.shouldTranslate(requestedProviderId, cred.providerId)) continue
+            val dstModel = defaultFlagshipModel(cred.providerId) ?: continue
+            return RoutingDecision(
+                credential = cred,
+                translation = RoutingTranslation(
+                    srcProviderId = requestedProviderId,
+                    dstProviderId = cred.providerId,
+                    srcModel = requestedModel,
+                    dstModel = dstModel,
+                )
+            )
+        }
+        return null
+    }
+
+    /**
+     * Family preference index for tiebreaking auto cross-family candidate
+     * ordering. Mirrors `FAMILY_ORDER` in routing.ts — keep in lockstep.
+     */
+    private fun familyOrder(providerId: String): Int = when (providerId) {
+        "anthropic" -> 0
+        "openai", "azure_openai", "groq", "together", "deepseek",
+        "xai", "perplexity", "fireworks", "openrouter", "mistral" -> 1
+        "gemini" -> 2
+        "cohere" -> 3
+        else -> 99
+    }
+
+    /**
+     * Flagship model id for the family containing `providerId`. Mirrors
+     * `DEFAULT_MODELS` in `packages/core/src/models.ts` — keep in sync
+     * whenever that map changes.
+     */
+    private fun defaultFlagshipModel(providerId: String): String? = when (providerId) {
+        "anthropic" -> "claude-sonnet-4-6"
+        "openai", "azure_openai", "groq", "together", "deepseek",
+        "xai", "perplexity", "fireworks", "openrouter", "mistral" -> "gpt-5.4"
+        "gemini" -> "gemini-2.5-pro"
+        "cohere" -> "command-a-03-2025"
+        else -> null
     }
 
     /**

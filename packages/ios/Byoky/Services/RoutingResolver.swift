@@ -21,6 +21,9 @@ struct RoutingResolver {
     ///   2. Same-family swap (group binds to a different openai-family
     ///      provider with the same wire format)
     ///   3. Direct credential for the provider the SDK called
+    ///   4. Auto cross-family translation — opportunistic fallback when the
+    ///      user holds credentials only in other families and the app has no
+    ///      group binding. Skipped when a group is set (group intent wins).
     ///
     /// Returns `nil` (signaling "no credential available") only when none of
     /// the above yields a usable credential.
@@ -61,6 +64,24 @@ struct RoutingResolver {
                 ? group?.model?.nilIfEmpty
                 : nil
             return RoutingDecision(credential: cred, translation: nil, modelOverride: override)
+        }
+
+        // 4. Auto cross-family translation. Fires only when the app has no
+        //    explicit group binding — the default sentinel group (empty
+        //    providerId) counts as "no binding" because the user hasn't
+        //    expressed routing intent. When the user HAS set a group, we
+        //    never silently route around it; returning nil here surfaces
+        //    NO_CREDENTIAL so the stale config gets noticed.
+        let hasExplicitGroup = (group?.providerId.isEmpty == false)
+        if !hasExplicitGroup {
+            if let auto = tryAutoCrossFamily(
+                requestedProviderId: requestedProviderId,
+                requestedModel: requestedModel,
+                credentials: credentials,
+                engine: engine
+            ) {
+                return auto
+            }
         }
 
         return nil
@@ -152,6 +173,98 @@ struct RoutingResolver {
             swapToProviderId: group.providerId,
             swapDstModel: group.model?.nilIfEmpty
         )
+    }
+
+    /// Auto cross-family fallback — mirrors `resolveAutoCrossFamilyRoute` in
+    /// `packages/core/src/routing.ts`. Picks a translatable credential from
+    /// the user's wallet when the app asks for a provider they don't hold.
+    ///
+    /// Candidate ordering (`Credential` on iOS has no `lastUsedAt` yet, so MRU
+    /// degrades to family order + createdAt):
+    ///   1. Family preference: anthropic > openai > gemini > cohere > other
+    ///   2. Tiebreak by `createdAt` desc (newest credential first)
+    ///
+    /// Uses `defaultModelFor(family:)` to pick the family flagship as the
+    /// destination model. The `srcModel` field of RoutingTranslation is
+    /// populated from the inbound request body when available.
+    private static func tryAutoCrossFamily(
+        requestedProviderId: String,
+        requestedModel: String?,
+        credentials: [Credential],
+        engine: TranslationEngine
+    ) -> RoutingDecision? {
+        // Defensive: if the user already holds the requested provider, the
+        // direct-match branch above already took it and we never run. But
+        // guard just in case callers invoke this method directly.
+        if credentials.contains(where: { $0.providerId == requestedProviderId }) {
+            return nil
+        }
+
+        let sorted = credentials.sorted { a, b in
+            let ao = familyOrder(for: a.providerId)
+            let bo = familyOrder(for: b.providerId)
+            if ao != bo { return ao < bo }
+            return a.createdAt > b.createdAt
+        }
+
+        guard let srcModel = requestedModel, !srcModel.isEmpty else {
+            // Translation needs a source model to build the outbound body.
+            // The extension extracts it from the request body earlier in the
+            // proxy pipeline; on mobile, missing srcModel → skip auto-route
+            // and surface NO_CREDENTIAL so the user notices.
+            return nil
+        }
+
+        for cred in sorted {
+            guard engine.shouldTranslate(srcProviderId: requestedProviderId, dstProviderId: cred.providerId) else {
+                continue
+            }
+            guard let dstModel = defaultFlagshipModel(for: cred.providerId) else { continue }
+            return RoutingDecision(
+                credential: cred,
+                translation: RoutingTranslation(
+                    srcProviderId: requestedProviderId,
+                    dstProviderId: cred.providerId,
+                    srcModel: srcModel,
+                    dstModel: dstModel
+                )
+            )
+        }
+
+        return nil
+    }
+
+    /// Family preference index for tiebreaking auto cross-family candidate
+    /// ordering. Mirrors `FAMILY_ORDER` in routing.ts — keep these in lockstep.
+    private static func familyOrder(for providerId: String) -> Int {
+        switch providerId {
+        case "anthropic": return 0
+        case "openai", "azure_openai", "groq", "together", "deepseek",
+             "xai", "perplexity", "fireworks", "openrouter", "mistral":
+            return 1
+        case "gemini": return 2
+        case "cohere": return 3
+        default: return 99
+        }
+    }
+
+    /// Flagship model id for the family containing `providerId`. Mirrors
+    /// `DEFAULT_MODELS` in `packages/core/src/models.ts` — keep in sync
+    /// whenever that map changes.
+    private static func defaultFlagshipModel(for providerId: String) -> String? {
+        switch providerId {
+        case "anthropic":
+            return "claude-sonnet-4-6"
+        case "openai", "azure_openai", "groq", "together", "deepseek",
+             "xai", "perplexity", "fireworks", "openrouter", "mistral":
+            return "gpt-5.4"
+        case "gemini":
+            return "gemini-2.5-pro"
+        case "cohere":
+            return "command-a-03-2025"
+        default:
+            return nil
+        }
     }
 
     /// Best-effort `model` extraction from a JSON request body. Returns nil

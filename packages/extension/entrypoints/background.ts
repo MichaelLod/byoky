@@ -51,6 +51,7 @@ import {
   resolveCrossFamilyRoute,
   resolveCrossFamilyGiftRoute,
   resolveSameFamilySwapRoute,
+  resolveAutoCrossFamilyRoute,
   buildNoCredentialMessage,
 } from '@byoky/core';
 import type { Runtime } from 'wxt/browser';
@@ -1143,7 +1144,18 @@ export default defineBackground(() => {
         ? resolveSameFamilySwapRoute(group, req.id, credentials)
         : undefined;
 
-      const cred = groupPinnedCred ?? crossRoute?.cred ?? swapRoute?.cred ?? credentials.find((c) => c.providerId === req.id);
+      const directCred = credentials.find((c) => c.providerId === req.id);
+
+      // Auto cross-family translation: opportunistic fallback when the app
+      // has no group binding AND no direct credential for the requested
+      // provider. Picks any translatable credential the user holds so apps
+      // "just work" against mismatched keys. Group intent always wins — we
+      // only fire this when `group` is absent.
+      const autoRoute = !group && !directCred
+        ? resolveAutoCrossFamilyRoute(req.id, credentials)
+        : undefined;
+
+      const cred = groupPinnedCred ?? crossRoute?.cred ?? swapRoute?.cred ?? directCred ?? autoRoute?.cred;
       const gc = groupPinnedGift ?? crossGiftRoute?.gc ?? giftedCreds.find((g) => g.providerId === req.id && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens);
       // Group gift pin wins over everything. Cross-family gift route is
       // next. Otherwise group credential pin wins over gift preference.
@@ -1180,6 +1192,7 @@ export default defineBackground(() => {
         };
         if (crossRoute) sp.translation = crossRoute.translation;
         else if (swapRoute) sp.swap = swapRoute.swap;
+        else if (autoRoute) sp.translation = autoRoute.translation;
         else if (group && group.providerId === req.id && group.model) {
           sp.modelOverride = group.model;
         }
@@ -1317,11 +1330,13 @@ export default defineBackground(() => {
 
       case 'addCredential': {
         if (!masterPassword) return { error: 'Wallet is locked' };
-        const { providerId: cpId, label: cLabel, value: cValue, authMethod: cAuth } = message.payload as {
-          providerId: string; label: string; value: string; authMethod: 'api_key' | 'oauth';
+        const { providerId: cpId, label: cLabel, value: cValue, authMethod: cAuth, baseUrl: cBaseUrl } = message.payload as {
+          providerId: string; label: string; value: string; authMethod: 'api_key' | 'oauth'; baseUrl?: string;
         };
         const cleanValue = cValue.replace(/\s+/g, '');
-        const encValue = await encrypt(cleanValue, masterPassword);
+        // Local providers run unauthenticated — empty key is allowed and we skip
+        // the encryption step entirely, storing an empty string as the marker.
+        const encValue = cleanValue ? await encrypt(cleanValue, masterPassword) : '';
         const data = await browser.storage.local.get('credentials');
         const creds = (data.credentials ?? []) as Array<Record<string, unknown>>;
         const isFirstCredential = creds.length === 0;
@@ -1332,6 +1347,7 @@ export default defineBackground(() => {
           authMethod: cAuth,
           createdAt: Date.now(),
         };
+        if (cBaseUrl) newCred.baseUrl = cBaseUrl;
         if (cAuth === 'api_key') {
           newCred.encryptedKey = encValue;
         } else {
@@ -1363,7 +1379,7 @@ export default defineBackground(() => {
         }
 
         refreshSessionProviders();
-        fireVaultSync(newCred.id as string, cpId, cLabel, cAuth, cleanValue).catch(() => {});
+        fireVaultSync(newCred.id as string, cpId, cLabel, cAuth, cleanValue, cBaseUrl).catch(() => {});
         return { success: true };
       }
 
@@ -3863,7 +3879,11 @@ export default defineBackground(() => {
         const swapRoute = !crossRoute && !groupPinnedGift && !crossGiftRoute
           ? resolveSameFamilySwapRoute(group, providerId, credentials)
           : undefined;
-        const cred = groupPinnedCred ?? crossRoute?.cred ?? swapRoute?.cred ?? credentials.find(c => c.providerId === providerId);
+        const directCred = credentials.find(c => c.providerId === providerId);
+        const autoRoute = !group && !directCred
+          ? resolveAutoCrossFamilyRoute(providerId, credentials)
+          : undefined;
+        const cred = groupPinnedCred ?? crossRoute?.cred ?? swapRoute?.cred ?? directCred ?? autoRoute?.cred;
         const gc = groupPinnedGift ?? crossGiftRoute?.gc ?? giftedCreds.find(g => g.providerId === providerId && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens);
         const preferGift = !!groupPinnedGift || !!crossGiftRoute || (!groupPinnedCred && !crossRoute && !swapRoute && gc && giftPrefs[providerId] === gc.giftId);
         const useGift = preferGift || (!cred && gc);
@@ -3876,6 +3896,7 @@ export default defineBackground(() => {
           const sp: SessionProvider = { providerId, credentialId: cred.id, available: true, authMethod: cred.authMethod };
           if (crossRoute) sp.translation = crossRoute.translation;
           else if (swapRoute) sp.swap = swapRoute.swap;
+          else if (autoRoute) sp.translation = autoRoute.translation;
           else if (group && group.providerId === providerId && group.model) {
             sp.modelOverride = group.model;
           }
@@ -4836,6 +4857,7 @@ export default defineBackground(() => {
     authMethod: string,
     plainKey: string,
     token: string,
+    baseUrl?: string,
   ): Promise<void> {
     const vaultKey = await getVaultKey();
     if (!vaultKey) return;
@@ -4845,6 +4867,7 @@ export default defineBackground(() => {
       encryptedApiKey,
       label,
       authMethod,
+      baseUrl,
     }, token);
 
     if (result.status === 401) {
@@ -4937,6 +4960,7 @@ export default defineBackground(() => {
       label: string;
       authMethod: string;
       encryptedApiKey?: string;
+      baseUrl?: string;
       createdAt: number;
       updatedAt: number;
       deletedAt: number | null;
@@ -5025,6 +5049,7 @@ export default defineBackground(() => {
             label: remote.label,
             authMethod: remote.authMethod,
           };
+          if (remote.baseUrl) updated.baseUrl = remote.baseUrl; else delete updated.baseUrl;
           if (remote.authMethod === 'api_key') {
             updated.encryptedKey = encrypted;
             delete updated.encryptedAccessToken;
@@ -5049,6 +5074,7 @@ export default defineBackground(() => {
               label: remote.label,
               authMethod: remote.authMethod,
             };
+            if (remote.baseUrl) updated.baseUrl = remote.baseUrl; else delete updated.baseUrl;
             if (remote.authMethod === 'api_key') {
               updated.encryptedKey = encrypted;
               delete updated.encryptedAccessToken;
@@ -5072,6 +5098,7 @@ export default defineBackground(() => {
             authMethod: remote.authMethod,
             createdAt: remote.createdAt,
           };
+          if (remote.baseUrl) newCred.baseUrl = remote.baseUrl;
           if (remote.authMethod === 'api_key') {
             newCred.encryptedKey = encrypted;
           } else {
@@ -5176,7 +5203,7 @@ export default defineBackground(() => {
       try {
         const plainKey = await decryptCredentialKey(cred);
         await syncCredentialToVault(
-          cred.id, cred.providerId, cred.label, cred.authMethod, plainKey, state.token,
+          cred.id, cred.providerId, cred.label, cred.authMethod, plainKey, state.token, cred.baseUrl,
         );
       } catch {
         // Non-blocking — will retry next time
@@ -5197,7 +5224,7 @@ export default defineBackground(() => {
       try {
         const plainKey = await decryptCredentialKey(cred);
         await syncCredentialToVault(
-          cred.id, cred.providerId, cred.label, cred.authMethod, plainKey, token,
+          cred.id, cred.providerId, cred.label, cred.authMethod, plainKey, token, cred.baseUrl,
         );
       } catch {
         // Non-blocking — pending sync will pick these up
@@ -5205,14 +5232,14 @@ export default defineBackground(() => {
     }
   }
 
-  async function fireVaultSync(localId: string, providerId: string, label: string, authMethod: string, plainKey: string): Promise<void> {
+  async function fireVaultSync(localId: string, providerId: string, label: string, authMethod: string, plainKey: string, baseUrl?: string): Promise<void> {
     const state = await getCloudVaultState();
     if (!state.enabled || !state.token || state.tokenExpired) return;
     if (isVaultTokenExpired(state.tokenIssuedAt)) {
       await handleVaultAuthError();
       return;
     }
-    enqueueVaultSync(() => syncCredentialToVault(localId, providerId, label, authMethod, plainKey, state.token!));
+    enqueueVaultSync(() => syncCredentialToVault(localId, providerId, label, authMethod, plainKey, state.token!, baseUrl));
   }
 
   async function fireVaultRemove(localId: string): Promise<void> {

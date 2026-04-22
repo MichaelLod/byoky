@@ -361,10 +361,20 @@ export function ConnectedApps() {
                         .map((p) => {
                           const provider = PROVIDERS[p.providerId];
                           const isGift = p.giftId || activeGiftProviders.has(p.providerId);
+                          const dstProvider = p.translation
+                            ? (PROVIDERS[p.translation.dstProviderId]?.name ?? p.translation.dstProviderId)
+                            : p.swap
+                              ? (PROVIDERS[p.swap.dstProviderId]?.name ?? p.swap.dstProviderId)
+                              : null;
                           return (
                             <span key={p.providerId} className={`badge badge-provider${isGift ? ' badge-gift-provider' : ''}`}>
                               {provider?.name ?? p.providerId}
                               {isGift && <span className="gift-indicator"> (gift)</span>}
+                              {dstProvider && (
+                                <span className="route-indicator" title={p.translation ? `Translated to ${dstProvider} (${p.translation.dstModel})` : `Routed to ${dstProvider}`}>
+                                  {' → '}{dstProvider}
+                                </span>
+                              )}
                             </span>
                           );
                         })}
