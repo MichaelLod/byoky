@@ -23,7 +23,7 @@ export default defineConfig({
     // Bridge's native-messaging `allowed_origins` can whitelist a stable ID.
     // Chrome Web Store ignores this when signing the published extension, so
     // the Web Store ID (igjohldpldlahcjmefdhlnbcpldlgmon) is unaffected.
-    // Derived ID: ojbcjlaehdajgaifoonomninjhhchfkf.
+    // Derived ID: idlmdfkobnkdakcpiihighchdbbmbpep.
     key: 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1n3eqKldDp0wukl8t9fVQiKZ9J1jtwcww0isKDymSOUNDBvt3ppeuRV6+8eFQ0IfKRBnqP50BHxKG7tQSAyFbNXSzFUPA6DSeFM4JVnynF6TL6FVFEPbnoGoEJp0m8T7FQMIbXKU5zTjjgeBQPffpwshOyrO3G+NcoIqSqIR/6sTRNFcOsfxaBheQf7zYAVuDTcMuOUHw4rI7FXv59Z+EwmszfUZYN/okDBtRrmsjOArNMSmr33Z9JDcGfMVnf0Iv96mbJmCQ+TPvDmV7Y7Ur/CA4M17BY/3r6sV7Th0GwCgm0sLmrfEJg6PQLPthlpQkyk1p2lOXA5iHFRoFKkZKwIDAQAB',
     permissions: ['storage', 'sidePanel', 'identity', 'nativeMessaging', 'alarms'],
     content_security_policy: {

@@ -50,7 +50,7 @@ const PUBLISHED_EXTENSION_ID = 'igjohldpldlahcjmefdhlnbcpldlgmon';
 // Derived from the `key` field pinned in packages/extension/wxt.config.ts.
 // Covers WXT dev builds and any unpacked/sideloaded build produced from this
 // repo — so Chrome Web Store lag doesn't block Bridge users.
-const UNPACKED_EXTENSION_ID = 'ojbcjlaehdajgaifoonomninjhhchfkf';
+const UNPACKED_EXTENSION_ID = 'idlmdfkobnkdakcpiihighchdbbmbpep';
 
 function buildManifest(hostPath: string, browserType: 'chrome' | 'firefox', extensionId?: string): object {
   const base = {

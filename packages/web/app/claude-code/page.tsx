@@ -214,7 +214,7 @@ function VersionHint() {
       </svg>
       <span>
         Requires Byoky extension <strong>v0.9.1+</strong> and{' '}
-        <code>@byoky/bridge@0.9.1+</code>. Firefox is live on AMO; Chrome
+        <code>@byoky/bridge@0.9.2+</code>. Firefox is live on AMO; Chrome
         Web Store is still on 0.7.4 in review, so{' '}
         <a
           className="oc-link"
@@ -323,8 +323,9 @@ function Troubleshooting() {
     [
       'The bridge works but Chrome won’t talk to it on my unpacked build',
       <>
-        Bridge 0.9.1+ whitelists both the Web Store extension ID and the
-        pinned unpacked ID. Upgrade with{' '}
+        Bridge 0.9.2+ whitelists both the Web Store extension ID and the
+        pinned unpacked ID (0.9.1 shipped with the wrong unpacked ID).
+        Upgrade with{' '}
         <code>npm i -g @byoky/bridge@latest &amp;&amp; byoky-bridge install</code>,
         restart the browser, and reload the unpacked extension.
       </>,
