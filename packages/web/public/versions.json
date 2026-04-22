@@ -21,9 +21,8 @@
     },
     {
       "platform": "Android",
-      "version": "1.0.19",
-      "status": "live",
-      "pending": "1.0.20"
+      "version": "1.0.20",
+      "status": "live"
     },
     {
       "platform": "npm",
