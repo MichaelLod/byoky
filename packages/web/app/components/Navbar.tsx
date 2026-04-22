@@ -87,6 +87,7 @@ export function Navbar() {
     { href: '/token-pool', label: 'Token Pool', match: (p) => p.startsWith('/token-pool') || p.startsWith('/marketplace') },
     { href: '/demo', label: 'Demo', match: (p) => p.startsWith('/demo') },
     { href: '/openclaw', label: 'OpenClaw', match: (p) => p.startsWith('/openclaw') },
+    { href: '/claude-code', label: 'Claude Code', match: (p) => p.startsWith('/claude-code') },
     { href: '/blog', label: 'Blog', match: (p) => p.startsWith('/blog') },
     { href: '/docs', label: 'Docs', match: (p) => p.startsWith('/docs') },
   ];
