@@ -34,18 +34,16 @@ export default function ClaudeCodeTutorial() {
         <Step
           n={1}
           title="Install the Byoky wallet"
-          subtitle="The wallet holds the Anthropic credential (yours, gifted, or a Claude Pro/Max setup token) and proxies every request."
+          subtitle="The wallet holds the Anthropic credential (yours, gifted, or a Claude Pro/Max setup token) and proxies every request. Claude Code runs on your desktop, so the wallet needs to live in a desktop browser on the same machine."
         >
-          <p>Pick the version for your machine:</p>
+          <p>Pick your browser:</p>
           <div className="oc-install-grid">
             <a
               className="oc-install-card"
-              href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon"
-              target="_blank"
-              rel="noopener noreferrer"
+              href="https://github.com/MichaelLod/byoky/releases/download/v0.9.1/byoky-chrome-v0.9.1.zip"
             >
               <svg width="20" height="20" viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="#fff" stroke="#ddd" strokeWidth="1"/><path d="M24 8a16 16 0 0 1 13.86 8H24v0z" fill="#EA4335"/><path d="M37.86 16A16 16 0 0 1 24 40l6.93-12z" fill="#FBBC05"/><path d="M24 40A16 16 0 0 1 10.14 16l6.93 12z" fill="#34A853"/><path d="M10.14 16A16 16 0 0 1 24 8v8z" fill="#4285F4"/><circle cx="24" cy="24" r="6" fill="#fff"/><circle cx="24" cy="24" r="4" fill="#4285F4"/></svg>
-              <span>Chrome</span>
+              <span>Chrome — v0.9.1 unpacked</span>
             </a>
             <a
               className="oc-install-card"
@@ -56,27 +54,19 @@ export default function ClaudeCodeTutorial() {
               <svg width="20" height="20" viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="#fff" stroke="#ddd" strokeWidth="1"/><path d="M38 18c-1-4-4-7-8-9 2 2 3 5 3 7 0 3-2 6-5 7-4 1-7-1-7-1s1 5 6 6c4 1 8-1 10-4 1-1 1-3 1-6z" fill="#FF4F00"/><path d="M14 30c-1-3 0-6 2-9 1-2 3-3 5-4-2 2-3 4-2 7 0 2 2 4 4 5 3 1 6 0 7-2-1 3-4 6-8 6-3 1-6-1-8-3z" fill="#FF9500"/></svg>
               <span>Firefox</span>
             </a>
-            <a
-              className="oc-install-card"
-              href="https://apps.apple.com/app/byoky/id6760779919"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="#999"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
-              <span>iOS</span>
-            </a>
-            <a
-              className="oc-install-card"
-              href="https://play.google.com/store/apps/details?id=com.byoky.app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="#3DDC84"><path d="M17.523 15.341a.91.91 0 0 0 .916-.907V9.478a.91.91 0 0 0-.916-.907.91.91 0 0 0-.917.907v4.956a.91.91 0 0 0 .917.907zm-11.046 0a.91.91 0 0 0 .917-.907V9.478a.91.91 0 0 0-.917-.907.91.91 0 0 0-.916.907v4.956a.91.91 0 0 0 .916.907zm1.48 5.178c0 .504.41.912.916.912h.95v2.66a.91.91 0 0 0 .916.909.91.91 0 0 0 .917-.908v-2.66h1.688v2.66a.91.91 0 0 0 .916.909.91.91 0 0 0 .917-.908v-2.66h.95a.914.914 0 0 0 .916-.913V8.879H7.957v11.64zM15.4 3.11l1.124-1.727a.235.235 0 0 0-.073-.324.237.237 0 0 0-.326.072l-1.14 1.75A6.813 6.813 0 0 0 12 2.321c-1.07 0-2.08.195-3.003.56L7.857 1.13a.236.236 0 0 0-.325-.072.235.235 0 0 0-.073.324L8.583 3.11C6.572 4.12 5.204 6.071 5.204 8.338h13.592c0-2.267-1.368-4.219-3.396-5.228z"/></svg>
-              <span>Android</span>
-            </a>
           </div>
           <p className="oc-note">
-            Open the wallet, set a password, and you&apos;re ready. No accounts, no email.
+            <strong>Version 0.9.1+ is required</strong> for Claude Code. The
+            Chrome Web Store is still serving 0.7.4 — download the unpacked
+            zip above and load it via <code>chrome://extensions</code> →{' '}
+            enable Developer mode → &quot;Load unpacked&quot; on the extracted
+            folder. Firefox is already on the required version.
+          </p>
+          <p className="oc-note oc-note-muted">
+            iOS and Android wallets exist but can&apos;t host Claude Code —
+            the <code>claude</code> CLI and the Byoky Bridge need a desktop
+            OS. (The mobile wallets are for gift senders or browsing the
+            token pool on the go.)
           </p>
         </Step>
 
@@ -223,32 +213,13 @@ function VersionHint() {
         <path d="M12 8h.01" />
       </svg>
       <span>
-        Requires the Byoky extension <strong>v0.9.1+</strong> and{' '}
-        <code>@byoky/bridge@0.9.1+</code>. Available now on{' '}
-        <a
-          className="oc-link"
-          href="https://addons.mozilla.org/en-US/firefox/addon/byoky/"
-          target="_blank"
-          rel="noopener noreferrer"
-        >Firefox</a>
-        {' '}and{' '}
-        <a
-          className="oc-link"
-          href="https://play.google.com/store/apps/details?id=com.byoky.app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >Android</a>
-        {' '}and{' '}
-        <a
-          className="oc-link"
-          href="https://apps.apple.com/app/byoky/id6760779919"
-          target="_blank"
-          rel="noopener noreferrer"
-        >iOS</a>. On Chrome,{' '}
+        Requires Byoky extension <strong>v0.9.1+</strong> and{' '}
+        <code>@byoky/bridge@0.9.1+</code>. Firefox is live on AMO; Chrome
+        Web Store is still on 0.7.4 in review, so{' '}
         <a
           className="oc-link"
           href="https://github.com/MichaelLod/byoky/releases/download/v0.9.1/byoky-chrome-v0.9.1.zip"
-        >load v0.9.1 unpacked</a> while the store update is in review.
+        >load the v0.9.1 unpacked build</a> for now.
       </span>
     </div>
   );
