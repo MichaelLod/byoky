@@ -37,6 +37,7 @@ export default function OpenClawTutorial() {
     <div className="oc-page">
       <div className="container oc-container">
         <Hero />
+        <VersionHint />
         <FreeCallout />
         <Step
           n={1}
@@ -235,6 +236,35 @@ function Hero() {
         <InstallWithAI />
       </div>
     </header>
+  );
+}
+
+function VersionHint() {
+  return (
+    <div className="oc-version-hint" role="note">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <circle cx="12" cy="12" r="10" />
+        <path d="M12 16v-4" />
+        <path d="M12 8h.01" />
+      </svg>
+      <span>
+        Requires the Byoky extension <strong>v0.9.0+</strong>. Available now on{' '}
+        <a
+          className="oc-link"
+          href="https://addons.mozilla.org/en-US/firefox/addon/byoky/"
+          target="_blank"
+          rel="noopener noreferrer"
+        >Firefox</a>
+        {' '}and{' '}
+        <a
+          className="oc-link"
+          href="https://play.google.com/store/apps/details?id=com.byoky.app"
+          target="_blank"
+          rel="noopener noreferrer"
+        >Android</a>
+        . On Chrome, load v0.9.0 unpacked while the store update is in review.
+      </span>
+    </div>
   );
 }
 
@@ -632,6 +662,28 @@ const styles = `
   .oc-ai-cta { flex-direction: column; align-items: stretch; gap: 14px; }
   .oc-ai-cta-btn { justify-content: center; }
 }
+
+/* ── Version hint ── */
+.oc-version-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: -32px auto 40px;
+  max-width: 680px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: rgba(234, 179, 8, 0.08);
+  border: 1px solid rgba(234, 179, 8, 0.3);
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+.oc-version-hint svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: #b45309;
+}
+.oc-version-hint strong { color: var(--text); }
 
 /* ── Two free paths ── */
 .oc-paths {
