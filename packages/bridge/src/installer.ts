@@ -47,7 +47,10 @@ function createNativeWrapper(hostPath: string, manifestDir: string): string {
 }
 
 const PUBLISHED_EXTENSION_ID = 'igjohldpldlahcjmefdhlnbcpldlgmon';
-const DEV_EXTENSION_ID = 'ahhecmfcclkjdgjnmackoacldnmgmipl';
+// Derived from the `key` field pinned in packages/extension/wxt.config.ts.
+// Covers WXT dev builds and any unpacked/sideloaded build produced from this
+// repo — so Chrome Web Store lag doesn't block Bridge users.
+const UNPACKED_EXTENSION_ID = 'ojbcjlaehdajgaifoonomninjhhchfkf';
 
 function buildManifest(hostPath: string, browserType: 'chrome' | 'firefox', extensionId?: string): object {
   const base = {
@@ -62,7 +65,7 @@ function buildManifest(hostPath: string, browserType: 'chrome' | 'firefox', exte
       ? [`chrome-extension://${extensionId}/`]
       : [
           `chrome-extension://${PUBLISHED_EXTENSION_ID}/`,
-          `chrome-extension://${DEV_EXTENSION_ID}/`,
+          `chrome-extension://${UNPACKED_EXTENSION_ID}/`,
         ];
     return {
       ...base,
