@@ -52,8 +52,11 @@ if (command === 'install' || command === 'uninstall' || command === 'status') {
     if (providers.includes('anthropic')) {
       console.log('\nRun Claude Code:');
       console.log('  export ANTHROPIC_BASE_URL=http://127.0.0.1:' + result.port + '/anthropic');
-      console.log('  export ANTHROPIC_AUTH_TOKEN=byoky');
+      console.log('  export ANTHROPIC_API_KEY=byoky');
       console.log('  claude');
+      console.log('\nNote: use ANTHROPIC_API_KEY (not AUTH_TOKEN) — Claude Code\'s first-run');
+      console.log('wizard checks API_KEY to skip the OAuth login prompt. The bridge strips');
+      console.log('the header and injects the real credential from your wallet.');
     }
     process.exit(0);
   } catch (e) {

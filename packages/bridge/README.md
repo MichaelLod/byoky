@@ -42,7 +42,9 @@ Point your client at it:
 
 ```bash
 export ANTHROPIC_BASE_URL=http://127.0.0.1:19280/anthropic
-export ANTHROPIC_AUTH_TOKEN=byoky  # any non-empty value; bridge strips the header
+export ANTHROPIC_API_KEY=byoky  # any non-empty value; bridge strips the header
+# Use ANTHROPIC_API_KEY, not ANTHROPIC_AUTH_TOKEN — API_KEY is what Claude Code's
+# first-run wizard checks to skip the OAuth login prompt.
 claude
 ```
 

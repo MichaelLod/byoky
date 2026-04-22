@@ -144,17 +144,27 @@ byoky-bridge install`}</Code>
           subtitle="Two env vars and you're done."
         >
           <Code>{`export ANTHROPIC_BASE_URL=http://127.0.0.1:19280/anthropic
-export ANTHROPIC_AUTH_TOKEN=byoky
+export ANTHROPIC_API_KEY=byoky
 claude`}</Code>
           <p>
             Add the two <code>export</code> lines to <code>~/.zshrc</code> or{' '}
-            <code>~/.bashrc</code> so new terminals pick them up. The token
-            value doesn&apos;t matter — the bridge strips the{' '}
-            <code>Authorization</code> header and injects the real credential
-            from your wallet. Token usage shows up in the wallet&apos;s{' '}
-            <strong>Sessions</strong> view. If you&apos;re using a gifted
-            credential, the gifter&apos;s budget ticks down in real time and
-            the session stops cleanly when it hits zero.
+            <code>~/.bashrc</code> so new terminals pick them up. Use{' '}
+            <code>ANTHROPIC_API_KEY</code> (not <code>AUTH_TOKEN</code>) — it&apos;s
+            what Claude Code&apos;s first-run wizard checks to skip the OAuth
+            login prompt. The value doesn&apos;t matter; the bridge strips the
+            auth header and injects the real credential from your wallet. Token
+            usage shows up in the wallet&apos;s <strong>Sessions</strong> view.
+            If you&apos;re using a gifted credential, the gifter&apos;s budget
+            ticks down in real time and the session stops cleanly when it hits
+            zero.
+          </p>
+          <p className="oc-note oc-note-muted">
+            <strong>Fresh Claude Code install?</strong> The wizard may still
+            show a brief theme picker — arrow-key through it and it&apos;ll land
+            you in chat once it sees <code>ANTHROPIC_API_KEY</code>. If it still
+            shows an OAuth URL to <code>platform.claude.com</code>, you have a
+            stale <code>~/.claude.json</code> — delete it and re-run{' '}
+            <code>claude</code>.
           </p>
           <p className="oc-note oc-note-muted">
             Pro tip: run <code>claude --model claude-sonnet-4-5</code> (or
@@ -217,7 +227,7 @@ function VersionHint() {
       </svg>
       <span>
         Requires Byoky extension <strong>v0.9.1+</strong> and{' '}
-        <code>@byoky/bridge@0.9.3+</code> (for <code>byoky-bridge connect</code>).
+        <code>@byoky/bridge@0.9.4+</code> (for <code>byoky-bridge connect</code>).
         Firefox is live on AMO; Chrome Web Store is still on 0.7.4 in review, so{' '}
         <a
           className="oc-link"

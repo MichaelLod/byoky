@@ -24,9 +24,9 @@ Your job — run these commands on my machine and report each step:
      byoky-bridge connect
    This opens a browser tab on http://127.0.0.1:<ephemeral>, I click "Connect wallet", approve the session in the Byoky popup, and the CLI reports "Bridge listening on http://127.0.0.1:19280". The bridge stays up as long as my browser is running — after a restart, re-run \`byoky-bridge connect\` to bring it back. If the CLI errors with "SDK failed to load", make sure I'm on @byoky/bridge@0.9.3 or later (\`byoky-bridge --help\` should list a \`connect\` command).
 
-4. Point Claude Code at the local Byoky bridge. The bridge exposes Anthropic at /anthropic — every request is rewritten to api.anthropic.com on the other side. \`ANTHROPIC_AUTH_TOKEN\` is required by the CLI but the bridge strips the header, so any non-empty value works:
+4. Point Claude Code at the local Byoky bridge. The bridge exposes Anthropic at /anthropic — every request is rewritten to api.anthropic.com on the other side. Use \`ANTHROPIC_API_KEY\` (not AUTH_TOKEN) — that's what Claude Code's first-run wizard checks to skip the OAuth login prompt. The bridge strips the header and injects the real credential, so any non-empty value works:
      export ANTHROPIC_BASE_URL=http://127.0.0.1:19280/anthropic
-     export ANTHROPIC_AUTH_TOKEN=byoky
+     export ANTHROPIC_API_KEY=byoky
    Add both lines to my shell profile (~/.zshrc or ~/.bashrc) so new terminals pick them up.
 
 5. Verify the bridge is up and Anthropic is in the provider list:
@@ -36,6 +36,7 @@ Your job — run these commands on my machine and report each step:
 
 6. Start Claude Code:
      claude
+   Fresh-install note: if Claude Code shows an OAuth URL pointing to platform.claude.com, it's not reading the env vars. Check ANTHROPIC_API_KEY is set in this shell, delete ~/.claude.json (stale onboarding state), and retry.
 
 Troubleshooting cheatsheet (only mention if the relevant error shows up):
 - "Third-party apps now draw from your extra usage" → the wallet is not treating this as first-party Claude Code. This is usually because the credential is an API key, not an OAuth setup token. Ask me to run \`claude setup-token\` and paste the result into the wallet.
