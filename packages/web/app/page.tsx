@@ -4,6 +4,7 @@ import { VersionStatus } from './components/VersionStatus';
 import { ProviderMarquee } from './components/ProviderMarquee';
 import { GitHubStars } from './components/GitHubStars';
 import { GitHubStarButton } from './components/GitHubStarButton';
+import { DiscordButton } from './components/DiscordButton';
 import { ExtensionMock, type MockScene } from './components/ExtensionMock';
 import { AppsShowcase } from './components/AppsShowcase';
 import { WhatsAppChat } from './components/WhatsAppChat';
@@ -874,6 +875,7 @@ function ClosingStrip() {
           <span className="closing-strip-label">Open source · MIT licensed</span>
           <div className="closing-strip-actions">
             <GitHubStarButton repo="MichaelLod/byoky" />
+            <DiscordButton invite="gRs8S9fxcT" />
             <InstallWalletButton className="btn btn-primary btn-sm">
               Install Wallet
             </InstallWalletButton>
