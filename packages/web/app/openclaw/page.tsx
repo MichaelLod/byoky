@@ -262,7 +262,7 @@ function VersionHint() {
           target="_blank"
           rel="noopener noreferrer"
         >Android</a>
-        . On Chrome, load v0.9.0 unpacked while the store update is in review.
+. On Chrome, load v0.9.0 unpacked while the store update is in review. <strong>iOS</strong> support is in flight — coming soon.
       </span>
     </div>
   );
