@@ -4,6 +4,7 @@ import {
   resolveCrossFamilyRoute,
   resolveCrossFamilyGiftRoute,
   resolveSameFamilySwapRoute,
+  resolveAutoCrossFamilyRoute,
   buildNoCredentialMessage,
 } from '../src/routing.js';
 import type { Credential, Group } from '../src/types.js';
@@ -161,10 +162,13 @@ describe('resolveRoute', () => {
       expect(decision!.swap).toBeUndefined();
     });
 
-    it('returns null when no credential matches', () => {
+    it('returns null when no credential matches and nothing translatable', () => {
+      // Requesting an unknown provider with credentials only in other
+      // families — auto cross-family also can't fire because the source is
+      // outside any known family.
       const credentials = [cred('c1', 'anthropic')];
 
-      const decision = resolveRoute('openai', undefined, credentials);
+      const decision = resolveRoute('unknown' as never, undefined, credentials);
 
       expect(decision).toBeNull();
     });
@@ -379,5 +383,116 @@ describe('buildNoCredentialMessage', () => {
   it('tells the user the wallet is empty when there are no credentials', () => {
     const msg = buildNoCredentialMessage('openai', [], undefined);
     expect(msg).toContain('No API keys in your wallet');
+  });
+});
+
+describe('auto cross-family translation', () => {
+  function credAt(id: string, providerId: string, lastUsedAt?: number): Credential {
+    return { ...cred(id, providerId), lastUsedAt };
+  }
+
+  it('auto-translates openai → anthropic when user only has an anthropic key', () => {
+    const credentials = [cred('c1', 'anthropic')];
+
+    const decision = resolveRoute('openai', undefined, credentials);
+
+    expect(decision).not.toBeNull();
+    expect(decision!.credential.id).toBe('c1');
+    expect(decision!.translation).toEqual({
+      srcProviderId: 'openai',
+      dstProviderId: 'anthropic',
+      dstModel: 'claude-sonnet-4-6',
+    });
+    expect(decision!.swap).toBeUndefined();
+  });
+
+  it('auto-translates gemini → openai against the openai flagship', () => {
+    const credentials = [cred('c1', 'openai')];
+
+    const decision = resolveRoute('gemini', undefined, credentials);
+
+    expect(decision!.credential.id).toBe('c1');
+    expect(decision!.translation?.dstProviderId).toBe('openai');
+    expect(decision!.translation?.dstModel).toBe('gpt-5.4');
+  });
+
+  it('does not fire when a direct credential exists', () => {
+    const credentials = [cred('c1', 'openai'), cred('c2', 'anthropic')];
+
+    const decision = resolveRoute('openai', undefined, credentials);
+
+    expect(decision!.credential.id).toBe('c1');
+    expect(decision!.translation).toBeUndefined();
+  });
+
+  it('is skipped when a group is set — group cross-family rules still win', () => {
+    const credentials = [cred('c1', 'anthropic'), cred('c2', 'gemini')];
+    // Group binds gemini without a model → step 1 (cross-family) rejects it
+    // for lack of model, step 2 (same-family) rejects it (different family),
+    // step 3 (direct) fails (no openai cred). Auto must NOT pick anthropic
+    // here — the group explicitly pointed to gemini, and silently routing
+    // past the group's intent would overwrite user config.
+    const g = group('gemini'); // no model → cross-family disabled
+
+    const decision = resolveRoute('openai', g, credentials);
+
+    expect(decision).toBeNull();
+  });
+
+  it('still returns null when group binds to the requested provider and no credential matches', () => {
+    const credentials = [cred('c1', 'anthropic')];
+    // Group pins openai (=requested) but user holds no openai credential.
+    // Auto must not kick in here either — the group's own rules take over.
+    const g = group('openai');
+
+    const decision = resolveRoute('openai', g, credentials);
+
+    expect(decision).toBeNull();
+  });
+
+  it('picks the most-recently-used candidate across families', () => {
+    const credentials = [
+      credAt('c1', 'anthropic', 100), // used earlier
+      credAt('c2', 'gemini', 500),    // most recent
+    ];
+
+    const decision = resolveAutoCrossFamilyRoute('openai', credentials);
+
+    expect(decision!.cred.id).toBe('c2');
+    expect(decision!.translation.dstProviderId).toBe('gemini');
+  });
+
+  it('tiebreaks by family order (anthropic > openai > gemini > cohere) when no lastUsedAt', () => {
+    const credentials = [cred('c1', 'cohere'), cred('c2', 'gemini'), cred('c3', 'anthropic')];
+
+    const decision = resolveAutoCrossFamilyRoute('openai', credentials);
+
+    expect(decision!.cred.id).toBe('c3');
+  });
+
+  it('tiebreaks by createdAt desc when lastUsedAt and family are equal', () => {
+    const a: Credential = { ...cred('c1', 'anthropic'), createdAt: 100 };
+    const b: Credential = { ...cred('c2', 'anthropic'), createdAt: 500 };
+
+    const decision = resolveAutoCrossFamilyRoute('openai', [a, b]);
+
+    expect(decision!.cred.id).toBe('c2');
+  });
+
+  it('returns undefined when no held credential is in a translatable family', () => {
+    // Unknown provider id → not in any family registry → resolveAutoCrossFamilyRoute skips it.
+    const credentials = [cred('c1', 'unknown' as never)];
+
+    const decision = resolveAutoCrossFamilyRoute('openai', credentials);
+
+    expect(decision).toBeUndefined();
+  });
+
+  it('returns undefined when the requested provider itself is unknown', () => {
+    const credentials = [cred('c1', 'anthropic')];
+
+    const decision = resolveAutoCrossFamilyRoute('unknown' as never, credentials);
+
+    expect(decision).toBeUndefined();
   });
 });

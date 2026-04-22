@@ -20,7 +20,12 @@
  *      a URL rewrite + credential swap + optional model substitution.
  *   3. Direct credential — no group, or group binds to the same provider the
  *      SDK called. Standard pass-through.
- *   4. None of the above — the caller should surface a NO_CREDENTIAL error
+ *   4. Auto cross-family translation — no group, no direct credential, but the
+ *      user holds a credential in a different translatable family. Silently
+ *      pick one (most-recently-used first, then family order) and translate
+ *      against the family flagship model. This is opportunistic: group rules
+ *      above still win, so explicit user config is never overwritten.
+ *   5. None of the above — the caller should surface a NO_CREDENTIAL error
  *      built via buildNoCredentialMessage to give the user actionable advice.
  */
 
@@ -38,6 +43,8 @@ import { isGiftExpired } from './gift.js';
 // shouldTranslate / sameFamily consult. Without this, every consumer would
 // need to import the barrel themselves before calling the resolver.
 import { shouldTranslate, sameFamily } from './translate/index.js';
+import { familyOf } from './translate/families.js';
+import { DEFAULT_MODELS, type ModelFamily } from './models.js';
 
 /**
  * The full routing decision for a single (requestedProviderId, group) pair.
@@ -109,7 +116,92 @@ export function resolveRoute(
   const direct = credentials.find((c) => c.providerId === requestedProviderId);
   if (direct) return { credential: direct, modelOverride };
 
+  // 4. Auto cross-family translation. Opportunistic fallback — fires only
+  //    when steps 1–3 all miss AND the app has no group binding. A group
+  //    expresses the user's explicit routing intent, so we never silently
+  //    route around it even when every group-based path fails to resolve a
+  //    credential (stale pin, missing dst key, etc.) — returning null in
+  //    those cases surfaces the stale config via NO_CREDENTIAL so the user
+  //    notices and fixes it.
+  if (!group) {
+    const auto = resolveAutoCrossFamilyRoute(requestedProviderId, credentials);
+    if (auto) {
+      return { credential: auto.cred, translation: auto.translation };
+    }
+  }
+
   return null;
+}
+
+/**
+ * Auto cross-family translation — tier-4 fallback. Fires when the user has
+ * no credential for the requested provider and no group binding steering
+ * them elsewhere. Picks any translatable credential they hold, targeting the
+ * family flagship via DEFAULT_MODELS.
+ *
+ * Candidate ordering:
+ *  1. Most-recently-used credential first (lastUsedAt desc). A user who just
+ *     approved a request against their Anthropic key almost certainly wants
+ *     the next cross-family hit to land there too.
+ *  2. Tiebreak by family preference: anthropic > openai > gemini > cohere.
+ *     Arbitrary but deterministic — picks the family with the broadest
+ *     translation coverage first.
+ *  3. Tiebreak by createdAt desc (newest credential first).
+ *
+ * Returns undefined in three cases:
+ *  - the user already holds a credential for the requested provider (caller
+ *    will have picked that via the direct path and never reach us; this is
+ *    defensive)
+ *  - the requested provider itself is outside any known family (translation
+ *    needs both ends in a family)
+ *  - no credential in the user's wallet is translatable against the request
+ */
+export function resolveAutoCrossFamilyRoute(
+  requestedProviderId: ProviderId,
+  credentials: Credential[],
+): { cred: Credential; translation: SessionTranslation } | undefined {
+  if (credentials.some((c) => c.providerId === requestedProviderId)) {
+    return undefined;
+  }
+  if (!familyOf(requestedProviderId)) return undefined;
+
+  const sorted = [...credentials].sort((a, b) => {
+    const byUse = (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0);
+    if (byUse !== 0) return byUse;
+    const byFamily = familyOrder(a.providerId) - familyOrder(b.providerId);
+    if (byFamily !== 0) return byFamily;
+    return b.createdAt - a.createdAt;
+  });
+
+  for (const cred of sorted) {
+    if (!shouldTranslate(requestedProviderId, cred.providerId)) continue;
+    const dstFamily = familyOf(cred.providerId);
+    if (!dstFamily) continue;
+    const dstModel = DEFAULT_MODELS[dstFamily];
+    if (!dstModel) continue;
+    return {
+      cred,
+      translation: {
+        srcProviderId: requestedProviderId,
+        dstProviderId: cred.providerId,
+        dstModel,
+      },
+    };
+  }
+
+  return undefined;
+}
+
+const FAMILY_ORDER: Record<ModelFamily, number> = {
+  anthropic: 0,
+  openai: 1,
+  gemini: 2,
+  cohere: 3,
+};
+
+function familyOrder(providerId: ProviderId): number {
+  const f = familyOf(providerId);
+  return f ? FAMILY_ORDER[f] : 99;
 }
 
 /**
