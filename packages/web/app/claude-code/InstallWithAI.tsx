@@ -15,28 +15,31 @@ Your job — run these commands on my machine and report each step:
      npm install -g @anthropic-ai/claude-code
    Verify with \`claude --version\`.
 
-2. Install the Byoky bridge and register the native messaging host:
+2. Install the Byoky bridge (v0.9.3+) and register the native messaging host:
      npm install -g @byoky/bridge
      byoky-bridge install
    The install command writes a native messaging manifest that whitelists the Byoky extension. Restart the browser afterwards so Chrome picks it up.
 
-3. Point Claude Code at the local Byoky bridge. The bridge exposes Anthropic at /anthropic — every request is rewritten to api.anthropic.com on the other side. \`ANTHROPIC_API_KEY\` is required by the CLI but the bridge strips the header, so any non-empty value works:
+3. Start the bridge proxy by connecting my wallet:
+     byoky-bridge connect
+   This opens a browser tab on http://127.0.0.1:<ephemeral>, I click "Connect wallet", approve the session in the Byoky popup, and the CLI reports "Bridge listening on http://127.0.0.1:19280". The bridge stays up as long as my browser is running — after a restart, re-run \`byoky-bridge connect\` to bring it back. If the CLI errors with "SDK failed to load", make sure I'm on @byoky/bridge@0.9.3 or later (\`byoky-bridge --help\` should list a \`connect\` command).
+
+4. Point Claude Code at the local Byoky bridge. The bridge exposes Anthropic at /anthropic — every request is rewritten to api.anthropic.com on the other side. \`ANTHROPIC_AUTH_TOKEN\` is required by the CLI but the bridge strips the header, so any non-empty value works:
      export ANTHROPIC_BASE_URL=http://127.0.0.1:19280/anthropic
      export ANTHROPIC_AUTH_TOKEN=byoky
    Add both lines to my shell profile (~/.zshrc or ~/.bashrc) so new terminals pick them up.
 
-4. Verify the bridge is up and Anthropic is in the provider list:
+5. Verify the bridge is up and Anthropic is in the provider list:
      curl http://127.0.0.1:19280/health
    Expected: {"status":"ok","providers":[..., "anthropic", ...]}
    If anthropic is missing, the wallet doesn't have an Anthropic credential or gift — tell me to add one and stop.
 
-5. Start Claude Code:
+6. Start Claude Code:
      claude
-   Ask me to open a Byoky session request if one pops up in the wallet popup — Claude Code's first request triggers a permission prompt.
 
 Troubleshooting cheatsheet (only mention if the relevant error shows up):
 - "Third-party apps now draw from your extra usage" → the wallet is not treating this as first-party Claude Code. This is usually because the credential is an API key, not an OAuth setup token. Ask me to run \`claude setup-token\` and paste the result into the wallet.
-- "ECONNREFUSED 127.0.0.1:19280" → the bridge isn't running. The extension starts the bridge on first session; open the wallet popup once and try again.
+- "ECONNREFUSED 127.0.0.1:19280" → the bridge proxy isn't running. Run \`byoky-bridge connect\` (or re-run it if the browser was restarted).
 - "invalid x-api-key" or "Invalid bearer token" → the wallet credential is bad or expired. Swap it or use a gift.
 - "rate_limit_error" on a gift → the gifter's upstream cap is being throttled. Try a different gift and wait a few minutes.
 - Claude Code complains about missing model → override with \`--model claude-sonnet-4-5\` (or another model the gifter/wallet has access to).

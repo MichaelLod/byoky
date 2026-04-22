@@ -116,19 +116,18 @@ byoky-bridge install`}</Code>
 
         <Step
           n={4}
-          title="Point Claude Code at the bridge"
-          subtitle="Two environment variables — that's the whole config."
+          title="Connect the wallet"
+          subtitle="One command that opens the browser, approves a session, and starts the bridge proxy on :19280."
         >
-          <Code>{`export ANTHROPIC_BASE_URL=http://127.0.0.1:19280/anthropic
-export ANTHROPIC_AUTH_TOKEN=byoky`}</Code>
+          <Code>{`byoky-bridge connect`}</Code>
           <p>
-            Add both lines to <code>~/.zshrc</code> or <code>~/.bashrc</code>{' '}
-            so new terminals pick them up. The token value doesn&apos;t
-            matter — the bridge strips the <code>Authorization</code> header
-            and injects the real credential from your wallet. <code>byoky</code>{' '}
-            is just a placeholder so the CLI doesn&apos;t abort on startup.
+            A browser tab opens on <code>http://127.0.0.1:&lt;ephemeral&gt;</code>.
+            Click <strong>Connect wallet</strong>, approve the session in the
+            Byoky popup, and the tab reports success. The bridge is now
+            listening on <code>127.0.0.1:19280</code> and stays up as long as
+            your browser is running. Re-run the command after a browser restart.
           </p>
-          <p>Verify the bridge is up and Anthropic is available:</p>
+          <p>Verify it:</p>
           <Code>
             {`curl http://127.0.0.1:19280/health
 # → {"status":"ok","providers":["anthropic",...]}`}
@@ -141,14 +140,18 @@ export ANTHROPIC_AUTH_TOKEN=byoky`}</Code>
 
         <Step
           n={5}
-          title="Run Claude Code"
-          subtitle="That's the whole setup. Every claude request routes through your wallet."
+          title="Point Claude Code at the bridge and run"
+          subtitle="Two env vars and you're done."
         >
-          <Code>{`claude`}</Code>
+          <Code>{`export ANTHROPIC_BASE_URL=http://127.0.0.1:19280/anthropic
+export ANTHROPIC_AUTH_TOKEN=byoky
+claude`}</Code>
           <p>
-            The first request triggers a permission prompt in the Byoky
-            popup — approve the session and subsequent requests flow through
-            silently. Token usage shows up in the wallet&apos;s{' '}
+            Add the two <code>export</code> lines to <code>~/.zshrc</code> or{' '}
+            <code>~/.bashrc</code> so new terminals pick them up. The token
+            value doesn&apos;t matter — the bridge strips the{' '}
+            <code>Authorization</code> header and injects the real credential
+            from your wallet. Token usage shows up in the wallet&apos;s{' '}
             <strong>Sessions</strong> view. If you&apos;re using a gifted
             credential, the gifter&apos;s budget ticks down in real time and
             the session stops cleanly when it hits zero.
@@ -214,8 +217,8 @@ function VersionHint() {
       </svg>
       <span>
         Requires Byoky extension <strong>v0.9.1+</strong> and{' '}
-        <code>@byoky/bridge@0.9.2+</code>. Firefox is live on AMO; Chrome
-        Web Store is still on 0.7.4 in review, so{' '}
+        <code>@byoky/bridge@0.9.3+</code> (for <code>byoky-bridge connect</code>).
+        Firefox is live on AMO; Chrome Web Store is still on 0.7.4 in review, so{' '}
         <a
           className="oc-link"
           href="https://github.com/MichaelLod/byoky/releases/download/v0.9.1/byoky-chrome-v0.9.1.zip"
@@ -288,10 +291,11 @@ function Troubleshooting() {
     [
       'ECONNREFUSED 127.0.0.1:19280',
       <>
-        The bridge isn&apos;t running yet. Open the Byoky popup once to wake
-        it (the extension starts the bridge lazily on the first session) and
-        retry. If that doesn&apos;t work, re-run <code>byoky-bridge install</code>{' '}
-        and restart your browser.
+        The bridge proxy isn&apos;t listening yet. Run{' '}
+        <code>byoky-bridge connect</code> — it opens a tab, waits for you to
+        approve the session in the wallet, and starts the proxy on :19280.
+        After a browser restart the proxy stops (the extension&apos;s service
+        worker holds it open), so re-run the command to bring it back.
       </>,
     ],
     [

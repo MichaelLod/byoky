@@ -1,7 +1,7 @@
 {
   "name": "@byoky/bridge",
-  "version": "0.9.2",
-  "description": "Native messaging bridge for Byoky — routes setup token requests through Claude Code CLI",
+  "version": "0.9.3",
+  "description": "Local HTTP proxy + native messaging bridge that lets CLI tools (Claude Code, OpenClaw) route through the Byoky wallet",
   "type": "module",
   "main": "dist/host.js",
   "exports": {
@@ -41,6 +41,7 @@
   },
   "dependencies": {
     "@byoky/core": "workspace:*",
+    "@byoky/sdk": "workspace:*",
     "ws": "^8.18.0"
   },
   "devDependencies": {
