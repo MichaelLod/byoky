@@ -15,9 +15,8 @@
     },
     {
       "platform": "iOS",
-      "version": "1.0.18",
-      "status": "live",
-      "pending": "1.0.20"
+      "version": "1.0.20",
+      "status": "live"
     },
     {
       "platform": "Android",

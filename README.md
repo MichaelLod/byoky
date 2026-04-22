@@ -42,7 +42,7 @@
 |----------|---------|------|
 | Chrome | ![Chrome version](https://img.shields.io/chrome-web-store/v/igjohldpldlahcjmefdhlnbcpldlgmon?style=flat&color=FF4F00&label=) | [Chrome Web Store](https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon) |
 | Firefox | ![Firefox version](https://img.shields.io/amo/v/byoky?style=flat&color=FF4F00&label=) | [Mozilla Add-ons](https://addons.mozilla.org/en-US/firefox/addon/byoky/) |
-| iOS | — | [App Store](https://apps.apple.com/app/byoky/id6760779919) |
+| iOS | 1.0.20 | [App Store](https://apps.apple.com/app/byoky/id6760779919) |
 | Android | — | [Google Play](https://play.google.com/store/apps/details?id=com.byoky.app) |
 | Safari (macOS) | Coming soon | — |
 | npm | ![npm version](https://img.shields.io/npm/v/@byoky/sdk?style=flat&color=FF4F00&label=) | [`@byoky/sdk`](https://www.npmjs.com/package/@byoky/sdk) · [`@byoky/core`](https://www.npmjs.com/package/@byoky/core) · [`@byoky/bridge`](https://www.npmjs.com/package/@byoky/bridge) |
