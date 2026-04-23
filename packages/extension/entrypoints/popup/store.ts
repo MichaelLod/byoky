@@ -75,7 +75,7 @@ interface WalletState {
   navigate: (page: Page) => void;
   openModal: (modal: 'add-credential' | 'redeem-gift') => void;
   closeModal: () => void;
-  addApiKey: (providerId: string, label: string, apiKey: string) => Promise<void>;
+  addApiKey: (providerId: string, label: string, apiKey: string, baseUrl?: string) => Promise<void>;
   addSetupToken: (providerId: string, label: string, token: string) => Promise<void>;
   startOAuth: (providerId: string, label: string) => Promise<void>;
   removeCredential: (id: string) => Promise<void>;
@@ -338,11 +338,11 @@ export const useWalletStore = create<WalletState>((set, get) => ({
 
   closeModal: () => set({ modal: null, error: null }),
 
-  addApiKey: async (providerId: string, label: string, apiKey: string) => {
+  addApiKey: async (providerId: string, label: string, apiKey: string, baseUrl?: string) => {
     set({ loading: true, error: null });
     try {
       const result = await sendInternal('addCredential', {
-        providerId, label, value: apiKey, authMethod: 'api_key',
+        providerId, label, value: apiKey, authMethod: 'api_key', baseUrl,
       });
       if (result.error) throw new Error(result.error as string);
       await get().refreshData();

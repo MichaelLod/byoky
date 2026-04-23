@@ -11,14 +11,20 @@ struct Credential: Identifiable, Codable {
     var label: String
     let authMethod: AuthMethod
     let createdAt: Date
+    /// Per-credential upstream origin. Required for providers with no fixed
+    /// host: Azure OpenAI (tenant-specific subdomain) and local providers
+    /// (Ollama, LM Studio — user-run loopback servers). `nil` for providers
+    /// whose upstream host is fixed globally.
+    var baseUrl: String?
 
-    static func create(providerId: String, label: String, authMethod: AuthMethod = .apiKey) -> Credential {
+    static func create(providerId: String, label: String, authMethod: AuthMethod = .apiKey, baseUrl: String? = nil) -> Credential {
         Credential(
             id: UUID().uuidString,
             providerId: providerId,
             label: label,
             authMethod: authMethod,
-            createdAt: Date()
+            createdAt: Date(),
+            baseUrl: baseUrl
         )
     }
 
@@ -36,6 +42,14 @@ struct Credential: Identifiable, Codable {
         // work; the header is safer (query params get sanitized out of logs).
         if providerId == "gemini" {
             request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+            return
+        }
+        // Local providers (Ollama, LM Studio) run unauthenticated by default.
+        // Forward a Bearer key only if the user supplied one.
+        if providerId == "ollama" || providerId == "lm_studio" {
+            if !apiKey.isEmpty {
+                request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            }
             return
         }
         if providerId == "anthropic" && authMethod == .oauth {
@@ -82,6 +96,18 @@ struct Provider: Identifiable, Hashable {
     let name: String
     let baseUrl: String
     let icon: String
+    /// Provider has no fixed upstream host — the real host lives on the
+    /// credential's `baseUrl`. True for Azure OpenAI (tenant subdomain) and
+    /// local providers (Ollama, LM Studio — user-run loopback servers).
+    let requiresCustomBaseUrl: Bool
+
+    init(id: String, name: String, baseUrl: String, icon: String, requiresCustomBaseUrl: Bool = false) {
+        self.id = id
+        self.name = name
+        self.baseUrl = baseUrl
+        self.icon = icon
+        self.requiresCustomBaseUrl = requiresCustomBaseUrl
+    }
 
     static let all: [Provider] = [
         Provider(id: "anthropic", name: "Anthropic", baseUrl: "https://api.anthropic.com", icon: "provider-anthropic"),
@@ -96,7 +122,9 @@ struct Provider: Identifiable, Hashable {
         Provider(id: "together", name: "Together AI", baseUrl: "https://api.together.xyz", icon: "provider-together"),
         Provider(id: "fireworks", name: "Fireworks AI", baseUrl: "https://api.fireworks.ai", icon: "provider-fireworks"),
         Provider(id: "openrouter", name: "OpenRouter", baseUrl: "https://openrouter.ai/api", icon: "provider-openrouter"),
-        Provider(id: "azure_openai", name: "Azure OpenAI", baseUrl: "https://openai.azure.com", icon: "provider-azure_openai"),
+        Provider(id: "azure_openai", name: "Azure OpenAI", baseUrl: "https://openai.azure.com", icon: "provider-azure_openai", requiresCustomBaseUrl: true),
+        Provider(id: "ollama", name: "Ollama (local)", baseUrl: "http://localhost:11434", icon: "provider-ollama", requiresCustomBaseUrl: true),
+        Provider(id: "lm_studio", name: "LM Studio (local)", baseUrl: "http://localhost:1234", icon: "provider-lm_studio", requiresCustomBaseUrl: true),
     ]
 
     /// Provider IDs that were removed from the registry. Used by WalletStore on
@@ -120,13 +148,17 @@ struct Provider: Identifiable, Hashable {
         return url
     }
 
-    static func validateUrl(_ urlString: String, for providerId: String) -> URL? {
+    static func validateUrl(_ urlString: String, for providerId: String, credentialBaseUrl: String? = nil) -> URL? {
         guard let provider = find(providerId),
               let url = URL(string: urlString),
-              let urlHost = url.host,
-              url.scheme == "https" else {
+              let urlHost = url.host else {
             return nil
         }
+        let isLocalProvider = providerId == "ollama" || providerId == "lm_studio"
+        let isLoopbackHost = urlHost == "localhost" || urlHost == "127.0.0.1" || urlHost == "::1"
+        let schemeOk = url.scheme == "https" || (url.scheme == "http" && isLocalProvider && isLoopbackHost)
+        guard schemeOk else { return nil }
+
         // Azure OpenAI uses per-resource subdomains like
         // `mycompany.openai.azure.com`. Strict host equality against the
         // placeholder baseUrl `openai.azure.com` would reject every real
@@ -135,6 +167,13 @@ struct Provider: Identifiable, Hashable {
         // pattern in wxt.config.ts:40.
         if providerId == "azure_openai" {
             return urlHost.hasSuffix(".openai.azure.com") ? url : nil
+        }
+        // Local providers: the host must match the credential's stored
+        // baseUrl (the user-configured loopback endpoint). Fall through to
+        // the generic path if somehow no credential baseUrl is supplied —
+        // the loopback scheme check above already limits the surface.
+        if isLocalProvider, let credBase = credentialBaseUrl, let credUrl = URL(string: credBase), let credHost = credUrl.host {
+            return urlHost == credHost && url.port == credUrl.port ? url : nil
         }
         guard let providerUrl = URL(string: provider.baseUrl),
               let providerHost = providerUrl.host,

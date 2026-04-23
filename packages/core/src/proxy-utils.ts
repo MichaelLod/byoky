@@ -10,6 +10,26 @@ import { PROVIDERS } from './providers.js';
  * tenant has its own `<resource>.openai.azure.com`). Strictly honored for
  * `requiresCustomBaseUrl` providers — absent override means reject.
  */
+/**
+ * Providers whose upstream is a user-run local server (Ollama, LM Studio).
+ * For these we allow `http://` — but only when the hostname is a loopback
+ * address, to prevent a malicious credential from pointing at an arbitrary
+ * internal host.
+ */
+const LOCAL_HTTP_PROVIDERS = new Set(['ollama', 'lm_studio']);
+
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+}
+
+function isAllowedProtocol(providerId: string, u: URL): boolean {
+  if (u.protocol === 'https:') return true;
+  if (u.protocol === 'http:' && LOCAL_HTTP_PROVIDERS.has(providerId) && isLoopbackHost(u.hostname)) {
+    return true;
+  }
+  return false;
+}
+
 export function validateProxyUrl(
   providerId: string,
   url: string,
@@ -19,12 +39,12 @@ export function validateProxyUrl(
   if (!provider) return false;
   try {
     const target = new URL(url);
-    if (target.protocol !== 'https:') return false;
+    if (!isAllowedProtocol(providerId, target)) return false;
 
     if (provider.requiresCustomBaseUrl) {
       if (!overrideBaseUrl) return false;
       const base = new URL(overrideBaseUrl);
-      if (base.protocol !== 'https:') return false;
+      if (!isAllowedProtocol(providerId, base)) return false;
       return target.origin === base.origin;
     }
 
@@ -134,6 +154,10 @@ export function buildHeaders(
     // Google AI Studio accepts x-goog-api-key OR ?key= query param. The
     // header is safer (query params get sanitized out of logs).
     headers['x-goog-api-key'] = apiKey;
+  } else if (providerId === 'ollama' || providerId === 'lm_studio') {
+    // Local servers run unauthenticated by default. If the user did supply
+    // a key (LM Studio can be configured with one), forward it as Bearer.
+    if (apiKey) headers['authorization'] = `Bearer ${apiKey}`;
   } else {
     headers['authorization'] = `Bearer ${apiKey}`;
   }

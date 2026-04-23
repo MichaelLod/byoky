@@ -357,12 +357,13 @@ final class TranslationEngine {
     /// with the destination provider's canonical chat endpoint, which may
     /// have a different shape (e.g. gemini puts the model in the path).
     /// Returns nil when the destination has no adapter or can't build a URL.
-    func rewriteProxyUrl(dstProviderId: String, model: String, stream: Bool) -> String? {
+    func rewriteProxyUrl(dstProviderId: String, model: String, stream: Bool, overrideBaseUrl: String? = nil) -> String? {
         do {
             return try queue.sync {
                 try ensureLoadedLocked()
                 guard let bridge = self.bridge else { return nil }
-                guard let result = bridge.invokeMethod("rewriteProxyUrl", withArguments: [dstProviderId, model, stream]) else {
+                let override = overrideBaseUrl ?? ""
+                guard let result = bridge.invokeMethod("rewriteProxyUrl", withArguments: [dstProviderId, model, stream, override]) else {
                     return nil
                 }
                 if pendingException() != nil { return nil }

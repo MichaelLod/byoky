@@ -105,10 +105,16 @@ interface MobileBridge {
    * the destination provider's canonical chat endpoint, which may have a
    * different shape (e.g. gemini puts the model in the path).
    *
+   * `overrideBaseUrl` lets the caller substitute the destination's host at
+   * request time — required for providers without a fixed upstream host
+   * (Azure OpenAI, Ollama, LM Studio). When omitted, the provider's
+   * registered baseUrl is used. Pass empty string to mean "no override"
+   * across the native bridge (JSC/Hermes can't express undefined cleanly).
+   *
    * Returns the new URL string, or null when the destination provider isn't
    * registered or has no adapter.
    */
-  rewriteProxyUrl(dstProviderId: string, model: string, stream: boolean): string | null;
+  rewriteProxyUrl(dstProviderId: string, model: string, stream: boolean, overrideBaseUrl?: string): string | null;
 
   /**
    * Return JSON-encoded model entries for a provider, or "[]" if the
@@ -235,8 +241,9 @@ const bridge: MobileBridge = {
     };
     return JSON.stringify(ctx);
   },
-  rewriteProxyUrl(dstProviderId, model, stream) {
-    return _rewriteProxyUrl(dstProviderId, model, stream);
+  rewriteProxyUrl(dstProviderId, model, stream, overrideBaseUrl) {
+    const override = overrideBaseUrl && overrideBaseUrl.length > 0 ? overrideBaseUrl : undefined;
+    return _rewriteProxyUrl(dstProviderId, model, stream, override);
   },
   getModelsForProvider(providerId) {
     const list = modelsForProvider(providerId).map((m) => ({

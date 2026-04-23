@@ -78,8 +78,6 @@ class ProxyService(
         val provider = Provider.find(providerId)
             ?: throw IllegalArgumentException("Unknown provider: $providerId")
 
-        val url = "${provider.baseUrl}$path"
-
         // Cross-family gift: group pins a gift whose provider differs from
         // the app's request, model is set, pair is translatable. Handle
         // before generic credential resolution so the cross-family gift
@@ -98,6 +96,14 @@ class ProxyService(
         }
 
         val source = resolveCredentialSource(providerId)
+
+        // Pick the upstream origin: requiresCustomBaseUrl providers
+        // (Azure, Ollama, LM Studio) carry the real host on the credential
+        // row. Fall back to the provider's fixed baseUrl for everything else.
+        val upstreamBase = if (provider.requiresCustomBaseUrl) {
+            (source as? CredentialSource.Own)?.credential?.baseUrl ?: provider.baseUrl
+        } else provider.baseUrl
+        val url = "$upstreamBase$path"
 
         if (source is CredentialSource.Gift) {
             return proxyRequestViaGift(source.gc, url, providerId, method, headers, body)
@@ -184,8 +190,6 @@ class ProxyService(
         val provider = Provider.find(providerId)
             ?: throw IllegalArgumentException("Unknown provider: $providerId")
 
-        val url = "${provider.baseUrl}$path"
-
         // Cross-family gift streaming path: translate request, route
         // through gift relay, apply SSE stream translator to chunks.
         val crossGift = resolveCrossFamilyGift(providerId, body)
@@ -207,6 +211,14 @@ class ProxyService(
 
         val credSource = resolveCredentialSource(providerId)
         var giftWs: WebSocket? = null
+
+        // Pick the upstream origin: requiresCustomBaseUrl providers (Azure,
+        // Ollama, LM Studio) carry the real host on the credential row.
+        // Fall back to the provider's fixed baseUrl for everything else.
+        val upstreamBase = if (provider.requiresCustomBaseUrl) {
+            (credSource as? CredentialSource.Own)?.credential?.baseUrl ?: provider.baseUrl
+        } else provider.baseUrl
+        val url = "$upstreamBase$path"
 
         if (credSource is CredentialSource.Gift) {
             val gc = credSource.gc
@@ -424,7 +436,7 @@ class ProxyService(
             return
         }
 
-        val urlString = engine.rewriteProxyUrl(translation.dstProviderId, translation.dstModel, true)
+        val urlString = engine.rewriteProxyUrl(translation.dstProviderId, translation.dstModel, true, routedCredential.baseUrl)
         if (urlString == null) {
             onError(IllegalStateException("rewriteProxyUrl returned null for ${translation.dstProviderId}"))
             return
@@ -587,7 +599,7 @@ class ProxyService(
         val translatedBodyString = engine.translateRequest(ctxJson, bodyString)
 
         // Rewrite upstream URL to the destination provider's chat endpoint.
-        val urlString = engine.rewriteProxyUrl(translation.dstProviderId, translation.dstModel, false)
+        val urlString = engine.rewriteProxyUrl(translation.dstProviderId, translation.dstModel, false, routedCredential.baseUrl)
             ?: throw IllegalStateException("rewriteProxyUrl returned null for ${translation.dstProviderId}")
 
         // Decrypt destination credential.
@@ -671,7 +683,7 @@ class ProxyService(
         // but rewriteProxyUrl needs a non-empty value to build a URL.
         val modelForUrl = swapDstModel ?: RoutingResolver.parseModel(body) ?: ""
 
-        val urlString = engine.rewriteProxyUrl(swapToProviderId, modelForUrl, isStreaming)
+        val urlString = engine.rewriteProxyUrl(swapToProviderId, modelForUrl, isStreaming, routedCredential.baseUrl)
             ?: throw IllegalStateException("rewriteProxyUrl returned null for $swapToProviderId")
 
         // Substitute the body's `model` field with the group's pinned dst
@@ -758,7 +770,7 @@ class ProxyService(
             return
         }
         val modelForUrl = swapDstModel ?: RoutingResolver.parseModel(body) ?: ""
-        val urlString = engine.rewriteProxyUrl(swapToProviderId, modelForUrl, true)
+        val urlString = engine.rewriteProxyUrl(swapToProviderId, modelForUrl, true, routedCredential.baseUrl)
         if (urlString == null) {
             onError(IllegalStateException("rewriteProxyUrl returned null for $swapToProviderId"))
             return
@@ -1490,6 +1502,12 @@ class ProxyService(
         // which gets sanitized out of logs).
         if (providerId == "gemini") {
             headers["x-goog-api-key"] = apiKey
+            return
+        }
+        if (providerId == "ollama" || providerId == "lm_studio") {
+            if (apiKey.isNotEmpty()) {
+                headers["Authorization"] = "Bearer $apiKey"
+            }
             return
         }
         if (providerId == "anthropic" && authMethod == AuthMethod.OAUTH) {

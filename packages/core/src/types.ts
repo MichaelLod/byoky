@@ -42,6 +42,13 @@ export interface CredentialBase {
   authMethod: AuthMethod;
   createdAt: number;
   lastUsedAt?: number;
+  /**
+   * Per-credential upstream origin. Required for providers with no fixed
+   * host: Azure OpenAI (tenant-specific subdomain) and local providers
+   * (Ollama, LM Studio — user-run loopback servers). Ignored for providers
+   * whose upstream host is fixed.
+   */
+  baseUrl?: string;
 }
 
 export interface ApiKeyCredential extends CredentialBase {

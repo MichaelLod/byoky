@@ -552,8 +552,15 @@ export default defineBackground(() => {
 
         // The URL the SDK sent must match the SOURCE provider's base URL.
         // (After translation we issue against the destination's URL — see
-        // rewriteProxyUrl below.)
-        if (!validateProxyUrl(msg.providerId, msg.url)) {
+        // rewriteProxyUrl below.) For providers without a fixed host (Azure,
+        // Ollama, LM Studio), pass the credential's baseUrl — but only when
+        // the credential is the source credential (no translation/swap), so
+        // we don't accidentally validate the source URL against the
+        // destination's tenant/loopback origin.
+        const sourceBaseUrl = (!translation && !swap && credential?.providerId === msg.providerId)
+          ? credential.baseUrl
+          : undefined;
+        if (!validateProxyUrl(msg.providerId, msg.url, sourceBaseUrl)) {
           port.postMessage({
             type: 'BYOKY_PROXY_RESPONSE_ERROR',
             requestId: msg.requestId,
@@ -591,7 +598,7 @@ export default defineBackground(() => {
             return;
           }
           const isStreaming = detectStreamingRequest(msg.body);
-          const rewritten = rewriteProxyUrl(translation.dstProviderId, translation.dstModel, isStreaming);
+          const rewritten = rewriteProxyUrl(translation.dstProviderId, translation.dstModel, isStreaming, credential?.baseUrl);
           if (!rewritten) {
             port.postMessage({
               type: 'BYOKY_PROXY_RESPONSE_ERROR',
@@ -607,7 +614,7 @@ export default defineBackground(() => {
           // optional body.model override. Binary bodies pass through
           // unchanged (we only touch the JSON when swap.dstModel is set).
           const isStreaming = detectStreamingRequest(msg.body);
-          const rewritten = rewriteProxyUrl(swap.dstProviderId, swap.dstModel ?? '', isStreaming);
+          const rewritten = rewriteProxyUrl(swap.dstProviderId, swap.dstModel ?? '', isStreaming, credential?.baseUrl);
           if (!rewritten) {
             port.postMessage({
               type: 'BYOKY_PROXY_RESPONSE_ERROR',
@@ -3284,7 +3291,13 @@ export default defineBackground(() => {
     const sessionProvider = session.providers.find((sp) => sp.providerId === providerId);
     const isGift = !!(sessionProvider?.giftId && sessionProvider.giftRelayUrl && sessionProvider.giftAuthToken);
 
-    if (!validateProxyUrl(providerId, url)) {
+    // For requiresCustomBaseUrl providers (Azure, Ollama, LM Studio) we can't
+    // validate here yet — we need the credential's baseUrl, which isn't
+    // resolved until below. Skip the pre-flight validate for those; direct-
+    // path calls revalidate after resolveCredential with the override. Gift
+    // path defers to the sender, which runs its own validate.
+    const providerCfg = PROVIDERS[providerId];
+    if (!providerCfg?.requiresCustomBaseUrl && !validateProxyUrl(providerId, url)) {
       bridgeProxyPort?.postMessage({
         type: 'proxy_http_error',
         requestId,
@@ -3332,6 +3345,24 @@ export default defineBackground(() => {
     const swap = sessionProvider?.swap;
     const effectiveProviderId = translation?.dstProviderId ?? swap?.dstProviderId ?? providerId;
 
+    // Revalidate for requiresCustomBaseUrl providers now that we have the
+    // credential's baseUrl. Direct path only — translation/swap builds the
+    // destination URL via rewriteProxyUrl below, so the pre-translation URL
+    // is still the source provider's (validated above when non-custom).
+    if (
+      providerCfg?.requiresCustomBaseUrl &&
+      !translation &&
+      !swap &&
+      !validateProxyUrl(providerId, url, credential.baseUrl)
+    ) {
+      bridgeProxyPort?.postMessage({
+        type: 'proxy_http_error',
+        requestId,
+        error: 'Request URL does not match the credential\'s registered base URL',
+      });
+      return;
+    }
+
     try {
       const apiKey = await decryptCredentialKey(credential);
 
@@ -3350,7 +3381,7 @@ export default defineBackground(() => {
           return;
         }
         const isStreaming = detectStreamingRequest(body);
-        const rewritten = rewriteProxyUrl(translation.dstProviderId, translation.dstModel, isStreaming);
+        const rewritten = rewriteProxyUrl(translation.dstProviderId, translation.dstModel, isStreaming, credential.baseUrl);
         if (!rewritten) {
           bridgeProxyPort?.postMessage({
             type: 'proxy_http_error',
@@ -3363,7 +3394,7 @@ export default defineBackground(() => {
       } else if (swap) {
         // Same-family swap: URL rewrite + optional body.model override.
         const isStreaming = detectStreamingRequest(body);
-        const rewritten = rewriteProxyUrl(swap.dstProviderId, swap.dstModel ?? '', isStreaming);
+        const rewritten = rewriteProxyUrl(swap.dstProviderId, swap.dstModel ?? '', isStreaming, credential.baseUrl);
         if (!rewritten) {
           bridgeProxyPort?.postMessage({
             type: 'proxy_http_error',
@@ -3683,6 +3714,13 @@ export default defineBackground(() => {
     credential: Credential,
   ): Promise<string> {
     if (!masterPassword) throw new Error('Wallet is locked');
+
+    // Local providers (Ollama, LM Studio) may be stored with an empty key
+    // when the user didn't set auth on their local server. No ciphertext,
+    // nothing to decrypt.
+    if (credential.authMethod === 'api_key' && !credential.encryptedKey) {
+      return '';
+    }
 
     try {
       if (credential.authMethod === 'api_key') {

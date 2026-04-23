@@ -645,11 +645,18 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
     var selectedProvider by remember { mutableStateOf<Provider?>(null) }
     var label by remember { mutableStateOf("") }
     var apiKey by remember { mutableStateOf("") }
+    var baseUrl by remember { mutableStateOf("") }
     var authMethod by remember { mutableStateOf(AuthMethod.API_KEY) }
     var error by remember { mutableStateOf<String?>(null) }
     val cloudVaultEnabled by wallet.cloudVaultEnabled.collectAsState()
 
     val supportsSetupToken = selectedProvider?.id == "anthropic"
+    val isLocalProvider = selectedProvider?.id == "ollama" || selectedProvider?.id == "lm_studio"
+    val defaultBaseUrlForProvider: String = when (selectedProvider?.id) {
+        "ollama" -> "http://localhost:11434"
+        "lm_studio" -> "http://localhost:1234"
+        else -> ""
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -684,6 +691,13 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
                             selectedProvider = provider
                             if (label.isEmpty()) label = provider.name
                             if (provider.id != "anthropic") authMethod = AuthMethod.API_KEY
+                            if (baseUrl.isEmpty()) {
+                                baseUrl = when (provider.id) {
+                                    "ollama" -> "http://localhost:11434"
+                                    "lm_studio" -> "http://localhost:1234"
+                                    else -> ""
+                                }
+                            }
                         },
                         color = if (selectedProvider?.id == provider.id) AccentSoft else BgCard,
                         shape = RoundedCornerShape(8.dp),
@@ -751,6 +765,50 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
 
                 Spacer(Modifier.height(16.dp))
 
+                if (isLocalProvider) {
+                    OutlinedTextField(
+                        value = baseUrl,
+                        onValueChange = { baseUrl = it },
+                        label = { Text("Server URL") },
+                        placeholder = { Text(defaultBaseUrlForProvider) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Accent,
+                            unfocusedBorderColor = Border,
+                            focusedContainerColor = BgCard,
+                            unfocusedContainerColor = BgCard,
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        if (selectedProvider?.id == "ollama")
+                            "Where your Ollama server is running. Make sure `ollama serve` is active."
+                        else
+                            "Where your LM Studio server is running. Start the \"Local Server\" in LM Studio.",
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.Top) {
+                        Icon(
+                            Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = Color(0xFFFF8A00),
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "Your computer must stay online. This credential only works while your machine is running. Gift recipients will see it as offline whenever your machine sleeps or disconnects.",
+                            color = Color(0xFFFF8A00),
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp,
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                }
+
                 OutlinedTextField(
                     value = label,
                     onValueChange = { label = it },
@@ -771,7 +829,15 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
                 OutlinedTextField(
                     value = apiKey,
                     onValueChange = { apiKey = it },
-                    label = { Text(if (authMethod == AuthMethod.OAUTH) "Setup Token" else "API Key") },
+                    label = {
+                        Text(
+                            when {
+                                authMethod == AuthMethod.OAUTH -> "Setup Token"
+                                isLocalProvider -> "API Key (optional)"
+                                else -> "API Key"
+                            }
+                        )
+                    },
                     visualTransformation = PasswordVisualTransformation(),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -825,6 +891,13 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
                             )
                         }
                     }
+                } else if (isLocalProvider) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Leave blank if your local server has no auth. Any key you enter is stored encrypted on-device and forwarded as a Bearer token.",
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                    )
                 } else {
                     Spacer(Modifier.height(8.dp))
                     Text(
@@ -842,13 +915,23 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
 
             Spacer(Modifier.height(24.dp))
 
-            val isValid = selectedProvider != null && label.isNotBlank() && apiKey.isNotBlank()
+            val isValid = selectedProvider != null && label.isNotBlank() && when {
+                isLocalProvider -> baseUrl.isNotBlank()
+                else -> apiKey.isNotBlank()
+            }
 
             Button(
                 onClick = {
                     try {
                         val cleanKey = apiKey.filter { !it.isWhitespace() }
-                        wallet.addCredential(selectedProvider!!.id, label, cleanKey, authMethod)
+                        val cleanBase = baseUrl.trim().trimEnd('/')
+                        wallet.addCredential(
+                            selectedProvider!!.id,
+                            label,
+                            cleanKey,
+                            authMethod,
+                            if (isLocalProvider) cleanBase.ifBlank { null } else null,
+                        )
                         onDismiss()
                     } catch (e: Exception) {
                         error = e.message

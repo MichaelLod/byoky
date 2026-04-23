@@ -232,7 +232,9 @@ private final class GiftRelayConnection {
         // Mirrors background.ts which uses `gift.providerId` throughout
         // handleGiftProxyRequest.
         let providerId = gift.providerId
-        guard let upstreamUrl = Provider.validateUrl(urlString, for: providerId) else {
+        // Pass credential.baseUrl so requiresCustomBaseUrl providers (Azure,
+        // Ollama, LM Studio) validate against the gifter's stored origin.
+        guard let upstreamUrl = Provider.validateUrl(urlString, for: providerId, credentialBaseUrl: credential.baseUrl) else {
             sendError(requestId: requestId, code: "INVALID_URL", message: "Request URL does not match provider")
             return
         }

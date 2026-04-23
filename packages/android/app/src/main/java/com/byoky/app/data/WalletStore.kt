@@ -297,15 +297,20 @@ class WalletStore(context: Context) {
 
     // MARK: - Credentials
 
-    fun addCredential(providerId: String, label: String, apiKey: String, authMethod: AuthMethod = AuthMethod.API_KEY) {
+    fun addCredential(providerId: String, label: String, apiKey: String, authMethod: AuthMethod = AuthMethod.API_KEY, baseUrl: String? = null) {
         val password = masterPassword ?: throw IllegalStateException("Wallet locked")
-        val credential = Credential(providerId = providerId, label = label, authMethod = authMethod)
-        val encrypted = CryptoService.encrypt(apiKey, password)
-        prefs.edit().putString("key_${credential.id}", encrypted).apply()
+        val credential = Credential(providerId = providerId, label = label, authMethod = authMethod, baseUrl = baseUrl)
+        // Local providers may legitimately ship with an empty key
+        // (unauthenticated server). Only persist ciphertext when a key was
+        // actually supplied — decryptKey handles the missing-entry case.
+        if (apiKey.isNotEmpty()) {
+            val encrypted = CryptoService.encrypt(apiKey, password)
+            prefs.edit().putString("key_${credential.id}", encrypted).apply()
+        }
         _credentials.value = _credentials.value + credential
         saveCredentials()
         val localId = credential.id
-        vaultScope.launch { syncAddToVault(localId, providerId, label, authMethod.name.lowercase(), apiKey) }
+        vaultScope.launch { syncAddToVault(localId, providerId, label, authMethod.name.lowercase(), apiKey, baseUrl) }
     }
 
     fun removeCredential(credential: Credential) {
@@ -333,7 +338,14 @@ class WalletStore(context: Context) {
     fun decryptKey(credential: Credential): String {
         val password = masterPassword ?: throw IllegalStateException("Wallet locked")
         val encrypted = prefs.getString("key_${credential.id}", null)
-            ?: throw IllegalStateException("Key not found")
+        if (encrypted == null) {
+            // Local providers may be stored with no keychain entry at all
+            // (unauthenticated server). Treat that as an empty key rather
+            // than an error so callers can fall through to the "no auth"
+            // header path.
+            if (credential.providerId == "ollama" || credential.providerId == "lm_studio") return ""
+            throw IllegalStateException("Key not found")
+        }
         return CryptoService.decrypt(encrypted, password)
     }
 
@@ -1783,7 +1795,7 @@ class WalletStore(context: Context) {
         }
     }
 
-    private fun syncAddToVault(localId: String, providerId: String, label: String, authMethod: String, plainKey: String) {
+    private fun syncAddToVault(localId: String, providerId: String, label: String, authMethod: String, plainKey: String, baseUrl: String? = null) {
         if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
         val token = vaultToken ?: return
         val vk = loadVaultKey() ?: return
@@ -1794,6 +1806,7 @@ class WalletStore(context: Context) {
             .put("encryptedApiKey", encryptedApiKey)
             .put("label", label)
             .put("authMethod", authMethod)
+        if (baseUrl != null) body.put("baseUrl", baseUrl)
         val (ok, status, data) = vaultRequest("/credentials", "POST", body, token)
 
         if (status == 401) {
@@ -1863,10 +1876,14 @@ class WalletStore(context: Context) {
         for (cred in _credentials.value) {
             if (vaultCredentialMap.containsKey(cred.id)) continue
             try {
-                val plainKey = CryptoService.decrypt(
-                    prefs.getString("key_${cred.id}", null) ?: continue, pw,
-                )
-                syncAddToVault(cred.id, cred.providerId, cred.label, cred.authMethod.name.lowercase(), plainKey)
+                val storedKey = prefs.getString("key_${cred.id}", null)
+                val isLocalProvider = cred.providerId == "ollama" || cred.providerId == "lm_studio"
+                val plainKey = when {
+                    storedKey != null -> CryptoService.decrypt(storedKey, pw)
+                    isLocalProvider -> ""
+                    else -> continue
+                }
+                syncAddToVault(cred.id, cred.providerId, cred.label, cred.authMethod.name.lowercase(), plainKey, cred.baseUrl)
             } catch (_: Exception) {}
         }
     }
@@ -1878,10 +1895,14 @@ class WalletStore(context: Context) {
             // extension's behavior to prevent duplicate uploads.
             if (vaultCredentialMap.containsKey(cred.id)) continue
             try {
-                val plainKey = CryptoService.decrypt(
-                    prefs.getString("key_${cred.id}", null) ?: continue, pw,
-                )
-                syncAddToVault(cred.id, cred.providerId, cred.label, cred.authMethod.name.lowercase(), plainKey)
+                val storedKey = prefs.getString("key_${cred.id}", null)
+                val isLocalProvider = cred.providerId == "ollama" || cred.providerId == "lm_studio"
+                val plainKey = when {
+                    storedKey != null -> CryptoService.decrypt(storedKey, pw)
+                    isLocalProvider -> ""
+                    else -> continue
+                }
+                syncAddToVault(cred.id, cred.providerId, cred.label, cred.authMethod.name.lowercase(), plainKey, cred.baseUrl)
             } catch (_: Exception) {}
         }
     }
@@ -1962,6 +1983,7 @@ class WalletStore(context: Context) {
                 AuthMethod.valueOf(authMethodRaw.uppercase())
             } catch (_: Exception) { AuthMethod.API_KEY }
 
+            val remoteBaseUrl = if (remote.isNull("baseUrl")) null else remote.optString("baseUrl", "").ifEmpty { null }
             val existingLocalId = serverToLocal[serverId]
 
             if (deletedAt != null) {
@@ -1976,9 +1998,16 @@ class WalletStore(context: Context) {
             }
 
             val encryptedApiKey = if (remote.isNull("encryptedApiKey")) null else remote.optString("encryptedApiKey", "")
-            if (encryptedApiKey.isNullOrEmpty()) continue
-            val vk = loadVaultKey() ?: continue
-            val apiKey = try { CryptoService.decryptWithKey(encryptedApiKey, vk) } catch (_: Exception) { continue }
+            val isLocalProvider = providerId == "ollama" || providerId == "lm_studio"
+            val apiKey: String = if (encryptedApiKey.isNullOrEmpty()) {
+                // Local providers may have been stored with no key at all.
+                // Anything else with no ciphertext is corrupt; skip.
+                if (!isLocalProvider) continue
+                ""
+            } else {
+                val vk = loadVaultKey() ?: continue
+                try { CryptoService.decryptWithKey(encryptedApiKey, vk) } catch (_: Exception) { continue }
+            }
 
             if (existingLocalId != null) {
                 val currentMeta = vaultCredentialMeta[existingLocalId]
@@ -1993,6 +2022,7 @@ class WalletStore(context: Context) {
                         providerId = providerId,
                         label = label,
                         authMethod = authMethod,
+                        baseUrl = remoteBaseUrl,
                     )
                 }
                 vaultCredentialMeta[existingLocalId] = VaultCredentialMeta(serverId, updatedAt)
@@ -2007,6 +2037,7 @@ class WalletStore(context: Context) {
                             providerId = providerId,
                             label = label,
                             authMethod = authMethod,
+                            baseUrl = remoteBaseUrl,
                         )
                     }
                     vaultCredentialMap[adoptId] = serverId
@@ -2027,6 +2058,7 @@ class WalletStore(context: Context) {
                         label = label,
                         authMethod = authMethod,
                         createdAt = createdAt,
+                        baseUrl = remoteBaseUrl,
                     ))
                     vaultCredentialMap[newId] = serverId
                     vaultCredentialMeta[newId] = VaultCredentialMeta(serverId, updatedAt)

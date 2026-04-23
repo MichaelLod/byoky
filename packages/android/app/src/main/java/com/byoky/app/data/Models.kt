@@ -10,6 +10,13 @@ data class Credential(
     val label: String,
     val authMethod: AuthMethod = AuthMethod.API_KEY,
     val createdAt: Long = System.currentTimeMillis(),
+    /**
+     * Per-credential upstream origin. Required for providers with no fixed
+     * host: Azure OpenAI (tenant-specific subdomain) and local providers
+     * (Ollama, LM Studio — user-run loopback servers). Null for providers
+     * whose upstream host is fixed globally.
+     */
+    val baseUrl: String? = null,
 )
 
 /** Aggregated request stats for a credential (or provider) over a time window. */
@@ -34,6 +41,12 @@ data class Provider(
     val id: String,
     val name: String,
     val baseUrl: String,
+    /**
+     * Provider has no fixed upstream host — the real host lives on the
+     * credential's `baseUrl`. True for Azure OpenAI (tenant subdomain) and
+     * local providers (Ollama, LM Studio — user-run loopback servers).
+     */
+    val requiresCustomBaseUrl: Boolean = false,
 ) {
     companion object {
         val all = listOf(
@@ -49,7 +62,9 @@ data class Provider(
             Provider("together", "Together AI", "https://api.together.xyz"),
             Provider("fireworks", "Fireworks AI", "https://api.fireworks.ai"),
             Provider("openrouter", "OpenRouter", "https://openrouter.ai/api"),
-            Provider("azure_openai", "Azure OpenAI", "https://openai.azure.com"),
+            Provider("azure_openai", "Azure OpenAI", "https://openai.azure.com", requiresCustomBaseUrl = true),
+            Provider("ollama", "Ollama (local)", "http://localhost:11434", requiresCustomBaseUrl = true),
+            Provider("lm_studio", "LM Studio (local)", "http://localhost:1234", requiresCustomBaseUrl = true),
         )
 
         /**

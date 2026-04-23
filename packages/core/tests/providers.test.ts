@@ -47,9 +47,14 @@ describe('PROVIDERS', () => {
     expect(PROVIDERS.anthropic.authMethods).toContain('oauth');
   });
 
-  it('provider base URLs are valid HTTPS', () => {
+  it('provider base URLs are valid HTTPS (except local loopback providers)', () => {
+    const LOCAL_LOOPBACK_PROVIDERS = new Set(['ollama', 'lm_studio']);
     for (const provider of Object.values(PROVIDERS)) {
-      expect(provider.baseUrl).toMatch(/^https:\/\//);
+      if (LOCAL_LOOPBACK_PROVIDERS.has(provider.id)) {
+        expect(provider.baseUrl).toMatch(/^http:\/\/localhost:/);
+      } else {
+        expect(provider.baseUrl).toMatch(/^https:\/\//);
+      }
     }
   });
 

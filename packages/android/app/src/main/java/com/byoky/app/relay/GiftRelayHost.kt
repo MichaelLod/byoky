@@ -226,11 +226,24 @@ private class GiftRelayConnection(
             return
         }
 
-        val requestHost = try { java.net.URL(urlString).host } catch (_: Exception) { null }
-        val hostOk = if (providerId == "azure_openai") {
-            requestHost?.endsWith(".openai.azure.com") == true
-        } else {
-            requestHost == try { java.net.URL(provider.baseUrl).host } catch (_: Exception) { null }
+        val reqUrl = try { java.net.URL(urlString) } catch (_: Exception) { null }
+        val requestHost = reqUrl?.host
+        val isLocalProvider = providerId == "ollama" || providerId == "lm_studio"
+        val isLoopbackHost = requestHost == "localhost" || requestHost == "127.0.0.1" || requestHost == "::1"
+        val schemeOk = reqUrl?.protocol == "https" || (reqUrl?.protocol == "http" && isLocalProvider && isLoopbackHost)
+        val hostOk = when {
+            !schemeOk -> false
+            providerId == "azure_openai" -> requestHost?.endsWith(".openai.azure.com") == true
+            isLocalProvider -> {
+                // Local providers validate against the gifter's stored
+                // credential baseUrl (host + port). The default provider
+                // placeholder would reject any real user's endpoint.
+                val credUrl = credential.baseUrl?.let { try { java.net.URL(it) } catch (_: Exception) { null } }
+                credUrl != null
+                    && requestHost == credUrl.host
+                    && reqUrl.port == credUrl.port
+            }
+            else -> requestHost == try { java.net.URL(provider.baseUrl).host } catch (_: Exception) { null }
         }
         if (!hostOk) {
             sendError(requestId, "INVALID_URL", "Request URL does not match provider")
@@ -367,6 +380,12 @@ private class GiftRelayConnection(
         }
         if (providerId == "gemini") {
             headers["x-goog-api-key"] = apiKey
+            return
+        }
+        if (providerId == "ollama" || providerId == "lm_studio") {
+            if (apiKey.isNotEmpty()) {
+                headers["Authorization"] = "Bearer $apiKey"
+            }
             return
         }
         if (providerId == "anthropic" && authMethod == com.byoky.app.data.AuthMethod.OAUTH) {

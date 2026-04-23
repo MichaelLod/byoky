@@ -236,9 +236,25 @@ final class RelayPairService: ObservableObject {
               let urlString = json["url"] as? String,
               let method = json["method"] as? String else { return }
 
-        guard let url = Provider.validateUrl(urlString, for: providerId) else {
-            sendRelayError(requestId: requestId, code: "INVALID_URL", message: "URL doesn't match provider")
-            return
+        // requiresCustomBaseUrl providers (Azure, Ollama, LM Studio) can't
+        // be validated against a fixed host here — the real host comes from
+        // the credential, which isn't resolved yet. Parse for transport;
+        // downstream paths revalidate once they have the credential's
+        // baseUrl.
+        let providerCfg = Provider.find(providerId)
+        let url: URL
+        if providerCfg?.requiresCustomBaseUrl == true {
+            guard let parsed = URL(string: urlString) else {
+                sendRelayError(requestId: requestId, code: "INVALID_URL", message: "URL doesn't parse")
+                return
+            }
+            url = parsed
+        } else {
+            guard let validated = Provider.validateUrl(urlString, for: providerId) else {
+                sendRelayError(requestId: requestId, code: "INVALID_URL", message: "URL doesn't match provider")
+                return
+            }
+            url = validated
         }
 
         let origin = pairedOrigin ?? "relay"
@@ -471,6 +487,17 @@ final class RelayPairService: ObservableObject {
                     return
                 }
 
+                // Post-resolve URL validation for requiresCustomBaseUrl
+                // providers. The pre-flight check in handleRelayRequest was
+                // permissive; enforce the credential's registered host now.
+                if Provider.find(providerId)?.requiresCustomBaseUrl == true {
+                    if Provider.validateUrl(urlString, for: providerId, credentialBaseUrl: credential.baseUrl) == nil {
+                        sendRelayError(requestId: requestId, code: "INVALID_URL",
+                                        message: "URL doesn't match credential's registered base URL")
+                        return
+                    }
+                }
+
                 let apiKey = try await MainActor.run {
                     try wallet.decryptKey(for: credential)
                 }
@@ -690,7 +717,8 @@ final class RelayPairService: ObservableObject {
             guard let urlString = engine.rewriteProxyUrl(
                 dstProviderId: translation.dstProviderId,
                 model: translation.dstModel,
-                stream: isStreaming
+                stream: isStreaming,
+                overrideBaseUrl: routedCredential.baseUrl
             ), let url = URL(string: urlString) else {
                 sendRelayError(requestId: requestId, code: "TRANSLATION_FAILED", message: "rewriteProxyUrl returned null")
                 return
@@ -886,6 +914,11 @@ final class RelayPairService: ObservableObject {
             )
             let translatedBody = try engine.translateRequest(contextJson: ctxJson, body: bodyString ?? "")
 
+            // Gift-translation path: the destination credential lives on
+            // the gifter's side, so we don't know its baseUrl here. The
+            // gifter's bridge re-resolves when the relay forwards the
+            // request. For own-credential translation this still uses the
+            // owned credential's baseUrl path above.
             guard let urlString = engine.rewriteProxyUrl(
                 dstProviderId: translation.dstProviderId,
                 model: translation.dstModel,
@@ -1037,7 +1070,8 @@ final class RelayPairService: ObservableObject {
             guard let rewrittenUrlString = engine.rewriteProxyUrl(
                 dstProviderId: swapToProviderId,
                 model: modelForUrl,
-                stream: isStreaming
+                stream: isStreaming,
+                overrideBaseUrl: routedCredential.baseUrl
             ), let url = URL(string: rewrittenUrlString) else {
                 sendRelayError(requestId: requestId, code: "SWAP_FAILED", message: "rewriteProxyUrl returned null for \(swapToProviderId)")
                 return

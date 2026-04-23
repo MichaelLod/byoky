@@ -361,10 +361,11 @@ class TranslationEngine private constructor(private val appContext: Context) {
      * Rewrite an upstream URL when routing cross-family. Returns null when
      * the destination has no adapter or can't build a URL.
      */
-    fun rewriteProxyUrl(dstProviderId: String, model: String, stream: Boolean): String? {
+    fun rewriteProxyUrl(dstProviderId: String, model: String, stream: Boolean, overrideBaseUrl: String? = null): String? {
         return try {
+            val overrideArg = jsLiteral(overrideBaseUrl ?: "")
             val expr =
-                "(function(){var u=BYOKY_TRANSLATE.rewriteProxyUrl(${jsLiteral(dstProviderId)},${jsLiteral(model)},${if (stream) "true" else "false"});return u==null?'':String(u);})()"
+                "(function(){var u=BYOKY_TRANSLATE.rewriteProxyUrl(${jsLiteral(dstProviderId)},${jsLiteral(model)},${if (stream) "true" else "false"},$overrideArg);return u==null?'':String(u);})()"
             val result = evalSync(expr)
             result.ifEmpty { null }
         } catch (_: Throwable) {

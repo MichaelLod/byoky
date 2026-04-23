@@ -654,7 +654,7 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
                 requestId = requestId,
             )
             val translatedBody = engine.translateRequest(ctxJson, bodyString ?: "")
-            val urlString = engine.rewriteProxyUrl(translation.dstProviderId, translation.dstModel, isStreaming)
+            val urlString = engine.rewriteProxyUrl(translation.dstProviderId, translation.dstModel, isStreaming, routedCredential.baseUrl)
                 ?: run {
                     sendRelayError(requestId, "TRANSLATION_FAILED", "rewriteProxyUrl returned null")
                     return
@@ -854,7 +854,7 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
             ?: ""
 
         try {
-            val urlString = engine.rewriteProxyUrl(swapToProviderId, modelForUrl, isStreaming)
+            val urlString = engine.rewriteProxyUrl(swapToProviderId, modelForUrl, isStreaming, routedCredential.baseUrl)
                 ?: run {
                     sendRelayError(requestId, "SWAP_FAILED", "rewriteProxyUrl returned null for $swapToProviderId")
                     return
@@ -1404,6 +1404,12 @@ class RelayPairService(private val appContext: android.content.Context? = null) 
         // Gemini uses `x-goog-api-key`.
         if (providerId == "gemini") {
             headers["x-goog-api-key"] = apiKey
+            return
+        }
+        if (providerId == "ollama" || providerId == "lm_studio") {
+            if (apiKey.isNotEmpty()) {
+                headers["Authorization"] = "Bearer $apiKey"
+            }
             return
         }
         if (providerId == "anthropic" && authMethod == com.byoky.app.data.AuthMethod.OAUTH) {

@@ -17,17 +17,25 @@ async function checkBridge(): Promise<boolean> {
   }
 }
 
+const LOCAL_PROVIDER_DEFAULT_BASE_URL: Record<string, string> = {
+  ollama: 'http://localhost:11434',
+  lm_studio: 'http://localhost:1234',
+};
+
 export function AddCredential() {
   const { addApiKey, addSetupToken, startOAuth, closeModal, error, loading, clearError } = useWalletStore();
   const [providerId, setProviderId] = useState('anthropic');
   const [authMethod, setAuthMethod] = useState<'api_key' | 'oauth'>('api_key');
   const [label, setLabel] = useState('');
   const [apiKey, setApiKey] = useState('');
+  const [baseUrl, setBaseUrl] = useState('');
   const [bridgeOnline, setBridgeOnline] = useState<boolean | null>(null);
 
   const provider = PROVIDERS[providerId];
   const supportsOAuth = provider?.authMethods.includes('oauth');
   const hasOAuthConfig = !!provider?.oauthConfig;
+  const isLocalProvider = providerId === 'ollama' || providerId === 'lm_studio';
+  const requiresBaseUrl = provider?.requiresCustomBaseUrl === true;
 
   useEffect(() => {
     if (authMethod === 'oauth' && !hasOAuthConfig) {
@@ -42,6 +50,11 @@ export function AddCredential() {
     if (!p?.authMethods.includes('oauth')) {
       setAuthMethod('api_key');
     }
+    // Pre-fill the loopback default when switching into a local provider,
+    // but only if the user hasn't already typed something.
+    if (LOCAL_PROVIDER_DEFAULT_BASE_URL[id] && !baseUrl) {
+      setBaseUrl(LOCAL_PROVIDER_DEFAULT_BASE_URL[id]);
+    }
   }
 
   function handleSubmit(e: FormEvent) {
@@ -49,6 +62,9 @@ export function AddCredential() {
     if (!label.trim()) return;
 
     const cleanKey = apiKey.replace(/\s+/g, '');
+    const cleanBaseUrl = baseUrl.trim().replace(/\/$/, '');
+
+    if (requiresBaseUrl && !cleanBaseUrl) return;
 
     if (authMethod === 'oauth') {
       if (hasOAuthConfig) {
@@ -58,8 +74,9 @@ export function AddCredential() {
         addSetupToken(providerId, label.trim(), cleanKey);
       }
     } else {
-      if (!cleanKey) return;
-      addApiKey(providerId, label.trim(), cleanKey);
+      // Local providers run unauthenticated — allow an empty key.
+      if (!isLocalProvider && !cleanKey) return;
+      addApiKey(providerId, label.trim(), cleanKey, cleanBaseUrl || undefined);
     }
   }
 
@@ -149,9 +166,48 @@ export function AddCredential() {
           />
         </div>
 
+        {requiresBaseUrl && (
+          <>
+            <div className="form-group">
+              <label htmlFor="baseUrl">
+                {providerId === 'azure_openai' ? 'Endpoint URL' : 'Server URL'}
+              </label>
+              <input
+                id="baseUrl"
+                type="text"
+                value={baseUrl}
+                onChange={(e) => setBaseUrl(e.target.value)}
+                placeholder={
+                  LOCAL_PROVIDER_DEFAULT_BASE_URL[providerId] ??
+                  (providerId === 'azure_openai'
+                    ? 'https://your-resource.openai.azure.com'
+                    : '')
+                }
+              />
+              <p className="form-hint">
+                {providerId === 'ollama'
+                  ? 'Where your Ollama server is running. Make sure `ollama serve` is active.'
+                  : providerId === 'lm_studio'
+                  ? 'Where your LM Studio server is running. Start the "Local Server" in LM Studio.'
+                  : 'Your Azure OpenAI resource endpoint.'}
+              </p>
+            </div>
+            {isLocalProvider && (
+              <div className="warning-note" style={{ marginTop: '10px', marginBottom: '12px' }}>
+                <strong>Your computer must stay online.</strong> This credential
+                only works while your machine is running and the Byoky Bridge is
+                connected. If you gift it to someone, they'll see it go offline
+                whenever your machine sleeps or you disconnect.
+              </div>
+            )}
+          </>
+        )}
+
         {authMethod === 'api_key' ? (
           <div className="form-group">
-            <label htmlFor="apiKey">API Key</label>
+            <label htmlFor="apiKey">
+              API Key{isLocalProvider ? ' (optional)' : ''}
+            </label>
             <textarea
               id="apiKey"
               value={apiKey}
@@ -159,21 +215,24 @@ export function AddCredential() {
               placeholder={
                 providerId === 'anthropic' ? 'sk-ant-api03-...'
                 : providerId === 'openai' ? 'sk-...'
+                : isLocalProvider ? 'Leave blank if your server has no auth'
                 : 'Your API key'
               }
-              rows={3}
+              rows={isLocalProvider ? 2 : 3}
             />
-            <p className="form-hint">
-              Get your API key from{' '}
-              <a
-                href={`https://${apiKeyHint}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hint-link"
-              >
-                {apiKeyHint}
-              </a>
-            </p>
+            {!isLocalProvider && (
+              <p className="form-hint">
+                Get your API key from{' '}
+                <a
+                  href={`https://${apiKeyHint}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hint-link"
+                >
+                  {apiKeyHint}
+                </a>
+              </p>
+            )}
           </div>
         ) : hasOAuthConfig ? (
           <div className="oauth-info">

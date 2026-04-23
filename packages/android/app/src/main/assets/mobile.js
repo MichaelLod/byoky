@@ -3229,6 +3229,27 @@ data: [DONE]
       // The real host is stored on the credential row and used at proxy time.
       baseUrl: "https://YOUR_RESOURCE.openai.azure.com",
       requiresCustomBaseUrl: true
+    },
+    ollama: {
+      id: "ollama",
+      name: "Ollama (local)",
+      authMethods: ["api_key"],
+      // Placeholder — the real host is per-credential (typically
+      // http://localhost:11434). Ollama exposes an OpenAI-compatible surface
+      // at /v1/chat/completions.
+      baseUrl: "http://localhost:11434",
+      chatPath: "/v1/chat/completions",
+      requiresCustomBaseUrl: true
+    },
+    lm_studio: {
+      id: "lm_studio",
+      name: "LM Studio (local)",
+      authMethods: ["api_key"],
+      // Placeholder — the real host is per-credential (LM Studio defaults to
+      // http://localhost:1234). OpenAI-compatible server.
+      baseUrl: "http://localhost:1234",
+      chatPath: "/v1/chat/completions",
+      requiresCustomBaseUrl: true
     }
   };
 
@@ -3606,8 +3627,9 @@ ${systemText}
       };
       return JSON.stringify(ctx);
     },
-    rewriteProxyUrl(dstProviderId, model, stream) {
-      return rewriteProxyUrl(dstProviderId, model, stream);
+    rewriteProxyUrl(dstProviderId, model, stream, overrideBaseUrl) {
+      const override = overrideBaseUrl && overrideBaseUrl.length > 0 ? overrideBaseUrl : void 0;
+      return rewriteProxyUrl(dstProviderId, model, stream, override);
     },
     getModelsForProvider(providerId) {
       const list = modelsForProvider(providerId).map((m) => ({

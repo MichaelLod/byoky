@@ -238,8 +238,14 @@ describe('security invariants', () => {
   describe('proxy-utils', () => {
     const proxyUtils = readFile('packages/core/src/proxy-utils.ts');
 
-    it('validateProxyUrl explicitly checks for HTTPS', () => {
-      expect(proxyUtils).toContain("target.protocol !== 'https:'");
+    it('validateProxyUrl explicitly checks for HTTPS (http allowed only for local-loopback providers)', () => {
+      // The helper isAllowedProtocol enforces https by default and carves
+      // out http only when the provider is in LOCAL_HTTP_PROVIDERS AND the
+      // hostname is a loopback address. All three substrings must be
+      // present together, or the invariant is broken.
+      expect(proxyUtils).toContain("u.protocol === 'https:'");
+      expect(proxyUtils).toContain('LOCAL_HTTP_PROVIDERS');
+      expect(proxyUtils).toContain('isLoopbackHost');
     });
 
     it('buildHeaders normalizes keys to lowercase', () => {

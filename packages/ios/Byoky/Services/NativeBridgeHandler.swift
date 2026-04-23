@@ -96,9 +96,25 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
               let urlString = msg["url"] as? String,
               let method = msg["method"] as? String else { return }
 
-        guard let url = Provider.validateUrl(urlString, for: providerId) else {
-            deliverProxyError(requestId: requestId, code: "INVALID_URL", message: "URL doesn't match provider")
-            return
+        // For requiresCustomBaseUrl providers (Azure, Ollama, LM Studio) we
+        // can't validate the URL against a fixed host — the real host lives
+        // on the credential's baseUrl, which we don't have yet. Parse the
+        // URL now for transport; proxyDirect revalidates with the resolved
+        // credential's baseUrl before issuing the fetch.
+        let providerCfg = Provider.find(providerId)
+        let url: URL
+        if providerCfg?.requiresCustomBaseUrl == true {
+            guard let parsed = URL(string: urlString) else {
+                deliverProxyError(requestId: requestId, code: "INVALID_URL", message: "URL doesn't parse")
+                return
+            }
+            url = parsed
+        } else {
+            guard let validated = Provider.validateUrl(urlString, for: providerId) else {
+                deliverProxyError(requestId: requestId, code: "INVALID_URL", message: "URL doesn't match provider")
+                return
+            }
+            url = validated
         }
 
         let allowanceCheck = wallet.checkAllowance(origin: appOrigin, providerId: providerId)
@@ -215,6 +231,18 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
         credential: Credential
     ) async {
         do {
+            // Post-resolve validation for requiresCustomBaseUrl providers.
+            // The initial parse in handleProxy was permissive; now we know
+            // the credential and can enforce that the URL actually points
+            // at the credential's registered host.
+            if Provider.find(providerId)?.requiresCustomBaseUrl == true {
+                if Provider.validateUrl(urlString, for: providerId, credentialBaseUrl: credential.baseUrl) == nil {
+                    deliverProxyError(requestId: requestId, code: "INVALID_URL",
+                                       message: "URL doesn't match credential's registered base URL")
+                    return
+                }
+            }
+
             let apiKey = try wallet.decryptKey(for: credential)
 
             var request = URLRequest(url: url)
@@ -275,7 +303,8 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             guard let urlString = engine.rewriteProxyUrl(
                 dstProviderId: translation.dstProviderId,
                 model: translation.dstModel,
-                stream: isStreaming
+                stream: isStreaming,
+                overrideBaseUrl: credential.baseUrl
             ), let url = URL(string: urlString) else {
                 deliverProxyError(requestId: requestId, code: "TRANSLATION_FAILED", message: "rewriteProxyUrl returned null")
                 return
@@ -387,7 +416,8 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
 
         do {
             guard let rewrittenUrlString = engine.rewriteProxyUrl(
-                dstProviderId: swapToProviderId, model: modelForUrl, stream: isStreaming
+                dstProviderId: swapToProviderId, model: modelForUrl, stream: isStreaming,
+                overrideBaseUrl: credential.baseUrl
             ), let url = URL(string: rewrittenUrlString) else {
                 deliverProxyError(requestId: requestId, code: "SWAP_FAILED",
                                   message: "rewriteProxyUrl returned null for \(swapToProviderId)")

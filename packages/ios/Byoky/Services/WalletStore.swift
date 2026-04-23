@@ -365,13 +365,16 @@ final class WalletStore: ObservableObject {
 
     // MARK: - Credentials
 
-    func addCredential(providerId: String, label: String, apiKey: String, authMethod: AuthMethod = .apiKey) throws {
+    func addCredential(providerId: String, label: String, apiKey: String, authMethod: AuthMethod = .apiKey, baseUrl: String? = nil) throws {
         guard let key = masterKey else { throw WalletError.locked }
 
-        let credential = Credential.create(providerId: providerId, label: label, authMethod: authMethod)
-        let encrypted = try crypto.encrypt(plaintext: apiKey, key: key)
-
-        try keychain.saveString(key: "key_\(credential.id)", value: "v2:" + encrypted)
+        let credential = Credential.create(providerId: providerId, label: label, authMethod: authMethod, baseUrl: baseUrl)
+        // Local providers may legitimately have an empty key (unauthenticated
+        // server). Only encrypt + store ciphertext when a key was supplied.
+        if !apiKey.isEmpty {
+            let encrypted = try crypto.encrypt(plaintext: apiKey, key: key)
+            try keychain.saveString(key: "key_\(credential.id)", value: "v2:" + encrypted)
+        }
 
         credentials.append(credential)
         try saveCredentials()
@@ -382,7 +385,7 @@ final class WalletStore: ObservableObject {
         )
 
         let localId = credential.id
-        Task { await syncAddToVault(localId: localId, providerId: providerId, label: label, authMethod: authMethod.rawValue, plainKey: apiKey) }
+        Task { await syncAddToVault(localId: localId, providerId: providerId, label: label, authMethod: authMethod.rawValue, plainKey: apiKey, baseUrl: baseUrl) }
     }
 
     func updateCredentialLabel(id: String, newLabel: String) throws {
@@ -411,7 +414,16 @@ final class WalletStore: ObservableObject {
 
     func decryptKey(for credential: Credential) throws -> String {
         guard let key = masterKey else { throw WalletError.locked }
-        let encrypted = try keychain.loadString(key: "key_\(credential.id)")
+
+        // Local providers (Ollama, LM Studio) may be stored with no key at
+        // all — their keychain entry is absent rather than empty. Return ""
+        // so callers that just feed this into applyAuth get the "no auth"
+        // path instead of a CryptoError.invalidData blowup.
+        let isLocalProvider = credential.providerId == "ollama" || credential.providerId == "lm_studio"
+        guard let encrypted = try? keychain.loadString(key: "key_\(credential.id)") else {
+            if isLocalProvider { return "" }
+            throw CryptoError.invalidData
+        }
 
         guard encrypted.hasPrefix("v2:") else {
             throw CryptoError.invalidData
@@ -1364,14 +1376,16 @@ final class WalletStore: ObservableObject {
         await reconcileGiftUsageWithVault()
     }
 
-    private func syncAddToVault(localId: String, providerId: String, label: String, authMethod: String, plainKey: String) async {
+    private func syncAddToVault(localId: String, providerId: String, label: String, authMethod: String, plainKey: String, baseUrl: String? = nil) async {
         guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
         guard let vk = loadVaultKey(),
               let encryptedApiKey = try? crypto.encrypt(plaintext: plainKey, key: vk) else { return }
 
-        let result = await vaultRequest(path: "/credentials", method: "POST", body: [
+        var body: [String: Any] = [
             "providerId": providerId, "encryptedApiKey": encryptedApiKey, "label": label, "authMethod": authMethod,
-        ], token: token)
+        ]
+        if let baseUrl = baseUrl { body["baseUrl"] = baseUrl }
+        let result = await vaultRequest(path: "/credentials", method: "POST", body: body, token: token)
 
         if result.status == 401 {
             cloudVaultTokenExpired = true
@@ -1434,7 +1448,7 @@ final class WalletStore: ObservableObject {
         for credential in credentials {
             guard vaultCredentialMap[credential.id] == nil else { continue }
             guard let plainKey = try? decryptKey(for: credential) else { continue }
-            await syncAddToVault(localId: credential.id, providerId: credential.providerId, label: credential.label, authMethod: credential.authMethod.rawValue, plainKey: plainKey)
+            await syncAddToVault(localId: credential.id, providerId: credential.providerId, label: credential.label, authMethod: credential.authMethod.rawValue, plainKey: plainKey, baseUrl: credential.baseUrl)
         }
     }
 
@@ -1444,7 +1458,7 @@ final class WalletStore: ObservableObject {
             // extension does the same check to avoid creating duplicates.
             guard vaultCredentialMap[credential.id] == nil else { continue }
             guard let plainKey = try? decryptKey(for: credential) else { continue }
-            await syncAddToVault(localId: credential.id, providerId: credential.providerId, label: credential.label, authMethod: credential.authMethod.rawValue, plainKey: plainKey)
+            await syncAddToVault(localId: credential.id, providerId: credential.providerId, label: credential.label, authMethod: credential.authMethod.rawValue, plainKey: plainKey, baseUrl: credential.baseUrl)
         }
     }
 
@@ -1511,6 +1525,7 @@ final class WalletStore: ObservableObject {
             let deletedAt = (remote["deletedAt"] as? NSNumber)?.int64Value
 
             let authMethod = AuthMethod(rawValue: authMethodRaw) ?? .apiKey
+            let remoteBaseUrl = remote["baseUrl"] as? String
             let existingLocalId = serverToLocal[serverId]
 
             if deletedAt != nil {
@@ -1524,9 +1539,18 @@ final class WalletStore: ObservableObject {
                 continue
             }
 
-            guard let encryptedApiKey = remote["encryptedApiKey"] as? String,
-                  let vk = loadVaultKey(),
-                  let apiKey = try? crypto.decrypt(encoded: encryptedApiKey, key: vk) else { continue }
+            let encryptedApiKey = remote["encryptedApiKey"] as? String ?? ""
+            let isLocalProvider = providerId == "ollama" || providerId == "lm_studio"
+            let apiKey: String
+            if encryptedApiKey.isEmpty {
+                // Local providers may be stored with no key at all.
+                if !isLocalProvider { continue }
+                apiKey = ""
+            } else {
+                guard let vk = loadVaultKey(),
+                      let decoded = try? crypto.decrypt(encoded: encryptedApiKey, key: vk) else { continue }
+                apiKey = decoded
+            }
 
             if let localId = existingLocalId {
                 let currentMeta = vaultCredentialMeta[localId]
@@ -1540,7 +1564,8 @@ final class WalletStore: ObservableObject {
                         providerId: providerId,
                         label: label,
                         authMethod: authMethod,
-                        createdAt: preserved
+                        createdAt: preserved,
+                        baseUrl: remoteBaseUrl
                     )
                 }
                 vaultCredentialMeta[localId] = VaultCredentialMeta(serverId: serverId, remoteUpdatedAt: updatedAt)
@@ -1555,7 +1580,8 @@ final class WalletStore: ObservableObject {
                         providerId: providerId,
                         label: label,
                         authMethod: authMethod,
-                        createdAt: credentials[idx].createdAt
+                        createdAt: credentials[idx].createdAt,
+                        baseUrl: remoteBaseUrl
                     )
                 }
                 vaultCredentialMap[adoptId] = serverId
@@ -1574,7 +1600,8 @@ final class WalletStore: ObservableObject {
                     providerId: providerId,
                     label: label,
                     authMethod: authMethod,
-                    createdAt: createdAt
+                    createdAt: createdAt,
+                    baseUrl: remoteBaseUrl
                 ))
                 vaultCredentialMap[newId] = serverId
                 vaultCredentialMeta[newId] = VaultCredentialMeta(serverId: serverId, remoteUpdatedAt: updatedAt)
