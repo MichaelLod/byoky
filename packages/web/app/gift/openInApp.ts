@@ -11,16 +11,25 @@ export function detectMobilePlatform(): MobilePlatform {
   return null;
 }
 
-export function extractGiftEncoded(giftLink: string): string | null {
+// A gift link can be long-form (`/gift/<encoded>`) or short-form (`/g/<shortId>`).
+// Both shapes have matching deep-link hosts that the mobile apps recognize.
+type GiftTarget = { host: 'gift' | 'g'; value: string };
+
+function extractGiftTarget(giftLink: string): GiftTarget | null {
   try {
     const u = new URL(giftLink);
     if (u.hash.startsWith('#') && u.hash.length > 1) {
-      return decodeURIComponent(u.hash.slice(1));
+      const v = decodeURIComponent(u.hash.slice(1));
+      if (/^[A-Za-z0-9_-]+$/.test(v)) return { host: 'gift', value: v };
     }
     const p = u.pathname.replace(/\/+$/, '');
     if (p.startsWith('/gift/')) {
-      const seg = p.slice('/gift/'.length);
-      if (seg) return decodeURIComponent(seg);
+      const seg = decodeURIComponent(p.slice('/gift/'.length));
+      if (/^[A-Za-z0-9_-]+$/.test(seg)) return { host: 'gift', value: seg };
+    }
+    if (p.startsWith('/g/')) {
+      const seg = decodeURIComponent(p.slice('/g/'.length));
+      if (/^[A-Za-z0-9]+$/.test(seg)) return { host: 'g', value: seg };
     }
   } catch {
     /* not a URL */
@@ -31,20 +40,22 @@ export function extractGiftEncoded(giftLink: string): string | null {
 export function openGiftInApp(giftLink: string): boolean {
   const platform = detectMobilePlatform();
   if (!platform) return false;
-  const encoded = extractGiftEncoded(giftLink);
-  if (!encoded || !/^[A-Za-z0-9_-]+$/.test(encoded)) return false;
+  const target = extractGiftTarget(giftLink);
+  if (!target) return false;
+
+  const deepPath = `${target.host}/${target.value}`;
+  const canonical = `byoky://${deepPath}`;
 
   // Best-effort clipboard stash so the app's clipboard fallback can recover
   // the link if the deep-link redirect doesn't auto-foreground the app
   // (common on repeat redeems — iOS/Android throttle custom-scheme launches).
-  const canonical = `byoky://gift/${encoded}`;
   if (typeof navigator !== 'undefined' && navigator.clipboard) {
     navigator.clipboard.writeText(canonical).catch(() => { /* clipboard blocked */ });
   }
 
   if (platform === 'android') {
     const fallback = encodeURIComponent(ANDROID_STORE);
-    window.location.href = `intent://gift/${encoded}#Intent;scheme=byoky;package=com.byoky.app;S.browser_fallback_url=${fallback};end`;
+    window.location.href = `intent://${deepPath}#Intent;scheme=byoky;package=com.byoky.app;S.browser_fallback_url=${fallback};end`;
     return true;
   }
 
@@ -61,6 +72,6 @@ export function openGiftInApp(giftLink: string): boolean {
     window.location.href = IOS_STORE;
   }, 1500);
   document.addEventListener('visibilitychange', onVisibility);
-  window.location.href = `byoky://gift/${encoded}`;
+  window.location.href = canonical;
   return true;
 }
