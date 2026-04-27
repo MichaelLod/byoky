@@ -482,6 +482,10 @@ function Phone({ pov }: { pov: Speaker }) {
           position: relative;
           width: 100%;
           max-width: 340px;
+          /* Cap height to viewport so the bottom bezel never falls below the
+             fold on small screens. svh accounts for mobile browser chrome
+             (URL bar) better than vh — width adjusts via aspect-ratio. */
+          max-height: 80svh;
           margin: 0 auto;
           aspect-ratio: 340 / 700;
           border-radius: 42px;
