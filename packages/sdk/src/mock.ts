@@ -13,6 +13,7 @@
 
 import { ByokyError, ByokyErrorCode } from '@byoky/core';
 import type { ByokySession } from './byoky.js';
+import { fetchModelsList } from './list-models-fetch.js';
 
 export interface MockConnectOptions {
   /**
@@ -137,7 +138,7 @@ export function createMockSession(options: MockConnectOptions = {}): ByokySessio
 
   const noop: () => () => void = () => () => {};
 
-  return {
+  const session: ByokySession = {
     sessionKey,
     proxyUrl: 'mock://',
     providers,
@@ -151,6 +152,7 @@ export function createMockSession(options: MockConnectOptions = {}): ByokySessio
       }
       return makeMockFetch(providerId, key, options.baseUrls?.[providerId]);
     },
+    listModels: (providerId) => fetchModelsList(session.createFetch(providerId), providerId),
     createRelay: () => {
       throw new ByokyError(
         ByokyErrorCode.UNKNOWN,
@@ -163,4 +165,5 @@ export function createMockSession(options: MockConnectOptions = {}): ByokySessio
     onDisconnect: noop,
     onProvidersUpdated: noop,
   };
+  return session;
 }

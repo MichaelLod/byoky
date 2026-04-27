@@ -256,8 +256,20 @@ export function Chat({ session, initialProvider }: Props) {
   const [attachedImage, setAttachedImage] = useState<{ file: File; preview: string } | null>(null);
   const [showCode, setShowCode] = useState(true);
   const [lastPrompt, setLastPrompt] = useState('Hello!');
+  // Model lists fetched live via session.listModels(). Falls back to the
+  // hardcoded `providers[id].models` when a provider has no entry here yet
+  // (initial render, in-flight fetch, or fetch failure).
+  const [fetchedModels, setFetchedModels] = useState<Record<string, string[]>>({});
 
-  const currentModel = selectedProvider ? (selectedModels[selectedProvider] ?? providers[selectedProvider].models[0]) : '';
+  const availableModels = selectedProvider
+    ? (fetchedModels[selectedProvider] ?? providers[selectedProvider].models)
+    : [];
+
+  const currentModel = selectedProvider
+    ? (selectedModels[selectedProvider] && availableModels.includes(selectedModels[selectedProvider])
+        ? selectedModels[selectedProvider]
+        : availableModels[0] ?? '')
+    : '';
 
   useEffect(() => {
     try { localStorage.setItem('byoky-demo-models', JSON.stringify(selectedModels)); } catch {}
@@ -290,6 +302,26 @@ export function Chat({ session, initialProvider }: Props) {
       setSelectedProvider(initialProvider);
     }
   }, [initialProvider]);
+
+  // Live model discovery: call session.listModels for the active provider once
+  // it's selected and not already cached. Failures (xAI has no endpoint, key
+  // rejected, etc.) silently fall back to the hardcoded list above.
+  useEffect(() => {
+    if (!selectedProvider) return;
+    if (fetchedModels[selectedProvider]) return;
+    let cancelled = false;
+    session.listModels(selectedProvider).then(
+      (list) => {
+        if (cancelled) return;
+        const ids = list.map((m) => m.id);
+        if (ids.length > 0) setFetchedModels((prev) => ({ ...prev, [selectedProvider]: ids }));
+      },
+      () => {
+        // ignore — fall back to the static list in `providers`
+      },
+    );
+    return () => { cancelled = true; };
+  }, [selectedProvider, session, fetchedModels]);
 
 
   function handleAttach() { fileInputRef.current?.click(); }
@@ -509,7 +541,7 @@ export function Chat({ session, initialProvider }: Props) {
           </select>
           {selectedProvider && (
             <select value={currentModel} onChange={e => setSelectedModels(prev => ({ ...prev, [selectedProvider]: e.target.value }))}>
-              {providers[selectedProvider].models.map(m => (
+              {availableModels.map(m => (
                 <option key={m} value={m}>{m}</option>
               ))}
             </select>

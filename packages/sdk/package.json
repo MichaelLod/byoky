@@ -1,7 +1,7 @@
 {
   "name": "@byoky/sdk",
   "description": "JavaScript SDK for Byoky — connect to the wallet extension, proxy AI API calls, and show a connect modal",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",

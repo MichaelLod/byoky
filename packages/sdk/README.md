@@ -124,12 +124,31 @@ const session = await byoky.tryReconnect();
 | `sessionKey` | Unique session identifier |
 | `providers` | Map of available providers with auth method |
 | `createFetch(providerId)` | Create a proxied `fetch` function |
+| `listModels(providerId)` | Discover models available to the user's credential (live, per provider) |
 | `createRelay(wsUrl)` | Open WebSocket relay for backend use |
 | `disconnect()` | End the session |
 | `isConnected()` | Check if session is still valid |
 | `getUsage()` | Get token usage stats (input/output tokens) |
 | `onDisconnect(cb)` | Subscribe to disconnection events |
 | `onProvidersUpdated(cb)` | Subscribe to provider changes |
+
+### Discover available models
+
+Build a model picker that reflects what the user actually has access to —
+including local models the user has installed in Ollama or LM Studio.
+
+```typescript
+const models = await session.listModels('anthropic');
+// → [{ id: 'claude-sonnet-4-6', displayName: 'Claude Sonnet 4.6', contextWindow: 1_000_000, ... }]
+
+const local = await session.listModels('ollama');
+// → [{ id: 'llama3.2:3b', displayName: 'llama3.2:3b', ... }]
+```
+
+Returned shape: `{ id, providerId, displayName?, contextWindow?, capabilities?, raw }`.
+Perplexity has no public model-list endpoint, so a hardcoded Sonar list is
+returned. xAI does not document a `/v1/models` endpoint either — calling
+`listModels('xai')` will throw `PROVIDER_UNAVAILABLE`.
 
 ### `ByokyServer` (from `@byoky/sdk/server`)
 

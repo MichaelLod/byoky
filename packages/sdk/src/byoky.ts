@@ -1,5 +1,6 @@
-import type { AuthMethod, ConnectRequest, ConnectResponse, SessionUsage } from '@byoky/core';
+import type { AuthMethod, ConnectRequest, ConnectResponse, ModelInfo, SessionUsage } from '@byoky/core';
 import { ByokyError, ByokyErrorCode, isByokyMessage, encodePairPayload } from '@byoky/core';
+import { fetchModelsList } from './list-models-fetch.js';
 import { isExtensionInstalled, getStoreUrl, getMessageTarget } from './detect.js';
 import { createProxyFetch } from './proxy-fetch.js';
 import { createRelayFetch } from './relay-fetch.js';
@@ -145,6 +146,12 @@ export interface ByokySession extends ConnectResponse {
   relay?: { url: string; roomId: string; authToken: string };
   /** Create a fetch function that proxies requests through the wallet for the given provider. */
   createFetch(providerId: string): typeof fetch;
+  /**
+   * Fetch the list of models the user's credential can access for a provider.
+   * Hits each provider's discovery endpoint (e.g. /v1/models) through the
+   * proxy. For Perplexity (no public endpoint) returns a hardcoded list.
+   */
+  listModels(providerId: string): Promise<ModelInfo[]>;
   /** Open a relay channel so a backend server can make LLM calls through this session. */
   createRelay(wsUrl: string): RelayConnection;
   /** Disconnect this session from the wallet. */
@@ -434,6 +441,8 @@ export class Byoky {
       proxyUrl: data.proxyUrl,
       providers: data.providers,
       createFetch: (providerId: string) => createVaultFetch(data.vaultUrl, data.appSessionToken, providerId),
+      listModels: (providerId: string) =>
+        fetchModelsList(createVaultFetch(data.vaultUrl, data.appSessionToken, providerId), providerId),
       createRelay: () => { throw new Error('Relay not supported in vault mode'); },
       disconnect: () => { clearVaultSession(); },
       isConnected: async () => {
@@ -711,7 +720,7 @@ export class Byoky {
       } catch {}
     });
 
-    return {
+    const session: ByokySession = {
       sessionKey,
       proxyUrl: '',
       providers,
@@ -725,6 +734,8 @@ export class Byoky {
           return relayFetch(input, init);
         };
       },
+      listModels: (providerId: string) =>
+        fetchModelsList(session.createFetch(providerId), providerId),
       createRelay: () => { throw new Error('Relay-in-relay not supported'); },
       disconnect: () => {
         clearInterval(pingInterval);
@@ -746,6 +757,7 @@ export class Byoky {
       },
       onProvidersUpdated: () => () => {},
     };
+    return session;
   }
 
   // --- Extension-based session ---
@@ -806,6 +818,8 @@ export class Byoky {
           return resp;
         };
       },
+      listModels: (providerId: string) =>
+        fetchModelsList(session.createFetch(providerId), providerId),
       createRelay: (wsUrl: string) =>
         createRelayClient(wsUrl, sessionKeyRef.current, session.providers),
       disconnect: () => {

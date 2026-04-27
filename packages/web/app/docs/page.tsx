@@ -49,16 +49,18 @@ const msg = await client.messages.create({
 # Session API
 
 - \`session.createFetch(providerId)\` — drop-in \`fetch\` for any provider SDK. Streaming, vision, and file uploads all work unchanged.
+- \`session.listModels(providerId)\` — discover models the user's credential can access (live per provider, including local Ollama / LM Studio installs). Returns \`{ id, displayName?, contextWindow?, capabilities?, raw }[]\`. Throws \`PROVIDER_UNAVAILABLE\` for providers without a discovery endpoint (xAI); returns a hardcoded list for Perplexity.
 - \`session.createRelay(wsUrl)\` — open a WebSocket so a backend server can make LLM calls through this session.
 - \`session.getUsage()\` — returns { requests, inputTokens, outputTokens, byProvider }.
 - \`session.onDisconnect(cb)\` / \`session.onProvidersUpdated(cb)\` — lifecycle callbacks.
 - \`session.sessionKey\`, \`session.proxyUrl\`, \`session.providers\` — session properties.
 - \`byoky.tryReconnect()\` — silently restore a previous session (returns null if nothing to restore).
 - \`byoky.connectViaVault({ vaultUrl, username, password, providers, appOrigin })\` — connect via a Byoky Vault server (works in Node.js too; \`appOrigin\` required server-side).
+- \`byoky.connectMock({ keys })\` — DEV ONLY: returns a fake session that calls providers directly with the supplied keys. Reads \`BYOKY_DEV_KEYS=anthropic:sk-...,openai:sk-...\` from env when no \`keys\` are passed. Refuses to run when \`NODE_ENV=production\`.
 
 # Supported providers (use these IDs with createFetch)
 
-anthropic, openai, gemini, mistral, cohere, xai, deepseek, perplexity, groq, together, fireworks, openrouter, azure_openai
+anthropic, openai, gemini, mistral, cohere, xai, deepseek, perplexity, groq, together, fireworks, openrouter, azure_openai, ollama, lm_studio
 
 # Backend relay (for server-side LLM calls)
 
@@ -77,8 +79,9 @@ Once the app works end-to-end, help me list it in the Byoky App Store so users c
 
 1. Deploy the app over HTTPS. The hosting server must allow iframe embedding — either omit \`X-Frame-Options\` or set \`Content-Security-Policy: frame-ancestors *\`. Do NOT set \`X-Frame-Options: DENY\` or \`SAMEORIGIN\`.
 2. From the project root, create the manifest: \`npx create-byoky-app init\`. This writes \`byoky.app.json\`.
-3. Submit: \`npx create-byoky-app submit\`. This POSTs the manifest to https://api.byoky.com/v1/apps/submit. The endpoint validates fields, fetches the URL, and rejects it if iframe embedding is blocked.
-4. Once approved, the app appears at https://byoky.com/apps and inside the extension / iOS / Android App Store. The author email on the manifest gets the approval notification.
+3. Validate locally: \`npx create-byoky-app preflight\`. This runs every check the submit endpoint runs (slug regex, length caps, HTTPS, iframe-embeddability) so you don't burn a round-trip on a fixable rejection.
+4. Submit: \`npx create-byoky-app submit\`. This POSTs the manifest to https://api.byoky.com/v1/apps/submit.
+5. Once approved, the app appears at https://byoky.com/apps and inside the extension / iOS / Android App Store. The author email on the manifest gets the approval notification.
 
 Manifest schema (\`byoky.app.json\`):
 - \`name\` (string, ≤100 chars) — display name
@@ -121,6 +124,7 @@ const categories = [
       { id: 'tool-use', label: 'Tool Use' },
       { id: 'structured-output', label: 'Structured Output' },
       { id: 'vision', label: 'Vision' },
+      { id: 'list-models', label: 'Model Discovery' },
       { id: 'errors', label: 'Error Handling' },
       { id: 'limits', label: 'Limits & Quotas' },
     ],
@@ -209,6 +213,7 @@ export default function Docs() {
         <ToolUse />
         <StructuredOutputSection />
         <Vision />
+        <ListModels />
         <Errors />
         <Limits />
         <BackendRelay />
@@ -1008,6 +1013,72 @@ function Vision() {
     ],
   }],
 });`}</Code>
+    </Section>
+  );
+}
+
+function ListModels() {
+  return (
+    <Section id="list-models" title="Model Discovery">
+      <p>
+        Build a model picker that reflects what the user actually has access to. Calling{' '}
+        <code>session.listModels(providerId)</code> hits each provider&apos;s discovery endpoint
+        through the proxy and returns a normalized list. For local providers (Ollama, LM Studio)
+        this is the only way to know what the user has installed.
+      </p>
+
+      <Code lang="typescript">{`const models = await session.listModels('anthropic');
+// → [
+//     { id: 'claude-sonnet-4-6', displayName: 'Claude Sonnet 4.6',
+//       contextWindow: 1_000_000, capabilities: { vision: true, reasoning: true }, raw: {...} },
+//     { id: 'claude-haiku-4-5', ... },
+//   ]
+
+// Build a <select> from it
+const options = models.map(m => ({
+  value: m.id,
+  label: m.displayName ?? m.id,
+}));`}</Code>
+
+      <h3>Returned shape</h3>
+      <Prop name="id" type="string">Exact model ID to pass in chat requests.</Prop>
+      <Prop name="providerId" type="string">Provider this model is hosted on.</Prop>
+      <Prop name="displayName" type="string?">Human-readable label, when the provider supplies one.</Prop>
+      <Prop name="contextWindow" type="number?">Max input context in tokens, when known.</Prop>
+      <Prop name="capabilities" type="Partial&lt;ModelCapabilities&gt;?">Best-effort flags ({`vision, tools, reasoning, structuredOutput`}). Some providers omit these — undefined means unknown, not unsupported.</Prop>
+      <Prop name="raw" type="unknown">Full provider payload for advanced consumers.</Prop>
+
+      <h3>Per-provider behaviour</h3>
+      <table className="docs-table">
+        <thead>
+          <tr><th>Provider</th><th>Endpoint hit</th><th>Notes</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>openai</code>, <code>groq</code>, <code>deepseek</code>, <code>mistral</code>, <code>fireworks</code>, <code>openrouter</code>, <code>lm_studio</code></td><td><code>/v1/models</code></td><td>OpenAI-compatible <code>{`{data:[...]}`}</code> shape</td></tr>
+          <tr><td><code>anthropic</code></td><td><code>/v1/models</code></td><td>Includes capabilities (<code>vision</code>, <code>thinking</code>, <code>structured_outputs</code>)</td></tr>
+          <tr><td><code>gemini</code></td><td><code>/v1beta/models</code></td><td>Filters out embedding-only models; strips the <code>models/</code> prefix from IDs</td></tr>
+          <tr><td><code>cohere</code></td><td><code>/v1/models</code></td><td>Filters to chat-capable models; reads <code>features</code> for capabilities</td></tr>
+          <tr><td><code>together</code></td><td><code>/v1/models</code></td><td>Returns a plain array (no <code>data</code> wrapper) — handled transparently</td></tr>
+          <tr><td><code>azure_openai</code></td><td><code>/openai/models?api-version=...</code></td><td>Returns deployments rather than upstream model IDs</td></tr>
+          <tr><td><code>ollama</code></td><td><code>/api/tags</code></td><td>Lists what the user has <code>ollama pull</code>&apos;d locally</td></tr>
+          <tr><td><code>perplexity</code></td><td>—</td><td>No public endpoint; returns a hardcoded Sonar list</td></tr>
+          <tr><td><code>xai</code></td><td>—</td><td>Endpoint not documented; throws <code>PROVIDER_UNAVAILABLE</code></td></tr>
+        </tbody>
+      </table>
+
+      <h3>Failure modes</h3>
+      <p>
+        <code>listModels</code> can throw a <code>ByokyError</code> with one of these codes:
+      </p>
+      <ul>
+        <li><code>PROVIDER_UNAVAILABLE</code> — the provider has no models endpoint, or returned 404/405.</li>
+        <li><code>INVALID_KEY</code> — credential rejected by the provider (401/403).</li>
+        <li><code>RATE_LIMITED</code> — upstream returned 429.</li>
+        <li><code>PROXY_ERROR</code> — anything else (transport failure, malformed response).</li>
+      </ul>
+      <p>
+        Defensive callers should fall back to a hardcoded list. The <a href="/demo" style={{ color: 'var(--teal-dark)' }}>demo</a> shows the pattern.
+      </p>
     </Section>
   );
 }

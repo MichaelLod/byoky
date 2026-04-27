@@ -14,6 +14,7 @@ export {
   type SessionUsage,
   type GiftLink,
   type PairPayload,
+  type ModelInfo,
   ByokyError,
   ByokyErrorCode,
   decodeGiftLink,
