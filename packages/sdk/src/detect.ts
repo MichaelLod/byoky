@@ -32,14 +32,17 @@ export function getStoreUrl(): string | null {
 
   const ua = navigator.userAgent.toLowerCase();
 
+  if (ua.includes('android')) {
+    return 'https://play.google.com/store/apps/details?id=com.byoky.app';
+  }
   if (ua.includes('chrome') && !ua.includes('edg')) {
-    return 'https://chrome.google.com/webstore/detail/byoky/TODO_EXTENSION_ID';
+    return 'https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon';
   }
   if (ua.includes('firefox')) {
     return 'https://addons.mozilla.org/en-US/firefox/addon/byoky/';
   }
   if (ua.includes('safari') && !ua.includes('chrome')) {
-    return 'https://apps.apple.com/app/byoky/TODO_APP_ID';
+    return 'https://apps.apple.com/app/byoky/id6760779919';
   }
   return null;
 }

@@ -6,6 +6,7 @@ import { createRelayFetch } from './relay-fetch.js';
 import { createRelayClient, type RelayConnection } from './relay-client.js';
 import { ConnectModal, type ModalOptions } from './modal/connect-modal.js';
 import { createVaultFetch } from './vault-fetch.js';
+import { createMockSession, type MockConnectOptions } from './mock.js';
 
 // --- Session persistence helpers ---
 
@@ -407,6 +408,18 @@ export class Byoky {
       proxyUrl: `${baseUrl}/proxy`,
       providers: handshakeData.providers,
     });
+  }
+
+  /**
+   * Dev-only mock session — runs the app's full code path without a real
+   * wallet. Provider keys come from the `keys` option or the `BYOKY_DEV_KEYS`
+   * environment variable (Node.js). Refuses to run when NODE_ENV=production.
+   *
+   * Useful for local development, integration tests, and CI. Not a security
+   * boundary — keys are used directly with the upstream provider, no proxy.
+   */
+  async connectMock(options: MockConnectOptions = {}): Promise<ByokySession> {
+    return createMockSession(options);
   }
 
   private buildVaultSession(data: {

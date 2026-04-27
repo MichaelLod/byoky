@@ -103,6 +103,7 @@ const categories = [
       { id: 'overview', label: 'Overview' },
       { id: 'installation', label: 'Installation' },
       { id: 'quickstart', label: 'Quickstart' },
+      { id: 'dev-sandbox', label: 'Dev Sandbox' },
     ],
   },
   {
@@ -121,6 +122,7 @@ const categories = [
       { id: 'structured-output', label: 'Structured Output' },
       { id: 'vision', label: 'Vision' },
       { id: 'errors', label: 'Error Handling' },
+      { id: 'limits', label: 'Limits & Quotas' },
     ],
   },
   {
@@ -199,6 +201,7 @@ export default function Docs() {
         <Overview />
         <Installation />
         <Quickstart />
+        <DevSandbox />
         <SdkReference />
         <SessionApi />
         <ProvidersSection />
@@ -207,6 +210,7 @@ export default function Docs() {
         <StructuredOutputSection />
         <Vision />
         <Errors />
+        <Limits />
         <BackendRelay />
         <Bridge />
         <TokenGifts />
@@ -323,6 +327,73 @@ const message = await client.messages.create({
         That&apos;s it. Full API compatibility &mdash; streaming, file uploads, and vision all work
         unchanged.
       </p>
+    </Section>
+  );
+}
+
+function DevSandbox() {
+  return (
+    <Section id="dev-sandbox" title="Dev Sandbox">
+      <p>
+        For local development and CI, the SDK can run without a wallet at all. Pass your own keys via{' '}
+        <code>byoky.connectMock()</code> and the returned session behaves exactly like a real one
+        &mdash; same <code>createFetch</code>, same provider IDs &mdash; except requests go straight
+        to the upstream provider.
+      </p>
+
+      <p>
+        <strong>This is a development convenience, not a security boundary.</strong> The SDK refuses
+        to construct a mock session when <code>NODE_ENV=production</code>. Never ship code that
+        relies on it.
+      </p>
+
+      <h3>From an environment variable</h3>
+      <p>
+        Set <code>BYOKY_DEV_KEYS</code> to a comma-separated list of <code>provider:key</code> pairs.
+        Works in Node.js (CI, scripts, server-side tests):
+      </p>
+      <Code lang="bash">{`# .env.local or shell
+BYOKY_DEV_KEYS=anthropic:sk-ant-...,openai:sk-...`}</Code>
+      <Code lang="typescript">{`import { Byoky } from '@byoky/sdk';
+
+const session = await new Byoky().connectMock();
+
+// Use the session exactly like a real one
+import Anthropic from '@anthropic-ai/sdk';
+const client = new Anthropic({
+  apiKey: session.sessionKey,
+  fetch: session.createFetch('anthropic'),
+});`}</Code>
+
+      <h3>With explicit keys</h3>
+      <p>
+        For unit tests, browser dev, or cases where the env var isn&apos;t available:
+      </p>
+      <Code lang="typescript">{`const session = await new Byoky().connectMock({
+  keys: {
+    anthropic: process.env.ANTHROPIC_API_KEY!,
+    openai:    process.env.OPENAI_API_KEY!,
+  },
+});`}</Code>
+
+      <h3>Local providers (Ollama, LM Studio, Azure)</h3>
+      <p>
+        Providers without a fixed upstream host accept a per-provider <code>baseUrl</code>:
+      </p>
+      <Code lang="typescript">{`const session = await new Byoky().connectMock({
+  keys: { ollama: 'ollama' }, // local servers usually accept any value
+  baseUrls: {
+    ollama: 'http://localhost:11434',
+  },
+});`}</Code>
+
+      <h3>Caveats</h3>
+      <ul>
+        <li><code>session.createRelay()</code> throws &mdash; relays go through a real wallet.</li>
+        <li><code>session.getUsage()</code> always returns zeros &mdash; no metering happens.</li>
+        <li>Cross-provider routing, gift redemption, and group rebinding are not simulated.</li>
+        <li>The auth header convention is fixed per provider (<code>x-api-key</code> for Anthropic, query <code>?key=</code> for Gemini, <code>Authorization: Bearer</code> for everyone else).</li>
+      </ul>
     </Section>
   );
 }
@@ -528,6 +599,8 @@ function ProvidersSection() {
           ['fireworks', 'Fireworks AI'],
           ['openrouter', 'OpenRouter'],
           ['azure_openai', 'Azure OpenAI'],
+          ['ollama', 'Ollama (local)'],
+          ['lm_studio', 'LM Studio (local)'],
         ].map(([id, name]) => (
           <div key={id} className="docs-provider-row">
             <code>{id}</code>
@@ -535,6 +608,90 @@ function ProvidersSection() {
           </div>
         ))}
       </div>
+
+      <h3>Wire-format families</h3>
+      <p>
+        Providers fall into one of four wire-format families. Two providers in the same family speak
+        the same API surface and are byte-for-byte interchangeable; crossing families requires the
+        wallet&apos;s translation layer (see{' '}
+        <a href="#cross-provider" style={{ color: 'var(--teal-dark)' }}>Cross-Provider Routing</a>).
+      </p>
+      <div className="docs-providers-grid">
+        {[
+          ['anthropic', 'anthropic'],
+          ['openai', 'openai, mistral, xai, deepseek, perplexity, groq, together, fireworks, openrouter, azure_openai, ollama, lm_studio'],
+          ['gemini', 'gemini'],
+          ['cohere', 'cohere'],
+        ].map(([family, members]) => (
+          <div key={family} className="docs-provider-row">
+            <code>{family}</code>
+            <span>{members}</span>
+          </div>
+        ))}
+      </div>
+
+      <h3>Capability matrix</h3>
+      <p>
+        What each family supports natively at the wire-format level. Capabilities below this baseline
+        depend on the specific model — e.g. <code>gpt-5.4-nano</code> drops vision, Cohere&apos;s
+        Command A drops vision and JSON mode. Always check the provider&apos;s docs for the exact
+        model you target.
+      </p>
+      <table className="docs-table">
+        <thead>
+          <tr>
+            <th>Family</th>
+            <th>Streaming</th>
+            <th>Tool use</th>
+            <th>Vision</th>
+            <th>JSON mode</th>
+            <th>Reasoning</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>anthropic</code></td>
+            <td>✓</td>
+            <td>✓</td>
+            <td>✓</td>
+            <td>via tool use</td>
+            <td>✓</td>
+          </tr>
+          <tr>
+            <td><code>openai</code></td>
+            <td>✓</td>
+            <td>✓</td>
+            <td>✓</td>
+            <td>✓ <span className="docs-table-note">(json_schema, json_object)</span></td>
+            <td>✓</td>
+          </tr>
+          <tr>
+            <td><code>gemini</code></td>
+            <td>✓</td>
+            <td>✓</td>
+            <td>✓</td>
+            <td>✓ <span className="docs-table-note">(responseMimeType)</span></td>
+            <td>✓</td>
+          </tr>
+          <tr>
+            <td><code>cohere</code></td>
+            <td>✓</td>
+            <td>✓</td>
+            <td>—</td>
+            <td>—</td>
+            <td>✓</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Local providers</h3>
+      <p>
+        <code>ollama</code> and <code>lm_studio</code> point at a user-run loopback server (default
+        <code> http://localhost:11434</code> for Ollama, <code>http://localhost:1234</code> for LM
+        Studio). The wallet stores the per-credential base URL alongside the API key — your app code
+        doesn&apos;t need to know which port. Both expose an OpenAI-compatible chat surface, so they
+        belong to the <code>openai</code> wire-format family.
+      </p>
     </Section>
   );
 }
@@ -866,29 +1023,41 @@ function Errors() {
 
       <p>
         The proxy layer adds its own error codes on top, signalled with an HTTP status and an{' '}
-        <code>error.code</code> field in the JSON body:
+        <code>error.code</code> field in the JSON body. The table below covers every value of the{' '}
+        <code>ByokyErrorCode</code> enum and what your app should do when it fires.
       </p>
 
-      <div className="docs-providers-grid">
-        {[
-          ['WALLET_NOT_INSTALLED', 'Extension/app not detected during connect()'],
-          ['USER_REJECTED', 'User dismissed the connect modal'],
-          ['PROVIDER_UNAVAILABLE', 'No credential and no routing group for this provider'],
-          ['SESSION_EXPIRED', 'Session was revoked or timed out — call connect() again'],
-          ['RATE_LIMITED', 'Upstream provider rate limit (HTTP 429)'],
-          ['QUOTA_EXCEEDED', 'Gift budget or wallet-imposed limit hit (HTTP 429)'],
-          ['INVALID_KEY', 'Stored credential rejected by provider'],
-          ['TOKEN_EXPIRED', 'OAuth token expired and refresh failed'],
-          ['PROXY_ERROR', 'Generic proxy failure — retryable'],
-          ['RELAY_CONNECTION_FAILED', 'Backend relay could not reach the browser'],
-          ['RELAY_DISCONNECTED', 'Relay peer disconnected mid-request'],
-        ].map(([code, desc]) => (
-          <div key={code} className="docs-provider-row">
-            <code>{code}</code>
-            <span>{desc}</span>
-          </div>
-        ))}
-      </div>
+      <table className="docs-table">
+        <thead>
+          <tr>
+            <th>Code</th>
+            <th>Meaning</th>
+            <th>What to do</th>
+          </tr>
+        </thead>
+        <tbody>
+          {[
+            ['WALLET_NOT_INSTALLED', 'No extension or mobile wallet was detected when connect() ran.', <>Show an install prompt — <code>getStoreUrl()</code> returns the right link per platform.</>],
+            ['USER_REJECTED', 'User dismissed the connect modal or denied the permission prompt.', 'Do not auto-retry. Wait for an explicit user action before calling connect() again.'],
+            ['PROVIDER_UNAVAILABLE', 'The wallet has no credential (and no routing group) that can serve this provider.', 'Tell the user which provider you need; deep-link them into the wallet to add a credential.'],
+            ['SESSION_EXPIRED', 'Session was revoked from the wallet or aged out.', <>Call <code>byoky.connect()</code> again. <code>tryReconnect()</code> handles silent restore.</>],
+            ['RATE_LIMITED', 'Upstream provider returned 429 (their rate limit, not byoky\'s).', <>Back off and retry. Honour the upstream <code>Retry-After</code> header.</>],
+            ['QUOTA_EXCEEDED', 'A token-gift budget or wallet-imposed limit ran out (HTTP 429).', 'Do not retry. Surface a "budget exhausted" UI — the gift/pool needs topping up.'],
+            ['INVALID_KEY', 'Stored credential was rejected by the provider (401).', 'Prompt the user to update the credential in their wallet.'],
+            ['TOKEN_EXPIRED', 'OAuth access token expired and the refresh attempt failed.', <>Call <code>connect()</code> again — the wallet will re-run OAuth.</>],
+            ['PROXY_ERROR', 'Generic proxy-layer failure (extension crashed, native message dropped, etc.).', 'Safe to retry once. Surface a generic error if it repeats.'],
+            ['RELAY_CONNECTION_FAILED', 'Backend WebSocket relay could not reach the browser.', 'Check the relay URL and that the user\'s tab is still open; retry with backoff.'],
+            ['RELAY_DISCONNECTED', 'Relay peer disconnected mid-request (user closed tab, network drop).', <>Reopen the relay via <code>session.createRelay(url)</code>.</>],
+            ['UNKNOWN', 'Anything that doesn\'t map to a specific code (last-resort fallback).', 'Log the original message and surface a generic error. Treat as transient.'],
+          ].map(([code, meaning, action]) => (
+            <tr key={code as string}>
+              <td><code>{code}</code></td>
+              <td>{meaning}</td>
+              <td>{action}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
 
       <h3>Handling quota errors</h3>
       <p>
@@ -928,6 +1097,122 @@ session.onProvidersUpdated((providers) => {
     .filter(([, v]) => v.available)
     .map(([id]) => id));
 });`}</Code>
+    </Section>
+  );
+}
+
+function Limits() {
+  return (
+    <Section id="limits" title="Limits & Quotas">
+      <p>
+        Byoky enforces a small set of guardrails at the wallet, bridge, and submission layers. Most
+        apps will never hit them — but knowing the numbers up front saves a debugging round-trip.
+      </p>
+
+      <h3>Connection rate limits</h3>
+      <p>
+        The wallet rate-limits how often a single origin can ask for a session, per the table below.
+        Hitting either limit returns a <code>RATE_LIMITED</code> proxy error during{' '}
+        <code>connect()</code>. These caps reset on a sliding 60-second window.
+      </p>
+      <table className="docs-table">
+        <thead>
+          <tr>
+            <th>Operation</th>
+            <th>Limit</th>
+            <th>Window</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Connect requests per origin</td>
+            <td><code>10</code></td>
+            <td>60 seconds</td>
+          </tr>
+          <tr>
+            <td>OAuth refresh attempts per origin</td>
+            <td><code>3</code></td>
+            <td>60 seconds</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        Provider-side rate limits (the <code>HTTP 429</code> from Anthropic, OpenAI, etc.) are
+        unaffected by these caps and surface as a <code>RATE_LIMITED</code> error with the upstream{' '}
+        <code>Retry-After</code> header preserved.
+      </p>
+
+      <h3>Session lifetime</h3>
+      <ul>
+        <li>
+          Session expiry is set by the wallet on approval. Treat it as opaque — listen for{' '}
+          <code>session.onDisconnect()</code> rather than tracking time yourself.
+        </li>
+        <li>
+          <code>byoky.tryReconnect()</code> silently restores a previous session within the same
+          tab. Useful as the first call on every page load.
+        </li>
+        <li>
+          Relay sessions (created by <code>session.createRelay()</code>) refresh internally every{' '}
+          <strong>10 minutes</strong> to bound the replay window for the auth token. No action
+          required from your code.
+        </li>
+      </ul>
+
+      <h3>Bridge body size</h3>
+      <p>
+        When apps route through <code>@byoky/bridge</code> (CLI / desktop), the bridge caps a single
+        request body at <strong>10 MB</strong>. Larger bodies fail with a{' '}
+        <code>413 Payload Too Large</code> at the proxy. The browser proxy path has no equivalent
+        cap, but very large bodies still incur extra latency from chunking.
+      </p>
+
+      <h3>Marketplace submission caps</h3>
+      <p>
+        Field limits enforced by <code>POST /v1/apps/submit</code>. Submissions outside these bounds
+        return <code>HTTP 400</code> with the offending field named.
+      </p>
+      <table className="docs-table">
+        <thead>
+          <tr>
+            <th>Field</th>
+            <th>Constraint</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>name</code></td><td>≤ 100 characters</td></tr>
+          <tr>
+            <td><code>slug</code></td>
+            <td>
+              <code>^[a-z0-9][a-z0-9-]&#123;0,61&#125;[a-z0-9]$</code> — lowercase alphanumeric and
+              hyphens, 2–63 chars
+            </td>
+          </tr>
+          <tr><td><code>url</code></td><td>≤ 2048 characters, must be HTTPS, must be publicly resolvable, must allow iframe embedding</td></tr>
+          <tr><td><code>icon</code></td><td>HTTPS URL (optional)</td></tr>
+          <tr><td><code>description</code></td><td>≤ 1000 characters</td></tr>
+          <tr>
+            <td><code>category</code></td>
+            <td><code>chat</code>, <code>coding</code>, <code>trading</code>, <code>productivity</code>, <code>research</code>, <code>creative</code>, or <code>other</code></td>
+          </tr>
+          <tr><td><code>providers</code></td><td>at least one valid provider ID</td></tr>
+          <tr><td><code>author.name</code></td><td>≤ 100 characters</td></tr>
+          <tr><td><code>author.email</code></td><td>≤ 320 characters</td></tr>
+          <tr><td><code>author.website</code></td><td>HTTPS URL (optional)</td></tr>
+        </tbody>
+      </table>
+      <p>
+        Run <code>npx create-byoky-app preflight</code> to validate every field locally before
+        submitting — it catches everything the server would reject, including iframe header issues.
+      </p>
+
+      <h3>What is <em>not</em> capped</h3>
+      <ul>
+        <li>Token usage — billed and metered by the upstream provider, not byoky.</li>
+        <li>Concurrent requests per session — bounded only by the user&apos;s connection.</li>
+        <li>Number of providers per session — request as many as the app actually needs.</li>
+        <li>Number of installed apps per wallet.</li>
+      </ul>
     </Section>
   );
 }
@@ -1878,6 +2163,46 @@ const docsStyles = `
 
 .docs-provider-row span {
   color: var(--docs-text-secondary);
+}
+
+.docs-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0 20px;
+  font-size: 14px;
+}
+
+.docs-table th,
+.docs-table td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--docs-border);
+  vertical-align: top;
+}
+
+.docs-table th {
+  font-weight: 600;
+  color: var(--docs-text);
+  background: var(--docs-bg-elevated);
+  font-size: 13px;
+}
+
+.docs-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.docs-table td code {
+  font-size: 12px;
+  color: var(--teal-dark);
+  background: var(--docs-bg-elevated);
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.docs-table-note {
+  color: var(--docs-text-secondary);
+  font-size: 12px;
 }
 
 /* ── Responsive ── */
