@@ -243,13 +243,14 @@ export default defineBackground(() => {
   const CONNECT_RATE_LIMIT = 10; // max requests per window
   const CONNECT_RATE_WINDOW = 60_000; // 1 minute
 
-  function isConnectRateLimited(origin: string): boolean {
+  function checkConnectRateLimit(origin: string): { limited: true; retryAfter: number } | { limited: false } {
     const now = Date.now();
     const timestamps = connectRateLimit.get(origin) ?? [];
     const recent = timestamps.filter((t) => now - t < CONNECT_RATE_WINDOW);
     if (recent.length >= CONNECT_RATE_LIMIT) {
       connectRateLimit.set(origin, recent);
-      return true;
+      const retryAfter = Math.max(1, Math.ceil((CONNECT_RATE_WINDOW - (now - recent[0])) / 1000));
+      return { limited: true, retryAfter };
     }
     recent.push(now);
     connectRateLimit.set(origin, recent);
@@ -261,7 +262,7 @@ export default defineBackground(() => {
         }
       }
     }
-    return false;
+    return { limited: false };
   }
 
   // Rate limiting for OAuth flow requests
@@ -285,9 +286,12 @@ export default defineBackground(() => {
   // Mutex for gift budget updates to prevent concurrent overwrites
   const giftBudgetLocks = new Map<string, Promise<void>>();
 
-  // Restore session after MV3 service worker restart
+  // Restore session after MV3 service worker restart. Capture the sessions
+  // promise so port handlers can await it — otherwise a proxy request that
+  // arrives during the SW boot window would miss the in-flight rehydrate
+  // and 401 with SESSION_EXPIRED even when a valid session is on disk.
   restoreSession();
-  restoreSessions();
+  const sessionsRestored = restoreSessions();
 
   // --- Open side panel on icon click (Chrome) / sidebar (Firefox) ---
 
@@ -342,6 +346,7 @@ export default defineBackground(() => {
       // broadcast to the side-panel's onMessage listener (which can interfere
       // in Chrome MV3 when multiple listeners exist).
       port.onMessage.addListener(async (raw: unknown) => {
+        await sessionsRestored;
         const message = raw as Record<string, unknown>;
         const sender = port.sender as Runtime.MessageSender;
         let response: unknown;
@@ -422,6 +427,7 @@ export default defineBackground(() => {
     const popupRelay = isSelfSender(port.sender);
 
     port.onMessage.addListener(async (raw: unknown) => {
+      await sessionsRestored;
       const msg = raw as ProxyRequest & { appOrigin?: string };
       if (msg.sessionKey == null) return;
       const effectiveOrigin = popupRelay && typeof msg.appOrigin === 'string'
@@ -874,26 +880,37 @@ export default defineBackground(() => {
     const origin = resolveAppOrigin(sender, message);
     const fromPopup = isSelfSender(sender);
 
-    if (isConnectRateLimited(origin)) {
-      return {
-        type: 'BYOKY_ERROR',
-        requestId: message.id,
-        payload: { code: 'RATE_LIMITED', message: 'Too many connection requests. Try again later.' },
-      };
-    }
-
-    // If there's already an active session for this origin, reuse it
+    // Cheap path: reuse an active session for this origin. Don't gate on
+    // the rate limit — every page load calls connect(), and reusing the
+    // same approval shouldn't burn budget.
     const existing = findActiveSession(origin);
     if (existing) {
       return buildSessionResponse(existing, message.id);
     }
 
-    // Silent reconnect: only return existing session, don't prompt
+    // Silent reconnect probe with no session is also cheap — answer NO_SESSION
+    // without consuming the rate-limit budget.
     if (message.payload.reconnectOnly) {
       return {
         type: 'BYOKY_ERROR',
         requestId: message.id,
         payload: { code: 'NO_SESSION', message: 'No active session for this origin' },
+      };
+    }
+
+    // Expensive path: a fresh session requires creation (and likely user
+    // approval). Apply the rate limit here so spam can't trigger repeat
+    // approval prompts.
+    const rl = checkConnectRateLimit(origin);
+    if (rl.limited) {
+      return {
+        type: 'BYOKY_ERROR',
+        requestId: message.id,
+        payload: {
+          code: 'RATE_LIMITED',
+          message: 'Please wait a moment before trying again.',
+          retryAfter: rl.retryAfter,
+        },
       };
     }
 
