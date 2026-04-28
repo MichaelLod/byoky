@@ -143,11 +143,14 @@ export function buildHeaders(
       const oauthBeta = ['claude-code-20250219', 'oauth-2025-04-20', 'fine-grained-tool-streaming-2025-05-14', 'interleaved-thinking-2025-05-14'];
       const existing = headers['anthropic-beta'] ? headers['anthropic-beta'].split(',').map(s => s.trim()) : [];
       headers['anthropic-beta'] = [...new Set([...existing, ...oauthBeta])].join(',');
-      headers['anthropic-dangerous-direct-browser-access'] = 'true';
     } else {
       headers['x-api-key'] = apiKey;
     }
     headers['anthropic-version'] = headers['anthropic-version'] ?? '2023-06-01';
+    // Always opt in: Anthropic flags any browser-origin request signature
+    // and 401s without this, even though our service-worker proxy isn't
+    // actually exposing the key to the page.
+    headers['anthropic-dangerous-direct-browser-access'] = 'true';
   } else if (providerId === 'azure_openai') {
     headers['api-key'] = apiKey;
   } else if (providerId === 'gemini') {
