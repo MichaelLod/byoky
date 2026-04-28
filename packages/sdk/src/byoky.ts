@@ -175,6 +175,10 @@ export interface ByokyOptions {
 export class Byoky {
   private timeout: number;
   private relayUrl: string;
+  // Snapshot of the last user-initiated connect request, so reconnects can
+  // fall back from `reconnectOnly` to a full connect when the wallet has
+  // dropped the session (browser restart / extension reload).
+  private lastConnectRequest?: ConnectRequest;
 
   constructor(options: ByokyOptions = {}) {
     this.timeout = options.timeout ?? 60_000;
@@ -212,6 +216,7 @@ export class Byoky {
     }
 
     const { onPairingReady, useRelay, modal, ...connectRequest } = request;
+    this.lastConnectRequest = connectRequest;
 
     if (modal) {
       const modalOpts = typeof modal === 'object' ? modal : {};
@@ -769,26 +774,44 @@ export class Byoky {
 
     let reconnectPromise: Promise<boolean> | null = null;
 
+    const applyNewResponse = (newResponse: ConnectResponse) => {
+      sessionKeyRef.current = newResponse.sessionKey;
+      session.sessionKey = newResponse.sessionKey;
+      session.providers = newResponse.providers;
+      saveExtSession(newResponse);
+      for (const cb of providersUpdatedCallbacks) cb(newResponse.providers);
+    };
+
     const attemptReconnect = (): Promise<boolean> => {
       if (reconnectPromise) return reconnectPromise;
-      reconnectPromise = this.sendConnectRequest({ reconnectOnly: true }).then(
-        (newResponse) => {
-          sessionKeyRef.current = newResponse.sessionKey;
-          session.sessionKey = newResponse.sessionKey;
-          session.providers = newResponse.providers;
-          saveExtSession(newResponse);
-          for (const cb of providersUpdatedCallbacks) cb(newResponse.providers);
-          reconnectPromise = null;
+      reconnectPromise = (async () => {
+        try {
+          const newResponse = await this.sendConnectRequest({ reconnectOnly: true });
+          applyNewResponse(newResponse);
           return true;
-        },
-        () => {
+        } catch (err) {
+          // Silent reconnect failed (NO_SESSION). If the user previously
+          // approved this origin in the wallet, a full connect will
+          // re-create the session via the trusted-sites auto-approve path
+          // (see extension handleConnect). Otherwise the wallet popup will
+          // re-prompt — better UX than surfacing a raw 401 in the chat.
+          if (this.lastConnectRequest && err instanceof ByokyError && err.code === ByokyErrorCode.NO_SESSION) {
+            try {
+              const newResponse = await this.sendConnectRequest(this.lastConnectRequest);
+              applyNewResponse(newResponse);
+              return true;
+            } catch {
+              // Fall through to disconnect
+            }
+          }
           clearExtSession();
           for (const cb of disconnectCallbacks) cb();
           disconnectCallbacks.clear();
-          reconnectPromise = null;
           return false;
-        },
-      );
+        } finally {
+          reconnectPromise = null;
+        }
+      })();
       return reconnectPromise;
     };
 
@@ -893,11 +916,16 @@ export class Byoky {
         if (msg.type === 'BYOKY_CONNECT_RESPONSE') {
           resolve(msg.payload as ConnectResponse);
         } else if (msg.type === 'BYOKY_ERROR') {
-          const { code, message } = msg.payload as {
+          const { code, message, retryAfter } = msg.payload as {
             code: string;
             message: string;
+            retryAfter?: number;
           };
-          reject(new ByokyError(code as ByokyErrorCode, message));
+          reject(new ByokyError(
+            code as ByokyErrorCode,
+            message,
+            retryAfter !== undefined ? { retryAfter } : undefined,
+          ));
         }
       };
 

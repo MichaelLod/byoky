@@ -1,3 +1,4 @@
+import { ByokyError } from '@byoky/core';
 import type { ByokySession } from '../byoky.js';
 import { encode, toSvg } from './qr.js';
 
@@ -84,6 +85,9 @@ const STYLES = /* css */ `
 
   .btn-primary { background: var(--byoky-accent); color: #fff; }
   .btn-primary:hover { background: var(--byoky-accent-hover); transform: translateY(-1px); }
+  .btn-primary:disabled, .btn-primary[aria-disabled="true"] {
+    background: var(--byoky-accent); opacity: 0.55; cursor: not-allowed; transform: none;
+  }
 
   .btn-secondary {
     background: var(--byoky-bg-elevated); color: var(--byoky-text);
@@ -175,6 +179,7 @@ const ICON_SHIELD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" 
 const ICON_PHONE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>';
 const ICON_EXT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>';
 const ICON_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
+const ICON_CLOCK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>';
 
 export class ConnectModal {
   private host: HTMLElement;
@@ -183,6 +188,9 @@ export class ConnectModal {
   private state: ModalState;
   private pairingCode: string | null = null;
   private errorMessage: string | null = null;
+  private errorCode: string | null = null;
+  private retryAfter: number | null = null;
+  private countdownInterval: ReturnType<typeof setInterval> | null = null;
   private fns!: ConnectFunctions;
   private resolve!: (s: ByokySession) => void;
   private reject!: (e: Error) => void;
@@ -233,6 +241,10 @@ export class ConnectModal {
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;
+    if (this.countdownInterval) {
+      clearInterval(this.countdownInterval);
+      this.countdownInterval = null;
+    }
     if (activeModal === this) activeModal = null;
     this.host.remove();
   }
@@ -357,18 +369,26 @@ export class ConnectModal {
 
   private renderError() {
     this.card.innerHTML = '';
-    this.addIcon(ICON_SHIELD);
-    this.addHeading('Connection failed');
+    if (this.countdownInterval) {
+      clearInterval(this.countdownInterval);
+      this.countdownInterval = null;
+    }
+
+    const isRateLimited = this.errorCode === 'RATE_LIMITED';
+    this.addIcon(isRateLimited ? ICON_CLOCK : ICON_SHIELD);
+    this.addHeading(isRateLimited ? 'Just a moment' : 'Connection failed');
+
     const msg = document.createElement('div');
     msg.className = 'error-msg';
+    if (isRateLimited) msg.style.color = 'var(--byoky-text-secondary)';
     msg.textContent = this.errorMessage ?? 'Something went wrong. Please try again.';
     this.card.appendChild(msg);
 
-    const options = document.createElement('div');
-    options.className = 'options';
-    options.appendChild(this.createButton('Try Again', 'btn-primary', null, () => {
+    const retry = () => {
       this.pairingCode = null;
       this.errorMessage = null;
+      this.errorCode = null;
+      this.retryAfter = null;
       if (this.fns.hasExtension) {
         this.setState('connecting');
         this.handleExtension();
@@ -376,7 +396,35 @@ export class ConnectModal {
         this.setState('relay-connecting');
         this.handleRelay();
       }
-    }));
+    };
+
+    const options = document.createElement('div');
+    options.className = 'options';
+
+    const tryBtn = this.createButton('Try Again', 'btn-primary', null, retry);
+    if (isRateLimited && this.retryAfter && this.retryAfter > 0) {
+      let remaining = this.retryAfter;
+      const label = tryBtn.querySelector('span:last-child') as HTMLElement | null;
+      const setLabel = (s: number) => {
+        if (label) label.textContent = s > 0 ? `Try Again in ${s}s` : 'Try Again';
+      };
+      setLabel(remaining);
+      tryBtn.setAttribute('aria-disabled', 'true');
+      tryBtn.disabled = true;
+      this.countdownInterval = setInterval(() => {
+        remaining -= 1;
+        if (remaining <= 0) {
+          if (this.countdownInterval) clearInterval(this.countdownInterval);
+          this.countdownInterval = null;
+          setLabel(0);
+          tryBtn.removeAttribute('aria-disabled');
+          tryBtn.disabled = false;
+        } else {
+          setLabel(remaining);
+        }
+      }, 1000);
+    }
+    options.appendChild(tryBtn);
     options.appendChild(this.createButton('Cancel', 'btn-ghost', null, () => this.handleCancel()));
     this.card.appendChild(options);
   }
@@ -433,6 +481,19 @@ export class ConnectModal {
 
   // --- Actions ---
 
+  private captureError(err: unknown, fallback: string) {
+    if (err instanceof ByokyError) {
+      this.errorMessage = err.message;
+      this.errorCode = err.code;
+      const ra = err.details?.retryAfter;
+      this.retryAfter = typeof ra === 'number' ? ra : null;
+    } else {
+      this.errorMessage = err instanceof Error ? err.message : fallback;
+      this.errorCode = null;
+      this.retryAfter = null;
+    }
+  }
+
   private async handleExtension() {
     this.setState('connecting');
     try {
@@ -440,7 +501,7 @@ export class ConnectModal {
       this.setState('success');
       setTimeout(() => { this.destroy(); this.resolve(session); }, 800);
     } catch (err) {
-      this.errorMessage = err instanceof Error ? err.message : 'Failed to connect to extension';
+      this.captureError(err, 'Failed to connect to extension');
       this.setState('error');
     }
   }
@@ -456,7 +517,7 @@ export class ConnectModal {
       setTimeout(() => { this.destroy(); this.resolve(session); }, 800);
     } catch (err) {
       if (this.destroyed) return;
-      this.errorMessage = err instanceof Error ? err.message : 'Failed to connect via relay';
+      this.captureError(err, 'Failed to connect via relay');
       this.setState('error');
     }
   }
