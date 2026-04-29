@@ -88,6 +88,7 @@ export function Navbar() {
     { href: '/demo', label: 'Demo', match: (p) => p.startsWith('/demo') },
     { href: '/openclaw', label: 'OpenClaw', match: (p) => p.startsWith('/openclaw') },
     { href: '/claude-code', label: 'Claude Code', match: (p) => p.startsWith('/claude-code') },
+    { href: '/hermes-agent', label: 'Hermes', match: (p) => p.startsWith('/hermes-agent') },
     { href: '/blog', label: 'Blog', match: (p) => p.startsWith('/blog') },
     { href: '/docs', label: 'Docs', match: (p) => p.startsWith('/docs') },
   ];
