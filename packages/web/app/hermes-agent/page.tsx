@@ -41,10 +41,12 @@ export default function HermesAgentTutorial() {
           <div className="oc-install-grid">
             <a
               className="oc-install-card"
-              href="https://github.com/MichaelLod/byoky/releases/download/v0.9.1/byoky-chrome-v0.9.1.zip"
+              href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon"
+              target="_blank"
+              rel="noopener noreferrer"
             >
               <svg width="20" height="20" viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="#fff" stroke="#ddd" strokeWidth="1"/><path d="M24 8a16 16 0 0 1 13.86 8H24v0z" fill="#EA4335"/><path d="M37.86 16A16 16 0 0 1 24 40l6.93-12z" fill="#FBBC05"/><path d="M24 40A16 16 0 0 1 10.14 16l6.93 12z" fill="#34A853"/><path d="M10.14 16A16 16 0 0 1 24 8v8z" fill="#4285F4"/><circle cx="24" cy="24" r="6" fill="#fff"/><circle cx="24" cy="24" r="4" fill="#4285F4"/></svg>
-              <span>Chrome — v0.9.1 unpacked</span>
+              <span>Chrome</span>
             </a>
             <a
               className="oc-install-card"
@@ -56,13 +58,6 @@ export default function HermesAgentTutorial() {
               <span>Firefox</span>
             </a>
           </div>
-          <p className="oc-note">
-            <strong>Version 0.9.1+ is required.</strong> The Chrome Web Store
-            is still serving 0.7.4 — download the unpacked zip above and load
-            it via <code>chrome://extensions</code> → enable Developer mode →{' '}
-            &quot;Load unpacked&quot; on the extracted folder. Firefox is
-            already on the required version.
-          </p>
           <p className="oc-note oc-note-muted">
             iOS and Android wallets exist but can&apos;t host Hermes — the{' '}
             <code>hermes</code> CLI and the Byoky Bridge need a desktop OS.
@@ -274,13 +269,10 @@ function VersionHint() {
         <path d="M12 8h.01" />
       </svg>
       <span>
-        Requires Byoky extension <strong>v0.9.1+</strong> and{' '}
-        <code>@byoky/bridge@0.9.6+</code> (for <code>byoky-bridge hermes-setup</code>).
-        Firefox is live on AMO; Chrome Web Store is still on 0.7.4 in review, so{' '}
-        <a
-          className="oc-link"
-          href="https://github.com/MichaelLod/byoky/releases/download/v0.9.1/byoky-chrome-v0.9.1.zip"
-        >load the v0.9.1 unpacked build</a> for now.
+        Requires Byoky extension <strong>v0.9.5+</strong> (live on the Chrome
+        Web Store and Firefox AMO) and{' '}
+        <code>@byoky/bridge@0.9.6+</code> (for{' '}
+        <code>byoky-bridge hermes-setup</code>).
       </span>
     </div>
   );

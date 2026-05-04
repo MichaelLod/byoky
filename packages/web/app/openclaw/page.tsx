@@ -269,7 +269,7 @@ function VersionHint() {
           target="_blank"
           rel="noopener noreferrer"
         >iOS</a>
-. On Chrome, load v0.9.0 unpacked while the store update is in review.
+        .
       </span>
     </div>
   );
