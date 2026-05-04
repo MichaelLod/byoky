@@ -1,6 +1,6 @@
 {
   "name": "create-byoky-app",
-  "version": "0.9.5",
+  "version": "0.9.10",
   "description": "Scaffold a new app powered by Byoky",
   "type": "module",
   "bin": {
