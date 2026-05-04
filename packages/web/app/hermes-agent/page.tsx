@@ -155,33 +155,63 @@ byoky-bridge install`}</Code>
 
         <Step
           n={5}
-          title="Point Hermes at the bridge and run"
-          subtitle="Two env vars, pick the model, and you're chatting."
+          title="Wire Hermes to the bridge"
+          subtitle="One command patches ~/.hermes/config.yaml so Hermes routes through byoky instead of going direct to api.anthropic.com."
         >
-          <Code>{`export ANTHROPIC_BASE_URL=http://127.0.0.1:19280/anthropic
-export ANTHROPIC_API_KEY=byoky
-
-hermes model     # pick provider=anthropic and a Claude model
-hermes           # start chatting`}</Code>
+          <Code>{`byoky-bridge hermes-setup`}</Code>
           <p>
-            Add the two <code>export</code> lines to <code>~/.zshrc</code> or{' '}
-            <code>~/.bashrc</code> so new terminals pick them up. The value of{' '}
-            <code>ANTHROPIC_API_KEY</code> doesn&apos;t matter — the bridge
-            strips the auth header and injects the real credential from your
-            wallet. Token usage shows up in the wallet&apos;s{' '}
-            <strong>Sessions</strong> view. If you&apos;re using a gifted
-            credential, the gifter&apos;s budget ticks down in real time and
-            the session stops cleanly when it hits zero.
+            That writes a <code>byoky-anthropic</code> entry into{' '}
+            <code>custom_providers</code> with{' '}
+            <code>api_mode: anthropic_messages</code>, flips{' '}
+            <code>model.provider</code> to <code>byoky-anthropic</code>, and
+            backs up the original to <code>config.yaml.bak</code>. Re-running
+            is a no-op if the file is already configured.
+          </p>
+          <p>Then run Hermes:</p>
+          <Code>{`hermes chat -q "ping" -Q       # one-shot smoke test
+hermes                          # interactive`}</Code>
+          <details>
+            <summary style={{ cursor: 'pointer', fontSize: 14, color: 'var(--text-secondary)', margin: '8px 0' }}>
+              Prefer to edit by hand? Show the manual diff.
+            </summary>
+            <Code>{`# At the top of ~/.hermes/config.yaml:
+model:
+  default: claude-sonnet-4-6        # or claude-opus-4-6, claude-haiku-4-5
+  provider: byoky-anthropic         # was: anthropic
+
+# In the custom_providers list, add (or fix) the byoky entry.
+# api_mode MUST be anthropic_messages — chat_completions yields 404 from the bridge.
+custom_providers:
+- name: byoky-anthropic
+  base_url: http://127.0.0.1:19280/anthropic
+  api_key: ''
+  api_mode: anthropic_messages`}</Code>
+          </details>
+          <p>
+            On a successful first call, <code>hermes status</code> shows{' '}
+            <strong>Provider: custom</strong> and <strong>Endpoint:
+            http://127.0.0.1:19280/anthropic</strong>. Token usage shows up
+            in the wallet&apos;s <strong>Sessions</strong> view in real time.
+            If you&apos;re using a gifted credential, the gifter&apos;s
+            budget ticks down and the session stops cleanly at zero.
           </p>
           <p className="oc-note oc-note-muted">
-            <strong>Heads-up: Hermes auto-discovers Claude Code creds.</strong>{' '}
-            If you have <code>~/.claude/.credentials.json</code> on disk,
-            Hermes will pick up that OAuth token and send it as{' '}
-            <code>x-api-key</code> regardless of what you set{' '}
-            <code>ANTHROPIC_API_KEY</code> to. This is safe — the bridge
-            strips the incoming auth header and injects the wallet credential
-            instead. But if you ever wonder why your explicit env var looks
-            ignored, that&apos;s why.
+            <strong>Why not env vars?</strong> The Hermes built-in{' '}
+            <code>anthropic</code> provider hits <code>api.anthropic.com</code>{' '}
+            directly and doesn&apos;t read <code>ANTHROPIC_BASE_URL</code>.
+            <code>--provider anthropic</code>, <code>hermes model → Anthropic</code>,
+            and any leftover <code>ANTHROPIC_API_KEY</code> in{' '}
+            <code>~/.hermes/.env</code> all bypass byoky. Routing has to go
+            through a <code>custom_providers</code> entry, which is what the
+            edits above set up.
+          </p>
+          <p className="oc-note oc-note-muted">
+            <strong>Coming from <code>hermes claw migrate</code>?</strong>{' '}
+            The migrator already drops a <code>byoky-anthropic</code> entry
+            in <code>custom_providers</code>, but with{' '}
+            <code>api_mode: chat_completions</code> — which yields a 404 from
+            the bridge. Change it to{' '}
+            <code>api_mode: anthropic_messages</code> and you&apos;re done.
           </p>
           <p className="oc-note oc-note-muted">
             Pro tip: Hermes ships a 36KB system prompt (its “SOUL.md”). Byoky
@@ -245,7 +275,7 @@ function VersionHint() {
       </svg>
       <span>
         Requires Byoky extension <strong>v0.9.1+</strong> and{' '}
-        <code>@byoky/bridge@0.9.4+</code> (for <code>byoky-bridge connect</code>).
+        <code>@byoky/bridge@0.9.6+</code> (for <code>byoky-bridge hermes-setup</code>).
         Firefox is live on AMO; Chrome Web Store is still on 0.7.4 in review, so{' '}
         <a
           className="oc-link"
@@ -311,12 +341,14 @@ function FromOpenClaw() {
           Hermes is the spiritual successor to OpenClaw and ships a built-in
           migrator. After installing Hermes, run{' '}
           <code>hermes claw migrate</code> to import your settings, memories,
-          skills, and (optionally) API keys. The Byoky integration looks
-          identical on this side — same bridge, same env vars, same wallet
-          credential. If you were running OpenClaw with the Byoky{' '}
-          <a className="oc-link" href="/openclaw">openclaw-plugin</a>, no
-          plugin equivalent is needed for Hermes; the bridge handles
-          everything.
+          skills, and (optionally) API keys. It also drops a{' '}
+          <code>byoky-anthropic</code> entry into{' '}
+          <code>~/.hermes/config.yaml</code> under{' '}
+          <code>custom_providers</code> — but with{' '}
+          <code>api_mode: chat_completions</code>, which the bridge returns
+          404 on. Change it to <code>api_mode: anthropic_messages</code>{' '}
+          (covered in step 5) and you&apos;re done. The wallet credential and
+          bridge plumbing are otherwise identical.
         </p>
       </div>
     </div>
@@ -326,15 +358,43 @@ function FromOpenClaw() {
 function Troubleshooting() {
   const items: [string, React.ReactNode][] = [
     [
+      'hermes status shows Endpoint: https://api.anthropic.com',
+      <>
+        Hermes is bypassing the bridge — it&apos;s using its built-in{' '}
+        <code>anthropic</code> provider, which ignores{' '}
+        <code>ANTHROPIC_BASE_URL</code> and goes direct. Confirm{' '}
+        <code>~/.hermes/config.yaml</code> has{' '}
+        <code>model.provider: byoky-anthropic</code> at the top and a{' '}
+        <code>byoky-anthropic</code> entry under <code>custom_providers</code>
+        {' '}with <code>api_mode: anthropic_messages</code>. After the edit{' '}
+        <code>hermes status</code> should report{' '}
+        <strong>Provider: custom</strong> and{' '}
+        <strong>Endpoint: http://127.0.0.1:19280/anthropic</strong>.
+      </>,
+    ],
+    [
+      'HTTP 404 from http://127.0.0.1:19280/anthropic',
+      <>
+        The byoky-anthropic entry in <code>custom_providers</code> is set to{' '}
+        <code>api_mode: chat_completions</code> — that path doesn&apos;t exist
+        on the bridge. Change it to{' '}
+        <code>api_mode: anthropic_messages</code>. (This is the default Hermes
+        leaves behind after <code>hermes claw migrate</code>; it has to be
+        flipped manually.)
+      </>,
+    ],
+    [
       '"Third-party apps now draw from your extra usage..."',
       <>
-        Anthropic classified your request as non-Claude-Code. Almost always
-        this means the wallet is using an <strong>API key</strong> instead of
-        an <strong>OAuth setup token</strong>. Run{' '}
-        <code>claude setup-token</code> in your terminal, paste the result
-        into the wallet as a fresh Anthropic credential, and retry. Gifted
-        Anthropic credentials already handle the classification on the
-        gifter&apos;s side.
+        Anthropic classified your request as non-Claude-Code, which only
+        happens when the request didn&apos;t actually go through the bridge.
+        Run <code>hermes status</code> — if it shows{' '}
+        <code>Endpoint: api.anthropic.com</code>, see the{' '}
+        <em>endpoint shows api.anthropic.com</em> entry above. If the endpoint
+        already points at <code>:19280/anthropic</code> and you still see this
+        error, the wallet credential itself is the issue: swap to a fresh{' '}
+        <code>claude setup-token</code> or a gift from the{' '}
+        <a className="oc-link" href="/token-pool">token pool</a>.
       </>,
     ],
     [
@@ -345,17 +405,6 @@ function Troubleshooting() {
         approve the session in the wallet, and starts the proxy on :19280.
         After a browser restart the proxy stops (the extension&apos;s service
         worker holds it open), so re-run the command to bring it back.
-      </>,
-    ],
-    [
-      'Hermes uses a different key than ANTHROPIC_API_KEY',
-      <>
-        Hermes auto-discovers Claude Code&apos;s OAuth token at{' '}
-        <code>~/.claude/.credentials.json</code> and uses it ahead of the env
-        var. The bridge strips the incoming <code>x-api-key</code> at the
-        boundary and injects the wallet credential, so this is safe. If you
-        want Hermes to stop trying, either remove that file or set the env
-        var explicitly via <code>hermes config set ANTHROPIC_API_KEY byoky</code>.
       </>,
     ],
     [
@@ -423,14 +472,17 @@ function HowItWorks() {
       </Code>
       <ol className="oc-list">
         <li>
-          Hermes sends Anthropic requests to{' '}
-          <code>$ANTHROPIC_BASE_URL</code> — pointed at{' '}
-          <code>http://127.0.0.1:19280/anthropic</code>.
+          Your <code>~/.hermes/config.yaml</code> declares a{' '}
+          <code>byoky-anthropic</code> entry under <code>custom_providers</code>
+          {' '}with <code>base_url: http://127.0.0.1:19280/anthropic</code> and{' '}
+          <code>api_mode: anthropic_messages</code>. That tells Hermes to POST
+          native Anthropic-shaped requests at the bridge instead of going to{' '}
+          <code>api.anthropic.com</code>.
         </li>
         <li>
-          The bridge strips the placeholder auth header (Hermes&apos;s own
-          stored token, if any) and forwards the request to your Byoky
-          extension via native messaging.
+          The bridge receives the request on :19280, strips the placeholder
+          auth header, and forwards the body to your Byoky extension via
+          native messaging.
         </li>
         <li>
           The extension injects the real Anthropic credential (your own API
