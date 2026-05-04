@@ -210,6 +210,39 @@ export default defineBackground(() => {
     } catch {}
   }
 
+  // The bridge's authorized sessionKey survives MV3 service worker evictions —
+  // without persisting it, every CLI request after a worker recycle hits the
+  // `sessionKey !== authorizedBridgeSessionKey` check and 401s, even though
+  // the session itself is still valid (sessions Map is restored above). The
+  // value is short-lived storage (storage.session, in-memory, browser-close-
+  // bounded) — same security profile as the sessions Map.
+  async function persistAuthorizedBridgeSessionKey() {
+    if (!hasSessionStorage) return;
+    try {
+      if (authorizedBridgeSessionKey) {
+        await browser.storage.session.set({ _bridgeKey: authorizedBridgeSessionKey });
+      } else {
+        await browser.storage.session.remove('_bridgeKey');
+      }
+    } catch {}
+  }
+
+  async function restoreAuthorizedBridgeSessionKey() {
+    if (!hasSessionStorage) return;
+    try {
+      const data = await browser.storage.session.get('_bridgeKey');
+      if (typeof data._bridgeKey === 'string' && data._bridgeKey) {
+        // Only honor it if the session itself is still in the Map. If autoLock
+        // cleared sessions, the cached bridge key is also dead.
+        if (sessions.has(data._bridgeKey)) {
+          authorizedBridgeSessionKey = data._bridgeKey;
+        } else {
+          await browser.storage.session.remove('_bridgeKey');
+        }
+      }
+    } catch {}
+  }
+
   // Auto-lock after 20 minutes of inactivity
   const IDLE_TIMEOUT_MS = 20 * 60 * 1000;
   let lastActivityAt = 0;
@@ -230,6 +263,7 @@ export default defineBackground(() => {
     sessions.clear();
     clearPersistedSessions();
     authorizedBridgeSessionKey = null;
+    persistAuthorizedBridgeSessionKey();
     disconnectAllGiftRelays();
     clearSessionStorage();
     browser.runtime.sendMessage({
@@ -291,7 +325,7 @@ export default defineBackground(() => {
   // arrives during the SW boot window would miss the in-flight rehydrate
   // and 401 with SESSION_EXPIRED even when a valid session is on disk.
   restoreSession();
-  const sessionsRestored = restoreSessions();
+  const sessionsRestored = restoreSessions().then(() => restoreAuthorizedBridgeSessionKey());
 
   // --- Open side panel on icon click (Chrome) / sidebar (Firefox) ---
 
@@ -363,6 +397,7 @@ export default defineBackground(() => {
               persistSessions();
               if (authorizedBridgeSessionKey === sessionKey) {
                 authorizedBridgeSessionKey = null;
+                persistAuthorizedBridgeSessionKey();
               }
               browser.runtime.sendMessage({
                 type: 'BYOKY_INTERNAL',
@@ -1336,6 +1371,7 @@ export default defineBackground(() => {
         sessions.clear();
         clearPersistedSessions();
         authorizedBridgeSessionKey = null;
+        persistAuthorizedBridgeSessionKey();
         disconnectAllGiftRelays();
         clearSessionStorage();
         if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
@@ -1459,6 +1495,7 @@ export default defineBackground(() => {
         sessions.clear();
         clearPersistedSessions();
         authorizedBridgeSessionKey = null;
+        persistAuthorizedBridgeSessionKey();
         disconnectAllGiftRelays();
         clearSessionStorage();
         if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
@@ -1489,6 +1526,7 @@ export default defineBackground(() => {
             persistSessions();
             if (authorizedBridgeSessionKey === key) {
               authorizedBridgeSessionKey = null;
+              persistAuthorizedBridgeSessionKey();
             }
             broadcastRevocation(key);
             break;
@@ -3154,6 +3192,7 @@ export default defineBackground(() => {
       bridgeProxyPort = browser.runtime.connectNative(BRIDGE_HOST);
 
       authorizedBridgeSessionKey = sessionKey;
+      persistAuthorizedBridgeSessionKey();
 
       // Tell bridge to start the HTTP proxy server
       bridgeProxyPort.postMessage({
@@ -3173,7 +3212,13 @@ export default defineBackground(() => {
 
       bridgeProxyPort.onDisconnect.addListener(() => {
         bridgeProxyPort = null;
-        authorizedBridgeSessionKey = null;
+        // Note: do NOT clear authorizedBridgeSessionKey here. The native-host
+        // port disconnects on every MV3 service-worker recycle (which is
+        // frequent and unrelated to user intent). Keeping the key authorized
+        // means the next bridge respawn lands in a working state instead of
+        // 401-storming until the user runs `byoky-bridge connect` again.
+        // The key is still cleared on autoLock and on explicit session
+        // revocation paths below.
       });
 
       return { success: true, port };
@@ -3247,6 +3292,11 @@ export default defineBackground(() => {
     const method = msg.method;
     const headers = msg.headers as Record<string, string>;
     const body = msg.body as string | undefined;
+
+    // CLI traffic via the bridge counts as wallet activity. Without this the
+    // 20-min idle auto-lock fires mid-Hermes/Claude-Code session even though
+    // the user is actively using the wallet through a CLI.
+    resetIdleTimer();
 
     // Validate the session key matches the one authorized at proxy start
     if (sessionKey !== authorizedBridgeSessionKey) {
