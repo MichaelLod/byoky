@@ -219,6 +219,32 @@ async function handleMessage(msg: unknown): Promise<void> {
  * - mode 'proxy_http': sends proxy_http_response_meta/chunk/done directly
  *   to proxy-server (CLI path, eliminates double hop)
  */
+/**
+ * Anthropic beta-header values that opt the request into a billing tier the
+ * caller probably can't afford on a Pro/Max OAuth token. Their mere presence
+ * (regardless of actual context size) routes the request through long-context
+ * billing, so we strip them on OAuth paths to api.anthropic.com to keep
+ * non-Claude-Code traffic indistinguishable from Claude Code's own.
+ */
+const OAUTH_INCOMPATIBLE_BETAS = new Set(['context-1m-2025-08-07']);
+
+function stripIncompatibleBetas(url: string, headers: Record<string, string>): Record<string, string> {
+  const auth = headers['authorization'] || headers['Authorization'] || '';
+  if (!url.includes('api.anthropic.com') || !auth.toLowerCase().startsWith('bearer ')) return headers;
+  const beta = headers['anthropic-beta'] || headers['Anthropic-Beta'];
+  if (!beta) return headers;
+  const filtered = beta.split(',').map((s) => s.trim()).filter((s) => s && !OAUTH_INCOMPATIBLE_BETAS.has(s));
+  if (filtered.length === beta.split(',').map((s) => s.trim()).length) return headers;
+  const next = { ...headers };
+  if ('Anthropic-Beta' in next) delete next['Anthropic-Beta'];
+  if (filtered.length > 0) {
+    next['anthropic-beta'] = filtered.join(',');
+  } else {
+    delete next['anthropic-beta'];
+  }
+  return next;
+}
+
 async function handleStreamingFetch(
   requestId: string,
   url: string,
@@ -238,6 +264,8 @@ async function handleStreamingFetch(
 
   const prefix = mode === 'bridge' ? 'proxy_response' : 'proxy_http_response';
   const errorType = mode === 'bridge' ? 'proxy_error' : 'proxy_http_error';
+
+  headers = stripIncompatibleBetas(url, headers);
 
   // SSE rewriter that translates Claude-Code aliases back to the framework's
   // original tool names. Identity passthrough when the map is empty.
@@ -301,23 +329,41 @@ async function handleStreamingFetch(
   }
 }
 
-let proxyRunning = false;
+interface RunningProxy {
+  server: import('node:http').Server;
+  sessionKey: string;
+  port: number;
+  providers: string[];
+}
+let runningProxy: RunningProxy | null = null;
 
 function handleStartProxy(req: StartProxyRequest, opts: { silent?: boolean } = {}): void {
-  if (proxyRunning) {
+  // Same session already running → ack and exit. This is the steady-state
+  // case (browser tab refreshes, extension service worker reconnect, etc.).
+  if (runningProxy && runningProxy.sessionKey === req.sessionKey && runningProxy.port === req.port) {
     if (!opts.silent) {
       writeMessage({ type: 'proxy-started', port: req.port } satisfies StartProxyResponse);
     }
     return;
   }
+
+  // Different session/port → tear down the old listener so we don't keep
+  // forwarding requests with a stale (likely revoked) sessionKey. Without
+  // this the persistent-session feature would shadow a fresh re-pair from
+  // `byoky-bridge connect` and every request would 401.
+  if (runningProxy) {
+    try { runningProxy.server.close(); } catch { /* best-effort */ }
+    runningProxy = null;
+  }
+
   try {
-    startProxyServer({
+    const server = startProxyServer({
       port: req.port,
       sessionKey: req.sessionKey,
       providers: req.providers,
       sendToExtension: (msg: ProxyRequestOut) => writeMessage(msg),
     });
-    proxyRunning = true;
+    runningProxy = { server, sessionKey: req.sessionKey, port: req.port, providers: req.providers };
     saveSession({ sessionKey: req.sessionKey, port: req.port, providers: req.providers });
 
     if (!opts.silent) {
