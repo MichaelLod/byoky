@@ -377,6 +377,21 @@ function Troubleshooting() {
       </>,
     ],
     [
+      'HTTP 401 "Byoky bridge session expired or revoked" mid-conversation',
+      <>
+        The wallet&apos;s 20-minute idle auto-lock fired while you were using
+        Hermes — CLI traffic wasn&apos;t counting as wallet activity, so the
+        timer ran out even during active sessions. <strong>Fixed in
+        v0.9.10:</strong> bridge requests now reset the idle timer, and the
+        bridge&apos;s authorized session key persists across MV3 service-worker
+        evictions. Upgrade extension to v0.9.10+ (until the stores update,
+        download from the{' '}
+        <a className="oc-link" href="https://github.com/MichaelLod/byoky/releases/latest">latest GitHub release</a>
+        {' '}and load unpacked). On v0.9.5 the only workaround is clicking the
+        wallet popup every ~15 minutes to reset the timer.
+      </>,
+    ],
+    [
       '"Third-party apps now draw from your extra usage..."',
       <>
         Anthropic classified your request as non-Claude-Code, which only
