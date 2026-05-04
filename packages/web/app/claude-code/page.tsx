@@ -221,10 +221,11 @@ function VersionHint() {
         <path d="M12 8h.01" />
       </svg>
       <span>
-        Requires Byoky extension <strong>v0.9.5+</strong> (live on the Chrome
-        Web Store and Firefox AMO) and{' '}
-        <code>@byoky/bridge@0.9.4+</code> (for{' '}
-        <code>byoky-bridge connect</code>).
+        Requires Byoky extension <strong>v0.9.10+</strong> and{' '}
+        <code>@byoky/bridge@0.9.10+</code> (session persistence + the
+        long-context billing fix). Stores are still on v0.9.5 in review —
+        until they update, grab the extension from the{' '}
+        <a className="oc-link" href="https://github.com/MichaelLod/byoky/releases/latest">latest GitHub release</a>.
       </span>
     </div>
   );

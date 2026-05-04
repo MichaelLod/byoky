@@ -17,7 +17,7 @@ Your job — run these commands on my machine and report each step:
    This clones into ~/.hermes, creates a venv with uv, and registers the \`hermes\` command on PATH. Native Windows is not supported — use WSL2.
    Verify with \`hermes --version\`.
 
-2. Install the Byoky bridge (v0.9.6+) and register the native messaging host:
+2. Install the Byoky bridge (v0.9.10+) and register the native messaging host:
      npm install -g @byoky/bridge
      byoky-bridge install
    Restart the browser afterwards so Chrome picks up the manifest.
