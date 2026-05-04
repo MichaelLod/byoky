@@ -429,6 +429,18 @@ mkdir -p dist
 (cd packages/extension/.output/firefox-mv2 && zip -r "$ROOT/dist/byoky-firefox-v${NEW_VERSION}.zip" .)
 (cd packages/extension/.output/safari-mv2 && zip -r "$ROOT/dist/byoky-safari-v${NEW_VERSION}.zip" .)
 
+# Chrome Web Store-ready zip: same build but with the `key` field stripped
+# from the manifest. CWS rejects uploads whose manifest key doesn't match the
+# registered extension's key (which CWS derives from the extension ID, not
+# from a user-supplied key field). The keyed zip above stays for sideloaders
+# who want a stable extension ID across dev machines.
+STORE_DIR="$(mktemp -d)/chrome-mv3-store"
+mkdir -p "$STORE_DIR"
+cp -R packages/extension/.output/chrome-mv3/. "$STORE_DIR/"
+node -e "const f='$STORE_DIR/manifest.json',j=JSON.parse(require('fs').readFileSync(f));delete j.key;require('fs').writeFileSync(f,JSON.stringify(j))"
+(cd "$STORE_DIR" && zip -r "$ROOT/dist/byoky-chrome-v${NEW_VERSION}-store.zip" .)
+rm -rf "$STORE_DIR"
+
 if [ "$SKIP_ANDROID" = false ]; then
   cp packages/android/app/build/outputs/bundle/release/app-release.aab \
      "dist/byoky-android-v${NEW_VERSION}.aab"
@@ -547,7 +559,7 @@ if [ "$SKIP_STORE_UPLOADS" = true ]; then
 elif [ -n "${CHROME_EXTENSION_ID:-}" ] && [ -n "${CHROME_CLIENT_ID:-}" ]; then
   echo "  Uploading to Chrome Web Store..."
   npx chrome-webstore-upload upload \
-    --source "dist/byoky-chrome-v${NEW_VERSION}.zip" \
+    --source "dist/byoky-chrome-v${NEW_VERSION}-store.zip" \
     --extension-id "$CHROME_EXTENSION_ID" \
     --client-id "$CHROME_CLIENT_ID" \
     --client-secret "$CHROME_CLIENT_SECRET" \
