@@ -2,7 +2,7 @@ import { defineConfig } from 'tsup';
 
 export default defineConfig([
   {
-    entry: ['src/host.ts', 'src/installer.ts', 'src/relay-mode.ts', 'src/spawner.ts', 'src/connect-mode.ts'],
+    entry: ['src/host.ts', 'src/installer.ts', 'src/relay-mode.ts', 'src/spawner.ts', 'src/connect-mode.ts', 'src/hermes-setup.ts'],
     format: ['esm'],
     dts: true,
     clean: true,

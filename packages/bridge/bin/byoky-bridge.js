@@ -63,6 +63,43 @@ if (command === 'install' || command === 'uninstall' || command === 'status') {
     console.error(`\n✗ ${(e && e.message) ? e.message : String(e)}`);
     process.exit(1);
   }
+} else if (command === 'hermes-setup') {
+  // Patch ~/.hermes/config.yaml so Hermes Agent routes through the byoky bridge.
+  // Hermes's built-in `anthropic` provider goes direct to api.anthropic.com and
+  // ignores ANTHROPIC_BASE_URL — routing has to live in `custom_providers`.
+  //
+  //   byoky-bridge hermes-setup [--port 19280] [--model claude-sonnet-4-6] [--config <path>]
+  const args = process.argv.slice(3);
+  const opt = (name) => {
+    const i = args.indexOf(name);
+    if (i < 0) return undefined;
+    return args[i + 1];
+  };
+  const port = parseInt(opt('--port') ?? '19280', 10);
+  const model = opt('--model');
+  const configPath = opt('--config');
+  if (!Number.isFinite(port) || port <= 0 || port > 65535) {
+    console.error('Invalid --port. Must be between 1 and 65535.');
+    process.exit(1);
+  }
+  const { runHermesSetup } = await import('../dist/hermes-setup.js');
+  console.log('Byoky Bridge — Hermes setup\n');
+  try {
+    const result = runHermesSetup({ port, model, configPath });
+    if (result.alreadyConfigured) {
+      console.log(`✓ ${result.configPath} already routes through the bridge. Nothing to do.`);
+    } else {
+      console.log(`Patched ${result.configPath}:`);
+      for (const c of result.changes) console.log(`  • ${c}`);
+      if (result.backupPath) console.log(`\nBackup written to ${result.backupPath}`);
+      console.log('\nSmoke-test:');
+      console.log('  hermes chat -q "ping" -Q');
+    }
+    process.exit(0);
+  } catch (e) {
+    console.error(`✗ ${(e && e.message) ? e.message : String(e)}`);
+    process.exit(1);
+  }
 } else if (command === 'relay') {
   // Mobile-pairing mode: open a WebSocket to the Byoky relay as a
   // recipient and expose the same HTTP proxy on 127.0.0.1:<port> that
@@ -102,11 +139,12 @@ if (command === 'install' || command === 'uninstall' || command === 'status') {
   console.log(`Usage: byoky-bridge <command>
 
 Commands:
-  install     Register native messaging host with browsers
-  uninstall   Remove native messaging registration
-  status      Check registration status
-  connect     Open browser, approve a session, start the HTTP proxy on :19280
-  relay       Run the HTTP proxy against the mobile wallet via the relay
+  install        Register native messaging host with browsers
+  uninstall      Remove native messaging registration
+  status         Check registration status
+  connect        Open browser, approve a session, start the HTTP proxy on :19280
+  hermes-setup   Patch ~/.hermes/config.yaml so Hermes Agent routes through the bridge
+  relay          Run the HTTP proxy against the mobile wallet via the relay
 
 The bridge runs automatically when called by the Byoky extension.
 Use \`connect\` for CLI tools like Claude Code that need the proxy running on demand.`);
