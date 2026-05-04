@@ -139,9 +139,16 @@ export function buildHeaders(
       headers['user-agent'] = 'claude-cli/2.1.76';
       headers['x-app'] = 'cli';
       headers['accept'] = headers['accept'] ?? 'application/json';
-      // Merge app's beta flags with OAuth-required flags
+      // Merge app's beta flags with OAuth-required flags. Strip betas that
+      // opt the request into a paid tier the OAuth token can't bill against
+      // (e.g. context-1m-2025-08-07 routes ALL requests through long-context
+      // billing — Pro/Max plans don't include that tier and 429 every call
+      // regardless of actual token count).
       const oauthBeta = ['claude-code-20250219', 'oauth-2025-04-20', 'fine-grained-tool-streaming-2025-05-14', 'interleaved-thinking-2025-05-14'];
-      const existing = headers['anthropic-beta'] ? headers['anthropic-beta'].split(',').map(s => s.trim()) : [];
+      const oauthIncompatibleBetas = new Set(['context-1m-2025-08-07']);
+      const existing = headers['anthropic-beta']
+        ? headers['anthropic-beta'].split(',').map(s => s.trim()).filter(s => s && !oauthIncompatibleBetas.has(s))
+        : [];
       headers['anthropic-beta'] = [...new Set([...existing, ...oauthBeta])].join(',');
     } else {
       headers['x-api-key'] = apiKey;
