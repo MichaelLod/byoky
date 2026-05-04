@@ -18,6 +18,7 @@ import {
   type ProxyRequestOut,
   type ProxyResponseMessage,
 } from './proxy-server.js';
+import { saveSession, loadSession } from './session-store.js';
 import { createToolNameSSERewriter, rewriteToolNamesInJSONBody } from '@byoky/core';
 
 interface BridgeRequest {
@@ -300,7 +301,15 @@ async function handleStreamingFetch(
   }
 }
 
-function handleStartProxy(req: StartProxyRequest): void {
+let proxyRunning = false;
+
+function handleStartProxy(req: StartProxyRequest, opts: { silent?: boolean } = {}): void {
+  if (proxyRunning) {
+    if (!opts.silent) {
+      writeMessage({ type: 'proxy-started', port: req.port } satisfies StartProxyResponse);
+    }
+    return;
+  }
   try {
     startProxyServer({
       port: req.port,
@@ -308,18 +317,33 @@ function handleStartProxy(req: StartProxyRequest): void {
       providers: req.providers,
       sendToExtension: (msg: ProxyRequestOut) => writeMessage(msg),
     });
+    proxyRunning = true;
+    saveSession({ sessionKey: req.sessionKey, port: req.port, providers: req.providers });
 
-    writeMessage({
-      type: 'proxy-started',
-      port: req.port,
-    } satisfies StartProxyResponse);
+    if (!opts.silent) {
+      writeMessage({
+        type: 'proxy-started',
+        port: req.port,
+      } satisfies StartProxyResponse);
+    }
   } catch (e) {
-    writeMessage({
-      type: 'proxy_error',
-      requestId: 'start-proxy',
-      error: 'Failed to start proxy server',
-    });
+    if (!opts.silent) {
+      writeMessage({
+        type: 'proxy_error',
+        requestId: 'start-proxy',
+        error: 'Failed to start proxy server',
+      });
+    }
   }
+}
+
+function tryRestoreProxy(): void {
+  const cached = loadSession();
+  if (!cached) return;
+  handleStartProxy(
+    { type: 'start-proxy', port: cached.port, sessionKey: cached.sessionKey, providers: cached.providers },
+    { silent: true },
+  );
 }
 
 // --- Main loop ---
@@ -327,6 +351,13 @@ function handleStartProxy(req: StartProxyRequest): void {
 async function main() {
   // Ensure stdin is in binary mode for native messaging
   process.stdin.resume();
+
+  // Restore the proxy from the last persisted session before the extension
+  // sends `start-proxy`. If the cached session is still valid in the wallet,
+  // CLI tools (Claude Code, Hermes via custom_providers, OpenClaw) can hit
+  // :19280 immediately after a browser/native-host restart instead of being
+  // told to re-run `byoky-bridge connect`.
+  tryRestoreProxy();
 
   while (true) {
     const msg = await readMessage();

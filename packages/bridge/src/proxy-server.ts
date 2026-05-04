@@ -14,6 +14,7 @@
  */
 
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
+import { clearSession } from './session-store.js';
 
 export interface ProxyRequestOut {
   type: 'proxy_http';
@@ -100,10 +101,26 @@ export function handleProxyResponse(msg: ProxyResponseMessage): void {
     clearTimeout(pending.timeout);
     pendingRequests.delete(msg.requestId);
   } else if (msg.type === 'proxy_http_error') {
+    // Translate the extension's "Unauthorized session key" into a clearer 401
+    // and drop the persisted session — the cached key is dead and the user
+    // needs to re-pair via `byoky-bridge connect`.
+    const isStaleSession =
+      typeof msg.error === 'string' && /unauthorized session key/i.test(msg.error);
     if (!pending.res.headersSent) {
-      pending.res.writeHead(502, { 'Content-Type': 'application/json' });
+      if (isStaleSession) {
+        clearSession();
+        pending.res.writeHead(401, { 'Content-Type': 'application/json' });
+        pending.res.end(JSON.stringify({
+          error: 'Byoky bridge session expired or revoked',
+          hint: 'Run `byoky-bridge connect` to re-pair the wallet.',
+        }));
+      } else {
+        pending.res.writeHead(502, { 'Content-Type': 'application/json' });
+        pending.res.end(JSON.stringify({ error: msg.error }));
+      }
+    } else {
+      pending.res.end();
     }
-    pending.res.end(JSON.stringify({ error: msg.error }));
     clearTimeout(pending.timeout);
     pendingRequests.delete(msg.requestId);
   }
