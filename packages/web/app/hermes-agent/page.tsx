@@ -171,7 +171,7 @@ hermes                          # interactive`}</Code>
             </summary>
             <Code>{`# At the top of ~/.hermes/config.yaml:
 model:
-  default: claude-sonnet-4-6        # or claude-opus-4-6, claude-haiku-4-5
+  default: claude-sonnet-4-6        # or claude-opus-4-7, claude-haiku-4-5
   provider: byoky-anthropic         # was: anthropic
 
 # In the custom_providers list, add (or fix) the byoky entry.

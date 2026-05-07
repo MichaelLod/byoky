@@ -11,7 +11,7 @@ const PROVIDER_NAMES: Record<string, string> = {
 
 const PROVIDER_MODELS: Record<string, string[]> = {
   anthropic:  ['claude-sonnet-4-6', 'claude-opus-4-7', 'claude-haiku-4-5'],
-  openai:     ['gpt-5.4-mini', 'gpt-5.4', 'gpt-5.4-nano', 'gpt-5-mini', 'gpt-4o', 'gpt-4o-mini'],
+  openai:     ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-nano', 'gpt-5-mini', 'gpt-4o', 'gpt-4o-mini'],
   gemini:     ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-pro', 'gemini-2.5-flash-lite', 'gemini-3.1-pro-preview', 'gemini-3.1-flash-lite-preview'],
   mistral:    ['mistral-large-latest', 'mistral-small-latest'],
   cohere:     ['command-a-03-2025', 'command-r-plus', 'command-r7b-12-2024'],

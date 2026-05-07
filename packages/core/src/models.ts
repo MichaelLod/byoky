@@ -18,9 +18,11 @@ export type { CapabilitySet } from './types.js';
  * still work for pass-through (no translation) requests; they just can't be
  * the *destination* of a translated request.
  *
- * last verified: 2026-04-09
- *  - Anthropic: docs.anthropic.com/en/docs/about-claude/models/overview
+ * last verified: 2026-05-07
+ *  - Anthropic: platform.claude.com/docs/en/about-claude/models/overview
  *  - OpenAI:    developers.openai.com/api/docs/models
+ *  - Gemini:    ai.google.dev/gemini-api/docs/models
+ *  - Cohere:    docs.cohere.com/docs/models
  */
 
 /**
@@ -83,10 +85,10 @@ const FRONTIER: ModelCapabilities = {
 export const MODELS: ModelEntry[] = [
   // ─── Anthropic ───────────────────────────────────────────────────────────
   {
-    id: 'claude-opus-4-6',
+    id: 'claude-opus-4-7',
     providerId: 'anthropic',
     family: 'anthropic',
-    displayName: 'Claude Opus 4.6',
+    displayName: 'Claude Opus 4.7',
     contextWindow: 1_000_000,
     maxOutput: 128_000,
     capabilities: FRONTIER,
@@ -111,6 +113,15 @@ export const MODELS: ModelEntry[] = [
   },
 
   // ─── OpenAI ──────────────────────────────────────────────────────────────
+  {
+    id: 'gpt-5.5',
+    providerId: 'openai',
+    family: 'openai',
+    displayName: 'GPT-5.5',
+    contextWindow: 1_000_000,
+    maxOutput: 128_000,
+    capabilities: FRONTIER,
+  },
   {
     id: 'gpt-5.4',
     providerId: 'openai',
@@ -190,7 +201,7 @@ export const MODELS: ModelEntry[] = [
  */
 export const DEFAULT_MODELS: Record<ModelFamily, string> = {
   anthropic: 'claude-sonnet-4-6',
-  openai: 'gpt-5.4',
+  openai: 'gpt-5.5',
   gemini: 'gemini-2.5-pro',
   cohere: 'command-a-03-2025',
 };

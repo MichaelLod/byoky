@@ -187,12 +187,12 @@ describe('resolveRoute', () => {
       // whatever the SDK put in the body. Without this, a user who pinned
       // Opus in the group would still see Sonnet if the app hardcoded it.
       const credentials = [cred('c1', 'anthropic')];
-      const g = group('anthropic', { model: 'claude-opus-4-6' });
+      const g = group('anthropic', { model: 'claude-opus-4-7' });
 
       const decision = resolveRoute('anthropic', g, credentials);
 
       expect(decision!.credential.id).toBe('c1');
-      expect(decision!.modelOverride).toBe('claude-opus-4-6');
+      expect(decision!.modelOverride).toBe('claude-opus-4-7');
       expect(decision!.translation).toBeUndefined();
       expect(decision!.swap).toBeUndefined();
     });
@@ -352,11 +352,11 @@ describe('resolveCrossFamilyGiftRoute', () => {
   it('preserves the exact dstModel from group.model in translation metadata', () => {
     const gc = giftedCred('rc1', 'anthropic', { giftId: 'gift_abc' });
     const g = group('anthropic', {
-      model: 'claude-opus-4-6',
+      model: 'claude-opus-4-7',
       giftId: 'gift_abc',
     });
     const result = resolveCrossFamilyGiftRoute(g, 'openai', [gc]);
-    expect(result!.translation.dstModel).toBe('claude-opus-4-6');
+    expect(result!.translation.dstModel).toBe('claude-opus-4-7');
   });
 });
 
@@ -413,7 +413,7 @@ describe('auto cross-family translation', () => {
 
     expect(decision!.credential.id).toBe('c1');
     expect(decision!.translation?.dstProviderId).toBe('openai');
-    expect(decision!.translation?.dstModel).toBe('gpt-5.4');
+    expect(decision!.translation?.dstModel).toBe('gpt-5.5');
   });
 
   it('does not fire when a direct credential exists', () => {

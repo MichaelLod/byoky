@@ -92,14 +92,14 @@ const openaiTools = [
 
 // OpenAI-compatible providers with their endpoint and model options
 const openaiCompatible: Record<string, { url: string; models: string[]; name: string }> = {
-  openai:     { url: 'https://api.openai.com/v1/chat/completions',             models: ['gpt-5.4-mini', 'gpt-5.4', 'gpt-5.4-nano', 'gpt-5-mini', 'gpt-4o', 'gpt-4o-mini'],                                                name: 'OpenAI (GPT)' },
+  openai:     { url: 'https://api.openai.com/v1/chat/completions',             models: ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-nano', 'gpt-5-mini', 'gpt-4o', 'gpt-4o-mini'],                                                name: 'OpenAI (GPT)' },
   groq:       { url: 'https://api.groq.com/openai/v1/chat/completions',        models: ['llama-3.3-70b-versatile', 'meta-llama/llama-4-scout-17b-16e-instruct', 'llama-3.1-8b-instant'],                                name: 'Groq (Llama)' },
   deepseek:   { url: 'https://api.deepseek.com/chat/completions',              models: ['deepseek-chat', 'deepseek-reasoner'],                                                                                         name: 'DeepSeek' },
   xai:        { url: 'https://api.x.ai/v1/chat/completions',                   models: ['grok-4-fast-non-reasoning', 'grok-4-fast-reasoning', 'grok-4', 'grok-3-mini'],                                                 name: 'xAI (Grok)' },
   mistral:    { url: 'https://api.mistral.ai/v1/chat/completions',             models: ['mistral-large-latest', 'mistral-small-latest'],                                                                                name: 'Mistral' },
   together:   { url: 'https://api.together.xyz/v1/chat/completions',           models: ['meta-llama/Llama-3.3-70B-Instruct-Turbo', 'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8', 'Qwen/Qwen2.5-72B-Instruct-Turbo'], name: 'Together AI' },
   fireworks:  { url: 'https://api.fireworks.ai/inference/v1/chat/completions', models: ['accounts/fireworks/models/llama4-maverick-instruct-basic', 'accounts/fireworks/models/llama-v3p3-70b-instruct'],               name: 'Fireworks AI' },
-  openrouter: { url: 'https://openrouter.ai/api/v1/chat/completions',          models: ['anthropic/claude-sonnet-4.6', 'openai/gpt-5.4-mini', 'google/gemini-2.5-flash', 'meta-llama/llama-3.3-70b-instruct'],           name: 'OpenRouter' },
+  openrouter: { url: 'https://openrouter.ai/api/v1/chat/completions',          models: ['anthropic/claude-opus-4.7', 'anthropic/claude-sonnet-4.6', 'openai/gpt-5.5', 'openai/gpt-5.4-mini', 'google/gemini-2.5-flash', 'meta-llama/llama-3.3-70b-instruct'], name: 'OpenRouter' },
 };
 
 const anthropicModels = ['claude-sonnet-4-6', 'claude-opus-4-7', 'claude-haiku-4-5'];

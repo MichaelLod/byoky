@@ -16,7 +16,7 @@ import type { RequestLogEntry } from '../../src/types.js';
 describe('MODELS', () => {
   it('contains the documented Anthropic frontier models', () => {
     const ids = MODELS.map((m) => m.id);
-    expect(ids).toContain('claude-opus-4-6');
+    expect(ids).toContain('claude-opus-4-7');
     expect(ids).toContain('claude-sonnet-4-6');
     expect(ids).toContain('claude-haiku-4-5-20251001');
   });

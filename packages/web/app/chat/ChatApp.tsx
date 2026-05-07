@@ -13,7 +13,7 @@ interface Message {
 
 const providers: Record<string, { url: string; models: string[]; name: string }> = {
   anthropic:  { url: 'https://api.anthropic.com/v1/messages',                 models: ['claude-sonnet-4-6', 'claude-opus-4-7', 'claude-haiku-4-5'],                                                                                               name: 'Claude' },
-  openai:     { url: 'https://api.openai.com/v1/chat/completions',            models: ['gpt-5.4-mini', 'gpt-5.4', 'gpt-5.4-nano', 'gpt-5-mini', 'gpt-4o', 'gpt-4o-mini'],                                                                       name: 'OpenAI' },
+  openai:     { url: 'https://api.openai.com/v1/chat/completions',            models: ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-nano', 'gpt-5-mini', 'gpt-4o', 'gpt-4o-mini'],                                                            name: 'OpenAI' },
   gemini:     { url: 'https://generativelanguage.googleapis.com/v1beta/models', models: ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-pro', 'gemini-2.5-flash-lite', 'gemini-3.1-pro-preview', 'gemini-3.1-flash-lite-preview'],    name: 'Gemini' },
   groq:       { url: 'https://api.groq.com/openai/v1/chat/completions',       models: ['llama-3.3-70b-versatile', 'meta-llama/llama-4-scout-17b-16e-instruct', 'llama-3.1-8b-instant'],                                                        name: 'Groq' },
   deepseek:   { url: 'https://api.deepseek.com/chat/completions',             models: ['deepseek-chat', 'deepseek-reasoner'],                                                                                                                  name: 'DeepSeek' },
@@ -22,7 +22,7 @@ const providers: Record<string, { url: string; models: string[]; name: string }>
   together:   { url: 'https://api.together.xyz/v1/chat/completions',          models: ['meta-llama/Llama-3.3-70B-Instruct-Turbo', 'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8', 'Qwen/Qwen2.5-72B-Instruct-Turbo'],                     name: 'Together AI' },
   fireworks:  { url: 'https://api.fireworks.ai/inference/v1/chat/completions', models: ['accounts/fireworks/models/llama4-maverick-instruct-basic', 'accounts/fireworks/models/llama-v3p3-70b-instruct'],                                     name: 'Fireworks' },
   perplexity: { url: 'https://api.perplexity.ai/chat/completions',            models: ['sonar', 'sonar-pro', 'sonar-deep-research'],                                                                                                           name: 'Perplexity' },
-  openrouter: { url: 'https://openrouter.ai/api/v1/chat/completions',         models: ['anthropic/claude-sonnet-4.6', 'openai/gpt-5.4-mini', 'google/gemini-2.5-flash', 'meta-llama/llama-3.3-70b-instruct'],                                  name: 'OpenRouter' },
+  openrouter: { url: 'https://openrouter.ai/api/v1/chat/completions',         models: ['anthropic/claude-opus-4.7', 'anthropic/claude-sonnet-4.6', 'openai/gpt-5.5', 'openai/gpt-5.4-mini', 'google/gemini-2.5-flash', 'meta-llama/llama-3.3-70b-instruct'], name: 'OpenRouter' },
   cohere:     { url: 'https://api.cohere.com/v2/chat',                        models: ['command-a-03-2025', 'command-r-plus', 'command-r7b-12-2024'],                                                                                         name: 'Cohere' },
 };
 
