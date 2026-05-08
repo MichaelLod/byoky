@@ -40,10 +40,10 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
   var MODELS = [
     // ─── Anthropic ───────────────────────────────────────────────────────────
     {
-      id: "claude-opus-4-6",
+      id: "claude-opus-4-7",
       providerId: "anthropic",
       family: "anthropic",
-      displayName: "Claude Opus 4.6",
+      displayName: "Claude Opus 4.7",
       contextWindow: 1e6,
       maxOutput: 128e3,
       capabilities: FRONTIER
@@ -67,6 +67,15 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
       capabilities: FRONTIER
     },
     // ─── OpenAI ──────────────────────────────────────────────────────────────
+    {
+      id: "gpt-5.5",
+      providerId: "openai",
+      family: "openai",
+      displayName: "GPT-5.5",
+      contextWindow: 1e6,
+      maxOutput: 128e3,
+      capabilities: FRONTIER
+    },
     {
       id: "gpt-5.4",
       providerId: "openai",
