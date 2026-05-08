@@ -251,10 +251,12 @@ export default defineBackground(() => {
 
   // Re-open the native-messaging port after a service-worker recycle so the
   // bridge process respawns and re-binds :19280 without the user having to
-  // re-run `byoky-bridge connect`. Best-effort — silently no-ops if the wallet
-  // is locked or the bridge isn't installed; the user falls back to the
-  // manual re-pair flow in those cases.
+  // re-run `byoky-bridge connect`. Idempotent — no-op if the bridge is
+  // already connected, the wallet is locked, or the bridge isn't installed.
+  // Called from two places: the SW boot chain (cold start) and the periodic
+  // keepalive alarm (warm-state health check).
   async function maybeAutoStartBridgeProxy() {
+    if (bridgeProxyPort) return;
     if (!authorizedBridgeSessionKey || !authorizedBridgePort) return;
     if (!masterPassword) return;
     if (!sessions.has(authorizedBridgeSessionKey)) return;
@@ -5575,7 +5577,8 @@ export default defineBackground(() => {
 
   // Wake the SW every minute to re-open any relay WS that MV3 idle-killed —
   // without this the vault fallback would be the only live sender for most
-  // of the idle window.
+  // of the idle window. Same wake-up also re-spawns the byoky-bridge native
+  // host if it died with the SW (Hermes/OpenClaw need :19280 stable).
   const RELAY_RECONNECT_ALARM = 'byoky:relay-reconnect';
   browser.alarms.create(RELAY_RECONNECT_ALARM, {
     periodInMinutes: 1,
@@ -5585,6 +5588,7 @@ export default defineBackground(() => {
   browser.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === RELAY_RECONNECT_ALARM) {
       reconnectGiftRelays().catch(() => {});
+      maybeAutoStartBridgeProxy().catch(() => {});
     }
   });
 });
