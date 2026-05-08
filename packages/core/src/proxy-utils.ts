@@ -134,20 +134,33 @@ export function buildHeaders(
   }
 
   if (providerId === 'anthropic') {
+    // Strip betas that opt the request into a paid tier the caller's plan
+    // probably can't bill against — applies to BOTH x-api-key and OAuth
+    // because tools like Hermes auto-attach context-1m-2025-08-07 (which
+    // routes ALL requests through long-context billing). Pro/Max OAuth and
+    // basic API keys both 400 with "long context beta is not yet available
+    // for this subscription" even when the request is well under 200K tokens.
+    const incompatibleBetas = new Set(['context-1m-2025-08-07']);
+    if (headers['anthropic-beta']) {
+      const filtered = headers['anthropic-beta']
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => s && !incompatibleBetas.has(s));
+      if (filtered.length > 0) {
+        headers['anthropic-beta'] = filtered.join(',');
+      } else {
+        delete headers['anthropic-beta'];
+      }
+    }
+
     if (authMethod === 'oauth') {
       headers['authorization'] = `Bearer ${apiKey}`;
       headers['user-agent'] = 'claude-cli/2.1.76';
       headers['x-app'] = 'cli';
       headers['accept'] = headers['accept'] ?? 'application/json';
-      // Merge app's beta flags with OAuth-required flags. Strip betas that
-      // opt the request into a paid tier the OAuth token can't bill against
-      // (e.g. context-1m-2025-08-07 routes ALL requests through long-context
-      // billing — Pro/Max plans don't include that tier and 429 every call
-      // regardless of actual token count).
       const oauthBeta = ['claude-code-20250219', 'oauth-2025-04-20', 'fine-grained-tool-streaming-2025-05-14', 'interleaved-thinking-2025-05-14'];
-      const oauthIncompatibleBetas = new Set(['context-1m-2025-08-07']);
       const existing = headers['anthropic-beta']
-        ? headers['anthropic-beta'].split(',').map(s => s.trim()).filter(s => s && !oauthIncompatibleBetas.has(s))
+        ? headers['anthropic-beta'].split(',').map((s) => s.trim()).filter((s) => s.length > 0)
         : [];
       headers['anthropic-beta'] = [...new Set([...existing, ...oauthBeta])].join(',');
     } else {

@@ -210,19 +210,22 @@ export default defineBackground(() => {
     } catch {}
   }
 
-  // The bridge's authorized sessionKey survives MV3 service worker evictions —
-  // without persisting it, every CLI request after a worker recycle hits the
-  // `sessionKey !== authorizedBridgeSessionKey` check and 401s, even though
-  // the session itself is still valid (sessions Map is restored above). The
-  // value is short-lived storage (storage.session, in-memory, browser-close-
-  // bounded) — same security profile as the sessions Map.
+  // The bridge's authorized sessionKey + port survive MV3 service worker
+  // evictions. Without persisting these, every CLI request after a worker
+  // recycle hits ECONNREFUSED (the bridge process exits when its native-
+  // messaging port closes) and the user has to re-run `byoky-bridge connect`.
+  // Storage is browser-close-bounded (storage.session) — same security
+  // profile as the sessions Map.
   async function persistAuthorizedBridgeSessionKey() {
     if (!hasSessionStorage) return;
     try {
-      if (authorizedBridgeSessionKey) {
-        await browser.storage.session.set({ _bridgeKey: authorizedBridgeSessionKey });
+      if (authorizedBridgeSessionKey && authorizedBridgePort) {
+        await browser.storage.session.set({
+          _bridgeKey: authorizedBridgeSessionKey,
+          _bridgePort: authorizedBridgePort,
+        });
       } else {
-        await browser.storage.session.remove('_bridgeKey');
+        await browser.storage.session.remove(['_bridgeKey', '_bridgePort']);
       }
     } catch {}
   }
@@ -230,16 +233,33 @@ export default defineBackground(() => {
   async function restoreAuthorizedBridgeSessionKey() {
     if (!hasSessionStorage) return;
     try {
-      const data = await browser.storage.session.get('_bridgeKey');
+      const data = await browser.storage.session.get(['_bridgeKey', '_bridgePort']);
       if (typeof data._bridgeKey === 'string' && data._bridgeKey) {
         // Only honor it if the session itself is still in the Map. If autoLock
         // cleared sessions, the cached bridge key is also dead.
         if (sessions.has(data._bridgeKey)) {
           authorizedBridgeSessionKey = data._bridgeKey;
+          if (typeof data._bridgePort === 'number') {
+            authorizedBridgePort = data._bridgePort;
+          }
         } else {
-          await browser.storage.session.remove('_bridgeKey');
+          await browser.storage.session.remove(['_bridgeKey', '_bridgePort']);
         }
       }
+    } catch {}
+  }
+
+  // Re-open the native-messaging port after a service-worker recycle so the
+  // bridge process respawns and re-binds :19280 without the user having to
+  // re-run `byoky-bridge connect`. Best-effort — silently no-ops if the wallet
+  // is locked or the bridge isn't installed; the user falls back to the
+  // manual re-pair flow in those cases.
+  async function maybeAutoStartBridgeProxy() {
+    if (!authorizedBridgeSessionKey || !authorizedBridgePort) return;
+    if (!masterPassword) return;
+    if (!sessions.has(authorizedBridgeSessionKey)) return;
+    try {
+      await startBridgeProxy(authorizedBridgeSessionKey, authorizedBridgePort);
     } catch {}
   }
 
@@ -263,6 +283,7 @@ export default defineBackground(() => {
     sessions.clear();
     clearPersistedSessions();
     authorizedBridgeSessionKey = null;
+    authorizedBridgePort = null;
     persistAuthorizedBridgeSessionKey();
     disconnectAllGiftRelays();
     clearSessionStorage();
@@ -324,8 +345,13 @@ export default defineBackground(() => {
   // promise so port handlers can await it — otherwise a proxy request that
   // arrives during the SW boot window would miss the in-flight rehydrate
   // and 401 with SESSION_EXPIRED even when a valid session is on disk.
-  restoreSession();
-  const sessionsRestored = restoreSessions().then(() => restoreAuthorizedBridgeSessionKey());
+  // After the bridge key is restored, kick off the native-host reconnect so
+  // CLI tools (Hermes, Claude Code) can hit :19280 without waiting for the
+  // user to re-run `byoky-bridge connect`.
+  const sessionRestored = restoreSession();
+  const sessionsRestored = Promise.all([sessionRestored, restoreSessions()])
+    .then(() => restoreAuthorizedBridgeSessionKey())
+    .then(() => maybeAutoStartBridgeProxy());
 
   // --- Open side panel on icon click (Chrome) / sidebar (Firefox) ---
 
@@ -397,6 +423,7 @@ export default defineBackground(() => {
               persistSessions();
               if (authorizedBridgeSessionKey === sessionKey) {
                 authorizedBridgeSessionKey = null;
+                authorizedBridgePort = null;
                 persistAuthorizedBridgeSessionKey();
               }
               browser.runtime.sendMessage({
@@ -1371,6 +1398,7 @@ export default defineBackground(() => {
         sessions.clear();
         clearPersistedSessions();
         authorizedBridgeSessionKey = null;
+        authorizedBridgePort = null;
         persistAuthorizedBridgeSessionKey();
         disconnectAllGiftRelays();
         clearSessionStorage();
@@ -1495,6 +1523,7 @@ export default defineBackground(() => {
         sessions.clear();
         clearPersistedSessions();
         authorizedBridgeSessionKey = null;
+        authorizedBridgePort = null;
         persistAuthorizedBridgeSessionKey();
         disconnectAllGiftRelays();
         clearSessionStorage();
@@ -1526,6 +1555,7 @@ export default defineBackground(() => {
             persistSessions();
             if (authorizedBridgeSessionKey === key) {
               authorizedBridgeSessionKey = null;
+              authorizedBridgePort = null;
               persistAuthorizedBridgeSessionKey();
             }
             broadcastRevocation(key);
@@ -3164,6 +3194,7 @@ export default defineBackground(() => {
 
   let bridgeProxyPort: Runtime.Port | null = null;
   let authorizedBridgeSessionKey: string | null = null;
+  let authorizedBridgePort: number | null = null;
 
   async function startBridgeProxy(
     sessionKey: string,
@@ -3192,6 +3223,7 @@ export default defineBackground(() => {
       bridgeProxyPort = browser.runtime.connectNative(BRIDGE_HOST);
 
       authorizedBridgeSessionKey = sessionKey;
+      authorizedBridgePort = port;
       persistAuthorizedBridgeSessionKey();
 
       // Tell bridge to start the HTTP proxy server
