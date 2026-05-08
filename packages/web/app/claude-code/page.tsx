@@ -221,10 +221,12 @@ function VersionHint() {
         <path d="M12 8h.01" />
       </svg>
       <span>
-        Requires Byoky extension <strong>v0.9.10+</strong> and{' '}
-        <code>@byoky/bridge@0.9.10+</code> (session persistence + the
-        long-context billing fix). Stores are still on v0.9.5 in review —
-        until they update, grab the extension from the{' '}
+        Requires Byoky extension <strong>v0.9.13+</strong> and{' '}
+        <code>@byoky/bridge@0.9.12+</code> (session persistence,
+        the long-context billing fix, and bridge auto-recovery on
+        service-worker recycle — needed for long Claude Code sessions).
+        Stores still on v0.9.5 in review — until they update, grab the
+        extension from the{' '}
         <a className="oc-link" href="https://github.com/MichaelLod/byoky/releases/latest">latest GitHub release</a>.
       </span>
     </div>
@@ -326,8 +328,11 @@ function Troubleshooting() {
         the timer ran out even during active sessions. <strong>Fixed in
         v0.9.10:</strong> bridge requests now reset the idle timer, and the
         bridge&apos;s authorized session key persists across MV3
-        service-worker evictions. Upgrade extension to v0.9.10+ (until the
-        stores update, download from the{' '}
+        service-worker evictions. <strong>v0.9.13</strong> closes the last
+        gap — when MV3 evicts the service worker mid-session, the bridge
+        auto-restarts on the next keepalive tick instead of leaving Claude
+        Code stuck on <code>ECONNREFUSED</code>. Upgrade extension to
+        v0.9.13+ (until the stores update, download from the{' '}
         <a className="oc-link" href="https://github.com/MichaelLod/byoky/releases/latest">latest GitHub release</a>
         {' '}and load unpacked). On v0.9.5 the only workaround is clicking
         the wallet popup every ~15 minutes to reset the timer.
