@@ -2,6 +2,7 @@
   "name": "byoky",
   "version": "0.9.13",
   "private": true,
+  "packageManager": "pnpm@9.15.9",
   "description": "Bring Your Own Key — Secure wallet for your AI credentials",
   "scripts": {
     "dev": "pnpm --filter @byoky/extension dev",
