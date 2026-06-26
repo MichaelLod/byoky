@@ -273,7 +273,7 @@ function VersionHint() {
         <code>@byoky/bridge@0.9.12+</code> (session persistence,
         the long-context billing fix, and bridge auto-recovery on
         service-worker recycle — needed for long Hermes sessions).
-        Stores still on v0.9.5 in review — until they update, grab the
+        v0.9.13 is live on the Chrome Web Store and Firefox — or grab the
         extension from the{' '}
         <a className="oc-link" href="https://github.com/MichaelLod/byoky/releases/latest">latest GitHub release</a>.
       </span>
@@ -389,10 +389,10 @@ function Troubleshooting() {
         evictions. <strong>v0.9.13</strong> closes the last gap — when MV3
         evicts the service worker mid-session, the bridge auto-restarts on the
         next keepalive tick instead of leaving Hermes stuck on
-        <code>ECONNREFUSED</code>. Upgrade extension to v0.9.13+ (until the
-        stores update, download from the{' '}
+        <code>ECONNREFUSED</code>. v0.9.13 is live on the Chrome Web Store
+        and Firefox — update there, or grab it from the{' '}
         <a className="oc-link" href="https://github.com/MichaelLod/byoky/releases/latest">latest GitHub release</a>
-        {' '}and load unpacked). On v0.9.5 the only workaround is clicking the
+        {' '}and load unpacked. On older builds the only workaround is clicking the
         wallet popup every ~15 minutes to reset the timer.
       </>,
     ],
