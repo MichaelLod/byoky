@@ -1,5 +1,5 @@
 FROM node:22-slim AS build
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 
 WORKDIR /app
 COPY package.json ./
@@ -10,7 +10,7 @@ COPY src/ ./src/
 RUN pnpm run build
 
 FROM node:22-slim
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 
 WORKDIR /app
 COPY package.json ./
