@@ -1,2 +1,6 @@
 packages:
   - "packages/*"
+  # inbox is a standalone app (private byoky-inbox submodule) with its own
+  # lockfile and no @byoky/* deps — kept out of the workspace so its deps
+  # don't enter the public lockfile.
+  - "!packages/inbox"
