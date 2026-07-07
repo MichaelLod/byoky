@@ -263,7 +263,8 @@ export default function InboxPage() {
         .bx-send { padding: 9px 20px; background: #0d9488; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 15px; }
         .bx-send:disabled { opacity: 0.6; cursor: default; }
         .bx-empty { color: #999; padding: 40px 20px; text-align: center; }
-        .bx-att { display: inline-block; font-size: 12px; background: #f1f5f5; border: 1px solid #e2e8e8; border-radius: 6px; padding: 3px 8px; margin: 2px 6px 2px 0; color: #444; }
+        .bx-att { display: inline-block; font-size: 12px; background: #f1f5f5; border: 1px solid #e2e8e8; border-radius: 6px; padding: 3px 8px; margin: 2px 6px 2px 0; color: #0d9488; text-decoration: none; cursor: pointer; }
+        .bx-att:hover { background: #e2f3f0; }
         @media (max-width: 720px) {
           .bx-list { width: 100%; }
           .bx-panes .bx-detail { display: none; }
@@ -312,7 +313,14 @@ export default function InboxPage() {
               {email.attachments.length > 0 && (
                 <div style={{ marginBottom: 12 }}>
                   {email.attachments.map((a) => (
-                    <span key={a.id} className="bx-att">📎 {a.filename || '(unnamed)'} · {formatSize(a.size)}</span>
+                    <a
+                      key={a.id}
+                      className="bx-att"
+                      href={`/api/inbox/${email.id}/attachments/${a.id}`}
+                      download={a.filename ?? undefined}
+                    >
+                      📎 {a.filename || '(unnamed)'} · {formatSize(a.size)}
+                    </a>
                   ))}
                 </div>
               )}

@@ -109,3 +109,25 @@ export async function sendEmail(input: SendEmailInput): Promise<{ id: string | n
   if (error) throw new Error(error.message);
   return { id: data?.id ?? null };
 }
+
+export interface AttachmentDownload {
+  filename: string | null;
+  contentType: string;
+  body: ReadableStream<Uint8Array>;
+}
+
+// Resend returns a short-lived signed download_url for the attachment; we
+// fetch it server-side and hand back the stream so bytes stay behind our
+// auth and the storage URL is never exposed to the client.
+export async function getAttachment(emailId: string, attachmentId: string): Promise<AttachmentDownload> {
+  const resend = getResend();
+  const { data, error } = await resend.emails.receiving.attachments.get({ emailId, id: attachmentId });
+  if (error) throw new Error(error.message);
+  const res = await fetch(data.download_url);
+  if (!res.ok || !res.body) throw new Error(`attachment fetch failed (${res.status})`);
+  return {
+    filename: data.filename ?? null,
+    contentType: data.content_type,
+    body: res.body,
+  };
+}
