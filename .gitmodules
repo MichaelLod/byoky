@@ -4,3 +4,6 @@
 [submodule "packages/relay"]
 	path = packages/relay
 	url = https://github.com/MichaelLod/byoky-relay.git
+[submodule "packages/inbox"]
+	path = packages/inbox
+	url = https://github.com/MichaelLod/byoky-inbox.git
