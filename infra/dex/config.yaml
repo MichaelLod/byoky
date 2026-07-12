@@ -1,0 +1,33 @@
+# Dex — a real OpenID Connect provider, used to verify Byoky's OIDC/SSO login
+# flow end-to-end locally (one protocol stands in for Google / Entra / Okta).
+#
+# Issuer must equal OIDC_ISSUER in the vault env AND be reachable from the vault
+# for discovery + JWKS. We run Dex on the host at :5556 with base path /dex.
+issuer: http://127.0.0.1:5556/dex
+
+storage:
+  type: memory
+
+web:
+  http: 0.0.0.0:5556
+
+# Trust the console client so the authorization-code flow needs no manual
+# approval screen (lets an automated e2e complete the redirect).
+oauth2:
+  skipApprovalScreen: true
+
+staticClients:
+  - id: byoky-console
+    secret: byoky-console-secret
+    name: Byoky Console
+    redirectURIs:
+      - http://127.0.0.1:3111/orgs/oidc/callback
+
+# A built-in username/password connector with one test user. The hash below is
+# bcrypt("password123").
+enablePasswordDB: true
+staticPasswords:
+  - email: alice@corp.com
+    hash: "$2a$10$rtIYASkvKG00b2X1AsJKlu/ALncpaOA82HUkbO/7AIhlwyj8Tjd7."
+    username: alice
+    userID: alice-uid-0001

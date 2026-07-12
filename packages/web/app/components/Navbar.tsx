@@ -83,14 +83,11 @@ export function Navbar() {
   if (pathname === '/chat' || embedded) return null;
 
   const navLinks: Array<{ href: string; label: string; match: (p: string) => boolean }> = [
-    { href: '/', label: 'Home', match: (p) => p === '/' },
-    { href: '/token-pool', label: 'Token Pool', match: (p) => p.startsWith('/token-pool') || p.startsWith('/marketplace') },
-    { href: '/demo', label: 'Demo', match: (p) => p.startsWith('/demo') },
-    { href: '/openclaw', label: 'OpenClaw', match: (p) => p.startsWith('/openclaw') },
-    { href: '/claude-code', label: 'Claude Code', match: (p) => p.startsWith('/claude-code') },
-    { href: '/hermes-agent', label: 'Hermes', match: (p) => p.startsWith('/hermes-agent') },
-    { href: '/blog', label: 'Blog', match: (p) => p.startsWith('/blog') },
+    { href: '/#features', label: 'Product', match: () => false },
+    { href: '/pricing', label: 'Pricing', match: (p) => p.startsWith('/pricing') },
+    { href: '/security', label: 'Security', match: (p) => p.startsWith('/security') },
     { href: '/docs', label: 'Docs', match: (p) => p.startsWith('/docs') },
+    { href: '/blog', label: 'Blog', match: (p) => p.startsWith('/blog') },
   ];
 
   return (
@@ -124,12 +121,13 @@ export function Navbar() {
           >
             <DiscordIcon />
           </a>
+          <a href="https://app.byoky.com" className="btn btn-primary btn-sm">Start free</a>
           <div
             className="install-dropdown"
             onMouseEnter={handleEnter}
             onMouseLeave={handleLeave}
           >
-            <button className="btn btn-primary btn-sm">
+            <button className="btn btn-secondary btn-sm">
               Install
               <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" style={{ marginLeft: 4 }}>
                 <path d={open ? 'M3 8l3-3 3 3' : 'M3 4l3 3 3-3'} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />

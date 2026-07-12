@@ -1,0 +1,57 @@
+# LiteLLM as a STATELESS forwarding engine behind the Byoky vault.
+# - No database_url  → no virtual-key/spend store (that is Byoky's job).
+# - Identity/budgets/policy/ledger all live in the vault; LiteLLM only does
+#   provider breadth + translation + RELIABILITY (retries/fallbacks/cache).
+# - Provider keys are injected by the vault per-request (KMS-unwrapped org key),
+#   so no long-lived provider keys are configured here except via env for
+#   optional local live testing.
+
+model_list:
+  # Mock model — lets us verify forwarding end-to-end with no provider key.
+  - model_name: mock-echo
+    litellm_params:
+      model: openai/gpt-4o
+      mock_response: "Hello from Byoky via LiteLLM (mock)."
+  # A cheaper equivalent, for verifying cross-provider arbitrage routing.
+  - model_name: mock-cheap
+    litellm_params:
+      model: openai/gpt-4o-mini
+      mock_response: "Hello from the cheaper model (mock)."
+
+  # Real passthrough models. api_key here is a fallback for local live tests;
+  # in production the vault passes the org key per-request (overrides this).
+  - model_name: gpt-5.5
+    litellm_params:
+      model: openai/gpt-5.5
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: claude-sonnet-4-6
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+  # Anthropic-format mock for verifying the /v1/messages passthrough.
+  - model_name: mock-claude
+    litellm_params:
+      model: anthropic/claude-3-5-sonnet
+      mock_response: "Hello from the Anthropic-native path (mock)."
+  # Gemini mock — verifies the gateway routes to the gemini org credential.
+  - model_name: gemini-2.5-pro
+    litellm_params:
+      model: gemini/gemini-2.5-pro
+      mock_response: "Hello from Gemini (mock)."
+  # Real Gemini passthrough (no mock) — the vault injects the org key per-request.
+  - model_name: gemini-2.5-flash
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+
+litellm_settings:
+  # Reliability features stay ON (they are the value-add that makes the proxy
+  # wanted, not just tolerated): automatic retries + in-process response cache.
+  num_retries: 2
+  request_timeout: 600
+  cache: true
+  cache_params:
+    type: local
+
+router_settings:
+  # Load-balance / fallback across same-named deployments when several exist.
+  routing_strategy: simple-shuffle

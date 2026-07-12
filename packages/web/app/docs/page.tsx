@@ -110,6 +110,13 @@ const categories = [
     ],
   },
   {
+    label: 'Control Plane',
+    items: [
+      { id: 'control-plane', label: 'Overview' },
+      { id: 'gateway', label: 'Gateway API' },
+    ],
+  },
+  {
     label: 'SDK Reference',
     items: [
       { id: 'sdk', label: 'Byoky Client' },
@@ -134,8 +141,6 @@ const categories = [
     items: [
       { id: 'backend-relay', label: 'Backend Relay' },
       { id: 'bridge', label: 'Bridge (CLI)' },
-      { id: 'token-gifts', label: 'Token Gifts' },
-      { id: 'token-pool', label: 'Token Pool' },
       { id: 'cross-provider', label: 'Cross-Provider Routing' },
     ],
   },
@@ -206,6 +211,8 @@ export default function Docs() {
         <Installation />
         <Quickstart />
         <DevSandbox />
+        <ControlPlane />
+        <GatewayApi />
         <SdkReference />
         <SessionApi />
         <ProvidersSection />
@@ -218,8 +225,6 @@ export default function Docs() {
         <Limits />
         <BackendRelay />
         <Bridge />
-        <TokenGifts />
-        <TokenPoolSection />
         <CrossProviderRouting />
         <AppEcosystem />
         <AppManifest />
@@ -260,19 +265,30 @@ function Overview() {
   return (
     <Section id="overview" title="Overview">
       <p>
-        Byoky lets users store their AI API keys in an encrypted wallet. Your app never sees the keys
-        &mdash; it gets a proxied session that routes requests through the wallet.
+        Byoky is the <strong>control layer for AI spend</strong>. It sits between your apps and every
+        AI provider so you can govern budgets, policy, and cost on every request — for a whole
+        company, or for a single side project. There are two ways to use it.
       </p>
 
-      <h3>How it works</h3>
+      <h3>1 · Control plane (teams &amp; companies)</h3>
+      <p>
+        Connect your provider keys once — they&apos;re sealed server-side. Apps and agents call an
+        OpenAI-compatible <strong>gateway</strong> with scoped <code>byk_</code> keys, and budgets,
+        policy, observability, and cost optimization are enforced centrally. You manage it in the{' '}
+        <a href="https://app.byoky.com" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--teal-dark)' }}>console</a>.
+        See <a href="#control-plane" style={{ color: 'var(--teal-dark)' }}>Control Plane</a> and{' '}
+        <a href="#gateway" style={{ color: 'var(--teal-dark)' }}>Gateway API</a>.
+      </p>
+
+      <h3>2 · On-device wallet (individuals &amp; apps)</h3>
+      <p>
+        Users keep their own keys in an encrypted wallet (browser extension / mobile). Your app
+        never sees the key — it gets a proxied session through the SDK. Ideal for consumer apps
+        where each user brings their own key. The SDK Reference below covers this path.
+      </p>
       <Code lang="text">{`Your App → SDK (createFetch) → Content Script → Extension → LLM API
                                                     ↑
                                           Keys stay here. Always.`}</Code>
-
-      <p>
-        Two lines changed. Full API compatibility. Streaming, file uploads, and vision all work.
-        Sessions auto-reconnect if the extension restarts.
-      </p>
     </Section>
   );
 }
@@ -306,7 +322,13 @@ function Installation() {
 function Quickstart() {
   return (
     <Section id="quickstart" title="Quickstart">
-      <p>Connect and make your first request in under a minute:</p>
+      <p style={{ padding: '10px 14px', background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8 }}>
+        <strong>Building for a team?</strong> Use the control plane — connect a key in the{' '}
+        <a href="https://app.byoky.com" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--teal-dark)' }}>console</a>{' '}
+        and swap one base URL (<a href="#gateway" style={{ color: 'var(--teal-dark)' }}>Gateway API</a>). The flow below is the
+        <strong> on-device wallet</strong> path, for apps where each user brings their own key.
+      </p>
+      <p>Connect and make your first wallet request in under a minute:</p>
       <Code lang="typescript" demo="chat" provider="anthropic">{`import Anthropic from '@anthropic-ai/sdk';
 import { Byoky } from '@byoky/sdk';
 
@@ -1359,77 +1381,83 @@ byoky-bridge install   # register native messaging host`}</Code>
   );
 }
 
-function TokenGifts() {
+function ControlPlane() {
   return (
-    <Section id="token-gifts" title="Token Gifts">
+    <Section id="control-plane" title="Control Plane">
       <p>
-        Share token access without sharing your API key. The sender&apos;s wallet proxies all
-        requests &mdash; the key never leaves the extension.
+        The <strong>control plane</strong> is Byoky for teams and companies: every AI request
+        flows through one endpoint where budgets, policy, observability, and cost optimization are
+        enforced. Your provider keys are connected once and sealed server-side; apps and agents
+        carry scoped <code>byk_</code> keys instead of the raw key.
       </p>
-
-      <Code lang="text">{`Sender's Extension ←WebSocket→ Relay Server ←WebSocket→ Recipient's Extension`}</Code>
-
-      <h3>Create a gift</h3>
-      <ol>
-        <li>Open the wallet &rarr; select a credential &rarr; click &quot;Gift&quot;</li>
-        <li>Set a token budget and expiry</li>
-        <li>Share the generated gift link</li>
-      </ol>
-
-      <h3>Redeem a gift</h3>
-      <ol>
-        <li>Open the wallet &rarr; click &quot;Redeem Gift&quot;</li>
-        <li>Paste the gift link &rarr; accept</li>
-      </ol>
-
       <p>
-        The recipient never receives your API key. Every request is relayed through the
-        sender&apos;s running extension, which enforces the token budget and can revoke access
-        at any time.
+        You manage it from the <a href="https://app.byoky.com" target="_blank" rel="noopener noreferrer">console</a>.
+        Getting live takes under 10 minutes:
+      </p>
+      <ol>
+        <li><strong>Create a workspace</strong> — sign in and name your org.</li>
+        <li><strong>Connect a provider key</strong> — paste your OpenAI / Anthropic / Gemini key once. It&apos;s KMS-envelope encrypted per org; no app ever sees it.</li>
+        <li><strong>Mint a <code>byk_</code> key</strong> — a scoped key your apps use in place of the provider key. Revocable, attributable, budget-bound.</li>
+        <li><strong>Point your client at the gateway</strong> — one base-URL swap (see below).</li>
+      </ol>
+      <p>
+        From there you set <strong>budgets</strong> (hard spend caps per team / app / agent),
+        <strong> policy</strong> (model allow/deny, auto-stop on a spend spike, loop kill-switch),
+        and watch attributed spend in real time — with one-click savings recommendations.
+      </p>
+      <h3>Identity model</h3>
+      <p>
+        <code>org → team → member / agent → grant → key</code>. Members sign in with SSO (OIDC) and
+        get a role (owner, admin, finance, security, member). Agents and apps get <code>byk_</code>
+        keys scoped to specific providers and models. Everything is org-isolated at the database
+        with row-level security.
       </p>
     </Section>
   );
 }
 
-function TokenPoolSection() {
+function GatewayApi() {
   return (
-    <Section id="token-pool" title="Token Pool">
+    <Section id="gateway" title="Gateway API">
       <p>
-        The{' '}
-        <a href="/token-pool" style={{ color: 'var(--teal-dark)' }}>
-          Token Pool
-        </a>{' '}
-        is a public board where users share free token gifts with the community.
+        The gateway is <strong>OpenAI-compatible</strong>. Point any OpenAI-style client at{' '}
+        <code>https://api.byoky.com/v1</code> and authenticate with a <code>byk_</code> key —
+        no other code change. Anthropic-native <code>/v1/messages</code> is also supported so the
+        Anthropic SDK adopts Byoky by swapping <code>baseURL</code> only.
       </p>
+      <Code lang="ts">{`import OpenAI from 'openai';
 
-      <h3>How it works</h3>
-      <ol>
-        <li>Create a gift in your wallet (extension or mobile)</li>
-        <li>Check &quot;List on Token Pool&quot;</li>
-        <li>Add a display name (or stay anonymous)</li>
-        <li>Your gift appears on the token pool for anyone to redeem</li>
-      </ol>
+const client = new OpenAI({
+  baseURL: 'https://api.byoky.com/v1',
+  apiKey: process.env.BYOKY_KEY,   // byk_live_…
+});
 
-      <h3>What users see</h3>
+const res = await client.chat.completions.create({
+  model: 'gpt-5.5',
+  messages: [{ role: 'user', content: 'Hello' }],
+});`}</Code>
+      <p>Or with curl:</p>
+      <Code lang="bash">{`curl https://api.byoky.com/v1/chat/completions \\
+  -H "authorization: Bearer $BYOKY_KEY" \\
+  -H "content-type: application/json" \\
+  -d '{"model":"gpt-5.5","messages":[{"role":"user","content":"hi"}]}'`}</Code>
+      <h3>What happens on every request</h3>
+      <p>
+        Auth (resolve the <code>byk_</code> key → org / scope) → policy verdict → budget check →
+        optional cheaper-model routing &amp; cache → the org&apos;s real key is KMS-unsealed and the
+        call is forwarded → usage is priced and metered. Streaming (<code>stream: true</code>) is
+        passed straight through; usage is parsed from the stream tail and fully metered.
+      </p>
+      <h3>Enforcement responses</h3>
       <ul>
-        <li><strong>Online/offline status</strong> &mdash; green dot if the gifter&apos;s wallet is online (gift is usable), red if offline</li>
-        <li><strong>Tokens remaining</strong> &mdash; progress bar showing how much budget is left</li>
-        <li><strong>Expiry countdown</strong> &mdash; time until the gift expires</li>
-        <li><strong>Provider</strong> &mdash; which LLM provider the tokens are for</li>
+        <li><code>402 BUDGET_EXCEEDED</code> — a scoped budget is at its cap.</li>
+        <li><code>403 POLICY_BLOCK</code> — a model/allowlist rule, spend-spike auto-stop, or loop kill-switch tripped.</li>
+        <li><code>403 AGENT_PAUSED</code> — the agent has been paused (manually or by auto kill-switch).</li>
+        <li><code>503 GATEWAY_DEGRADED</code> — the engine is unreachable; the SDK fails open straight to the provider so requests keep working.</li>
       </ul>
-
-      <h3>API endpoints</h3>
       <p>
-        Pool listings live on the vault at <code>vault.byoky.com</code>. Online status is tracked
-        live via the relay&apos;s WebSocket, and token usage updates flow through the proxy — neither
-        needs a separate REST endpoint.
-      </p>
-      <Code lang="text">{`GET    /pool          — list currently-listed gifts (public)
-POST   /pool/list     — list a gift publicly (bearer: gift authToken)
-POST   /pool/unlist   — remove a listing (bearer: gift authToken)`}</Code>
-      <p>
-        Redemption goes through the short-link flow at <code>byoky.com/g/:shortId</code>, which
-        resolves to the full gift link and opens the wallet&apos;s redeem view.
+        Prefer an ergonomic wrapper? <code>@byoky/sdk</code> gives a drop-in <code>fetch</code> with
+        the base-URL swap and fail-open bypass built in.
       </p>
     </Section>
   );

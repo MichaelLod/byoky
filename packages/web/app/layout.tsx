@@ -1,17 +1,22 @@
 import type { Metadata } from 'next';
-import { Sora, JetBrains_Mono, Outfit } from 'next/font/google';
+import { Space_Grotesk, Inter, JetBrains_Mono } from 'next/font/google';
 import { Navbar } from './components/Navbar';
 import { ProductHuntBanner } from './components/ProductHuntBanner';
 import './globals.css';
 
-const sora = Sora({
+// Display: a grotesk with mechanical character (shares DNA with monospace) — an
+// "instrument" voice for a control plane. Body: Inter, neutral and legible.
+// Mono: JetBrains — carries every number, label, and readout (the signature).
+const spaceGrotesk = Space_Grotesk({
   subsets: ['latin'],
-  variable: '--font-sora',
+  weight: ['500', '600', '700'],
+  variable: '--font-sora', // keep the existing var name so all rules pick it up
   display: 'swap',
 });
 
-const outfit = Outfit({
+const inter = Inter({
   subsets: ['latin'],
+  weight: ['400', '500', '600'],
   variable: '--font-outfit',
   display: 'swap',
 });
@@ -25,26 +30,26 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   metadataBase: new URL('https://byoky.com'),
   title: {
-    default: 'Byoky — Build AI apps. Your users bring the keys.',
+    default: 'Byoky — The control layer for AI spend',
     template: '%s — Byoky',
   },
   description:
-    'Build AI apps with zero API costs. Your users connect their own keys through Byoky — encrypted locally, proxied securely. 13 providers, 2 lines to integrate. Open source.',
+    'Govern every AI dollar. Give every employee and agent access to any model with budgets, policy, and real-time spend visibility. Typically cuts 20–40% of the AI bill. Live in 10 minutes. 2% of managed spend — no seats, no flat fee.',
   keywords: [
-    'AI API key wallet',
-    'LLM API key manager',
-    'bring your own key',
-    'BYOK',
-    'browser extension',
-    'API key security',
-    'Chrome extension security',
-    'API key theft protection',
-    'secure API key storage',
-    'AI key encryption',
-    'protect OpenAI keys',
-    'OpenAI key wallet',
-    'Anthropic key wallet',
-    'AI developer tools',
+    'AI spend management',
+    'LLM cost control',
+    'AI governance platform',
+    'LLM gateway',
+    'AI budgets and policy',
+    'AI observability',
+    'AI FinOps',
+    'AI access management',
+    'LLM proxy',
+    'AI cost optimization',
+    'enterprise AI control plane',
+    'AI usage governance',
+    'multi-provider LLM',
+    'BYOK enterprise',
   ],
   alternates: {
     canonical: '/',
@@ -63,18 +68,18 @@ export const metadata: Metadata = {
     apple: '/apple-touch-icon.png',
   },
   openGraph: {
-    title: 'Byoky — Share your AI budget without sharing your keys',
+    title: 'Byoky — The control layer for AI spend',
     description:
-      'Send a friend tokens from your Claude, OpenAI, or Gemini plan. One network for all your AI tokens — open source, end-to-end encrypted.',
+      'Okta + Ramp, for AI. Govern every AI dollar with budgets, policy, and observability across every provider. Cut 20–40% of your AI bill. 2% of managed spend — no seats.',
     url: 'https://byoky.com',
     siteName: 'Byoky',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Byoky — Share your AI budget without sharing your keys',
+    title: 'Byoky — The control layer for AI spend',
     description:
-      'Send a friend tokens from your Claude, OpenAI, or Gemini plan. One network for all your AI tokens — open source, end-to-end encrypted.',
+      'Okta + Ramp, for AI. Govern every AI dollar with budgets, policy, and observability. Cut 20–40% of your AI bill. 2% of managed spend — no seats.',
   },
 };
 
@@ -84,7 +89,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${sora.variable} ${jetbrainsMono.variable} ${outfit.variable}`}>
+    <html lang="en" className={`${spaceGrotesk.variable} ${jetbrainsMono.variable} ${inter.variable}`}>
       <body>
         <script
           type="application/ld+json"
@@ -93,10 +98,10 @@ export default function RootLayout({
               '@context': 'https://schema.org',
               '@type': 'SoftwareApplication',
               name: 'Byoky',
-              applicationCategory: 'BrowserApplication',
-              operatingSystem: 'Chrome, Firefox, Safari',
+              applicationCategory: 'BusinessApplication',
+              operatingSystem: 'Web',
               description:
-                'Build AI apps with zero API costs. Your users bring their own keys — encrypted locally with AES-256-GCM, proxied securely. 13 providers, open source.',
+                'The control layer for AI spend. Govern every AI dollar with budgets, policy, observability, and cost optimization across every provider. 2% of managed spend — no seats, no flat fee.',
               url: 'https://byoky.com',
               offers: {
                 '@type': 'Offer',

@@ -5,6 +5,8 @@ export type { ModalOptions } from './modal/connect-modal.js';
 export { isExtensionInstalled, getStoreUrl } from './detect.js';
 export { encode as encodeQr, toSvg as qrToSvg } from './modal/qr.js';
 export { createProxyFetch } from './proxy-fetch.js';
+export { ByokyGateway, createGatewayFetch } from './gateway.js';
+export type { GatewayOptions, FailOpenConfig } from './gateway.js';
 export { createVaultFetch } from './vault-fetch.js';
 export type { RelayConnection } from './relay-client.js';
 export {

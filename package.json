@@ -16,6 +16,7 @@
     "test:security": "vitest run packages/core/tests/security.test.ts",
     "test:live": "vitest run --config vitest.config.live.ts",
     "typecheck": "pnpm -r typecheck",
+    "seed:demo": "node scripts/seed-demo.mjs",
     "clean": "pnpm -r clean",
     "test:e2e": "pnpm build:core && pnpm build:sdk && pnpm build:extension && npx playwright test --config e2e/playwright.config.ts",
     "test:e2e:headed": "pnpm build:core && pnpm build:sdk && pnpm build:extension && npx playwright test --config e2e/playwright.config.ts --headed",

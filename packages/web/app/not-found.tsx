@@ -54,9 +54,9 @@ export default function NotFound() {
         <FadeIn delay={0.5}>
           <div className="notfound-links">
             <span>Try instead:</span>
-            <a href="/token-pool">Token Pool</a>
+            <a href="/pricing">Pricing</a>
             <span aria-hidden>·</span>
-            <a href="/openclaw">OpenClaw</a>
+            <a href="/docs">Docs</a>
             <span aria-hidden>·</span>
             <a href="/blog">Blog</a>
             <span aria-hidden>·</span>

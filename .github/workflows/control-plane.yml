@@ -1,0 +1,89 @@
+# CI for the enterprise control plane (vault gateway, console, sdk, core).
+# Typechecks + unit tests every push; spins up Postgres + Redis + LiteLLM (mock)
+# and runs the end-to-end smoke + tenant-isolation suites against a real vault.
+name: control-plane
+
+on:
+  push:
+    paths:
+      - 'packages/vault/**'
+      - 'packages/console/**'
+      - 'packages/sdk/**'
+      - 'packages/core/**'
+      - 'infra/litellm/**'
+      - 'scripts/smoke-control-plane.mjs'
+      - 'scripts/test-tenant-isolation.mjs'
+      - '.github/workflows/control-plane.yml'
+  pull_request:
+
+jobs:
+  typecheck-and-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9.15.9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @byoky/core build
+      - name: Typecheck
+        run: |
+          for p in core sdk vault console; do pnpm --filter @byoky/$p typecheck; done
+      - name: Unit tests (pricing, policy, sdk gateway)
+        run: npx vitest run packages/core/tests/pricing.test.ts packages/core/tests/policy.test.ts packages/sdk/tests/gateway.test.ts
+
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_USER: byoky, POSTGRES_PASSWORD: byoky, POSTGRES_DB: byoky }
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U byoky" --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9.15.9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @byoky/core build && pnpm --filter @byoky/vault build
+
+      - name: Start LiteLLM (mock models)
+        run: docker compose -f infra/litellm/docker-compose.yml up -d
+      - name: Provision schema + limited role + seed prices
+        env: { DATABASE_URL: 'postgres://byoky:byoky@127.0.0.1:5432/byoky' }
+        run: |
+          cd packages/vault && echo y | pnpm exec drizzle-kit push
+          psql "$DATABASE_URL" -f - <<'SQL'
+          DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='byoky_app') THEN CREATE ROLE byoky_app LOGIN PASSWORD 'app'; END IF; END $$;
+          GRANT USAGE ON SCHEMA public TO byoky_app;
+          GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO byoky_app;
+          INSERT INTO price_cache VALUES ('mock-echo',1000,2000,'ci',0) ON CONFLICT (model) DO NOTHING;
+          INSERT INTO price_cache VALUES ('mock-cheap',100,200,'ci',0) ON CONFLICT (model) DO NOTHING;
+          SQL
+
+      - name: Run vault (limited role, RLS on)
+        env:
+          DATABASE_URL: 'postgres://byoky_app:app@127.0.0.1:5432/byoky'
+          JWT_SECRET: ci_jwt_secret_at_least_32_characters_long
+          VAULT_WRAP_SECRET: ci_wrap_secret_at_least_32_characters_long
+          REDIS_URL: 'redis://127.0.0.1:6379'
+          LITELLM_BASE_URL: 'http://127.0.0.1:4000'
+          LITELLM_MASTER_KEY: sk-byoky-internal
+          RUN_MIGRATIONS: 'false'
+          RATE_LIMIT_MAX: '100000'
+          PORT: '3111'
+        run: |
+          node packages/vault/dist/server.js &
+          for i in $(seq 1 30); do curl -sf http://localhost:3111/readyz && break; sleep 1; done
+
+      - name: Smoke + tenant-isolation
+        run: |
+          node scripts/smoke-control-plane.mjs
+          node scripts/test-tenant-isolation.mjs

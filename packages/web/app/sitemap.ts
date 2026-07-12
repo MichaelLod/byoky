@@ -39,28 +39,16 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.7,
     },
     {
-      url: 'https://byoky.com/token-pool',
+      url: 'https://byoky.com/pricing',
       lastModified: new Date(),
-      changeFrequency: 'daily',
-      priority: 0.8,
-    },
-    {
-      url: 'https://byoky.com/openclaw',
-      lastModified: new Date(),
-      changeFrequency: 'monthly',
+      changeFrequency: 'weekly',
       priority: 0.9,
     },
     {
-      url: 'https://byoky.com/claude-code',
+      url: 'https://byoky.com/security',
       lastModified: new Date(),
       changeFrequency: 'monthly',
-      priority: 0.9,
-    },
-    {
-      url: 'https://byoky.com/hermes-agent',
-      lastModified: new Date(),
-      changeFrequency: 'monthly',
-      priority: 0.9,
+      priority: 0.7,
     },
     {
       url: 'https://byoky.com/built-with',

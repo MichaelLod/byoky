@@ -1,0 +1,18 @@
+# Dex — local OpenID Connect provider for verifying Byoky's SSO login flow.
+# Bring up:  docker compose -f infra/dex/docker-compose.yml up -d
+# Then run the vault with:
+#   OIDC_ISSUER=http://127.0.0.1:5556/dex
+#   OIDC_CLIENT_ID=byoky-console
+#   OIDC_CLIENT_SECRET=byoky-console-secret
+#   OIDC_REDIRECT_URI=http://127.0.0.1:3111/orgs/oidc/callback
+# and:  node scripts/test-oidc-sso.mjs   (user alice@corp.com / password123)
+services:
+  dex:
+    image: ghcr.io/dexidp/dex:v2.41.1
+    container_name: byoky-dex
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    ports:
+      - "5556:5556"
+    volumes:
+      - ./config.yaml:/etc/dex/config.yaml:ro
+    restart: unless-stopped

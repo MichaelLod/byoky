@@ -1,0 +1,9 @@
+/.git
+/ios
+/android
+/marketing
+/e2e
+/docs
+/packages/inbox
+/.claude
+*.log

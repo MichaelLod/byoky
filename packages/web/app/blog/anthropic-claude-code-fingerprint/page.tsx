@@ -282,8 +282,8 @@ anthropic-dangerous-direct-browser-access: true`}</code>
               Step-by-step install for Chrome, Firefox, iOS and Android, plus the exact OpenClaw
               config to point at the Byoky bridge.
             </p>
-            <Link href="/openclaw" className="blog-cta-button">
-              Open the OpenClaw guide &rarr;
+            <Link href="/docs" className="blog-cta-button">
+              Read the Byoky docs &rarr;
             </Link>
           </div>
           <p>

@@ -37,3 +37,8 @@ packages/android/build/
 packages/android/app/build/
 packages/android/local.properties
 .claude/
+
+# local dev/deploy artifacts
+.playwright-mcp/
+/overview.png
+/overview-roi.png
