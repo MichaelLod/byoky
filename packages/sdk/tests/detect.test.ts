@@ -41,7 +41,7 @@ describe('getStoreUrl', () => {
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     );
     const url = getStoreUrl();
-    expect(url).toContain('chrome.google.com/webstore');
+    expect(url).toContain('chromewebstore.google.com');
   });
 
   it('returns Firefox Add-ons URL for Firefox', () => {

@@ -1,5 +1,5 @@
 import type { SerializedFormDataEntry } from '@byoky/core';
-import { getMessageTarget } from './detect.js';
+import { resolveMessageTarget } from './detect.js';
 
 interface ReadBodyResult {
   body: string;
@@ -97,22 +97,27 @@ export function createProxyFetch(
         channel.port1.close();
       }
 
-      const { target, origin } = getMessageTarget();
-      target.postMessage(
-        {
-          type: 'BYOKY_PROXY_REQUEST',
-          requestId,
-          sessionKey: sessionKeyRef.current,
-          providerId,
-          url,
-          method,
-          headers,
-          body: bodyResult?.body,
-          bodyEncoding: bodyResult?.bodyEncoding,
-        },
-        origin,
-        [channel.port2],
-      );
+      // This message carries the session key and the full request body, so
+      // it must never go to an unverified parent frame. resolveMessageTarget
+      // returns the self/content-script route unless the parent has proven
+      // itself an extension origin.
+      void resolveMessageTarget().then(({ target, origin }) => {
+        target.postMessage(
+          {
+            type: 'BYOKY_PROXY_REQUEST',
+            requestId,
+            sessionKey: sessionKeyRef.current,
+            providerId,
+            url,
+            method,
+            headers,
+            body: bodyResult?.body,
+            bodyEncoding: bodyResult?.bodyEncoding,
+          },
+          origin,
+          [channel.port2],
+        );
+      });
     });
   };
 }

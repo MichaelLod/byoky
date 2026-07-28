@@ -64,12 +64,34 @@ function setupBridge(
 ): () => void {
   const proxyPorts = new Map<string, ReturnType<typeof browser.runtime.connect>>();
 
+  // Identify ourselves to the framed app. The SDK will only route messages
+  // to its parent after receiving this from an extension origin — without
+  // it, a page that framed the app with `#byoky-in-popup` in the URL could
+  // pose as the wallet and read every request the app makes.
+  //
+  // targetOrigin '*' is required here, not sloppiness: the iframe is
+  // sandboxed without allow-same-origin, so its origin is opaque and a
+  // concrete targetOrigin would never match. The message carries no secret
+  // — the trust flows the other way, from our extension origin, which the
+  // browser stamps on the event and page script cannot forge.
+  function sendHello() {
+    const iframe = iframeRef.current;
+    try {
+      iframe?.contentWindow?.postMessage({ type: 'BYOKY_POPUP_HELLO' }, '*');
+    } catch { /* frame not ready yet; the SDK re-asks */ }
+  }
+
   function handleMessage(event: MessageEvent) {
     const iframe = iframeRef.current;
     if (!iframe || event.source !== iframe.contentWindow) return;
     const data = event.data as { type?: string; [k: string]: unknown } | undefined;
     if (!data || typeof data.type !== 'string' || !data.type.startsWith('BYOKY_')) return;
     const replyPort: MessagePort | undefined = event.ports?.[0];
+
+    if (data.type === 'BYOKY_POPUP_HELLO_REQUEST') {
+      sendHello();
+      return;
+    }
 
     if (data.type === 'BYOKY_PROXY_REQUEST') {
       const requestId = typeof data.requestId === 'string' ? data.requestId : null;
@@ -142,8 +164,15 @@ function setupBridge(
   }
 
   window.addEventListener('message', handleMessage);
+
+  // Also announce ourselves proactively for a short window after mount, so
+  // an SDK that finished loading before its listener was attached still
+  // completes the handshake without waiting on its own retry loop.
+  const helloTimers = [0, 100, 300, 800, 1500].map((d) => setTimeout(sendHello, d));
+
   return () => {
     window.removeEventListener('message', handleMessage);
+    for (const t of helloTimers) clearTimeout(t);
     for (const p of proxyPorts.values()) { try { p.disconnect(); } catch {} }
     proxyPorts.clear();
   };

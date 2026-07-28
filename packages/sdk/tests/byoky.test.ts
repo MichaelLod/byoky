@@ -139,6 +139,10 @@ describe('Byoky', () => {
 
     const session = await connectPromise;
     session.disconnect();
+    // The message target is resolved asynchronously now (the SDK waits for
+    // the popup to prove its extension origin before choosing a target), so
+    // the postMessage lands a tick after disconnect() returns.
+    await new Promise((r) => setTimeout(r, 10));
 
     const disconnectMsg = postedMessages.find(
       (m) => m.data.type === 'BYOKY_DISCONNECT',

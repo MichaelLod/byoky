@@ -1,7 +1,7 @@
 import type { AuthMethod, ConnectRequest, ConnectResponse, ModelInfo, SessionUsage } from '@byoky/core';
 import { ByokyError, ByokyErrorCode, isByokyMessage, encodePairPayload } from '@byoky/core';
 import { fetchModelsList } from './list-models-fetch.js';
-import { isExtensionInstalled, getStoreUrl, getMessageTarget } from './detect.js';
+import { isExtensionInstalled, getStoreUrl, resolveMessageTarget } from './detect.js';
 import { createProxyFetch } from './proxy-fetch.js';
 import { createRelayFetch } from './relay-fetch.js';
 import { createRelayClient, type RelayConnection } from './relay-client.js';
@@ -879,12 +879,15 @@ export class Byoky {
       }
     };
     {
-      const { target, origin } = getMessageTarget();
-      target.postMessage(
-        { type: 'BYOKY_REGISTER_NOTIFY' },
-        origin,
-        [notifyChannel.port2],
-      );
+      // Resolving the target may await the popup handshake, so this is
+      // fire-and-forget: the notify channel simply registers a moment later.
+      void resolveMessageTarget().then(({ target, origin }) => {
+        target.postMessage(
+          { type: 'BYOKY_REGISTER_NOTIFY' },
+          origin,
+          [notifyChannel.port2],
+        );
+      });
     }
 
     saveExtSession(response);
@@ -934,26 +937,28 @@ export class Byoky {
         channel.port1.close();
       }
 
-      const { target, origin } = getMessageTarget();
-      target.postMessage(
-        {
-          type: 'BYOKY_CONNECT_REQUEST',
-          id: requestId,
-          requestId,
-          payload: request,
-        },
-        origin,
-        [channel.port2],
-      );
+      void resolveMessageTarget().then(({ target, origin }) => {
+        target.postMessage(
+          {
+            type: 'BYOKY_CONNECT_REQUEST',
+            id: requestId,
+            requestId,
+            payload: request,
+          },
+          origin,
+          [channel.port2],
+        );
+      });
     });
   }
 
   private sendDisconnect(sessionKey: string): void {
-    const { target, origin } = getMessageTarget();
-    target.postMessage(
-      { type: 'BYOKY_DISCONNECT', payload: { sessionKey } },
-      origin,
-    );
+    void resolveMessageTarget().then(({ target, origin }) => {
+      target.postMessage(
+        { type: 'BYOKY_DISCONNECT', payload: { sessionKey } },
+        origin,
+      );
+    });
   }
 
   private querySessionStatus(sessionKey: string): Promise<boolean> {
@@ -977,12 +982,13 @@ export class Byoky {
         channel.port1.close();
       }
 
-      const { target, origin } = getMessageTarget();
-      target.postMessage({
-        type: 'BYOKY_SESSION_STATUS',
-        requestId,
-        payload: { sessionKey },
-      }, origin, [channel.port2]);
+      void resolveMessageTarget().then(({ target, origin }) => {
+        target.postMessage({
+          type: 'BYOKY_SESSION_STATUS',
+          requestId,
+          payload: { sessionKey },
+        }, origin, [channel.port2]);
+      });
     });
   }
 
@@ -1014,12 +1020,13 @@ export class Byoky {
         channel.port1.close();
       }
 
-      const { target, origin } = getMessageTarget();
-      target.postMessage({
-        type: 'BYOKY_SESSION_USAGE',
-        requestId,
-        payload: { sessionKey },
-      }, origin, [channel.port2]);
+      void resolveMessageTarget().then(({ target, origin }) => {
+        target.postMessage({
+          type: 'BYOKY_SESSION_USAGE',
+          requestId,
+          payload: { sessionKey },
+        }, origin, [channel.port2]);
+      });
     });
   }
 }
