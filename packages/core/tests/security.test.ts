@@ -79,9 +79,12 @@ describe('security invariants', () => {
       expect(validateCalls.length).toBeGreaterThanOrEqual(fetchCalls.length);
     });
 
-    it('uses deny-by-default for portOrigin', () => {
-      expect(bg).toContain('!portOrigin ||');
-      expect(bg).not.toMatch(/portOrigin && portOrigin !== session\.appOrigin/);
+    it('uses deny-by-default for the proxy port origin', () => {
+      // The check reads `!effectiveOrigin || effectiveOrigin !== ...` since
+      // popup-relayed requests resolve their origin before comparison. What
+      // matters is that a missing origin denies rather than falls through.
+      expect(bg).toContain('!effectiveOrigin ||');
+      expect(bg).not.toMatch(/effectiveOrigin && effectiveOrigin !== session\.appOrigin/);
     });
 
     it('strips sessionKey from getSessions response', () => {
@@ -130,7 +133,7 @@ describe('security invariants', () => {
     });
 
     it('has rate limiting on connect requests with cleanup', () => {
-      expect(bg).toContain('isConnectRateLimited');
+      expect(bg).toContain('checkConnectRateLimit');
       expect(bg).toContain('CONNECT_RATE_LIMIT');
       // Must clean up stale entries to prevent memory leak
       expect(bg).toContain('connectRateLimit.delete(key)');
@@ -495,8 +498,13 @@ describe('security invariants', () => {
     });
 
     it('validates provider ID in buildAuthPage', () => {
+      // The id must clear the allow-list before it reaches the page, and it
+      // must be serialized rather than interpolated into the HTML.
       expect(plugin).toContain('VALID_PROVIDER_IDS');
-      expect(plugin).toContain('JSON.stringify(requestProviderId)');
+      expect(plugin).toContain('VALID_PROVIDER_IDS.has(requestProviderId)');
+      expect(plugin).toMatch(/JSON\.stringify\(\[\{ id: requestProviderId/);
+      // Never interpolated raw into the returned markup.
+      expect(plugin).not.toMatch(/\$\{requestProviderId\}/);
     });
   });
 
