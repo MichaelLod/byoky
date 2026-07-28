@@ -79,6 +79,38 @@ type PendingResponse = {
 const MAX_PENDING_REQUESTS = 100;
 const pendingRequests = new Map<string, PendingResponse>();
 
+/**
+ * Reject requests a browser made on behalf of a web page.
+ *
+ * The Host-header check below stops DNS rebinding, but not plain CSRF: a
+ * page on any site can POST to http://127.0.0.1:<port>/... as a "simple
+ * request" (no preflight) and the browser sets a passing `Host` itself.
+ * Without this gate every visited website could drive the user's wallet
+ * (burning their API quota) or POST /_shutdown to kill the bridge.
+ *
+ * Two signals, both set by the browser and unforgeable from script:
+ *   - `Origin`: present on every cross-origin fetch/XHR. Local CLI clients
+ *     (Claude Code, OpenClaw, curl) never send it, so "absent" is the
+ *     legitimate case. Extension origins are allowed — that is how the
+ *     wallet's own pages talk to the bridge.
+ *   - `Sec-Fetch-Site`: a forbidden header name, so page script cannot set
+ *     or clear it. Anything but `none`/`same-origin` came from a document
+ *     on another site.
+ */
+const EXTENSION_ORIGIN_RE = /^(chrome|moz|safari-web)-extension:\/\//i;
+
+function isBrowserCrossSiteRequest(req: IncomingMessage): boolean {
+  const origin = req.headers['origin'];
+  if (typeof origin === 'string' && origin.length > 0) {
+    if (!EXTENSION_ORIGIN_RE.test(origin)) return true;
+  }
+  const site = req.headers['sec-fetch-site'];
+  if (typeof site === 'string' && site !== 'none' && site !== 'same-origin') {
+    return true;
+  }
+  return false;
+}
+
 export function handleProxyResponse(msg: ProxyResponseMessage): void {
   const pending = pendingRequests.get(msg.requestId);
   if (!pending) return;
@@ -129,7 +161,22 @@ export function handleProxyResponse(msg: ProxyResponseMessage): void {
 export function startProxyServer(config: ProxyConfig): Server {
   const { port, sessionKey, providers, sendToExtension, validateUrl } = config;
 
-  const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+  // Node does not catch rejections thrown out of an async request listener,
+  // and an unhandled rejection terminates the process by default. Wrapping
+  // the handler keeps a malformed request from killing the bridge.
+  const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+    void handleRequest(req, res).catch((err: unknown) => {
+      process.stderr.write(
+        `Byoky proxy request failed: ${err instanceof Error ? err.message : 'unknown'}\n`,
+      );
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+      }
+      try { res.end(JSON.stringify({ error: 'Internal bridge error' })); } catch { /* already closed */ }
+    });
+  });
+
+  async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     // Reject DNS rebinding: only accept requests with a localhost Host header
     const host = req.headers.host || '';
     const hostWithoutPort = host.split(':')[0];
@@ -139,7 +186,18 @@ export function startProxyServer(config: ProxyConfig): Server {
       return;
     }
 
+    // CSRF: refuse anything a browser issued for a web page. Checked before
+    // every route, including /health and /_shutdown.
+    if (isBrowserCrossSiteRequest(req)) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Forbidden: cross-site request' }));
+      return;
+    }
+
     if (req.method === 'OPTIONS') {
+      // No CORS headers are emitted anywhere in this server, so a browser
+      // preflight can never succeed. Answering 204 just keeps non-browser
+      // clients that probe with OPTIONS happy.
       res.writeHead(204);
       res.end();
       return;
@@ -153,9 +211,11 @@ export function startProxyServer(config: ProxyConfig): Server {
     }
 
     // Graceful shutdown — used by the OpenClaw plugin to replace a stale
-    // bridge bound to an old relay room. Only reachable on 127.0.0.1 (the
-    // Host-header check above already enforces that), so there is no remote
-    // exposure. POST only — avoids link-preview fetches tripping it.
+    // bridge bound to an old relay room. Reachable only from a local process:
+    // the Host-header check pins it to loopback and isBrowserCrossSiteRequest
+    // rejects the browser-driven CSRF path (any visited page could otherwise
+    // POST here and kill the bridge). POST only — avoids link-preview
+    // fetches tripping it.
     if (req.method === 'POST' && req.url === '/_shutdown') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
@@ -196,8 +256,20 @@ export function startProxyServer(config: ProxyConfig): Server {
       return;
     }
 
-    // Read request body
-    const body = await readBody(req);
+    // Read request body. readBody rejects when the stream exceeds
+    // MAX_BODY_SIZE — which a chunked request slips past the Content-Length
+    // pre-check above. Left unhandled, that rejection escapes this async
+    // listener and takes the whole bridge process down.
+    let body: string;
+    try {
+      body = await readBody(req);
+    } catch {
+      if (!res.headersSent) {
+        res.writeHead(413, { 'Content-Type': 'application/json' });
+      }
+      res.end(JSON.stringify({ error: 'Payload too large' }));
+      return;
+    }
 
     // Build the real URL from the provider's base URL
     const providerUrls: Record<string, string> = {
@@ -278,7 +350,7 @@ export function startProxyServer(config: ProxyConfig): Server {
 
     pendingRequests.set(requestId, { res, timeout });
     sendToExtension(proxyMsg);
-  });
+  }
 
   server.listen(port, '127.0.0.1', () => {
     process.stderr.write(`Byoky proxy listening on http://127.0.0.1:${port}\n`);
