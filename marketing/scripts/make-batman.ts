@@ -59,64 +59,91 @@ interface BeatStyle {
   frameCandidates: string[];
 }
 
+// Keyed by narrate.ts segment ids, in narration order (the accent colour
+// lookup below indexes BEAT_STYLES by beat position).
 const BEAT_STYLES: Record<string, BeatStyle> = {
-  '01-hook': {
-    onomatopoeia: 'UGH!',
-    burstFill: '#f43f5e',
-    burstText: '#fff',
-    flashColor: '#f43f5e',
-    rotate: -8,
-    frameCandidates: [path.join(COMPOSITES, 'eye-catcher-multi-1920x1080.png')],
-  },
-  '02-intro': {
+  '01-metamask': {
     onomatopoeia: 'BAM!',
     burstFill: '#fde047',
     burstText: '#141418',
     flashColor: '#fde047',
-    rotate: 6,
+    rotate: -8,
     frameCandidates: [
       path.join(COMPOSITES, 'chrome-store-01-1280x800.png'),
       path.join(COMPOSITES, 'eye-catcher-multi-1920x1080.png'),
     ],
   },
-  '03-multi-provider': {
+  '02-one-wallet': {
     onomatopoeia: 'ZOOM!',
     burstFill: '#0ea5e9',
     burstText: '#fff',
     flashColor: '#0ea5e9',
-    rotate: -5,
+    rotate: 6,
     frameCandidates: [
       path.join(COMPOSITES, 'chrome-store-02-1280x800.png'),
       path.join(COMPOSITES, 'eye-catcher-multi-1920x1080.png'),
     ],
   },
-  '04-gifts': {
-    onomatopoeia: 'POW!',
+  '03-apps-connect': {
+    onomatopoeia: 'ZAP!',
     burstFill: '#22c55e',
     burstText: '#fff',
     flashColor: '#22c55e',
-    rotate: 9,
+    rotate: -5,
     frameCandidates: [
       path.join(COMPOSITES, 'chrome-store-03-1280x800.png'),
       path.join(COMPOSITES, 'eye-catcher-multi-1920x1080.png'),
     ],
   },
-  '05-cross-device': {
+  '04-control': {
+    onomatopoeia: 'WHAM!',
+    burstFill: '#f43f5e',
+    burstText: '#fff',
+    flashColor: '#f43f5e',
+    rotate: 9,
+    frameCandidates: [
+      path.join(COMPOSITES, 'chrome-store-04-1280x800.png'),
+      path.join(COMPOSITES, 'eye-catcher-multi-1920x1080.png'),
+    ],
+  },
+  '05-routing': {
     onomatopoeia: 'ZUSH!',
     burstFill: '#a855f7',
     burstText: '#fff',
     flashColor: '#a855f7',
     rotate: -12,
-    // Landscape first — the 1.35× zoom-punch crops a portrait iPhone too
-    // aggressively (top/bottom get sliced). The product-hunt-cover carries
-    // an iPhone inside a landscape composition, so we still see the phone.
     frameCandidates: [
-      path.join(COMPOSITES, 'product-hunt-cover-1270x760.png'),
+      path.join(COMPOSITES, 'chrome-store-05-1280x800.png'),
       path.join(COMPOSITES, 'eye-catcher-multi-1920x1080.png'),
-      path.join(COMPOSITES, 'ios-app-store-01-1320x2868.png'),
     ],
   },
-  '06-call-to-action': {
+  '06-mobile': {
+    onomatopoeia: 'POW!',
+    burstFill: '#f97316',
+    burstText: '#fff',
+    flashColor: '#f97316',
+    rotate: 7,
+    // Landscape first — the zoom-punch crops a portrait iPhone too
+    // aggressively (top/bottom get sliced). The eye-catcher and the
+    // product-hunt-cover carry the phones inside a landscape composition.
+    frameCandidates: [
+      path.join(COMPOSITES, 'eye-catcher-multi-1920x1080.png'),
+      path.join(COMPOSITES, 'product-hunt-cover-1270x760.png'),
+      path.join(COMPOSITES, 'ios-app-store-02-1320x2868.png'),
+    ],
+  },
+  '07-no-servers': {
+    onomatopoeia: 'BIFF!',
+    burstFill: '#7dd3fc',
+    burstText: '#141418',
+    flashColor: '#7dd3fc',
+    rotate: -6,
+    frameCandidates: [
+      path.join(COMPOSITES, 'chrome-store-06-1280x800.png'),
+      path.join(COMPOSITES, 'eye-catcher-multi-1920x1080.png'),
+    ],
+  },
+  '08-call-to-action': {
     onomatopoeia: 'KAPOW!',
     burstFill: '#fde047',
     burstText: '#141418',
@@ -325,6 +352,7 @@ async function makeFlashClip(color: string, outFile: string): Promise<void> {
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i];
     const style = BEAT_STYLES[seg.id];
+    if (!style) throw new Error(`No Batman style for beat "${seg.id}" — narration.json is stale, re-run pnpm narrate`);
     const burstPng = bursts[seg.id];
     const img = pickFrame(style);
     const dur = seg.duration + 0.3;
@@ -485,7 +513,7 @@ async function makeFlashClip(color: string, outFile: string): Promise<void> {
   console.log(`\n✓ ${path.basename(finalMp4)} (${sizeMb} MB)`);
   console.log(`✓ ${path.basename(squareMp4)}`);
   console.log(`✓ ${path.basename(verticalMp4)}\n`);
-  console.log('🦇 BANG! ZOOM! POW! 🦇\n');
+  console.log('🦇 BAM! ZOOM! KAPOW! 🦇\n');
 })().catch((err) => {
   console.error(err);
   process.exit(1);

@@ -364,8 +364,8 @@ async function productHuntCover() {
   const headline = textOverlay({
     width: W,
     height: HEADLINE_BAND,
-    headline: 'Bring Your Own Key',
-    sub: 'Your AI keys, your wallet, your rules — across every browser and phone.',
+    headline: 'The MetaMask for API keys',
+    sub: 'Every AI key in one wallet. Apps connect, and your keys never leave it.',
     align: 'center',
     headlineSize: 56,
     subSize: 20,
@@ -378,15 +378,15 @@ async function productHuntCover() {
   const center = firstExisting([
     path.join(RAW_POPUP, '09-dashboard-multi-provider.png'),
     path.join(RAW_POPUP, '08-dashboard-with-anthropic.png'),
-    path.join(RAW_POPUP, '16-dashboard-final.png'),
+    path.join(RAW_POPUP, '18-dashboard-final.png'),
   ]) ?? path.join(RAW_POPUP, '09-dashboard-multi-provider.png');
-  const iosFrame = firstExisting([path.join(RAW_IOS, '02-dashboard.png'), path.join(RAW_IOS, '01-onboarding.png')]);
+  const iosFrame = firstExisting([path.join(RAW_IOS, '02-dashboard.png'), path.join(RAW_IOS, '01-welcome.png')]);
   const androidFrame = firstExisting([
-    path.join(RAW_ANDROID, '04-dashboard-with-key.png'),
+    path.join(RAW_ANDROID, '05-wallet-with-keys.png'),
     path.join(RAW_ANDROID, '01-onboarding.png'),
   ]);
-  const popupAlt1 = firstExisting([path.join(RAW_POPUP, '11-create-gift.png'), path.join(RAW_POPUP, '10-gifts-empty.png')]);
-  const popupAlt2 = firstExisting([path.join(RAW_POPUP, '13-activity.png'), path.join(RAW_POPUP, '14-usage.png')]);
+  const popupAlt1 = firstExisting([path.join(RAW_POPUP, '10-approval-request.png'), path.join(RAW_POPUP, '11-connected-apps.png')]);
+  const popupAlt2 = firstExisting([path.join(RAW_POPUP, '14-groups-routing.png'), path.join(RAW_POPUP, '15-request-history.png')]);
   const left = iosFrame ?? popupAlt1 ?? center;
   const right = androidFrame ?? popupAlt2 ?? center;
   const leftKind: 'phone-ios' | 'browser' = iosFrame ? 'phone-ios' : 'browser';
@@ -445,8 +445,8 @@ async function productHuntCover() {
   const headerText = textOverlay({
     width: HW,
     height: 240,
-    headline: 'Bring Your Own Key',
-    sub: 'A wallet for your AI API keys.',
+    headline: 'The MetaMask for API keys',
+    sub: 'One wallet for every AI key. Apps connect, keys never leave.',
     align: 'center',
     headlineSize: 72,
     subSize: 24,
@@ -491,28 +491,23 @@ async function eyeCatcher() {
     width: W,
     height: 220,
     headline: 'One wallet. Every AI provider. Any device.',
-    sub: 'Your API keys never leave your browser. Send a gift instead.',
+    sub: 'Apps connect to the wallet. Your API keys never leave it.',
     align: 'center',
     headlineSize: 64,
     subSize: 26,
   });
   overlays.push({ input: headline, top: 30, left: 0 });
 
-  const popup = firstExisting([
-    path.join(RAW_POPUP, '09-dashboard-multi-provider.png'),
-    path.join(RAW_POPUP, '08-dashboard-with-anthropic.png'),
-    path.join(RAW_POPUP, '16-dashboard-final.png'),
-  ]);
-  const popupGifts = firstExisting([path.join(RAW_POPUP, '11-create-gift.png'), path.join(RAW_POPUP, '10-gifts-empty.png')]);
-  const popupActivity = firstExisting([path.join(RAW_POPUP, '13-activity.png'), path.join(RAW_POPUP, '14-usage.png')]);
-  const iosFrame = firstExisting([path.join(RAW_IOS, '02-dashboard.png'), path.join(RAW_IOS, '01-onboarding.png')]);
+  const popupApproval = firstExisting([path.join(RAW_POPUP, '10-approval-request.png'), path.join(RAW_POPUP, '11-connected-apps.png')]);
+  const popupRouting = firstExisting([path.join(RAW_POPUP, '14-groups-routing.png'), path.join(RAW_POPUP, '15-request-history.png')]);
+  const iosFrame = firstExisting([path.join(RAW_IOS, '06-app-runtime.png'), path.join(RAW_IOS, '02-dashboard.png')]);
   const androidFrame = firstExisting([
-    path.join(RAW_ANDROID, '04-dashboard-with-key.png'),
-    path.join(RAW_ANDROID, '02-dashboard-empty.png'),
+    path.join(RAW_ANDROID, '05-wallet-with-keys.png'),
+    path.join(RAW_ANDROID, '03-wallet-empty.png'),
   ]);
   // Fall back to popup variants when mobile frames not available
-  const ios = iosFrame ?? popupGifts;
-  const android = androidFrame ?? popupActivity;
+  const ios = iosFrame ?? popupApproval;
+  const android = androidFrame ?? popupRouting;
   const iosKind: 'phone-ios' | 'browser' = iosFrame ? 'phone-ios' : 'browser';
   const androidKind: 'phone-android' | 'browser' = androidFrame ? 'phone-android' : 'browser';
   const web = firstExisting([
@@ -560,8 +555,8 @@ async function chromePromo() {
     const text = textOverlay({
       width: w,
       height: h,
-      headline: name === 'marquee' ? 'Your AI keys.\nYour wallet.' : 'Byoky',
-      sub: name === 'marquee' ? 'Bring Your Own Key — for every AI app, every device.' : 'BYOK wallet for AI',
+      headline: name === 'marquee' ? 'The MetaMask\nfor API keys.' : 'Byoky',
+      sub: name === 'marquee' ? 'One wallet for every AI key. Apps connect, keys never leave.' : 'The MetaMask for API keys',
       align: name === 'marquee' ? 'left' : 'center',
       headlineSize: fontHeadline,
       subSize: fontSub,
@@ -591,37 +586,41 @@ function firstExisting(paths: string[]): string | undefined {
 (async () => {
   console.log('\n📐 Composing marketing assets...\n');
 
-  // Chrome / Firefox Web Store slides — same 1280×800 spec
+  // Chrome / Firefox Web Store slides — same 1280×800 spec. Story beats:
+  // MetaMask for API keys → every provider → apps connect, keys never leave →
+  // you're in control → Claude-to-GPT routing → no servers, open source.
+  // Frames come from capture-extension.spec.ts (raw/popup-frames/).
+  // Subs are one unwrapped line: past ~60 characters they clip at the edge.
   const chromeSlides: Slide[] = [
     {
-      headline: 'Your AI keys.\nYour wallet.',
-      sub: 'Local-first, encrypted with AES-256. Keys never leave your browser.',
-      popupFrame: '08-dashboard-with-anthropic.png',
-    },
-    {
-      headline: 'One key,\nevery provider.',
-      sub: 'Anthropic, OpenAI, Gemini, and any OpenAI-compatible endpoint.',
+      headline: 'The MetaMask\nfor API keys.',
+      sub: 'Every AI key in one wallet, encrypted on your device.',
       popupFrame: '09-dashboard-multi-provider.png',
     },
     {
-      headline: 'Send AI as a gift.',
-      sub: 'Mint a token-budgeted key for a friend. Revoke anytime.',
-      popupFrame: '11b-create-gift-submit.png',
+      headline: 'One wallet,\nevery provider.',
+      sub: 'Anthropic, OpenAI, Gemini, Mistral and nine more.',
+      popupFrame: '06-add-credential-form.png',
     },
     {
-      headline: 'See every request.',
-      sub: 'Real-time activity log, token usage, per-app spend.',
-      popupFrame: '13-activity.png',
+      headline: 'Apps connect.\nKeys never leave.',
+      sub: 'The wallet makes the calls. The app never sees your key.',
+      popupFrame: '10-approval-request.png',
     },
     {
-      headline: 'Apps you control.',
-      sub: 'Approve once, revoke anytime. Per-app limits.',
-      popupFrame: '12-apps.png',
+      headline: "You're in control.",
+      sub: 'Approve apps, watch every request, cap tokens, revoke.',
+      popupFrame: '12-token-cap.png',
     },
     {
-      headline: 'Total visibility.',
-      sub: 'Track tokens used by every app, every model, every day.',
-      popupFrame: '14-usage.png',
+      headline: 'Drag an app\nfrom Claude to GPT.',
+      sub: 'Groups reroute apps. The wallet translates on the fly.',
+      popupFrame: '14-groups-routing.png',
+    },
+    {
+      headline: 'No servers.\nNo account.',
+      sub: 'Fully local, open source. Encrypted .byoky backups.',
+      popupFrame: '16-settings.png',
     },
   ];
   for (let i = 0; i < chromeSlides.length; i++) {
@@ -629,26 +628,29 @@ function firstExisting(paths: string[]): string | undefined {
     await chromeStoreSlide(chromeSlides[i], i, 'firefox-amo');
   }
 
-  // iOS App Store slides (Safari extension lives inside this app)
+  // iOS App Store slides (Safari extension lives inside this app). Frames
+  // come from ByokyMarketingTests.swift via capture-ios.sh (raw/ios/).
   const iosSlides: Slide[] = [
-    { headline: 'Your AI wallet.', sub: 'On your iPhone.', mobileFrame: '02-dashboard.png' },
-    { headline: 'Send a gift.', sub: 'Share AI access with anyone.', mobileFrame: '05-create-gift-form.png' },
-    { headline: 'Set a budget.', sub: 'Token-capped. Time-bound.', mobileFrame: '06-create-gift-filled.png' },
-    { headline: 'Tap, share, done.', sub: 'A link they can redeem in seconds.', mobileFrame: '07-gift-link-ready.png' },
-    { headline: 'Track every gift.', sub: 'See who used what, in real time.', mobileFrame: '08-gifts-with-sent-gift.png' },
-    { headline: 'Stay in control.', sub: 'Revoke any time.', mobileFrame: '09-dashboard-final.png' },
+    { headline: 'The MetaMask\nfor API keys.', sub: 'Every AI key in one wallet, on your iPhone.', mobileFrame: '02-dashboard.png' },
+    { headline: 'Add any app\nby URL.', sub: 'Web apps run right inside your wallet.', mobileFrame: '05-add-app-form.png' },
+    { headline: 'Apps connect.\nKeys never leave.', sub: 'The wallet makes the calls for them.', mobileFrame: '06-app-runtime.png' },
+    { headline: 'All your apps,\none tap away.', sub: 'Plus a Safari extension for the web.', mobileFrame: '07-apps-grid.png' },
+    { headline: "You're in control.", sub: 'Groups, routing and one-tap revoke.', mobileFrame: '08-connected-apps.png' },
+    { headline: 'Encrypted\n.byoky backups.', sub: 'Move keys between devices. No cloud.', mobileFrame: '03-settings-backup.png' },
   ];
   for (let i = 0; i < iosSlides.length; i++) {
     await mobileStoreSlide(iosSlides[i], i, 'ios');
   }
 
-  // Android (Google Play) slides
+  // Android (Google Play) slides. Frames come from capture-android.sh
+  // (raw/android/).
   const androidSlides: Slide[] = [
-    { headline: 'Your AI wallet.', sub: 'On Android.', mobileFrame: '04-dashboard-with-key.png' },
-    { headline: 'Share access,\nnot keys.', sub: 'Token-budgeted gift links.', mobileFrame: '10-gifts-empty.png' },
-    { headline: 'Set a budget.', sub: 'Pick a cap. Pick a window.', mobileFrame: '05-create-gift.png' },
-    { headline: 'Apps you control.', sub: 'Approve once, revoke anytime.', mobileFrame: '12-apps.png' },
-    { headline: 'Total visibility.', sub: 'Tokens, requests, spend.', mobileFrame: '14-usage.png' },
+    { headline: 'The MetaMask\nfor API keys.', sub: 'Every AI key in one wallet, on Android.', mobileFrame: '05-wallet-with-keys.png' },
+    { headline: 'One wallet,\nevery provider.', sub: 'Anthropic, OpenAI, Gemini and more.', mobileFrame: '04-add-credential.png' },
+    { headline: 'Add any app\nby URL.', sub: 'It opens in the in-wallet browser.', mobileFrame: '07-add-app-form.png' },
+    { headline: 'Apps connect.\nKeys never leave.', sub: 'The wallet makes the calls for them.', mobileFrame: '08-app-runtime.png' },
+    { headline: "You're in control.", sub: 'Groups, token caps, one-tap revoke.', mobileFrame: '10-connected-apps.png' },
+    { headline: 'No servers.\nNo account.', sub: 'Encrypted .byoky backups. Open source.', mobileFrame: '11-settings.png' },
   ];
   for (let i = 0; i < androidSlides.length; i++) {
     await mobileStoreSlide(androidSlides[i], i, 'android');

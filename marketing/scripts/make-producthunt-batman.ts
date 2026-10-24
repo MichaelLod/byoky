@@ -29,8 +29,9 @@ const VIDEO_W = 1920;
 const VIDEO_H = 1080;
 const FPS = 30;
 
-// PH beats (same IDs as make-producthunt.ts)
-const PH_BEATS = ['ph01-hero', 'ph02-control', 'ph03-bills', 'ph04-gifts', 'ph05-cta', 'ph06-bye'];
+// PH beats (same IDs as make-producthunt.ts — run that first; this reuses
+// its per-beat WAVs).
+const PH_BEATS = ['ph01-hero', 'ph02-control', 'ph03-bills', 'ph04-routing', 'ph05-cta', 'ph06-bye'];
 
 interface BeatStyle {
   onomatopoeia: string;
@@ -52,7 +53,7 @@ const BEAT_STYLES: Record<string, BeatStyle> = {
     flashColor: '#fde047',
     rotate: -6,
     frameCandidates: [
-      path.join(COMPOSITES, 'chrome-store-02-1280x800.png'),
+      path.join(COMPOSITES, 'chrome-store-01-1280x800.png'),
       path.join(COMPOSITES, 'eye-catcher-multi-1920x1080.png'),
     ],
     // BANG = classic kick (60Hz sub-bass) + high-freq noise transient
@@ -77,7 +78,7 @@ const BEAT_STYLES: Record<string, BeatStyle> = {
     flashColor: '#f43f5e',
     rotate: 5,
     frameCandidates: [
-      path.join(COMPOSITES, 'chrome-store-05-1280x800.png'),
+      path.join(COMPOSITES, 'chrome-store-03-1280x800.png'),
       path.join(COMPOSITES, 'chrome-store-04-1280x800.png'),
     ],
     // SLAM = thud (40Hz) + metallic hit (white noise high-passed)
@@ -102,8 +103,8 @@ const BEAT_STYLES: Record<string, BeatStyle> = {
     flashColor: '#22c55e',
     rotate: -8,
     frameCandidates: [
-      path.join(COMPOSITES, 'chrome-store-06-1280x800.png'),
       path.join(COMPOSITES, 'chrome-store-04-1280x800.png'),
+      path.join(COMPOSITES, 'chrome-store-03-1280x800.png'),
     ],
     // YES = bass boom + bright major-chord sparkle (C E G = 523/659/784 Hz)
     sfxSynth: (out) => [
@@ -125,14 +126,14 @@ const BEAT_STYLES: Record<string, BeatStyle> = {
       '-map "[out]"', out,
     ].join(' '),
   },
-  'ph04-gifts': {
+  'ph04-routing': {
     onomatopoeia: 'POW!',
     burstFill: '#a855f7',
     burstText: '#fff',
     flashColor: '#a855f7',
     rotate: 10,
     frameCandidates: [
-      path.join(COMPOSITES, 'chrome-store-03-1280x800.png'),
+      path.join(COMPOSITES, 'chrome-store-05-1280x800.png'),
     ],
     // POW = punchy kick + snare-like snap
     sfxSynth: (out) => [

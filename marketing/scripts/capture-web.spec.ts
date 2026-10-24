@@ -1,6 +1,9 @@
 /**
- * Captures hero shots of byoky.com pages (landing, /demo, /chat, /marketplace,
- * /apps, /docs) at 1920×1080 (desktop hero) and 1280×800 (Chrome store).
+ * Captures hero shots of byoky.com pages (landing, /demo, /chat, /docs,
+ * /openclaw) at 1920×1080 (desktop hero) and 1280×800 (Chrome store).
+ *
+ * Output names are `<name>-<w>x<h>-<suffix>.png`; compose.ts reads
+ * demo-1920x1080-hero.png and landing-1920x1080-hero.png.
  *
  * Defaults to BYOKY_WEB_URL=http://localhost:3000 — start the dev server
  * with: pnpm -C packages/web dev
@@ -19,8 +22,6 @@ const PAGES: { route: string; name: string; waitFor?: string }[] = [
   { route: '/', name: 'landing' },
   { route: '/demo', name: 'demo' },
   { route: '/chat', name: 'chat' },
-  { route: '/marketplace', name: 'marketplace' },
-  { route: '/apps', name: 'apps' },
   { route: '/docs', name: 'docs' },
   { route: '/openclaw', name: 'openclaw' },
 ];

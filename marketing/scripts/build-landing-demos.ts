@@ -1,10 +1,13 @@
 /**
- * Build the 4 demo loops for the landing page (packages/web/public/demos/).
+ * Build the demo loops for the landing page (packages/web/public/demos/):
+ *
+ *   hero-demo.{mp4,gif}       one wallet → keys in → an app connects
+ *   cross-provider.{mp4,gif}  connected app → GPT group → Claude-to-GPT routing
  *
  * Each demo is a 6-8s silent autoplay loop at 1200×690 that shows ONE punchy
- * feature using frames we already captured in marketing/raw/. Crossfades,
- * subtle zooms, and a short caption make them feel designed instead of
- * "screen recordings with jitter".
+ * feature using frames we already captured in marketing/raw/popup-frames
+ * (capture-extension.spec.ts). Crossfades, subtle zooms, and a short caption
+ * make them feel designed instead of "screen recordings with jitter".
  *
  * Run: pnpm -C marketing tsx scripts/build-landing-demos.ts
  */
@@ -15,8 +18,6 @@ import sharp from 'sharp';
 
 const ROOT = path.resolve(__dirname, '../..');
 const POPUP = path.join(ROOT, 'marketing/raw/popup-frames');
-const IOS = path.join(ROOT, 'marketing/raw/ios');
-const WEB = path.join(ROOT, 'marketing/raw/web');
 const OUT = path.join(ROOT, 'packages/web/public/demos');
 const TMP = path.join(ROOT, 'marketing/.cache/landing');
 fs.mkdirSync(OUT, { recursive: true });
@@ -52,33 +53,17 @@ const DEMOS: Demo[] = [
   {
     name: 'hero-demo',
     shots: [
-      { src: path.join(POPUP, '01-welcome.png'), caption: 'Install once', dur: 2.2, frame: 'browser' },
-      { src: path.join(POPUP, '08-dashboard-with-anthropic.png'), caption: 'Drop in your key', dur: 2.4, frame: 'browser' },
-      { src: path.join(POPUP, '09-dashboard-multi-provider.png'), caption: 'You\'re connected', dur: 2.6, frame: 'browser' },
+      { src: path.join(POPUP, '01-welcome.png'), caption: 'One wallet for every AI key', dur: 2.2, frame: 'browser' },
+      { src: path.join(POPUP, '09-dashboard-multi-provider.png'), caption: 'Add your keys once', dur: 2.4, frame: 'browser' },
+      { src: path.join(POPUP, '10-approval-request.png'), caption: 'Apps connect. Keys never leave.', dur: 2.6, frame: 'browser' },
     ],
   },
   {
     name: 'cross-provider',
     shots: [
-      { src: path.join(POPUP, '09-dashboard-multi-provider.png'), caption: 'One wallet', dur: 2.2, frame: 'browser' },
-      { src: path.join(POPUP, '12-apps.png'), caption: 'Every connected app', dur: 2.4, frame: 'browser' },
-      { src: path.join(POPUP, '13-activity.png'), caption: 'Full visibility', dur: 2.6, frame: 'browser' },
-    ],
-  },
-  {
-    name: 'mobile-qr',
-    shots: [
-      { src: path.join(IOS, '02-dashboard.png'), caption: 'Your wallet on iPhone', dur: 2.4, frame: 'phone' },
-      { src: path.join(IOS, '07-gift-link-ready.png'), caption: 'Gift a key', dur: 2.4, frame: 'phone' },
-      { src: path.join(IOS, '08-gifts-with-sent-gift.png'), caption: 'Track every share', dur: 2.4, frame: 'phone' },
-    ],
-  },
-  {
-    name: 'token-gift',
-    shots: [
-      { src: path.join(POPUP, '10-gifts-empty.png'), caption: 'Want to share AI?', dur: 2.2, frame: 'browser' },
-      { src: path.join(POPUP, '11-create-gift.png'), caption: 'Set a token budget', dur: 2.4, frame: 'browser' },
-      { src: path.join(POPUP, '11b-create-gift-submit.png'), caption: 'Send. Revoke any time.', dur: 2.4, frame: 'browser' },
+      { src: path.join(POPUP, '11-connected-apps.png'), caption: 'Every connected app', dur: 2.2, frame: 'browser' },
+      { src: path.join(POPUP, '13-group-form.png'), caption: 'Pin a group to GPT', dur: 2.4, frame: 'browser' },
+      { src: path.join(POPUP, '14-groups-routing.png'), caption: 'Drag it over. Claude to GPT.', dur: 2.6, frame: 'browser' },
     ],
   },
 ];
@@ -274,7 +259,7 @@ async function buildDemo(demo: Demo, backdrop: string): Promise<void> {
   for (const demo of DEMOS) {
     await buildDemo(demo, backdrop);
   }
-  console.log(`\n✓ All 4 demos written to ${OUT}\n`);
+  console.log(`\n✓ All ${DEMOS.length} demos written to ${OUT}\n`);
 })().catch((err) => {
   console.error(err);
   process.exit(1);

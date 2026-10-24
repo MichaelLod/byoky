@@ -40,31 +40,44 @@ const segments: Segment[] = JSON.parse(fs.readFileSync(NARRATION_JSON, 'utf-8'))
 // Composites already carry their own headline + sub text; no chapter labels.
 // Only the final CTA beat gets a big centered callout so the URL lands.
 const BEAT_HERO_CAPTION: Record<string, string> = {
-  '06-call-to-action': 'byoky.com',
+  '08-call-to-action': 'byoky.com',
 };
 
-// Map narration beats to which composite to show. Falls back gracefully if a
-// composite is missing.
+// Map narration beats (ids from narrate.ts SEGMENTS) to which composite to
+// show. chrome-store-0N follows the beat order of compose.ts chromeSlides.
+// Falls back gracefully if a composite is missing.
 const BEAT_FRAME: Record<string, string[]> = {
-  '01-hook': [path.join(COMPOSITES, 'eye-catcher-multi-1920x1080.png')],
-  '02-intro': [
+  '01-metamask': [
     path.join(COMPOSITES, 'chrome-store-01-1280x800.png'),
     path.join(COMPOSITES, 'eye-catcher-multi-1920x1080.png'),
   ],
-  '03-multi-provider': [
+  '02-one-wallet': [
     path.join(COMPOSITES, 'chrome-store-02-1280x800.png'),
     path.join(COMPOSITES, 'eye-catcher-multi-1920x1080.png'),
   ],
-  '04-gifts': [
+  '03-apps-connect': [
     path.join(COMPOSITES, 'chrome-store-03-1280x800.png'),
     path.join(COMPOSITES, 'eye-catcher-multi-1920x1080.png'),
   ],
-  '05-cross-device': [
-    path.join(COMPOSITES, 'ios-app-store-01-1320x2868.png'),
-    path.join(COMPOSITES, 'product-hunt-cover-1270x760.png'),
+  '04-control': [
+    path.join(COMPOSITES, 'chrome-store-04-1280x800.png'),
     path.join(COMPOSITES, 'eye-catcher-multi-1920x1080.png'),
   ],
-  '06-call-to-action': [path.join(COMPOSITES, 'product-hunt-header-1200x630.png')],
+  '05-routing': [
+    path.join(COMPOSITES, 'chrome-store-05-1280x800.png'),
+    path.join(COMPOSITES, 'eye-catcher-multi-1920x1080.png'),
+  ],
+  // iPhone + Android + web side by side matches "iPhone… Android…" best.
+  '06-mobile': [
+    path.join(COMPOSITES, 'eye-catcher-multi-1920x1080.png'),
+    path.join(COMPOSITES, 'ios-app-store-02-1320x2868.png'),
+    path.join(COMPOSITES, 'product-hunt-cover-1270x760.png'),
+  ],
+  '07-no-servers': [
+    path.join(COMPOSITES, 'chrome-store-06-1280x800.png'),
+    path.join(COMPOSITES, 'eye-catcher-multi-1920x1080.png'),
+  ],
+  '08-call-to-action': [path.join(COMPOSITES, 'product-hunt-header-1200x630.png')],
 };
 
 const VIDEO_W = 1920;

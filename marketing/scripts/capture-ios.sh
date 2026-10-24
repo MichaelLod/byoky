@@ -6,8 +6,23 @@
 # Requires: a booted iOS simulator with the Byoky app installed.
 # Defaults to BYOKY_IOS_SIM="iPhone 17 Pro".
 #
-# Output: marketing/raw/ios/{01-welcome,02-dashboard,...}.png at sim native
-# resolution (1320×2868 for iPhone 17 Pro = App Store 6.9" portrait spec).
+# Output: marketing/raw/ios/<phase>.png at sim native resolution (1320×2868
+# for iPhone 17 Pro = App Store 6.9" portrait spec). The phase names come
+# from packages/ios/ByokyUITests/ByokyMarketingTests.swift:
+#
+#   01-welcome          onboarding
+#   02-dashboard        wallet with the auto-setup Gemini key
+#   03-settings-backup  Settings (wallet toolbar), encrypted .byoky backup on top
+#   03b-export-backup   Export Backup sheet
+#   04-apps-empty       Apps tab, nothing added yet
+#   05-add-app-form     add an app by URL (byoky.com/chat)
+#   06-app-runtime      the app running in the in-wallet browser
+#   07-apps-grid        Apps tab with the added app
+#   08-connected-apps   Connected tab (sessions + routing groups)
+#   09-dashboard-final  back on the wallet
+#
+# compose.ts consumes these names; EXPECTED_FRAMES below warns when a frame
+# the test should produce didn't get captured.
 
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -19,6 +34,7 @@ CONFIG="/tmp/byoky-ios-test-config.json"
 PHASE_FILE="/tmp/byoky-mkt-phase.txt"
 ACK_FILE="/tmp/byoky-mkt-snapped"
 TEST_LOG="${OUT}/_test.log"
+EXPECTED_FRAMES=(01-welcome 02-dashboard 03-settings-backup 03b-export-backup 04-apps-empty 05-add-app-form 06-app-runtime 07-apps-grid 08-connected-apps 09-dashboard-final)
 
 mkdir -p "${OUT}"
 rm -f "${PHASE_FILE}" "${ACK_FILE}" "${OUT}"/*.png
@@ -107,12 +123,15 @@ while [ $(date +%s) -lt $DEADLINE ]; do
 done
 
 # Wait briefly for test to wrap up
-wait "${TEST_PID}" 2>/dev/null || true
+wait "${TEST_PID}" 2>/dev/null
 TEST_RC=$?
 
 echo ""
 echo "✓ Snapped ${SNAPPED_COUNT} iOS frames to ${OUT}/"
 ls -1 "${OUT}"/*.png 2>/dev/null | xargs -I{} basename {} 2>/dev/null
+for f in "${EXPECTED_FRAMES[@]}"; do
+  [ -f "${OUT}/${f}.png" ] || echo "⚠ missing ${f}.png (compose skips any slide that uses it)"
+done
 echo ""
 if [ ${TEST_RC} -ne 0 ]; then
   echo "⚠ XCUITest exit code ${TEST_RC} — see ${TEST_LOG} for details"

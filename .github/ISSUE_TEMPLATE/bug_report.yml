@@ -33,11 +33,14 @@ body:
   - type: dropdown
     id: browser
     attributes:
-      label: Browser
+      label: Wallet
       options:
-        - Chrome
-        - Firefox
-        - Safari
+        - Chrome extension
+        - Firefox extension
+        - iOS app / Safari extension
+        - Android app
+        - Bridge / CLI
+        - SDK
         - Other
     validations:
       required: true
@@ -46,4 +49,4 @@ body:
     id: version
     attributes:
       label: byoky version
-      placeholder: "0.1.0"
+      placeholder: "1.0.0"

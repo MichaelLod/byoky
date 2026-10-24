@@ -15,14 +15,21 @@ pnpm dev  # Start extension in Chrome dev mode
 
 | Package | Description |
 |---------|-------------|
-| `packages/core` | Shared types, crypto, protocol, provider registry |
+| `packages/core` | Shared types, crypto, protocol, provider registry, translation |
 | `packages/sdk` | `@byoky/sdk` — npm package for developers |
 | `packages/extension` | Browser extension (WXT + React + Zustand) |
-| `packages/web` | Landing page (Next.js) |
+| `packages/bridge` | `@byoky/bridge` — localhost proxy + native messaging for CLI/desktop apps |
+| `packages/ios` | iOS wallet + Safari extension (SwiftUI) |
+| `packages/android` | Android wallet (Kotlin + Compose) |
+| `packages/openclaw-plugin` | OpenClaw provider plugin |
+| `packages/create-byoky-app` | `npx create-byoky-app` scaffolder |
+| `packages/web` | byoky.com — landing page, docs, demo (Next.js) |
+
+Byoky is local-only by design: the wallets never depend on a byoky-hosted server. Changes that add accounts, cloud sync or a relay won't be merged.
 
 ## Making changes
 
-1. Fork the repo and create a branch from `dev`
+1. Fork the repo and create a branch from `main`
 2. Make your changes
 3. Ensure everything builds: `pnpm build`
 4. Open a pull request

@@ -6,15 +6,18 @@
  *   Output: marketing/videos/product-hunt.mp4  (+ square + vertical variants)
  *
  * Script (user-provided):
- *   1. One wallet, all your AI API keys
+ *   1. The MetaMask for API keys: one wallet, all your AI API keys
  *   2. Devs can connect and use them — as much as YOU allow
  *   3. No more crazy AI bills for devs
- *   4. (Gifts pitch — reused from the main walkthrough)
+ *   4. (Routing pitch — reused from the main walkthrough)
  *   5. byoky.com — let's connect and build
  *   6. Okay thanks bye
  *
  * Each TTS call is prefixed with a delivery instruction (confident / relieved /
- * conspiratorial / warm-casual) so Puck doesn't flatten into one tone.
+ * playful / warm-casual) so Puck doesn't flatten into one tone.
+ *
+ * chrome-store-0N composites follow compose.ts chromeSlides: 01 MetaMask,
+ * 02 every provider, 03 apps connect, 04 control, 05 routing, 06 no servers.
  */
 import fs from 'fs';
 import path from 'path';
@@ -61,9 +64,9 @@ interface Segment {
 const SEGMENTS: Segment[] = [
   {
     id: 'ph01-hero',
-    text: 'Say with bright, confident launch energy — like you just unveiled something cool: One wallet. All your AI API keys.',
+    text: 'Say with bright, confident launch energy — like you just unveiled something cool: The MetaMask for API keys. One wallet. All your AI API keys.',
     frameCandidates: [
-      path.join(COMPOSITES, 'chrome-store-02-1280x800.png'), // multi-provider dashboard
+      path.join(COMPOSITES, 'chrome-store-01-1280x800.png'), // MetaMask for API keys (multi-provider wallet)
       path.join(COMPOSITES, 'eye-catcher-multi-1920x1080.png'),
     ],
   },
@@ -71,23 +74,23 @@ const SEGMENTS: Segment[] = [
     id: 'ph02-control',
     text: 'Say with calm authority, like you\'re laying down the rules: Devs can connect and use them — as much as YOU allow them to.',
     frameCandidates: [
-      path.join(COMPOSITES, 'chrome-store-05-1280x800.png'), // apps you control
-      path.join(COMPOSITES, 'chrome-store-04-1280x800.png'), // see every request
+      path.join(COMPOSITES, 'chrome-store-03-1280x800.png'), // apps connect, keys never leave
+      path.join(COMPOSITES, 'chrome-store-04-1280x800.png'), // you're in control
     ],
   },
   {
     id: 'ph03-bills',
     text: 'Say with relief, like a weight has been lifted, but punchy: No more crazy AI bills. For anyone.',
     frameCandidates: [
-      path.join(COMPOSITES, 'chrome-store-06-1280x800.png'), // total visibility / usage
-      path.join(COMPOSITES, 'chrome-store-04-1280x800.png'), // see every request
+      path.join(COMPOSITES, 'chrome-store-04-1280x800.png'), // per-app token caps
+      path.join(COMPOSITES, 'chrome-store-03-1280x800.png'),
     ],
   },
   {
-    id: 'ph04-gifts',
-    text: 'Say in a clever, conspiratorial tone — like sharing a lifehack: Want to hook up a friend? Mint them a gift. Cap the budget. Kill it whenever.',
+    id: 'ph04-routing',
+    text: 'Say playfully, like revealing a magic trick: Want that app on GPT instead of Claude? Drag it to another group. Done.',
     frameCandidates: [
-      path.join(COMPOSITES, 'chrome-store-03-1280x800.png'), // send AI as a gift
+      path.join(COMPOSITES, 'chrome-store-05-1280x800.png'), // drag an app from Claude to GPT
     ],
   },
   {

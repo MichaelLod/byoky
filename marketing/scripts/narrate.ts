@@ -35,15 +35,19 @@ if (!API_KEY) {
 }
 
 // Voice options: Kore, Puck, Charon, Fenrir, Aoede, Leda, Orus, Zephyr.
-// Puck = upbeat, punchy, launch-video energy. Perfect for a 40-second hook.
+// Puck = upbeat, punchy, launch-video energy. Perfect for a 45-second walkthrough.
 const VOICE = process.env.BYOKY_TTS_VOICE || 'Puck';
 const MODEL = 'gemini-2.5-flash-preview-tts';
 
 // Segments — each is one beat of the walkthrough video. Each text is prefixed
 // with a per-beat *delivery instruction* that Gemini TTS respects. This is
 // what keeps the voice from sounding like a monotone news anchor — different
-// beats get different energy: tired sarcasm on the hook, excited pitch on
-// features, conspiratorial on gifts, triumphant on the CTA.
+// beats get different energy: tired sarcasm flipping into the reveal on the
+// hook, excited pitch on features, calm authority on control, a magic-trick
+// tone on routing, grounded sincerity on "no servers", triumphant on the CTA.
+//
+// The ids are a contract: video.ts (BEAT_FRAME, BEAT_HERO_CAPTION) and
+// make-batman.ts (BEAT_STYLES) key their per-beat config on them.
 export interface Segment {
   id: string;
   text: string;
@@ -51,31 +55,39 @@ export interface Segment {
 
 export const SEGMENTS: Segment[] = [
   {
-    id: '01-hook',
-    text: 'Say with tired, slightly exasperated sarcasm, like you are fed up: Okay. Another AI app. Another key. Paste. Again.',
+    id: '01-metamask',
+    text: 'Start with tired, slightly exasperated sarcasm, like you are fed up, then snap into bright, confident launch energy for the last sentence: Another AI app. Another key to paste. Again? Nope. Meet the MetaMask for API keys.',
   },
   {
-    id: '02-intro',
-    text: "Say with bright, confident launch energy — like you just cracked the secret: Stop. There's a better way. One wallet. Your keys. Your rules.",
+    id: '02-one-wallet',
+    text: 'Say with excited, fast-paced enthusiasm, stacking features: Anthropic. OpenAI. Gemini. Mistral. Every key goes into one wallet, encrypted right on your device.',
   },
   {
-    id: '03-multi-provider',
-    text: 'Say with excited, fast-paced enthusiasm, stacking features: Anthropic. OpenAI. Gemini. Drop them in. Any app, any model. One click, connected.',
+    id: '03-apps-connect',
+    text: "Say with confident clarity, like explaining a neat trick: Apps connect to the wallet, like dapps connect to MetaMask. The wallet makes the call. The app never sees your key.",
   },
   {
-    id: '04-gifts',
-    text: 'Say in a conspiratorial, clever tone — like sharing a lifehack: Want to hook up a friend? Mint them a gift. Cap the budget. Kill it whenever.',
+    id: '04-control',
+    text: "Say with calm authority, like you're laying down the rules: You approve every app. You see every request. Cap its tokens. Cut it off in one click.",
   },
   {
-    id: '05-cross-device',
-    text: 'Say with expansive, impressed wonder, like the camera pulls back to reveal scale: And on your phone? Yeah. iOS. Android. Same vault. Zero sync drama.',
+    id: '05-routing',
+    text: 'Say playfully, like revealing a magic trick: Want that app on GPT instead of Claude? Drag it to another group. The wallet translates on the fly.',
   },
   {
-    id: '06-call-to-action',
+    id: '06-mobile',
+    text: 'Say with expansive, impressed wonder, like the camera pulls back to reveal scale: And on your phone? Yep. iPhone, with a Safari extension. Android, with a built-in browser. Both open any app by URL.',
+  },
+  {
+    id: '07-no-servers',
+    text: 'Say with grounded, sincere confidence, slowing down slightly: No servers. No account. No cloud. Your wallet talks straight to your providers. And every line is open source.',
+  },
+  {
+    id: '08-call-to-action',
     // "Byoky" is not a real word, so spell it out — otherwise Gemini tends to
     // swallow the trailing 'y' and say "Byok dot com". Letter-by-letter is
     // clearest and also doubles as a memorable brand beat.
-    text: 'Say triumphantly, with a punchy landing. Pronounce "byoky" as bye-oh-kee, not byok: Bring your own key. Take it back. Bye-oh-kee dot com. That\'s B, Y, O, K, Y dot com.',
+    text: 'Say triumphantly, with a punchy landing. Pronounce "byoky" as bye-oh-kee, not byok: Bring your own key. Keep it yours. Bye-oh-kee dot com. That\'s B, Y, O, K, Y dot com.',
   },
 ];
 

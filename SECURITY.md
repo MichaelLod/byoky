@@ -12,11 +12,13 @@ You should receive an initial response within 48 hours. We will work with you to
 
 Security issues we care about include:
 
-- API key exposure or leakage from the extension
-- Encryption weaknesses in the vault (AES-256-GCM, PBKDF2)
-- Bypass of the approval flow (apps accessing keys without user consent)
-- Cross-origin or content script injection attacks
+- API key exposure or leakage from any wallet (browser extension, iOS app + Safari extension, Android app)
+- Encryption weaknesses in local key storage (AES-256-GCM, PBKDF2, Keychain/Keystore usage) or in `.byoky` backup files
+- Bypass of the approval flow (apps accessing keys or proxying without user consent)
+- Cross-origin, content script or in-wallet browser bridge injection attacks
+- Abuse of the local proxies (`@byoky/bridge`, the Android localhost proxy) from other origins or processes
 - Session token prediction or replay attacks
+- Any code path that sends credentials somewhere other than the provider the user configured
 
 ## Supported Versions
 

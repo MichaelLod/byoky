@@ -349,9 +349,6 @@ for f in "${IOS_PLISTS[@]}"; do
   sed -i '' "s|<string>$OLD_VERSION_CODE</string>|<string>$NEW_VERSION_CODE</string>|" "$f"
 done
 
-echo "  Bumping iOS Safari manifest..."
-sed -i '' "s/\"version\":\"[^\"]*\"/\"version\":\"$NEW_VERSION\"/" packages/ios/SafariExtension/Resources/manifest.json
-
 echo "  Done."
 
 # ============================================================
@@ -370,6 +367,11 @@ echo "  Building Firefox extension..."
 
 echo "  Building Safari extension..."
 (cd packages/extension && npx wxt build --browser safari)
+
+# The iOS/macOS Safari extension bundles this build (SafariExtension/Resources
+# is gitignored), so refresh it before archiving or the apps ship a stale copy.
+echo "  Syncing Safari extension into the iOS project..."
+bash packages/ios/Scripts/copy-wxt-output.sh
 
 # --- Android ---
 if [ "$SKIP_ANDROID" = false ]; then
@@ -478,8 +480,7 @@ ls -lh dist/byoky-*-v${NEW_VERSION}.* 2>/dev/null | awk '{print "    " $NF " (" 
 # ============================================================
 step "Git commit + tag"
 
-# Stage all version-bumped files (skip submodules — vault and relay are
-# tracked as submodules and their package.json bumps live in those repos).
+# Stage all version-bumped files.
 git add \
   package.json \
   packages/core/package.json \
@@ -489,13 +490,11 @@ git add \
   packages/web/package.json \
   packages/openclaw-plugin/package.json \
   packages/create-byoky-app/package.json \
-  packages/marketplace/package.json \
   packages/android/app/build.gradle.kts \
   packages/ios/Byoky/App/Info.plist \
   packages/ios/SafariExtension/Info.plist \
   packages/ios/macOS/Info.plist \
-  packages/ios/macOS/SafariExtension-macOS-Info.plist \
-  packages/ios/SafariExtension/Resources/manifest.json
+  packages/ios/macOS/SafariExtension-macOS-Info.plist
 
 # Also stage the synced mobile bundles if they changed
 git add packages/ios/Byoky/Resources/mobile.js 2>/dev/null || true

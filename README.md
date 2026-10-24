@@ -1,11 +1,11 @@
 <p align="center">
   <br />
-  <strong>Your AI budget is going to waste.</strong>
+  <strong>The MetaMask for API keys.</strong>
   <br />
-  Byoky lets you share your token budget with friends, your team, or anyone building cool stuff — without exposing your keys.
+  Keep every AI API key in one wallet. Apps connect to the wallet. Your keys never leave Byoky.
   <br />
   <br />
-  <a href="https://byoky.com">Website</a> · <a href="https://byoky.com/docs">Docs</a> · <a href="https://byoky.com/apps">Apps</a> · <a href="https://byoky.com/token-pool">Token Pool</a> · <a href="https://byoky.com/demo">Demo</a> · <a href="#quick-start">Quick Start</a> · <a href="https://discord.gg/gRs8S9fxcT">Discord</a> · <a href="https://github.com/MichaelLod/byoky/issues">Issues</a>
+  <a href="https://byoky.com">Website</a> · <a href="https://byoky.com/docs">Docs</a> · <a href="https://byoky.com/demo">Demo</a> · <a href="#quick-start">Quick Start</a> · <a href="https://discord.gg/gRs8S9fxcT">Discord</a> · <a href="https://github.com/MichaelLod/byoky/issues">Issues</a>
   <br />
   <br />
   <a href="https://github.com/MichaelLod/byoky/blob/main/LICENSE"><img src="https://img.shields.io/github/license/MichaelLod/byoky?style=flat&color=FF4F00" alt="License" /></a>
@@ -20,20 +20,21 @@
 
 ## What is Byoky?
 
-**Byoky** (Bring Your Own Key) is an open-source browser extension that stores your AI API keys and setup tokens in an encrypted vault. Developers integrate via `@byoky/sdk` — their apps can use your credentials without ever seeing them.
+**Byoky** (Bring Your Own Key) is a wallet for your AI credentials: a browser extension plus iOS and Android apps. You add your API keys and setup tokens once, and they're encrypted on your device. Apps connect to the wallet the way dapps connect to MetaMask. They ask for access, you approve, and the wallet makes their LLM calls for them. The app never sees the key.
 
-- **For users** — One wallet for all your AI credentials. Add keys, approve apps, revoke access, export encrypted backups. Full visibility into every request.
-- **For developers** — Two lines of code. Use your favorite provider SDK. Keys never touch your app.
-- **Groups** — Bucket connected apps by purpose (e.g. "Personal", "Work"). Pin each group to a specific credential, then drag apps between groups to switch which key they use. Live sessions reroute automatically — no code changes in any app.
-- **Cross-provider routing** — Drag an app from a Claude group into a GPT group and the wallet transparently translates the request. Anthropic ↔ OpenAI ↔ Gemini ↔ Cohere — request body, response body, and SSE streams are rewritten on the fly. Apps keep calling their preferred SDK; the wallet picks the upstream.
-- **Token gifts** — Share token access with friends or teammates without sharing your API key. Set budgets and expiration. All requests relay through your wallet.
+- **One wallet, every provider.** Anthropic, OpenAI, Gemini, Mistral and nine more, plus custom endpoints. Add a key once and use it in every Byoky-enabled app.
+- **Apps connect instead of copying keys.** No more pasting `sk-...` into a settings page. Approve an app, see every request it makes, set spending caps, revoke it with one click.
+- **No servers.** No accounts, no cloud sync, no relay. Byoky doesn't run anything that sits between you and your provider. The wallet talks only to the AI providers you add.
+- **Groups.** Bucket connected apps by purpose ("Personal", "Work"), pin each group to a credential, then drag apps between groups to switch which key they use. Live sessions reroute without code changes.
+- **Cross-provider routing.** Drag an app from a Claude group into a GPT group and the wallet translates on the fly: Anthropic ↔ OpenAI ↔ Gemini ↔ Cohere request bodies, response bodies and SSE streams.
+- **Fully open source.** Every component, including the mobile apps, is in this repo under MIT.
 
 ### How it works
 
 ```
 1. Install the Byoky wallet → set a master password
-2. Add your API keys or a Claude setup token → encrypted locally
-3. Visit any Byoky-enabled app → approve access → keys stay in the vault
+2. Add your API keys or a Claude setup token → encrypted on this device
+3. Open any Byoky-enabled app → approve access → the wallet proxies its calls
 ```
 
 ## Install
@@ -42,24 +43,24 @@
 |----------|---------|------|
 | Chrome | ![Chrome version](https://img.shields.io/chrome-web-store/v/igjohldpldlahcjmefdhlnbcpldlgmon?style=flat&color=FF4F00&label=) | [Chrome Web Store](https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon) |
 | Firefox | ![Firefox version](https://img.shields.io/amo/v/byoky?style=flat&color=FF4F00&label=) | [Mozilla Add-ons](https://addons.mozilla.org/en-US/firefox/addon/byoky/) |
-| iOS | 1.0.20 | [App Store](https://apps.apple.com/app/byoky/id6760779919) |
-| Android | — | [Google Play](https://play.google.com/store/apps/details?id=com.byoky.app) |
+| iOS | — | [App Store](https://apps.apple.com/app/byoky/id6760779919) (wallet + Safari extension) |
+| Android | — | [Google Play](https://play.google.com/store/apps/details?id=com.byoky.app) (wallet + in-wallet browser) |
 | Safari (macOS) | Coming soon | — |
 | npm | ![npm version](https://img.shields.io/npm/v/@byoky/sdk?style=flat&color=FF4F00&label=) | [`@byoky/sdk`](https://www.npmjs.com/package/@byoky/sdk) · [`@byoky/core`](https://www.npmjs.com/package/@byoky/core) · [`@byoky/bridge`](https://www.npmjs.com/package/@byoky/bridge) |
 
-> Live version status (current + pending store reviews) at [byoky.com](https://byoky.com).
+## Where apps can connect
+
+Each wallet serves the apps on its own device:
+
+| App runs in… | Connects through | Keys live in |
+|---|---|---|
+| Desktop browser (Chrome, Firefox) | Byoky browser extension | the extension |
+| Safari on iPhone / iPad | Byoky Safari extension (ships inside the iOS app) | the Safari extension |
+| Byoky's in-wallet browser (iOS, Android) | injected wallet bridge (open any https app by URL) | the mobile app |
+| CLI tools and desktop apps | `@byoky/bridge` (localhost) → native messaging | the extension |
+| Your backend | `@byoky/sdk/server` over your own WebSocket → user's browser | the extension |
 
 ## Quick Start
-
-### For Users
-
-**Chrome:** [Install from Chrome Web Store](https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon)
-
-**Firefox:** [Install from Mozilla Add-ons](https://addons.mozilla.org/en-US/firefox/addon/byoky/)
-
-**iOS:** [Install from App Store](https://apps.apple.com/app/byoky/id6760779919) (wallet + Safari extension in one app)
-
-**Android:** [Install from Google Play](https://play.google.com/store/apps/details?id=com.byoky.app) (standalone wallet. Chrome Android has no extension support; pair via QR or relay)
 
 ### For Developers
 
@@ -99,31 +100,14 @@ const message = await client.messages.create({
 });
 ```
 
-> **Two lines changed.** Full API compatibility. Streaming, file uploads, and vision all work. Keys never exposed. Sessions auto-reconnect if the extension restarts.
-
-### Mobile Wallet (No Extension Needed)
-
-No browser extension? Users can connect with the Byoky iOS or Android app instead. The SDK connects via relay — showing a pairing code that the user scans with their phone.
-
-```
-Web App ←WebSocket→ Relay Server ←WebSocket→ Phone Wallet → LLM API
-```
-
-With `modal: true`, the connect modal automatically detects whether the extension is installed. If not, it falls back to relay mode and shows a built-in QR code for mobile pairing — no custom UI needed. Both iOS and Android apps run the same translation engine, so cross-provider routing works on mobile too.
-
-```typescript
-// Works with both extension and mobile — modal handles detection and QR code
-const session = await byoky.connect({ modal: true });
-```
-
-> **Works on any browser, any device.** No extension install required. Keys stay on the phone.
+> **Two lines changed.** Full API compatibility: streaming, file uploads and vision all work. `session.sessionKey` is a per-app session token, not the user's key. Sessions auto-reconnect if the extension restarts.
 
 ### Backend Relay
 
-Need LLM calls from your server? The user's browser relays requests through the extension — your backend never sees the API key.
+Need LLM calls from your server? The user's browser relays them through the wallet over a WebSocket **you** host. Your backend never sees the API key, and no Byoky server is involved.
 
 ```
-Backend ←WebSocket→ User's Frontend ←Extension→ LLM API
+Your backend ←WebSocket (your server)→ User's browser ←→ Byoky extension → LLM API
 ```
 
 ```typescript
@@ -152,12 +136,12 @@ wss.on('connection', async (ws) => {
 });
 ```
 
-### CLI / Local Apps (Bridge Proxy)
+### CLI / Local Apps (Bridge)
 
-CLI tools and desktop apps can route API calls through the bridge — a local HTTP proxy that relays requests to the extension. Keys never leave the extension.
+CLI tools and desktop apps route API calls through the bridge, a localhost HTTP proxy that hands requests to the extension over native messaging. Keys never leave the extension.
 
 ```
-CLI App → HTTP → Bridge (localhost) → Native Messaging → Extension → LLM API
+CLI app → HTTP → Bridge (localhost) → Native Messaging → Extension → LLM API
 ```
 
 ```bash
@@ -165,71 +149,27 @@ npm install -g @byoky/bridge
 byoky-bridge install   # register native messaging host
 ```
 
-### Token Gifts (Relay)
-
-Share token access without sharing your API key. The sender's extension proxies all requests — the key never leaves the wallet.
-
-```
-Sender's Extension ←WebSocket→ Relay Server ←WebSocket→ Recipient's Extension
-```
-
-**Create a gift:**
-1. Open the wallet → select a credential → click "Gift"
-2. Set a token budget and expiry
-3. Share the generated gift link
-
-**Redeem a gift:**
-1. Open the wallet → click "Redeem Gift"
-2. Paste the gift link → accept
-
-> **Privacy guarantee:** The recipient never receives your API key. Every request is relayed through the sender's running extension, which enforces the token budget and can revoke access at any time.
-
-### Token Pool
-
-**[byoky.com/token-pool](https://byoky.com/token-pool)** — A public board where users share free token gifts with the community. Browse available gifts, see which are online, check remaining tokens and expiry, and redeem directly into your wallet.
-
-**How to list a gift:**
-1. Create a gift in your wallet (extension or mobile)
-2. Check "List on Token Pool"
-3. Add a display name (or stay anonymous)
-4. Your gift appears on the token pool for anyone to redeem
-
-The token pool shows live online/offline status (green/red dot), remaining token budget, and expiration countdown. Expired and depleted gifts appear in a grayed-out section.
-
 ### OpenClaw Integration
 
-Use your Byoky wallet as the key provider for [OpenClaw](https://openclaw.dev). The plugin connects through the bridge — your keys never leave the extension, even from the CLI.
+Use your Byoky wallet as the key provider for [OpenClaw](https://openclaw.dev). The plugin connects through the bridge, so your keys stay in the extension even when the agent runs in your terminal. See the [OpenClaw plugin](packages/openclaw-plugin) for setup.
 
 ```
 OpenClaw → HTTP → Bridge (localhost) → Native Messaging → Extension → LLM API
 ```
 
-All 13 providers are available through the plugin. Install the bridge, connect your wallet, and OpenClaw uses your Byoky credentials transparently. See the [OpenClaw plugin](packages/openclaw-plugin) for setup instructions.
-
-**Setup tokens too.** Since v0.4.19, OpenClaw (and any other third-party agent framework) can use a Claude.ai setup token as the byoky-anthropic credential — not just a `sk-ant-api03-...` API key. The bridge transparently rewrites tool names and relocates the framework's system prompt out of the system field on the way out, then reverses tool names on the streaming response, so Anthropic's first-party detection accepts the request without breaking the agent's behavior.
-
-#### Remote OpenClaw (Cloud Deployment)
-
-Run OpenClaw on a remote server (Railway, Fly.io, etc.) and keep your API keys on your device. The relay bridges the gap — your cloud instance never sees your credentials.
-
-```
-OpenClaw (Railway) ←WebSocket→ Relay Server ←WebSocket→ Your Wallet → LLM API
-```
-
-No environment variables. No secrets management. No leaked `.env` files. Your keys stay in the wallet, and OpenClaw runs wherever you need it.
+**Setup tokens work too.** OpenClaw (and other third-party agent frameworks) can use a Claude.ai setup token as the Anthropic credential, not just an `sk-ant-api03-...` API key. The bridge rewrites tool names and moves the framework's system prompt out of the system field on the way out, then reverses the tool names on the streaming response. Anthropic's first-party detection accepts the request and the agent behaves as before.
 
 ## Security
 
 | | |
 |---|---|
-| **AES-256-GCM** | Keys encrypted with PBKDF2-derived key (600K iterations) via Web Crypto API |
-| **Zero exposure** | API keys never leave the extension. Apps get temporary session tokens |
-| **Password strength** | 12-char minimum with real-time strength meter (entropy, patterns, common passwords) |
-| **Vault backup** | Encrypted export/import (`.byoky` files) with separate export password |
-| **Audit log** | Every request logged — app origin, provider, status, timestamp |
-| **Spending caps** | Token allowances per app — total and per-provider limits, enforced at the proxy |
-| **Token gifts** | Share access without sharing keys — relay-backed with budget enforcement, sender-side proxy |
-| **Local by default** | Keys stay on your device. Cloud sync is opt-in; credentials are encrypted client-side before upload with a key derived from your password, and the vault only holds that key in memory during your active session. No telemetry, no prompt/response logging |
+| **AES-256-GCM** | Keys encrypted with a PBKDF2-derived key (600K iterations) via the Web Crypto API (Keychain / Keystore-backed on mobile) |
+| **Zero exposure** | API keys never leave the wallet. Apps get per-session tokens |
+| **No servers** | No accounts, no cloud sync, no relay, no telemetry. Requests go straight from your wallet to the provider |
+| **Password strength** | 12-character minimum with a real-time strength meter (entropy, patterns, common passwords) |
+| **Encrypted backup** | Export/import `.byoky` files protected by a separate export password, in every wallet. This is how you move keys between devices; no cloud involved |
+| **Audit log** | Every request logged locally: app origin, provider, status, timestamp |
+| **Spending caps** | Token allowances per app (total and per-provider), enforced at the proxy |
 
 ## Supported Providers
 
@@ -254,79 +194,35 @@ No environment variables. No secrets management. No leaked `.env` files. Your ke
 
 ## Architecture
 
-Byoky uses a **proxy model**. Keys never leave the extension. Three integration paths, same guarantee:
+Byoky uses a **proxy model**: keys never leave the wallet, and every integration path ends at a wallet on the user's own device.
 
 ```
-Browser apps  → SDK (createFetch) → Content Script → Extension → LLM API
-Mobile wallet → SDK (createFetch) → WebSocket → Relay → Phone App → LLM API
-Backend apps  → SDK/server (WebSocket) → User's Browser → Extension → LLM API
-CLI/desktop   → HTTP → Bridge (localhost) → Native Messaging → Extension → LLM API
-Remote apps   → WebSocket → Relay Server → WebSocket → Your Wallet → LLM API
-Token gifts   → WebSocket → Relay Server → WebSocket → Sender's Extension → LLM API
+Browser apps   → SDK (createFetch) → Content Script → Extension → LLM API
+Safari (iOS)   → SDK (createFetch) → Content Script → Safari Extension → LLM API
+In-wallet apps → SDK (createFetch) → Native bridge → iOS / Android app → LLM API
+Backend apps   → SDK/server (your WebSocket) → User's browser → Extension → LLM API
+CLI/desktop    → HTTP → Bridge (localhost) → Native Messaging → Extension → LLM API
 ```
 
-The SDK provides `createFetch()` — a drop-in `fetch` replacement that routes through the extension. Works with **any provider's native SDK**.
+The SDK provides `createFetch()`, a drop-in `fetch` replacement that routes through the wallet. It works with **any provider's native SDK**.
 
 ## Project Structure
 
 ```
 byoky/
 ├── packages/
-│   ├── core/          # Shared types, crypto, protocol, provider registry
-│   ├── sdk/           # @byoky/sdk (+ @byoky/sdk/server for backend relay)
-│   ├── extension/     # Browser extension (Chrome, Firefox, Safari) — WXT
-│   ├── bridge/        # @byoky/bridge — HTTP proxy + native messaging for CLI/desktop apps
-│   ├── ios/           # iOS app (wallet + Safari extension)
-│   ├── openclaw-plugin/ # OpenClaw provider plugin
+│   ├── core/             # Shared types, crypto, protocol, provider registry, translation
+│   ├── sdk/              # @byoky/sdk (+ @byoky/sdk/server for backend relay)
+│   ├── extension/        # Browser extension (Chrome, Firefox, Safari) — WXT
+│   ├── bridge/           # @byoky/bridge — localhost proxy + native messaging for CLI/desktop apps
+│   ├── ios/              # iOS app (wallet + Safari extension + in-wallet browser)
+│   ├── android/          # Android app (wallet + in-wallet browser)
+│   ├── openclaw-plugin/  # OpenClaw provider plugin (via the bridge)
 │   ├── create-byoky-app/ # CLI scaffolder — npx create-byoky-app
-│   └── web/           # Landing page (byoky.com) + MiniApps + Developer Hub
-├── e2e/               # Playwright cross-device tests (Chrome + iOS + Android)
-└── marketing/         # Screenshot + composite + video pipeline (gitignored outputs)
+│   └── web/              # byoky.com — landing page, docs, demo, chat
+├── e2e/                  # Playwright tests against the real extension
+└── marketing/            # Screenshot + composite + video pipeline (gitignored outputs)
 ```
-
-## Marketing pipeline
-
-`marketing/` contains a self-contained pipeline that generates every asset
-needed for the Chrome Web Store, Firefox AMO, iOS App Store, Google Play, and
-Product Hunt — plus narrated walkthrough videos — by reusing the e2e Playwright
-fixtures and the iOS/Android simulators the e2e suite already drives.
-
-```bash
-pnpm marketing:install                  # one-time: Sharp, Playwright, Chromium
-pnpm marketing:desktop                  # Chrome + web + composites + narration + video
-pnpm marketing:capture:ios              # requires booted iOS simulator
-pnpm marketing:capture:android          # requires adb-visible emulator
-pnpm marketing:all                      # end-to-end
-```
-
-**What gets generated** (all under `marketing/`, gitignored):
-- `raw/popup-frames/*.png` — Chrome extension popup states (16 screens)
-- `raw/web/*.png` — landing / demo / chat / marketplace hero + store shots
-- `raw/ios/*.png` — native iOS simulator captures @ 1320×2868 (App Store 6.9″)
-- `raw/android/*.png` — Android emulator captures @ 1080×1920 (Play portrait)
-- `composites/*.png` — 6 Chrome/Firefox store slides · 6 iOS App Store slides ·
-  Chrome promo small (440×280) + marquee (1400×560) · Product Hunt cover
-  (1270×760) + header (1200×630) + thumb (240×240) · multi-screen eye-catcher
-  (1920×1080)
-- `voiceover/narration.wav` — Gemini 2.5 Flash TTS (Puck voice) with
-  per-segment style direction
-- `videos/walkthrough.mp4` — 16:9 narrated walkthrough (+ square + vertical)
-- `videos/product-hunt.mp4` — Product Hunt launch variant (+ square + vertical)
-- `videos/walkthrough-batman.mp4` — punchy Batman-TV-style remix with
-  comic-book starburst overlays (POW! BAM! ZOOM!), hard zoom punches, screen
-  shake, and color-flash transitions between beats
-
-**Key design decisions:**
-- iOS marketing capture runs [`ByokyMarketingTests.swift`](packages/ios/ByokyUITests/ByokyMarketingTests.swift)
-  — a slim XCUITest that walks the app through every store-worthy screen and
-  pauses at sentinel files so a parallel bash runner can snap via
-  `xcrun simctl io screenshot`.
-- Videos use `scale+lanczos+eval=frame` for sub-pixel smooth Ken-Burns motion
-  (ffmpeg's `zoompan` rounds crop offsets to integers, producing visible 1px
-  wobble — avoided here).
-- Aspect-ratio variants (1:1 square, 9:16 vertical) preserve the full 16:9
-  content with a blurred-fill background behind the letterbox bars, not a
-  hard center-crop.
 
 ## Development
 
@@ -335,6 +231,7 @@ pnpm install              # Install dependencies
 pnpm dev                  # Start extension in dev mode (Chrome)
 pnpm build                # Build all packages
 pnpm typecheck            # Type check everything
+pnpm test                 # Unit tests
 ```
 
 **Browser-specific builds:**
@@ -350,74 +247,34 @@ pnpm --filter @byoky/extension build:all     # Chrome + Firefox + Safari
 3. Enable "Developer mode"
 4. Click "Load unpacked" → select `packages/extension/.output/chrome-mv3`
 
+**Mobile:** open `packages/ios/Byoky.xcodeproj` in Xcode, or `packages/android` in Android Studio. Both embed the core translation bundle. Run `./scripts/sync-mobile-bundle.sh` after changing `packages/core/src/translate/`.
+
+## Marketing pipeline
+
+`marketing/` holds a self-contained pipeline that generates store screenshots, composites and narrated walkthrough videos. It reuses the e2e Playwright fixtures and the iOS/Android simulators.
+
+```bash
+pnpm marketing:install                  # one-time: Sharp, Playwright, Chromium
+pnpm marketing:desktop                  # Chrome + web + composites + narration + video
+pnpm marketing:capture:ios              # requires booted iOS simulator
+pnpm marketing:capture:android          # requires adb-visible emulator
+pnpm marketing:all                      # end-to-end
+```
+
 ## Tech Stack
 
 | | |
 |---|---|
 | **Extension** | [WXT](https://wxt.dev) · React · Zustand · Web Crypto API |
-| **SDK** | TypeScript · built-in connect modal with QR code for mobile pairing · zero dependencies (except @byoky/core) |
+| **Mobile** | SwiftUI · Kotlin / Jetpack Compose · shared JS translation bundle |
+| **SDK** | TypeScript · built-in connect modal · zero dependencies (except @byoky/core) |
 | **Monorepo** | pnpm workspaces · TypeScript strict mode |
-| **Browsers** | Chrome (MV3) · Firefox · Safari |
-
-## Roadmap
-
-- [x] Backend relay (`@byoky/sdk/server`)
-- [x] Token allowances per app (total + per-provider limits)
-- [x] Encrypted vault export/import (`.byoky` files)
-- [x] Browser extension store listings (Chrome, Firefox)
-- [x] OpenClaw provider plugin (bridge proxy — keys stay in extension)
-- [x] Token gifts (relay-backed, zero key exposure)
-- [x] Mobile wallet relay connect (no extension needed, pair via QR code)
-- [x] iOS app (wallet + Safari extension + relay pairing)
-- [x] Android app (standalone wallet + relay pairing)
-- [x] create-byoky-app CLI scaffolder
-- [x] Alias groups — drag apps between groups to swap which credential they use
-- [x] Setup token compatibility for third-party agents (OpenClaw etc.) — transparent tool name + system prompt rewriting
-- [x] Cross-provider translation — drag an app from a Claude group to a GPT group and have requests transparently rewrite (request body, response body, SSE streams)
-- [x] Remote OpenClaw via relay (cloud deployment, zero key exposure)
-- [x] App Ecosystem — curated marketplace, in-wallet app runtime (sandboxed iframe/WebView), developer submission flow
-- [x] Token Pool — public gift board where users share free tokens with the community
-- [x] Mobile gift hosting — iOS and Android wallets serve gifts from the phone (previously extension-only)
-- [x] Cross-provider translation for gifts — gift an Anthropic key, recipient can call it from the OpenAI SDK (or vice versa)
-- [x] Gifted credentials via bridge proxy — CLI/desktop apps can use gifts through `@byoky/bridge`
-- [ ] Password change (re-encrypt vault with new master password)
-
-## App Ecosystem
-
-**[byoky.com/apps](https://byoky.com/apps)** — A curated marketplace of apps that run on your own API keys. Install apps directly into your wallet (extension or mobile), and they run inside a sandboxed iframe/WebView — your keys never leave the wallet.
-
-**How it works:**
-1. Browse the App Store from the **Apps** tab in your wallet
-2. Install an app — it appears as an icon on your app grid (iPhone-style)
-3. Tap to launch — the app runs inside the wallet in a sandboxed environment
-4. The app uses `@byoky/sdk` to request provider access — you approve which providers it can use
-5. All API calls are proxied through the wallet — keys never touch the app
-
-**For developers:**
-```bash
-npx create-byoky-app my-app    # scaffold a new app
-npx create-byoky-app init      # create a byoky.app.json manifest
-npx create-byoky-app submit    # POST manifest to api.byoky.com/v1/apps/submit
-```
-
-Or submit via the web form at [byoky.com/apps/submit](https://byoky.com/apps/submit). Full walkthrough: [byoky.com/docs#submitting](https://byoky.com/docs#submitting).
-
-**Security model:**
-- Apps run in a sandboxed iframe (`allow-scripts allow-forms`) or WKWebView/WebView
-- Cross-origin isolation prevents access to wallet storage, DOM, or keys
-- Apps can only communicate via the SDK's `postMessage` bridge
-- Users can disable or uninstall apps at any time
-- Per-app usage tracking and provider access controls
-
-**Hosting requirement:** your app URL must allow iframe embedding. Don't set `X-Frame-Options: DENY`/`SAMEORIGIN`; either omit CSP `frame-ancestors` or set it to `*` (or include the Byoky extension origin). The submission API verifies this automatically.
 
 ## Built with Byoky
 
 | Project | Description |
 |---------|-------------|
 | [LamboChart](https://lambochart.com) | AI-powered analytics for vibe coders — users bring their own LLM keys via Byoky |
-
-[Add your project →](https://byoky.com/built-with)
 
 ## Star History
 
@@ -435,4 +292,4 @@ Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines
 
 ## License
 
-[MIT](LICENSE) — free forever.
+[MIT](LICENSE). Everything that makes up Byoky, from the wallets and SDK to the bridge and the website, lives in this repository. There are no closed components and no hosted services.
