@@ -339,25 +339,27 @@ private fun GroupBucket(
                         fontSize = 11.sp,
                     )
                 }
-                Box {
-                    IconButton(onClick = { menuOpen = true }) {
-                        Icon(
-                            Icons.Default.MoreVert,
-                            "Group menu",
-                            tint = Accent,
-                        )
-                    }
-                    DropdownMenu(
-                        expanded = menuOpen,
-                        onDismissRequest = { menuOpen = false },
-                        modifier = Modifier.background(BgRaised),
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text(if (isDefault) "Edit default" else "Edit", color = TextPrimary) },
-                            onClick = { menuOpen = false; onEditGroup() },
-                            leadingIcon = { Icon(Icons.Default.Edit, null, tint = Accent) },
-                        )
-                        if (!isDefault) {
+                // The default group stays routing-neutral (ensureDefaultGroup
+                // resets it), so it has nothing to edit or delete.
+                if (!isDefault) {
+                    Box {
+                        IconButton(onClick = { menuOpen = true }) {
+                            Icon(
+                                Icons.Default.MoreVert,
+                                "Group menu",
+                                tint = Accent,
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = menuOpen,
+                            onDismissRequest = { menuOpen = false },
+                            modifier = Modifier.background(BgRaised),
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Edit", color = TextPrimary) },
+                                onClick = { menuOpen = false; onEditGroup() },
+                                leadingIcon = { Icon(Icons.Default.Edit, null, tint = Accent) },
+                            )
                             DropdownMenuItem(
                                 text = { Text("Delete", color = Danger) },
                                 onClick = { menuOpen = false; onDeleteGroup() },

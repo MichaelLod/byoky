@@ -171,23 +171,25 @@ struct AppsView: View {
                         .clipShape(Capsule())
                 }
                 Spacer()
-                Menu {
-                    Button {
-                        editingGroup = group
-                    } label: {
-                        Label(isDefault ? "Edit default" : "Edit", systemImage: "pencil")
-                    }
-                    if !isDefault {
+                // The default group stays routing-neutral (ensureDefaultGroup
+                // resets it on unlock), so it has nothing to edit or delete.
+                if !isDefault {
+                    Menu {
+                        Button {
+                            editingGroup = group
+                        } label: {
+                            Label("Edit", systemImage: "pencil")
+                        }
                         Button(role: .destructive) {
                             try? wallet.deleteGroup(id: group.id)
                         } label: {
                             Label("Delete", systemImage: "trash")
                         }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.callout)
+                            .foregroundStyle(Theme.accent)
                     }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .font(.callout)
-                        .foregroundStyle(Theme.accent)
                 }
             }
         } footer: {

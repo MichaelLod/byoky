@@ -1332,7 +1332,6 @@ export default defineBackground(() => {
         const encValue = cleanValue ? await encrypt(cleanValue, masterPassword) : '';
         const data = await browser.storage.local.get('credentials');
         const creds = (data.credentials ?? []) as Array<Record<string, unknown>>;
-        const isFirstCredential = creds.length === 0;
         const newCred: Record<string, unknown> = {
           id: crypto.randomUUID(),
           providerId: cpId,
@@ -1348,28 +1347,6 @@ export default defineBackground(() => {
         }
         creds.push(newCred);
         await browser.storage.local.set({ credentials: creds });
-
-        // First credential becomes the default group's pin. If the default
-        // group already exists with no pin, adopt this credential.
-        const groups = await getGroups();
-        const defIdx = groups.findIndex((g) => g.id === DEFAULT_GROUP_ID);
-        if (defIdx < 0) {
-          groups.unshift({
-            id: DEFAULT_GROUP_ID,
-            name: 'Default',
-            providerId: cpId,
-            credentialId: newCred.id as string,
-            createdAt: Date.now(),
-          });
-          await setGroups(groups);
-        } else if (isFirstCredential || !groups[defIdx].credentialId) {
-          groups[defIdx] = {
-            ...groups[defIdx],
-            providerId: cpId,
-            credentialId: newCred.id as string,
-          };
-          await setGroups(groups);
-        }
 
         refreshSessionProviders();
         return { success: true };

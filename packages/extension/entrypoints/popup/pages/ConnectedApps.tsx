@@ -258,11 +258,13 @@ export function ConnectedApps() {
                       : 'Any credential for this provider'}
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: '6px' }}>
-                <button className="text-link" style={{ fontSize: '12px' }} onClick={() => setEditingGroupId(editingGroupId === group.id ? null : group.id)}>
-                  Edit
-                </button>
-                {!isDefault && (
+              {/* The default group stays routing-neutral (ensureDefaultGroup
+                  resets it), so it has nothing to edit or delete. */}
+              {!isDefault && (
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <button className="text-link" style={{ fontSize: '12px' }} onClick={() => setEditingGroupId(editingGroupId === group.id ? null : group.id)}>
+                    Edit
+                  </button>
                   <button
                     className="text-link"
                     style={{ fontSize: '12px', color: 'var(--danger)' }}
@@ -274,8 +276,8 @@ export function ConnectedApps() {
                   >
                     Delete
                   </button>
-                )}
-              </div>
+                </div>
+              )}
             </div>
 
             {editingGroupId === group.id && (
@@ -461,7 +463,6 @@ function GroupForm({
   onSave: (patch: { name?: string; providerId?: string; credentialId?: string | null; model?: string | null }) => void;
   onCancel: () => void;
 }) {
-  const isDefault = group?.id === DEFAULT_GROUP_ID;
   const [name, setName] = useState(group?.name ?? '');
   const [providerId, setProviderId] = useState(group?.providerId ?? (credentials[0]?.providerId ?? 'anthropic'));
   // Credential pin. Empty string means "no pin — any credential".
@@ -483,7 +484,7 @@ function GroupForm({
 
   function handleSave() {
     onSave({
-      name: isDefault ? undefined : name,
+      name,
       providerId,
       credentialId: credentialId || null,
       model: model || null,
@@ -492,18 +493,16 @@ function GroupForm({
 
   return (
     <div style={{ marginTop: '8px' }}>
-      {!isDefault && (
-        <div className="form-group">
-          <label>Group name</label>
-          <input
-            type="text"
-            placeholder="e.g. Engineering"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            maxLength={200}
-          />
-        </div>
-      )}
+      <div className="form-group">
+        <label>Group name</label>
+        <input
+          type="text"
+          placeholder="e.g. Engineering"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          maxLength={200}
+        />
+      </div>
       <div className="form-group">
         <label>Provider</label>
         <select
