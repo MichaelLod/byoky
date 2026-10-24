@@ -103,14 +103,22 @@ async function main() {
     const notes = readFileSync(notesFile, 'utf8').slice(0, 4000)
     const locData = await api(`/appStoreVersions/${ver.id}/appStoreVersionLocalizations`)
     let enLoc = locData.data?.find(l => l.attributes.locale.startsWith('en'))
+    let notesSet = true
 
     if (enLoc) {
-      await api(`/appStoreVersionLocalizations/${enLoc.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          data: { type: 'appStoreVersionLocalizations', id: enLoc.id, attributes: { whatsNew: notes } },
-        }),
-      })
+      try {
+        await api(`/appStoreVersionLocalizations/${enLoc.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            data: { type: 'appStoreVersionLocalizations', id: enLoc.id, attributes: { whatsNew: notes } },
+          }),
+        })
+      } catch (e) {
+        // An app's first version on a platform has no "What's New" (409).
+        if (!e.message.startsWith('409')) throw e
+        notesSet = false
+        console.log(`  No release notes for a first version`)
+      }
     } else {
       await api('/appStoreVersionLocalizations', {
         method: 'POST',
@@ -123,7 +131,7 @@ async function main() {
         }),
       })
     }
-    console.log(`  Release notes set (${notes.length} chars)`)
+    if (notesSet) console.log(`  Release notes set (${notes.length} chars)`)
   }
 
   // 4. Find the latest processed build of this version for this platform.
