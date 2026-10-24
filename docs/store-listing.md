@@ -76,10 +76,10 @@ The MetaMask for API keys. Keep every AI API key in one encrypted wallet in your
 
 ## Apple App Store (iOS)
 
-**Subtitle** (≤30 chars):
+**Subtitle** (≤30 chars; shared with the Mac app). Apple often rejects other brands' names in the name or subtitle (guideline 2.3.7), so the MetaMask line stays in the description:
 
 ```
-The MetaMask for API keys
+Wallet for your AI API keys
 ```
 
 **Promotional text** (≤170 chars):
@@ -126,6 +126,45 @@ api key,ai,llm,wallet,byok,openai,anthropic,gemini,developer,safari extension,pr
 **App Privacy (nutrition label):** "Data Not Collected." Before submitting, remove any data types declared for cloud vault accounts (e.g. user ID or username), gifts or pairing.
 
 **What's New** for the first local-only version: see "Release notes" below.
+
+## Apple App Store (macOS)
+
+The Mac app is the container for the Safari extension, so its text is the extension's, minus the bridge (Chrome and Firefox only). Keywords and subtitle are the iOS ones. Its first version (1.1.0) can't have "What's New".
+
+**Promotional text** (≤170 chars):
+
+```
+Keep every AI API key in one encrypted wallet in Safari. Websites connect to it, and your keys never leave your Mac. No account, no cloud, open source.
+```
+
+**Description:**
+
+```
+Byoky is the MetaMask for API keys, in Safari on your Mac.
+
+Stop pasting API keys into every app. Byoky keeps your OpenAI, Anthropic, Gemini and other AI keys in one encrypted wallet. Websites connect to the wallet, you approve, and Byoky makes the API calls for them. The site never sees your key.
+
+ONE WALLET, EVERY PROVIDER
+Anthropic (API keys and Claude setup tokens), OpenAI, Google Gemini, Mistral, Cohere, xAI, DeepSeek, Perplexity, Groq, Together AI, Fireworks, OpenRouter, Azure OpenAI, plus any OpenAI-compatible endpoint.
+
+YOU STAY IN CONTROL
+• Every site asks before it connects. Approve once, or trust a site.
+• See every connected app and every request it makes.
+• Set token allowances per app and per provider.
+• Revoke access with one click.
+
+GROUPS AND CROSS-PROVIDER ROUTING
+Put apps in groups ("Work", "Personal") and pin each group to a key. Drag an app from a Claude group to a GPT group and Byoky translates requests and streaming responses on the fly. The app doesn't change a line.
+
+NO SERVERS
+No account. No cloud. No telemetry. Keys are encrypted on your Mac with AES-256-GCM, using a key derived from your password. Requests go straight from your wallet to the provider. To move keys to another device, export a password-protected .byoky file.
+
+GETTING STARTED
+Open Byoky once, then turn on the Byoky extension in Safari Settings > Extensions.
+
+OPEN SOURCE
+Every line is MIT-licensed on GitHub: github.com/MichaelLod/byoky
+```
 
 ## Google Play
 
