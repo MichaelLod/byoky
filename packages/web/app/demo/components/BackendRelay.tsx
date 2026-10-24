@@ -230,8 +230,7 @@ export function BackendRelay({ session }: Props) {
           {dropdownProviders.map((id) => {
             const meta = session.providers[id];
             const direct = meta?.available === true;
-            const isGift = meta?.gift;
-            const suffix = isGift ? ' (Gift)' : direct ? '' : ' (via routing)';
+            const suffix = direct ? '' : ' (via routing)';
             return (
               <option key={id} value={id}>{PROVIDER_NAMES[id] ?? id}{suffix}</option>
             );

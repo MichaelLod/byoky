@@ -25,11 +25,11 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   metadataBase: new URL('https://byoky.com'),
   title: {
-    default: 'Byoky — Build AI apps. Your users bring the keys.',
+    default: 'Byoky — The MetaMask for API keys',
     template: '%s — Byoky',
   },
   description:
-    'Build AI apps with zero API costs. Your users connect their own keys through Byoky — encrypted locally, proxied securely. 13 providers, 2 lines to integrate. Open source.',
+    'Keep every AI API key in one wallet. Apps connect to the wallet, the wallet proxies their calls, and your keys never leave Byoky. No servers, no accounts. 13 providers, fully open source.',
   keywords: [
     'AI API key wallet',
     'LLM API key manager',
@@ -45,6 +45,8 @@ export const metadata: Metadata = {
     'OpenAI key wallet',
     'Anthropic key wallet',
     'AI developer tools',
+    'MetaMask for API keys',
+    'local AI key wallet',
   ],
   alternates: {
     canonical: '/',
@@ -63,18 +65,18 @@ export const metadata: Metadata = {
     apple: '/apple-touch-icon.png',
   },
   openGraph: {
-    title: 'Byoky — Share your AI budget without sharing your keys',
+    title: 'Byoky — The MetaMask for API keys',
     description:
-      'Send a friend tokens from your Claude, OpenAI, or Gemini plan. One network for all your AI tokens — open source, end-to-end encrypted.',
+      'Keep every AI API key in one wallet. Apps connect to the wallet. Your keys never leave Byoky. No servers, no accounts, fully open source.',
     url: 'https://byoky.com',
     siteName: 'Byoky',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Byoky — Share your AI budget without sharing your keys',
+    title: 'Byoky — The MetaMask for API keys',
     description:
-      'Send a friend tokens from your Claude, OpenAI, or Gemini plan. One network for all your AI tokens — open source, end-to-end encrypted.',
+      'Keep every AI API key in one wallet. Apps connect to the wallet. Your keys never leave Byoky. No servers, no accounts, fully open source.',
   },
 };
 
@@ -94,9 +96,9 @@ export default function RootLayout({
               '@type': 'SoftwareApplication',
               name: 'Byoky',
               applicationCategory: 'BrowserApplication',
-              operatingSystem: 'Chrome, Firefox, Safari',
+              operatingSystem: 'Chrome, Firefox, iOS, Android',
               description:
-                'Build AI apps with zero API costs. Your users bring their own keys — encrypted locally with AES-256-GCM, proxied securely. 13 providers, open source.',
+                'The MetaMask for API keys. Keep every AI API key in one wallet, encrypted locally with AES-256-GCM. Apps connect to the wallet and never see your keys. No servers, no accounts, 13 providers, open source.',
               url: 'https://byoky.com',
               offers: {
                 '@type': 'Offer',

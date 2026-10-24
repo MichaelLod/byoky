@@ -3,7 +3,7 @@ import { FadeIn } from './components/FadeIn';
 
 export const metadata: Metadata = {
   title: 'Page not found',
-  description: "This page isn't in the vault. Head back to byoky.com to find your way.",
+  description: "This page doesn't exist. Head back to byoky.com to find your way.",
   robots: { index: false, follow: false },
 };
 
@@ -34,7 +34,7 @@ export default function NotFound() {
 
         <FadeIn delay={0.3}>
           <p>
-            The page you&apos;re looking for isn&apos;t in the vault. It may have moved,
+            The page you&apos;re looking for isn&apos;t in the wallet. It may have moved,
             been renamed, or never existed at all.
           </p>
         </FadeIn>
@@ -54,7 +54,7 @@ export default function NotFound() {
         <FadeIn delay={0.5}>
           <div className="notfound-links">
             <span>Try instead:</span>
-            <a href="/token-pool">Token Pool</a>
+            <a href="/demo">Demo</a>
             <span aria-hidden>·</span>
             <a href="/openclaw">OpenClaw</a>
             <span aria-hidden>·</span>

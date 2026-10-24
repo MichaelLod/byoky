@@ -84,7 +84,6 @@ export function Navbar() {
 
   const navLinks: Array<{ href: string; label: string; match: (p: string) => boolean }> = [
     { href: '/', label: 'Home', match: (p) => p === '/' },
-    { href: '/token-pool', label: 'Token Pool', match: (p) => p.startsWith('/token-pool') || p.startsWith('/marketplace') },
     { href: '/demo', label: 'Demo', match: (p) => p.startsWith('/demo') },
     { href: '/openclaw', label: 'OpenClaw', match: (p) => p.startsWith('/openclaw') },
     { href: '/claude-code', label: 'Claude Code', match: (p) => p.startsWith('/claude-code') },

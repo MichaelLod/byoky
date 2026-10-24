@@ -14,7 +14,7 @@ import { Byoky } from '@byoky/sdk';
 const byoky = new Byoky();
 const session = await byoky.connect({
   providers: [{ id: 'anthropic', required: true }],
-  modal: true, // built-in connect UI with QR code
+  modal: true, // built-in connect UI, with install guidance if no wallet is found
 });
 
 const client = new Anthropic({

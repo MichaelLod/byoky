@@ -1,12 +1,9 @@
 import { FadeIn } from './components/FadeIn';
-import { AnimatedCounter } from './components/AnimatedCounter';
 import { VersionStatus } from './components/VersionStatus';
 import { ProviderMarquee } from './components/ProviderMarquee';
-import { GitHubStars } from './components/GitHubStars';
 import { GitHubStarButton } from './components/GitHubStarButton';
-import { ExtensionMock, type MockScene } from './components/ExtensionMock';
+import { ExtensionMock } from './components/ExtensionMock';
 import { AppsShowcase } from './components/AppsShowcase';
-import { WhatsAppChat } from './components/WhatsAppChat';
 import { InstallWalletButton } from './components/InstallWalletButton';
 import { HeroRollout } from './components/HeroRollout';
 
@@ -15,142 +12,26 @@ export default function Home() {
     <>
       <Hero />
       <div className="divider" />
-      <WhatsAppChat />
-      <div className="divider" />
-      <OpenClawCTA />
+      <HowItWorks />
+      <Providers />
       <div className="divider" />
       <AppsShowcase />
       <div className="divider" />
-      <HowItWorks />
-      <Providers />
+      <WhyAWallet />
+      <div className="divider" />
+      <NoServers />
+      <div className="divider" />
+      <WhereAppsConnect />
+      <div className="divider" />
+      <OpenClawCTA />
       <div className="divider" />
       <ForDevelopers />
       <div className="divider" />
       <Security />
       <div className="divider" />
-      <ShippingNow />
-      <div className="divider" />
       <ClosingStrip />
       <Footer />
     </>
-  );
-}
-
-/* ─── Shipping now ─────────────────────────────── */
-
-function ShippingNow() {
-  return (
-    <section className="shipping-now-section">
-      <div className="container">
-        <FadeIn>
-          <div className="shipping-now-inner">
-            <div className="shipping-now-head">
-              <span className="shipping-now-eyebrow">Work in progress</span>
-              <h2>Byoky improves continuously.</h2>
-              <p className="shipping-now-sub">
-                A few things are mid-flight between repo and the stores. You can follow along on GitHub.
-              </p>
-            </div>
-            <ul className="shipping-now-list">
-              <li>
-                <a href="https://github.com/MichaelLod/byoky/issues/14" target="_blank" rel="noopener noreferrer">
-                  Mobile v0.7.3
-                </a>
-                <span> — refresh-rejoin, QR scanner fix, pair-URL paste, honest vault providers map. Landed on main, awaiting the next App Store / Play Store release.</span>
-              </li>
-              <li>
-                <a href="https://github.com/MichaelLod/byoky/issues/15" target="_blank" rel="noopener noreferrer">
-                  Setup tokens via cloud vault
-                </a>
-                <span> — Claude Pro/Max setup tokens today only proxy while the phone is live. Porting the CLI request shape into the vault so they keep working when the phone's asleep.</span>
-              </li>
-              <li>
-                <a href="https://github.com/MichaelLod/byoky/issues/16" target="_blank" rel="noopener noreferrer">
-                  Graceful rejoin against older phone builds
-                </a>
-                <span> — gate the new SDK rejoin on a capability flag advertised by v0.7.3+ so refreshes against older apps fall straight to the reconnect screen instead of hanging.</span>
-              </li>
-            </ul>
-            <a
-              href="https://github.com/MichaelLod/byoky/issues"
-              className="shipping-now-more"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              All open issues &rarr;
-            </a>
-          </div>
-        </FadeIn>
-      </div>
-      <style>{`
-        .shipping-now-section { padding: 80px 0; }
-        .shipping-now-inner {
-          max-width: 780px;
-          margin: 0 auto;
-          text-align: left;
-        }
-        .shipping-now-head { text-align: center; margin-bottom: 32px; }
-        .shipping-now-eyebrow {
-          display: inline-block;
-          font-size: 11px;
-          font-weight: 700;
-          letter-spacing: 0.14em;
-          text-transform: uppercase;
-          color: var(--accent, #FF4F00);
-          margin-bottom: 10px;
-        }
-        .shipping-now-head h2 {
-          font-size: 28px;
-          font-weight: 800;
-          letter-spacing: -0.02em;
-          margin: 0 0 8px;
-        }
-        .shipping-now-sub {
-          color: var(--text-secondary);
-          font-size: 14px;
-          margin: 0;
-        }
-        .shipping-now-list {
-          list-style: none;
-          padding: 0;
-          margin: 0 0 24px;
-          display: flex;
-          flex-direction: column;
-          gap: 14px;
-        }
-        .shipping-now-list li {
-          padding: 14px 18px;
-          background: var(--bg-card, #fff);
-          border: 1px solid var(--border, #e5e5e5);
-          border-radius: 10px;
-          font-size: 13px;
-          line-height: 1.55;
-          color: var(--text-secondary);
-        }
-        .shipping-now-list a {
-          color: var(--text, #1a1a1a);
-          font-weight: 700;
-          text-decoration: none;
-          border-bottom: 1px dashed var(--border-strong, #d1d1d1);
-        }
-        .shipping-now-list a:hover {
-          color: var(--accent, #FF4F00);
-          border-bottom-color: var(--accent, #FF4F00);
-        }
-        .shipping-now-more {
-          display: inline-block;
-          font-size: 13px;
-          font-weight: 600;
-          color: var(--text-muted);
-          text-decoration: none;
-        }
-        .shipping-now-more:hover { color: var(--accent, #FF4F00); }
-        @media (max-width: 640px) {
-          .shipping-now-section { padding: 56px 0; }
-          .shipping-now-head h2 { font-size: 22px; }
-        }
-      `}</style>
-    </section>
   );
 }
 
@@ -166,33 +47,33 @@ function Hero() {
         <FadeIn>
           <div className="hero-badge">
             <span className="hero-badge-dot" />
-            The AI token network
+            Open source · No servers · No accounts
           </div>
         </FadeIn>
         <FadeIn delay={0.1}>
           <h1>
-            <span className="hero-eyebrow">One network.</span>
-            <span className="hero-gradient">All your AI tokens.</span>
+            <span className="hero-eyebrow">The MetaMask</span>
+            <span className="hero-gradient">for API keys.</span>
           </h1>
         </FadeIn>
         <FadeIn delay={0.2}>
           <p>
-            Byoky lets you share your token budget with friends,
-            your team, or anyone building cool stuff — without exposing your keys.
+            Keep every AI API key in one wallet. Apps connect to the wallet,
+            the wallet makes their calls, and your keys never leave Byoky.
           </p>
         </FadeIn>
         <FadeIn delay={0.3}>
           <div className="hero-actions">
-            <a
-              href="/docs"
-              className="btn btn-primary"
-            >
-              Start Building
-            </a>
-            <InstallWalletButton className="btn btn-secondary">
+            <InstallWalletButton className="btn btn-primary">
               <DownloadIcon />
               Install Wallet
             </InstallWalletButton>
+            <a
+              href="/docs"
+              className="btn btn-secondary"
+            >
+              Start Building
+            </a>
           </div>
           <div className="hero-also">
             Also on{' '}
@@ -213,8 +94,8 @@ function Hero() {
               <span>13 Providers</span>
             </div>
             <div className="hero-trust-item">
-              <CheckIcon />
-              <span>2 Lines to Integrate</span>
+              <CloudOffIcon />
+              <span>No Servers, No Accounts</span>
             </div>
             <div className="hero-trust-item">
               <LockIcon />
@@ -241,8 +122,8 @@ function HowItWorks() {
     <section className="steps-section">
       <div className="container">
         <FadeIn>
-          <h2>Install once. Use everywhere.</h2>
-          <div style={{ display: 'flex', gap: '20px', justifyContent: 'center', alignItems: 'center', marginBottom: '24px' }}>
+          <h2>Add your keys once. Every app connects.</h2>
+          <div style={{ display: 'flex', gap: '20px', justifyContent: 'center', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 500 }}>
               <svg width="18" height="18" viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="#fff" stroke="#ddd" strokeWidth="1"/><path d="M24 8a16 16 0 0 1 13.86 8H24v0z" fill="#EA4335"/><path d="M37.86 16A16 16 0 0 1 24 40l6.93-12z" fill="#FBBC05"/><path d="M24 40A16 16 0 0 1 10.14 16l6.93 12z" fill="#34A853"/><path d="M10.14 16A16 16 0 0 1 24 8v8z" fill="#4285F4"/><circle cx="24" cy="24" r="6" fill="#fff"/><circle cx="24" cy="24" r="4" fill="#4285F4"/></svg>
               Chrome
@@ -253,15 +134,15 @@ function HowItWorks() {
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 500 }}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="#999"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
-              iOS
+              iOS &amp; Safari
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 500 }}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="#3DDC84"><path d="M17.523 15.341a.91.91 0 0 0 .916-.907V9.478a.91.91 0 0 0-.916-.907.91.91 0 0 0-.917.907v4.956a.91.91 0 0 0 .917.907zm-11.046 0a.91.91 0 0 0 .917-.907V9.478a.91.91 0 0 0-.917-.907.91.91 0 0 0-.916.907v4.956a.91.91 0 0 0 .916.907zm1.48 5.178c0 .504.41.912.916.912h.95v2.66a.91.91 0 0 0 .916.909.91.91 0 0 0 .917-.908v-2.66h1.688v2.66a.91.91 0 0 0 .916.909.91.91 0 0 0 .917-.908v-2.66h.95a.914.914 0 0 0 .916-.913V8.879H7.957v11.64zM15.4 3.11l1.124-1.727a.235.235 0 0 0-.073-.324.237.237 0 0 0-.326.072l-1.14 1.75A6.813 6.813 0 0 0 12 2.321c-1.07 0-2.08.195-3.003.56L7.857 1.13a.236.236 0 0 0-.325-.072.235.235 0 0 0-.073.324L8.583 3.11C6.572 4.12 5.204 6.071 5.204 8.338h13.592c0-2.267-1.368-4.219-3.396-5.228z"/></svg>
               Android
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 500 }}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#999" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-              Web
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#999" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+              CLI
             </div>
           </div>
         </FadeIn>
@@ -271,10 +152,10 @@ function HowItWorks() {
               <div className="step-number">
                 <WalletIcon />
               </div>
-              <h3>Install the wallet</h3>
+              <h3>Add your keys once</h3>
               <p>
-                Add the Byoky extension to Chrome or Firefox, or
-                grab the iOS or Android app.
+                Install the wallet, set a master password, and add your API
+                keys or a Claude setup token. They&apos;re encrypted on this device.
               </p>
               <div className="step-mock-wrap">
                 <ExtensionMock scene="wallet" size="cell" />
@@ -286,10 +167,10 @@ function HowItWorks() {
               <div className="step-number">
                 <LinkIcon />
               </div>
-              <h3>Connect to any app</h3>
+              <h3>Apps ask, you approve</h3>
               <p>
-                Visit any Byoky-enabled app. Approve access in one click.
-                Keys never leave your device.
+                Open any Byoky-enabled app. It asks for access to the providers
+                it needs, and you decide.
               </p>
               <div className="step-mock-wrap">
                 <ExtensionMock scene="approval" size="cell" />
@@ -301,10 +182,10 @@ function HowItWorks() {
               <div className="step-number">
                 <CheckIcon />
               </div>
-              <h3>AI just works</h3>
+              <h3>The wallet makes the calls</h3>
               <p>
-                Your keys are proxied securely. Switch models or providers
-                anytime. The app never sees your credentials.
+                Requests go from your wallet straight to the provider. The app
+                gets a session token, never your key.
               </p>
               <div className="step-mock-wrap">
                 <ExtensionMock scene="connect-chat" size="cell" />
@@ -317,50 +198,184 @@ function HowItWorks() {
   );
 }
 
-/* ─── Threat Context ──────────────────────────── */
+/* ─── Providers ────────────────────────────────── */
 
-function ThreatContext() {
+function Providers() {
+  return <ProviderMarquee />;
+}
+
+/* ─── Why a wallet ─────────────────────────────── */
+
+function WhyAWallet() {
   return (
-    <section className="threat-section">
+    <section className="wallet-section">
       <div className="container">
         <FadeIn>
-          <h2>Why users trust Byoky with their keys.</h2>
-          <p className="subtitle">
-            Chrome extensions that handle API keys have a track record of abuse.
-            Byoky was built to be the exception.
-          </p>
+          <div className="wallet-section-head">
+            <h2>Stop pasting keys into apps.</h2>
+            <p>
+              A key pasted into a settings page is a key you no longer control.
+              With Byoky, apps connect to your wallet the way dapps connect to MetaMask.
+            </p>
+          </div>
         </FadeIn>
-        <div className="threat-grid">
-          <FadeIn delay={0.05}>
-            <div className="threat-card">
-              <span className="threat-stat">10,000+</span>
-              <span className="threat-label">users exposed by a fake ChatGPT Chrome extension</span>
+        <div className="side-by-side-grid">
+          <FadeIn>
+            <div className="sbs-card">
+              <div className="sbs-badge">Providers</div>
+              <div className="sbs-icon-row">
+                <KeyIcon />
+              </div>
+              <h3 className="sbs-title">One wallet, every provider.</h3>
+              <p className="sbs-desc">
+                Anthropic, OpenAI, Gemini, Mistral and nine more, plus custom
+                endpoints. Add a key once and use it in every Byoky-enabled app.
+              </p>
             </div>
           </FadeIn>
           <FadeIn delay={0.1}>
-            <div className="threat-card">
-              <span className="threat-stat">900K</span>
-              <span className="threat-label">users compromised by extensions stealing AI conversations</span>
+            <div className="sbs-card">
+              <div className="sbs-badge">Control</div>
+              <div className="sbs-icon-row">
+                <EyeIcon />
+              </div>
+              <h3 className="sbs-title">Apps connect instead of copying keys.</h3>
+              <p className="sbs-desc">
+                Approve an app, see every request it makes, set spending caps,
+                and revoke it with one click. No more <code style={{ fontFamily: 'var(--font-code)', color: 'var(--teal-light)', fontSize: 13 }}>sk-...</code> in a settings page.
+              </p>
             </div>
           </FadeIn>
-          <FadeIn delay={0.15}>
-            <div className="threat-card">
-              <span className="threat-stat">$8.5M</span>
-              <span className="threat-label">in crypto stolen through a Chrome extension compromise</span>
+          <FadeIn>
+            <div className="sbs-card">
+              <div className="sbs-badge">Groups</div>
+              <div className="sbs-icon-row">
+                <LayersIcon />
+              </div>
+              <h3 className="sbs-title">Switch keys by dragging an app.</h3>
+              <p className="sbs-desc">
+                Bucket connected apps by purpose (&ldquo;Personal&rdquo;, &ldquo;Work&rdquo;), pin
+                each group to a credential, then drag apps between groups to change
+                which key they use. Live sessions reroute without code changes.
+              </p>
+              <div className="openclaw-flow" style={{ marginTop: 16, marginBottom: 0 }}>
+                <div className="openclaw-flow-step">
+                  <span className="openclaw-flow-label">Your App</span>
+                  <span className="openclaw-flow-sub">connected</span>
+                </div>
+                <span className="openclaw-flow-arrow">&rarr;</span>
+                <div className="openclaw-flow-step openclaw-flow-highlight">
+                  <span className="openclaw-flow-label">Work</span>
+                  <span className="openclaw-flow-sub">group</span>
+                </div>
+                <span className="openclaw-flow-arrow">&rarr;</span>
+                <div className="openclaw-flow-step">
+                  <span className="openclaw-flow-label">Team key</span>
+                  <span className="openclaw-flow-sub">credential</span>
+                </div>
+              </div>
             </div>
           </FadeIn>
-          <FadeIn delay={0.2}>
-            <div className="threat-card">
-              <span className="threat-stat">30+</span>
-              <span className="threat-label">malicious AI extensions caught in 2025&ndash;2026</span>
+          <FadeIn delay={0.1}>
+            <div className="sbs-card">
+              <div className="sbs-badge">Cross-Provider</div>
+              <div className="sbs-icon-row">
+                <ShuffleIcon />
+              </div>
+              <h3 className="sbs-title">One app. Any provider.</h3>
+              <p className="sbs-desc">
+                Drag an app from a Claude group into a GPT group and the wallet
+                translates on the fly: Anthropic ↔ OpenAI ↔ Gemini ↔ Cohere request
+                bodies, response bodies and SSE streams.
+              </p>
+              <div className="openclaw-flow" style={{ marginTop: 16, marginBottom: 0 }}>
+                <div className="openclaw-flow-step">
+                  <span className="openclaw-flow-label">Your App</span>
+                  <span className="openclaw-flow-sub">Anthropic SDK</span>
+                </div>
+                <span className="openclaw-flow-arrow">&rarr;</span>
+                <div className="openclaw-flow-step openclaw-flow-highlight">
+                  <span className="openclaw-flow-label">Wallet</span>
+                  <span className="openclaw-flow-sub">Translates</span>
+                </div>
+                <span className="openclaw-flow-arrow">&rarr;</span>
+                <div className="openclaw-flow-step">
+                  <span className="openclaw-flow-label">GPT-4o</span>
+                  <span className="openclaw-flow-sub">OpenAI API</span>
+                </div>
+              </div>
             </div>
           </FadeIn>
         </div>
-        <FadeIn delay={0.25}>
-          <p className="threat-cta">
-            Byoky encrypts keys locally with AES-256-GCM, proxies every request,
-            and gives users full visibility into what apps access. Your users
-            install it once and trust every app you build.
+      </div>
+      <style>{`
+        .wallet-section-head {
+          text-align: center;
+          max-width: 640px;
+          margin: 0 auto 48px;
+        }
+        .wallet-section-head h2 {
+          font-size: 44px;
+          font-weight: 700;
+          letter-spacing: -0.03em;
+          margin-bottom: 14px;
+        }
+        .wallet-section-head p {
+          font-size: 17px;
+          color: var(--text-secondary);
+          line-height: 1.6;
+        }
+        @media (max-width: 720px) {
+          .wallet-section-head h2 { font-size: 32px; }
+          .wallet-section-head p { font-size: 15px; }
+        }
+      `}</style>
+    </section>
+  );
+}
+
+/* ─── No servers ───────────────────────────────── */
+
+function NoServers() {
+  return (
+    <section className="zero-cost-section">
+      <div className="zero-cost-glow" aria-hidden />
+      <div className="container">
+        <FadeIn>
+          <h2 className="zero-cost-heading">
+            No servers.<br />
+            <span className="hero-gradient">No accounts. No cloud.</span>
+          </h2>
+          <p className="zero-cost-body">
+            Byoky doesn&apos;t run anything that sits between you and your provider.
+            The wallet talks only to the AI providers you add. There is nothing to
+            sign up for and nothing to sync.
+          </p>
+        </FadeIn>
+        <div className="zero-cost-grid">
+          <FadeIn delay={0.1}>
+            <div className="zero-cost-card">
+              <span className="zero-cost-stat">0</span>
+              <span className="zero-cost-label">Byoky servers in the request path</span>
+            </div>
+          </FadeIn>
+          <FadeIn delay={0.2}>
+            <div className="zero-cost-card">
+              <span className="zero-cost-stat">0</span>
+              <span className="zero-cost-label">accounts to create</span>
+            </div>
+          </FadeIn>
+          <FadeIn delay={0.3}>
+            <div className="zero-cost-card">
+              <span className="zero-cost-stat">MIT</span>
+              <span className="zero-cost-label">every component open source, mobile apps included</span>
+            </div>
+          </FadeIn>
+        </div>
+        <FadeIn delay={0.4}>
+          <p className="zero-cost-pitch">
+            Your keys are encrypted on your device. Moving them to another device
+            is up to you, with an encrypted backup file.
           </p>
         </FadeIn>
       </div>
@@ -368,55 +383,119 @@ function ThreatContext() {
   );
 }
 
-/* ─── Zero Cost ───────────────────────────────── */
+/* ─── Where apps can connect ───────────────────── */
 
-function ZeroCost() {
+const connectTargets: Array<{
+  badge: string;
+  title: string;
+  desc: string;
+  flow: Array<{ label: string; sub?: string; highlight?: boolean }>;
+}> = [
+  {
+    badge: 'Desktop browser',
+    title: 'Chrome and Firefox',
+    desc: 'Web apps connect through the Byoky browser extension. Keys live in the extension.',
+    flow: [
+      { label: 'Web app', sub: 'SDK' },
+      { label: 'Extension', sub: 'Keys here', highlight: true },
+      { label: 'LLM API' },
+    ],
+  },
+  {
+    badge: 'iPhone & iPad',
+    title: 'Safari on iOS',
+    desc: 'The Byoky Safari extension, included with the iOS app, brings the wallet to Safari. Add your keys in its popup and web apps in Safari connect to it.',
+    flow: [
+      { label: 'Web app', sub: 'Safari' },
+      { label: 'Safari ext.', sub: 'Keys here', highlight: true },
+      { label: 'LLM API' },
+    ],
+  },
+  {
+    badge: 'In-wallet browser',
+    title: 'Any web app on iOS and Android',
+    desc: 'Open any https app by URL in the built-in browser of the iOS or Android app. It connects through an injected wallet bridge, no extension needed.',
+    flow: [
+      { label: 'Web app', sub: 'in-wallet' },
+      { label: 'Mobile app', sub: 'Keys here', highlight: true },
+      { label: 'LLM API' },
+    ],
+  },
+  {
+    badge: 'CLI & desktop',
+    title: 'Terminal tools and agents',
+    desc: '@byoky/bridge is a localhost proxy that hands requests to the extension over native messaging. Works with OpenClaw, Claude Code and Hermes.',
+    flow: [
+      { label: 'CLI', sub: 'HTTP' },
+      { label: 'Bridge', sub: 'localhost' },
+      { label: 'Extension', sub: 'Keys here', highlight: true },
+    ],
+  },
+  {
+    badge: 'Your backend',
+    title: 'Server-side LLM calls',
+    desc: 'Your server makes calls through the user’s browser over a WebSocket you host. Your backend never sees the key, and no Byoky server is involved.',
+    flow: [
+      { label: 'Backend', sub: 'your WS' },
+      { label: 'Browser', sub: 'SDK' },
+      { label: 'Extension', sub: 'Keys here', highlight: true },
+    ],
+  },
+  {
+    badge: 'Between devices',
+    title: 'No sync. Bring your backup.',
+    desc: 'Wallets don\u2019t pair or sync. To use your keys on another device, export a password-protected .byoky backup and import it there.',
+    flow: [
+      { label: 'Wallet', sub: 'device A' },
+      { label: '.byoky file', sub: 'encrypted', highlight: true },
+      { label: 'Wallet', sub: 'device B' },
+    ],
+  },
+];
+
+function WhereAppsConnect() {
   return (
-    <section className="zero-cost-section">
-      <div className="zero-cost-glow" aria-hidden />
+    <section className="wallet-section">
       <div className="container">
         <FadeIn>
-          <h2 className="zero-cost-heading">
-            Build AI apps.<br />
-            <span className="hero-gradient">Your users bring the keys.</span>
-          </h2>
-          <p className="zero-cost-body">
-            Stop worrying about API bills killing your project.
-            Your users connect their own AI keys through Byoky — you
-            get the full power of Claude, GPT-4, Gemini, and 10 more
-            providers without spending a cent on infrastructure. Users
-            pay their chosen provider directly.
-          </p>
+          <div className="wallet-section-head">
+            <h2>Works where your apps run.</h2>
+            <p>
+              Each wallet serves the apps on its own device. Every path ends at a
+              wallet you hold.
+            </p>
+          </div>
         </FadeIn>
-        <div className="zero-cost-grid">
-          <FadeIn delay={0.1}>
-            <div className="zero-cost-card">
-              <span className="zero-cost-stat">$0</span>
-              <span className="zero-cost-label">your infrastructure cost — forever</span>
-            </div>
-          </FadeIn>
-          <FadeIn delay={0.2}>
-            <div className="zero-cost-card">
-              <AnimatedCounter value={13} />
-              <span className="zero-cost-label">AI providers supported</span>
-            </div>
-          </FadeIn>
-          <FadeIn delay={0.3}>
-            <div className="zero-cost-card">
-              <AnimatedCounter value={2} />
-              <span className="zero-cost-label">lines to integrate</span>
-            </div>
-          </FadeIn>
+        <div className="side-by-side-grid">
+          {connectTargets.map((t, i) => (
+            <FadeIn key={t.badge} delay={0.05 * (i % 2)}>
+              <div className="sbs-card">
+                <div className="sbs-badge">{t.badge}</div>
+                <h3 className="sbs-title">{t.title}</h3>
+                <p className="sbs-desc">{t.desc}</p>
+                <div className="openclaw-flow" style={{ marginTop: 16, marginBottom: 0 }}>
+                  {t.flow.map((step, j) => (
+                    <FlowStep key={`${j}-${step.label}`} step={step} last={j === t.flow.length - 1} />
+                  ))}
+                </div>
+              </div>
+            </FadeIn>
+          ))}
         </div>
-        <FadeIn delay={0.4}>
-          <p className="zero-cost-pitch">
-            Indie dev? Startup? Side project? It doesn&apos;t matter.
-            If your users have API keys, you have a product. No billing
-            integration, no usage caps, no margin pressure.
-          </p>
-        </FadeIn>
       </div>
     </section>
+  );
+}
+
+function FlowStep({ step, last }: { step: { label: string; sub?: string; highlight?: boolean }; last: boolean }) {
+  return (
+    <>
+      <div className={`openclaw-flow-step${step.highlight ? ' openclaw-flow-highlight' : ''}`}>
+        <span className="openclaw-flow-label">{step.label}</span>
+        {step.sub && <span className="openclaw-flow-sub">{step.sub}</span>}
+      </div>
+      {!last && <span className="openclaw-flow-arrow">&rarr;</span>}
+    </>
   );
 }
 
@@ -451,16 +530,17 @@ function OpenClawCTA() {
                 in OpenClaw.
               </h2>
               <p>
-                Use an existing <strong>Claude Pro/Max</strong> subscription, or
-                accept a gifted token budget from someone who&apos;s sharing theirs.
-                Either way, no new API account needed — just a 5-minute setup.
+                Use the keys already in your wallet, or an existing <strong>Claude Pro/Max</strong>{' '}
+                subscription via a setup token. The plugin routes through the local
+                bridge, so your keys stay in the wallet even when the agent runs in
+                your terminal.
               </p>
               <div className="openclaw-cta-actions">
                 <a href="/openclaw" className="btn btn-primary">
                   Read the 5-minute setup
                 </a>
-                <a href="/token-pool" className="btn btn-secondary">
-                  Browse free gifts
+                <a href="/claude-code" className="btn btn-secondary">
+                  Claude Code guide
                 </a>
               </div>
             </div>
@@ -574,7 +654,8 @@ function ForDevelopers() {
           <h2>Build AI apps.<br />Your users bring the keys.</h2>
           <p className="subtitle">
             Integrate with any AI provider using their native SDK.
-            Just swap in Byoky&apos;s fetch — keys never touch your app.
+            Just swap in Byoky&apos;s fetch. Keys never touch your app, and
+            your users pay their provider directly.
           </p>
           <p className="subtitle" style={{ fontSize: 14, marginBottom: 0, marginTop: 0 }}>
             <code style={{ fontFamily: 'var(--font-code)', color: 'var(--teal-light)', fontSize: 13 }}>npm install @byoky/sdk</code> to add to an existing project
@@ -604,8 +685,21 @@ function ForDevelopers() {
                   <div>
                     <h4>Streaming out of the box</h4>
                     <p>
-                      Full SSE streaming support through the extension proxy. No
+                      Full SSE streaming support through the wallet proxy. No
                       special handling needed.
+                    </p>
+                  </div>
+                </div>
+                <div className="dev-feature">
+                  <div className="dev-feature-icon">
+                    <CheckIcon />
+                  </div>
+                  <div>
+                    <h4>Built-in connect modal</h4>
+                    <p>
+                      <code style={{ fontFamily: 'var(--font-code)', color: 'var(--teal-light)', fontSize: 13 }}>modal: true</code> handles the connect flow. No wallet
+                      yet? It shows install links, and on phones it points users to
+                      the Byoky app&apos;s built-in browser.
                     </p>
                   </div>
                 </div>
@@ -617,7 +711,7 @@ function ForDevelopers() {
                     <h4>Backend relay</h4>
                     <p>
                       Your server makes LLM calls through the user&apos;s browser
-                      via WebSocket. Keys never leave the extension — even server-side.
+                      over a WebSocket you host. Keys never leave the wallet, even server-side.
                     </p>
                   </div>
                 </div>
@@ -630,18 +724,6 @@ function ForDevelopers() {
                     <p>
                       The Byoky Bridge lets CLI tools and desktop apps route
                       through the wallet via a local HTTP proxy. Keys stay in the extension.
-                    </p>
-                  </div>
-                </div>
-                <div className="dev-feature">
-                  <div className="dev-feature-icon">
-                    <CheckIcon />
-                  </div>
-                  <div>
-                    <h4>Token gifts</h4>
-                    <p>
-                      Let users share token access without sharing API keys.
-                      Relay-backed with budget caps, expiry, and instant revocation.
                     </p>
                   </div>
                 </div>
@@ -675,7 +757,7 @@ function CodeBlock() {
             <span className="tk">const</span> <span className="tp">byoky</span> <span className="tn">=</span> <span className="tk">new</span> <span className="tt">Byoky</span><span className="tn">();</span>{'\n'}
             <span className="tk">const</span> <span className="tp">session</span> <span className="tn">=</span> <span className="tk">await</span> <span className="tp">byoky</span><span className="tn">.</span><span className="tp">connect</span><span className="tn">(</span><span className="tn">{'{'}</span>{'\n'}
             {'  '}<span className="tp">providers</span><span className="tn">:</span> <span className="tn">[{'{'}</span> <span className="tp">id</span><span className="tn">:</span> <span className="ts">&apos;anthropic&apos;</span><span className="tn">,</span> <span className="tp">required</span><span className="tn">:</span> <span className="tv">true</span> <span className="tn">{'}]'}</span><span className="tn">,</span>{'\n'}
-            {'  '}<span className="tp">modal</span><span className="tn">:</span> <span className="tv">true</span><span className="tn">,</span> <span className="tc">{'// built-in connect UI with QR code'}</span>{'\n'}
+            {'  '}<span className="tp">modal</span><span className="tn">:</span> <span className="tv">true</span><span className="tn">,</span> <span className="tc">{'// built-in connect + install UI'}</span>{'\n'}
             <span className="tn">{'}'});</span>{'\n'}
             {'\n'}
             <span className="tc">{'// Use the native Anthropic SDK — keys never exposed'}</span>{'\n'}
@@ -694,12 +776,12 @@ function CodeBlock() {
 
 function Security() {
   const items = [
-    { icon: <LockIcon />, title: 'AES-256-GCM', desc: 'PBKDF2 600K iterations. Web Crypto API.' },
-    { icon: <ShieldIcon />, title: 'Zero key exposure', desc: 'Keys never leave your device. Apps get session tokens.' },
-    { icon: <EyeIcon />, title: 'Full audit log', desc: 'Every request logged with origin, provider, and status.' },
-    { icon: <GaugeIcon />, title: 'Spending caps', desc: 'Token allowances per app. Proxy enforces limits.' },
-    { icon: <GiftIcon />, title: 'Relay gifting', desc: 'Share tokens without sharing keys. Budget-capped.' },
-    { icon: <CloudOffIcon />, title: 'Local by default', desc: 'Opt-in cloud sync. No telemetry. No logging.' },
+    { icon: <LockIcon />, title: 'AES-256-GCM', desc: 'PBKDF2 600K iterations. Keychain / Keystore-backed on mobile.' },
+    { icon: <ShieldIcon />, title: 'Zero key exposure', desc: 'Keys never leave the wallet. Apps get per-session tokens.' },
+    { icon: <EyeIcon />, title: 'Full audit log', desc: 'Every request logged locally with origin, provider, and status.' },
+    { icon: <GaugeIcon />, title: 'Spending caps', desc: 'Token allowances per app. The proxy enforces limits.' },
+    { icon: <ArchiveIcon />, title: 'Encrypted backup', desc: 'Export .byoky files protected by a separate password.' },
+    { icon: <CloudOffIcon />, title: 'No servers', desc: 'No accounts, no cloud sync, no relay, no telemetry.' },
   ];
 
   return (
@@ -726,144 +808,6 @@ function Security() {
   );
 }
 
-/* ─── Showcase ────────────────────────────────── */
-
-const showcaseItems: Array<{ label: string; desc: string; scene: MockScene }> = [
-  {
-    label: 'Connect & Chat',
-    desc: 'One approval, then every request streams through the wallet — your keys never touch the page.',
-    scene: 'connect-chat',
-  },
-  {
-    label: 'Cross-Provider Routing',
-    desc: 'An app written for one provider hot-swaps to any other. The translation layer rewrites the call on the fly.',
-    scene: 'cross-provider',
-  },
-  {
-    label: 'Mobile QR Pairing',
-    desc: 'No extension? Scan a QR with the Byoky app — your phone becomes the relay. Same approval, same chat.',
-    scene: 'mobile-qr',
-  },
-  {
-    label: 'Token Gifts',
-    desc: 'Share a budget-capped link to anyone. They redeem it in their wallet — your API key never leaves yours.',
-    scene: 'token-gift',
-  },
-];
-
-function Showcase() {
-  return (
-    <section className="showcase-section">
-      <div className="container">
-        <FadeIn>
-          <h2>See it in action.</h2>
-        </FadeIn>
-        <FadeIn delay={0.1}>
-          <div className="showcase-tour">
-            <ExtensionMock scene="walkthrough" size="hero" />
-            <p className="showcase-tour-caption">
-              Live preview — click Connect, approve in the wallet, watch the chat stream. Keys never leave your device.
-            </p>
-          </div>
-        </FadeIn>
-        <div className="showcase-grid">
-          {showcaseItems.map((item, i) => (
-            <FadeIn key={item.label} delay={0.1 * i}>
-              <div className="showcase-cell">
-                <div className="showcase-video">
-                  <ExtensionMock scene={item.scene} size="cell" />
-                </div>
-                <div className="showcase-info">
-                  <h3>{item.label}</h3>
-                  <p>{item.desc}</p>
-                </div>
-              </div>
-            </FadeIn>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-/* ─── Providers ────────────────────────────────── */
-
-function Providers() {
-  return <ProviderMarquee />;
-}
-
-/* ─── Cross-Provider Routing ───────────────────── */
-
-function CrossProviderRouting() {
-  return (
-        <FadeIn>
-          <div className="sbs-card">
-            <div className="sbs-badge">Cross-Provider</div>
-            <div className="sbs-icon-row">
-              <ShuffleIcon />
-            </div>
-            <h3 className="sbs-title">One App. Any Provider.</h3>
-            <p className="sbs-desc">
-              Move an app from a Claude group into a GPT group — the wallet translates
-              requests on the fly. Anthropic ↔ OpenAI ↔ Gemini ↔ Cohere. No code changes.
-            </p>
-            <div className="openclaw-flow" style={{ marginTop: 16 }}>
-              <div className="openclaw-flow-step">
-                <span className="openclaw-flow-label">Your App</span>
-                <span className="openclaw-flow-sub">Anthropic SDK</span>
-              </div>
-              <span className="openclaw-flow-arrow">&rarr;</span>
-              <div className="openclaw-flow-step openclaw-flow-highlight">
-                <span className="openclaw-flow-label">Wallet</span>
-                <span className="openclaw-flow-sub">Translates</span>
-              </div>
-              <span className="openclaw-flow-arrow">&rarr;</span>
-              <div className="openclaw-flow-step">
-                <span className="openclaw-flow-label">GPT-4o</span>
-                <span className="openclaw-flow-sub">OpenAI API</span>
-              </div>
-            </div>
-          </div>
-        </FadeIn>
-  );
-}
-
-/* ─── Mobile Wallet ────────────────────────────── */
-
-function MobileWallet() {
-  return (
-        <FadeIn delay={0.1}>
-          <div className="sbs-card">
-            <div className="sbs-badge">Mobile</div>
-            <div className="sbs-icon-row">
-              <PhoneIcon />
-            </div>
-            <h3 className="sbs-title">No Extension? Use Your Phone.</h3>
-            <p className="sbs-desc">
-              Scan a QR code with the Byoky iOS or Android app. Your keys proxy
-              through your phone. Works on any browser, any computer.
-            </p>
-            <div className="openclaw-flow" style={{ marginTop: 16 }}>
-              <div className="openclaw-flow-step">
-                <span className="openclaw-flow-label">Browser</span>
-                <span className="openclaw-flow-sub">Any device</span>
-              </div>
-              <span className="openclaw-flow-arrow">&harr;</span>
-              <div className="openclaw-flow-step openclaw-flow-highlight">
-                <span className="openclaw-flow-label">Phone</span>
-                <span className="openclaw-flow-sub">Keys here</span>
-              </div>
-              <span className="openclaw-flow-arrow">&rarr;</span>
-              <div className="openclaw-flow-step">
-                <span className="openclaw-flow-label">LLM API</span>
-              </div>
-            </div>
-          </div>
-        </FadeIn>
-  );
-}
-
-
 /* ─── Open Source ───────────────────────────────── */
 
 function ClosingStrip() {
@@ -871,7 +815,7 @@ function ClosingStrip() {
     <section className="closing-strip">
       <div className="container">
         <div className="closing-strip-inner">
-          <span className="closing-strip-label">Open source · MIT licensed</span>
+          <span className="closing-strip-label">Fully open source · MIT licensed · No hosted services</span>
           <div className="closing-strip-actions">
             <GitHubStarButton repo="MichaelLod/byoky" />
             <InstallWalletButton className="btn btn-primary btn-sm">
@@ -896,13 +840,13 @@ function Footer() {
         <div className="footer-grid">
           <div className="footer-col">
             <span className="footer-brand">Byoky</span>
-            <span className="footer-note">The AI token network.</span>
+            <span className="footer-note">The MetaMask for API keys.</span>
           </div>
           <div className="footer-col">
             <span className="footer-col-title">Product</span>
             <a href="/docs">Docs</a>
             <a href="/demo">Demo</a>
-            <a href="/token-pool">Token Pool</a>
+            <a href="/chat">Chat</a>
             <a href="/openclaw">OpenClaw</a>
           </div>
           <div className="footer-col">
@@ -910,6 +854,7 @@ function Footer() {
             <a href="https://github.com/MichaelLod/byoky" target="_blank" rel="noopener noreferrer">GitHub</a>
             <a href="https://github.com/MichaelLod/byoky/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a>
             <a href="/blog">Blog</a>
+            <a href="/support">Support</a>
             <a href="/privacy">Privacy</a>
             <a href="/terms">Terms</a>
           </div>
@@ -934,14 +879,6 @@ function DownloadIcon() {
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
       <polyline points="7 10 12 15 17 10" />
       <line x1="12" y1="15" x2="12" y2="3" />
-    </svg>
-  );
-}
-
-function GitHubIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
     </svg>
   );
 }
@@ -1011,11 +948,12 @@ function ArchiveIcon() {
   );
 }
 
-function PhoneIcon() {
+function LayersIcon() {
   return (
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
-      <line x1="12" y1="18" x2="12.01" y2="18" />
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="12 2 2 7 12 12 22 7 12 2" />
+      <polyline points="2 17 12 22 22 17" />
+      <polyline points="2 12 12 17 22 12" />
     </svg>
   );
 }
@@ -1037,39 +975,11 @@ function CheckIcon() {
   );
 }
 
-function GiftIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M20 12v10H4V12" />
-      <path d="M2 7h20v5H2z" />
-      <path d="M12 22V7" />
-      <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z" />
-      <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" />
-    </svg>
-  );
-}
-
 function GaugeIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z" />
       <path d="M12 6v6l4 2" />
-    </svg>
-  );
-}
-
-function AppleIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M17.05 12.04c-.03-2.93 2.39-4.34 2.5-4.41-1.36-1.99-3.48-2.27-4.24-2.3-1.81-.18-3.53 1.06-4.45 1.06-.92 0-2.34-1.04-3.85-1.01-1.98.03-3.81 1.15-4.83 2.92-2.06 3.57-.53 8.85 1.48 11.75.98 1.42 2.15 3.01 3.69 2.95 1.48-.06 2.04-.96 3.83-.96 1.79 0 2.29.96 3.86.93 1.59-.03 2.6-1.45 3.58-2.87 1.13-1.65 1.59-3.24 1.62-3.32-.04-.02-3.11-1.19-3.14-4.74zM14.13 3.71c.81-.99 1.36-2.36 1.21-3.71-1.17.05-2.59.78-3.43 1.76-.75.87-1.41 2.27-1.23 3.59 1.31.1 2.64-.66 3.45-1.64z" />
-    </svg>
-  );
-}
-
-function AndroidIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M17.523 15.341c-.5523 0-1-.4477-1-1s.4477-1 1-1 1 .4477 1 1-.4477 1-1 1m-11.046 0c-.5523 0-1-.4477-1-1s.4477-1 1-1 1 .4477 1 1-.4477 1-1 1m11.405-6.02 1.997-3.46a.416.416 0 0 0-.152-.567.416.416 0 0 0-.567.152l-2.022 3.503A12.595 12.595 0 0 0 12 7.812c-1.85 0-3.595.397-5.138 1.137L4.84 5.446a.416.416 0 0 0-.567-.152.416.416 0 0 0-.152.567l1.997 3.46C2.69 11.187.5 14.456 0 18.32h24c-.5-3.864-2.69-7.133-6.118-8.999" />
     </svg>
   );
 }

@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 export const metadata: Metadata = {
   title: 'Privacy Policy',
   description:
-    'How Byoky collects, uses, stores, and shares your data. Byoky runs locally by default; optional cloud sync stores keys encrypted with a password-derived key.',
+    'How Byoky handles your data. Byoky is a local wallet: your keys are encrypted on your device and Byoky operates no service that receives them, your prompts, or your usage.',
   alternates: {
     canonical: '/privacy',
   },
@@ -14,26 +14,25 @@ export default function Privacy() {
     <div className="container" style={{ paddingTop: '120px', paddingBottom: '80px', maxWidth: '680px' }}>
       <h1 style={{ fontSize: '32px', marginBottom: '8px' }}>Privacy Policy</h1>
       <p style={{ color: 'var(--text-muted)', marginBottom: '40px', fontSize: '14px' }}>
-        Last updated: May 1, 2026
+        Last updated: October 23, 2026
       </p>
 
       <Section title="Summary">
         <p>
-          Byoky runs locally by default. Your API keys and OAuth tokens are encrypted on your
-          device and never leave it unless you explicitly opt in to cloud sync at
-          vault.byoky.com. When you do, each credential is encrypted on your device before
-          upload — the plaintext never crosses the network — and stored as ciphertext in our
-          database. The decryption key is held in server memory during your active session so
-          features like gift relay and remote OpenClaw can work. This is not end-to-end
-          encryption — see the cloud sync section below. We do not run analytics, do not log
-          prompts or responses, and do not sell or share data with advertisers.
+          Byoky is a local wallet. Your API keys and OAuth tokens are encrypted on your device and
+          never leave it, except when the wallet sends a credential to the LLM provider it belongs
+          to in order to make a request that you, or an app you approved, initiated. Byoky does
+          not operate any service that receives your keys, prompts, responses, or usage data:
+          there are no Byoky accounts, no cloud sync, no relay, no gift or token-pool service, and
+          no app registry. The only service we operate is the byoky.com website. We do not run
+          analytics, do not log prompts or responses, and do not sell or share data with
+          advertisers.
         </p>
       </Section>
 
       <Section title="Who we are (data controller)">
         <p>
-          The data controller for the optional vault sync, gift relay, and the byoky.com website
-          is:
+          The data controller for the byoky.com website is:
         </p>
         <ul>
           <li>Michael Lodzik</li>
@@ -46,13 +45,17 @@ export default function Privacy() {
           </li>
         </ul>
         <p>
-          When you use Byoky in local-only mode (no vault account) there is no data controller
-          relationship with us, because no personal data ever reaches our servers.
+          The Byoky browser extension, the iOS and Android apps, the Byoky Bridge, and the SDK run
+          entirely on your own devices. Using them does not create a data controller relationship
+          with us, because no personal data from them ever reaches us.
         </p>
       </Section>
 
-      <Section title="What data we collect">
-        <p>We only collect the categories listed below. We do not collect anything else.</p>
+      <Section title="What data Byoky processes">
+        <p>
+          The Byoky software processes the categories below <strong>locally on your
+          device</strong>. None of it is sent to us.
+        </p>
         <ul>
           <li>
             <strong>Authentication credentials.</strong> The API keys and OAuth tokens you
@@ -61,65 +64,55 @@ export default function Privacy() {
             OpenRouter, Azure OpenAI).
           </li>
           <li>
-            <strong>Vault account data (only if you create one).</strong> A username you choose
-            (no email required), a password hash, and a server-wrapped session key so you can
-            sign back in after idle timeout.
-          </li>
-          <li>
-            <strong>Usage metadata (only if you use vault sync).</strong> For each LLM call
-            relayed by the vault: the calling app origin, provider ID, model name, response
-            status, and token counts. We do not store prompts, completions, IP addresses, or
-            user-agent strings.
-          </li>
-          <li>
             <strong>Local-only request log.</strong> A history of which apps used which
-            credentials, kept in your browser&apos;s local storage. This never leaves your
+            credentials, kept in the wallet&apos;s local storage. This never leaves your
             device.
           </li>
           <li>
-            <strong>App-permission settings.</strong> If you create alias groups or authorize
-            apps, the resulting policy mappings.
+            <strong>App-permission settings.</strong> If you create groups or authorize apps,
+            the resulting policy mappings, spending caps, and routing rules.
           </li>
           <li>
-            <strong>Gifts you create.</strong> If you share a key as a gift: the encrypted key,
-            the relay URL, the budget and expiration you set, and a running token-count.
+            <strong>Encrypted backups.</strong> If you export a <code>.byoky</code> backup
+            file, it is written to a location you choose and protected by a password you set.
+            We never receive it.
           </li>
         </ul>
+        <p>
+          When you visit byoky.com, our hosting provider processes standard HTTP request logs
+          for the website (see below). We do not collect anything else.
+        </p>
       </Section>
 
-      <Section title="How we collect your data">
+      <Section title="How data is collected">
         <ul>
           <li>
-            <strong>Directly from you.</strong> All authentication credentials, account data,
-            and gift configurations are entered by you in the extension or mobile app.
+            <strong>Directly from you.</strong> All authentication credentials and settings are
+            entered by you in the extension or mobile app and stay on your device.
           </li>
           <li>
-            <strong>Generated by your use of the Service.</strong> Usage metadata and the
-            local-only request log are generated as a byproduct of LLM calls you initiate. We
-            do not buy, scrape, or otherwise acquire personal data from third parties.
+            <strong>Generated by your use of the software.</strong> The local-only request log
+            is generated on your device as a byproduct of LLM calls you or your approved apps
+            initiate. We do not buy, scrape, or otherwise acquire personal data from third
+            parties.
           </li>
         </ul>
       </Section>
 
-      <Section title="How we use your data">
-        <p>We use the data described above only for these purposes:</p>
+      <Section title="How your data is used">
+        <p>The Byoky software uses the data described above only for these purposes:</p>
         <ul>
           <li>To authenticate you to the LLM providers whose keys you supplied.</li>
           <li>
-            To proxy LLM API calls on your behalf — locally from the extension, or via
-            vault.byoky.com when you have cloud sync enabled.
+            To proxy LLM API calls on your behalf, directly from the wallet on your device (the
+            extension or the mobile app) or through the Byoky Bridge on your own computer.
           </li>
           <li>
             To show you a per-app history of which credentials were used and how many tokens
             were consumed, so you can audit and revoke access.
           </li>
           <li>
-            To synchronize your credentials and policies across the devices you have linked to
-            the same vault account, if you opt in to cloud sync.
-          </li>
-          <li>
-            To enforce budget and expiration limits on gift links you create, and to relay
-            requests on the gift recipient&apos;s behalf.
+            To enforce the app permissions, groups, routing rules, and spending caps you set.
           </li>
         </ul>
         <p>
@@ -128,7 +121,7 @@ export default function Privacy() {
         </p>
       </Section>
 
-      <Section title="How we store your data">
+      <Section title="How your data is stored">
         <ul>
           <li>
             <strong>On your device.</strong> All credentials are encrypted with AES-256-GCM
@@ -137,35 +130,30 @@ export default function Privacy() {
             store. Your master password hash is stored locally for unlock verification only.
           </li>
           <li>
-            <strong>On our servers (only if you opt in to cloud sync).</strong> Encrypted
-            credentials, account records, request metadata, group/policy data, and gift records
-            are stored in a PostgreSQL database hosted on Railway, in the United States.
-            Plaintext credentials are never written to disk on the server.
-          </li>
-          <li>
-            <strong>In server memory (transient).</strong> When you sign in to your vault, your
-            decryption key is held in process memory and wrapped with a server-held secret in
-            the sessions table so you stay signed in across the session window. Logging out or
-            deleting the account evicts it.
+            <strong>Not on our servers.</strong> Byoky has no backend that stores credentials,
+            account records, request metadata, or policy data. Nothing you add to the wallet is
+            uploaded to us.
           </li>
         </ul>
       </Section>
 
-      <Section title="How we share your data">
-        <p>We share your data only with the following recipients, and only as described:</p>
+      <Section title="How data is shared">
+        <p>Data leaves your device only in the following cases:</p>
         <ul>
           <li>
             <strong>LLM providers you have configured.</strong> When you make an LLM call,
-            Byoky forwards your prompt and the relevant API key or OAuth token to the
-            provider you selected (Anthropic, OpenAI, Google Gemini, Mistral, Cohere, xAI,
+            the wallet forwards your prompt and the relevant API key or OAuth token directly to
+            the provider you selected (Anthropic, OpenAI, Google Gemini, Mistral, Cohere, xAI,
             DeepSeek, Perplexity, Groq, Together AI, Fireworks AI, OpenRouter, or Azure
             OpenAI). The provider then handles the request under its own privacy policy, which
             we do not control.
           </li>
           <li>
-            <strong>Railway (US) — infrastructure subprocessor.</strong> Hosts our PostgreSQL
-            database and the vault server. Railway only ever sees the encrypted data described
-            above and acts strictly on our instructions.
+            <strong>Apps you connect.</strong> When you approve an app, or open one in the
+            mobile app&apos;s built-in browser, it receives a session token and the responses
+            to the requests it makes through the wallet. It never
+            receives your keys. What the app does with your prompts and responses is governed by
+            that app&apos;s own privacy policy.
           </li>
           <li>
             <strong>Vercel (US) — infrastructure subprocessor.</strong> Hosts the byoky.com
@@ -173,9 +161,10 @@ export default function Privacy() {
             HTTP request logs for the website itself.
           </li>
           <li>
-            <strong>Gift recipients you choose.</strong> If you create a gift link, the
-            recipient can spend the gifted credit subject to the limits you set, until you
-            revoke the gift or it expires.
+            <strong>Resources loaded by the website.</strong> Some byoky.com pages load provider
+            icons from unpkg.com and the GitHub star count from api.github.com directly in your
+            browser. Those services receive your browser&apos;s request under their own
+            policies.
           </li>
         </ul>
         <p>
@@ -185,27 +174,13 @@ export default function Privacy() {
         </p>
       </Section>
 
-      <Section title="Optional cloud sync (vault.byoky.com)">
+      <Section title="No accounts, no cloud sync">
         <p>
-          Cloud sync is disabled by default. You must create a vault account and toggle it on
-          in Settings.
-        </p>
-        <p>
-          <strong>Encryption model.</strong> On login, your device and our server independently
-          derive the same AES-256-GCM key from your password using PBKDF2 (600,000 iterations)
-          against a per-user salt. Your device uses its copy to encrypt each API key before
-          upload, so the plaintext key never traverses the network. The server uses its copy —
-          held in memory during your session, and wrapped with a server-held secret in the
-          sessions table — to decrypt stored ciphertext when relaying gift and remote-OpenClaw
-          traffic on your behalf. This means it is <strong>not end-to-end encryption</strong>:
-          a compromise of our server or the wrapping secret while your session is active could
-          expose your credentials. Logging out evicts the key; deleting your account removes it
-          entirely.
-        </p>
-        <p>
-          You can delete your vault account at any time from Settings. Deleting your account
-          removes your user record, all synced credentials, sessions, groups, request logs, and
-          gifts from our database within 30 days.
+          Byoky has no user accounts and no cloud sync. Your credentials exist only in the wallet
+          on the device where you added them. To move them to another device, you can export a{' '}
+          <code>.byoky</code> backup file protected by a separate password and import it on the
+          other device. Where you keep that file is up to you; it does not pass through our
+          servers.
         </p>
       </Section>
 
@@ -267,20 +242,8 @@ export default function Privacy() {
         <ul>
           <li>
             <strong>Local data.</strong> Stays on your device for as long as you have the
-            extension or mobile app installed. Uninstalling the extension removes it.
-          </li>
-          <li>
-            <strong>Vault account, credentials, groups, sessions.</strong> Retained until you
-            delete the account; deleted within 30 days of the deletion request.
-          </li>
-          <li>
-            <strong>Vault request log.</strong> Retained for 90 days for usage display and
-            abuse detection, then automatically deleted. Deleted immediately if you delete the
-            account.
-          </li>
-          <li>
-            <strong>Gift records.</strong> Retained until you revoke the gift or it expires;
-            removed automatically on expiration.
+            extension or mobile app installed. Uninstalling the extension or app removes it.
+            Backup files you exported stay wherever you saved them until you delete them.
           </li>
           <li>
             <strong>Website server logs (Vercel).</strong> Standard HTTP logs retained for up
@@ -291,27 +254,26 @@ export default function Privacy() {
 
       <Section title="International data transfers">
         <p>
-          Our hosting providers (Railway, Vercel) operate from the United States. If you are
-          located in the European Economic Area, the United Kingdom, or Switzerland, using the
-          vault sync feature involves an international transfer of personal data. We rely on
-          the European Commission&apos;s Standard Contractual Clauses (SCCs) and the providers&apos;
-          implementation of equivalent safeguards as our legal mechanism for these transfers.
-          Because credentials are stored encrypted with a key the server derives only in
-          memory during your session, the data at rest in the US has no plaintext exposure.
+          Our website hosting provider (Vercel) operates from the United States. If you are
+          located in the European Economic Area, the United Kingdom, or Switzerland, visiting
+          byoky.com involves an international transfer of the HTTP request data described above.
+          We rely on the European Commission&apos;s Standard Contractual Clauses (SCCs) and the
+          provider&apos;s implementation of equivalent safeguards as our legal mechanism for
+          this transfer. The Byoky software itself transfers no data to us.
         </p>
       </Section>
 
       <Section title="Your rights under GDPR">
         <p>
-          If the GDPR applies to you, you have the following rights with respect to data you
-          have given us via vault sync:
+          If the GDPR applies to you, you have the following rights with respect to personal
+          data we process about you:
         </p>
         <ul>
           <li>Right of access (Art. 15) — request a copy of your data.</li>
           <li>Right to rectification (Art. 16) — correct inaccurate data.</li>
-          <li>Right to erasure (Art. 17) — delete your account and associated data.</li>
+          <li>Right to erasure (Art. 17).</li>
           <li>Right to restriction of processing (Art. 18).</li>
-          <li>Right to data portability (Art. 20) — export your synced credentials.</li>
+          <li>Right to data portability (Art. 20).</li>
           <li>Right to object (Art. 21).</li>
           <li>
             Right to lodge a complaint with the Austrian Data Protection Authority
@@ -323,23 +285,23 @@ export default function Privacy() {
           </li>
         </ul>
         <p>
-          You can exercise most of these rights directly inside the extension Settings (export,
-          delete account). For anything else, email{' '}
+          Data held by the Byoky software lives only on your device: you can export it or delete
+          it in the wallet&apos;s Settings, or remove it by uninstalling. For anything else,
+          email{' '}
           <a href="mailto:privacy@byoky.com" style={{ color: 'var(--teal-light)' }}>
             privacy@byoky.com
           </a>
           . We respond within 30 days.
         </p>
         <p>
-          Legal basis for processing under GDPR Art. 6: performance of the contract you enter
-          when you create a vault account (Art. 6(1)(b)) for credentials, account data, and
-          request relaying; our legitimate interest in preventing abuse (Art. 6(1)(f)) for the
-          90-day request log.
+          Legal basis for processing under GDPR Art. 6: our legitimate interest in operating and
+          securing the website (Art. 6(1)(f)) for website request logs.
         </p>
       </Section>
 
       <Section title="What Byoky does NOT do">
         <ul>
+          <li>We do not operate servers that receive your keys, prompts, responses, or usage data.</li>
           <li>We do not collect analytics, telemetry, or tracking data in the extension.</li>
           <li>We do not track your browsing activity.</li>
           <li>We do not log prompts, completions, IP addresses, or user agents.</li>
@@ -364,8 +326,8 @@ export default function Privacy() {
 
       <Section title="Open source">
         <p>
-          Byoky — including the vault server — is fully open source under the MIT license. You
-          can audit every line at{' '}
+          Byoky is fully open source under the MIT license, including the extension, the mobile
+          apps, the bridge, the SDK, and this website. You can audit every line at{' '}
           <a href="https://github.com/MichaelLod/byoky" style={{ color: 'var(--teal-light)' }}>
             github.com/MichaelLod/byoky
           </a>
@@ -376,8 +338,7 @@ export default function Privacy() {
       <Section title="Changes to this policy">
         <p>
           If we make material changes to this policy we will update the &ldquo;Last
-          updated&rdquo; date and, for existing vault users, surface a notice in the extension
-          on next unlock.
+          updated&rdquo; date on this page.
         </p>
       </Section>
 

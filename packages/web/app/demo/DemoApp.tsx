@@ -199,7 +199,24 @@ export function DemoApp() {
                 >
                   Firefox Extension
                 </a>
+                <a
+                  href="https://apps.apple.com/app/byoky/id6760779919"
+                  className="btn btn-ghost"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  iOS App
+                </a>
+                <a
+                  href="https://play.google.com/store/apps/details?id=com.byoky.app"
+                  className="btn btn-ghost"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Android App
+                </a>
               </div>
+              <p style={{ marginTop: 12 }}>On a phone? Open this page in the Byoky app&apos;s built-in browser.</p>
             </div>
           </div>
         ) : (

@@ -22,15 +22,25 @@ export default function Support() {
           <li>
             <strong>What is Byoky?</strong>
             <p>
-              Byoky is a secure browser extension that acts as a wallet for your LLM API keys.
-              It lets you connect to any compatible web app without pasting your keys into third-party sites.
+              Byoky is the MetaMask for API keys: a wallet for your AI credentials, available as a
+              browser extension and as iOS and Android apps. Apps connect to the wallet instead of
+              asking for your keys, and the wallet makes their LLM calls for them.
             </p>
           </li>
           <li>
             <strong>Are my API keys safe?</strong>
             <p>
               Yes. Your keys are encrypted with AES-256-GCM and never leave your device. API requests
-              go directly from the extension to the provider — no intermediary servers.
+              go directly from the wallet to the provider — no intermediary servers.
+            </p>
+          </li>
+          <li>
+            <strong>Do I need an account? Is there cloud sync?</strong>
+            <p>
+              No. Byoky has no accounts, no cloud sync and no servers. Your keys live only in the
+              wallet on your device. To move them to another device, export an encrypted{' '}
+              <code>.byoky</code> backup file, protected by a password you choose, and import it
+              there.
             </p>
           </li>
           <li>
@@ -42,9 +52,13 @@ export default function Support() {
             </p>
           </li>
           <li>
-            <strong>Which browsers are supported?</strong>
+            <strong>Where does Byoky work?</strong>
             <p>
-              Chrome, Firefox, and Safari on iOS. Safari on macOS is coming soon.
+              Chrome and Firefox on desktop, Safari on iPhone and iPad (through the Byoky Safari
+              extension, included with the iOS app), and the built-in browser of the iOS and Android
+              apps, where you can
+              open any https web app by URL. CLI tools on desktop connect through{' '}
+              <code>@byoky/bridge</code>. Safari on macOS is coming soon.
             </p>
           </li>
           <li>

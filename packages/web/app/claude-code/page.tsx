@@ -2,24 +2,24 @@ import type { Metadata } from 'next';
 import { InstallWithAI } from './InstallWithAI';
 
 export const metadata: Metadata = {
-  title: 'Run Claude Code with Byoky — free, on your existing Claude Pro/Max plan',
+  title: 'Run Claude Code with Byoky — on your existing Claude Pro/Max plan',
   description:
-    'Use Claude Code — Anthropic’s official CLI — with a free Byoky token gift or your existing Claude Pro/Max subscription. Zero API credits, keys never leave your machine.',
+    'Use Claude Code — Anthropic’s official CLI — through your Byoky wallet with your existing Claude Pro/Max subscription or your own Anthropic API key. Keys never leave your machine.',
   alternates: {
     canonical: '/claude-code',
   },
   openGraph: {
-    title: 'Run Claude Code with Byoky — free, on your existing Claude Pro/Max plan',
+    title: 'Run Claude Code with Byoky — on your existing Claude Pro/Max plan',
     description:
-      'Point Claude Code at the Byoky bridge and run it on a gifted credential or your Claude Pro/Max subscription. Up in 5 minutes.',
+      'Point Claude Code at the Byoky bridge and run it on your Claude Pro/Max subscription or your own API key. Up in 5 minutes.',
     url: 'https://byoky.com/claude-code',
     type: 'article',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Run Claude Code with Byoky — free, on your existing Claude Pro/Max plan',
+    title: 'Run Claude Code with Byoky — on your existing Claude Pro/Max plan',
     description:
-      'Point Claude Code at the Byoky bridge and run it on a gifted credential or your Claude Pro/Max subscription.',
+      'Point Claude Code at the Byoky bridge and run it on your Claude Pro/Max subscription or your own API key.',
   },
 };
 
@@ -34,7 +34,7 @@ export default function ClaudeCodeTutorial() {
         <Step
           n={1}
           title="Install the Byoky wallet"
-          subtitle="The wallet holds the Anthropic credential (yours, gifted, or a Claude Pro/Max setup token) and proxies every request. Claude Code runs on your desktop, so the wallet needs to live in a desktop browser on the same machine."
+          subtitle="The wallet holds the Anthropic credential (your API key or a Claude Pro/Max setup token) and proxies every request. Claude Code runs on your desktop, so the wallet needs to live in a desktop browser on the same machine."
         >
           <p>Pick your browser:</p>
           <div className="oc-install-grid">
@@ -58,25 +58,19 @@ export default function ClaudeCodeTutorial() {
             </a>
           </div>
           <p className="oc-note oc-note-muted">
-            iOS and Android wallets exist but can&apos;t host Claude Code —
-            the <code>claude</code> CLI and the Byoky Bridge need a desktop
-            OS. (The mobile wallets are for gift senders or browsing the
-            token pool on the go.)
+            The iOS and Android wallets can&apos;t host Claude Code — the{' '}
+            <code>claude</code> CLI and the Byoky Bridge need a desktop OS and
+            the browser extension. The mobile wallets serve web apps on the
+            phone itself.
           </p>
         </Step>
 
         <Step
           n={2}
           title="Add an Anthropic credential"
-          subtitle="Three options — pick whichever fits."
+          subtitle="Two options — pick whichever fits."
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <div className="oc-option-card">
-              <strong>Free token gift</strong> — grab one from the{' '}
-              <a className="oc-link" href="/token-pool">Token Pool</a>. Filter
-              for Anthropic. The gifter&apos;s key runs the calls; you just
-              burn their budget.
-            </div>
             <div className="oc-option-card">
               <strong>Claude Pro/Max setup token</strong> — run{' '}
               <code>claude setup-token</code> in your terminal and paste the
@@ -149,9 +143,6 @@ claude`}</Code>
             login prompt. The value doesn&apos;t matter; the bridge strips the
             auth header and injects the real credential from your wallet. Token
             usage shows up in the wallet&apos;s <strong>Sessions</strong> view.
-            If you&apos;re using a gifted credential, the gifter&apos;s budget
-            ticks down in real time and the session stops cleanly when it hits
-            zero.
           </p>
           <p className="oc-note oc-note-muted">
             <strong>Fresh Claude Code install?</strong> The wizard may still
@@ -163,8 +154,8 @@ claude`}</Code>
           </p>
           <p className="oc-note oc-note-muted">
             Pro tip: run <code>claude --model claude-sonnet-4-5</code> (or
-            whichever model the gifter&apos;s plan covers) if you hit a model
-            access error.
+            whichever model your plan covers) if you hit a model access
+            error.
           </p>
         </Step>
 
@@ -184,7 +175,7 @@ function Hero() {
   return (
     <header className="oc-hero">
       <div className="oc-eyebrow">Claude Code × Byoky</div>
-      <h1>Run Claude Code — on your Pro/Max plan or a free gift.</h1>
+      <h1>Run Claude Code — on your Pro/Max plan, through your wallet.</h1>
       <div style={{
         display: 'flex', gap: '16px', justifyContent: 'center',
         flexWrap: 'wrap', margin: '24px 0',
@@ -199,7 +190,7 @@ function Hero() {
       </div>
       <p className="oc-lede">
         Point Anthropic&apos;s official CLI at the Byoky bridge.<br />
-        Zero API credits. Keys stay in your wallet.
+        No API credits needed. Keys stay in your wallet.
       </p>
       <div className="oc-cta-row" style={{ justifyContent: 'center', alignItems: 'center' }}>
         <a className="btn btn-primary" href="#step-1" style={{ minWidth: '220px', textAlign: 'center', justifyContent: 'center' }}>
@@ -236,28 +227,8 @@ function VersionHint() {
 function FreeCallout() {
   return (
     <div className="oc-paths">
-      <div className="oc-paths-heading">Two ways to run Claude Code for free</div>
+      <div className="oc-paths-heading">Two ways to run Claude Code</div>
       <div className="oc-paths-grid">
-        <div className="oc-path-card">
-          <div className="oc-path-icon" aria-hidden>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M20 12v10H4V12" />
-              <path d="M2 7h20v5H2z" />
-              <path d="M12 22V7" />
-              <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z" />
-              <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" />
-            </svg>
-          </div>
-          <h3>Token gift from the token pool</h3>
-          <p>
-            Anyone can gift Anthropic token access on the{' '}
-            <a className="oc-link" href="/token-pool">Byoky token pool</a>.
-            Claude Code runs entirely on the gifter&apos;s budget — capped,
-            revocable, and proxied through their wallet so their key never
-            leaves their machine.
-          </p>
-          <p className="oc-path-tag">No card, no signup, no Anthropic account.</p>
-        </div>
         <div className="oc-path-card">
           <div className="oc-path-icon" aria-hidden>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -274,6 +245,20 @@ function FreeCallout() {
           </p>
           <p className="oc-path-tag">Uses your existing plan.</p>
         </div>
+        <div className="oc-path-card">
+          <div className="oc-path-icon" aria-hidden>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4" />
+            </svg>
+          </div>
+          <h3>Your Anthropic API key</h3>
+          <p>
+            Already on Anthropic&apos;s API tier? Keep the key in your wallet
+            instead of your shell config. Claude Code calls it through the
+            bridge and never sees it.
+          </p>
+          <p className="oc-path-tag">Pay-per-use, billed by Anthropic.</p>
+        </div>
       </div>
     </div>
   );
@@ -288,9 +273,7 @@ function Troubleshooting() {
         this means the wallet is using an <strong>API key</strong> instead of
         an <strong>OAuth setup token</strong>. Run{' '}
         <code>claude setup-token</code> in your terminal, paste the result
-        into the wallet as a fresh Anthropic credential, and retry. Gifted
-        Anthropic credentials already handle the classification on the
-        gifter&apos;s side.
+        into the wallet as a fresh Anthropic credential, and retry.
       </>,
     ],
     [
@@ -307,17 +290,16 @@ function Troubleshooting() {
       '"invalid x-api-key" or "Invalid bearer token"',
       <>
         The key stored in your wallet is wrong or revoked. Grab a fresh one
-        from <code>console.anthropic.com</code>, re-run{' '}
-        <code>claude setup-token</code>, or use a free gift from the{' '}
-        <a className="oc-link" href="/token-pool">token pool</a>.
+        from <code>console.anthropic.com</code> or re-run{' '}
+        <code>claude setup-token</code>, and paste it into the wallet.
       </>,
     ],
     [
-      'Anthropic keeps returning 429 rate_limit_error on a gift',
+      'Anthropic keeps returning 429 rate_limit_error',
       <>
-        The gifter&apos;s upstream key is being throttled (the limit is on
-        their account, not yours). Try a different Anthropic gift, or wait
-        for the window to clear (usually 1 hour).
+        Your Anthropic key or Pro/Max plan is being throttled upstream (the
+        limit is on your Anthropic account, not on Byoky). Wait for the
+        window to clear, or switch to a smaller model.
       </>,
     ],
     [
@@ -404,8 +386,7 @@ function HowItWorks() {
         </li>
         <li>
           The extension injects the real Anthropic credential (your own API
-          key, your OAuth setup token, or a gifted credential routed through
-          the gifter&apos;s extension) and makes the call.
+          key or your OAuth setup token) and makes the call.
         </li>
         <li>
           The streaming response flows back through the same path —
@@ -432,12 +413,12 @@ function Closing() {
     <section className="oc-closing">
       <h2>Ready to try it?</h2>
       <p>
-        Grab a free Anthropic token gift from the token pool and you&apos;ll
-        be running Claude Code on it in under five minutes.
+        Install the wallet, add your setup token, and you&apos;ll be running
+        Claude Code through Byoky in under five minutes.
       </p>
       <div className="oc-cta-row">
-        <a className="btn btn-primary" href="/token-pool">
-          Browse free gifts
+        <a className="btn btn-primary" href="#step-1">
+          Start setup
         </a>
         <a
           className="btn btn-secondary"
@@ -566,7 +547,7 @@ const styles = `
   border-radius: 3px;
 }
 
-/* Two free paths */
+/* Two credential paths */
 .oc-paths { margin-bottom: 64px; }
 .oc-paths-heading {
   font-size: 12px;

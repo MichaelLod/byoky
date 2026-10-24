@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, Fragment } from 'react';
-import { Byoky, isInByokyPopupAsync, type ByokySession } from '@byoky/sdk';
+import { Byoky, type ByokySession } from '@byoky/sdk';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -123,20 +123,6 @@ export function ChatApp() {
       try {
         const s = await byoky.tryReconnect();
         if (s) { onConnected(s); return; }
-      } catch {}
-      // Auto-connect when loaded inside the Byoky extension popup (trusted
-      // installed apps auto-approve; non-trusted sites will fall through to
-      // the manual Connect button).
-      //
-      // Verified via the SDK handshake, not the URL hash: the hash is set by
-      // whoever framed us, so reading it directly let any site trigger an
-      // unprompted connect just by embedding this page.
-      if (!(await isInByokyPopupAsync())) return;
-      try {
-        const s = await byoky.connect({
-          providers: providerIds.map(id => ({ id, required: false })),
-        });
-        onConnected(s);
       } catch {}
     })();
   }, []);

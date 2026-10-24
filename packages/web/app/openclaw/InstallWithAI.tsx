@@ -5,9 +5,9 @@ import { useState } from 'react';
 const AI_PROMPT = `You are helping me set up OpenClaw to run on Byoky (https://byoky.com/openclaw).
 
 Context:
-- Byoky is a BYOK wallet extension. It holds API keys (mine, gifted, or a Claude Pro/Max subscription token) and proxies every LLM request so keys never leave the wallet.
+- Byoky is a local BYOK wallet ("the MetaMask for API keys"). The browser extension holds my API keys (or a Claude Pro/Max setup token) and proxies every LLM request so keys never leave the wallet. Byoky runs no servers.
 - The Byoky bridge is a tiny local HTTP proxy on 127.0.0.1:19280. OpenClaw talks to the bridge, which forwards through native messaging to the extension, which calls the provider.
-- I already have the Byoky wallet installed (Chrome/Firefox/iOS/Android) and a credential or gift loaded. Do not worry about that side.
+- I already have the Byoky browser extension installed (Chrome or Firefox) with a credential loaded. Do not worry about that side.
 
 Your job — run these commands on my machine and report each step:
 
@@ -30,11 +30,11 @@ Your job — run these commands on my machine and report each step:
 5. Inside OpenClaw I can run /byoky anytime to see bridge status and connected providers.
 
 Troubleshooting cheatsheet (only mention if the relevant error shows up):
-- "invalid x-api-key" or "Invalid bearer token" → the key in the wallet is bad/expired. Ask me to swap it or use a gift.
-- "rate_limit_error" on Anthropic → usually the gifter's upstream cap; try a different gift or switch providers.
+- "invalid x-api-key" or "Invalid bearer token" → the key in the wallet is bad/expired. Ask me to swap it.
+- "rate_limit_error" on Anthropic → my Anthropic key or subscription is being throttled upstream; wait, or switch to another byoky provider.
 - "provider not available in this session" after I added a wallet key → re-run \`openclaw models auth login --provider byoky\`.
 - OpenClaw keeps failing even after I fixed a credential → \`openclaw gateway restart\` clears the in-memory profile cooldown.
-- Higher-tier Anthropic key? Plugin defaults max_tokens to 4096 for gift compatibility. Override via \`plugins.entries.byoky.config.anthropicMaxTokens\` in ~/.openclaw/openclaw.json (then re-auth).
+- Higher-tier Anthropic key? Plugin defaults max_tokens to 4096. Override via \`plugins.entries.byoky.config.anthropicMaxTokens\` in ~/.openclaw/openclaw.json (then re-auth).
 
 Rules:
 - Run one command at a time and show me the output before moving on.

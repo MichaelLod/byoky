@@ -11,7 +11,7 @@ const AI_PROMPT = `You are helping me build an app on Byoky (https://byoky.com).
 
 # What Byoky is
 
-Byoky is a BYOK ("bring your own key") wallet for AI. Users store their API keys for providers like Anthropic, OpenAI, Gemini, etc. in an encrypted browser extension or mobile app. My app never sees the keys — it calls the user's wallet through a proxied session.
+Byoky is "the MetaMask for API keys": a BYOK ("bring your own key") wallet for AI. Users store their API keys for providers like Anthropic, OpenAI, Gemini, etc. in an encrypted browser extension or mobile app. My app never sees the keys — it connects to the user's wallet and the wallet proxies every LLM call. Byoky runs no servers: there is no account, cloud vault or relay to configure.
 
 # Setup
 
@@ -30,7 +30,7 @@ import { Byoky } from '@byoky/sdk';
 const byoky = new Byoky();
 const session = await byoky.connect({
   providers: [{ id: 'anthropic', required: true }],
-  modal: true, // built-in connect UI: extension detection + QR for mobile wallets
+  modal: true, // built-in connect UI: wallet detection + install guidance
 });
 
 // Use the native provider SDK — just pass Byoky's fetch and sessionKey
@@ -55,7 +55,7 @@ const msg = await client.messages.create({
 - \`session.onDisconnect(cb)\` / \`session.onProvidersUpdated(cb)\` — lifecycle callbacks.
 - \`session.sessionKey\`, \`session.proxyUrl\`, \`session.providers\` — session properties.
 - \`byoky.tryReconnect()\` — silently restore a previous session (returns null if nothing to restore).
-- \`byoky.connectViaVault({ vaultUrl, username, password, providers, appOrigin })\` — connect via a Byoky Vault server (works in Node.js too; \`appOrigin\` required server-side).
+- \`byoky.reconnect(savedResponse)\` — restore a session from a ConnectResponse you stored yourself (returns null if it is no longer valid).
 - \`byoky.connectMock({ keys })\` — DEV ONLY: returns a fake session that calls providers directly with the supplied keys. Reads \`BYOKY_DEV_KEYS=anthropic:sk-...,openai:sk-...\` from env when no \`keys\` are passed. Refuses to run when \`NODE_ENV=production\`.
 
 # Supported providers (use these IDs with createFetch)
@@ -64,38 +64,15 @@ anthropic, openai, gemini, mistral, cohere, xai, deepseek, perplexity, groq, tog
 
 # Backend relay (for server-side LLM calls)
 
-Frontend opens \`session.createRelay('wss://your-app.com/ws/relay')\`. Backend uses \`ByokyServer\` from \`@byoky/sdk/server\` and calls \`client.createFetch(id)\` the same way. Your backend never sees the API key — all traffic relays through the user's browser → extension → LLM.
+Frontend opens \`session.createRelay('wss://your-app.com/ws/relay')\` against a WebSocket server I host. Backend uses \`ByokyServer\` from \`@byoky/sdk/server\` and calls \`client.createFetch(id)\` the same way. My backend never sees the API key — all traffic relays through the user's browser → extension → LLM. No Byoky server is involved.
 
 # Rules
 
 - Use native provider SDKs (Anthropic, OpenAI, Google GenAI, etc.). Pass \`session.createFetch(id)\` as \`fetch\` and \`session.sessionKey\` as \`apiKey\`.
 - Never collect or prompt the user for an API key — Byoky replaces that entirely.
-- Users install one of: Chrome/Firefox extension, iOS app, or Android app. The SDK's \`modal: true\` handles extension detection, relay fallback, and QR pairing for mobile automatically.
+- Users install one of: Chrome/Firefox extension, the iOS app (Safari extension or its in-wallet browser), or the Android app (in-wallet browser). Each wallet serves apps on its own device; there is no cross-device pairing. The SDK's \`modal: true\` detects the wallet and, when none is found, shows install links plus a hint to open the page in the Byoky app's built-in browser on phones.
+- CLI tools and desktop apps don't use the SDK — they send plain HTTP to \`@byoky/bridge\` on localhost, which forwards to the extension.
 - Full docs: https://byoky.com/docs
-
-# Publishing to the Byoky marketplace
-
-Once the app works end-to-end, help me list it in the Byoky App Store so users can install it directly into their wallet.
-
-1. Deploy the app over HTTPS. The hosting server must allow iframe embedding — either omit \`X-Frame-Options\` or set \`Content-Security-Policy: frame-ancestors *\`. Do NOT set \`X-Frame-Options: DENY\` or \`SAMEORIGIN\`.
-2. From the project root, create the manifest: \`npx create-byoky-app init\`. This writes \`byoky.app.json\`.
-3. Validate locally: \`npx create-byoky-app preflight\`. This runs every check the submit endpoint runs (slug regex, length caps, HTTPS, iframe-embeddability) so you don't burn a round-trip on a fixable rejection.
-4. Submit: \`npx create-byoky-app submit\`. This POSTs the manifest to https://api.byoky.com/v1/apps/submit.
-5. Once approved, the app appears at https://byoky.com/apps and inside the extension / iOS / Android App Store. The author email on the manifest gets the approval notification.
-
-Manifest schema (\`byoky.app.json\`):
-- \`name\` (string, ≤100 chars) — display name
-- \`slug\` (string, lowercase a-z0-9-, 2-63 chars) — unique marketplace ID
-- \`url\` (https URL) — where the app is hosted; this is what loads in the sandboxed iframe
-- \`icon\` (https URL, optional)
-- \`description\` (string, ≤1000 chars)
-- \`category\` — one of: chat | coding | trading | productivity | research | creative | other
-- \`providers\` (string[]) — IDs from the provider list above; only request what the app actually uses
-- \`author\` — \`{ name, email, website? }\`
-
-Review criteria: HTTPS, iframe-embeddable, uses \`@byoky/sdk\` for all LLM access, only requests providers the app uses, no obfuscated JavaScript, privacy policy exists.
-
-Full publishing walkthrough: https://byoky.com/docs#submitting
 
 Now help me build: `;
 
@@ -104,6 +81,7 @@ const categories = [
     label: 'Getting Started',
     items: [
       { id: 'overview', label: 'Overview' },
+      { id: 'where-apps-connect', label: 'Where Apps Connect' },
       { id: 'installation', label: 'Installation' },
       { id: 'quickstart', label: 'Quickstart' },
       { id: 'dev-sandbox', label: 'Dev Sandbox' },
@@ -134,17 +112,7 @@ const categories = [
     items: [
       { id: 'backend-relay', label: 'Backend Relay' },
       { id: 'bridge', label: 'Bridge (CLI)' },
-      { id: 'token-gifts', label: 'Token Gifts' },
-      { id: 'token-pool', label: 'Token Pool' },
       { id: 'cross-provider', label: 'Cross-Provider Routing' },
-    ],
-  },
-  {
-    label: 'App Ecosystem',
-    items: [
-      { id: 'app-ecosystem', label: 'Overview' },
-      { id: 'manifest', label: 'App Manifest' },
-      { id: 'submitting', label: 'Submitting Your App' },
     ],
   },
 ];
@@ -203,6 +171,7 @@ export default function Docs() {
         <DocsCards />
 
         <Overview />
+        <WhereAppsConnect />
         <Installation />
         <Quickstart />
         <DevSandbox />
@@ -218,12 +187,7 @@ export default function Docs() {
         <Limits />
         <BackendRelay />
         <Bridge />
-        <TokenGifts />
-        <TokenPoolSection />
         <CrossProviderRouting />
-        <AppEcosystem />
-        <AppManifest />
-        <SubmittingYourApp />
       </main>
 
       <style>{docsStyles}</style>
@@ -260,8 +224,10 @@ function Overview() {
   return (
     <Section id="overview" title="Overview">
       <p>
-        Byoky lets users store their AI API keys in an encrypted wallet. Your app never sees the keys
-        &mdash; it gets a proxied session that routes requests through the wallet.
+        Byoky is the MetaMask for API keys. Users keep their AI API keys in an encrypted wallet on
+        their own device. Your app connects to the wallet the way a dapp connects to MetaMask: it
+        asks for access, the user approves, and your app gets a proxied session that routes requests
+        through the wallet. Your app never sees the keys.
       </p>
 
       <h3>How it works</h3>
@@ -272,6 +238,99 @@ function Overview() {
       <p>
         Two lines changed. Full API compatibility. Streaming, file uploads, and vision all work.
         Sessions auto-reconnect if the extension restarts.
+      </p>
+
+      <p>
+        <strong>No servers.</strong> Byoky doesn&apos;t run anything between your app, the wallet
+        and the provider. There are no accounts, no cloud sync and no relay service to configure
+        &mdash; the wallet talks only to the AI providers the user has added. Keys move between
+        devices only when the user exports and imports a password-protected <code>.byoky</code>{' '}
+        backup.
+      </p>
+    </Section>
+  );
+}
+
+function WhereAppsConnect() {
+  return (
+    <Section id="where-apps-connect" title="Where Apps Connect">
+      <p>
+        Every integration path ends at a wallet on the user&apos;s own device. Each wallet serves the
+        apps on that device &mdash; there is no pairing between a phone and a desktop, and no Byoky
+        server in between. Users who want the same keys on several devices move them with a
+        password-protected <code>.byoky</code> backup file.
+      </p>
+
+      <table className="docs-table">
+        <thead>
+          <tr>
+            <th>App runs in&hellip;</th>
+            <th>Connects through</th>
+            <th>Keys live in</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Desktop browser (Chrome, Firefox)</td>
+            <td>Byoky browser extension</td>
+            <td>the extension</td>
+          </tr>
+          <tr>
+            <td>Safari on iPhone / iPad</td>
+            <td>Byoky Safari extension (included with the iOS app)</td>
+            <td>the Safari extension</td>
+          </tr>
+          <tr>
+            <td>Byoky&apos;s in-wallet browser (iOS, Android)</td>
+            <td>injected wallet bridge (<code>window.__byoky__</code>) &mdash; open any https app by URL</td>
+            <td>the mobile app</td>
+          </tr>
+          <tr>
+            <td>CLI tools and desktop apps</td>
+            <td><code>@byoky/bridge</code> (localhost) &rarr; native messaging</td>
+            <td>the extension</td>
+          </tr>
+          <tr>
+            <td>Your backend</td>
+            <td><code>@byoky/sdk/server</code> over your own WebSocket &rarr; user&apos;s browser</td>
+            <td>the extension</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Web apps</h3>
+      <p>
+        The same SDK code works in all three web environments: the desktop extension, the iOS
+        Safari extension, and the in-wallet browser of the iOS and Android apps. They expose the same
+        page protocol (the in-wallet browser injects the same <code>window.__byoky__</code> bridge and
+        message protocol as the extension), so <code>byoky.connect()</code> and{' '}
+        <code>session.createFetch()</code> need no changes. On a phone without the Safari extension, users can open your app&apos;s URL in
+        the Byoky app&apos;s built-in browser &mdash; the connect modal points them there.
+      </p>
+      <p>
+        On iOS these are two separate wallets: the Safari extension keeps its own keys (added in
+        its popup), and the iOS app&apos;s keys serve its in-wallet browser. They don&apos;t share
+        credentials.
+      </p>
+      <Code lang="text">{`Browser apps   → SDK (createFetch) → Content Script → Extension → LLM API
+Safari (iOS)   → SDK (createFetch) → Safari Extension → LLM API
+In-wallet apps → SDK (createFetch) → Native bridge → iOS / Android app → LLM API`}</Code>
+
+      <h3>CLI tools and desktop apps</h3>
+      <p>
+        Tools that run outside a browser talk HTTP to <code>@byoky/bridge</code> on localhost, which
+        hands each request to the extension over native messaging. See{' '}
+        <a href="#bridge" style={{ color: 'var(--teal-dark)' }}>Bridge</a>, and the{' '}
+        <a href="/openclaw" style={{ color: 'var(--teal-dark)' }}>OpenClaw</a>,{' '}
+        <a href="/claude-code" style={{ color: 'var(--teal-dark)' }}>Claude Code</a> and{' '}
+        <a href="/hermes-agent" style={{ color: 'var(--teal-dark)' }}>Hermes</a> guides.
+      </p>
+
+      <h3>Your backend</h3>
+      <p>
+        When your server needs to make the LLM call, the user&apos;s browser relays it through the
+        wallet over a WebSocket server <em>you</em> run. See{' '}
+        <a href="#backend-relay" style={{ color: 'var(--teal-dark)' }}>Backend Relay</a>.
       </p>
     </Section>
   );
@@ -296,9 +355,13 @@ function Installation() {
       <ul>
         <li><a href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon" style={{ color: 'var(--teal-dark)' }}>Chrome Extension</a></li>
         <li><a href="https://addons.mozilla.org/en-US/firefox/addon/byoky/" style={{ color: 'var(--teal-dark)' }}>Firefox Extension</a></li>
-        <li><a href="https://apps.apple.com/app/byoky/id6760779919" style={{ color: 'var(--teal-dark)' }}>iOS App</a> (wallet + Safari extension)</li>
-        <li><a href="https://play.google.com/store/apps/details?id=com.byoky.app" style={{ color: 'var(--teal-dark)' }}>Android App</a> (pair via QR or relay)</li>
+        <li><a href="https://apps.apple.com/app/byoky/id6760779919" style={{ color: 'var(--teal-dark)' }}>iOS App</a> (wallet + in-wallet browser, plus the Byoky Safari extension)</li>
+        <li><a href="https://play.google.com/store/apps/details?id=com.byoky.app" style={{ color: 'var(--teal-dark)' }}>Android App</a> (wallet + in-wallet browser)</li>
       </ul>
+      <p>
+        Each wallet serves the apps on its own device. See{' '}
+        <a href="#where-apps-connect" style={{ color: 'var(--teal-dark)' }}>Where Apps Connect</a>.
+      </p>
     </Section>
   );
 }
@@ -313,7 +376,7 @@ import { Byoky } from '@byoky/sdk';
 const byoky = new Byoky();
 const session = await byoky.connect({
   providers: [{ id: 'anthropic', required: true }],
-  modal: true,  // shows built-in connect UI with QR code
+  modal: true,  // built-in connect UI, with install guidance if no wallet is found
 });
 
 // Use the native Anthropic SDK — just swap in Byoky's fetch
@@ -396,7 +459,7 @@ const client = new Anthropic({
       <ul>
         <li><code>session.createRelay()</code> throws &mdash; relays go through a real wallet.</li>
         <li><code>session.getUsage()</code> always returns zeros &mdash; no metering happens.</li>
-        <li>Cross-provider routing, gift redemption, and group rebinding are not simulated.</li>
+        <li>Cross-provider routing and group rebinding are not simulated.</li>
         <li>The auth header convention is fixed per provider (<code>x-api-key</code> for Anthropic, query <code>?key=</code> for Gemini, <code>Authorization: Bearer</code> for everyone else).</li>
       </ul>
     </Section>
@@ -410,12 +473,20 @@ function SdkReference() {
       <Code lang="typescript">{`import { Byoky } from '@byoky/sdk';
 
 const byoky = new Byoky({
-  timeout: 60000,                      // connection timeout (ms)
-  relayUrl: 'wss://relay.byoky.com',   // relay server for mobile pairing
+  timeout: 60000, // how long connect() waits for the wallet to answer (ms)
 });`}</Code>
 
+      <Prop name="timeout" type="number">
+        Milliseconds to wait for the wallet to respond to a connect request. Defaults to{' '}
+        <code>60000</code>.
+      </Prop>
+
       <h3>byoky.connect(options)</h3>
-      <p>Connect to a Byoky wallet. Returns a <code>ByokySession</code>.</p>
+      <p>
+        Connect to the user&apos;s Byoky wallet: the browser extension, the iOS Safari extension, or
+        the in-wallet browser of the iOS and Android apps (they all expose the same page protocol).
+        Returns a <code>ByokySession</code>.
+      </p>
       <Code lang="typescript" demo="session">{`const session = await byoky.connect({
   // Which providers your app needs
   providers: [
@@ -423,59 +494,71 @@ const byoky = new Byoky({
     { id: 'openai', required: false },
   ],
 
-  // Show built-in modal with extension detection + QR code fallback
+  // Show the built-in connect modal (wallet detection + install guidance)
   modal: true,
-
-  // Or handle pairing yourself
-  onPairingReady: (code) => showQR(code),
-
-  // Skip extension, go straight to relay (mobile)
-  useRelay: true,
 });`}</Code>
 
       <Prop name="providers" type="ProviderRequirement[]">
         List of providers your app needs. <code>required: true</code> means connection fails if the
         user doesn&apos;t have that provider.
       </Prop>
+      <Prop name="capabilities" type="string[]">
+        Optional list of capabilities your app intends to use, passed through to the wallet with the
+        connect request.
+      </Prop>
       <Prop name="modal" type="boolean | ModalOptions">
-        Show the built-in connect modal. Handles extension detection, relay fallback, and QR code
-        for mobile pairing automatically.
+        Show the built-in connect modal. While the wallet asks the user for approval, the modal shows
+        a waiting state. If no wallet is installed, it shows &ldquo;Byoky wallet not found&rdquo; with
+        an install link for the user&apos;s browser, an &ldquo;I&apos;ve installed it&rdquo; button that
+        re-checks, and a hint that on a phone the page can be opened in the Byoky app&apos;s built-in
+        browser. Pass <code>ModalOptions</code> to customise it.
       </Prop>
-      <Prop name="onPairingReady" type="(code: string) => void">
-        Called with a pairing code when no extension is detected. Display as QR or text for mobile
-        wallet pairing.
-      </Prop>
-      <Prop name="useRelay" type="boolean">
-        Skip extension detection and go directly to relay pairing.
-      </Prop>
+      <Code lang="typescript">{`interface ModalOptions {
+  container?: HTMLElement;      // mount point (defaults to document.body)
+  theme?: {
+    accentColor?: string;
+    backgroundColor?: string;
+    textColor?: string;
+    borderRadius?: string;
+  };
+}`}</Code>
+      <p>
+        Without <code>modal</code>, <code>connect()</code> throws a <code>ByokyError</code> with code{' '}
+        <code>WALLET_NOT_INSTALLED</code> when no wallet is present (and opens the store page for the
+        user&apos;s browser, if there is one). <code>USER_REJECTED</code> means the user declined.
+      </p>
 
       <h3>byoky.tryReconnect()</h3>
       <p>
-        Silently reconnect to an existing session. Checks persisted vault sessions, extension live
-        sessions, and stored extension sessions in order. Returns <code>null</code> if nothing is
-        restorable.
+        Silently reconnect to an existing session for the current origin. Checks the wallet&apos;s
+        live session first, then the session persisted in <code>sessionStorage</code>. Returns{' '}
+        <code>null</code> if nothing is restorable. Good first call on every page load.
       </p>
       <Code lang="typescript" demo="session">{`const session = await byoky.tryReconnect();
 if (session) {
   // Restored — ready to make requests
 }`}</Code>
 
-      <h3>byoky.connectViaVault(options)</h3>
+      <h3>byoky.reconnect(savedResponse)</h3>
       <p>
-        Connect via a Byoky Vault server. Works in both browser and Node.js environments.
+        Restore a session from a <code>ConnectResponse</code> you stored yourself (for example the
+        session object&apos;s <code>sessionKey</code>, <code>proxyUrl</code> and{' '}
+        <code>providers</code>). Returns <code>null</code> if the wallet no longer recognises it.
       </p>
-      <Code lang="typescript">{`const session = await byoky.connectViaVault({
-  vaultUrl: 'https://vault.byoky.com',
-  username: 'user@example.com',
-  password: 'password',
-  providers: [{ id: 'anthropic' }],
-  appOrigin: 'https://myapp.com', // required in Node.js
-});`}</Code>
+      <Code lang="typescript">{`const saved = JSON.parse(localStorage.getItem('byoky-session') ?? 'null');
+const session = saved ? await byoky.reconnect(saved) : null;`}</Code>
+
+      <h3>byoky.connectMock(options)</h3>
+      <p>
+        Development only: returns a session that calls providers directly with keys you supply. See{' '}
+        <a href="#dev-sandbox" style={{ color: 'var(--teal-dark)' }}>Dev Sandbox</a>.
+      </p>
 
       <h3>Utilities</h3>
       <Code lang="typescript">{`import { isExtensionInstalled, getStoreUrl } from '@byoky/sdk';
 
-// Check if the Byoky extension is installed
+// True when a Byoky wallet is present on this page
+// (extension, iOS Safari extension, or in-wallet browser)
 if (isExtensionInstalled()) { ... }
 
 // Get the store URL for the user's browser
@@ -489,8 +572,8 @@ function SessionApi() {
     <Section id="session" title="Session API">
       <p>
         A <code>ByokySession</code> is returned by <code>connect()</code>,{' '}
-        <code>tryReconnect()</code>, or <code>connectViaVault()</code>. It provides everything you
-        need to make API calls through the wallet.
+        <code>tryReconnect()</code>, <code>reconnect()</code>, or <code>connectMock()</code>. It
+        provides everything you need to make API calls through the wallet.
       </p>
 
       <h3>session.createFetch(providerId)</h3>
@@ -518,10 +601,17 @@ const res = await fetch('https://api.anthropic.com/v1/messages', {
   body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1024, messages: [...] }),
 });`}</Code>
 
+      <h3>session.listModels(providerId)</h3>
+      <p>
+        List the models the user&apos;s credential can access for a provider. See{' '}
+        <a href="#list-models" style={{ color: 'var(--teal-dark)' }}>Model Discovery</a>.
+      </p>
+
       <h3>session.createRelay(wsUrl)</h3>
       <p>
-        Open a WebSocket relay channel so a backend server can make LLM calls through this session.
-        See <a href="#backend-relay" style={{ color: 'var(--teal-dark)' }}>Backend Relay</a>.
+        Open a WebSocket relay channel to <em>your own</em> server so your backend can make LLM calls
+        through this session. Requires <code>wss://</code> (or <code>ws://</code> on localhost). See{' '}
+        <a href="#backend-relay" style={{ color: 'var(--teal-dark)' }}>Backend Relay</a>.
       </p>
 
       <h3>session.disconnect()</h3>
@@ -563,7 +653,7 @@ session.proxyUrl    // string — the proxy endpoint URL
 session.providers   // Record<ProviderId, ProviderStatus>
 
 interface ProviderStatus {
-  // true: the wallet has a working credential (or gift) for this provider
+  // true: the wallet has a working credential for this provider
   //       and will hit the provider directly.
   // false: your app can still call createFetch(id) — the wallet may route
   //        it through another provider via cross-provider translation.
@@ -571,10 +661,6 @@ interface ProviderStatus {
 
   // How the credential authenticates upstream.
   authMethod: 'api_key' | 'oauth';
-
-  // Present and true when the credential came from a redeemed Token Gift.
-  // The gifter's wallet proxies every request and enforces the token budget.
-  gift?: boolean;
 }`}</Code>
       <p>
         Check <code>providers[id].available</code> before assuming direct access. A provider marked{' '}
@@ -1108,16 +1194,17 @@ function Errors() {
         </thead>
         <tbody>
           {[
-            ['WALLET_NOT_INSTALLED', 'No extension or mobile wallet was detected when connect() ran.', <>Show an install prompt — <code>getStoreUrl()</code> returns the right link per platform.</>],
+            ['WALLET_NOT_INSTALLED', 'No Byoky wallet (extension, iOS Safari extension, or in-wallet browser) was detected when connect() ran.', <>Show an install prompt — <code>getStoreUrl()</code> returns the right link per browser. Or pass <code>modal: true</code> and let the SDK do it.</>],
             ['USER_REJECTED', 'User dismissed the connect modal or denied the permission prompt.', 'Do not auto-retry. Wait for an explicit user action before calling connect() again.'],
             ['PROVIDER_UNAVAILABLE', 'The wallet has no credential (and no routing group) that can serve this provider.', 'Tell the user which provider you need; deep-link them into the wallet to add a credential.'],
             ['SESSION_EXPIRED', 'Session was revoked from the wallet or aged out.', <>Call <code>byoky.connect()</code> again. <code>tryReconnect()</code> handles silent restore.</>],
+            ['NO_SESSION', 'A silent reconnect found no live session for this origin.', <>Expected on first visit. Fall back to <code>connect()</code> when the user is ready.</>],
             ['RATE_LIMITED', 'Upstream provider returned 429 (their rate limit, not byoky\'s).', <>Back off and retry. Honour the upstream <code>Retry-After</code> header.</>],
-            ['QUOTA_EXCEEDED', 'A token-gift budget or wallet-imposed limit ran out (HTTP 429).', 'Do not retry. Surface a "budget exhausted" UI — the gift/pool needs topping up.'],
+            ['QUOTA_EXCEEDED', 'A spending cap the user set for your app in the wallet ran out (HTTP 429).', 'Do not retry. Surface a "budget exhausted" UI — the user can raise the cap in their wallet.'],
             ['INVALID_KEY', 'Stored credential was rejected by the provider (401).', 'Prompt the user to update the credential in their wallet.'],
             ['TOKEN_EXPIRED', 'OAuth access token expired and the refresh attempt failed.', <>Call <code>connect()</code> again — the wallet will re-run OAuth.</>],
             ['PROXY_ERROR', 'Generic proxy-layer failure (extension crashed, native message dropped, etc.).', 'Safe to retry once. Surface a generic error if it repeats.'],
-            ['RELAY_CONNECTION_FAILED', 'Backend WebSocket relay could not reach the browser.', 'Check the relay URL and that the user\'s tab is still open; retry with backoff.'],
+            ['RELAY_CONNECTION_FAILED', 'Your backend relay WebSocket could not reach the browser.', 'Check your relay URL and that the user\'s tab is still open; retry with backoff.'],
             ['RELAY_DISCONNECTED', 'Relay peer disconnected mid-request (user closed tab, network drop).', <>Reopen the relay via <code>session.createRelay(url)</code>.</>],
             ['UNKNOWN', 'Anything that doesn\'t map to a specific code (last-resort fallback).', 'Log the original message and surface a generic error. Treat as transient.'],
           ].map(([code, meaning, action]) => (
@@ -1132,9 +1219,9 @@ function Errors() {
 
       <h3>Handling quota errors</h3>
       <p>
-        When a user redeems a Token Gift with a limited budget, or the wallet enforces per-session
-        limits, requests fail with HTTP 429 and <code>code: 'QUOTA_EXCEEDED'</code>. Surface this to
-        the user rather than retrying:
+        When the user has set a spending cap for your app in their wallet and it runs out, requests
+        fail with HTTP 429 and <code>code: 'QUOTA_EXCEEDED'</code>. Surface this to the user rather
+        than retrying:
       </p>
       <Code lang="typescript">{`const fetch = session.createFetch('anthropic');
 const res = await fetch(url, { method: 'POST', headers, body });
@@ -1176,8 +1263,8 @@ function Limits() {
   return (
     <Section id="limits" title="Limits & Quotas">
       <p>
-        Byoky enforces a small set of guardrails at the wallet, bridge, and submission layers. Most
-        apps will never hit them — but knowing the numbers up front saves a debugging round-trip.
+        Byoky enforces a small set of guardrails at the wallet and bridge layers. Most apps will
+        never hit them — but knowing the numbers up front saves a debugging round-trip.
       </p>
 
       <h3>Connection rate limits</h3>
@@ -1224,9 +1311,8 @@ function Limits() {
           tab. Useful as the first call on every page load.
         </li>
         <li>
-          Relay sessions (created by <code>session.createRelay()</code>) refresh internally every{' '}
-          <strong>10 minutes</strong> to bound the replay window for the auth token. No action
-          required from your code.
+          A backend relay (<code>session.createRelay()</code>) lives as long as the user&apos;s tab
+          keeps its WebSocket open. Listen with <code>relay.onClose()</code> and reopen when needed.
         </li>
       </ul>
 
@@ -1238,51 +1324,12 @@ function Limits() {
         cap, but very large bodies still incur extra latency from chunking.
       </p>
 
-      <h3>Marketplace submission caps</h3>
-      <p>
-        Field limits enforced by <code>POST /v1/apps/submit</code>. Submissions outside these bounds
-        return <code>HTTP 400</code> with the offending field named.
-      </p>
-      <table className="docs-table">
-        <thead>
-          <tr>
-            <th>Field</th>
-            <th>Constraint</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr><td><code>name</code></td><td>≤ 100 characters</td></tr>
-          <tr>
-            <td><code>slug</code></td>
-            <td>
-              <code>^[a-z0-9][a-z0-9-]&#123;0,61&#125;[a-z0-9]$</code> — lowercase alphanumeric and
-              hyphens, 2–63 chars
-            </td>
-          </tr>
-          <tr><td><code>url</code></td><td>≤ 2048 characters, must be HTTPS, must be publicly resolvable, must allow iframe embedding</td></tr>
-          <tr><td><code>icon</code></td><td>HTTPS URL (optional)</td></tr>
-          <tr><td><code>description</code></td><td>≤ 1000 characters</td></tr>
-          <tr>
-            <td><code>category</code></td>
-            <td><code>chat</code>, <code>coding</code>, <code>trading</code>, <code>productivity</code>, <code>research</code>, <code>creative</code>, or <code>other</code></td>
-          </tr>
-          <tr><td><code>providers</code></td><td>at least one valid provider ID</td></tr>
-          <tr><td><code>author.name</code></td><td>≤ 100 characters</td></tr>
-          <tr><td><code>author.email</code></td><td>≤ 320 characters</td></tr>
-          <tr><td><code>author.website</code></td><td>HTTPS URL (optional)</td></tr>
-        </tbody>
-      </table>
-      <p>
-        Run <code>npx create-byoky-app preflight</code> to validate every field locally before
-        submitting — it catches everything the server would reject, including iframe header issues.
-      </p>
-
       <h3>What is <em>not</em> capped</h3>
       <ul>
-        <li>Token usage — billed and metered by the upstream provider, not byoky.</li>
+        <li>Token usage — billed and metered by the upstream provider, not byoky (unless the user sets a spending cap for your app).</li>
         <li>Concurrent requests per session — bounded only by the user&apos;s connection.</li>
         <li>Number of providers per session — request as many as the app actually needs.</li>
-        <li>Number of installed apps per wallet.</li>
+        <li>Number of connected apps per wallet.</li>
       </ul>
     </Section>
   );
@@ -1292,11 +1339,12 @@ function BackendRelay() {
   return (
     <Section id="backend-relay" title="Backend Relay">
       <p>
-        Need LLM calls from your server? The user&apos;s browser relays requests through the
-        extension &mdash; your backend never sees the API key.
+        Need LLM calls from your server? The user&apos;s browser relays them through the wallet over
+        a WebSocket <strong>you</strong> host. Your backend never sees the API key, and no Byoky
+        server is involved.
       </p>
 
-      <Code lang="text">{`Backend ←WebSocket→ User's Frontend ←Extension→ LLM API`}</Code>
+      <Code lang="text">{`Your backend ←WebSocket (your server)→ User's browser ←→ Byoky extension → LLM API`}</Code>
 
       <h3>Frontend</h3>
       <Code lang="typescript" demo="relay" provider="anthropic">{`import { Byoky } from '@byoky/sdk';
@@ -1359,82 +1407,6 @@ byoky-bridge install   # register native messaging host`}</Code>
   );
 }
 
-function TokenGifts() {
-  return (
-    <Section id="token-gifts" title="Token Gifts">
-      <p>
-        Share token access without sharing your API key. The sender&apos;s wallet proxies all
-        requests &mdash; the key never leaves the extension.
-      </p>
-
-      <Code lang="text">{`Sender's Extension ←WebSocket→ Relay Server ←WebSocket→ Recipient's Extension`}</Code>
-
-      <h3>Create a gift</h3>
-      <ol>
-        <li>Open the wallet &rarr; select a credential &rarr; click &quot;Gift&quot;</li>
-        <li>Set a token budget and expiry</li>
-        <li>Share the generated gift link</li>
-      </ol>
-
-      <h3>Redeem a gift</h3>
-      <ol>
-        <li>Open the wallet &rarr; click &quot;Redeem Gift&quot;</li>
-        <li>Paste the gift link &rarr; accept</li>
-      </ol>
-
-      <p>
-        The recipient never receives your API key. Every request is relayed through the
-        sender&apos;s running extension, which enforces the token budget and can revoke access
-        at any time.
-      </p>
-    </Section>
-  );
-}
-
-function TokenPoolSection() {
-  return (
-    <Section id="token-pool" title="Token Pool">
-      <p>
-        The{' '}
-        <a href="/token-pool" style={{ color: 'var(--teal-dark)' }}>
-          Token Pool
-        </a>{' '}
-        is a public board where users share free token gifts with the community.
-      </p>
-
-      <h3>How it works</h3>
-      <ol>
-        <li>Create a gift in your wallet (extension or mobile)</li>
-        <li>Check &quot;List on Token Pool&quot;</li>
-        <li>Add a display name (or stay anonymous)</li>
-        <li>Your gift appears on the token pool for anyone to redeem</li>
-      </ol>
-
-      <h3>What users see</h3>
-      <ul>
-        <li><strong>Online/offline status</strong> &mdash; green dot if the gifter&apos;s wallet is online (gift is usable), red if offline</li>
-        <li><strong>Tokens remaining</strong> &mdash; progress bar showing how much budget is left</li>
-        <li><strong>Expiry countdown</strong> &mdash; time until the gift expires</li>
-        <li><strong>Provider</strong> &mdash; which LLM provider the tokens are for</li>
-      </ul>
-
-      <h3>API endpoints</h3>
-      <p>
-        Pool listings live on the vault at <code>vault.byoky.com</code>. Online status is tracked
-        live via the relay&apos;s WebSocket, and token usage updates flow through the proxy — neither
-        needs a separate REST endpoint.
-      </p>
-      <Code lang="text">{`GET    /pool          — list currently-listed gifts (public)
-POST   /pool/list     — list a gift publicly (bearer: gift authToken)
-POST   /pool/unlist   — remove a listing (bearer: gift authToken)`}</Code>
-      <p>
-        Redemption goes through the short-link flow at <code>byoky.com/g/:shortId</code>, which
-        resolves to the full gift link and opens the wallet&apos;s redeem view.
-      </p>
-    </Section>
-  );
-}
-
 function CrossProviderRouting() {
   return (
     <Section id="cross-provider" title="Cross-Provider Routing">
@@ -1460,200 +1432,6 @@ function CrossProviderRouting() {
       <p>
         <strong>No code changes required.</strong> Your app keeps calling its preferred SDK; the
         wallet handles the translation. Live sessions reroute automatically.
-      </p>
-    </Section>
-  );
-}
-
-function AppEcosystem() {
-  return (
-    <Section id="app-ecosystem" title="App Ecosystem">
-      <p>
-        Build apps that users install directly into their Byoky wallet. Your app runs inside a
-        sandboxed iframe (extension) or WebView (mobile) &mdash; full isolation from the wallet&apos;s
-        keys and storage.
-      </p>
-
-      <h3>How marketplace apps work</h3>
-      <ol>
-        <li>You build a web app that uses <code>@byoky/sdk</code></li>
-        <li>You host it on your own infrastructure (HTTPS required)</li>
-        <li>You submit it to the marketplace for review</li>
-        <li>Once approved, users can install it from the App Store inside their wallet</li>
-        <li>Your app runs in a sandboxed environment &mdash; keys never touch your code</li>
-      </ol>
-
-      <h3>Security model</h3>
-      <ul>
-        <li>Apps run in sandboxed iframes (<code>allow-scripts allow-forms</code>) or native WebViews</li>
-        <li>Cross-origin isolation prevents access to wallet storage, DOM, or keys</li>
-        <li>All communication happens via the SDK&apos;s <code>postMessage</code> bridge</li>
-        <li>Installing an app auto-trusts its origin for the declared providers</li>
-        <li>Users can disable or uninstall apps at any time</li>
-      </ul>
-
-      <h3>Hosting requirements</h3>
-      <p>
-        Because your app loads inside an iframe in the Byoky extension, your server must allow iframe
-        embedding. Do <em>not</em> set <code>X-Frame-Options: DENY</code> or <code>SAMEORIGIN</code>,
-        and either omit <code>Content-Security-Policy</code> <code>frame-ancestors</code> or set it
-        to something permissive:
-      </p>
-      <Code lang="http">{`Content-Security-Policy: frame-ancestors *`}</Code>
-      <p>
-        We verify this automatically at submission time and reject apps that would fail to load.
-      </p>
-    </Section>
-  );
-}
-
-function AppManifest() {
-  return (
-    <Section id="manifest" title="App Manifest">
-      <p>
-        Every marketplace app needs a <code>byoky.app.json</code> manifest in the project root.
-        Run <code>npx create-byoky-app init</code> to generate one interactively.
-      </p>
-
-      <Code lang="json">{`{
-  "name": "TradeBot Pro",
-  "slug": "tradebot-pro",
-  "url": "https://tradebot.acme-ai.com",
-  "icon": "/icon.png",
-  "description": "AI-powered trading signals using your own API keys",
-  "category": "trading",
-  "providers": ["anthropic", "openai"],
-  "author": {
-    "name": "Acme AI",
-    "email": "dev@acme-ai.com",
-    "website": "https://acme-ai.com"
-  }
-}`}</Code>
-
-      <h3>Fields</h3>
-      <Prop name="name" type="string">Display name shown in the App Store and icon grid.</Prop>
-      <Prop name="slug" type="string">URL-safe identifier. Must be unique across the marketplace.</Prop>
-      <Prop name="url" type="string">HTTPS URL where your app is hosted. This is what loads in the sandboxed iframe.</Prop>
-      <Prop name="icon" type="string">URL to your app icon. Displayed as a rounded square in the app grid.</Prop>
-      <Prop name="description" type="string">Short description shown in the store listing.</Prop>
-      <Prop name="category" type="string">
-        One of: <code>chat</code>, <code>coding</code>, <code>trading</code>,{' '}
-        <code>productivity</code>, <code>research</code>, <code>creative</code>, <code>other</code>.
-      </Prop>
-      <Prop name="providers" type="string[]">
-        Provider IDs your app needs (e.g. <code>[&quot;anthropic&quot;, &quot;openai&quot;]</code>).
-        Users approve which providers to grant on install.
-      </Prop>
-      <Prop name="author" type="object">
-        Author info: <code>name</code> (required), <code>email</code> (required),{' '}
-        <code>website</code> (optional).
-      </Prop>
-
-      <h3>Review criteria</h3>
-      <p>
-        Submission (<code>api.byoky.com/v1/apps/submit</code>) enforces the automated checks;
-        the rest are human-review criteria applied before the listing goes public.
-      </p>
-      <ul>
-        <li>App loads over HTTPS <em>(automated)</em></li>
-        <li>App URL allows iframe embedding &mdash; no <code>X-Frame-Options: DENY</code> / <code>SAMEORIGIN</code>, no restrictive <code>frame-ancestors</code> <em>(automated)</em></li>
-        <li>Slug, category, and provider IDs are valid <em>(automated)</em></li>
-        <li>Uses <code>@byoky/sdk</code> for all LLM access <em>(human review)</em></li>
-        <li>Only requests providers it actually uses <em>(human review)</em></li>
-        <li>No obfuscated JavaScript <em>(human review)</em></li>
-        <li>Privacy policy exists <em>(human review)</em></li>
-      </ul>
-    </Section>
-  );
-}
-
-function SubmittingYourApp() {
-  return (
-    <Section id="submitting" title="Submitting Your App">
-      <p>
-        Two paths get your app into the marketplace: the CLI (for developers already working in a
-        byoky project) and the web form (for everyone else). Both hit the same review queue.
-      </p>
-
-      <AiPromptCTA
-        title="Create & ship an app with AI"
-        subtitle="Copy the full prompt — it covers scaffold, SDK integration, hosting requirements, and the exact submit command. Paste into Claude, ChatGPT, or Cursor to go from idea to submitted manifest in one session."
-        buttonLabel="Copy create-app prompt"
-      />
-
-      <h3>1. Scaffold or wire up an existing project</h3>
-      <p>
-        If you&apos;re starting fresh, generate a project with a working <code>@byoky/sdk</code>{' '}
-        integration:
-      </p>
-      <Code lang="bash">{`npx create-byoky-app my-app
-cd my-app
-npm install`}</Code>
-      <p>
-        Pick a template (AI Chat / Multi-Provider / Backend Relay). The generator also drops a
-        starter <code>byoky.app.json</code> in the project root.
-      </p>
-      <p>
-        If you already have an app, skip the scaffold and jump to the manifest step &mdash; any web
-        app that uses <code>@byoky/sdk</code> and allows iframe embedding is eligible.
-      </p>
-
-      <h3>2. Create the manifest</h3>
-      <p>
-        Run the interactive generator from inside your project directory:
-      </p>
-      <Code lang="bash">{`npx create-byoky-app init`}</Code>
-      <p>
-        This writes <code>byoky.app.json</code> with your app name, slug, URL, description,
-        category, providers, and author info. See the <a href="#manifest">App Manifest</a> section
-        for the full field reference.
-      </p>
-
-      <h3>3. Host it with iframe embedding allowed</h3>
-      <p>
-        Your app URL must be HTTPS and must not block iframe embedding. The submission endpoint
-        fetches your URL and rejects it if the response headers would prevent it from loading
-        inside the wallet.
-      </p>
-      <Code lang="http">{`# Either omit X-Frame-Options entirely, or allow embedding via CSP:
-Content-Security-Policy: frame-ancestors *`}</Code>
-
-      <h3>4. Submit</h3>
-      <p>
-        From inside your project (where <code>byoky.app.json</code> lives):
-      </p>
-      <Code lang="bash">{`npx create-byoky-app submit`}</Code>
-      <p>
-        This POSTs your manifest to{' '}
-        <code>https://api.byoky.com/v1/apps/submit</code>. You&apos;ll see a confirmation line once
-        the manifest is queued.
-      </p>
-      <p>
-        Prefer a form? Fill out the same fields at{' '}
-        <a href="https://byoky.com/apps/submit">byoky.com/apps/submit</a>.
-      </p>
-
-      <h3>5. Review &amp; approval</h3>
-      <ol>
-        <li>
-          The endpoint validates field formats, checks that your URL is reachable over HTTPS, and
-          verifies iframe embedding is allowed. Failures return a 400 with an explanation &mdash;
-          fix and resubmit.
-        </li>
-        <li>
-          Approved submissions appear at <a href="https://byoky.com/apps">byoky.com/apps</a> and in
-          the App Store tab inside the extension, iOS, and Android wallets.
-        </li>
-        <li>
-          We notify you at the author email you provided in the manifest.
-        </li>
-      </ol>
-
-      <h3>Updating an approved app</h3>
-      <p>
-        Resubmit with the same <code>slug</code>. The existing listing&apos;s metadata updates on
-        approval; the app URL itself can ship new versions anytime &mdash; users always load your
-        current <code>https://</code> URL, so deploying a new build is enough.
       </p>
     </Section>
   );

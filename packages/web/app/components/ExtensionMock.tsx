@@ -6,8 +6,6 @@ export type MockScene =
   | 'walkthrough'
   | 'connect-chat'
   | 'cross-provider'
-  | 'mobile-qr'
-  | 'token-gift'
   | 'approval'
   | 'wallet';
 
@@ -55,36 +53,12 @@ const NavWallet = () => (
     <path d="M18 12a2 2 0 0 0 0 4h4v-4z" />
   </svg>
 );
-const NavGift = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M20 12v10H4V12" />
-    <path d="M2 7h20v5H2z" />
-    <path d="M12 22V7" />
-    <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z" />
-    <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" />
-  </svg>
-);
-const NavApps = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="2" y="2" width="9" height="9" rx="2" />
-    <rect x="13" y="2" width="9" height="9" rx="2" />
-    <rect x="2" y="13" width="9" height="9" rx="2" />
-    <rect x="13" y="13" width="9" height="9" rx="2" />
-  </svg>
-);
 const NavConnect = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M5 12.55a11 11 0 0 1 14.08 0" />
     <path d="M1.42 9a16 16 0 0 1 21.16 0" />
     <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
     <line x1="12" y1="20" x2="12.01" y2="20" />
-  </svg>
-);
-const NavUsage = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M18 20V10" />
-    <path d="M12 20V4" />
-    <path d="M6 20v-6" />
   </svg>
 );
 const NavSettings = () => (
@@ -94,7 +68,7 @@ const NavSettings = () => (
   </svg>
 );
 
-type ActiveNav = 'wallet' | 'gifts' | 'apps' | 'connect' | 'usage' | 'settings';
+type ActiveNav = 'wallet' | 'connect' | 'settings';
 
 function MockShell({
   active,
@@ -111,10 +85,7 @@ function MockShell({
 }) {
   const items: Array<{ k: ActiveNav; Icon: () => ReactNode }> = [
     { k: 'wallet', Icon: NavWallet },
-    { k: 'gifts', Icon: NavGift },
-    { k: 'apps', Icon: NavApps },
     { k: 'connect', Icon: NavConnect },
-    { k: 'usage', Icon: NavUsage },
     { k: 'settings', Icon: NavSettings },
   ];
   return (
@@ -180,12 +151,11 @@ function ApprovalRow({
 }: {
   providerId: keyof typeof ICON;
   providerName: string;
-  state: 'ok' | 'gift' | 'missing';
+  state: 'ok' | 'missing';
 }) {
   return (
     <div className="mock-approval-row">
       <span className="mock-badge mock-badge-prov">{providerName}</span>
-      {state === 'gift' && <span className="mock-badge mock-badge-gift-sm">Gift</span>}
       {state === 'missing' && <span className="mock-no-cred">no key added</span>}
     </div>
   );
@@ -546,8 +516,8 @@ function CrossProviderScene() {
 
   return (
     <div ref={ref} className="mock-stage">
-      <MockShell active="apps">
-        <h2 className="mock-page-title">Apps</h2>
+      <MockShell active="connect">
+        <h2 className="mock-page-title">Connected Apps</h2>
         <div className="mock-card mock-cross-card">
           <div className="mock-card-row">
             <div className="mock-app-fav lg">C</div>
@@ -589,217 +559,6 @@ function CrossProviderScene() {
             </span>
           ))}
         </div>
-      </MockShell>
-    </div>
-  );
-}
-
-/* ── Mobile QR (cell) — pair phone ─────────────────────────── */
-
-function QRGrid() {
-  const cells = Array.from({ length: 81 }, (_, i) => {
-    const r = (i * 9301 + 49297) % 233280;
-    return r / 233280 > 0.55;
-  });
-  return (
-    <div className="mock-qr-grid">
-      {cells.map((on, i) => (
-        <span key={i} className={on ? 'on' : ''} />
-      ))}
-      <div className="mock-qr-eye tl" />
-      <div className="mock-qr-eye tr" />
-      <div className="mock-qr-eye bl" />
-    </div>
-  );
-}
-
-function MobileQRScene() {
-  const ref = useRef<HTMLDivElement>(null);
-  const step = useStepCycle(ref, 3, 2000);
-  const paired = step === 2;
-  const scanning = step >= 1;
-
-  return (
-    <div ref={ref} className="mock-stage">
-      <MockShell active="connect" badge={paired ? 1 : undefined}>
-        <h2 className="mock-page-title">Pair phone</h2>
-        <p className="mock-page-sub">
-          Scan with the Byoky app on your phone to use its keys here.
-        </p>
-        <div className="mock-qr-wrap">
-          <div className={`mock-qr ${paired ? 'paired' : ''}`}>
-            <QRGrid />
-            <div className="mock-qr-pulse" />
-            {paired && <div className="mock-qr-check">✓</div>}
-          </div>
-          <div className={`mock-qr-status ${paired ? 'ok' : ''}`}>
-            {paired ? (
-              <>
-                <span className="mock-status-ok-dot" />
-                Phone connected
-              </>
-            ) : (
-              <>
-                <span className="mock-spinner-sm" />
-                Waiting for phone…
-              </>
-            )}
-          </div>
-        </div>
-        <div className="mock-relay">
-          <span className="mock-mono dim">relay</span>
-          <span className="mock-mono">wss://relay.byoky.com</span>
-        </div>
-      </MockShell>
-      <div className={`mock-phone ${scanning ? 'scanning' : ''}`}>
-        <div className="mock-phone-notch" />
-        <div className="mock-phone-screen">
-          <div className="mock-phone-cam" />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ── Token Gifts (cell) — share + redeem ───────────────────── */
-
-const GIFT_PRESETS = ['10K', '50K', '100K', '500K', '1M'];
-
-function TokenGiftScene() {
-  const ref = useRef<HTMLDivElement>(null);
-  // 6 steps total: 0 form-empty, 1 form-filled, 2 created, 3 redeem-empty, 4 redeem-preview, 5 redeem-accepted
-  const step = useStepCycle(ref, 6, 1800);
-
-  const phase = step <= 2 ? 'send' : 'redeem';
-  const filled = step >= 1;
-  const created = step === 2;
-  const linkPasted = step >= 4;
-  const accepted = step === 5;
-
-  return (
-    <div ref={ref} className="mock-stage">
-      <MockShell active="gifts">
-        <div className="mock-gift-tabs">
-          <span className={`mock-gift-tab ${phase === 'send' ? 'active' : ''}`}>Share gift</span>
-          <span className={`mock-gift-tab ${phase === 'redeem' ? 'active' : ''}`}>Redeem gift</span>
-        </div>
-
-        {phase === 'send' && !created && (
-          <div className="mock-gift-pane">
-            <div className="mock-field">
-              <label>Credential</label>
-              <div className="mock-input mock-input-row">
-                <img src={ICON.anthropic} alt="" />
-                <span>My Anthropic key (Anthropic)</span>
-                <span className="mock-select-caret">▾</span>
-              </div>
-            </div>
-            <div className="mock-field">
-              <label>Token budget</label>
-              <div className="mock-presets">
-                {GIFT_PRESETS.map((p, i) => (
-                  <span key={p} className={`mock-preset ${filled && i === 2 ? 'on' : ''}`}>{p}</span>
-                ))}
-              </div>
-            </div>
-            <div className="mock-field mock-field-row">
-              <div style={{ flex: 1 }}>
-                <label>Expires in</label>
-                <div className="mock-input mock-input-row">
-                  <span>24 hours</span>
-                  <span className="mock-select-caret">▾</span>
-                </div>
-              </div>
-            </div>
-            <button
-              className={`mock-btn mock-btn-primary mock-btn-wide ${filled ? 'ready' : ''}`}
-              type="button"
-              tabIndex={-1}
-            >
-              Create Gift
-            </button>
-          </div>
-        )}
-
-        {phase === 'send' && created && (
-          <div className="mock-gift-success">
-            <div className="mock-gift-check">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-            </div>
-            <div className="mock-gift-success-h">Gift Created</div>
-            <div className="mock-gift-success-sub">100K tokens via Anthropic</div>
-            <div className="mock-gift-link">
-              <span className="mock-mono">byoky.com/gift/</span>
-              <span className="mock-mono accent">eyJzIjoiTWlja…</span>
-            </div>
-            <div className="mock-gift-actions">
-              <button className="mock-btn mock-btn-primary mock-btn-flex" type="button" tabIndex={-1}>
-                Share Gift
-              </button>
-              <button className="mock-btn mock-btn-secondary mock-btn-flex" type="button" tabIndex={-1}>
-                Copy Link
-              </button>
-            </div>
-          </div>
-        )}
-
-        {phase === 'redeem' && (
-          <div className="mock-gift-pane">
-            <p className="mock-page-sub-tight">
-              Paste a gift link to receive token access from another Byoky user.
-            </p>
-            <div className="mock-field">
-              <label>Gift link</label>
-              <div className={`mock-textarea ${linkPasted ? 'filled' : ''}`}>
-                {linkPasted ? (
-                  <span className="mock-mono small">https://byoky.com/gift/eyJzIjoiTWlja…</span>
-                ) : (
-                  <span className="mock-textarea-placeholder">https://byoky.com/gift/... or byoky://gift/...</span>
-                )}
-              </div>
-            </div>
-            {linkPasted && (
-              <div className="mock-gift-preview">
-                <div className="mock-gift-preview-head">
-                  <NavGift />
-                  <span>Token gift from <strong>Michael</strong></span>
-                </div>
-                <div className="mock-gift-rows">
-                  <div className="mock-gift-prow">
-                    <span className="dim">Provider</span>
-                    <span>Anthropic</span>
-                  </div>
-                  <div className="mock-gift-prow">
-                    <span className="dim">Budget</span>
-                    <span>100K tokens</span>
-                  </div>
-                  <div className="mock-gift-prow">
-                    <span className="dim">Expires</span>
-                    <span>23h 51m</span>
-                  </div>
-                  <div className="mock-gift-prow">
-                    <span className="dim">Relay</span>
-                    <span className="mock-mono small">relay.byoky.com</span>
-                  </div>
-                </div>
-              </div>
-            )}
-            <div className="mock-gift-actions">
-              <button className="mock-btn mock-btn-secondary mock-btn-flex" type="button" tabIndex={-1}>
-                Cancel
-              </button>
-              <button
-                className={`mock-btn mock-btn-primary mock-btn-flex ${linkPasted ? 'ready' : ''} ${accepted ? 'pressed' : ''}`}
-                type="button"
-                tabIndex={-1}
-              >
-                Accept Gift
-              </button>
-            </div>
-          </div>
-        )}
       </MockShell>
     </div>
   );
@@ -927,8 +686,6 @@ export function ExtensionMock({
       {scene === 'walkthrough' && <WalkthroughScene />}
       {scene === 'connect-chat' && <ConnectChatScene />}
       {scene === 'cross-provider' && <CrossProviderScene />}
-      {scene === 'mobile-qr' && <MobileQRScene />}
-      {scene === 'token-gift' && <TokenGiftScene />}
       {scene === 'approval' && <ApprovalScene />}
       {scene === 'wallet' && <WalletScene />}
     </div>

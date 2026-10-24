@@ -2,16 +2,16 @@ import type { Metadata } from 'next';
 import { InstallWithAI } from './InstallWithAI';
 
 export const metadata: Metadata = {
-  title: 'Run OpenClaw with Byoky — free, no API credits required',
+  title: 'Run OpenClaw with Byoky — your keys stay in your wallet',
   description:
-    'Use OpenClaw — the open-source AI agent CLI — with Claude, GPT, Gemini and 10 more providers. Pair it with a free Byoky token gift or your existing Claude Pro/Max subscription and run frontier models at zero extra cost.',
+    'Use OpenClaw — the open-source AI agent CLI — with Claude, GPT, Gemini and 10 more providers. Power it with the API keys in your Byoky wallet or your existing Claude Pro/Max subscription. Keys never leave the wallet.',
   alternates: {
     canonical: '/openclaw',
   },
   openGraph: {
-    title: 'Run OpenClaw with Byoky — free, no API credits required',
+    title: 'Run OpenClaw with Byoky — your keys stay in your wallet',
     description:
-      'Use OpenClaw with Claude, GPT, and Gemini for free. Grab a token gift from the Byoky token pool, or sign in with your Claude Pro/Max subscription. Up in 5 minutes.',
+      'Use OpenClaw with Claude, GPT, and Gemini through your Byoky wallet — your own API keys or your Claude Pro/Max subscription. Up in 5 minutes.',
     url: 'https://byoky.com/openclaw',
     type: 'article',
     images: [
@@ -25,9 +25,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Run OpenClaw with Byoky — free, no API credits required',
+    title: 'Run OpenClaw with Byoky — your keys stay in your wallet',
     description:
-      'Use OpenClaw with Claude, GPT, and Gemini for free. Grab a token gift from the token pool, or sign in with your Claude Pro/Max subscription.',
+      'Use OpenClaw with Claude, GPT, and Gemini through your Byoky wallet — your own API keys or your Claude Pro/Max subscription.',
     images: ['/openclaw-og.png'],
   },
 };
@@ -42,9 +42,9 @@ export default function OpenClawTutorial() {
         <Step
           n={1}
           title="Install the Byoky wallet"
-          subtitle="The wallet holds API keys (yours or gifted) and proxies every request."
+          subtitle="The browser extension holds your API keys and proxies every request."
         >
-          <p>Pick the version for your machine:</p>
+          <p>Pick your browser:</p>
           <div className="oc-install-grid">
             <a
               className="oc-install-card"
@@ -64,40 +64,20 @@ export default function OpenClawTutorial() {
               <svg width="20" height="20" viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="#fff" stroke="#ddd" strokeWidth="1"/><path d="M38 18c-1-4-4-7-8-9 2 2 3 5 3 7 0 3-2 6-5 7-4 1-7-1-7-1s1 5 6 6c4 1 8-1 10-4 1-1 1-3 1-6z" fill="#FF4F00"/><path d="M14 30c-1-3 0-6 2-9 1-2 3-3 5-4-2 2-3 4-2 7 0 2 2 4 4 5 3 1 6 0 7-2-1 3-4 6-8 6-3 1-6-1-8-3z" fill="#FF9500"/></svg>
               <span>Firefox</span>
             </a>
-            <a
-              className="oc-install-card"
-              href="https://apps.apple.com/app/byoky/id6760779919"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="#999"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
-              <span>iOS</span>
-            </a>
-            <a
-              className="oc-install-card"
-              href="https://play.google.com/store/apps/details?id=com.byoky.app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="#3DDC84"><path d="M17.523 15.341a.91.91 0 0 0 .916-.907V9.478a.91.91 0 0 0-.916-.907.91.91 0 0 0-.917.907v4.956a.91.91 0 0 0 .917.907zm-11.046 0a.91.91 0 0 0 .917-.907V9.478a.91.91 0 0 0-.917-.907.91.91 0 0 0-.916.907v4.956a.91.91 0 0 0 .916.907zm1.48 5.178c0 .504.41.912.916.912h.95v2.66a.91.91 0 0 0 .916.909.91.91 0 0 0 .917-.908v-2.66h1.688v2.66a.91.91 0 0 0 .916.909.91.91 0 0 0 .917-.908v-2.66h.95a.914.914 0 0 0 .916-.913V8.879H7.957v11.64zM15.4 3.11l1.124-1.727a.235.235 0 0 0-.073-.324.237.237 0 0 0-.326.072l-1.14 1.75A6.813 6.813 0 0 0 12 2.321c-1.07 0-2.08.195-3.003.56L7.857 1.13a.236.236 0 0 0-.325-.072.235.235 0 0 0-.073.324L8.583 3.11C6.572 4.12 5.204 6.071 5.204 8.338h13.592c0-2.267-1.368-4.219-3.396-5.228z"/></svg>
-              <span>Android</span>
-            </a>
           </div>
           <p className="oc-note">
             Open the wallet, set a password, and you&apos;re ready. No accounts, no email.
+            OpenClaw reaches the wallet through the local bridge and native messaging, so it
+            needs the desktop browser extension.
           </p>
         </Step>
 
         <Step
           n={2}
           title="Add a credential"
-          subtitle="Three options — pick whichever fits."
+          subtitle="Two options — pick whichever fits."
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <div className="oc-option-card">
-              <strong>Free token gift</strong> — grab one from the{' '}
-              <a className="oc-link" href="/token-pool">Token Pool</a>. No API key needed.
-            </div>
             <div className="oc-option-card">
               <strong>Claude Pro/Max setup token</strong> — run <code>claude setup-token</code> in your terminal and paste it into Byoky.
             </div>
@@ -160,7 +140,7 @@ export default function OpenClawTutorial() {
         >
           <Code>{`openclaw models set byoky-anthropic/claude-sonnet-4-6`}</Code>
           <p>
-            Swap the model for whichever you actually have a key or gift for:{' '}
+            Swap the model for whichever you actually have a key for:{' '}
             <code>byoky-openai/gpt-4.1</code>, <code>byoky-gemini/gemini-2.5-pro</code>,{' '}
             <code>byoky-xai/grok-3</code>, etc. <code>openclaw models list --all</code>{' '}
             shows every option.
@@ -179,9 +159,7 @@ export default function OpenClawTutorial() {
           <Code>{`/byoky`}</Code>
           <p>
             Token usage is tracked in your wallet&apos;s{' '}
-            <strong>Sessions</strong> view. If you&apos;re using a gifted
-            credential, the gifter&apos;s budget ticks down in real time and
-            stops you cleanly when it hits zero.
+            <strong>Sessions</strong> view.
           </p>
         </Step>
 
@@ -208,7 +186,7 @@ function Hero() {
   return (
     <header className="oc-hero">
       <div className="oc-eyebrow">OpenClaw × Byoky</div>
-      <h1>Run Claude Code in OpenClaw — for free.</h1>
+      <h1>Run Claude Code in OpenClaw — on your own keys.</h1>
       <div style={{
         display: 'flex', gap: '16px', justifyContent: 'center',
         flexWrap: 'wrap', margin: '24px 0',
@@ -225,8 +203,8 @@ function Hero() {
         ))}
       </div>
       <p className="oc-lede">
-        Grab a free token gift or use your Claude Pro/Max subscription.<br />
-        Zero extra cost. Keys never exposed.
+        Use the API keys in your wallet or your Claude Pro/Max subscription.<br />
+        Keys never leave the wallet.
       </p>
       <div className="oc-cta-row" style={{ justifyContent: 'center', alignItems: 'center' }}>
         <a className="btn btn-primary" href="#step-1" style={{ minWidth: '220px', textAlign: 'center', justifyContent: 'center' }}>
@@ -248,27 +226,20 @@ function VersionHint() {
         <path d="M12 8h.01" />
       </svg>
       <span>
-        Requires the Byoky extension <strong>v0.9.0+</strong>. Available now on{' '}
+        Requires the Byoky browser extension <strong>v0.9.0+</strong> for{' '}
+        <a
+          className="oc-link"
+          href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon"
+          target="_blank"
+          rel="noopener noreferrer"
+        >Chrome</a>
+        {' '}or{' '}
         <a
           className="oc-link"
           href="https://addons.mozilla.org/en-US/firefox/addon/byoky/"
           target="_blank"
           rel="noopener noreferrer"
         >Firefox</a>
-        {' '}and{' '}
-        <a
-          className="oc-link"
-          href="https://play.google.com/store/apps/details?id=com.byoky.app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >Android</a>
-        {' '}and{' '}
-        <a
-          className="oc-link"
-          href="https://apps.apple.com/app/byoky/id6760779919"
-          target="_blank"
-          rel="noopener noreferrer"
-        >iOS</a>
         .
       </span>
     </div>
@@ -278,29 +249,21 @@ function VersionHint() {
 function FreeCallout() {
   return (
     <div className="oc-paths">
-      <div className="oc-paths-heading">Two ways to run OpenClaw for free</div>
+      <div className="oc-paths-heading">Two ways to power OpenClaw</div>
       <div className="oc-paths-grid">
         <div className="oc-path-card">
           <div className="oc-path-icon" aria-hidden>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M20 12v10H4V12" />
-              <path d="M2 7h20v5H2z" />
-              <path d="M12 22V7" />
-              <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z" />
-              <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" />
+              <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4" />
             </svg>
           </div>
-          <h3>Token gift from the token pool</h3>
+          <h3>The API keys in your wallet</h3>
           <p>
-            Anyone can gift token access on the{' '}
-            <a className="oc-link" href="/token-pool">
-              Byoky token pool
-            </a>
-            . OpenClaw runs entirely on the gifter&apos;s budget — capped,
-            revocable, and proxied through their wallet so their key never
-            leaves their machine.
+            Any of the 13 providers you&apos;ve added to Byoky — Anthropic,
+            OpenAI, Gemini, xAI and more. OpenClaw calls them through your
+            wallet, so the keys never land in a config file on disk.
           </p>
-          <p className="oc-path-tag">No card, no signup, no provider account.</p>
+          <p className="oc-path-tag">You pay your provider directly. Byoky runs no servers.</p>
         </div>
         <div className="oc-path-card">
           <div className="oc-path-icon" aria-hidden>
@@ -323,36 +286,6 @@ function FreeCallout() {
   );
 }
 
-function Overview() {
-  return (
-    <section className="oc-overview">
-      <h2>What you&apos;ll do</h2>
-      <div className="oc-overview-grid">
-        <div className="oc-overview-card">
-          <span className="oc-overview-num">1</span>
-          <h3>Install the wallet</h3>
-          <p>Chrome, Firefox, iOS, or Android — one click.</p>
-        </div>
-        <div className="oc-overview-card">
-          <span className="oc-overview-num">2</span>
-          <h3>Get free tokens</h3>
-          <p>Redeem a gift from the token pool, or use your own key.</p>
-        </div>
-        <div className="oc-overview-card">
-          <span className="oc-overview-num">3</span>
-          <h3>Install the plugin</h3>
-          <p>One npm install. Plugin pulls in the bridge.</p>
-        </div>
-        <div className="oc-overview-card">
-          <span className="oc-overview-num">4</span>
-          <h3>Run OpenClaw</h3>
-          <p>One auth command and you&apos;re calling Claude / GPT / Gemini.</p>
-        </div>
-      </div>
-    </section>
-  );
-}
-
 function Troubleshooting() {
   const items: [string, React.ReactNode][] = [
     [
@@ -361,7 +294,7 @@ function Troubleshooting() {
         The bridge session got out of sync with the extension (happens after a
         browser restart or wallet re-lock). Re-run{' '}
         <code>openclaw models auth login --provider byoky</code> — plugin 0.7.7+
-        detects this and forces a fresh wallet re-pair.
+        detects this and forces a fresh wallet connection.
       </>,
     ],
     [
@@ -378,8 +311,7 @@ function Troubleshooting() {
       '"invalid x-api-key" from Anthropic (or OpenAI)',
       <>
         The key saved in your wallet is wrong or revoked. Grab a fresh one from{' '}
-        the provider's console and paste it in, or use a free gift from the{' '}
-        <a className="oc-link" href="/token-pool">token pool</a> instead.
+        the provider&apos;s console and paste it into the wallet.
       </>,
     ],
     [
@@ -393,19 +325,19 @@ function Troubleshooting() {
     [
       'Fixed the bad credential, but OpenClaw still won\u2019t use that provider',
       <>
-        After a credential fails (bad key, expired gift, rate limit), OpenClaw
+        After a credential fails (bad key, expired token, rate limit), OpenClaw
         puts the provider profile in an in-memory cooldown that persists until
         the gateway restarts. Restart it with{' '}
         <code>openclaw gateway restart</code> and try again.
       </>,
     ],
     [
-      'Anthropic keeps returning 429 rate_limit_error on a gift',
+      'Anthropic keeps returning 429 rate_limit_error',
       <>
-        The gifter\u2019s upstream key is being throttled by Anthropic (the
-        limit is on their account, not yours). Try a different Anthropic gift,
-        switch the chat model to a non-Anthropic byoky provider, or wait for
-        the window to clear (usually 1 hour).
+        Your Anthropic key or Pro/Max subscription is being throttled upstream
+        (the limit is on your Anthropic account, not on Byoky). Switch the chat
+        model to a non-Anthropic byoky provider, or wait for the window to
+        clear.
       </>,
     ],
   ];
@@ -481,15 +413,13 @@ function HowItWorks() {
       <ol className="oc-list">
         <li>The plugin registers each Byoky provider in OpenClaw, pointing at <code>http://127.0.0.1:19280/&lt;provider&gt;</code>.</li>
         <li>OpenClaw sends an LLM request to the local bridge.</li>
-        <li>The bridge relays the request to your Byoky extension via Chrome native messaging.</li>
-        <li>The extension injects the real API key (yours or a gifted one) and calls the provider.</li>
+        <li>The bridge relays the request to your Byoky extension via native messaging.</li>
+        <li>The extension injects the real API key and calls the provider directly.</li>
         <li>The response streams back through the same path.</li>
       </ol>
       <p>
-        If you&apos;re using a gifted credential, requests are relayed once
-        more — through the gifter&apos;s extension, which holds the real key
-        and enforces the token budget. You see streaming tokens; the gifter
-        sees a usage counter ticking down.
+        Everything runs on your machine. No Byoky server sits anywhere in the
+        path.
       </p>
     </section>
   );
@@ -500,12 +430,12 @@ function Closing() {
     <section className="oc-closing">
       <h2>Ready to try it?</h2>
       <p>
-        Grab a free token gift from the token pool and you&apos;ll be running
-        Claude or GPT inside OpenClaw in under five minutes.
+        Install the wallet, add a key, and you&apos;ll be running Claude or GPT
+        inside OpenClaw in under five minutes.
       </p>
       <div className="oc-cta-row">
-        <a className="btn btn-primary" href="/token-pool">
-          Browse free gifts
+        <a className="btn btn-primary" href="#step-1">
+          Start setup
         </a>
         <a
           className="btn btn-secondary"
@@ -692,7 +622,7 @@ const styles = `
 }
 .oc-version-hint strong { color: var(--text); }
 
-/* ── Two free paths ── */
+/* ── Two credential paths ── */
 .oc-paths {
   margin-bottom: 64px;
 }

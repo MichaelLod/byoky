@@ -5,9 +5,9 @@ import { useState } from 'react';
 const AI_PROMPT = `You are helping me set up Claude Code (Anthropic's official CLI) to run on Byoky (https://byoky.com/claude-code).
 
 Context:
-- Byoky is a BYOK wallet extension. It holds API keys (mine, gifted, or a Claude Pro/Max subscription token) and proxies every LLM request so keys never leave the wallet.
+- Byoky is a local BYOK wallet ("the MetaMask for API keys"). The browser extension holds my API keys (or a Claude Pro/Max setup token) and proxies every LLM request so keys never leave the wallet. Byoky runs no servers.
 - The Byoky bridge is a tiny local HTTP proxy on 127.0.0.1:19280. Claude Code talks to the bridge, which forwards through native messaging to the extension, which calls Anthropic.
-- I already have the Byoky wallet installed (Chrome/Firefox/iOS/Android) and an Anthropic credential or gift loaded. Do not worry about that side.
+- I already have the Byoky browser extension installed (Chrome or Firefox) with an Anthropic credential loaded. Do not worry about that side.
 
 Your job — run these commands on my machine and report each step:
 
@@ -32,7 +32,7 @@ Your job — run these commands on my machine and report each step:
 5. Verify the bridge is up and Anthropic is in the provider list:
      curl http://127.0.0.1:19280/health
    Expected: {"status":"ok","providers":[..., "anthropic", ...]}
-   If anthropic is missing, the wallet doesn't have an Anthropic credential or gift — tell me to add one and stop.
+   If anthropic is missing, the wallet doesn't have an Anthropic credential — tell me to add one and stop.
 
 6. Start Claude Code:
      claude
@@ -41,9 +41,9 @@ Your job — run these commands on my machine and report each step:
 Troubleshooting cheatsheet (only mention if the relevant error shows up):
 - "Third-party apps now draw from your extra usage" → the wallet is not treating this as first-party Claude Code. This is usually because the credential is an API key, not an OAuth setup token. Ask me to run \`claude setup-token\` and paste the result into the wallet.
 - "ECONNREFUSED 127.0.0.1:19280" → the bridge proxy isn't running. Run \`byoky-bridge connect\` (or re-run it if the browser was restarted).
-- "invalid x-api-key" or "Invalid bearer token" → the wallet credential is bad or expired. Swap it or use a gift.
-- "rate_limit_error" on a gift → the gifter's upstream cap is being throttled. Try a different gift and wait a few minutes.
-- Claude Code complains about missing model → override with \`--model claude-sonnet-4-5\` (or another model the gifter/wallet has access to).
+- "invalid x-api-key" or "Invalid bearer token" → the wallet credential is bad or expired. Ask me to swap it.
+- "rate_limit_error" → my Anthropic account is being throttled upstream. Wait a few minutes.
+- Claude Code complains about missing model → override with \`--model claude-sonnet-4-5\` (or another model my plan has access to).
 
 Rules:
 - Run one command at a time and show me the output before moving on.

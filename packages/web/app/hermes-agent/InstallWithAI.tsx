@@ -5,9 +5,9 @@ import { useState } from 'react';
 const AI_PROMPT = `You are helping me set up Hermes Agent (Nous Research's self-improving CLI agent) to run on Byoky (https://byoky.com/hermes-agent).
 
 Context:
-- Byoky is a BYOK wallet extension. It holds API keys (mine, gifted, or a Claude Pro/Max subscription token) and proxies every LLM request so keys never leave the wallet.
+- Byoky is a local BYOK wallet ("the MetaMask for API keys"). The browser extension holds my API keys (or a Claude Pro/Max setup token) and proxies every LLM request so keys never leave the wallet. Byoky runs no servers.
 - The Byoky bridge is a tiny local HTTP proxy on 127.0.0.1:19280. Hermes talks to the bridge, which forwards through native messaging to the extension, which calls the upstream provider (Anthropic in this guide).
-- I already have the Byoky wallet installed (Chrome/Firefox) and an Anthropic credential or gift loaded. Do not worry about that side.
+- I already have the Byoky browser extension installed (Chrome or Firefox) with an Anthropic credential loaded. Do not worry about that side.
 - IMPORTANT: Hermes's built-in \`anthropic\` provider goes direct to api.anthropic.com and ignores ANTHROPIC_BASE_URL. To route through byoky, you have to register the bridge as a custom_providers entry in ~/.hermes/config.yaml and switch model.provider to it. Env-vars alone do nothing.
 
 Your job — run these commands on my machine and report each step:
@@ -29,7 +29,7 @@ Your job — run these commands on my machine and report each step:
 4. Verify the bridge is up and Anthropic is in the provider list:
      curl http://127.0.0.1:19280/health
    Expected: {"status":"ok","providers":[..., "anthropic", ...]}
-   If anthropic is missing, the wallet doesn't have an Anthropic credential or gift — tell me to add one and stop.
+   If anthropic is missing, the wallet doesn't have an Anthropic credential — tell me to add one and stop.
 
 5. Wire Hermes to the bridge with the new helper command (it patches ~/.hermes/config.yaml idempotently and writes a .bak):
      byoky-bridge hermes-setup
@@ -54,9 +54,9 @@ Your job — run these commands on my machine and report each step:
 Troubleshooting cheatsheet (only mention if the relevant error shows up):
 - HTTP 404 from http://127.0.0.1:19280/anthropic → The byoky-anthropic entry has api_mode: chat_completions. Change it to anthropic_messages.
 - "hermes status" shows Endpoint: https://api.anthropic.com → Hermes is bypassing the bridge. The model.provider line is still "anthropic" instead of "byoky-anthropic", or the custom_providers entry name doesn't match. Re-check step 5(a) and (b).
-- "Third-party apps now draw from your extra usage" → ONLY happens when Hermes hit api.anthropic.com directly. Verify with \`hermes status\`; if endpoint is api.anthropic.com, fix step 5. If the endpoint is :19280/anthropic and this still appears, the wallet credential needs swapping (fresh \`claude setup-token\` or a gift).
+- "Third-party apps now draw from your extra usage" → ONLY happens when Hermes hit api.anthropic.com directly. Verify with \`hermes status\`; if endpoint is api.anthropic.com, fix step 5. If the endpoint is :19280/anthropic and this still appears, the wallet credential needs swapping (fresh \`claude setup-token\`).
 - "ECONNREFUSED 127.0.0.1:19280" → the bridge isn't running. Run \`byoky-bridge connect\`.
-- "invalid x-api-key" or "Invalid bearer token" → the wallet credential is bad or expired. Swap it or use a gift.
+- "invalid x-api-key" or "Invalid bearer token" → the wallet credential is bad or expired. Ask me to swap it.
 - Migrating from OpenClaw → Hermes can import your settings, memories, skills, and API keys. Run \`hermes claw migrate\`. After it runs, you still need step 5 — flip the migrated byoky-anthropic api_mode from chat_completions to anthropic_messages.
 
 Rules:

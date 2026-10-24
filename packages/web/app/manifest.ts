@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: 'Byoky — Bring Your Own Key',
     short_name: 'Byoky',
     description:
-      'A secure browser wallet for your LLM API keys and setup tokens. Connect to any app — your keys never leave the extension.',
+      'The MetaMask for API keys. Keep every AI API key in one wallet. Apps connect to the wallet, and your keys never leave Byoky.',
     start_url: '/',
     display: 'browser',
     background_color: '#fafaf9',

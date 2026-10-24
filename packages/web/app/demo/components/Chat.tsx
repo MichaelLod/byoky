@@ -291,8 +291,8 @@ export function Chat({ session, initialProvider }: Props) {
 
   useEffect(() => {
     // Keep the selection in sync with what's actually usable. Drop a stale
-    // choice when its key disappears (e.g. relay → vault handoff drops
-    // providers the vault can't serve).
+    // choice when its key disappears (e.g. the user removes a credential
+    // from the wallet mid-session).
     if (selectedProvider && availableProviderIds.includes(selectedProvider)) return;
     setSelectedProvider(availableProviderIds[0] ?? '');
   }, [availableProviderIds, selectedProvider]);

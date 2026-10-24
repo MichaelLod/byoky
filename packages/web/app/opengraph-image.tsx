@@ -1,6 +1,6 @@
 import { ImageResponse } from 'next/og';
 
-export const alt = 'Byoky — Share your AI budget without sharing your keys';
+export const alt = 'Byoky — The MetaMask for API keys';
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
 
@@ -104,7 +104,7 @@ export default function Image() {
                 display: 'flex',
               }}
             />
-            The AI token network
+            Open source · No servers
           </div>
         </div>
 
@@ -125,7 +125,7 @@ export default function Image() {
               display: 'flex',
             }}
           >
-            Share your AI budget
+            The MetaMask
           </div>
           <div
             style={{
@@ -137,7 +137,7 @@ export default function Image() {
               display: 'flex',
             }}
           >
-            without sharing your keys.
+            for API keys.
           </div>
         </div>
 
@@ -158,8 +158,8 @@ export default function Image() {
               lineHeight: 1.35,
             }}
           >
-            Send a friend tokens from your Claude, OpenAI, or Gemini plan.
-            Open source. End-to-end encrypted.
+            Keep every AI API key in one wallet. Apps connect to the wallet.
+            Your keys never leave Byoky.
           </div>
           <div
             style={{

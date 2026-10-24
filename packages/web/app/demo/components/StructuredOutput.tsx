@@ -172,11 +172,9 @@ export function StructuredOutput({ session }: Props) {
             <option value="" disabled>No keys in wallet</option>
           )}
           {availableProviders.map((id) => {
-            const meta = session.providers[id];
-            const suffix = meta?.gift ? ' (Gift)' : '';
             const label = id === 'anthropic' ? 'Anthropic (Claude)' : openaiCompat[id]?.name ?? id;
             return (
-              <option key={id} value={id}>{label}{suffix}</option>
+              <option key={id} value={id}>{label}</option>
             );
           })}
         </select>

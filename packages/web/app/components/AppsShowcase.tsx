@@ -342,8 +342,8 @@ export function AppsShowcase() {
         <div className="apps-showcase-head">
           <h2>One wallet. Every AI app.</h2>
           <p className="subtitle">
-            Log in with your own keys. Byoky brings Bring-Your-Own-Key to the apps you already use —
-            no more subscriptions, no more lock-in. Pick an app below to see what it looks like.
+            Apps connect to your wallet instead of asking for your keys. One click to approve,
+            one click to revoke. Pick an app below to see what it could look like.
           </p>
         </div>
 
