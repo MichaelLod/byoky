@@ -59,6 +59,15 @@ function getTemplatesDir(): string {
   throw new Error('Could not find templates directory');
 }
 
+// @byoky/sdk is released in lockstep with this package, so new projects depend
+// on the SDK version matching the scaffolder that created them.
+function getSdkVersion(): string {
+  const pkgPath = path.resolve(__dirname, '..', 'package.json');
+  return JSON.parse(fs.readFileSync(pkgPath, 'utf-8')).version;
+}
+
+const SDK_VERSION = getSdkVersion();
+
 function copyTemplateDir(srcDir: string, destDir: string, projectName: string): void {
   const entries = fs.readdirSync(srcDir, { withFileTypes: true });
 
@@ -75,6 +84,7 @@ function copyTemplateDir(srcDir: string, destDir: string, projectName: string): 
     } else {
       let content = fs.readFileSync(srcPath, 'utf-8');
       content = content.replaceAll('{{PROJECT_NAME}}', projectName);
+      content = content.replaceAll('{{SDK_VERSION}}', SDK_VERSION);
       fs.writeFileSync(destPath, content, 'utf-8');
     }
   }

@@ -10,7 +10,7 @@
     "build:client": "vite build client"
   },
   "dependencies": {
-    "@byoky/sdk": "^0.4.9",
+    "@byoky/sdk": "^{{SDK_VERSION}}",
     "express": "^4.21.0",
     "ws": "^8.18.0"
   },

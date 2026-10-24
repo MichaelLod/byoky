@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@byoky/sdk": "^0.4.9"
+    "@byoky/sdk": "^{{SDK_VERSION}}"
   },
   "devDependencies": {
     "typescript": "^5.7.0",
