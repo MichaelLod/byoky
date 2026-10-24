@@ -140,6 +140,7 @@ fi
 DRY_RUN=false
 SKIP_MOBILE=false
 SKIP_STORE_UPLOADS=false
+ASSUME_YES=false
 NEW_VERSION=""
 
 for arg in "$@"; do
@@ -147,19 +148,21 @@ for arg in "$@"; do
     --dry)     DRY_RUN=true ;;
     --skip-mobile) SKIP_MOBILE=true ;;
     --skip-store-uploads) SKIP_STORE_UPLOADS=true ;;
+    --yes)     ASSUME_YES=true ;;
     *)         NEW_VERSION="$arg" ;;
   esac
 done
 
 if [ -z "$NEW_VERSION" ]; then
   CURRENT=$(node -p "require('./package.json').version")
-  echo "Usage: ./scripts/release.sh <new-version> [--dry] [--skip-mobile] [--skip-store-uploads]"
+  echo "Usage: ./scripts/release.sh <new-version> [--dry] [--skip-mobile] [--skip-store-uploads] [--yes]"
   echo "       ./scripts/release.sh status"
   echo ""
   echo "  --dry                  Print what would happen without executing"
   echo "  --skip-mobile          Skip iOS/macOS/Android builds and uploads"
   echo "  --skip-store-uploads   Build + npm publish + GitHub release, but skip"
   echo "                         Chrome/Firefox/App Store/Play uploads"
+  echo "  --yes                  Don't ask before starting (non-interactive runs)"
   echo ""
   echo "Current version: $CURRENT"
   exit 1
@@ -212,6 +215,16 @@ if [ "$SKIP_MOBILE" = false ]; then
 else
   SKIP_IOS=true
   SKIP_ANDROID=true
+fi
+
+# Signing is prepared before anything is bumped, so a missing certificate or
+# profile stops the release while the tree is still clean. See ios-signing.sh.
+SIGNING_KEYCHAIN="$HOME/Library/Keychains/byoky-signing.keychain-db"
+if [ "$SKIP_IOS" = false ]; then
+  echo "  Preparing iOS/macOS signing..."
+  if ! bash scripts/ios-signing.sh; then
+    ERRORS+=("iOS/macOS signing isn't ready (see above); fix it or pass --skip-mobile")
+  fi
 fi
 
 # Check git state
@@ -315,10 +328,12 @@ if [ "$DRY_RUN" = true ]; then
   exit 0
 fi
 
-read -rp "Proceed? [y/N] " CONFIRM
-if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
-  echo "Aborted."
-  exit 1
+if [ "$ASSUME_YES" = false ]; then
+  read -rp "Proceed? [y/N] " CONFIRM
+  if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+    echo "Aborted."
+    exit 1
+  fi
 fi
 
 STEP=0
@@ -363,9 +378,13 @@ IOS_PLISTS=(
   packages/ios/macOS/SafariExtension-macOS-Info.plist
 )
 
+# The build number follows Android's versionCode. Set it outright: the iOS
+# plists drifted from versionCode once, and a sed on the old value then
+# silently matched nothing (App Store Connect requires macOS build numbers
+# to keep rising).
 for f in "${IOS_PLISTS[@]}"; do
-  sed -i '' "s|<string>$OLD_NATIVE_VERSION</string>|<string>$NEW_NATIVE_VERSION</string>|" "$f"
-  sed -i '' "s|<string>$OLD_VERSION_CODE</string>|<string>$NEW_VERSION_CODE</string>|" "$f"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $NEW_NATIVE_VERSION" "$f"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $NEW_VERSION_CODE" "$f"
 done
 
 echo "  Done."
@@ -404,10 +423,17 @@ BUILD_DIR="$ROOT/build"
 mkdir -p "$BUILD_DIR"
 
 if [ "$SKIP_IOS" = false ]; then
-  # -allowProvisioningUpdates lets Xcode (via the account signed in under
-  # Settings > Accounts) renew expired development certificates and refresh
-  # the managed provisioning profiles; without it a yearly cert renewal stops
-  # the archive with a stale-profile error.
+  # Archives sign with the development identity in the signing keychain; the
+  # App Store Connect key lets xcodebuild refresh development profiles without
+  # an Xcode account. Exports sign manually with the App Store profiles that
+  # ios-signing.sh installed and write the .ipa/.pkg locally; step 9 uploads them.
+  ASC_AUTH=(
+    -allowProvisioningUpdates
+    -authenticationKeyPath "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+    -authenticationKeyID "$ASC_KEY_ID"
+    -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+  )
+
   echo "  Archiving iOS app..."
   xcodebuild archive \
     -project "$IOS_DIR/Byoky.xcodeproj" \
@@ -416,14 +442,15 @@ if [ "$SKIP_IOS" = false ]; then
     -archivePath "$BUILD_DIR/Byoky-iOS.xcarchive" \
     -destination "generic/platform=iOS" \
     CODE_SIGN_STYLE=Automatic \
-    -allowProvisioningUpdates \
+    OTHER_CODE_SIGN_FLAGS="--keychain $SIGNING_KEYCHAIN" \
+    "${ASC_AUTH[@]}" \
     -quiet
 
   echo "  Exporting iOS IPA..."
+  rm -rf "$BUILD_DIR/ios-export"
   xcodebuild -exportArchive \
     -archivePath "$BUILD_DIR/Byoky-iOS.xcarchive" \
     -exportOptionsPlist "$IOS_DIR/ExportOptions.plist" \
-    -allowProvisioningUpdates \
     -exportPath "$BUILD_DIR/ios-export" \
     -quiet
 
@@ -435,14 +462,15 @@ if [ "$SKIP_IOS" = false ]; then
     -archivePath "$BUILD_DIR/Byoky-macOS.xcarchive" \
     -destination "generic/platform=macOS" \
     CODE_SIGN_STYLE=Automatic \
-    -allowProvisioningUpdates \
+    OTHER_CODE_SIGN_FLAGS="--keychain $SIGNING_KEYCHAIN" \
+    "${ASC_AUTH[@]}" \
     -quiet
 
   echo "  Exporting macOS app..."
+  rm -rf "$BUILD_DIR/macos-export"
   xcodebuild -exportArchive \
     -archivePath "$BUILD_DIR/Byoky-macOS.xcarchive" \
     -exportOptionsPlist "$IOS_DIR/ExportOptions-macOS.plist" \
-    -allowProvisioningUpdates \
     -exportPath "$BUILD_DIR/macos-export" \
     -quiet
 fi
