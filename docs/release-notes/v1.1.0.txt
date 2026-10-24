@@ -1,0 +1,5 @@
+Byoky is now fully local: the MetaMask for API keys.
+• Your keys live only on your device. No account, no cloud, no relay.
+• New: move keys between devices with encrypted .byoky backup files.
+• Removed: cloud sync, gifts, the token pool, phone pairing and the in-app app store. On mobile, open any web app by its address instead.
+Keys already on this device are untouched.

@@ -13,6 +13,17 @@ for envfile in .env .env.local; do
   fi
 done
 
+# Hand-written notes in docs/release-notes/v<version>.txt, when present,
+# replace the store "What's New" generated from conventional-commit prefixes.
+write_store_notes() {
+  local version="$1" prev_tag="$2" out="$3"
+  if [ -f "docs/release-notes/v${version}.txt" ]; then
+    cp "docs/release-notes/v${version}.txt" "$out"
+  elif [ -n "$prev_tag" ]; then
+    node scripts/release-notes.mjs --store "$prev_tag" "v${version}" > "$out"
+  fi
+}
+
 # ============================================================
 # Status check mode
 # ============================================================
@@ -40,7 +51,7 @@ if [ "${1:-}" = "retry" ]; then
   mkdir -p "$BUILD_DIR"
   STORE_NOTES_FILE="$BUILD_DIR/store-notes.txt"
   PREV_TAG=$(git tag --list 'v*' --sort=-version:refname | sed -n '2p')
-  [ -n "$PREV_TAG" ] && node scripts/release-notes.mjs --store "$PREV_TAG" "v${CURRENT}" > "$STORE_NOTES_FILE"
+  write_store_notes "$CURRENT" "$PREV_TAG" "$STORE_NOTES_FILE"
 
   RETRIED=0
 
@@ -529,11 +540,14 @@ if [ -z "$PREV_TAG" ]; then
 fi
 
 RELEASE_NOTES=$(node scripts/release-notes.mjs "$PREV_TAG" "v${NEW_VERSION}" "$NEW_VERSION" "$NEW_NATIVE_VERSION" "$NEW_VERSION_CODE")
+if [ -f "docs/release-notes/v${NEW_VERSION}.txt" ]; then
+  RELEASE_NOTES="$(cat "docs/release-notes/v${NEW_VERSION}.txt")"$'\n\n'"$RELEASE_NOTES"
+fi
 echo "$RELEASE_NOTES"
 
 # Store-formatted notes (plain text, max 500 chars) for App Store + Google Play
 STORE_NOTES_FILE="$BUILD_DIR/store-notes.txt"
-node scripts/release-notes.mjs --store "$PREV_TAG" "v${NEW_VERSION}" > "$STORE_NOTES_FILE"
+write_store_notes "$NEW_VERSION" "$PREV_TAG" "$STORE_NOTES_FILE"
 echo ""
 echo "  Store notes:"
 cat "$STORE_NOTES_FILE" | sed 's/^/    /'
