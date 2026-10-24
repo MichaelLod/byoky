@@ -132,6 +132,8 @@ dependencies {
     // minSdk). Available on devices with WebView 110+ (Android 12L+ in
     // practice; gracefully degrades by throwing on older devices).
     implementation("androidx.javascriptengine:javascriptengine:1.0.0")
+    // Also backs the in-wallet browser: WebViewCompat.addWebMessageListener
+    // and addDocumentStartJavaScript (origin-scoped bridge injection).
     implementation("androidx.webkit:webkit:1.12.1")
     // kotlinx-coroutines-guava: lets us await ListenableFuture results from
     // suspend functions. Pinned to the 1.7.3 line that's already pulled in
@@ -139,19 +141,16 @@ dependencies {
     // colliding on the classpath.
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.7.3")
 
-    // CameraX (QR scanner)
-    implementation("androidx.camera:camera-camera2:1.4.1")
-    implementation("androidx.camera:camera-lifecycle:1.4.1")
-    implementation("androidx.camera:camera-view:1.4.1")
-
-    // ML Kit Barcode Scanning
-    implementation("com.google.mlkit:barcode-scanning:17.3.0")
-
     // Lifecycle (for auto-lock)
     implementation("androidx.lifecycle:lifecycle-process:2.8.7")
 
     // Debug
     debugImplementation("androidx.compose.ui:ui-tooling")
+
+    // JVM unit tests (pure Kotlin logic such as AppUrl and the .byoky format).
+    testImplementation("junit:junit:4.13.2")
+    // android.jar only ships stubs for org.json; unit tests need the real thing.
+    testImplementation("org.json:json:20240303")
 
     // Instrumented tests for the JS bridge. JavaScriptSandbox needs a real
     // Android runtime + WebView, so these run via `./gradlew connectedAndroidTest`
@@ -161,6 +160,5 @@ dependencies {
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test:core-ktx:1.6.1")
     androidTestImplementation("androidx.test:rules:1.6.1")
-    androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
     androidTestImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
 }

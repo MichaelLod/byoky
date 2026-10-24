@@ -222,13 +222,6 @@ data class Group(
     val name: String,
     val providerId: String,
     val credentialId: String? = null,
-    /**
-     * Optional pin to a received gift (matches `GiftedCredential.giftId`).
-     * Mutually exclusive with `credentialId` — setting one clears the other.
-     * When set, the routing resolver short-circuits to the gift and sends
-     * the request through that gift's relay instead of using an owned key.
-     */
-    val giftId: String? = null,
     val model: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
 ) {
@@ -236,14 +229,12 @@ data class Group(
         // The default group is a sentinel bucket for apps with no explicit
         // binding. It carries no routing (empty providerId), so unbound apps
         // fall through to direct credential lookup for the provider they
-        // actually request. Mirrors the vault's default group seeding and
-        // the extension's ensureDefaultGroup.
+        // actually request. Mirrors the extension's ensureDefaultGroup.
         fun makeDefault() = Group(
             id = DEFAULT_GROUP_ID,
             name = "Default",
             providerId = "",
             credentialId = null,
-            giftId = null,
             model = null,
         )
     }
@@ -297,37 +288,105 @@ data class RoutingDecision(
     val needsSwap: Boolean get() = swapToProviderId != null
 }
 
-// --- Marketplace Apps ---
+// --- Installed apps ---
 
+/**
+ * A web app the user added by URL. It opens in the in-wallet browser
+ * (AppRuntimeScreen), where the injected bridge lets it call providers
+ * through the wallet without ever seeing a key. Persisted unencrypted in
+ * `byoky_state` (it holds no secrets).
+ */
 data class InstalledApp(
     val id: String,
-    val slug: String,
     val name: String,
+    /** Normalized https URL the app opens at. */
     val url: String,
-    val icon: String,
-    val description: String,
-    val category: String,
-    val providers: List<String>,
-    val authorName: String,
-    val authorWebsite: String? = null,
-    val verified: Boolean = false,
     val installedAt: Long = System.currentTimeMillis(),
     val enabled: Boolean = true,
-)
+) {
+    /** `https://host[:port]`: the identity the bridge, sessions and groups key on. */
+    val origin: String get() = AppUrl.originOf(url) ?: url
+}
 
-data class MarketplaceApp(
-    val id: String,
-    val name: String,
-    val slug: String,
-    val url: String,
-    val icon: String,
-    val description: String,
-    val category: String,
-    val providers: List<String>,
-    val authorName: String,
-    val authorWebsite: String? = null,
-    val status: String = "approved",
-    val verified: Boolean = false,
-    val featured: Boolean = false,
-    val createdAt: Long = 0,
-)
+/**
+ * Validation and normalization for "Add app by URL". Pure JVM (java.net.URI)
+ * so it can be unit-tested without an Android runtime.
+ */
+object AppUrl {
+    sealed class Result {
+        data class Valid(val url: String, val origin: String, val suggestedName: String) : Result()
+        data class Invalid(val reason: String) : Result()
+    }
+
+    /**
+     * Accepts `https://…` or a bare host (`app.example.com/path`, which is
+     * treated as https). Rejects every other scheme, credentials embedded in
+     * the URL, and hosts that don't parse. The fragment is dropped.
+     */
+    fun normalize(input: String): Result {
+        val trimmed = input.trim()
+        if (trimmed.isEmpty()) return Result.Invalid("Enter a URL")
+        if (trimmed.any { it.isWhitespace() }) return Result.Invalid("URLs can't contain spaces")
+
+        val schemeMatch = Regex("^([a-zA-Z][a-zA-Z0-9+.-]*):").find(trimmed)
+        val hasAuthority = trimmed.contains("://")
+        val candidate = when {
+            schemeMatch != null && hasAuthority -> trimmed
+            // "localhost:3000" / "example.com:8443/x" look like scheme:rest
+            // but are really host:port. Anything else with a scheme and no
+            // "//" (mailto:, javascript:, data:) is not a web app URL.
+            schemeMatch != null && Regex("^[^/:]+:\\d+(/.*)?$").matches(trimmed) -> "https://$trimmed"
+            schemeMatch != null -> return Result.Invalid("Only https:// URLs are supported")
+            else -> "https://$trimmed"
+        }
+
+        val uri = try { java.net.URI(candidate) } catch (_: Exception) {
+            return Result.Invalid("That doesn't look like a valid URL")
+        }
+        if (!uri.scheme.equals("https", ignoreCase = true)) {
+            return Result.Invalid("Only https:// URLs are supported")
+        }
+        if (uri.rawUserInfo != null) return Result.Invalid("URLs with a username or password aren't allowed")
+        val host = uri.host?.lowercase()?.trimEnd('.')
+        if (host.isNullOrEmpty()) return Result.Invalid("That doesn't look like a valid URL")
+        if (!host.contains('.') && host != "localhost") return Result.Invalid("Enter a full domain, e.g. app.example.com")
+
+        val port = if (uri.port == 443) -1 else uri.port
+        val origin = "https://$host" + if (port != -1) ":$port" else ""
+        val path = uri.rawPath?.takeIf { it.isNotEmpty() } ?: "/"
+        val query = uri.rawQuery?.let { "?$it" } ?: ""
+        return Result.Valid(
+            url = origin + path + query,
+            origin = origin,
+            suggestedName = host.removePrefix("www."),
+        )
+    }
+
+    private val SHARED_HOSTS = setOf("sites.google.com", "script.google.com")
+    private val SHARED_HOST_SUFFIXES = listOf(
+        "github.io", "gitlab.io", "vercel.app", "netlify.app", "pages.dev", "workers.dev",
+        "web.app", "firebaseapp.com", "appspot.com", "herokuapp.com", "onrender.com",
+        "glitch.me", "replit.app", "repl.co", "surge.sh", "fly.dev", "deno.dev", "azurewebsites.net",
+    )
+
+    /**
+     * True for hosting domains where pages by different authors (or every
+     * project of one author) share an origin. Wallet access is granted per
+     * origin, so all of them would get it.
+     */
+    fun isSharedHosting(host: String): Boolean {
+        val h = host.lowercase().trimEnd('.')
+        return h in SHARED_HOSTS || SHARED_HOST_SUFFIXES.any { h == it || h.endsWith(".$it") }
+    }
+
+    /** `https://host[:port]` for a stored app URL, or null if it isn't https. */
+    fun originOf(url: String): String? =
+        (normalize(url) as? Result.Valid)?.origin
+}
+
+/** Compact token count for badges and stats: 950, 12K, 1.3M. */
+fun formatTokens(n: Int): String = when {
+    n >= 1_000_000 -> String.format("%.1fM", n / 1_000_000.0)
+    n >= 1_000 -> "${n / 1_000}K"
+    else -> "$n"
+}

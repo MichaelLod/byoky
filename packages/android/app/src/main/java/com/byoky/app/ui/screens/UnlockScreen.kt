@@ -12,6 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -22,6 +23,7 @@ import com.byoky.app.data.WalletStore
 import com.byoky.app.ui.components.BrandMark
 import com.byoky.app.ui.theme.*
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 fun UnlockScreen(wallet: WalletStore) {
@@ -30,11 +32,10 @@ fun UnlockScreen(wallet: WalletStore) {
     var error by remember { mutableStateOf<String?>(null) }
     var shakeOffset by remember { mutableFloatStateOf(0f) }
     val lockoutEndTime by wallet.lockoutEndTime.collectAsState()
-    val cloudVaultUsername by wallet.cloudVaultUsername.collectAsState()
-    val cloudVaultLastUsername by wallet.cloudVaultLastUsername.collectAsState()
-    val displayUsername = cloudVaultUsername ?: cloudVaultLastUsername
     var lockoutRemaining by remember { mutableIntStateOf(0) }
     var showResetDialog by remember { mutableStateOf(false) }
+    var unlocking by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     val shakeAnim = remember { Animatable(0f) }
 
@@ -89,15 +90,6 @@ fun UnlockScreen(wallet: WalletStore) {
 
         Spacer(Modifier.height(8.dp))
 
-        if (displayUsername != null) {
-            Text(
-                displayUsername,
-                fontWeight = FontWeight.SemiBold,
-                color = TextPrimary,
-            )
-            Spacer(Modifier.height(4.dp))
-        }
-
         Text(
             "Enter your master password to unlock",
             color = TextSecondary,
@@ -127,7 +119,7 @@ fun UnlockScreen(wallet: WalletStore) {
             },
             visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
             singleLine = true,
-            enabled = lockoutRemaining <= 0,
+            enabled = lockoutRemaining <= 0 && !unlocking,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp)
@@ -159,20 +151,26 @@ fun UnlockScreen(wallet: WalletStore) {
 
         Button(
             onClick = {
-                when (val result = wallet.unlock(password)) {
-                    is UnlockResult.Success -> { /* navigates automatically */ }
-                    is UnlockResult.WrongPassword -> {
-                        error = "Wrong password"
-                        password = ""
-                        shakeOffset = 1f
+                if (unlocking) return@Button
+                unlocking = true
+                scope.launch {
+                    // Key derivation runs on Dispatchers.Default inside unlock().
+                    when (val result = wallet.unlock(password)) {
+                        is UnlockResult.Success -> { /* navigates automatically */ }
+                        is UnlockResult.WrongPassword -> {
+                            error = "Wrong password"
+                            password = ""
+                            shakeOffset = 1f
+                        }
+                        is UnlockResult.LockedOut -> {
+                            error = "Too many attempts. Try again in ${result.secondsRemaining}s"
+                            password = ""
+                        }
                     }
-                    is UnlockResult.LockedOut -> {
-                        error = "Too many attempts. Try again in ${result.secondsRemaining}s"
-                        password = ""
-                    }
+                    unlocking = false
                 }
             },
-            enabled = password.isNotEmpty() && lockoutRemaining <= 0,
+            enabled = password.isNotEmpty() && lockoutRemaining <= 0 && !unlocking,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp)
@@ -183,7 +181,13 @@ fun UnlockScreen(wallet: WalletStore) {
                 disabledContainerColor = Accent.copy(alpha = 0.3f),
             ),
         ) {
-            Text("Unlock", fontWeight = FontWeight.SemiBold)
+            if (unlocking) {
+                CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(10.dp))
+                Text("Unlocking…", fontWeight = FontWeight.SemiBold)
+            } else {
+                Text("Unlock", fontWeight = FontWeight.SemiBold)
+            }
         }
 
         Spacer(Modifier.weight(1f))

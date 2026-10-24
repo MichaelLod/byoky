@@ -22,11 +22,13 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.byoky.app.data.InstalledApp
 import com.byoky.app.data.WalletStatus
 import com.byoky.app.data.WalletStore
-import com.byoky.app.relay.RelayPairService
 import com.byoky.app.ui.theme.Accent
 import com.byoky.app.ui.theme.AccentHover
+
+private const val APP_RUNTIME_ROUTE = "app/{appId}"
 
 @Composable
 fun AppNavigation(wallet: WalletStore) {
@@ -42,47 +44,28 @@ fun AppNavigation(wallet: WalletStore) {
 @Composable
 private fun MainScreen(wallet: WalletStore) {
     val navController = rememberNavController()
-    var selectedTab by remember { mutableIntStateOf(0) }
     var fabMenuOpen by remember { mutableStateOf(false) }
-    var showAddCredentialFromFab by remember { mutableStateOf(false) }
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val pairService = remember { RelayPairService.shared(context.applicationContext) }
+    var showAddCredential by remember { mutableStateOf(false) }
+    var showAddApp by remember { mutableStateOf(false) }
 
     val tabs = listOf(
         Triple("Wallet", Icons.Default.Wallet, "wallet"),
-        Triple("Gifts", Icons.Default.CardGiftcard, "gifts"),
         Triple("Apps", Icons.Default.Apps, "apps"),
-        Triple("Connect", Icons.Default.CellTower, "connect"),
+        Triple("Connected", Icons.Default.Link, "connected"),
     )
 
-    // Hide FAB on routes where the global "+" actions don't make sense (the
-    // user is already inside one of the targets).
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
-    val showFab = currentRoute !in setOf("redeem-gift", "create-gift", "settings", "app-store")
+    val inAppRuntime = currentRoute == APP_RUNTIME_ROUTE
+    // Settings is pushed from the Wallet tab, so keep that tab highlighted.
+    val selectedTab = tabs.indexOfFirst { it.third == currentRoute }
+        .takeIf { it >= 0 } ?: if (currentRoute == "settings") 0 else -1
+    val showFab = !inAppRuntime && currentRoute != "settings"
 
-    // When a byoky://pair/<payload> deep link arrives, MainActivity sets
-    // wallet.pendingPairLink. Switch to the Connect tab so PairContent can
-    // pick it up and kick off the relay handshake.
-    val pendingPairLink by wallet.pendingPairLink.collectAsState()
-    val connectIndex = tabs.indexOfFirst { it.third == "connect" }
-    LaunchedEffect(pendingPairLink) {
-        if (pendingPairLink != null && connectIndex >= 0) {
-            selectedTab = connectIndex
-            navController.navigate("connect") {
-                popUpTo("wallet") { inclusive = false }
-                launchSingleTop = true
-            }
-        }
-    }
-
-    // byoky://gift/<payload> deep link: route to the redeem-gift screen
-    // which pulls the link from wallet.pendingGiftLink on appear.
-    val pendingGiftLink by wallet.pendingGiftLink.collectAsState()
-    LaunchedEffect(pendingGiftLink) {
-        if (pendingGiftLink != null) {
-            navController.navigate("redeem-gift") { launchSingleTop = true }
-        }
+    // Opening an app is explicit consent: lift any revoke block for its origin.
+    fun openApp(app: InstalledApp) {
+        wallet.allowOrigin(app.origin)
+        navController.navigate("app/${app.id}") { launchSingleTop = true }
     }
 
     Scaffold(
@@ -109,23 +92,15 @@ private fun MainScreen(wallet: WalletStore) {
                             leadingIcon = { Icon(Icons.Default.Key, null, tint = Accent) },
                             onClick = {
                                 fabMenuOpen = false
-                                showAddCredentialFromFab = true
+                                showAddCredential = true
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text("Redeem gift") },
-                            leadingIcon = { Icon(Icons.Default.Redeem, null, tint = Accent) },
-                            onClick = {
-                                fabMenuOpen = false
-                                navController.navigate("redeem-gift") { launchSingleTop = true }
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Install app") },
+                            text = { Text("Add app") },
                             leadingIcon = { Icon(Icons.Default.Apps, null, tint = Accent) },
                             onClick = {
                                 fabMenuOpen = false
-                                navController.navigate("app-store") { launchSingleTop = true }
+                                showAddApp = true
                             },
                         )
                     }
@@ -133,28 +108,29 @@ private fun MainScreen(wallet: WalletStore) {
             }
         },
         bottomBar = {
-            NavigationBar(
-                containerColor = MaterialTheme.colorScheme.surface,
-                windowInsets = WindowInsets(left = 8.dp, right = 8.dp),
-            ) {
-                tabs.forEachIndexed { index, (label, icon, _) ->
-                    NavigationBarItem(
-                        icon = { Icon(icon, contentDescription = label) },
-                        label = { Text(label, fontSize = androidx.compose.ui.unit.TextUnit(10f, androidx.compose.ui.unit.TextUnitType.Sp)) },
-                        selected = selectedTab == index,
-                        onClick = {
-                            selectedTab = index
-                            navController.navigate(tabs[index].third) {
-                                popUpTo("wallet") { inclusive = false }
-                                launchSingleTop = true
-                            }
-                        },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = Accent,
-                            selectedTextColor = Accent,
-                            indicatorColor = Accent.copy(alpha = 0.12f),
-                        ),
-                    )
+            if (!inAppRuntime) {
+                NavigationBar(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    windowInsets = WindowInsets(left = 8.dp, right = 8.dp),
+                ) {
+                    tabs.forEachIndexed { index, (label, icon, route) ->
+                        NavigationBarItem(
+                            icon = { Icon(icon, contentDescription = label) },
+                            label = { Text(label, fontSize = androidx.compose.ui.unit.TextUnit(10f, androidx.compose.ui.unit.TextUnitType.Sp)) },
+                            selected = selectedTab == index,
+                            onClick = {
+                                navController.navigate(route) {
+                                    popUpTo("wallet") { inclusive = false }
+                                    launchSingleTop = true
+                                }
+                            },
+                            colors = NavigationBarItemDefaults.colors(
+                                selectedIconColor = Accent,
+                                selectedTextColor = Accent,
+                                indicatorColor = Accent.copy(alpha = 0.12f),
+                            ),
+                        )
+                    }
                 }
             }
         },
@@ -170,43 +146,39 @@ private fun MainScreen(wallet: WalletStore) {
                     onNavigateToSettings = {
                         navController.navigate("settings") { launchSingleTop = true }
                     },
-                    onNavigateToRedeemGift = {
-                        navController.navigate("redeem-gift") { launchSingleTop = true }
-                    },
                 )
             }
-            composable("gifts") {
-                GiftsScreen(
-                    wallet = wallet,
-                    onNavigateToCreate = {
-                        navController.navigate("create-gift") { launchSingleTop = true }
-                    },
-                    onNavigateToRedeem = {
-                        navController.navigate("redeem-gift") { launchSingleTop = true }
-                    },
-                )
-            }
-            composable("create-gift") {
-                CreateGiftScreen(wallet = wallet, onBack = { navController.popBackStack() })
-            }
-            composable("redeem-gift") {
-                RedeemGiftScreen(wallet = wallet, onBack = { navController.popBackStack() })
-            }
-            composable("connect") { ConnectScreen(wallet, pairService) }
             composable("apps") {
-                MarketplaceTabScreen(
+                InstalledAppsScreen(
                     wallet = wallet,
-                    onBrowseStore = { navController.navigate("app-store") { launchSingleTop = true } },
+                    onOpenApp = { openApp(it) },
+                    onAddApp = { showAddApp = true },
                 )
             }
-            composable("app-store") {
-                AppStoreScreen(wallet = wallet, onBack = { navController.popBackStack() })
+            composable("connected") { AppsScreen(wallet) }
+            composable(APP_RUNTIME_ROUTE) { entry ->
+                AppRuntimeScreen(
+                    wallet = wallet,
+                    appId = entry.arguments?.getString("appId").orEmpty(),
+                    onClose = { navController.popBackStack() },
+                )
             }
             composable("settings") { SettingsScreen(wallet) }
         }
     }
 
-    if (showAddCredentialFromFab) {
-        AddCredentialSheet(wallet) { showAddCredentialFromFab = false }
+    if (showAddCredential) {
+        AddCredentialSheet(wallet) { showAddCredential = false }
+    }
+
+    if (showAddApp) {
+        AddAppDialog(
+            wallet = wallet,
+            onDismiss = { showAddApp = false },
+            onAdded = { app ->
+                showAddApp = false
+                openApp(app)
+            },
+        )
     }
 }

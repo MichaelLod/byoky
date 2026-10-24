@@ -15,7 +15,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.byoky.app.BuildConfig
@@ -30,15 +29,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun SettingsScreen(wallet: WalletStore) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val cloudVaultEnabled by wallet.cloudVaultEnabled.collectAsState()
-    val cloudVaultUsername by wallet.cloudVaultUsername.collectAsState()
-    val cloudVaultTokenExpired by wallet.cloudVaultTokenExpired.collectAsState()
-    var showCloudVaultSetup by remember { mutableStateOf(false) }
-    var showCloudVaultRelogin by remember { mutableStateOf(false) }
-    var showDeleteAccountConfirm by remember { mutableStateOf(false) }
     var showResetWalletConfirm by remember { mutableStateOf(false) }
-    var dangerError by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
         topBar = {
@@ -59,70 +50,6 @@ fun SettingsScreen(wallet: WalletStore) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            // Cloud Vault
-            Card(
-                colors = CardDefaults.cardColors(containerColor = BgCard),
-                shape = RoundedCornerShape(16.dp),
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Cloud, null, tint = Accent, modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.width(10.dp))
-                            Text("Cloud Sync", fontWeight = FontWeight.SemiBold, color = TextPrimary)
-                        }
-                        Switch(
-                            checked = cloudVaultEnabled,
-                            onCheckedChange = { enabled ->
-                                if (enabled) {
-                                    showCloudVaultSetup = true
-                                } else {
-                                    scope.launch { wallet.disableCloudVault() }
-                                }
-                            },
-                            colors = SwitchDefaults.colors(checkedTrackColor = Accent),
-                        )
-                    }
-
-                    if (cloudVaultEnabled) {
-                        cloudVaultUsername?.let { username ->
-                            Spacer(Modifier.height(8.dp))
-                            Text("Synced as $username", color = TextMuted, fontSize = 12.sp)
-                        }
-                        if (cloudVaultTokenExpired) {
-                            Spacer(Modifier.height(8.dp))
-                            Surface(
-                                onClick = { showCloudVaultRelogin = true },
-                                color = BgCard,
-                                shape = RoundedCornerShape(8.dp),
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Icon(Icons.Default.Warning, null, tint = Warning, modifier = Modifier.size(16.dp))
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("Session expired — tap to re-login", color = Warning, fontSize = 13.sp)
-                                }
-                            }
-                        }
-                    } else {
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            "Keep your keys in sync across devices and let apps use them while this device is offline.",
-                            color = TextSecondary,
-                            fontSize = 14.sp,
-                        )
-                    }
-                }
-            }
-
             // Security
             Card(
                 colors = CardDefaults.cardColors(containerColor = BgCard),
@@ -153,9 +80,11 @@ fun SettingsScreen(wallet: WalletStore) {
 
                     InfoRow("Encryption", "AES-256-GCM")
                     InfoRow("Key Derivation", "PBKDF2 (600K)")
-                    InfoRow("Storage", "EncryptedSharedPreferences")
+                    InfoRow("Storage", "On this device only")
                 }
             }
+
+            BackupSection(wallet)
 
             // Translation engine debug — only shown in debug builds.
             if (BuildConfig.DEBUG) {
@@ -234,26 +163,11 @@ fun SettingsScreen(wallet: WalletStore) {
                     Text("Danger Zone", color = Danger, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        if (cloudVaultEnabled)
-                            "Delete account removes your Cloud Sync account and all synced keys. Reset wallet clears only this device."
-                        else
-                            "Reset wallet clears all keys on this device.",
+                        "Reset wallet permanently deletes all keys and settings on this device. Export a backup first if you want to keep them.",
                         color = TextMuted,
                         fontSize = 11.sp,
                     )
                     Spacer(Modifier.height(12.dp))
-                    if (cloudVaultEnabled) {
-                        OutlinedButton(
-                            onClick = { showDeleteAccountConfirm = true },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Danger),
-                        ) {
-                            Icon(Icons.Default.Delete, null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Delete Cloud Sync Account")
-                        }
-                        Spacer(Modifier.height(8.dp))
-                    }
                     OutlinedButton(
                         onClick = { showResetWalletConfirm = true },
                         modifier = Modifier.fillMaxWidth(),
@@ -268,38 +182,6 @@ fun SettingsScreen(wallet: WalletStore) {
         }
     }
 
-    if (showDeleteAccountConfirm) {
-        AlertDialog(
-            onDismissRequest = { showDeleteAccountConfirm = false },
-            containerColor = BgCard,
-            title = { Text("Delete Cloud Sync Account?", color = Danger) },
-            text = {
-                Text(
-                    "Your vault account and all synced keys will be permanently deleted from vault.byoky.com. This device will also be reset. This cannot be undone.",
-                    color = TextSecondary,
-                    fontSize = 13.sp,
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showDeleteAccountConfirm = false
-                        scope.launch {
-                            try {
-                                wallet.deleteVaultAccount()
-                            } catch (e: Exception) {
-                                dangerError = e.message
-                            }
-                        }
-                    },
-                ) { Text("Delete", color = Danger) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDeleteAccountConfirm = false }) { Text("Cancel") }
-            },
-        )
-    }
-
     if (showResetWalletConfirm) {
         AlertDialog(
             onDismissRequest = { showResetWalletConfirm = false },
@@ -307,10 +189,7 @@ fun SettingsScreen(wallet: WalletStore) {
             title = { Text("Reset Wallet?", color = Danger) },
             text = {
                 Text(
-                    if (cloudVaultEnabled)
-                        "All keys on this device will be cleared. Your Cloud Sync account will NOT be deleted — use Delete Cloud Sync Account for that."
-                    else
-                        "All keys on this device will be permanently deleted. This cannot be undone.",
+                    "All keys on this device will be permanently deleted. This cannot be undone.",
                     color = TextSecondary,
                     fontSize = 13.sp,
                 )
@@ -328,210 +207,6 @@ fun SettingsScreen(wallet: WalletStore) {
             },
         )
     }
-
-    dangerError?.let { errMsg ->
-        AlertDialog(
-            onDismissRequest = { dangerError = null },
-            containerColor = BgCard,
-            title = { Text("Error", color = TextPrimary) },
-            text = { Text(errMsg, color = TextSecondary, fontSize = 13.sp) },
-            confirmButton = { TextButton(onClick = { dangerError = null }) { Text("OK") } },
-        )
-    }
-
-    if (showCloudVaultSetup) {
-        CloudVaultSetupDialog(
-            wallet = wallet,
-            onDismiss = { showCloudVaultSetup = false },
-        )
-    }
-
-    if (showCloudVaultRelogin) {
-        CloudVaultReloginDialog(
-            wallet = wallet,
-            onDismiss = { showCloudVaultRelogin = false },
-        )
-    }
-}
-
-@Composable
-fun CloudVaultSetupDialog(wallet: WalletStore, onDismiss: () -> Unit) {
-    val scope = rememberCoroutineScope()
-    val lastUsername by wallet.cloudVaultLastUsername.collectAsState()
-    var isSignup by remember { mutableStateOf(lastUsername == null) }
-    var username by remember { mutableStateOf(lastUsername ?: "") }
-    var password by remember { mutableStateOf("") }
-    var loading by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    val usernameRegex = remember { Regex("^[a-z0-9][a-z0-9_-]{1,28}[a-z0-9]$") }
-    val isUsernameValid = username.lowercase().trim().matches(usernameRegex)
-    var usernameStatus by remember { mutableStateOf("idle") } // idle, checking, available, taken, invalid
-    var checkJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
-
-    fun checkUsernameAvailability(value: String) {
-        checkJob?.cancel()
-        val trimmed = value.lowercase().trim()
-        if (trimmed.length < 3) { usernameStatus = "idle"; return }
-        if (!trimmed.matches(usernameRegex)) { usernameStatus = "invalid"; return }
-        usernameStatus = "checking"
-        checkJob = scope.launch {
-            kotlinx.coroutines.delay(400)
-            val (available, reason) = wallet.checkUsernameAvailability(trimmed)
-            if (!coroutineContext[kotlinx.coroutines.Job]!!.isActive) return@launch
-            usernameStatus = if (available) "available" else if (reason == "invalid") "invalid" else "taken"
-        }
-    }
-
-    AlertDialog(
-        onDismissRequest = { if (!loading) onDismiss() },
-        containerColor = BgCard,
-        title = {
-            Text(
-                if (isSignup) "Create Cloud Sync Account" else "Login to Cloud Sync",
-                color = TextPrimary,
-            )
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    "End-to-end encrypted with your password. We can't read your keys.",
-                    color = TextSecondary,
-                    fontSize = 12.sp,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(
-                            selected = isSignup,
-                            onClick = { isSignup = true; error = null },
-                            label = { Text("Sign Up") },
-                        )
-                        FilterChip(
-                            selected = !isSignup,
-                            onClick = { isSignup = false; error = null },
-                            label = { Text("Login") },
-                        )
-                    }
-                    error?.let {
-                        Text(it, color = Warning, fontSize = 13.sp)
-                    }
-                    OutlinedTextField(
-                        value = username,
-                        onValueChange = {
-                            username = it
-                            if (isSignup) checkUsernameAvailability(it)
-                        },
-                        label = { Text("Username") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        isError = isSignup && username.isNotEmpty() && usernameStatus in listOf("taken", "invalid"),
-                        supportingText = if (isSignup && username.trim().length >= 3) {
-                            {
-                                when (usernameStatus) {
-                                    "checking" -> Text("Checking availability...", color = TextSecondary)
-                                    "available" -> Text("Username is available", color = Success)
-                                    "taken" -> Text("Username is already taken", color = Danger)
-                                    "invalid" -> Text("Letters, numbers, hyphens, underscores only (3\u201330 chars)", color = Danger)
-                                    else -> {}
-                                }
-                            }
-                        } else null,
-                    )
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = { Text("Password") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    loading = true
-                    error = null
-                    scope.launch {
-                        try {
-                            wallet.enableCloudVault(username, password, isSignup)
-                            onDismiss()
-                        } catch (e: Exception) {
-                            error = e.message
-                        }
-                        loading = false
-                    }
-                },
-                enabled = !loading && username.isNotBlank() && password.isNotBlank() &&
-                    (!isSignup || password.length >= 12) &&
-                    (!isSignup || (isUsernameValid && usernameStatus !in listOf("taken", "invalid", "checking"))),
-            ) { Text(if (loading) "Connecting..." else if (isSignup) "Sign Up" else "Login") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !loading) { Text("Cancel") }
-        },
-    )
-}
-
-@Composable
-private fun CloudVaultReloginDialog(wallet: WalletStore, onDismiss: () -> Unit) {
-    val scope = rememberCoroutineScope()
-    val username by wallet.cloudVaultUsername.collectAsState()
-    var password by remember { mutableStateOf("") }
-    var loading by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-
-    AlertDialog(
-        onDismissRequest = { if (!loading) onDismiss() },
-        containerColor = BgCard,
-        title = { Text("Re-login to Cloud Sync", color = TextPrimary) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    "Your session has expired. Enter your Cloud Sync password to reconnect.",
-                    color = TextSecondary,
-                    fontSize = 14.sp,
-                )
-                error?.let {
-                    Text(it, color = Warning, fontSize = 13.sp)
-                }
-                OutlinedTextField(
-                    value = username ?: "",
-                    onValueChange = {},
-                    label = { Text("Username") },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = false,
-                )
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = { Text("Password") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    loading = true
-                    error = null
-                    scope.launch {
-                        try {
-                            wallet.reloginCloudVault(password)
-                            onDismiss()
-                        } catch (e: Exception) {
-                            error = e.message
-                        }
-                        loading = false
-                    }
-                },
-                enabled = !loading && password.isNotBlank(),
-            ) { Text(if (loading) "Logging in..." else "Login") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !loading) { Text("Cancel") }
-        },
-    )
 }
 
 /**

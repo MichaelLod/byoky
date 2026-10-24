@@ -3,1076 +3,340 @@ package com.byoky.app.proxy
 import android.content.Context
 import com.byoky.app.data.AuthMethod
 import com.byoky.app.data.Credential
-import com.byoky.app.data.DEFAULT_GROUP_ID
-import com.byoky.app.data.GiftedCredential
+import com.byoky.app.data.Group
 import com.byoky.app.data.Provider
+import com.byoky.app.data.RoutingDecision
 import com.byoky.app.data.RoutingTranslation
 import com.byoky.app.data.WalletStore
-import com.byoky.app.data.isGiftExpired
-import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
 import okhttp3.Headers.Companion.toHeaders
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
-import okhttp3.WebSocket
-import okhttp3.WebSocketListener
 import org.json.JSONObject
-import java.net.InetSocketAddress
-import java.net.ServerSocket
 import java.util.UUID
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
+/**
+ * Proxies provider calls for apps running on this device. The app never sees
+ * a key: it sends the request it would have sent to the provider, and this
+ * class resolves routing (group binding, cross-family translation, same-family
+ * swap), injects the decrypted credential and forwards the call.
+ *
+ * Callers:
+ *   - [forward]: streaming entry point used by the in-wallet browser bridge
+ *     (`runtime/AppBridge.kt`).
+ *   - [proxyRequest]: buffered convenience wrapper (instrumented tests).
+ *
+ * All methods block on network I/O and on the JS translation sandbox, so
+ * they must be called off the main thread.
+ */
 class ProxyService(
     private val wallet: WalletStore,
     private val appContext: Context? = null,
 ) {
     /**
      * The translation engine. Lazy because constructing it requires an
-     * Android Context for JavaScriptSandbox; the existing call sites that
-     * only need findAvailablePort() can pass null and never touch it.
-     * The proxy paths that DO use it require a context to have been provided.
+     * Android Context for JavaScriptSandbox. Without a context, routing
+     * degrades to direct credential lookup (no translation or swaps).
      */
     private val translationEngine: TranslationEngine? by lazy {
         appContext?.let { TranslationEngine.get(it) }
     }
+
+    // Redirects are never followed: OkHttp would carry x-api-key /
+    // x-goog-api-key / api-key to whatever host the Location names. A 3xx
+    // goes back to the app as is.
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(120, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
+        .followRedirects(false)
+        .followSslRedirects(false)
         .build()
 
-    private sealed class CredentialSource {
-        data class Own(val credential: Credential, val apiKey: String) : CredentialSource()
-        data class Gift(val gc: GiftedCredential) : CredentialSource()
+    /**
+     * Receives one proxied response. [onMeta] is called once, then any number
+     * of [onChunk] calls, then [onDone]. Methods run on the calling thread;
+     * throwing from any of them aborts the transfer and closes the upstream
+     * connection.
+     */
+    interface ResponseSink {
+        fun onMeta(status: Int, statusText: String, headers: Map<String, String>)
+        fun onChunk(chunk: String)
+        fun onDone()
     }
 
-    fun findAvailablePort(): Int {
-        return try {
-            ServerSocket().use { socket ->
-                socket.reuseAddress = true
-                socket.bind(InetSocketAddress("127.0.0.1", 0))
-                socket.localPort
-            }
-        } catch (_: Exception) {
-            0
+    /** A request that was rejected before reaching the provider. */
+    class ProxyError(val code: String, message: String, val status: Int) : IllegalStateException(message)
+
+    /**
+     * Forward one request. `url` is the full provider URL the app asked for;
+     * it must belong to `providerId` (checked here). Routing uses the group
+     * bound to `appOrigin`, and the request is logged under that origin.
+     *
+     * Throws [ProxyError] when the request can't be routed (unknown provider,
+     * URL mismatch, allowance exceeded, no credential). Any other exception
+     * is a transport or translation failure.
+     */
+    fun forward(
+        appOrigin: String,
+        providerId: String,
+        url: String,
+        method: String,
+        headers: Map<String, String>,
+        body: ByteArray?,
+        sink: ResponseSink,
+    ) {
+        val provider = Provider.find(providerId)
+            ?: throw ProxyError("NO_PROVIDER", "Unknown provider: $providerId", 400)
+
+        val parsedUrl = url.toHttpUrlOrNull()
+            ?: throw ProxyError("INVALID_URL", "URL doesn't parse", 400)
+        val credentials = wallet.credentials.value
+        // Host-only check for now; for providers without a fixed host the
+        // URL is checked against the credential routing picks (forwardDirect).
+        if (!UpstreamPolicy.requestUrlAllowed(provider, parsedUrl)) {
+            throw ProxyError("INVALID_URL", "URL doesn't match provider $providerId", 400)
+        }
+
+        val allowance = wallet.checkAllowance(appOrigin, providerId)
+        if (!allowance.allowed) {
+            throw ProxyError("QUOTA_EXCEEDED", allowance.reason ?: "Token allowance exceeded", 429)
+        }
+
+        val group = wallet.groupForOrigin(appOrigin)
+        val routing = resolveRouting(providerId, body, group, credentials)
+            ?: throw ProxyError("NO_CREDENTIAL", noCredentialMessage(providerId, credentials, group), 403)
+
+        when {
+            routing.translation != null -> forwardTranslated(
+                appOrigin, providerId, routing.translation, routing.credential, method, headers, body, sink,
+            )
+            routing.swapToProviderId != null -> forwardSwapped(
+                appOrigin, providerId, routing.swapToProviderId, routing.swapDstModel,
+                routing.credential, method, headers, body, sink,
+            )
+            else -> forwardDirect(
+                appOrigin, provider, parsedUrl, routing.credential, routing.modelOverride,
+                method, headers, body, sink,
+            )
         }
     }
 
-    fun checkAvailable(): Boolean {
-        return wallet.credentials.value.isNotEmpty() || wallet.giftedCredentials.value.isNotEmpty()
-    }
-
+    /**
+     * Buffered wrapper around [forward]: builds the URL from the provider's
+     * base (or the credential's base for providers without a fixed host)
+     * plus `path`, and returns the whole response at once.
+     */
     fun proxyRequest(
         providerId: String,
         path: String,
         method: String,
         headers: Map<String, String>,
         body: ByteArray?,
+        appOrigin: String = DEFAULT_ORIGIN,
     ): Response {
         val provider = Provider.find(providerId)
             ?: throw IllegalArgumentException("Unknown provider: $providerId")
-
-        // Cross-family gift: group pins a gift whose provider differs from
-        // the app's request, model is set, pair is translatable. Handle
-        // before generic credential resolution so the cross-family gift
-        // wins over the direct-provider lookup.
-        val crossGift = resolveCrossFamilyGift(providerId, body)
-        if (crossGift != null) {
-            val (gc, translation) = crossGift
-            return proxyRequestViaGiftWithTranslation(
-                gc = gc,
-                translation = translation,
-                originalProviderId = providerId,
-                method = method,
-                headers = headers,
-                body = body,
-            )
-        }
-
-        val source = resolveCredentialSource(providerId)
-
-        // Pick the upstream origin: requiresCustomBaseUrl providers
-        // (Azure, Ollama, LM Studio) carry the real host on the credential
-        // row. Fall back to the provider's fixed baseUrl for everything else.
-        val upstreamBase = if (provider.requiresCustomBaseUrl) {
-            (source as? CredentialSource.Own)?.credential?.baseUrl ?: provider.baseUrl
+        val base = if (provider.requiresCustomBaseUrl) {
+            wallet.credentials.value.firstOrNull { it.providerId == providerId }?.baseUrl ?: provider.baseUrl
         } else provider.baseUrl
-        val url = "$upstreamBase$path"
+        val url = base.trimEnd('/') + path
 
-        if (source is CredentialSource.Gift) {
-            return proxyRequestViaGift(source.gc, url, providerId, method, headers, body)
-        }
-
-        val own = source as CredentialSource.Own
-
-        // Routing resolution. Mobile's local TCP proxy currently lacks a
-        // per-app origin tag (a single TCP listener serves every caller),
-        // so we resolve against the "bridge" origin → default group. The
-        // relay path (RelayPairService) carries the real paired origin and
-        // uses it for per-app routing; this branch will gain the same once
-        // the local proxy adds a pairing handshake. Three outcomes mirror
-        // the relay flow:
-        //   1. Cross-family translation (group binds a different family)
-        //   2. Same-family swap (group binds a different provider in the
-        //      same family — different credential, identical wire format)
-        //   3. Pass-through (no group, no model, or no usable rule)
-        val routing = resolveRouting(providerId, body)
-        if (routing != null && routing.translation != null) {
-            return proxyRequestWithTranslation(
-                originalProviderId = providerId,
-                translation = routing.translation,
-                routedCredential = routing.credential,
-                method = method,
-                headers = headers,
-                body = body,
-            )
-        }
-        if (routing != null && routing.swapToProviderId != null) {
-            return proxyRequestWithSwap(
-                originalProviderId = providerId,
-                swapToProviderId = routing.swapToProviderId,
-                swapDstModel = routing.swapDstModel,
-                routedCredential = routing.credential,
-                method = method,
-                headers = headers,
-                body = body,
-            )
-        }
-
-        val filteredHeaders = headers.filterKeys {
-            it.lowercase() !in setOf("host", "authorization", "x-api-key")
-        }.toMutableMap()
-
-        applyAuth(filteredHeaders, providerId, own.credential.authMethod, own.apiKey)
-
-        // Group-pinned model wins over the SDK's choice even on the direct
-        // path (no provider swap or translation needed, just a body rewrite).
-        val overriddenBody = routing?.modelOverride?.let { override ->
-            rewriteModelInJsonBody(body?.toString(Charsets.UTF_8), override)?.toByteArray(Charsets.UTF_8)
-        } ?: body
-        val injectedBody = injectStreamUsageOptions(providerId, overriddenBody)
-        val finalBody = if (providerId == "anthropic" && own.credential.authMethod == AuthMethod.OAUTH && injectedBody != null) {
-            injectClaudeCodeSystemPrompt(injectedBody)
-        } else {
-            injectedBody
-        }
-
-        val requestBody = when {
-            finalBody != null && method.uppercase() in setOf("POST", "PUT", "PATCH") -> {
-                val contentType = filteredHeaders["content-type"] ?: "application/json"
-                finalBody.toRequestBody(contentType.toMediaTypeOrNull())
+        val collected = object : ResponseSink {
+            var status = 0
+            var statusText = ""
+            var headers: Map<String, String> = emptyMap()
+            val text = StringBuilder()
+            override fun onMeta(status: Int, statusText: String, headers: Map<String, String>) {
+                this.status = status
+                this.statusText = statusText
+                this.headers = headers
             }
-            else -> null
+            override fun onChunk(chunk: String) { text.append(chunk) }
+            override fun onDone() {}
         }
+        forward(appOrigin, providerId, url, method, headers, body, collected)
 
-        val request = Request.Builder()
-            .url(url)
-            .method(method.uppercase(), requestBody)
-            .headers(filteredHeaders.toHeaders())
-            .build()
-
-        return client.newCall(request).execute()
-    }
-
-    fun proxyStreamingRequest(
-        providerId: String,
-        path: String,
-        method: String,
-        headers: Map<String, String>,
-        body: ByteArray?,
-    ): Flow<ByteArray> = callbackFlow {
-        val provider = Provider.find(providerId)
-            ?: throw IllegalArgumentException("Unknown provider: $providerId")
-
-        // Cross-family gift streaming path: translate request, route
-        // through gift relay, apply SSE stream translator to chunks.
-        val crossGift = resolveCrossFamilyGift(providerId, body)
-        if (crossGift != null) {
-            val (gc, translation) = crossGift
-            streamViaGiftRelayWithTranslation(
-                gc = gc,
-                translation = translation,
-                originalProviderId = providerId,
-                method = method,
-                headers = headers,
-                body = body,
-                onChunk = { trySend(it) },
-                onClose = { err -> if (err != null) close(err) else close() },
-            )
-            awaitClose { /* nothing to cancel explicitly; WS self-closes */ }
-            return@callbackFlow
-        }
-
-        val credSource = resolveCredentialSource(providerId)
-        var giftWs: WebSocket? = null
-
-        // Pick the upstream origin: requiresCustomBaseUrl providers (Azure,
-        // Ollama, LM Studio) carry the real host on the credential row.
-        // Fall back to the provider's fixed baseUrl for everything else.
-        val upstreamBase = if (provider.requiresCustomBaseUrl) {
-            (credSource as? CredentialSource.Own)?.credential?.baseUrl ?: provider.baseUrl
-        } else provider.baseUrl
-        val url = "$upstreamBase$path"
-
-        if (credSource is CredentialSource.Gift) {
-            val gc = credSource.gc
-            val requestId = UUID.randomUUID().toString()
-            val filteredHeaders = headers.filterKeys {
-                it.lowercase() !in setOf("host", "authorization", "x-api-key")
-            }
-
-            val wsReq = Request.Builder().url(gc.relayUrl).build()
-            giftWs = client.newWebSocket(wsReq, object : WebSocketListener() {
-                var authenticated = false
-                var reqSent = false
-
-                override fun onOpen(ws: WebSocket, resp: Response) {
-                    ws.send(JSONObject().apply {
-                        put("type", "relay:auth")
-                        put("roomId", gc.giftId)
-                        put("authToken", gc.authToken)
-                        put("role", "recipient")
-                    }.toString())
-                }
-
-                fun sendReq(ws: WebSocket) {
-                    if (reqSent) return
-                    reqSent = true
-                    ws.send(JSONObject().apply {
-                        put("type", "relay:request")
-                        put("requestId", requestId)
-                        put("providerId", providerId)
-                        put("url", url)
-                        put("method", method)
-                        put("headers", JSONObject(filteredHeaders))
-                        body?.let { put("body", String(it, Charsets.UTF_8)) }
-                    }.toString())
-                }
-
-                override fun onMessage(ws: WebSocket, text: String) {
-                    try {
-                        val json = JSONObject(text)
-                        when (json.optString("type")) {
-                            "relay:auth:result" -> {
-                                if (json.optBoolean("success")) {
-                                    authenticated = true
-                                    if (json.optBoolean("peerOnline", false)) sendReq(ws)
-                                } else {
-                                    close(Exception("Gift auth failed"))
-                                }
-                            }
-                            "relay:peer:status" -> {
-                                if (json.optBoolean("online") && authenticated && !reqSent) sendReq(ws)
-                            }
-                            "relay:response:chunk" -> {
-                                if (json.optString("requestId") == requestId) {
-                                    trySend(json.optString("chunk", "").toByteArray(Charsets.UTF_8))
-                                }
-                            }
-                            "relay:response:done" -> {
-                                if (json.optString("requestId") == requestId) {
-                                    Thread { Thread.sleep(2000); ws.close(1000, null) }.start()
-                                    close()
-                                }
-                            }
-                            "relay:response:error" -> {
-                                if (json.optString("requestId") == requestId) {
-                                    val errObj = json.optJSONObject("error")
-                                    val msg = errObj?.optString("message").takeUnless { it.isNullOrEmpty() } ?: "Gift relay error"
-                                    if (errObj?.optString("code") == "GIFT_EXPIRED") {
-                                        wallet.removeGiftedCredential(gc.id)
-                                    }
-                                    close(Exception(msg))
-                                }
-                            }
-                            "relay:usage" -> {
-                                if (json.optString("giftId") == gc.giftId) {
-                                    wallet.updateGiftedCredentialUsage(gc.giftId, json.optInt("usedTokens"))
-                                }
-                            }
-                        }
-                    } catch (_: Exception) {}
-                }
-
-                override fun onFailure(ws: WebSocket, t: Throwable, resp: Response?) {
-                    close(Exception("Gift relay failed: ${t.message}"))
-                }
-            })
-        } else {
-            val own = credSource as CredentialSource.Own
-
-            // Routing resolution (mirrors the non-streaming path). Three
-            // outcomes: cross-family translation, same-family swap, or fall
-            // through to pass-through.
-            val routing = resolveRouting(providerId, body)
-            if (routing != null && routing.translation != null) {
-                streamWithTranslation(
-                    originalProviderId = providerId,
-                    translation = routing.translation,
-                    routedCredential = routing.credential,
-                    method = method,
-                    headers = headers,
-                    body = body,
-                    onChunk = { trySend(it) },
-                    onError = { close(it) },
-                    onComplete = { close() },
-                )
-            } else if (routing != null && routing.swapToProviderId != null) {
-                streamWithSwap(
-                    originalProviderId = providerId,
-                    swapToProviderId = routing.swapToProviderId,
-                    swapDstModel = routing.swapDstModel,
-                    routedCredential = routing.credential,
-                    method = method,
-                    headers = headers,
-                    body = body,
-                    onChunk = { trySend(it) },
-                    onError = { close(it) },
-                    onComplete = { close() },
-                )
-            } else {
-                val filteredHeaders = headers.filterKeys {
-                    it.lowercase() !in setOf("host", "authorization", "x-api-key")
-                }.toMutableMap()
-
-                applyAuth(filteredHeaders, providerId, own.credential.authMethod, own.apiKey)
-
-                // Group-pinned model wins over the SDK's choice even on the
-                // direct path (same provider, no translation/swap needed).
-                val overriddenBody = routing?.modelOverride?.let { override ->
-                    rewriteModelInJsonBody(body?.toString(Charsets.UTF_8), override)?.toByteArray(Charsets.UTF_8)
-                } ?: body
-                val injectedBody = injectStreamUsageOptions(providerId, overriddenBody)
-                val finalBody = if (providerId == "anthropic" && own.credential.authMethod == AuthMethod.OAUTH && injectedBody != null) {
-                    injectClaudeCodeSystemPrompt(injectedBody)
-                } else {
-                    injectedBody
-                }
-
-                val requestBody = when {
-                    finalBody != null && method.uppercase() in setOf("POST", "PUT", "PATCH") -> {
-                        val contentType = filteredHeaders["content-type"] ?: "application/json"
-                        finalBody.toRequestBody(contentType.toMediaTypeOrNull())
-                    }
-                    else -> null
-                }
-
-                val request = Request.Builder()
-                    .url(url)
-                    .method(method.uppercase(), requestBody)
-                    .headers(filteredHeaders.toHeaders())
-                    .build()
-
-                val response = client.newCall(request).execute()
-                val responseBody = response.body
-
-                try {
-                    if (responseBody != null) {
-                        val source = responseBody.source()
-                        val buffer = ByteArray(4096)
-                        while (!source.exhausted()) {
-                            val read = source.read(buffer)
-                            if (read > 0) {
-                                send(buffer.copyOf(read))
-                            }
-                        }
-                    }
-                    close()
-                } catch (e: Exception) {
-                    close(e)
-                } finally {
-                    responseBody?.close()
-                }
-            }
-        }
-
-        awaitClose { giftWs?.close(1000, null) }
-    }
-
-    /**
-     * Cross-family streaming path. Reads upstream SSE in 4 KB chunks, hands
-     * each chunk to the JS stream translator, and forwards the translated
-     * bytes back to the caller. Logs once at end with translation metadata.
-     */
-    private fun streamWithTranslation(
-        originalProviderId: String,
-        translation: RoutingTranslation,
-        routedCredential: Credential,
-        method: String,
-        headers: Map<String, String>,
-        body: ByteArray?,
-        onChunk: (ByteArray) -> Unit,
-        onError: (Throwable) -> Unit,
-        onComplete: () -> Unit,
-    ) {
-        val engine = translationEngine
-        if (engine == null) {
-            onError(IllegalStateException("TranslationEngine context not provided"))
-            return
-        }
-        val requestId = UUID.randomUUID().toString()
-
-        val ctxJson: String
-        val translatedBodyString: String
-        try {
-            val bodyString = body?.toString(Charsets.UTF_8) ?: ""
-            ctxJson = engine.buildTranslationContext(
-                srcProviderId = translation.srcProviderId,
-                dstProviderId = translation.dstProviderId,
-                srcModel = translation.srcModel,
-                dstModel = translation.dstModel,
-                isStreaming = true,
-                requestId = requestId,
-            )
-            translatedBodyString = engine.translateRequest(ctxJson, bodyString)
-        } catch (t: Throwable) {
-            onError(t)
-            return
-        }
-
-        val urlString = engine.rewriteProxyUrl(translation.dstProviderId, translation.dstModel, true, routedCredential.baseUrl)
-        if (urlString == null) {
-            onError(IllegalStateException("rewriteProxyUrl returned null for ${translation.dstProviderId}"))
-            return
-        }
-
-        val dstApiKey = wallet.decryptKey(routedCredential)
-
-        val translatedBytes = injectStreamUsageOptions(translation.dstProviderId, translatedBodyString.toByteArray(Charsets.UTF_8))
-            ?: translatedBodyString.toByteArray(Charsets.UTF_8)
-
-        val filteredHeaders = headers.filterKeys {
-            it.lowercase() !in setOf("host", "authorization", "x-api-key", "anthropic-version", "content-length")
-        }.toMutableMap()
-        applyAuth(filteredHeaders, translation.dstProviderId, routedCredential.authMethod, dstApiKey)
-
-        val requestBody = translatedBytes.toRequestBody("application/json".toMediaTypeOrNull())
-        val request = Request.Builder()
-            .url(urlString)
-            .method(method.uppercase(), requestBody)
-            .headers(filteredHeaders.toHeaders())
-            .build()
-
-        // Open the stream translator handle. Always release it via the
-        // finally block below to avoid leaking the JS-side entry.
-        val streamHandle = try {
-            engine.createStreamTranslator(ctxJson)
-        } catch (t: Throwable) {
-            onError(t)
-            return
-        }
-        var releasedExplicitly = false
-
-        try {
-            val response = client.newCall(request).execute()
-            val statusCode = response.code
-            val responseBody = response.body
-
-            if (statusCode !in 200..299) {
-                // Pass error bodies through verbatim (translator can't handle non-source-shaped errors).
-                if (responseBody != null) {
-                    val source = responseBody.source()
-                    val buffer = ByteArray(4096)
-                    while (!source.exhausted()) {
-                        val read = source.read(buffer)
-                        if (read > 0) onChunk(buffer.copyOf(read))
-                    }
-                }
-                wallet.logRequest(
-                    appOrigin = "bridge",
-                    providerId = originalProviderId,
-                    method = method,
-                    url = urlString,
-                    statusCode = statusCode,
-                    requestBody = body,
-                    responseBody = null,
-                    actualProviderId = translation.dstProviderId,
-                    actualModel = translation.dstModel,
-                    groupId = DEFAULT_GROUP_ID,
-                )
-                responseBody?.close()
-                onComplete()
-                return
-            }
-
-            // 2xx path: stream chunks through the translator. We use 4 KB
-            // raw byte reads — the JS translator buffers internally and is
-            // tolerant of partial events. UTF-8 boundary risk is small at
-            // 4 KB but not zero; the JS-side parser handles invalid bytes
-            // gracefully (skips and resumes).
-            if (responseBody != null) {
-                val source = responseBody.source()
-                val buffer = ByteArray(4096)
-                while (!source.exhausted()) {
-                    val read = source.read(buffer)
-                    if (read > 0) {
-                        val chunkString = String(buffer, 0, read, Charsets.UTF_8)
-                        val translated = engine.processStreamChunk(streamHandle, chunkString)
-                        if (translated.isNotEmpty()) {
-                            onChunk(translated.toByteArray(Charsets.UTF_8))
-                        }
-                    }
-                }
-                // Flush any buffered output and release the handle.
-                val trailing = engine.flushStreamTranslator(streamHandle)
-                releasedExplicitly = true
-                if (trailing.isNotEmpty()) {
-                    onChunk(trailing.toByteArray(Charsets.UTF_8))
-                }
-            }
-            responseBody?.close()
-
-            wallet.logRequest(
-                appOrigin = "bridge",
-                providerId = originalProviderId,
-                method = method,
-                url = urlString,
-                statusCode = statusCode,
-                requestBody = body,
-                responseBody = null,
-                actualProviderId = translation.dstProviderId,
-                actualModel = translation.dstModel,
-                groupId = DEFAULT_GROUP_ID,
-            )
-            onComplete()
-        } catch (t: Throwable) {
-            onError(t)
-        } finally {
-            if (!releasedExplicitly) {
-                engine.releaseStreamTranslator(streamHandle)
-            }
-        }
-    }
-
-    /**
-     * Resolve cross-family routing. Returns null for pass-through cases (no
-     * group / same family / no model / no credential / no engine context).
-     * Caller has already resolved the credential source as `.own` — gifts
-     * skip routing entirely.
-     */
-    private fun resolveRouting(requestedProviderId: String, body: ByteArray?): com.byoky.app.data.RoutingDecision? {
-        val engine = translationEngine ?: return null
-        val group = wallet.groupForOrigin("bridge")
-        val srcModel = RoutingResolver.parseModel(body)
-        return RoutingResolver.resolve(
-            requestedProviderId = requestedProviderId,
-            requestedModel = srcModel,
-            group = group,
-            credentials = wallet.credentials.value,
-            engine = engine,
-        )
-    }
-
-    /**
-     * Cross-family translation path for non-streaming requests. Translates
-     * the request body src→dst, sends to the destination provider, and
-     * translates the response dst→src so the SDK sees its native dialect.
-     */
-    private fun proxyRequestWithTranslation(
-        originalProviderId: String,
-        translation: RoutingTranslation,
-        routedCredential: Credential,
-        method: String,
-        headers: Map<String, String>,
-        body: ByteArray?,
-    ): Response {
-        val engine = translationEngine
-            ?: throw IllegalStateException("TranslationEngine context not provided")
-        val requestId = UUID.randomUUID().toString()
-
-        // Build context + translate request body via the JS bridge.
-        val bodyString = body?.toString(Charsets.UTF_8) ?: ""
-        val ctxJson = engine.buildTranslationContext(
-            srcProviderId = translation.srcProviderId,
-            dstProviderId = translation.dstProviderId,
-            srcModel = translation.srcModel,
-            dstModel = translation.dstModel,
-            isStreaming = false,
-            requestId = requestId,
-        )
-        val translatedBodyString = engine.translateRequest(ctxJson, bodyString)
-
-        // Rewrite upstream URL to the destination provider's chat endpoint.
-        val urlString = engine.rewriteProxyUrl(translation.dstProviderId, translation.dstModel, false, routedCredential.baseUrl)
-            ?: throw IllegalStateException("rewriteProxyUrl returned null for ${translation.dstProviderId}")
-
-        // Decrypt destination credential.
-        val dstApiKey = wallet.decryptKey(routedCredential)
-
-        // Build OkHttp request with translated body and destination auth.
-        val translatedBytes = injectStreamUsageOptions(translation.dstProviderId, translatedBodyString.toByteArray(Charsets.UTF_8))
-        val finalBody = translatedBytes ?: translatedBodyString.toByteArray(Charsets.UTF_8)
-
-        val filteredHeaders = headers.filterKeys {
-            it.lowercase() !in setOf("host", "authorization", "x-api-key", "anthropic-version", "content-length")
-        }.toMutableMap()
-        applyAuth(filteredHeaders, translation.dstProviderId, routedCredential.authMethod, dstApiKey)
-
-        val requestBody = finalBody.toRequestBody("application/json".toMediaTypeOrNull())
-        val request = Request.Builder()
-            .url(urlString)
-            .method(method.uppercase(), requestBody)
-            .headers(filteredHeaders.toHeaders())
-            .build()
-
-        val upstream = client.newCall(request).execute()
-        val statusCode = upstream.code
-        val upstreamBody = upstream.body?.string() ?: ""
-
-        // Translate response dst → src so the app sees its dialect. Skip on
-        // non-2xx — error bodies are rarely in the source dialect's shape.
-        val translatedResponseString = if (statusCode in 200..299) {
-            engine.translateResponse(ctxJson, upstreamBody)
-        } else {
-            upstreamBody
-        }
-
-        wallet.logRequest(
-            appOrigin = "bridge",
-            providerId = originalProviderId,
-            method = method,
-            url = urlString,
-            statusCode = statusCode,
-            requestBody = body,
-            responseBody = translatedResponseString,
-            actualProviderId = translation.dstProviderId,
-            actualModel = translation.dstModel,
-            groupId = DEFAULT_GROUP_ID,
-        )
-
-        // Build a fresh Response with the translated body so the caller sees
-        // the source dialect. Preserve status + headers from the upstream.
+        val contentType = collected.headers["content-type"] ?: "application/json"
         return Response.Builder()
-            .request(request)
-            .protocol(upstream.protocol)
-            .code(statusCode)
-            .message(upstream.message)
-            .headers(upstream.headers)
-            .body(translatedResponseString.toResponseBody("application/json".toMediaTypeOrNull()))
-            .build()
-    }
-
-    /**
-     * Same-family swap path for non-streaming requests. Two providers in the
-     * same family (e.g. Groq → OpenAI) speak identical wire formats, so we
-     * skip the JS translation bridge entirely and just rewrite the URL, swap
-     * the credential, and (optionally) override the body's `model` field.
-     * Mirrors `RelayPairService.handleRelayRequestWithSwap`.
-     */
-    private fun proxyRequestWithSwap(
-        originalProviderId: String,
-        swapToProviderId: String,
-        swapDstModel: String?,
-        routedCredential: Credential,
-        method: String,
-        headers: Map<String, String>,
-        body: ByteArray?,
-    ): Response {
-        val engine = translationEngine
-            ?: throw IllegalStateException("TranslationEngine context not provided")
-        val isStreaming = RoutingResolver.isStreamingRequest(body)
-        // Use the group's pinned destination model for URL building when set,
-        // otherwise fall back to whatever the SDK sent. Most openai-family
-        // providers ignore the model in the URL (it comes from the body),
-        // but rewriteProxyUrl needs a non-empty value to build a URL.
-        val modelForUrl = swapDstModel ?: RoutingResolver.parseModel(body) ?: ""
-
-        val urlString = engine.rewriteProxyUrl(swapToProviderId, modelForUrl, isStreaming, routedCredential.baseUrl)
-            ?: throw IllegalStateException("rewriteProxyUrl returned null for $swapToProviderId")
-
-        // Substitute the body's `model` field with the group's pinned dst
-        // model when set. Same-family providers all accept a JSON body with
-        // a top-level `model` string, so a surgical edit is safe and minimal.
-        val bodyString = body?.toString(Charsets.UTF_8)
-        val forwardedString = if (!swapDstModel.isNullOrEmpty()) {
-            rewriteModelInJsonBody(bodyString, swapDstModel)
-        } else {
-            bodyString
-        }
-        val injectedBytes = injectStreamUsageOptions(swapToProviderId, forwardedString?.toByteArray(Charsets.UTF_8))
-            ?: forwardedString?.toByteArray(Charsets.UTF_8)
-
-        val dstApiKey = wallet.decryptKey(routedCredential)
-
-        val filteredHeaders = headers.filterKeys {
-            it.lowercase() !in setOf("host", "authorization", "x-api-key", "anthropic-version", "content-length")
-        }.toMutableMap()
-        applyAuth(filteredHeaders, swapToProviderId, routedCredential.authMethod, dstApiKey)
-
-        val requestBody = if (injectedBytes != null && method.uppercase() in setOf("POST", "PUT", "PATCH")) {
-            val contentType = filteredHeaders["content-type"] ?: "application/json"
-            injectedBytes.toRequestBody(contentType.toMediaTypeOrNull())
-        } else null
-
-        val request = Request.Builder()
-            .url(urlString)
-            .method(method.uppercase(), requestBody)
-            .headers(filteredHeaders.toHeaders())
-            .build()
-
-        val upstream = client.newCall(request).execute()
-        val statusCode = upstream.code
-
-        // Forward the response verbatim — wire formats are identical on both
-        // sides of a same-family swap. Read the body once for logging then
-        // re-emit it on the synthesized Response so the caller still sees it.
-        val upstreamBytes = upstream.body?.bytes() ?: ByteArray(0)
-        wallet.logRequest(
-            appOrigin = "bridge",
-            providerId = originalProviderId,
-            method = method,
-            url = urlString,
-            statusCode = statusCode,
-            requestBody = body,
-            responseBody = upstreamBytes.toString(Charsets.UTF_8),
-            actualProviderId = swapToProviderId,
-            actualModel = swapDstModel,
-            groupId = DEFAULT_GROUP_ID,
-        )
-
-        return Response.Builder()
-            .request(request)
-            .protocol(upstream.protocol)
-            .code(statusCode)
-            .message(upstream.message)
-            .headers(upstream.headers)
-            .body(upstreamBytes.toResponseBody(upstream.body?.contentType()))
-            .build()
-    }
-
-    /**
-     * Same-family swap path for streaming requests. Mirrors the non-streaming
-     * version above but pipes upstream bytes straight through to the caller —
-     * no translation, just verbatim forwarding under the destination
-     * provider's credential.
-     */
-    private fun streamWithSwap(
-        originalProviderId: String,
-        swapToProviderId: String,
-        swapDstModel: String?,
-        routedCredential: Credential,
-        method: String,
-        headers: Map<String, String>,
-        body: ByteArray?,
-        onChunk: (ByteArray) -> Unit,
-        onError: (Throwable) -> Unit,
-        onComplete: () -> Unit,
-    ) {
-        val engine = translationEngine
-        if (engine == null) {
-            onError(IllegalStateException("TranslationEngine context not provided"))
-            return
-        }
-        val modelForUrl = swapDstModel ?: RoutingResolver.parseModel(body) ?: ""
-        val urlString = engine.rewriteProxyUrl(swapToProviderId, modelForUrl, true, routedCredential.baseUrl)
-        if (urlString == null) {
-            onError(IllegalStateException("rewriteProxyUrl returned null for $swapToProviderId"))
-            return
-        }
-
-        val bodyString = body?.toString(Charsets.UTF_8)
-        val forwardedString = if (!swapDstModel.isNullOrEmpty()) {
-            rewriteModelInJsonBody(bodyString, swapDstModel)
-        } else {
-            bodyString
-        }
-        val injectedBytes = injectStreamUsageOptions(swapToProviderId, forwardedString?.toByteArray(Charsets.UTF_8))
-            ?: forwardedString?.toByteArray(Charsets.UTF_8)
-
-        val dstApiKey = wallet.decryptKey(routedCredential)
-
-        val filteredHeaders = headers.filterKeys {
-            it.lowercase() !in setOf("host", "authorization", "x-api-key", "anthropic-version", "content-length")
-        }.toMutableMap()
-        applyAuth(filteredHeaders, swapToProviderId, routedCredential.authMethod, dstApiKey)
-
-        val requestBody = if (injectedBytes != null && method.uppercase() in setOf("POST", "PUT", "PATCH")) {
-            val contentType = filteredHeaders["content-type"] ?: "application/json"
-            injectedBytes.toRequestBody(contentType.toMediaTypeOrNull())
-        } else null
-
-        val request = Request.Builder()
-            .url(urlString)
-            .method(method.uppercase(), requestBody)
-            .headers(filteredHeaders.toHeaders())
-            .build()
-
-        try {
-            val response = client.newCall(request).execute()
-            val statusCode = response.code
-            val responseBody = response.body
-            try {
-                if (responseBody != null) {
-                    val source = responseBody.source()
-                    val buffer = ByteArray(4096)
-                    while (!source.exhausted()) {
-                        val read = source.read(buffer)
-                        if (read > 0) onChunk(buffer.copyOf(read))
-                    }
-                }
-                wallet.logRequest(
-                    appOrigin = "bridge",
-                    providerId = originalProviderId,
-                    method = method,
-                    url = urlString,
-                    statusCode = statusCode,
-                    requestBody = body,
-                    responseBody = null,
-                    actualProviderId = swapToProviderId,
-                    actualModel = swapDstModel,
-                    groupId = DEFAULT_GROUP_ID,
-                )
-                onComplete()
-            } finally {
-                responseBody?.close()
-            }
-        } catch (t: Throwable) {
-            onError(t)
-        }
-    }
-
-    /**
-     * Surgically rewrite the top-level `model` field of a JSON request body
-     * to [newModel]. Returns the original body unchanged if parsing fails —
-     * we'd rather pass through and let the destination return a real error
-     * than silently corrupt the request. Used by the same-family swap path
-     * when the group pins a destination model.
-     */
-    private fun rewriteModelInJsonBody(body: String?, newModel: String): String? {
-        if (body == null) return null
-        return try {
-            val parsed = JSONObject(body)
-            parsed.put("model", newModel)
-            parsed.toString()
-        } catch (_: Exception) {
-            body
-        }
-    }
-
-    /**
-     * Detect a cross-family gift route. Returns (gift, translation) when
-     * the active group pins a gift whose provider differs from the app's
-     * request AND a model is set AND the pair is translatable.
-     */
-    private fun resolveCrossFamilyGift(
-        providerId: String,
-        body: ByteArray?,
-    ): Pair<GiftedCredential, com.byoky.app.data.RoutingTranslation>? {
-        val engine = translationEngine ?: return null
-        val group = wallet.groupForOrigin("bridge") ?: return null
-        if (group.providerId == providerId) return null
-        val gid = group.giftId ?: return null
-        val model = group.model
-        if (model.isNullOrEmpty()) return null
-        val srcModel = com.byoky.app.proxy.RoutingResolver.parseModel(body) ?: return null
-        if (!engine.shouldTranslate(providerId, group.providerId)) return null
-        val gc = wallet.giftedCredentials.value.firstOrNull {
-            it.giftId == gid && !isGiftExpired(it.expiresAt) && it.usedTokens < it.maxTokens
-        } ?: return null
-        return gc to com.byoky.app.data.RoutingTranslation(
-            srcProviderId = providerId,
-            dstProviderId = group.providerId,
-            srcModel = srcModel,
-            dstModel = model,
-        )
-    }
-
-    private fun resolveCredentialSource(providerId: String): CredentialSource {
-        val prefs = wallet.giftPreferences.value
-        val giftedCreds = wallet.giftedCredentials.value
-        val ownCred = wallet.credentials.value.firstOrNull { it.providerId == providerId }
-        val group = wallet.groupForOrigin("bridge")
-
-        // A group pinned to a specific gift for this provider wins over every
-        // other source — owned creds, preferences, unpinned gifts. The gift's
-        // own relay carries the request. Falls through if the pinned gift is
-        // expired, exhausted, or gone.
-        if (group != null && group.providerId == providerId && group.giftId != null) {
-            val pinnedGift = giftedCreds.firstOrNull {
-                it.giftId == group.giftId
-                        && !isGiftExpired(it.expiresAt) && it.usedTokens < it.maxTokens
-            }
-            if (pinnedGift != null) return CredentialSource.Gift(pinnedGift)
-        }
-
-        val preferredGiftId = prefs[providerId]
-        if (preferredGiftId != null) {
-            val gc = giftedCreds.firstOrNull {
-                it.giftId == preferredGiftId && it.providerId == providerId
-                        && !isGiftExpired(it.expiresAt) && it.usedTokens < it.maxTokens
-            }
-            if (gc != null) return CredentialSource.Gift(gc)
-        }
-
-        if (ownCred != null) {
-            val apiKey = wallet.decryptKey(ownCred)
-            return CredentialSource.Own(ownCred, apiKey)
-        }
-
-        val gc = giftedCreds.firstOrNull {
-            it.providerId == providerId && !isGiftExpired(it.expiresAt) && it.usedTokens < it.maxTokens
-        }
-        if (gc != null) return CredentialSource.Gift(gc)
-
-        throw IllegalStateException("No credential for provider: $providerId")
-    }
-
-    private fun proxyRequestViaGift(
-        gc: GiftedCredential,
-        url: String,
-        providerId: String,
-        method: String,
-        headers: Map<String, String>,
-        body: ByteArray?,
-    ): Response {
-        val requestId = UUID.randomUUID().toString()
-        val latch = CountDownLatch(1)
-        var error: Exception? = null
-        var responseCode = 0
-        var responseMessage = ""
-        val respHeaders = mutableMapOf<String, String>()
-        val responseBody = StringBuilder()
-        val filteredHeaders = headers.filterKeys {
-            it.lowercase() !in setOf("host", "authorization", "x-api-key")
-        }
-
-        val wsReq = Request.Builder().url(gc.relayUrl).build()
-        val ws = client.newWebSocket(wsReq, object : WebSocketListener() {
-            var authenticated = false
-            var reqSent = false
-
-            override fun onOpen(ws: WebSocket, resp: Response) {
-                ws.send(JSONObject().apply {
-                    put("type", "relay:auth")
-                    put("roomId", gc.giftId)
-                    put("authToken", gc.authToken)
-                    put("role", "recipient")
-                }.toString())
-            }
-
-            fun sendReq(ws: WebSocket) {
-                if (reqSent) return
-                reqSent = true
-                ws.send(JSONObject().apply {
-                    put("type", "relay:request")
-                    put("requestId", requestId)
-                    put("providerId", providerId)
-                    put("url", url)
-                    put("method", method)
-                    put("headers", JSONObject(filteredHeaders))
-                    body?.let { put("body", String(it, Charsets.UTF_8)) }
-                }.toString())
-            }
-
-            override fun onMessage(ws: WebSocket, text: String) {
-                try {
-                    val json = JSONObject(text)
-                    when (json.optString("type")) {
-                        "relay:auth:result" -> {
-                            if (json.optBoolean("success")) {
-                                authenticated = true
-                                if (json.optBoolean("peerOnline", false)) {
-                                    sendReq(ws)
-                                }
-                            } else {
-                                error = Exception("Gift auth failed: ${json.optString("error")}")
-                                latch.countDown()
-                            }
-                        }
-                        "relay:peer:status" -> {
-                            if (json.optBoolean("online") && authenticated && !reqSent) {
-                                sendReq(ws)
-                            }
-                        }
-                        "relay:response:meta" -> {
-                            if (json.optString("requestId") == requestId) {
-                                responseCode = json.optInt("status")
-                                responseMessage = json.optString("statusText", "")
-                                val hdrs = json.optJSONObject("headers")
-                                hdrs?.keys()?.forEach { k -> respHeaders[k] = hdrs.getString(k) }
-                            }
-                        }
-                        "relay:response:chunk" -> {
-                            if (json.optString("requestId") == requestId) {
-                                responseBody.append(json.optString("chunk", ""))
-                            }
-                        }
-                        "relay:response:done" -> {
-                            if (json.optString("requestId") == requestId) {
-                                latch.countDown()
-                                Thread { Thread.sleep(2000); ws.close(1000, null) }.start()
-                            }
-                        }
-                        "relay:response:error" -> {
-                            if (json.optString("requestId") == requestId) {
-                                val errObj = json.optJSONObject("error")
-                                error = Exception(errObj?.optString("message").takeUnless { it.isNullOrEmpty() } ?: "Gift relay error")
-                                if (errObj?.optString("code") == "GIFT_EXPIRED") {
-                                    wallet.removeGiftedCredential(gc.id)
-                                }
-                                latch.countDown()
-                            }
-                        }
-                        "relay:usage" -> {
-                            if (json.optString("giftId") == gc.giftId) {
-                                wallet.updateGiftedCredentialUsage(gc.giftId, json.optInt("usedTokens"))
-                            }
-                        }
-                    }
-                } catch (_: Exception) {}
-            }
-
-            override fun onFailure(ws: WebSocket, t: Throwable, resp: Response?) {
-                error = Exception("Gift relay failed: ${t.message}")
-                latch.countDown()
-            }
-        })
-
-        if (!latch.await(150, TimeUnit.SECONDS)) {
-            ws.close(1000, null)
-            throw Exception("Gift relay request timed out")
-        }
-
-        error?.let { throw it }
-
-        return Response.Builder()
-            .code(responseCode)
-            .message(responseMessage)
             .request(Request.Builder().url(url).build())
-            .protocol(okhttp3.Protocol.HTTP_1_1)
-            .body(responseBody.toString().toResponseBody("application/json".toMediaTypeOrNull()))
-            .headers(okhttp3.Headers.Builder().apply {
-                respHeaders.forEach { (k, v) -> add(k, v) }
-            }.build())
+            .protocol(Protocol.HTTP_1_1)
+            .code(collected.status)
+            .message(collected.statusText)
+            .headers(collected.headers.toHeaders())
+            .body(collected.text.toString().toResponseBody(contentType.toMediaTypeOrNull()))
             .build()
     }
 
+    // ──────────────────────────────────────────────────────────────────────
+    // Routing
+    // ──────────────────────────────────────────────────────────────────────
+
+    private fun resolveRouting(
+        providerId: String,
+        body: ByteArray?,
+        group: Group?,
+        credentials: List<Credential>,
+    ): RoutingDecision? {
+        val engine = translationEngine
+        val srcModel = RoutingResolver.parseModel(body)
+        if (engine != null) {
+            return RoutingResolver.resolve(providerId, srcModel, group, credentials, engine)
+        }
+        // No engine: direct match only, still honoring a group-pinned model.
+        val direct = credentials.firstOrNull { it.providerId == providerId } ?: return null
+        val override = if (group?.providerId == providerId) group.model?.takeIf { it.isNotEmpty() } else null
+        return RoutingDecision(direct, modelOverride = override)
+    }
+
+    /** The URL a request may go to with [credential]'s key, or a [ProxyError]. */
+    private fun allowedTarget(provider: Provider, url: HttpUrl, credential: Credential): String =
+        when (val t = UpstreamPolicy.target(provider, url, credential.baseUrl)) {
+            is UpstreamPolicy.Target.Allowed -> t.url
+            UpstreamPolicy.Target.MissingBaseUrl -> throw missingBaseUrl(provider, credential)
+            UpstreamPolicy.Target.WrongHost ->
+                throw ProxyError("INVALID_URL", "URL doesn't match the server registered for the ${provider.name} key \"${credential.label}\"", 400)
+        }
+
+    /** Base URL for rewriteProxyUrl: none for fixed-host providers, else the credential's own. */
+    private fun rewriteBase(dstProviderId: String, credential: Credential): String? =
+        when (val o = UpstreamPolicy.rewriteOverride(dstProviderId, credential.baseUrl)) {
+            UpstreamPolicy.Override.None -> null
+            is UpstreamPolicy.Override.Base -> o.baseUrl
+            UpstreamPolicy.Override.MissingBaseUrl ->
+                throw missingBaseUrl(Provider.find(dstProviderId) ?: Provider(dstProviderId, dstProviderId, ""), credential)
+        }
+
     /**
-     * Cross-family translation via the gift relay for the local TCP proxy
-     * non-streaming path. Translates request body src → dst, routes through
-     * the gift relay (sender holds the dst-provider API key), buffers the
-     * response, then translates dst → src. Non-2xx responses pass through
-     * verbatim.
+     * Re-check a URL produced by the JS bundle's rewriteProxyUrl before any
+     * key is attached, so a bundle that ignores the rules can't redirect it.
      */
-    private fun proxyRequestViaGiftWithTranslation(
-        gc: GiftedCredential,
-        translation: com.byoky.app.data.RoutingTranslation,
-        originalProviderId: String,
+    private fun checkedRewrite(dstProviderId: String, rewritten: String?, credential: Credential, code: String): String {
+        val provider = Provider.find(dstProviderId)
+            ?: throw ProxyError(code, "Unknown destination provider $dstProviderId", 500)
+        val parsed = rewritten?.toHttpUrlOrNull()
+            ?: throw ProxyError(code, "No upstream URL for $dstProviderId", 500)
+        return allowedTarget(provider, parsed, credential)
+    }
+
+    private fun missingBaseUrl(provider: Provider, credential: Credential) = ProxyError(
+        "NO_BASE_URL",
+        "The ${provider.name} key \"${credential.label}\" has no server URL. Remove it and add it again with its endpoint.",
+        400,
+    )
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Paths
+    // ──────────────────────────────────────────────────────────────────────
+
+    /** Pass-through: same provider the app called, the user's own key. */
+    private fun forwardDirect(
+        appOrigin: String,
+        provider: Provider,
+        url: HttpUrl,
+        credential: Credential,
+        modelOverride: String?,
         method: String,
         headers: Map<String, String>,
         body: ByteArray?,
-    ): Response {
+        sink: ResponseSink,
+    ) {
+        val providerId = provider.id
+        val upstreamUrl = allowedTarget(provider, url, credential)
+        val apiKey = wallet.decryptKey(credential)
+
+        val outHeaders = filterHeaders(headers, DIRECT_DROPPED_HEADERS)
+        ProviderAuth.apply(outHeaders, providerId, credential.authMethod, apiKey)
+
+        // The group is the strongest routing force: a pinned model wins over
+        // the app's choice even when no translation or swap is needed.
+        var outBody = modelOverride?.let { rewriteModel(body, it) } ?: body
+
+        // Anthropic setup tokens only accept Claude-Code-shaped requests; the
+        // tool-alias map is applied in reverse on the response.
+        var toolNameMap: Map<String, String> = emptyMap()
+        val engine = translationEngine?.takeIf { it.isSupported }
+        if (isSetupToken(providerId, credential) && outBody != null) {
+            val shaped = shapeForSetupToken(outBody.toString(Charsets.UTF_8))
+            toolNameMap = shaped.toolNameMap
+            outBody = shaped.body.toByteArray(Charsets.UTF_8)
+        }
+        outBody = injectStreamUsageOptions(providerId, outBody)
+
+        val request = buildRequest(upstreamUrl, method, outHeaders, outBody)
+        val capture = LogCapture()
+        val status = client.newCall(request).execute().use { response ->
+            sink.onMeta(response.code, statusText(response), responseHeaders(response))
+            val rewriter = if (toolNameMap.isNotEmpty() && engine != null && response.isSuccessful) engine else null
+            when {
+                rewriter == null -> streamText(response) { text ->
+                    capture.append(text)
+                    sink.onChunk(text)
+                }
+                isEventStream(response) -> {
+                    val handle = rewriter.createClaudeCodeSSERewriter(toolNameMap)
+                    var flushed = false
+                    try {
+                        streamText(response) { text ->
+                            capture.append(text)
+                            val out = rewriter.processClaudeCodeSSE(handle, text)
+                            if (out.isNotEmpty()) sink.onChunk(out)
+                        }
+                        val tail = rewriter.flushClaudeCodeSSE(handle)
+                        flushed = true
+                        if (tail.isNotEmpty()) sink.onChunk(tail)
+                    } finally {
+                        if (!flushed) rewriter.releaseClaudeCodeSSE(handle)
+                    }
+                }
+                else -> {
+                    val full = readText(response)
+                    capture.append(full)
+                    sink.onChunk(rewriter.rewriteClaudeCodeJSONBody(toolNameMap, full))
+                }
+            }
+            sink.onDone()
+            response.code
+        }
+
+        wallet.logRequest(
+            appOrigin = appOrigin,
+            providerId = providerId,
+            method = method,
+            url = upstreamUrl,
+            statusCode = status,
+            requestBody = body,
+            responseBody = capture.textOrNull(),
+            groupId = wallet.groupForOrigin(appOrigin)?.id,
+        )
+    }
+
+    /**
+     * Cross-family translation: the group (or auto-routing) sends this app's
+     * requests to a provider that speaks a different dialect. The body is
+     * translated src→dst, the response dst→src, so the app sees its own
+     * dialect. Error responses pass through untranslated.
+     */
+    private fun forwardTranslated(
+        appOrigin: String,
+        originalProviderId: String,
+        translation: RoutingTranslation,
+        credential: Credential,
+        method: String,
+        headers: Map<String, String>,
+        body: ByteArray?,
+        sink: ResponseSink,
+    ) {
         val engine = translationEngine
-            ?: throw IllegalStateException("TranslationEngine context not provided")
-        val bodyString = body?.let { String(it, Charsets.UTF_8) } ?: ""
-        val isStreaming = com.byoky.app.proxy.RoutingResolver.isStreamingRequest(body)
-        val requestId = UUID.randomUUID().toString()
+            ?: throw ProxyError("TRANSLATION_FAILED", "Translation engine unavailable", 500)
+        val isStreaming = RoutingResolver.isStreamingRequest(body)
 
         val ctxJson = engine.buildTranslationContext(
             srcProviderId = translation.srcProviderId,
@@ -1080,378 +344,256 @@ class ProxyService(
             srcModel = translation.srcModel,
             dstModel = translation.dstModel,
             isStreaming = isStreaming,
-            requestId = requestId,
+            requestId = UUID.randomUUID().toString(),
         )
-        val translatedBody = engine.translateRequest(ctxJson, bodyString)
-        val urlString = engine.rewriteProxyUrl(translation.dstProviderId, translation.dstModel, isStreaming)
-            ?: throw IllegalStateException("rewriteProxyUrl returned null")
+        val translatedBody = engine.translateRequest(ctxJson, body?.toString(Charsets.UTF_8) ?: "")
+        val upstreamUrl = checkedRewrite(
+            translation.dstProviderId,
+            engine.rewriteProxyUrl(translation.dstProviderId, translation.dstModel, isStreaming, rewriteBase(translation.dstProviderId, credential)),
+            credential,
+            "TRANSLATION_FAILED",
+        )
 
-        val filteredHeaders = headers.filterKeys {
-            it.lowercase() !in setOf("host", "authorization", "x-api-key", "anthropic-version", "content-length")
+        val dstApiKey = wallet.decryptKey(credential)
+        val outHeaders = filterHeaders(headers, ROUTED_DROPPED_HEADERS)
+        ProviderAuth.apply(outHeaders, translation.dstProviderId, credential.authMethod, dstApiKey)
+
+        // The translated body is Anthropic-shaped when the destination is
+        // Anthropic, so setup tokens get the same Claude Code shaping as the
+        // direct path (the extension does this too). Responses then undo the
+        // tool aliases first and translate back to the app's dialect second.
+        var outText = translatedBody
+        var toolNameMap: Map<String, String> = emptyMap()
+        if (isSetupToken(translation.dstProviderId, credential)) {
+            val shaped = shapeForSetupToken(translatedBody)
+            outText = shaped.body
+            toolNameMap = shaped.toolNameMap
         }
+        val outBody = injectStreamUsageOptions(translation.dstProviderId, outText.toByteArray(Charsets.UTF_8))
+        val unalias = toolNameMap.takeIf { it.isNotEmpty() && engine.isSupported }
 
-        val latch = CountDownLatch(1)
-        var responseCode = 0
-        var responseMessage = ""
-        val respHeaders = mutableMapOf<String, String>()
-        val rawBody = StringBuilder()
-        var isUpstreamError = false
-        var streamHandle: Int? = null
-        var handleReleased = false
-        var error: Throwable? = null
-
-        fun releaseHandle() {
-            val h = streamHandle
-            if (h != null && !handleReleased) {
-                try { engine.releaseStreamTranslator(h) } catch (_: Throwable) {}
-                handleReleased = true
-            }
-        }
-
-        val wsReq = Request.Builder().url(gc.relayUrl).build()
-        val ws = client.newWebSocket(wsReq, object : WebSocketListener() {
-            var authenticated = false
-            var reqSent = false
-
-            override fun onOpen(ws: WebSocket, resp: Response) {
-                ws.send(JSONObject().apply {
-                    put("type", "relay:auth")
-                    put("roomId", gc.giftId)
-                    put("authToken", gc.authToken)
-                    put("role", "recipient")
-                }.toString())
-            }
-
-            fun sendReq(ws: WebSocket) {
-                if (reqSent) return
-                reqSent = true
-                ws.send(JSONObject().apply {
-                    put("type", "relay:request")
-                    put("requestId", requestId)
-                    put("providerId", translation.dstProviderId)
-                    put("url", urlString)
-                    put("method", method)
-                    put("headers", JSONObject(filteredHeaders))
-                    put("body", translatedBody)
-                }.toString())
-            }
-
-            override fun onMessage(ws: WebSocket, text: String) {
-                try {
-                    val json = JSONObject(text)
-                    when (json.optString("type")) {
-                        "relay:auth:result" -> {
-                            if (json.optBoolean("success")) {
-                                authenticated = true
-                                if (json.optBoolean("peerOnline", false)) sendReq(ws)
-                            } else {
-                                error = Exception("Gift auth failed")
-                                latch.countDown()
+        val request = buildRequest(upstreamUrl, method, outHeaders, outBody, defaultContentType = "application/json")
+        val capture = LogCapture()
+        val status = client.newCall(request).execute().use { response ->
+            sink.onMeta(response.code, statusText(response), responseHeaders(response))
+            when {
+                !response.isSuccessful -> streamText(response) { text ->
+                    capture.append(text)
+                    sink.onChunk(text)
+                }
+                isStreaming -> {
+                    val handle = engine.createStreamTranslator(ctxJson)
+                    val aliasHandle = unalias?.let { engine.createClaudeCodeSSERewriter(it) }
+                    var flushed = false
+                    var aliasFlushed = aliasHandle == null
+                    try {
+                        streamText(response) { text ->
+                            capture.append(text)
+                            val restored = if (aliasHandle != null) engine.processClaudeCodeSSE(aliasHandle, text) else text
+                            if (restored.isNotEmpty()) {
+                                val out = engine.processStreamChunk(handle, restored)
+                                if (out.isNotEmpty()) sink.onChunk(out)
                             }
                         }
-                        "relay:peer:status" -> {
-                            if (json.optBoolean("online") && authenticated && !reqSent) sendReq(ws)
-                        }
-                        "relay:response:meta" -> {
-                            if (json.optString("requestId") == requestId) {
-                                responseCode = json.optInt("status")
-                                responseMessage = json.optString("statusText", "")
-                                isUpstreamError = responseCode !in 200..299
-                                val hdrs = json.optJSONObject("headers")
-                                hdrs?.keys()?.forEach { k -> respHeaders[k] = hdrs.getString(k) }
-                                if (!isUpstreamError && isStreaming) {
-                                    try {
-                                        streamHandle = engine.createStreamTranslator(ctxJson)
-                                    } catch (t: Throwable) {
-                                        error = t
-                                        latch.countDown()
-                                    }
-                                }
+                        if (aliasHandle != null) {
+                            val aliasTail = engine.flushClaudeCodeSSE(aliasHandle)
+                            aliasFlushed = true
+                            if (aliasTail.isNotEmpty()) {
+                                val out = engine.processStreamChunk(handle, aliasTail)
+                                if (out.isNotEmpty()) sink.onChunk(out)
                             }
                         }
-                        "relay:response:chunk" -> {
-                            if (json.optString("requestId") == requestId) {
-                                val chunk = json.optString("chunk", "")
-                                val handle = streamHandle
-                                if (isUpstreamError) {
-                                    rawBody.append(chunk)
-                                } else if (handle != null) {
-                                    try {
-                                        val translated = engine.processStreamChunk(handle, chunk)
-                                        if (translated.isNotEmpty()) rawBody.append(translated)
-                                    } catch (t: Throwable) {
-                                        error = t
-                                        releaseHandle()
-                                        latch.countDown()
-                                    }
-                                } else {
-                                    // Non-streaming: accumulate the dst body.
-                                    rawBody.append(chunk)
-                                }
-                            }
-                        }
-                        "relay:response:done" -> {
-                            if (json.optString("requestId") == requestId) {
-                                val handle = streamHandle
-                                try {
-                                    if (handle != null) {
-                                        val trailing = engine.flushStreamTranslator(handle)
-                                        if (trailing.isNotEmpty()) rawBody.append(trailing)
-                                    } else if (!isUpstreamError && !isStreaming) {
-                                        // Swap dst body for translated src body.
-                                        val translated = engine.translateResponse(ctxJson, rawBody.toString())
-                                        rawBody.clear()
-                                        rawBody.append(translated)
-                                    }
-                                } catch (t: Throwable) {
-                                    error = t
-                                } finally {
-                                    releaseHandle()
-                                }
-                                latch.countDown()
-                                Thread { Thread.sleep(2000); ws.close(1000, null) }.start()
-                            }
-                        }
-                        "relay:response:error" -> {
-                            if (json.optString("requestId") == requestId) {
-                                val errObj = json.optJSONObject("error")
-                                error = Exception(errObj?.optString("message").takeUnless { it.isNullOrEmpty() } ?: "Gift relay error")
-                                if (errObj?.optString("code") == "GIFT_EXPIRED") {
-                                    wallet.removeGiftedCredential(gc.id)
-                                }
-                                releaseHandle()
-                                latch.countDown()
-                            }
-                        }
-                        "relay:usage" -> {
-                            if (json.optString("giftId") == gc.giftId) {
-                                wallet.updateGiftedCredentialUsage(gc.giftId, json.optInt("usedTokens"))
-                            }
-                        }
+                        val tail = engine.flushStreamTranslator(handle)
+                        flushed = true
+                        if (tail.isNotEmpty()) sink.onChunk(tail)
+                    } finally {
+                        if (!aliasFlushed && aliasHandle != null) engine.releaseClaudeCodeSSE(aliasHandle)
+                        if (!flushed) engine.releaseStreamTranslator(handle)
                     }
-                } catch (_: Exception) {}
+                }
+                else -> {
+                    val full = readText(response)
+                    capture.append(full)
+                    val restored = if (unalias != null) engine.rewriteClaudeCodeJSONBody(unalias, full) else full
+                    sink.onChunk(engine.translateResponse(ctxJson, restored))
+                }
             }
-
-            override fun onFailure(ws: WebSocket, t: Throwable, resp: Response?) {
-                error = Exception("Gift relay failed: ${t.message}")
-                releaseHandle()
-                latch.countDown()
-            }
-        })
-
-        if (!latch.await(150, TimeUnit.SECONDS)) {
-            ws.close(1000, null)
-            releaseHandle()
-            throw Exception("Gift relay request timed out")
+            sink.onDone()
+            response.code
         }
 
-        error?.let { throw it }
-
-        return Response.Builder()
-            .code(if (responseCode == 0) 502 else responseCode)
-            .message(responseMessage)
-            .request(Request.Builder().url(urlString).build())
-            .protocol(okhttp3.Protocol.HTTP_1_1)
-            .body(rawBody.toString().toResponseBody("application/json".toMediaTypeOrNull()))
-            .headers(okhttp3.Headers.Builder().apply {
-                respHeaders.forEach { (k, v) -> add(k, v) }
-            }.build())
-            .build()
+        wallet.logRequest(
+            appOrigin = appOrigin,
+            providerId = originalProviderId,
+            method = method,
+            url = upstreamUrl,
+            statusCode = status,
+            requestBody = body,
+            // Upstream (destination-dialect) body: logRequest parses usage
+            // with the destination provider when actualProviderId is set.
+            responseBody = capture.textOrNull(),
+            actualProviderId = translation.dstProviderId,
+            actualModel = translation.dstModel,
+            groupId = wallet.groupForOrigin(appOrigin)?.id,
+        )
     }
 
     /**
-     * Streaming variant — feeds raw gift-relay chunks through a stream
-     * translator and calls onChunk for each translated byte slice. Closes
-     * the Flow via onClose when the relay emits done or fails.
+     * Same-family swap (e.g. Groq → OpenAI): identical wire format, so only
+     * the URL, the credential and optionally the body's `model` change. The
+     * response is forwarded verbatim.
      */
-    private fun streamViaGiftRelayWithTranslation(
-        gc: GiftedCredential,
-        translation: com.byoky.app.data.RoutingTranslation,
+    private fun forwardSwapped(
+        appOrigin: String,
         originalProviderId: String,
+        swapToProviderId: String,
+        swapDstModel: String?,
+        credential: Credential,
         method: String,
         headers: Map<String, String>,
         body: ByteArray?,
-        onChunk: (ByteArray) -> Unit,
-        onClose: (Throwable?) -> Unit,
+        sink: ResponseSink,
     ) {
-        val engine = translationEngine ?: run {
-            onClose(IllegalStateException("TranslationEngine context not provided"))
-            return
-        }
-        val bodyString = body?.let { String(it, Charsets.UTF_8) } ?: ""
-        val isStreaming = com.byoky.app.proxy.RoutingResolver.isStreamingRequest(body)
-        val requestId = UUID.randomUUID().toString()
+        val engine = translationEngine
+            ?: throw ProxyError("SWAP_FAILED", "Translation engine unavailable", 500)
+        val isStreaming = RoutingResolver.isStreamingRequest(body)
+        // rewriteProxyUrl needs a non-empty model even though most
+        // openai-family providers read it from the body.
+        val modelForUrl = swapDstModel ?: RoutingResolver.parseModel(body) ?: ""
+        val upstreamUrl = checkedRewrite(
+            swapToProviderId,
+            engine.rewriteProxyUrl(swapToProviderId, modelForUrl, isStreaming, rewriteBase(swapToProviderId, credential)),
+            credential,
+            "SWAP_FAILED",
+        )
 
-        val ctxJson: String
-        val translatedBody: String
-        val urlString: String
-        try {
-            ctxJson = engine.buildTranslationContext(
-                srcProviderId = translation.srcProviderId,
-                dstProviderId = translation.dstProviderId,
-                srcModel = translation.srcModel,
-                dstModel = translation.dstModel,
-                isStreaming = isStreaming,
-                requestId = requestId,
-            )
-            translatedBody = engine.translateRequest(ctxJson, bodyString)
-            urlString = engine.rewriteProxyUrl(translation.dstProviderId, translation.dstModel, isStreaming)
-                ?: run {
-                    onClose(IllegalStateException("rewriteProxyUrl returned null"))
-                    return
-                }
-        } catch (t: Throwable) {
-            onClose(t)
-            return
-        }
+        val dstApiKey = wallet.decryptKey(credential)
+        val outHeaders = filterHeaders(headers, ROUTED_DROPPED_HEADERS)
+        ProviderAuth.apply(outHeaders, swapToProviderId, credential.authMethod, dstApiKey)
+        val swappedBody = if (!swapDstModel.isNullOrEmpty()) rewriteModel(body, swapDstModel) else body
+        val outBody = injectStreamUsageOptions(swapToProviderId, swappedBody)
 
-        val filteredHeaders = headers.filterKeys {
-            it.lowercase() !in setOf("host", "authorization", "x-api-key", "anthropic-version", "content-length")
+        val request = buildRequest(upstreamUrl, method, outHeaders, outBody)
+        val capture = LogCapture()
+        val status = client.newCall(request).execute().use { response ->
+            sink.onMeta(response.code, statusText(response), responseHeaders(response))
+            streamText(response) { text ->
+                capture.append(text)
+                sink.onChunk(text)
+            }
+            sink.onDone()
+            response.code
         }
 
-        val wsReq = Request.Builder().url(gc.relayUrl).build()
-        client.newWebSocket(wsReq, object : WebSocketListener() {
-            var authenticated = false
-            var reqSent = false
-            var isUpstreamError = false
-            var streamHandle: Int? = null
-            var handleReleased = false
-            val accumulated = StringBuilder()
+        wallet.logRequest(
+            appOrigin = appOrigin,
+            providerId = originalProviderId,
+            method = method,
+            url = upstreamUrl,
+            statusCode = status,
+            requestBody = body,
+            responseBody = capture.textOrNull(),
+            actualProviderId = swapToProviderId,
+            actualModel = swapDstModel,
+            groupId = wallet.groupForOrigin(appOrigin)?.id,
+        )
+    }
 
-            fun releaseHandle() {
-                val h = streamHandle
-                if (h != null && !handleReleased) {
-                    try { engine.releaseStreamTranslator(h) } catch (_: Throwable) {}
-                    handleReleased = true
-                }
-            }
+    // ──────────────────────────────────────────────────────────────────────
+    // Helpers
+    // ──────────────────────────────────────────────────────────────────────
 
-            override fun onOpen(ws: WebSocket, resp: Response) {
-                ws.send(JSONObject().apply {
-                    put("type", "relay:auth")
-                    put("roomId", gc.giftId)
-                    put("authToken", gc.authToken)
-                    put("role", "recipient")
-                }.toString())
-            }
+    private fun buildRequest(
+        url: String,
+        method: String,
+        headers: Map<String, String>,
+        body: ByteArray?,
+        defaultContentType: String? = null,
+    ): Request {
+        val upper = method.uppercase()
+        val requestBody = if (body != null && upper in METHODS_WITH_BODY) {
+            val contentType = headers.entries.firstOrNull { it.key.equals("content-type", ignoreCase = true) }?.value
+                ?: defaultContentType ?: "application/json"
+            body.toRequestBody(contentType.toMediaTypeOrNull())
+        } else null
+        return Request.Builder()
+            .url(url)
+            .method(upper, requestBody)
+            .headers(headers.toHeaders())
+            .build()
+    }
 
-            fun sendReq(ws: WebSocket) {
-                if (reqSent) return
-                reqSent = true
-                ws.send(JSONObject().apply {
-                    put("type", "relay:request")
-                    put("requestId", requestId)
-                    put("providerId", translation.dstProviderId)
-                    put("url", urlString)
-                    put("method", method)
-                    put("headers", JSONObject(filteredHeaders))
-                    put("body", translatedBody)
-                }.toString())
-            }
+    /** Lower-cases names so [ProviderAuth] replaces app-sent values instead of duplicating them. */
+    private fun filterHeaders(headers: Map<String, String>, dropped: Set<String>): MutableMap<String, String> {
+        val out = mutableMapOf<String, String>()
+        for ((name, value) in headers) {
+            val lower = name.lowercase()
+            if (lower !in dropped) out[lower] = value
+        }
+        return out
+    }
 
-            override fun onMessage(ws: WebSocket, text: String) {
-                try {
-                    val json = JSONObject(text)
-                    when (json.optString("type")) {
-                        "relay:auth:result" -> {
-                            if (json.optBoolean("success")) {
-                                authenticated = true
-                                if (json.optBoolean("peerOnline", false)) sendReq(ws)
-                            } else {
-                                onClose(Exception("Gift auth failed"))
-                                ws.close(1000, null)
-                            }
-                        }
-                        "relay:peer:status" -> {
-                            if (json.optBoolean("online") && authenticated && !reqSent) sendReq(ws)
-                        }
-                        "relay:response:meta" -> {
-                            if (json.optString("requestId") == requestId) {
-                                val status = json.optInt("status")
-                                isUpstreamError = status !in 200..299
-                                if (!isUpstreamError && isStreaming) {
-                                    try {
-                                        streamHandle = engine.createStreamTranslator(ctxJson)
-                                    } catch (t: Throwable) {
-                                        onClose(t)
-                                        ws.close(1000, null)
-                                    }
-                                }
-                            }
-                        }
-                        "relay:response:chunk" -> {
-                            if (json.optString("requestId") == requestId) {
-                                val chunk = json.optString("chunk", "")
-                                val handle = streamHandle
-                                if (isUpstreamError) {
-                                    onChunk(chunk.toByteArray(Charsets.UTF_8))
-                                } else if (handle != null) {
-                                    try {
-                                        val translated = engine.processStreamChunk(handle, chunk)
-                                        if (translated.isNotEmpty()) {
-                                            onChunk(translated.toByteArray(Charsets.UTF_8))
-                                        }
-                                    } catch (t: Throwable) {
-                                        onClose(t)
-                                        releaseHandle()
-                                        ws.close(1000, null)
-                                    }
-                                } else {
-                                    accumulated.append(chunk)
-                                }
-                            }
-                        }
-                        "relay:response:done" -> {
-                            if (json.optString("requestId") == requestId) {
-                                val handle = streamHandle
-                                try {
-                                    if (handle != null) {
-                                        val trailing = engine.flushStreamTranslator(handle)
-                                        if (trailing.isNotEmpty()) {
-                                            onChunk(trailing.toByteArray(Charsets.UTF_8))
-                                        }
-                                    } else if (!isUpstreamError && !isStreaming) {
-                                        val translated = engine.translateResponse(ctxJson, accumulated.toString())
-                                        onChunk(translated.toByteArray(Charsets.UTF_8))
-                                    }
-                                } catch (t: Throwable) {
-                                    onClose(t)
-                                    releaseHandle()
-                                    ws.close(1000, null)
-                                    return
-                                } finally {
-                                    releaseHandle()
-                                }
-                                Thread { Thread.sleep(2000); ws.close(1000, null) }.start()
-                                onClose(null)
-                            }
-                        }
-                        "relay:response:error" -> {
-                            if (json.optString("requestId") == requestId) {
-                                val errObj = json.optJSONObject("error")
-                                val msg = errObj?.optString("message").takeUnless { it.isNullOrEmpty() } ?: "Gift relay error"
-                                if (errObj?.optString("code") == "GIFT_EXPIRED") {
-                                    wallet.removeGiftedCredential(gc.id)
-                                }
-                                releaseHandle()
-                                onClose(Exception(msg))
-                                ws.close(1000, null)
-                            }
-                        }
-                        "relay:usage" -> {
-                            if (json.optString("giftId") == gc.giftId) {
-                                wallet.updateGiftedCredentialUsage(gc.giftId, json.optInt("usedTokens"))
-                            }
-                        }
-                    }
-                } catch (_: Exception) {}
-            }
+    private fun isSetupToken(providerId: String, credential: Credential): Boolean =
+        providerId == "anthropic" && credential.authMethod == AuthMethod.OAUTH
 
-            override fun onFailure(ws: WebSocket, t: Throwable, resp: Response?) {
-                releaseHandle()
-                onClose(Exception("Gift relay failed: ${t.message}"))
+    /** Claude Code shaping for setup tokens, via the bundled core when the sandbox is available. */
+    private fun shapeForSetupToken(body: String): ClaudeCodeShaping.Shaped {
+        val engine = translationEngine?.takeIf { it.isSupported }
+        val prepare: ((String) -> ClaudeCodeShaping.Shaped)? = engine?.let { e ->
+            { text -> e.prepareClaudeCodeBody(text).let { ClaudeCodeShaping.Shaped(it.body, it.toolNameMap) } }
+        }
+        return ClaudeCodeShaping.shape(body, prepare)
+    }
+
+    private fun responseHeaders(response: Response): Map<String, String> {
+        val out = mutableMapOf<String, String>()
+        for ((name, values) in response.headers.toMultimap()) {
+            val lower = name.lowercase()
+            if (lower in SENSITIVE_RESPONSE_HEADERS || lower in HOP_BY_HOP_RESPONSE_HEADERS) continue
+            out[lower] = values.joinToString(", ")
+        }
+        return out
+    }
+
+    private fun statusText(response: Response): String =
+        response.message.ifEmpty { if (response.isSuccessful) "OK" else "Error" }
+
+    private fun isEventStream(response: Response): Boolean =
+        response.header("content-type")?.lowercase()?.contains("text/event-stream") == true
+
+    /** Read the body incrementally as UTF-8 text, never splitting a multi-byte character. */
+    private fun streamText(response: Response, onText: (String) -> Unit) {
+        val source = response.body?.source() ?: return
+        val decoder = Utf8StreamDecoder()
+        val buffer = ByteArray(8192)
+        while (true) {
+            val read = source.read(buffer)
+            if (read == -1) break
+            if (read > 0) {
+                val text = decoder.decode(buffer, read)
+                if (text.isNotEmpty()) onText(text)
             }
-        })
+        }
+        val tail = decoder.finish()
+        if (tail.isNotEmpty()) onText(tail)
+    }
+
+    private fun readText(response: Response): String {
+        val sb = StringBuilder()
+        streamText(response) { sb.append(it) }
+        return sb.toString()
+    }
+
+    /** Rewrite the top-level `model` of a JSON body; unparseable bodies pass through untouched. */
+    private fun rewriteModel(body: ByteArray?, newModel: String): ByteArray? {
+        if (body == null) return null
+        return try {
+            val parsed = JSONObject(String(body, Charsets.UTF_8))
+            parsed.put("model", newModel)
+            parsed.toString().toByteArray(Charsets.UTF_8)
+        } catch (_: Exception) {
+            body
+        }
     }
 
     private fun injectStreamUsageOptions(providerId: String, body: ByteArray?): ByteArray? {
@@ -1469,83 +611,61 @@ class ProxyService(
         } catch (_: Exception) { body }
     }
 
-    private fun injectClaudeCodeSystemPrompt(body: ByteArray): ByteArray {
-        return try {
-            val parsed = org.json.JSONObject(String(body, Charsets.UTF_8))
-            val prefix = "You are Claude Code, Anthropic's official CLI for Claude."
-            val existing = parsed.optString("system", "").takeIf { it.isNotEmpty() }
-            if (existing == null) {
-                parsed.put("system", prefix)
-            } else {
-                parsed.put("system", "$prefix\n\n$existing")
-            }
-            parsed.toString().toByteArray(Charsets.UTF_8)
-        } catch (_: Exception) {
-            body
+    /**
+     * Actionable NO_CREDENTIAL message:
+     *   1. The app's group routes to a provider with no key → name it.
+     *   2. The wallet has keys, just not for this provider → list them.
+     *   3. The wallet is empty → ask for any key.
+     */
+    private fun noCredentialMessage(providerId: String, credentials: List<Credential>, group: Group?): String {
+        // An empty providerId is the default sentinel group: no routing.
+        val groupBinding = group?.providerId?.takeIf { it.isNotEmpty() }
+        if (groupBinding != null && groupBinding != providerId) {
+            return "No $groupBinding API key found. Add a $groupBinding key to your wallet, or assign this app to a provider you already have a key for."
         }
+        val held = credentials.map { it.providerId }.distinct().sorted()
+        if (held.isNotEmpty()) {
+            return "No $providerId API key found. Keys: ${held.joinToString(", ")}. Add a $providerId key, or assign this app to one of those providers."
+        }
+        return "No API keys in your wallet. Add a key for any provider to get started."
     }
 
-    private fun applyAuth(
-        headers: MutableMap<String, String>,
-        providerId: String,
-        authMethod: AuthMethod,
-        apiKey: String,
-    ) {
-        // Azure OpenAI uses an `api-key` header, not Bearer auth. Mirrors the
-        // extension's behavior in proxy-utils.ts:71. Without this special case
-        // mobile sends the wrong header and Azure responds with 401.
-        if (providerId == "azure_openai") {
-            headers["api-key"] = apiKey
-            return
-        }
-        // Gemini uses `x-goog-api-key` (header is safer than ?key= query param,
-        // which gets sanitized out of logs).
-        if (providerId == "gemini") {
-            headers["x-goog-api-key"] = apiKey
-            return
-        }
-        if (providerId == "ollama" || providerId == "lm_studio") {
-            if (apiKey.isNotEmpty()) {
-                headers["Authorization"] = "Bearer $apiKey"
+    /** Keeps the upstream body for usage parsing, up to a cap. */
+    private class LogCapture {
+        private val sb = StringBuilder()
+        private var overflowed = false
+        fun append(text: String) {
+            if (overflowed) return
+            if (sb.length + text.length > LOG_CAPTURE_LIMIT) {
+                overflowed = true
+                sb.setLength(0)
+                return
             }
-            return
+            sb.append(text)
         }
-        if (providerId == "anthropic" && authMethod == AuthMethod.OAUTH) {
-            headers["Authorization"] = "Bearer $apiKey"
-            headers["User-Agent"] = "claude-cli/2.1.76"
-            headers["x-app"] = "cli"
-            if (!headers.containsKey("Accept") && !headers.containsKey("accept")) {
-                headers["Accept"] = "application/json"
-            }
-            val oauthBeta = listOf(
-                "claude-code-20250219",
-                "oauth-2025-04-20",
-                "fine-grained-tool-streaming-2025-05-14",
-                "interleaved-thinking-2025-05-14",
-            )
-            val existing = (headers["anthropic-beta"] ?: "")
-                .split(",")
-                .map { it.trim() }
-                .filter { it.isNotEmpty() }
-            val merged = (existing + oauthBeta).distinct().sorted()
-            headers["anthropic-beta"] = merged.joinToString(",")
-            headers["anthropic-dangerous-direct-browser-access"] = "true"
-        } else if (providerId == "anthropic") {
-            headers["x-api-key"] = apiKey
-        } else {
-            headers["Authorization"] = "Bearer $apiKey"
-        }
+        fun textOrNull(): String? = if (overflowed || sb.isEmpty()) null else sb.toString()
     }
 
     companion object {
-        // Note: this set tracks providers that need stream_options injection
-        // for token usage in streaming responses. Uses the canonical
-        // azure_openai id (underscore) — the legacy hyphenated form has
-        // been removed from the registry as of Phase 0.
+        /** Origin used for requests that don't come from an identified app. */
+        const val DEFAULT_ORIGIN = "bridge"
+
+        // Providers that need stream_options injection for token usage in
+        // streaming responses (canonical azure_openai id, underscore).
         private val STREAM_USAGE_PROVIDERS = setOf("openai", "azure_openai", "together", "deepseek")
+        private val METHODS_WITH_BODY = setOf("POST", "PUT", "PATCH")
+        private val DIRECT_DROPPED_HEADERS = setOf("host", "authorization", "x-api-key", "content-length")
+        private val ROUTED_DROPPED_HEADERS = setOf("host", "authorization", "x-api-key", "anthropic-version", "content-length")
+        private const val LOG_CAPTURE_LIMIT = 1_048_576
+
         val SENSITIVE_RESPONSE_HEADERS = setOf(
             "server", "x-request-id", "x-cloud-trace-context",
             "set-cookie", "set-cookie2", "alt-svc", "via",
+        )
+        // The body is re-emitted as decoded text chunks, so framing and
+        // encoding headers from upstream no longer describe it.
+        private val HOP_BY_HOP_RESPONSE_HEADERS = setOf(
+            "content-length", "content-encoding", "transfer-encoding", "connection", "keep-alive",
         )
     }
 }

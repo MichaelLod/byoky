@@ -16,10 +16,8 @@ import org.json.JSONObject
  * (`shouldTranslate`) are delegated to the JS bridge so the family →
  * providers mapping stays in core, not duplicated across Swift + Kotlin.
  *
- * Mobile uses the default group as the global routing rule because the SDK
- * protocol doesn't yet carry per-app origin. Phase 2's data model supports
- * multiple groups for forward compat; the proxy currently only consults the
- * default.
+ * The group comes from `WalletStore.groupForOrigin(appOrigin)`: the in-wallet
+ * browser passes each app's origin, so per-app group bindings apply.
  */
 object RoutingResolver {
 
@@ -104,12 +102,7 @@ object RoutingResolver {
         if (credentials.any { it.providerId == requestedProviderId }) return null
         if (requestedModel.isNullOrEmpty()) return null
 
-        val sorted = credentials.sortedWith(
-            compareBy<Credential> { familyOrder(it.providerId) }
-                .thenByDescending { it.createdAt }
-        )
-
-        for (cred in sorted) {
+        for (cred in autoCandidateOrder(credentials)) {
             if (!engine.shouldTranslate(requestedProviderId, cred.providerId)) continue
             val dstModel = defaultFlagshipModel(cred.providerId) ?: continue
             return RoutingDecision(
@@ -124,6 +117,18 @@ object RoutingResolver {
         }
         return null
     }
+
+    /**
+     * Auto cross-family candidate order: family preference, then newest
+     * first. `createdAt` values in the future are treated as "now", so a
+     * credential with a forged timestamp (for example from an imported file)
+     * can't jump the queue.
+     */
+    internal fun autoCandidateOrder(credentials: List<Credential>, now: Long = System.currentTimeMillis()): List<Credential> =
+        credentials.sortedWith(
+            compareBy<Credential> { familyOrder(it.providerId) }
+                .thenByDescending { minOf(it.createdAt, now) }
+        )
 
     /**
      * Family preference index for tiebreaking auto cross-family candidate

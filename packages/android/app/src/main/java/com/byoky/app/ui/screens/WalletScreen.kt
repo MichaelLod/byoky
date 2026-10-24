@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -24,20 +23,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.byoky.app.data.AuthMethod
 import com.byoky.app.data.Credential
+import com.byoky.app.data.CredentialBaseUrl
 import com.byoky.app.data.CredentialUsageStats
-import com.byoky.app.data.Gift
-import com.byoky.app.data.GiftedCredential
 import com.byoky.app.data.Provider
-import com.byoky.app.data.RequestLog
 import com.byoky.app.data.WalletStore
-import com.byoky.app.data.formatTokens
-import com.byoky.app.data.giftBudgetPercent
-import com.byoky.app.data.giftBudgetRemaining
-import com.byoky.app.data.isGiftExpired
-import com.byoky.app.ui.components.OfflineUpgradeBanner
 import com.byoky.app.ui.components.ProviderIcon
+import com.byoky.app.ui.components.RetiredFeaturesNotice
 import com.byoky.app.ui.theme.*
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -45,20 +38,13 @@ import kotlinx.coroutines.launch
 fun WalletScreen(
     wallet: WalletStore,
     onNavigateToSettings: () -> Unit = {},
-    onNavigateToRedeemGift: () -> Unit = {},
 ) {
     val credentials by wallet.credentials.collectAsState()
-    val giftedCredentials by wallet.giftedCredentials.collectAsState()
-    val giftPeerOnline by wallet.giftPeerOnline.collectAsState()
     val requestLogs by wallet.requestLogs.collectAsState()
-    val gifts by wallet.gifts.collectAsState()
-    val cloudVaultEnabled by wallet.cloudVaultEnabled.collectAsState()
+    val showRetiredNotice by wallet.retiredFeaturesNotice.collectAsState()
     var showAddSheet by remember { mutableStateOf(false) }
-    var showCloudVaultSetup by remember { mutableStateOf(false) }
-    var showDisableCloudVaultConfirm by remember { mutableStateOf(false) }
-    var statsTarget by remember { mutableStateOf<WalletStatsTarget?>(null) }
+    var statsCredentialId by remember { mutableStateOf<String?>(null) }
     var renameTarget by remember { mutableStateOf<Credential?>(null) }
-    val scope = rememberCoroutineScope()
 
     // Aggregate the last 7 days of successful requests per provider. Per-credential
     // granularity isn't possible (request log only carries providerId, not a
@@ -77,57 +63,11 @@ fun WalletScreen(
         acc.mapValues { CredentialUsageStats(it.value[0], it.value[1], it.value[2]) }
     }
 
-    // Sum tokens redeemed via gifts, keyed by the sender credential.
-    val giftedByCredential = remember(gifts) {
-        val acc = mutableMapOf<String, IntArray>() // [count, used]
-        for (g in gifts) {
-            val arr = acc.getOrPut(g.credentialId) { IntArray(2) }
-            arr[0] += 1
-            arr[1] += g.usedTokens
-        }
-        acc.mapValues { GiftedSpend(it.value[0], it.value[1]) }
-    }
-
-    val activeGifts = remember(giftedCredentials) {
-        giftedCredentials.filter { !isGiftExpired(it.expiresAt) }
-    }
-
-    // Re-probe every 15s while the Wallet is visible so the dot self-heals
-    // if the sender WS briefly blinks. A single one-shot probe would latch
-    // offline if it happened to land in a reconnect gap. The LaunchedEffect
-    // scope cancels on leave, so the loop stops when the screen goes away.
-    LaunchedEffect(activeGifts.map { it.giftId }) {
-        if (activeGifts.isEmpty()) return@LaunchedEffect
-        while (true) {
-            wallet.probeGiftPeers()
-            delay(15_000)
-        }
-    }
-
-    val hasAny = credentials.isNotEmpty() || activeGifts.isNotEmpty()
-
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Wallet") },
                 actions = {
-                    TextButton(onClick = {
-                        if (cloudVaultEnabled) {
-                            showDisableCloudVaultConfirm = true
-                        } else {
-                            showCloudVaultSetup = true
-                        }
-                    }) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("Cloud Sync", fontSize = 14.sp, color = if (cloudVaultEnabled) Accent else TextMuted)
-                            Icon(
-                                if (cloudVaultEnabled) Icons.Default.Cloud else Icons.Default.CloudOff,
-                                "Cloud Vault",
-                                tint = if (cloudVaultEnabled) Accent else TextMuted,
-                                modifier = Modifier.size(20.dp),
-                            )
-                        }
-                    }
                     IconButton(onClick = onNavigateToSettings) {
                         Icon(Icons.Default.Settings, "Settings", tint = TextSecondary)
                     }
@@ -140,17 +80,16 @@ fun WalletScreen(
         },
         containerColor = BgMain,
     ) { padding ->
-        if (!hasAny) {
+        if (credentials.isEmpty()) {
             Column(modifier = Modifier.padding(padding)) {
-                if (!cloudVaultEnabled) {
-                    Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                        OfflineUpgradeBanner(wallet, onActivate = { showCloudVaultSetup = true })
-                    }
-                }
+                RetiredFeaturesNotice(
+                    wallet,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    onOpenSettings = onNavigateToSettings,
+                )
                 EmptyWallet(
                     modifier = Modifier,
                     onAdd = { showAddSheet = true },
-                    onRedeemGift = onNavigateToRedeemGift,
                 )
             }
         } else {
@@ -159,90 +98,31 @@ fun WalletScreen(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                if (!cloudVaultEnabled) {
-                    item {
-                        OfflineUpgradeBanner(wallet, onActivate = { showCloudVaultSetup = true })
-                    }
+                if (showRetiredNotice) {
+                    item { RetiredFeaturesNotice(wallet, onOpenSettings = onNavigateToSettings) }
                 }
-                if (credentials.isNotEmpty()) {
-                    item {
-                        Text(
-                            "${credentials.size} credential${if (credentials.size == 1) "" else "s"}",
-                            color = TextSecondary,
-                            fontSize = 12.sp,
-                            modifier = Modifier.padding(bottom = 4.dp),
-                        )
-                    }
-                    items(credentials, key = { it.id }) { credential ->
-                        CredentialCard(
-                            credential = credential,
-                            usage = usageByProvider[credential.providerId],
-                            gifted = giftedByCredential[credential.id],
-                            onOpenStats = { statsTarget = WalletStatsTarget.Credential(credential.id) },
-                            onRename = { renameTarget = credential },
-                            onDelete = { wallet.removeCredential(credential) },
-                        )
-                    }
+                item {
+                    Text(
+                        "${credentials.size} credential${if (credentials.size == 1) "" else "s"}",
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(bottom = 4.dp),
+                    )
                 }
-                if (activeGifts.isNotEmpty()) {
-                    item {
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "${activeGifts.size} gift${if (activeGifts.size == 1) "" else "s"}",
-                            color = TextSecondary,
-                            fontSize = 12.sp,
-                            modifier = Modifier.padding(bottom = 4.dp),
-                        )
-                    }
-                    items(activeGifts, key = { it.id }) { gc ->
-                        GiftCredentialCard(
-                            gc = gc,
-                            online = giftPeerOnline[gc.giftId],
-                            hasOwnKey = credentials.any { it.providerId == gc.providerId },
-                            isPreferred = wallet.giftPreferences.collectAsState().value[gc.providerId] == gc.giftId,
-                            onPreferredChange = { preferred ->
-                                wallet.setGiftPreference(gc.providerId, if (preferred) gc.giftId else null)
-                            },
-                            onOpenStats = { statsTarget = WalletStatsTarget.Gift(gc.id) },
-                            onRemove = { wallet.removeGiftedCredential(gc.id) },
-                        )
-                    }
+                items(credentials, key = { it.id }) { credential ->
+                    CredentialCard(
+                        credential = credential,
+                        usage = usageByProvider[credential.providerId],
+                        onOpenStats = { statsCredentialId = credential.id },
+                        onRename = { renameTarget = credential },
+                        onDelete = { wallet.removeCredential(credential) },
+                    )
                 }
             }
         }
 
         if (showAddSheet) {
             AddCredentialSheet(wallet) { showAddSheet = false }
-        }
-
-        if (showCloudVaultSetup) {
-            CloudVaultSetupDialog(
-                wallet = wallet,
-                onDismiss = { showCloudVaultSetup = false },
-            )
-        }
-
-        if (showDisableCloudVaultConfirm) {
-            AlertDialog(
-                onDismissRequest = { showDisableCloudVaultConfirm = false },
-                title = { Text("Turn off Cloud Sync?") },
-                text = {
-                    Text(
-                        "Your keys stay on this device. They remain on the " +
-                            "server under your account — sign back in anytime to restore sync.",
-                    )
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        showDisableCloudVaultConfirm = false
-                        scope.launch { wallet.disableCloudVault() }
-                    }) { Text("Turn off Cloud Sync") }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showDisableCloudVaultConfirm = false }) { Text("Cancel") }
-                },
-                containerColor = BgCard,
-            )
         }
 
         renameTarget?.let { target ->
@@ -256,15 +136,12 @@ fun WalletScreen(
             )
         }
 
-        statsTarget?.let { target ->
+        statsCredentialId?.let { id ->
             WalletStatsSheet(
-                target = target,
+                credentialId = id,
                 credentials = credentials,
-                gifts = gifts,
-                giftedCredentials = giftedCredentials,
                 requestLogs = requestLogs,
-                giftPeerOnline = giftPeerOnline,
-                onDismiss = { statsTarget = null },
+                onDismiss = { statsCredentialId = null },
             )
         }
     }
@@ -303,7 +180,7 @@ private fun RenameCredentialDialog(
 }
 
 @Composable
-private fun EmptyWallet(modifier: Modifier, onAdd: () -> Unit, onRedeemGift: () -> Unit) {
+private fun EmptyWallet(modifier: Modifier, onAdd: () -> Unit) {
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -318,10 +195,10 @@ private fun EmptyWallet(modifier: Modifier, onAdd: () -> Unit, onRedeemGift: () 
             modifier = Modifier.size(48.dp),
         )
         Spacer(Modifier.height(16.dp))
-        Text("No credentials or gifts", fontWeight = FontWeight.SemiBold, color = TextPrimary)
+        Text("No credentials yet", fontWeight = FontWeight.SemiBold, color = TextPrimary)
         Spacer(Modifier.height(8.dp))
         Text(
-            "Add your first API key or redeem a gift to get started. Keys are encrypted with your master password and stored securely.",
+            "Add your first API key to get started. Keys are encrypted with your master password and never leave this device.",
             color = TextSecondary,
             textAlign = TextAlign.Center,
             fontSize = 14.sp,
@@ -336,181 +213,19 @@ private fun EmptyWallet(modifier: Modifier, onAdd: () -> Unit, onRedeemGift: () 
             Spacer(Modifier.width(8.dp))
             Text("Add API Key")
         }
-        Spacer(Modifier.height(12.dp))
-        OutlinedButton(
-            onClick = onRedeemGift,
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = Accent),
-        ) {
-            Icon(Icons.Default.Redeem, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("Redeem Gift")
-        }
     }
 }
-
-/**
- * Renders a received gift as a wallet credential. Mirrors [CredentialCard]'s
- * shape but shows a peer online dot, tokens-remaining bar, and sender label.
- * The green/red dot reflects [online] (null = still probing, yellow).
- */
-@Composable
-private fun GiftCredentialCard(
-    gc: GiftedCredential,
-    online: Boolean?,
-    hasOwnKey: Boolean,
-    isPreferred: Boolean,
-    onPreferredChange: (Boolean) -> Unit,
-    onOpenStats: () -> Unit,
-    onRemove: () -> Unit,
-) {
-    val provider = Provider.find(gc.providerId)
-    val remaining = giftBudgetRemaining(gc.usedTokens, gc.maxTokens)
-    val percent = giftBudgetPercent(gc.usedTokens, gc.maxTokens)
-    val dotColor = when (online) {
-        true -> Color(0xFF34D399)   // green — sender online
-        false -> Color(0xFFF43F5E)  // red — sender offline
-        null -> Color(0xFFF59E0B)   // amber — still probing
-    }
-
-    Card(
-        colors = CardDefaults.cardColors(containerColor = BgCard),
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.clickable { onOpenStats() },
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color.Black),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    ProviderIcon(
-                        providerId = gc.providerId,
-                        tint = Color.White,
-                        size = 20.dp,
-                    )
-                }
-
-                Spacer(Modifier.width(14.dp))
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(dotColor),
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            provider?.name ?: gc.providerId,
-                            fontWeight = FontWeight.Medium,
-                            color = TextPrimary,
-                        )
-                    }
-                    Text(
-                        "Gift from ${gc.senderLabel}",
-                        fontSize = 12.sp,
-                        color = TextSecondary,
-                    )
-                }
-
-                Text(
-                    "Gift",
-                    fontSize = 11.sp,
-                    color = Accent,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(AccentSoft)
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                )
-
-                IconButton(onClick = onRemove) {
-                    Icon(Icons.Default.Delete, "Remove", tint = TextMuted, modifier = Modifier.size(18.dp))
-                }
-            }
-
-            Spacer(Modifier.height(10.dp))
-
-            LinearProgressIndicator(
-                progress = { percent / 100f },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(6.dp)
-                    .clip(RoundedCornerShape(3.dp)),
-                color = if (percent > 80) Warning else Accent,
-                trackColor = BgHover,
-            )
-
-            Spacer(Modifier.height(6.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text(
-                    "${formatTokens(remaining)} / ${formatTokens(gc.maxTokens)} left",
-                    fontSize = 11.sp,
-                    color = TextSecondary,
-                )
-                Text(
-                    formatGiftExpiry(gc.expiresAt),
-                    fontSize = 11.sp,
-                    color = TextMuted,
-                )
-            }
-
-            if (hasOwnKey) {
-                Spacer(Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "Use instead of own key",
-                        fontSize = 12.sp,
-                        color = TextSecondary,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Switch(
-                        checked = isPreferred,
-                        onCheckedChange = onPreferredChange,
-                        colors = SwitchDefaults.colors(checkedTrackColor = Accent),
-                    )
-                }
-            }
-        }
-    }
-}
-
-private fun formatGiftExpiry(expiresAt: Long): String {
-    val remaining = expiresAt - System.currentTimeMillis()
-    if (remaining <= 0) return "Expired"
-    val hours = remaining / 3_600_000
-    val days = hours / 24
-    return when {
-        days > 0 -> "${days}d left"
-        hours > 0 -> "${hours}h left"
-        else -> "${remaining / 60_000}m left"
-    }
-}
-
-data class GiftedSpend(val count: Int, val used: Int)
 
 @Composable
 private fun CredentialCard(
     credential: Credential,
     usage: CredentialUsageStats?,
-    gifted: GiftedSpend?,
     onOpenStats: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val provider = Provider.find(credential.providerId)
     val hasUsage = usage != null && usage.requests > 0
-    val hasGifted = gifted != null && gifted.used > 0
 
     Card(
         colors = CardDefaults.cardColors(containerColor = BgCard),
@@ -592,35 +307,6 @@ private fun CredentialCard(
                     label = "output",
                 )
             }
-
-            Spacer(Modifier.height(10.dp))
-            HorizontalDivider(color = BgHover.copy(alpha = 0.5f))
-            Spacer(Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "Spent on gifts",
-                    fontSize = 12.sp,
-                    color = TextSecondary,
-                )
-                if (hasGifted) {
-                    Text(
-                        "${formatTokens(gifted!!.used)} · ${gifted.count} gift${if (gifted.count == 1) "" else "s"}",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = TextPrimary,
-                    )
-                } else {
-                    Text(
-                        "None",
-                        fontSize = 12.sp,
-                        color = TextMuted,
-                    )
-                }
-            }
         }
     }
 }
@@ -648,13 +334,19 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
     var baseUrl by remember { mutableStateOf("") }
     var authMethod by remember { mutableStateOf(AuthMethod.API_KEY) }
     var error by remember { mutableStateOf<String?>(null) }
-    val cloudVaultEnabled by wallet.cloudVaultEnabled.collectAsState()
+    var saving by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     val supportsSetupToken = selectedProvider?.id == "anthropic"
     val isLocalProvider = selectedProvider?.id == "ollama" || selectedProvider?.id == "lm_studio"
+    // Azure OpenAI and local servers have no fixed host: the key may only
+    // ever be sent to the URL stored with it, so one is required.
+    val needsBaseUrl = selectedProvider?.requiresCustomBaseUrl == true
+    val normalizedBaseUrl = selectedProvider?.let { CredentialBaseUrl.normalize(it.id, baseUrl) }
     val defaultBaseUrlForProvider: String = when (selectedProvider?.id) {
         "ollama" -> "http://localhost:11434"
         "lm_studio" -> "http://localhost:1234"
+        "azure_openai" -> "https://my-resource.openai.azure.com"
         else -> ""
     }
 
@@ -691,12 +383,11 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
                             selectedProvider = provider
                             if (label.isEmpty()) label = provider.name
                             if (provider.id != "anthropic") authMethod = AuthMethod.API_KEY
-                            if (baseUrl.isEmpty()) {
-                                baseUrl = when (provider.id) {
-                                    "ollama" -> "http://localhost:11434"
-                                    "lm_studio" -> "http://localhost:1234"
-                                    else -> ""
-                                }
+                            // A server URL belongs to one provider; never carry it over.
+                            baseUrl = when (provider.id) {
+                                "ollama" -> "http://localhost:11434"
+                                "lm_studio" -> "http://localhost:1234"
+                                else -> ""
                             }
                         },
                         color = if (selectedProvider?.id == provider.id) AccentSoft else BgCard,
@@ -765,13 +456,15 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
 
                 Spacer(Modifier.height(16.dp))
 
-                if (isLocalProvider) {
+                if (needsBaseUrl) {
                     OutlinedTextField(
                         value = baseUrl,
                         onValueChange = { baseUrl = it },
-                        label = { Text("Server URL") },
+                        label = { Text(if (isLocalProvider) "Server URL" else "Endpoint URL") },
                         placeholder = { Text(defaultBaseUrlForProvider) },
                         singleLine = true,
+                        isError = baseUrl.isNotBlank() && normalizedBaseUrl == null,
+                        supportingText = { Text(CredentialBaseUrl.requirementText(selectedProvider!!.id), fontSize = 11.sp) },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = Accent,
@@ -783,15 +476,16 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        if (selectedProvider?.id == "ollama")
-                            "Where your Ollama server is running. Make sure `ollama serve` is active."
-                        else
-                            "Where your LM Studio server is running. Start the \"Local Server\" in LM Studio.",
+                        when (selectedProvider?.id) {
+                            "ollama" -> "Where your Ollama server is running. Make sure `ollama serve` is active."
+                            "lm_studio" -> "Where your LM Studio server is running. Start the \"Local Server\" in LM Studio."
+                            else -> "Your key is only ever sent to this endpoint."
+                        },
                         color = TextSecondary,
                         fontSize = 12.sp,
                     )
                     Spacer(Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.Top) {
+                    if (isLocalProvider) Row(verticalAlignment = Alignment.Top) {
                         Icon(
                             Icons.Default.Warning,
                             contentDescription = null,
@@ -800,7 +494,7 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
                         )
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            "Your computer must stay online. This credential only works while your machine is running. Gift recipients will see it as offline whenever your machine sleeps or disconnects.",
+                            "Plain http:// only works for a server on this phone (localhost or 127.0.0.1). A server elsewhere on your network needs https://. Requests fail while the server is offline or asleep.",
                             color = Color(0xFFFF8A00),
                             fontSize = 12.sp,
                             lineHeight = 16.sp,
@@ -857,40 +551,6 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
                         color = TextSecondary,
                         fontSize = 12.sp,
                     )
-                    Spacer(Modifier.height(8.dp))
-                    if (cloudVaultEnabled) {
-                        Row(verticalAlignment = Alignment.Top) {
-                            Icon(
-                                Icons.Default.Cloud,
-                                contentDescription = null,
-                                tint = Accent,
-                                modifier = Modifier.size(16.dp),
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                "Cloud Sync enabled — setup-token requests are served by Byoky's residential-proxy gateway when your phone is closed or asleep.",
-                                color = Accent,
-                                fontSize = 12.sp,
-                                lineHeight = 16.sp,
-                            )
-                        }
-                    } else {
-                        Row(verticalAlignment = Alignment.Top) {
-                            Icon(
-                                Icons.Default.Warning,
-                                contentDescription = null,
-                                tint = Color(0xFFFF8A00),
-                                modifier = Modifier.size(16.dp),
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                "Online only — without Cloud Sync, setup tokens require the Byoky app to be open. Apps using this credential will fail if the phone is closed or asleep.",
-                                color = Color(0xFFFF8A00),
-                                fontSize = 12.sp,
-                                lineHeight = 16.sp,
-                            )
-                        }
-                    }
                 } else if (isLocalProvider) {
                     Spacer(Modifier.height(8.dp))
                     Text(
@@ -915,29 +575,33 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
 
             Spacer(Modifier.height(24.dp))
 
-            val isValid = selectedProvider != null && label.isNotBlank() && when {
-                isLocalProvider -> baseUrl.isNotBlank()
-                else -> apiKey.isNotBlank()
-            }
+            val isValid = selectedProvider != null && label.isNotBlank() &&
+                (!needsBaseUrl || normalizedBaseUrl != null) &&
+                (isLocalProvider || apiKey.isNotBlank())
 
             Button(
                 onClick = {
-                    try {
-                        val cleanKey = apiKey.filter { !it.isWhitespace() }
-                        val cleanBase = baseUrl.trim().trimEnd('/')
-                        wallet.addCredential(
-                            selectedProvider!!.id,
-                            label,
-                            cleanKey,
-                            authMethod,
-                            if (isLocalProvider) cleanBase.ifBlank { null } else null,
-                        )
-                        onDismiss()
-                    } catch (e: Exception) {
-                        error = e.message
+                    if (saving) return@Button
+                    saving = true
+                    error = null
+                    val providerId = selectedProvider!!.id
+                    val cleanKey = apiKey.filter { !it.isWhitespace() }
+                    val base = if (needsBaseUrl) normalizedBaseUrl else null
+                    scope.launch {
+                        // Encryption (PBKDF2) runs on Dispatchers.Default inside addCredential().
+                        try {
+                            wallet.addCredential(providerId, label, cleanKey, authMethod, base)
+                            onDismiss()
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            error = e.message
+                        } finally {
+                            saving = false
+                        }
                     }
                 },
-                enabled = isValid,
+                enabled = isValid && !saving,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp),
@@ -947,7 +611,13 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
                     disabledContainerColor = Accent.copy(alpha = 0.3f),
                 ),
             ) {
-                Text("Save", fontWeight = FontWeight.SemiBold)
+                if (saving) {
+                    CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Text("Encrypting…", fontWeight = FontWeight.SemiBold)
+                } else {
+                    Text("Save", fontWeight = FontWeight.SemiBold)
+                }
             }
         }
     }

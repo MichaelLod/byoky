@@ -3262,93 +3262,32 @@ data: [DONE]
     }
   };
 
-  // src/translate/families.ts
-  var FAMILY_PROVIDERS = {
-    anthropic: /* @__PURE__ */ new Set(["anthropic"]),
-    openai: /* @__PURE__ */ new Set([
-      "openai",
-      "azure_openai",
-      "groq",
-      "together",
-      "deepseek",
-      "xai",
-      "perplexity",
-      "fireworks",
-      "openrouter",
-      "mistral"
-    ]),
-    gemini: /* @__PURE__ */ new Set(["gemini"]),
-    cohere: /* @__PURE__ */ new Set(["cohere"])
-  };
-  function familyOf(providerId) {
-    for (const family of Object.keys(FAMILY_PROVIDERS)) {
-      if (FAMILY_PROVIDERS[family].has(providerId)) return family;
-    }
-    return null;
-  }
-  function shouldTranslate(srcProviderId, dstProviderId) {
-    const src = familyOf(srcProviderId);
-    if (!src || !hasAdapter(src)) return false;
-    const dst = familyOf(dstProviderId);
-    if (!dst || !hasAdapter(dst)) return false;
-    return src !== dst;
-  }
-  function sameFamily(srcProviderId, dstProviderId) {
-    const src = familyOf(srcProviderId);
-    if (!src) return false;
-    return src === familyOf(dstProviderId);
-  }
-  function rewriteProxyUrl(dstProviderId, model, stream, overrideBaseUrl) {
-    const provider = PROVIDERS[dstProviderId];
-    if (!provider) return null;
-    const family = familyOf(dstProviderId);
-    if (!family || !hasAdapter(family)) return null;
-    if (provider.requiresCustomBaseUrl && !overrideBaseUrl) return null;
-    const rawBase = overrideBaseUrl ?? provider.baseUrl;
-    const base = rawBase.replace(/\/$/, "");
-    if (provider.chatPath) {
-      return `${base}${provider.chatPath}`;
-    }
-    return getAdapter(family).buildChatUrl(base, model, stream);
-  }
-
-  // src/translate/index.ts
-  registerAdapter(anthropicAdapter);
-  registerAdapter(openaiAdapter);
-  registerAdapter(geminiAdapter);
-  registerAdapter(cohereAdapter);
-  function translateRequest(ctx, body) {
-    const src = getAdapter(ctx.srcFamily);
-    const dst = getAdapter(ctx.dstFamily);
-    const ir = src.parseRequest(body);
-    return dst.serializeRequest(ctx, ir);
-  }
-  function translateResponse(ctx, body) {
-    const dst = getAdapter(ctx.dstFamily);
-    const src = getAdapter(ctx.srcFamily);
-    const ir = dst.parseResponse(body);
-    return src.serializeResponse(ctx, ir);
-  }
-  function createStreamTranslator(ctx) {
-    const dst = getAdapter(ctx.dstFamily);
-    const src = getAdapter(ctx.srcFamily);
-    const parser = dst.createStreamParser();
-    const serializer = src.createStreamSerializer(ctx);
-    return {
-      process(chunk) {
-        const events = parser.process(chunk);
-        return serializer.process(events);
-      },
-      flush() {
-        const trailing = parser.flush();
-        let out = serializer.process(trailing);
-        out += serializer.flush();
-        return out;
-      }
-    };
-  }
-
   // src/proxy-utils.ts
+  var LOCAL_HTTP_PROVIDERS = /* @__PURE__ */ new Set(["ollama", "lm_studio"]);
+  function isLoopbackHost(hostname) {
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" || hostname === "::1";
+  }
+  function isAllowedProtocol(providerId, u) {
+    if (u.protocol === "https:") return true;
+    if (u.protocol === "http:" && LOCAL_HTTP_PROVIDERS.has(providerId) && isLoopbackHost(u.hostname)) {
+      return true;
+    }
+    return false;
+  }
+  function resolveProviderBaseUrl(providerId, overrideBaseUrl) {
+    const provider = PROVIDERS[providerId];
+    if (!provider) return null;
+    if (!provider.requiresCustomBaseUrl) return provider.baseUrl;
+    if (!overrideBaseUrl) return null;
+    try {
+      const base = new URL(overrideBaseUrl);
+      if (!isAllowedProtocol(providerId, base)) return null;
+      if (base.username || base.password || base.search || base.hash) return null;
+      return overrideBaseUrl;
+    } catch {
+      return null;
+    }
+  }
   var MAX_BODY_PARSE_SIZE = 10485760;
   function detectRequestCapabilities(body) {
     const empty = {
@@ -3581,7 +3520,313 @@ ${systemText}
     return frame;
   }
 
+  // src/translate/families.ts
+  var FAMILY_PROVIDERS = {
+    anthropic: /* @__PURE__ */ new Set(["anthropic"]),
+    openai: /* @__PURE__ */ new Set([
+      "openai",
+      "azure_openai",
+      "groq",
+      "together",
+      "deepseek",
+      "xai",
+      "perplexity",
+      "fireworks",
+      "openrouter",
+      "mistral"
+    ]),
+    gemini: /* @__PURE__ */ new Set(["gemini"]),
+    cohere: /* @__PURE__ */ new Set(["cohere"])
+  };
+  function familyOf(providerId) {
+    for (const family of Object.keys(FAMILY_PROVIDERS)) {
+      if (FAMILY_PROVIDERS[family].has(providerId)) return family;
+    }
+    return null;
+  }
+  function shouldTranslate(srcProviderId, dstProviderId) {
+    const src = familyOf(srcProviderId);
+    if (!src || !hasAdapter(src)) return false;
+    const dst = familyOf(dstProviderId);
+    if (!dst || !hasAdapter(dst)) return false;
+    return src !== dst;
+  }
+  function sameFamily(srcProviderId, dstProviderId) {
+    const src = familyOf(srcProviderId);
+    if (!src) return false;
+    return src === familyOf(dstProviderId);
+  }
+  function isChatCompletionsEndpoint(family, url) {
+    if (!hasAdapter(family)) return false;
+    return getAdapter(family).matchesChatEndpoint(url);
+  }
+  function rewriteProxyUrl(dstProviderId, model, stream, overrideBaseUrl) {
+    const provider = PROVIDERS[dstProviderId];
+    if (!provider) return null;
+    const family = familyOf(dstProviderId);
+    if (!family || !hasAdapter(family)) return null;
+    const rawBase = resolveProviderBaseUrl(dstProviderId, overrideBaseUrl);
+    if (!rawBase) return null;
+    const base = rawBase.replace(/\/$/, "");
+    if (provider.chatPath) {
+      return `${base}${provider.chatPath}`;
+    }
+    return getAdapter(family).buildChatUrl(base, model, stream);
+  }
+
+  // src/translate/index.ts
+  registerAdapter(anthropicAdapter);
+  registerAdapter(openaiAdapter);
+  registerAdapter(geminiAdapter);
+  registerAdapter(cohereAdapter);
+  function translateRequest(ctx, body) {
+    const src = getAdapter(ctx.srcFamily);
+    const dst = getAdapter(ctx.dstFamily);
+    const ir = src.parseRequest(body);
+    return dst.serializeRequest(ctx, ir);
+  }
+  function translateResponse(ctx, body) {
+    const dst = getAdapter(ctx.dstFamily);
+    const src = getAdapter(ctx.srcFamily);
+    const ir = dst.parseResponse(body);
+    return src.serializeResponse(ctx, ir);
+  }
+  function createStreamTranslator(ctx) {
+    const dst = getAdapter(ctx.dstFamily);
+    const src = getAdapter(ctx.srcFamily);
+    const parser = dst.createStreamParser();
+    const serializer = src.createStreamSerializer(ctx);
+    return {
+      process(chunk) {
+        const events = parser.process(chunk);
+        return serializer.process(events);
+      },
+      flush() {
+        const trailing = parser.flush();
+        let out = serializer.process(trailing);
+        out += serializer.flush();
+        return out;
+      }
+    };
+  }
+
+  // src/translate/url-fallback.ts
+  var DEFAULT_PORTS = { "http:": "80", "https:": "443" };
+  var SCHEME_RE = /^([A-Za-z][A-Za-z0-9+.-]*):/;
+  var ENCODE_SET_RE = /["<>`{}^|]/;
+  var BAD_PERCENT_RE = /%(?![0-9A-Fa-f]{2})/;
+  var USERINFO_RE = /^[A-Za-z0-9\-._~!$&'()*+,%]*$/;
+  var HOST_CHARS_RE = /^[a-z0-9.-]+$/;
+  var NUMERIC_LABEL_RE = /^(?:0x[0-9a-f]*|[0-9]+)$/;
+  var IPV4_OCTET_RE = /^(?:0|[1-9][0-9]{0,2})$/;
+  var PORT_RE = /^[1-9][0-9]{0,4}$/;
+  var DOT_SEGMENT_RE = /^(?:\.|%2e){1,2}$/i;
+  var IPV6_CHARS_RE = /^[0-9A-Fa-f:]+$/;
+  var IPV6_GROUP_RE = /^[0-9A-Fa-f]{1,4}$/;
+  function invalid(reason) {
+    throw new TypeError(`Invalid URL: ${reason}`);
+  }
+  function parsePort(raw, protocol) {
+    if (!PORT_RE.test(raw) || Number(raw) > 65535) invalid("bad port");
+    return raw === DEFAULT_PORTS[protocol] ? "" : raw;
+  }
+  function parseIPv6(s) {
+    if (!IPV6_CHARS_RE.test(s)) invalid("unsupported IPv6 literal");
+    const groups = (part) => {
+      if (part === "") return [];
+      return part.split(":").map((g) => {
+        if (!IPV6_GROUP_RE.test(g)) invalid("bad IPv6 group");
+        return parseInt(g, 16);
+      });
+    };
+    const dbl = s.indexOf("::");
+    if (dbl === -1) {
+      const pieces = groups(s);
+      if (pieces.length !== 8) invalid("bad IPv6 length");
+      return pieces;
+    }
+    if (s.indexOf("::", dbl + 1) !== -1) invalid("multiple :: in IPv6");
+    const head = groups(s.slice(0, dbl));
+    const tail = groups(s.slice(dbl + 2));
+    if (head.length + tail.length > 7) invalid("bad IPv6 length");
+    const zeros = [];
+    for (let i = head.length + tail.length; i < 8; i++) zeros.push(0);
+    return [...head, ...zeros, ...tail];
+  }
+  function serializeIPv6(pieces) {
+    let compress = -1;
+    let bestLen = 1;
+    for (let i = 0; i < 8; ) {
+      if (pieces[i] !== 0) {
+        i++;
+        continue;
+      }
+      let j = i;
+      while (j < 8 && pieces[j] === 0) j++;
+      if (j - i > bestLen) {
+        bestLen = j - i;
+        compress = i;
+      }
+      i = j;
+    }
+    let out = "";
+    let ignore0 = false;
+    for (let i = 0; i < 8; i++) {
+      if (ignore0 && pieces[i] === 0) continue;
+      ignore0 = false;
+      if (i === compress) {
+        out += i === 0 ? "::" : ":";
+        ignore0 = true;
+        continue;
+      }
+      out += pieces[i].toString(16);
+      if (i !== 7) out += ":";
+    }
+    return out;
+  }
+  function parseDomainOrIPv4(raw) {
+    if (raw === "") invalid("empty host");
+    const host = raw.toLowerCase();
+    if (!HOST_CHARS_RE.test(host)) invalid("unsupported character in host");
+    const labels = host.split(".");
+    for (const label of labels) {
+      if (label === "") invalid("empty host label");
+      if (label.length > 63) invalid("host label too long");
+      if (label.startsWith("-") || label.endsWith("-")) invalid("hyphen at host label edge");
+      if (label.startsWith("xn--")) invalid("punycode host label");
+    }
+    if (NUMERIC_LABEL_RE.test(labels[labels.length - 1])) {
+      const canonical = labels.length === 4 && labels.every((l) => IPV4_OCTET_RE.test(l) && Number(l) <= 255);
+      if (!canonical) invalid("non-canonical IPv4 host");
+    }
+    return host;
+  }
+  function parse(input) {
+    for (let i = 0; i < input.length; i++) {
+      const c = input.charCodeAt(i);
+      if (c <= 32 || c >= 127) invalid("whitespace, control or non-ASCII character");
+    }
+    if (input.includes("\\")) invalid("backslash");
+    if (ENCODE_SET_RE.test(input)) invalid("character that would be percent-encoded");
+    if (BAD_PERCENT_RE.test(input)) invalid("malformed percent-escape");
+    const scheme = SCHEME_RE.exec(input);
+    if (!scheme) invalid("missing scheme");
+    const protocol = `${scheme[1].toLowerCase()}:`;
+    if (protocol !== "http:" && protocol !== "https:") invalid("unsupported scheme");
+    let rest = input.slice(scheme[0].length);
+    if (!rest.startsWith("//")) invalid("missing // after scheme");
+    rest = rest.slice(2);
+    const authorityEnd = rest.search(/[/?#]/);
+    const authority = authorityEnd === -1 ? rest : rest.slice(0, authorityEnd);
+    let tail = authorityEnd === -1 ? "" : rest.slice(authorityEnd);
+    let username = "";
+    let password = "";
+    let hostPort = authority;
+    const at = authority.indexOf("@");
+    if (at !== -1) {
+      if (authority.indexOf("@", at + 1) !== -1) invalid("multiple @ in authority");
+      const userinfo = authority.slice(0, at);
+      hostPort = authority.slice(at + 1);
+      const colon = userinfo.indexOf(":");
+      username = colon === -1 ? userinfo : userinfo.slice(0, colon);
+      password = colon === -1 ? "" : userinfo.slice(colon + 1);
+      if (username === "") invalid("empty username");
+      if (!USERINFO_RE.test(username) || !USERINFO_RE.test(password)) {
+        invalid("unsupported character in userinfo");
+      }
+    }
+    let hostname;
+    let port = "";
+    if (hostPort.startsWith("[")) {
+      const close = hostPort.indexOf("]");
+      if (close === -1) invalid("unterminated IPv6 literal");
+      hostname = `[${serializeIPv6(parseIPv6(hostPort.slice(1, close)))}]`;
+      const after = hostPort.slice(close + 1);
+      if (after !== "") {
+        if (!after.startsWith(":")) invalid("unexpected text after IPv6 literal");
+        port = parsePort(after.slice(1), protocol);
+      }
+    } else {
+      const colon = hostPort.indexOf(":");
+      if (colon !== -1) port = parsePort(hostPort.slice(colon + 1), protocol);
+      hostname = parseDomainOrIPv4(colon === -1 ? hostPort : hostPort.slice(0, colon));
+    }
+    let fragment = null;
+    const hashAt = tail.indexOf("#");
+    if (hashAt !== -1) {
+      fragment = tail.slice(hashAt + 1);
+      tail = tail.slice(0, hashAt);
+    }
+    let query = null;
+    const queryAt = tail.indexOf("?");
+    if (queryAt !== -1) {
+      query = tail.slice(queryAt + 1);
+      tail = tail.slice(0, queryAt);
+    }
+    if (query !== null && query.includes("'")) invalid("' in query");
+    const pathname = tail === "" ? "/" : tail;
+    for (const segment of pathname.split("/")) {
+      if (DOT_SEGMENT_RE.test(segment)) invalid("dot segment in path");
+    }
+    return { protocol, username, password, hostname, port, pathname, query, fragment };
+  }
+  var FallbackURL = class _FallbackURL {
+    href;
+    origin;
+    protocol;
+    username;
+    password;
+    host;
+    hostname;
+    port;
+    pathname;
+    search;
+    hash;
+    constructor(input, base) {
+      if (base !== void 0) invalid("base URLs are not supported");
+      const p = parse(String(input));
+      this.protocol = p.protocol;
+      this.username = p.username;
+      this.password = p.password;
+      this.hostname = p.hostname;
+      this.port = p.port;
+      this.host = p.port ? `${p.hostname}:${p.port}` : p.hostname;
+      this.pathname = p.pathname;
+      this.search = p.query ? `?${p.query}` : "";
+      this.hash = p.fragment ? `#${p.fragment}` : "";
+      this.origin = `${p.protocol}//${this.host}`;
+      const userinfo = p.username || p.password ? `${p.username}${p.password ? `:${p.password}` : ""}@` : "";
+      this.href = `${p.protocol}//${userinfo}${this.host}${p.pathname}` + (p.query !== null ? `?${p.query}` : "") + (p.fragment !== null ? `#${p.fragment}` : "");
+      Object.freeze(this);
+    }
+    static canParse(input, base) {
+      try {
+        new _FallbackURL(input, base);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    toString() {
+      return this.href;
+    }
+    toJSON() {
+      return this.href;
+    }
+  };
+  function installURLFallback(target = globalThis) {
+    if (typeof target.URL !== "undefined") return false;
+    Object.defineProperty(target, "URL", {
+      value: FallbackURL,
+      writable: true,
+      configurable: true,
+      enumerable: false
+    });
+    return true;
+  }
+
   // src/translate/mobile-entry.ts
+  var urlImpl = installURLFallback() ? "fallback" : "native";
   var streams = /* @__PURE__ */ new Map();
   var ccRewriters = /* @__PURE__ */ new Map();
   var nextHandle = 1;
@@ -3640,6 +3885,10 @@ ${systemText}
       const override = overrideBaseUrl && overrideBaseUrl.length > 0 ? overrideBaseUrl : void 0;
       return rewriteProxyUrl(dstProviderId, model, stream, override);
     },
+    isChatEndpoint(providerId, url) {
+      const family = familyOf(providerId);
+      return family ? isChatCompletionsEndpoint(family, url) : false;
+    },
     getModelsForProvider(providerId) {
       const list = modelsForProvider(providerId).map((m) => ({
         id: m.id,
@@ -3696,7 +3945,8 @@ ${systemText}
       const map = JSON.parse(mapJson);
       return rewriteToolNamesInJSONBody(body, map);
     },
-    version: "0.5.2"
+    version: "0.5.3",
+    urlImpl
   };
   globalThis.BYOKY_TRANSLATE = bridge;
 })();

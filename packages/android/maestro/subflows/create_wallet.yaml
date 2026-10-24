@@ -2,9 +2,9 @@ appId: com.byoky.app
 ---
 # Requires env: PASSWORD
 #
-# Welcome → offline setup → password → MainScreen (Wallet tab).
+# Welcome → Get Started → password → MainScreen (Wallet tab).
 - assertVisible: "Byoky Wallet"
-- tapOn: "Continue with your API keys"
+- tapOn: "Get Started"
 - assertVisible: "Set Master Password"
 - tapOn: "Master password"
 - inputText: ${PASSWORD}
@@ -13,4 +13,4 @@ appId: com.byoky.app
 - hideKeyboard
 - tapOn: "Create Wallet"
 # Landing on MainScreen → Wallet tab → empty state.
-- assertVisible: "No credentials or gifts"
+- assertVisible: "No credentials yet"

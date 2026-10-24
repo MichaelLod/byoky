@@ -6,12 +6,10 @@ tags:
 # Mirrors e2e/tests/live-flow.spec.ts for the Android app.
 #
 # Coverage:
-#   1. Onboarding → create offline wallet with master password
+#   1. Onboarding → create a local wallet with master password
 #   2. Add 3 credentials: Anthropic, OpenAI, Google Gemini
 #   3. Assert wallet shows "3 credentials"
-#   4. Create a gift from the first credential
-#   5. Revoke the gift
-#   6. Lock the wallet
+#   4. Lock the wallet
 #
 # Environment:
 #   ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY must be exported
@@ -24,7 +22,7 @@ tags:
     file: subflows/reset_and_launch.yaml
 
 - runFlow:
-    file: subflows/create_wallet_offline.yaml
+    file: subflows/create_wallet.yaml
     env:
       PASSWORD: "TestPassword123!long"
 
@@ -58,12 +56,6 @@ tags:
 - assertVisible: "Anthropic"
 - assertVisible: "OpenAI"
 - assertVisible: "Google Gemini"
-
-- runFlow:
-    file: subflows/create_gift.yaml
-
-- runFlow:
-    file: subflows/revoke_gift.yaml
 
 - runFlow:
     file: subflows/lock_wallet.yaml

@@ -6,6 +6,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.byoky.app.BuildConfig
 import com.byoky.app.data.AuthMethod
 import com.byoky.app.data.WalletStore
+import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertTrue
@@ -44,7 +45,7 @@ class ProxyServiceLiveFlowTest {
         context = InstrumentationRegistry.getInstrumentation().targetContext
         clearWalletState(context)
         wallet = WalletStore(context)
-        wallet.createPassword(testPassword)
+        runBlocking { wallet.createPassword(testPassword) }
         proxy = ProxyService(wallet, context)
     }
 
@@ -59,7 +60,7 @@ class ProxyServiceLiveFlowTest {
         val key = BuildConfig.TEST_ANTHROPIC_KEY
         assumeTrue("BYOKY_TEST_ANTHROPIC_KEY not set", key.isNotEmpty())
 
-        wallet.addCredential("anthropic", "e2e-anthropic", key, AuthMethod.API_KEY)
+        runBlocking { wallet.addCredential("anthropic", "e2e-anthropic", key, AuthMethod.API_KEY) }
 
         val body = """
             {"model":"claude-haiku-4-5-20251001","max_tokens":50,
@@ -89,7 +90,7 @@ class ProxyServiceLiveFlowTest {
         val key = BuildConfig.TEST_OPENAI_KEY
         assumeTrue("BYOKY_TEST_OPENAI_KEY not set", key.isNotEmpty())
 
-        wallet.addCredential("openai", "e2e-openai", key, AuthMethod.API_KEY)
+        runBlocking { wallet.addCredential("openai", "e2e-openai", key, AuthMethod.API_KEY) }
 
         val body = """
             {"model":"gpt-4o-mini","max_tokens":50,
@@ -116,7 +117,7 @@ class ProxyServiceLiveFlowTest {
         val key = BuildConfig.TEST_GEMINI_KEY
         assumeTrue("BYOKY_TEST_GEMINI_KEY not set", key.isNotEmpty())
 
-        wallet.addCredential("gemini", "e2e-gemini", key, AuthMethod.API_KEY)
+        runBlocking { wallet.addCredential("gemini", "e2e-gemini", key, AuthMethod.API_KEY) }
 
         val body = """
             {"contents":[{"parts":[{"text":"Reply with the single word: pong"}]}],
@@ -145,7 +146,7 @@ class ProxyServiceLiveFlowTest {
         // with no stored password_hash, so the next WalletStore lands in
         // UNINITIALIZED state.
         try {
-            ctx.deleteSharedPreferences("byoky_vault")
+            ctx.deleteSharedPreferences(WalletStore.ENCRYPTED_PREFS_FILE)
         } catch (_: Throwable) {
             // deleteSharedPreferences is API 24+; ignore failures so this
             // test still runs in stripped-down instrumentation contexts.

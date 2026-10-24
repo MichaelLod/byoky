@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.sp
 import com.byoky.app.data.WalletStore
 import com.byoky.app.ui.components.BrandMark
 import com.byoky.app.ui.theme.*
+import kotlinx.coroutines.launch
 
 internal data class PasswordQualityResult(
     val icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -40,7 +41,7 @@ internal data class PasswordQualityResult(
     }
 }
 
-private enum class OnboardingStep { WELCOME, VAULT_AUTH, OFFLINE_SETUP }
+private enum class OnboardingStep { WELCOME, PASSWORD }
 
 @Composable
 fun OnboardingScreen(wallet: WalletStore) {
@@ -48,7 +49,8 @@ fun OnboardingScreen(wallet: WalletStore) {
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
-    var vaultMode by remember { mutableStateOf(VaultAuthMode.SIGNUP) }
+    var creating by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     Column(
         modifier = Modifier
@@ -74,7 +76,7 @@ fun OnboardingScreen(wallet: WalletStore) {
             Spacer(Modifier.height(12.dp))
 
             Text(
-                "Your encrypted wallet for AI API keys. Sync across devices, end-to-end encrypted.",
+                "Your encrypted wallet for AI API keys. Keys stay on this device; apps you open in the wallet use them without ever seeing them.",
                 color = TextSecondary,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(horizontal = 16.dp),
@@ -83,10 +85,7 @@ fun OnboardingScreen(wallet: WalletStore) {
             Spacer(Modifier.height(32.dp))
 
             Button(
-                onClick = {
-                    vaultMode = VaultAuthMode.SIGNUP
-                    step = OnboardingStep.VAULT_AUTH
-                },
+                onClick = { step = OnboardingStep.PASSWORD },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),
@@ -96,17 +95,6 @@ fun OnboardingScreen(wallet: WalletStore) {
                 Text("Get Started", fontWeight = FontWeight.SemiBold)
             }
 
-            Spacer(Modifier.height(8.dp))
-
-            TextButton(onClick = { step = OnboardingStep.OFFLINE_SETUP }) {
-                Text("Continue with your API keys", color = TextMuted, fontSize = 12.sp)
-            }
-        } else if (step == OnboardingStep.VAULT_AUTH) {
-            VaultAuthContent(
-                wallet = wallet,
-                initialMode = vaultMode,
-                onBack = { step = OnboardingStep.WELCOME },
-            )
         } else {
             // Password step
             BrandMark(
@@ -191,13 +179,20 @@ fun OnboardingScreen(wallet: WalletStore) {
 
             Button(
                 onClick = {
-                    try {
-                        wallet.createPassword(password)
-                    } catch (e: Exception) {
-                        error = e.message
+                    if (creating) return@Button
+                    creating = true
+                    error = null
+                    scope.launch {
+                        // Hashing runs on Dispatchers.Default inside createPassword().
+                        try {
+                            wallet.createPassword(password)
+                        } catch (e: Exception) {
+                            error = e.message
+                        }
+                        creating = false
                     }
                 },
-                enabled = isValid,
+                enabled = isValid && !creating,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),
@@ -207,7 +202,17 @@ fun OnboardingScreen(wallet: WalletStore) {
                     disabledContainerColor = Accent.copy(alpha = 0.3f),
                 ),
             ) {
-                Text("Create Wallet", fontWeight = FontWeight.SemiBold)
+                if (creating) {
+                    CircularProgressIndicator(
+                        color = androidx.compose.ui.graphics.Color.White,
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text("Creating wallet…", fontWeight = FontWeight.SemiBold)
+                } else {
+                    Text("Create Wallet", fontWeight = FontWeight.SemiBold)
+                }
             }
 
             Spacer(Modifier.height(12.dp))

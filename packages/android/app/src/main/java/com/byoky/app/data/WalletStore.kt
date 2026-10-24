@@ -2,28 +2,25 @@ package com.byoky.app.data
 
 import android.content.Context
 import android.content.SharedPreferences
-import android.util.Base64
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.byoky.app.crypto.CryptoService
 import com.byoky.app.proxy.TranslationEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import kotlin.coroutines.resume
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
-import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 enum class WalletStatus { UNINITIALIZED, LOCKED, UNLOCKED }
@@ -43,9 +40,12 @@ class WalletStore(context: Context) {
         .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
         .build()
 
+    // Encrypted local store for the password hash, encrypted keys, groups,
+    // sessions and logs. The file name predates the local-only design and
+    // must stay as is: renaming it would orphan every existing wallet.
     private val prefs: SharedPreferences = EncryptedSharedPreferences.create(
         context,
-        "byoky_vault",
+        ENCRYPTED_PREFS_FILE,
         masterKey,
         EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
         EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
@@ -66,37 +66,6 @@ class WalletStore(context: Context) {
     private val _requestLogs = MutableStateFlow<List<RequestLog>>(emptyList())
     val requestLogs: StateFlow<List<RequestLog>> = _requestLogs.asStateFlow()
 
-    private val _gifts = MutableStateFlow<List<Gift>>(emptyList())
-    val gifts: StateFlow<List<Gift>> = _gifts.asStateFlow()
-
-    private val _giftedCredentials = MutableStateFlow<List<GiftedCredential>>(emptyList())
-    val giftedCredentials: StateFlow<List<GiftedCredential>> = _giftedCredentials.asStateFlow()
-
-    /** Set by MainActivity when a byoky://pair/<payload> deep link fires.
-     *  AppNavigation switches to the Connect tab, ConnectScreen forces the
-     *  Pair sub-tab, and PairContent auto-kicks off the relay handshake. */
-    private val _pendingPairLink = MutableStateFlow<String?>(null)
-    val pendingPairLink: StateFlow<String?> = _pendingPairLink.asStateFlow()
-    fun setPendingPairLink(link: String?) { _pendingPairLink.value = link }
-
-    /** Set by MainActivity when a byoky://gift/<payload> deep link fires.
-     *  AppNavigation routes to the redeem-gift screen which pre-fills the
-     *  link text from this value and clears it. */
-    private val _pendingGiftLink = MutableStateFlow<String?>(null)
-    val pendingGiftLink: StateFlow<String?> = _pendingGiftLink.asStateFlow()
-    fun setPendingGiftLink(link: String?) { _pendingGiftLink.value = link }
-
-    private val _giftPreferences = MutableStateFlow<Map<String, String>>(emptyMap())
-    val giftPreferences: StateFlow<Map<String, String>> = _giftPreferences.asStateFlow()
-
-    /**
-     * Last-known online status per received gift, keyed by giftId. Filled in
-     * by [probeGiftPeers] which the Wallet screen calls on launch. Treated
-     * as transient — not persisted; missing values mean "not yet probed".
-     */
-    private val _giftPeerOnline = MutableStateFlow<Map<String, Boolean>>(emptyMap())
-    val giftPeerOnline: StateFlow<Map<String, Boolean>> = _giftPeerOnline.asStateFlow()
-
     private val _tokenAllowances = MutableStateFlow<List<TokenAllowance>>(emptyList())
     val tokenAllowances: StateFlow<List<TokenAllowance>> = _tokenAllowances.asStateFlow()
 
@@ -109,78 +78,98 @@ class WalletStore(context: Context) {
     private val _lockoutEndTime = MutableStateFlow<Long?>(null)
     val lockoutEndTime: StateFlow<Long?> = _lockoutEndTime.asStateFlow()
 
-    private val _cloudVaultEnabled = MutableStateFlow(false)
-    val cloudVaultEnabled: StateFlow<Boolean> = _cloudVaultEnabled.asStateFlow()
-
-    private val _cloudVaultUsername = MutableStateFlow<String?>(null)
-    val cloudVaultUsername: StateFlow<String?> = _cloudVaultUsername.asStateFlow()
-
-    private val _cloudVaultLastUsername = MutableStateFlow<String?>(null)
-    val cloudVaultLastUsername: StateFlow<String?> = _cloudVaultLastUsername.asStateFlow()
-
-    private val _cloudVaultTokenExpired = MutableStateFlow(false)
-    val cloudVaultTokenExpired: StateFlow<Boolean> = _cloudVaultTokenExpired.asStateFlow()
-
     private val _installedApps = MutableStateFlow<List<InstalledApp>>(emptyList())
     val installedApps: StateFlow<List<InstalledApp>> = _installedApps.asStateFlow()
 
+    /**
+     * Origins whose access the user revoked. They can't silently reconnect;
+     * opening the app again from the Apps tab (fresh consent) lifts the block.
+     */
+    private val _blockedOrigins = MutableStateFlow<Set<String>>(emptySet())
+
+    /**
+     * True when this install used cloud sync, gifts or relay pairing before
+     * those were retired, and the user hasn't dismissed the one-time notice
+     * yet. Filled in by the launch cleanup.
+     */
+    private val _retiredFeaturesNotice = MutableStateFlow(false)
+    val retiredFeaturesNotice: StateFlow<Boolean> = _retiredFeaturesNotice.asStateFlow()
+
+    /** Released once the launch cleanup has finished (or given up). */
+    private val launchCleanupDone = CountDownLatch(1)
+
     private var masterPassword: String? = null
     private var backgroundTime: Long? = null
-    private var vaultToken: String? = null
-    private var vaultSessionId: String? = null
-    private var vaultTokenIssuedAt: Long = 0
-    private var vaultCredentialMap: ConcurrentHashMap<String, String> = ConcurrentHashMap()
-    // Parallel to vaultCredentialMap: tracks the server's updatedAt per
-    // credential so pullFromVault can do last-write-wins on merges. Both
-    // are kept in lockstep; legacy code still reads vaultCredentialMap
-    // directly (group sync in particular).
-    private data class VaultCredentialMeta(val serverId: String, val remoteUpdatedAt: Long)
-    private var vaultCredentialMeta: ConcurrentHashMap<String, VaultCredentialMeta> = ConcurrentHashMap()
-    private var vaultLastSyncAt: Long = 0L
-    // AES-GCM key derived from (vault password, encryptionSalt). Used to
-    // encrypt apiKey before upload and decrypt on sync pull so plaintext
-    // never crosses the wire. Persisted raw in SharedPreferences (already
-    // app-sandboxed); cached in memory for reuse.
-    @Volatile private var vaultKey: javax.crypto.spec.SecretKeySpec? = null
 
     private val autoLockTimeout = 900_000L // 15 minutes
 
-    private val vaultClient = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
-        .writeTimeout(10, TimeUnit.SECONDS)
-        .build()
-
-    private val vaultScope = CoroutineScope(Dispatchers.IO)
-
     init {
+        // Off the main thread: it reads and rewrites the encrypted store.
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                purgeRetiredServiceData()
+                _retiredFeaturesNotice.value = plainPrefs.getBoolean(RETIRED_FEATURES_NOTICE_FLAG, false)
+            } catch (_: Exception) {
+                // Best-effort; retried next launch.
+            } finally {
+                launchCleanupDone.countDown()
+            }
+        }
         _status.value = if (prefs.contains("password_hash")) WalletStatus.LOCKED else WalletStatus.UNINITIALIZED
         restoreLockoutState()
         loadInstalledApps()
-        // Read username from prefs at init so UnlockScreen can show it
-        // before the wallet is unlocked. Full cloud-vault state (tokens,
-        // credential maps) still loads in loadCloudVaultState() on unlock.
-        _cloudVaultUsername.value = prefs.getString("cloudVault_username", null)
-        _cloudVaultLastUsername.value = prefs.getString("cloudVault_lastUsername", null)
+        _blockedOrigins.value = plainPrefs.getStringSet(BLOCKED_ORIGINS_KEY, emptySet())?.toSet() ?: emptySet()
     }
 
     val isUnlocked: Boolean get() = _status.value == WalletStatus.UNLOCKED
 
     // MARK: - Password
 
-    fun createPassword(password: String) {
+    /**
+     * Create the wallet's master password. The 600k-iteration PBKDF2 hash
+     * runs on [Dispatchers.Default], so this is safe to call from the UI.
+     */
+    suspend fun createPassword(password: String) = withContext(Dispatchers.Default) {
         val hash = CryptoService.hashPassword(password)
         prefs.edit().putString("password_hash", hash).apply()
         masterPassword = password
+        awaitLaunchCleanup()
+        loadGroups()
+        loadAppGroups()
+        ensureDefaultGroup()
+        loadInstalledApps()
         _status.value = WalletStatus.UNLOCKED
-        // Without this attach, gifts created before the user's first
-        // lock+unlock cycle never open their sender-side relay socket —
-        // recipients hit 503 GIFT_SENDER_OFFLINE. See COD-13.
-        com.byoky.app.relay.GiftRelayHost.attach(this)
-        com.byoky.app.relay.GiftRelayHost.reconnectAll()
     }
 
-    fun unlock(password: String): UnlockResult {
+    /**
+     * Verify the master password and load the wallet. The PBKDF2 check and
+     * the loads run on [Dispatchers.Default]; status flips to UNLOCKED only
+     * once everything is loaded, so the main screen never shows a half-empty
+     * wallet.
+     */
+    suspend fun unlock(password: String): UnlockResult = withContext(Dispatchers.Default) { unlockBlocking(password) }
+
+    /**
+     * Re-check the master password right before a sensitive action (export).
+     * Shares the unlock brute-force counter and lockout, so an unlocked phone
+     * can't be used to guess the password. PBKDF2 runs on Dispatchers.Default.
+     */
+    suspend fun confirmMasterPassword(password: String): UnlockResult = withContext(Dispatchers.Default) {
+        val now = System.currentTimeMillis()
+        val endTime = _lockoutEndTime.value
+        if (endTime != null && now < endTime) {
+            return@withContext UnlockResult.LockedOut(maxOf(1, ((endTime - now) / 1000).toInt()))
+        }
+        val hash = prefs.getString("password_hash", null) ?: return@withContext UnlockResult.WrongPassword
+        if (!CryptoService.verifyPassword(password, hash)) {
+            handleFailedAttempt()
+            return@withContext UnlockResult.WrongPassword
+        }
+        resetFailedAttempts()
+        UnlockResult.Success
+    }
+
+    private fun unlockBlocking(password: String): UnlockResult {
         val now = System.currentTimeMillis()
         val endTime = _lockoutEndTime.value
         if (endTime != null && now < endTime) {
@@ -195,7 +184,7 @@ class WalletStore(context: Context) {
 
         resetFailedAttempts()
         masterPassword = password
-        _status.value = WalletStatus.UNLOCKED
+        awaitLaunchCleanup()
         loadCredentials()
         pruneRemovedProviders()
         loadGroups()
@@ -203,34 +192,17 @@ class WalletStore(context: Context) {
         ensureDefaultGroup()
         loadSessions()
         loadRequestLogs()
-        loadGifts()
-        loadGiftedCredentials()
-        loadGiftPreferences()
         loadTokenAllowances()
-        loadCloudVaultState()
-        vaultScope.launch {
-            if (_cloudVaultEnabled.value && vaultToken != null && !_cloudVaultTokenExpired.value) {
-                pullFromVault()
-            }
-            syncPendingCredentials()
-            syncPendingGroups()
-            syncPendingGifts()
-            reconcileGiftUsageWithVault()
-        }
-        com.byoky.app.relay.GiftRelayHost.attach(this)
-        com.byoky.app.relay.GiftRelayHost.reconnectAll()
+        loadInstalledApps()
+        _status.value = WalletStatus.UNLOCKED
         return UnlockResult.Success
     }
 
     fun lock() {
-        com.byoky.app.relay.GiftRelayHost.disconnectAll()
         masterPassword = null
         _credentials.value = emptyList()
         _sessions.value = emptyList()
         _requestLogs.value = emptyList()
-        _gifts.value = emptyList()
-        _giftedCredentials.value = emptyList()
-        _giftPreferences.value = emptyMap()
         _tokenAllowances.value = emptyList()
         _groups.value = emptyList()
         _appGroups.value = emptyMap()
@@ -297,9 +269,18 @@ class WalletStore(context: Context) {
 
     // MARK: - Credentials
 
-    fun addCredential(providerId: String, label: String, apiKey: String, authMethod: AuthMethod = AuthMethod.API_KEY, baseUrl: String? = null) {
+    /**
+     * Add a credential. Encrypting the key is a 600k-iteration PBKDF2, so the
+     * whole thing runs on [Dispatchers.Default]; safe to call from the UI.
+     */
+    suspend fun addCredential(providerId: String, label: String, apiKey: String, authMethod: AuthMethod = AuthMethod.API_KEY, baseUrl: String? = null) = withContext(Dispatchers.Default) {
         val password = masterPassword ?: throw IllegalStateException("Wallet locked")
-        val credential = Credential(providerId = providerId, label = label, authMethod = authMethod, baseUrl = baseUrl)
+        // Fixed-host providers never keep a base URL; the others must have a safe one.
+        val safeBaseUrl = CredentialBaseUrl.normalize(providerId, baseUrl)
+        if (CredentialBaseUrl.isRequired(providerId) && safeBaseUrl == null) {
+            throw IllegalArgumentException("A valid server URL is required for this provider")
+        }
+        val credential = Credential(providerId = providerId, label = label, authMethod = authMethod, baseUrl = safeBaseUrl)
         // Local providers may legitimately ship with an empty key
         // (unauthenticated server). Only persist ciphertext when a key was
         // actually supplied — decryptKey handles the missing-entry case.
@@ -307,18 +288,14 @@ class WalletStore(context: Context) {
             val encrypted = CryptoService.encrypt(apiKey, password)
             prefs.edit().putString("key_${credential.id}", encrypted).apply()
         }
-        _credentials.value = _credentials.value + credential
+        _credentials.update { it + credential }
         saveCredentials()
-        val localId = credential.id
-        vaultScope.launch { syncAddToVault(localId, providerId, label, authMethod.name.lowercase(), apiKey, baseUrl) }
     }
 
     fun removeCredential(credential: Credential) {
-        val localId = credential.id
         prefs.edit().remove("key_${credential.id}").apply()
         _credentials.value = _credentials.value.filter { it.id != credential.id }
         saveCredentials()
-        vaultScope.launch { syncRemoveFromVault(localId) }
     }
 
     fun updateCredentialLabel(credentialId: String, newLabel: String) {
@@ -332,7 +309,6 @@ class WalletStore(context: Context) {
             this[idx] = this[idx].copy(label = trimmed)
         }
         saveCredentials()
-        vaultScope.launch { syncRenameToVault(credentialId, trimmed) }
     }
 
     fun decryptKey(credential: Credential): String {
@@ -349,25 +325,91 @@ class WalletStore(context: Context) {
         return CryptoService.decrypt(encrypted, password)
     }
 
+    // MARK: - Backup support
+
+    /**
+     * Plaintext secrets of [credentials], decrypted in parallel (one PBKDF2
+     * each). Entries that can't be decrypted map to null. CPU-heavy: runs on
+     * [Dispatchers.Default]; [onStep] fires from worker threads.
+     */
+    suspend fun decryptSecrets(
+        credentials: List<Credential>,
+        onStep: () -> Unit = {},
+    ): List<String?> = coroutineScope {
+        if (masterPassword == null) throw IllegalStateException("Wallet locked")
+        credentials.map { cred ->
+            async(Dispatchers.Default) {
+                try { decryptKey(cred) } catch (_: Exception) { null }.also { onStep() }
+            }
+        }.awaitAll()
+    }
+
+    /**
+     * Append credentials restored from a backup. Each gets the id already
+     * assigned in [items] (fresh, never an existing one) and its secret is
+     * encrypted under the master password like any other key. Existing
+     * credentials are not touched. Encryption runs in parallel on
+     * [Dispatchers.Default]; the final write is not cancellable so a
+     * half-written import can't happen.
+     */
+    suspend fun addImportedCredentials(
+        items: List<BackupFile.PlainCredential>,
+        onStep: () -> Unit = {},
+    ): List<Credential> {
+        val password = masterPassword ?: throw IllegalStateException("Wallet locked")
+        val existingIds = _credentials.value.mapTo(HashSet()) { it.id }
+        val prepared = coroutineScope {
+            items.map { item ->
+                async(Dispatchers.Default) {
+                    require(item.id !in existingIds) { "Credential id collision" }
+                    val safeBaseUrl = CredentialBaseUrl.normalize(item.providerId, item.baseUrl)
+                    require(!CredentialBaseUrl.isRequired(item.providerId) || safeBaseUrl != null) { "Unsafe server URL" }
+                    val credential = Credential(
+                        id = item.id,
+                        providerId = item.providerId,
+                        label = item.label,
+                        authMethod = item.authMethod,
+                        createdAt = minOf(item.createdAt, System.currentTimeMillis()),
+                        baseUrl = safeBaseUrl,
+                    )
+                    // Keyless local providers have no keychain entry, same as addCredential.
+                    val encrypted = if (item.secret.isNotEmpty()) {
+                        CryptoService.encrypt(item.secret, password).also { onStep() }
+                    } else null
+                    credential to encrypted
+                }
+            }.awaitAll()
+        }
+        return withContext(NonCancellable + Dispatchers.IO) {
+            // Keys first, then the list that references them.
+            val editor = prefs.edit()
+            prepared.forEach { (cred, encrypted) -> if (encrypted != null) editor.putString("key_${cred.id}", encrypted) }
+            if (!editor.commit()) throw IllegalStateException("Could not save the imported keys")
+            val added = prepared.map { it.first }
+            _credentials.update { it + added }
+            saveCredentials()
+            added
+        }
+    }
+
     // MARK: - Sessions
 
     /**
-     * Default expiry window for relay-paired sessions. The pair stays in the
-     * Apps screen for 30 days even if the WebSocket drops between requests —
-     * the user revokes explicitly when they're done. Lines up with how the
-     * extension treats sessions as durable trust records, not live sockets.
+     * How long a connected app stays listed without reconnecting. Sessions
+     * are durable trust records (like the extension's), not live sockets:
+     * the user revokes them explicitly from the Connected tab.
      */
-    private val relaySessionTtlMs: Long = 30L * 24 * 60 * 60 * 1000
+    private val sessionTtlMs: Long = 30L * 24 * 60 * 60 * 1000
 
     /**
-     * Upsert a session for `appOrigin`. Used by `RelayPairService` when a
-     * pair handshake completes — durable record so the app shows up in the
-     * Apps screen across reconnects. Re-pairing the same origin updates the
-     * providers list and resets the expiry, but keeps the existing session id.
+     * Upsert a session for `appOrigin`. Called by the in-wallet app bridge
+     * when an app connects, so it shows up in the Connected tab. Connecting
+     * the same origin again refreshes the providers list and the expiry but
+     * keeps the existing session id.
      */
     fun upsertSession(appOrigin: String, providers: List<String>): Session {
         val now = System.currentTimeMillis()
-        val expiresAt = now + relaySessionTtlMs
+        val expiresAt = now + sessionTtlMs
 
         val existing = _sessions.value.firstOrNull { it.appOrigin == appOrigin }
         if (existing != null) {
@@ -390,249 +432,26 @@ class WalletStore(context: Context) {
         return session
     }
 
+    /**
+     * Disconnect an app. Its origin is also blocked from reconnecting on its
+     * own until the user reopens it from the Apps tab ([allowOrigin]).
+     */
     fun revokeSession(session: Session) {
         _sessions.value = _sessions.value.filter { it.id != session.id }
         saveSessions()
+        setBlockedOrigins(_blockedOrigins.value + session.appOrigin)
     }
 
-    // MARK: - Gifts
+    fun isOriginBlocked(origin: String): Boolean = origin in _blockedOrigins.value
 
-    fun createGift(
-        credentialId: String,
-        providerId: String,
-        label: String,
-        maxTokens: Int,
-        expiresInMs: Long,
-        relayUrl: String,
-        listPublicly: Boolean = false,
-        description: String? = null,
-    ): Gift {
-        val trimmedDescription = description?.trim()?.takeIf { it.isNotEmpty() }
-        val gift = Gift(
-            credentialId = credentialId,
-            providerId = providerId,
-            label = label,
-            authToken = generateAuthToken(),
-            maxTokens = maxTokens,
-            expiresAt = System.currentTimeMillis() + expiresInMs,
-            relayUrl = relayUrl,
-            listed = listPublicly,
-            description = trimmedDescription,
-        )
-        _gifts.value = _gifts.value + gift
-        saveGifts()
-        com.byoky.app.relay.GiftRelayHost.connect(gift)
-        vaultScope.launch { registerGiftWithVault(gift) }
-        return gift
+    /** The user opened this app themselves: that is fresh consent to connect. */
+    fun allowOrigin(origin: String) {
+        if (origin in _blockedOrigins.value) setBlockedOrigins(_blockedOrigins.value - origin)
     }
 
-    fun revokeGift(id: String) {
-        _gifts.value = _gifts.value.map {
-            if (it.id == id) it.copy(active = false) else it
-        }
-        saveGifts()
-        com.byoky.app.relay.GiftRelayHost.disconnect(id)
-        vaultScope.launch { unregisterGiftFromVault(id) }
-    }
-
-    fun addGiftSenderUsage(giftId: String, tokens: Int): Int? {
-        if (tokens <= 0) return null
-        val list = _gifts.value.toMutableList()
-        val idx = list.indexOfFirst { it.id == giftId }
-        if (idx < 0) return null
-        val gift = list[idx]
-        if (gift.usedTokens >= gift.maxTokens) return null
-        val next = minOf(gift.maxTokens, gift.usedTokens + tokens)
-        list[idx] = gift.copy(usedTokens = next)
-        _gifts.value = list
-        saveGifts()
-        return next
-    }
-
-    fun redeemGift(encoded: String): Pair<Boolean, String?> {
-        val link = decodeGiftLink(encoded) ?: return Pair(false, "Invalid gift link")
-        val (valid, error) = validateGiftLink(link)
-        if (!valid) return Pair(false, error)
-
-        val existing = _giftedCredentials.value.any { it.giftId == link.id }
-        if (existing) return Pair(false, "Gift already redeemed")
-
-        val credential = GiftedCredential(
-            giftId = link.id,
-            providerId = link.p,
-            providerName = link.n,
-            senderLabel = link.s,
-            authToken = link.t,
-            maxTokens = link.m,
-            expiresAt = link.e,
-            relayUrl = link.r,
-        )
-        _giftedCredentials.value = _giftedCredentials.value + credential
-        saveGiftedCredentials()
-        // Fire-and-forget: register the redemption with the vault so the
-        // bridge→vault fallback path (phone offline) can still serve this
-        // gift's provider. Failure is non-fatal — the local gift works
-        // regardless; only the remote fallback requires the vault record.
-        vaultScope.launch { syncRedeemedGiftToVault(link.id) }
-        return Pair(true, null)
-    }
-
-    fun removeGiftedCredential(id: String) {
-        var removedGiftId: String? = null
-        val gc = _giftedCredentials.value.find { it.id == id }
-        if (gc != null) {
-            removedGiftId = gc.giftId
-            if (_giftPreferences.value[gc.providerId] == gc.giftId) {
-                _giftPreferences.value = _giftPreferences.value - gc.providerId
-                saveGiftPreferences()
-            }
-            // Unpin any group that was bound to this gift — avoids a dangling
-            // reference that the routing resolver would silently fall through.
-            val swept = mutableListOf<Group>()
-            val updatedGroups = _groups.value.map { g ->
-                if (g.giftId == gc.giftId) {
-                    val cleared = g.copy(giftId = null)
-                    swept.add(cleared)
-                    cleared
-                } else g
-            }
-            if (swept.isNotEmpty()) {
-                _groups.value = updatedGroups
-                saveGroups()
-                for (g in swept) {
-                    vaultScope.launch { syncGroupToVault(g) }
-                }
-            }
-        }
-        _giftedCredentials.value = _giftedCredentials.value.filter { it.id != id }
-        saveGiftedCredentials()
-        if (removedGiftId != null) {
-            val giftIdToDelete = removedGiftId
-            vaultScope.launch { syncRedeemedGiftDeleteToVault(giftIdToDelete) }
-        }
-    }
-
-    private suspend fun syncRedeemedGiftToVault(giftId: String) {
-        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
-        val (_, status, _) = vaultRequest("/gifts/redeemed", "POST", org.json.JSONObject().put("giftId", giftId), vaultToken)
-        if (status == 401) {
-            _cloudVaultTokenExpired.value = true
-            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
-        }
-    }
-
-    private suspend fun syncRedeemedGiftDeleteToVault(giftId: String) {
-        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
-        val encoded = java.net.URLEncoder.encode(giftId, "UTF-8")
-        val (_, status, _) = vaultRequest("/gifts/redeemed/$encoded", "DELETE", null, vaultToken)
-        if (status == 401) {
-            _cloudVaultTokenExpired.value = true
-            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
-        }
-    }
-
-    fun setGiftPreference(providerId: String, giftId: String?) {
-        _giftPreferences.value = if (giftId != null) {
-            _giftPreferences.value + (providerId to giftId)
-        } else {
-            _giftPreferences.value - providerId
-        }
-        saveGiftPreferences()
-    }
-
-    fun updateGiftedCredentialUsage(giftId: String, usedTokens: Int) {
-        _giftedCredentials.value = _giftedCredentials.value.map { gc ->
-            if (gc.giftId == giftId) gc.copy(usedTokens = usedTokens) else gc
-        }
-        saveGiftedCredentials()
-    }
-
-    /**
-     * Probe each non-expired received gift's relay to check whether the
-     * sender peer is online. Runs probes in parallel and fills in
-     * [giftPeerOnline] as each completes. Called from the Wallet screen on
-     * LaunchedEffect so the online dot reflects current state each time the
-     * user opens the tab.
-     */
-    fun probeGiftPeers() {
-        val active = _giftedCredentials.value.filter {
-            !isGiftExpired(it.expiresAt) && it.usedTokens < it.maxTokens
-        }
-        if (active.isEmpty()) {
-            _giftPeerOnline.value = emptyMap()
-            return
-        }
-        val activeIds = active.map { it.giftId }.toSet()
-        for (gc in active) {
-            vaultScope.launch {
-                val online = probeGiftPeerOnline(gc)
-                withContext(Dispatchers.Main) {
-                    if (activeIds.contains(gc.giftId)) {
-                        _giftPeerOnline.value = _giftPeerOnline.value + (gc.giftId to online)
-                    }
-                }
-            }
-        }
-    }
-
-    /**
-     * Briefly connect to a received gift's relay as recipient and read
-     * `peerOnline` from `relay:auth:result`. Returns false on any error or
-     * timeout. Used by [probeGiftPeers] to render the online dot on each
-     * received gift in the Wallet screen.
-     */
-    private suspend fun probeGiftPeerOnline(gc: GiftedCredential): Boolean {
-        // Only probe wss:// or localhost ws:// to match the proxy path's
-        // security posture — we never open plaintext sockets to random hosts.
-        val url = try { java.net.URI(gc.relayUrl) } catch (_: Throwable) { return false }
-        val isSecure = url.scheme == "wss"
-        val isLocalWs = url.scheme == "ws" &&
-            (url.host == "localhost" || url.host == "127.0.0.1" || url.host == "::1")
-        if (!isSecure && !isLocalWs) return false
-
-        return suspendCancellableCoroutine { cont ->
-            val latch = java.util.concurrent.atomic.AtomicBoolean(false)
-            fun finish(online: Boolean, ws: okhttp3.WebSocket?) {
-                if (latch.compareAndSet(false, true)) {
-                    try { ws?.close(1000, null) } catch (_: Throwable) {}
-                    if (cont.isActive) cont.resume(online)
-                }
-            }
-            val req = okhttp3.Request.Builder().url(gc.relayUrl).build()
-            val ws = vaultClient.newWebSocket(req, object : okhttp3.WebSocketListener() {
-                override fun onOpen(ws: okhttp3.WebSocket, response: okhttp3.Response) {
-                    val auth = JSONObject().apply {
-                        put("type", "relay:auth")
-                        put("roomId", gc.giftId)
-                        put("authToken", gc.authToken)
-                        put("role", "recipient")
-                    }
-                    ws.send(auth.toString())
-                }
-                override fun onMessage(ws: okhttp3.WebSocket, text: String) {
-                    try {
-                        val json = JSONObject(text)
-                        if (json.optString("type") == "relay:auth:result") {
-                            val success = json.optBoolean("success", false)
-                            val peerOnline = json.optBoolean("peerOnline", false)
-                            finish(success && peerOnline, ws)
-                        }
-                    } catch (_: Throwable) { /* ignore; timeout will fire */ }
-                }
-                override fun onFailure(ws: okhttp3.WebSocket, t: Throwable, response: okhttp3.Response?) {
-                    finish(false, ws)
-                }
-                override fun onClosed(ws: okhttp3.WebSocket, code: Int, reason: String) {
-                    finish(false, ws)
-                }
-            })
-            // 5-second cap per probe so a dead relay doesn't hold the dashboard.
-            vaultScope.launch {
-                kotlinx.coroutines.delay(5_000)
-                finish(false, ws)
-            }
-            cont.invokeOnCancellation { finish(false, ws) }
-        }
+    private fun setBlockedOrigins(origins: Set<String>) {
+        _blockedOrigins.value = origins
+        plainPrefs.edit().putStringSet(BLOCKED_ORIGINS_KEY, origins).apply()
     }
 
     // MARK: - Reset
@@ -661,40 +480,26 @@ class WalletStore(context: Context) {
         editor.remove("credentials")
         editor.remove("sessions")
         editor.remove("requestLogs")
-        editor.remove("gifts")
-        editor.remove("giftedCredentials")
-        editor.remove("giftPreferences")
         editor.remove("tokenAllowances")
-        editor.remove("cloudVault_enabled")
-        editor.remove("cloudVault_username")
-        editor.remove("cloudVault_lastUsername")
-        editor.remove("cloudVault_token")
-        editor.remove("cloudVault_sessionId")
-        editor.remove("cloudVault_tokenIssuedAt")
-        editor.remove("cloudVault_tokenExpired")
-        editor.remove("cloudVault_credentialMap")
-        editor.remove("cloudVault_vaultKey")
+        editor.remove("groups")
+        editor.remove("appGroups")
         editor.apply()
-
-        _cloudVaultEnabled.value = false
-        _cloudVaultUsername.value = null
-        _cloudVaultLastUsername.value = null
-        _cloudVaultTokenExpired.value = false
-        vaultToken = null
-        vaultSessionId = null
-        vaultTokenIssuedAt = 0
-        vaultCredentialMap.clear()
-        vaultKey = null
 
         // Clear in-memory state
         _credentials.value = emptyList()
         _sessions.value = emptyList()
         _requestLogs.value = emptyList()
-        _gifts.value = emptyList()
-        _giftedCredentials.value = emptyList()
         _tokenAllowances.value = emptyList()
+        _groups.value = emptyList()
+        _appGroups.value = emptyMap()
         _installedApps.value = emptyList()
-        plainPrefs.edit().remove("installed_apps").apply()
+        _retiredFeaturesNotice.value = false
+        _blockedOrigins.value = emptySet()
+        plainPrefs.edit()
+            .remove("installed_apps")
+            .remove(BLOCKED_ORIGINS_KEY)
+            .remove(RETIRED_FEATURES_NOTICE_FLAG)
+            .apply()
 
         // Reset brute-force state
         failedAttempts = 0
@@ -707,77 +512,76 @@ class WalletStore(context: Context) {
         _status.value = WalletStatus.UNINITIALIZED
     }
 
-    // MARK: - Marketplace Apps
+    // MARK: - Installed Apps
 
     private fun loadInstalledApps() {
-        val json = plainPrefs.getString("installed_apps", null) ?: return
-        val arr = JSONArray(json)
-        val apps = mutableListOf<InstalledApp>()
-        for (i in 0 until arr.length()) {
-            val o = arr.getJSONObject(i)
-            val providers = mutableListOf<String>()
-            val pArr = o.optJSONArray("providers")
-            if (pArr != null) for (j in 0 until pArr.length()) providers.add(pArr.getString(j))
-            apps.add(InstalledApp(
-                id = o.getString("id"),
-                slug = o.getString("slug"),
-                name = o.getString("name"),
-                url = o.getString("url"),
-                icon = o.optString("icon", ""),
-                description = o.optString("description", ""),
-                category = o.optString("category", "other"),
-                providers = providers,
-                authorName = o.optString("authorName", ""),
-                authorWebsite = o.optString("authorWebsite", null),
-                verified = o.optBoolean("verified", false),
-                installedAt = o.optLong("installedAt", 0),
-                enabled = o.optBoolean("enabled", true),
-            ))
+        val json = plainPrefs.getString("installed_apps", null) ?: run {
+            _installedApps.value = emptyList()
+            return
         }
+        val apps = mutableListOf<InstalledApp>()
+        try {
+            val arr = JSONArray(json)
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                // Entries written by older builds carry extra registry
+                // metadata (slug, icon, author…); only the fields below
+                // matter now. Anything that isn't a valid https URL is
+                // dropped rather than opened.
+                val valid = AppUrl.normalize(o.optString("url", "")) as? AppUrl.Result.Valid ?: continue
+                val id = o.optString("id", "").ifEmpty { java.util.UUID.randomUUID().toString() }
+                apps.add(InstalledApp(
+                    id = id,
+                    name = o.optString("name", "").ifBlank { valid.suggestedName },
+                    url = valid.url,
+                    installedAt = o.optLong("installedAt", 0),
+                    enabled = o.optBoolean("enabled", true),
+                ))
+            }
+        } catch (_: Exception) {}
         _installedApps.value = apps
     }
 
     private fun saveInstalledApps() {
         val arr = JSONArray()
         for (app in _installedApps.value) {
-            val o = JSONObject()
-            o.put("id", app.id)
-            o.put("slug", app.slug)
-            o.put("name", app.name)
-            o.put("url", app.url)
-            o.put("icon", app.icon)
-            o.put("description", app.description)
-            o.put("category", app.category)
-            o.put("providers", JSONArray(app.providers))
-            o.put("authorName", app.authorName)
-            if (app.authorWebsite != null) o.put("authorWebsite", app.authorWebsite)
-            o.put("verified", app.verified)
-            o.put("installedAt", app.installedAt)
-            o.put("enabled", app.enabled)
-            arr.put(o)
+            arr.put(JSONObject().apply {
+                put("id", app.id)
+                put("name", app.name)
+                put("url", app.url)
+                put("installedAt", app.installedAt)
+                put("enabled", app.enabled)
+            })
         }
         plainPrefs.edit().putString("installed_apps", arr.toString()).apply()
     }
 
-    fun installApp(app: MarketplaceApp) {
-        val uri = android.net.Uri.parse(app.url)
-        if (uri.scheme != "https") return
+    sealed class AddAppResult {
+        data class Added(val app: InstalledApp) : AddAppResult()
+        data class Rejected(val reason: String) : AddAppResult()
+    }
 
-        val installed = InstalledApp(
-            id = app.id,
-            slug = app.slug,
-            name = app.name,
-            url = app.url,
-            icon = app.icon,
-            description = app.description,
-            category = app.category,
-            providers = app.providers,
-            authorName = app.authorName,
-            authorWebsite = app.authorWebsite,
-            verified = app.verified,
+    /**
+     * "Add app by URL". Only https URLs are accepted (see [AppUrl.normalize]);
+     * the name defaults to the host when left blank. The same URL can't be
+     * added twice.
+     */
+    fun addAppByUrl(input: String, name: String? = null): AddAppResult {
+        val valid = when (val r = AppUrl.normalize(input)) {
+            is AppUrl.Result.Invalid -> return AddAppResult.Rejected(r.reason)
+            is AppUrl.Result.Valid -> r
+        }
+        if (_installedApps.value.any { it.url == valid.url }) {
+            return AddAppResult.Rejected("That app is already in your list")
+        }
+        val app = InstalledApp(
+            id = java.util.UUID.randomUUID().toString(),
+            name = name?.trim()?.take(60)?.ifEmpty { null } ?: valid.suggestedName,
+            url = valid.url,
         )
-        _installedApps.value = _installedApps.value + installed
+        _installedApps.value = _installedApps.value + app
         saveInstalledApps()
+        return AddAppResult.Added(app)
     }
 
     fun uninstallApp(id: String) {
@@ -877,6 +681,7 @@ class WalletStore(context: Context) {
                     label = obj.getString("label"),
                     authMethod = AuthMethod.valueOf(obj.optString("authMethod", "API_KEY")),
                     createdAt = obj.getLong("createdAt"),
+                    baseUrl = obj.optString("baseUrl", "").ifEmpty { null },
                 )
             )
         }
@@ -922,7 +727,6 @@ class WalletStore(context: Context) {
                         name = obj.getString("name"),
                         providerId = obj.getString("providerId"),
                         credentialId = if (obj.has("credentialId") && !obj.isNull("credentialId")) obj.getString("credentialId") else null,
-                        giftId = if (obj.has("giftId") && !obj.isNull("giftId")) obj.getString("giftId") else null,
                         model = if (obj.has("model") && !obj.isNull("model")) obj.getString("model") else null,
                         createdAt = obj.optLong("createdAt", System.currentTimeMillis()),
                     )
@@ -942,7 +746,6 @@ class WalletStore(context: Context) {
                 put("name", g.name)
                 put("providerId", g.providerId)
                 if (g.credentialId != null) put("credentialId", g.credentialId)
-                if (g.giftId != null) put("giftId", g.giftId)
                 if (g.model != null) put("model", g.model)
                 put("createdAt", g.createdAt)
             })
@@ -995,8 +798,7 @@ class WalletStore(context: Context) {
     /**
      * Returns the group that should route this origin's requests — the user's
      * per-app binding from `appGroups`, falling back to the default group when
-     * no binding exists. Used by both `ProxyService` and `RelayPairService`
-     * before each upstream call.
+     * no binding exists. Used by `ProxyService` before each upstream call.
      */
     fun groupForOrigin(origin: String): Group? {
         val bound = _appGroups.value[origin]
@@ -1017,7 +819,6 @@ class WalletStore(context: Context) {
         if (_groups.value.none { it.id == groupId }) throw GroupError.NotFound()
         _appGroups.value = _appGroups.value + (origin to groupId)
         saveAppGroups()
-        vaultScope.launch { syncAppGroupToVault(origin, groupId) }
     }
 
     sealed class GroupError(message: String) : RuntimeException(message) {
@@ -1026,9 +827,6 @@ class WalletStore(context: Context) {
         class ProviderInvalid : GroupError("Invalid provider")
         class CredentialNotFound : GroupError("Credential not found")
         class CredentialMismatch : GroupError("Credential does not match provider")
-        class GiftNotFound : GroupError("Gift not found")
-        class GiftMismatch : GroupError("Gift does not match provider")
-        class PinConflict : GroupError("Credential and gift are mutually exclusive")
         class NotFound : GroupError("Group not found")
         class CannotDeleteDefault : GroupError("Cannot delete the default group")
     }
@@ -1037,22 +835,15 @@ class WalletStore(context: Context) {
         name: String,
         providerId: String,
         credentialId: String? = null,
-        giftId: String? = null,
         model: String? = null,
     ): Group {
         val trimmed = name.trim()
         if (trimmed.isEmpty() || trimmed.length > 200) throw GroupError.NameInvalid()
         if (Provider.find(providerId) == null) throw GroupError.ProviderInvalid()
-        if (credentialId != null && giftId != null) throw GroupError.PinConflict()
         if (credentialId != null) {
             val cred = _credentials.value.firstOrNull { it.id == credentialId }
                 ?: throw GroupError.CredentialNotFound()
             if (cred.providerId != providerId) throw GroupError.CredentialMismatch()
-        }
-        if (giftId != null) {
-            val gc = _giftedCredentials.value.firstOrNull { it.giftId == giftId }
-                ?: throw GroupError.GiftNotFound()
-            if (gc.providerId != providerId) throw GroupError.GiftMismatch()
         }
         if (_groups.value.any { it.name.equals(trimmed, ignoreCase = true) }) {
             throw GroupError.NameDuplicate()
@@ -1062,20 +853,18 @@ class WalletStore(context: Context) {
             name = trimmed,
             providerId = providerId,
             credentialId = credentialId,
-            giftId = giftId,
             model = model?.trim()?.takeIf { it.isNotEmpty() },
         )
         _groups.value = _groups.value + group
         saveGroups()
-        vaultScope.launch { syncGroupToVault(group) }
         return group
     }
 
     /**
      * Update a group. Pass nulls for fields you don't want to change. To
-     * explicitly UNSET credentialId / giftId / model, pass the corresponding
-     * unset*** flag — credentialId / giftId / model string args are ignored
-     * when the flag is set.
+     * explicitly UNSET credentialId / model, pass the corresponding unset***
+     * flag — the credentialId / model string args are ignored when the flag
+     * is set.
      *
      * Why a sentinel rather than a triple-state Optional<Optional<String>>:
      * Kotlin doesn't have a clean way to express "missing vs. nullable" for
@@ -1086,10 +875,8 @@ class WalletStore(context: Context) {
         name: String? = null,
         providerId: String? = null,
         credentialId: String? = null,
-        giftId: String? = null,
         model: String? = null,
         unsetCredentialId: Boolean = false,
-        unsetGiftId: Boolean = false,
         unsetModel: Boolean = false,
     ): Group {
         val idx = _groups.value.indexOfFirst { it.id == id }
@@ -1106,11 +893,10 @@ class WalletStore(context: Context) {
         }
         if (providerId != null) {
             if (Provider.find(providerId) == null) throw GroupError.ProviderInvalid()
-            // Provider change invalidates both pins unless this same patch sets one.
+            // Provider change invalidates the pin unless this same patch sets one.
             next = next.copy(
                 providerId = providerId,
                 credentialId = if (credentialId != null || unsetCredentialId) next.credentialId else null,
-                giftId = if (giftId != null || unsetGiftId) next.giftId else null,
             )
         }
         if (unsetCredentialId) {
@@ -1119,17 +905,7 @@ class WalletStore(context: Context) {
             val cred = _credentials.value.firstOrNull { it.id == credentialId }
                 ?: throw GroupError.CredentialNotFound()
             if (cred.providerId != next.providerId) throw GroupError.CredentialMismatch()
-            // Setting a credential pin clears any gift pin (mutual exclusion).
-            next = next.copy(credentialId = credentialId, giftId = null)
-        }
-        if (unsetGiftId) {
-            next = next.copy(giftId = null)
-        } else if (giftId != null) {
-            val gc = _giftedCredentials.value.firstOrNull { it.giftId == giftId }
-                ?: throw GroupError.GiftNotFound()
-            if (gc.providerId != next.providerId) throw GroupError.GiftMismatch()
-            // Setting a gift pin clears any credential pin (mutual exclusion).
-            next = next.copy(giftId = giftId, credentialId = null)
+            next = next.copy(credentialId = credentialId)
         }
         if (unsetModel) {
             next = next.copy(model = null)
@@ -1140,8 +916,6 @@ class WalletStore(context: Context) {
         val updated = _groups.value.toMutableList().also { it[idx] = next }
         _groups.value = updated
         saveGroups()
-        val nextSnapshot = next
-        vaultScope.launch { syncGroupToVault(nextSnapshot) }
         return next
     }
 
@@ -1151,23 +925,11 @@ class WalletStore(context: Context) {
         _groups.value = _groups.value.filterNot { it.id == id }
         saveGroups()
         // Reassign any apps that pointed at this group back to the default.
-        val reassignedOrigins = mutableListOf<String>()
-        val newAppGroups = _appGroups.value.toMutableMap()
-        for ((origin, gid) in _appGroups.value) {
-            if (gid == id) {
-                newAppGroups[origin] = DEFAULT_GROUP_ID
-                reassignedOrigins.add(origin)
+        if (_appGroups.value.containsValue(id)) {
+            _appGroups.value = _appGroups.value.mapValues { (_, gid) ->
+                if (gid == id) DEFAULT_GROUP_ID else gid
             }
-        }
-        if (reassignedOrigins.isNotEmpty()) {
-            _appGroups.value = newAppGroups
             saveAppGroups()
-        }
-        vaultScope.launch {
-            syncGroupDeleteToVault(id)
-            for (origin in reassignedOrigins) {
-                syncAppGroupToVault(origin, DEFAULT_GROUP_ID)
-            }
         }
     }
 
@@ -1180,6 +942,7 @@ class WalletStore(context: Context) {
                 put("label", c.label)
                 put("authMethod", c.authMethod.name)
                 put("createdAt", c.createdAt)
+                c.baseUrl?.let { put("baseUrl", it) }
             })
         }
         prefs.edit().putString("credentials", arr.toString()).apply()
@@ -1285,122 +1048,6 @@ class WalletStore(context: Context) {
         prefs.edit().putString("requestLogs", arr.toString()).apply()
     }
 
-    private fun loadGifts() {
-        val json = prefs.getString("gifts", null) ?: return
-        try {
-            val arr = JSONArray(json)
-            val list = mutableListOf<Gift>()
-            for (i in 0 until arr.length()) {
-                val obj = arr.getJSONObject(i)
-                list.add(
-                    Gift(
-                        id = obj.getString("id"),
-                        credentialId = obj.getString("credentialId"),
-                        providerId = obj.getString("providerId"),
-                        label = obj.getString("label"),
-                        authToken = obj.getString("authToken"),
-                        maxTokens = obj.getInt("maxTokens"),
-                        usedTokens = obj.optInt("usedTokens", 0),
-                        expiresAt = obj.getLong("expiresAt"),
-                        createdAt = obj.getLong("createdAt"),
-                        active = obj.optBoolean("active", true),
-                        relayUrl = obj.getString("relayUrl"),
-                    )
-                )
-            }
-            _gifts.value = list
-        } catch (_: Exception) {
-            _gifts.value = emptyList()
-        }
-    }
-
-    private fun saveGifts() {
-        val arr = JSONArray()
-        _gifts.value.forEach { g ->
-            arr.put(JSONObject().apply {
-                put("id", g.id)
-                put("credentialId", g.credentialId)
-                put("providerId", g.providerId)
-                put("label", g.label)
-                put("authToken", g.authToken)
-                put("maxTokens", g.maxTokens)
-                put("usedTokens", g.usedTokens)
-                put("expiresAt", g.expiresAt)
-                put("createdAt", g.createdAt)
-                put("active", g.active)
-                put("relayUrl", g.relayUrl)
-            })
-        }
-        prefs.edit().putString("gifts", arr.toString()).apply()
-    }
-
-    private fun loadGiftedCredentials() {
-        val json = prefs.getString("giftedCredentials", null) ?: return
-        try {
-            val arr = JSONArray(json)
-            val list = mutableListOf<GiftedCredential>()
-            for (i in 0 until arr.length()) {
-                val obj = arr.getJSONObject(i)
-                list.add(
-                    GiftedCredential(
-                        id = obj.getString("id"),
-                        giftId = obj.getString("giftId"),
-                        providerId = obj.getString("providerId"),
-                        providerName = obj.getString("providerName"),
-                        senderLabel = obj.getString("senderLabel"),
-                        authToken = obj.getString("authToken"),
-                        maxTokens = obj.getInt("maxTokens"),
-                        usedTokens = obj.optInt("usedTokens", 0),
-                        expiresAt = obj.getLong("expiresAt"),
-                        relayUrl = obj.getString("relayUrl"),
-                        createdAt = obj.getLong("createdAt"),
-                    )
-                )
-            }
-            _giftedCredentials.value = list
-        } catch (_: Exception) {
-            _giftedCredentials.value = emptyList()
-        }
-    }
-
-    private fun saveGiftedCredentials() {
-        val arr = JSONArray()
-        _giftedCredentials.value.forEach { gc ->
-            arr.put(JSONObject().apply {
-                put("id", gc.id)
-                put("giftId", gc.giftId)
-                put("providerId", gc.providerId)
-                put("providerName", gc.providerName)
-                put("senderLabel", gc.senderLabel)
-                put("authToken", gc.authToken)
-                put("maxTokens", gc.maxTokens)
-                put("usedTokens", gc.usedTokens)
-                put("expiresAt", gc.expiresAt)
-                put("relayUrl", gc.relayUrl)
-                put("createdAt", gc.createdAt)
-            })
-        }
-        prefs.edit().putString("giftedCredentials", arr.toString()).apply()
-    }
-
-    private fun loadGiftPreferences() {
-        val json = prefs.getString("giftPreferences", null) ?: return
-        try {
-            val obj = JSONObject(json)
-            val map = mutableMapOf<String, String>()
-            obj.keys().forEach { key -> map[key] = obj.getString(key) }
-            _giftPreferences.value = map
-        } catch (_: Exception) {
-            _giftPreferences.value = emptyMap()
-        }
-    }
-
-    private fun saveGiftPreferences() {
-        val obj = JSONObject()
-        _giftPreferences.value.forEach { (k, v) -> obj.put(k, v) }
-        prefs.edit().putString("giftPreferences", obj.toString()).apply()
-    }
-
     // MARK: - Token Allowances
 
     fun setAllowance(allowance: TokenAllowance) {
@@ -1471,875 +1118,114 @@ class WalletStore(context: Context) {
         prefs.edit().putString("tokenAllowances", arr.toString()).apply()
     }
 
-    // MARK: - Cloud Vault
+    // MARK: - Retired service data
+
+    /**
+     * One-time, best-effort removal of state left behind by the hosted
+     * services this wallet no longer talks to: cloud-sync account tokens and
+     * key-wrapping material, gift and gift-link records, and relay pairing
+     * sessions (every stored session was created by relay pairing, since
+     * nothing else wrote sessions before the in-wallet browser existed).
+     *
+     * Only the keys named in [RETIRED_ENCRYPTED_KEYS] are removed, plus gift
+     * pins inside `groups`. The password hash, the encrypted API keys
+     * (`key_*`), `credentials`, app bindings, allowances and request logs are
+     * never touched. Runs on a background thread at launch; a failure leaves
+     * the done-flag unset so the next launch retries.
+     */
+    private fun purgeRetiredServiceData() {
+        if (plainPrefs.getBoolean(RETIRED_DATA_PURGED_FLAG, false)) return
+
+        // Record whether the user actually used a retired feature before the
+        // evidence is deleted, so the Wallet screen can explain once.
+        if (usedRetiredFeatures()) {
+            plainPrefs.edit().putBoolean(RETIRED_FEATURES_NOTICE_FLAG, true).commit()
+        }
+
+        val editor = prefs.edit()
+        RETIRED_ENCRYPTED_KEYS.forEach { editor.remove(it) }
+        stripGroupPinsToRetiredItems()?.let { editor.putString("groups", it) }
+        if (!editor.commit()) return
+        plainPrefs.edit().putBoolean(RETIRED_DATA_PURGED_FLAG, true).commit()
+    }
+
+    private fun usedRetiredFeatures(): Boolean {
+        fun flag(key: String) = try { prefs.getBoolean(key, false) } catch (_: Exception) { false }
+        fun present(key: String) = try { !prefs.getString(key, null).isNullOrEmpty() } catch (_: Exception) { false }
+        fun nonEmptyArray(key: String) = try {
+            prefs.getString(key, null)?.let { JSONArray(it).length() > 0 } ?: false
+        } catch (_: Exception) { false }
+
+        val cloudSync = flag("cloudVault_enabled") ||
+            present("cloudVault_username") ||
+            present("cloudVault_lastUsername") ||
+            present("cloudVault_token")
+        val gifts = nonEmptyArray("gifts") || nonEmptyArray("giftedCredentials")
+        val pairing = nonEmptyArray("sessions")
+        return cloudSync || gifts || pairing
+    }
+
+    /** Groups could pin a received gift (`giftId`). Returns the rewritten
+     *  `groups` JSON with those pins removed, or null when nothing changed. */
+    private fun stripGroupPinsToRetiredItems(): String? {
+        val json = prefs.getString("groups", null) ?: return null
+        return try {
+            val arr = JSONArray(json)
+            var changed = false
+            for (i in 0 until arr.length()) {
+                val obj = arr.optJSONObject(i) ?: continue
+                if (obj.has("giftId")) {
+                    obj.remove("giftId")
+                    changed = true
+                }
+            }
+            if (changed) arr.toString() else null
+        } catch (_: Exception) { null }
+    }
+
+    /**
+     * Unlock must not load sessions or groups while the cleanup may still be
+     * rewriting them. The cleanup takes milliseconds and the user is still
+     * typing the password, so this normally returns immediately.
+     */
+    private fun awaitLaunchCleanup() {
+        try { launchCleanupDone.await(5, TimeUnit.SECONDS) } catch (_: InterruptedException) {}
+    }
+
+    /** Hide the one-time retired-features notice for good. */
+    fun dismissRetiredFeaturesNotice() {
+        _retiredFeaturesNotice.value = false
+        plainPrefs.edit().remove(RETIRED_FEATURES_NOTICE_FLAG).apply()
+    }
 
     companion object {
-        private const val VAULT_URL = "https://vault.byoky.com"
-        private val JSON_MEDIA = "application/json".toMediaType()
-        private const val SIX_DAYS_MS = 6L * 24 * 60 * 60 * 1000
+        /** Name of the EncryptedSharedPreferences file holding local wallet data. */
+        const val ENCRYPTED_PREFS_FILE = "byoky_vault"
+
+        private const val RETIRED_DATA_PURGED_FLAG = "retiredServiceDataPurged_v1"
+        private const val RETIRED_FEATURES_NOTICE_FLAG = "retiredFeaturesNoticePending"
+        private const val BLOCKED_ORIGINS_KEY = "blockedOrigins"
+
+        private val RETIRED_ENCRYPTED_KEYS = listOf(
+            // Cloud sync account
+            "cloudVault_enabled",
+            "cloudVault_username",
+            "cloudVault_lastUsername",
+            "cloudVault_token",
+            "cloudVault_sessionId",
+            "cloudVault_tokenIssuedAt",
+            "cloudVault_tokenExpired",
+            "cloudVault_credentialMap",
+            "cloudVault_credentialMeta",
+            "cloudVault_lastSyncAt",
+            "cloudVault_vaultKey",
+            "vaultBannerDismissedAt",
+            // Gifts (sent, received, per-provider preference)
+            "gifts",
+            "giftedCredentials",
+            "giftPreferences",
+            // Relay pairing sessions
+            "sessions",
+        )
     }
-
-    private fun loadCloudVaultState() {
-        _cloudVaultEnabled.value = prefs.getBoolean("cloudVault_enabled", false)
-        _cloudVaultUsername.value = prefs.getString("cloudVault_username", null)
-        _cloudVaultLastUsername.value = prefs.getString("cloudVault_lastUsername", null)
-        vaultToken = prefs.getString("cloudVault_token", null)
-        vaultSessionId = prefs.getString("cloudVault_sessionId", null)
-        vaultTokenIssuedAt = prefs.getLong("cloudVault_tokenIssuedAt", 0)
-        _cloudVaultTokenExpired.value = prefs.getBoolean("cloudVault_tokenExpired", false)
-
-        val mapJson = prefs.getString("cloudVault_credentialMap", null)
-        vaultCredentialMap = if (mapJson != null) {
-            try {
-                val obj = JSONObject(mapJson)
-                val map = ConcurrentHashMap<String, String>()
-                obj.keys().forEach { key -> map[key] = obj.getString(key) }
-                map
-            } catch (_: Exception) { ConcurrentHashMap() }
-        } else { ConcurrentHashMap() }
-
-        val metaJson = prefs.getString("cloudVault_credentialMeta", null)
-        vaultCredentialMeta = if (metaJson != null) {
-            try {
-                val obj = JSONObject(metaJson)
-                val map = ConcurrentHashMap<String, VaultCredentialMeta>()
-                obj.keys().forEach { key ->
-                    val entry = obj.getJSONObject(key)
-                    map[key] = VaultCredentialMeta(
-                        serverId = entry.getString("serverId"),
-                        remoteUpdatedAt = entry.getLong("remoteUpdatedAt"),
-                    )
-                }
-                map
-            } catch (_: Exception) { ConcurrentHashMap() }
-        } else { ConcurrentHashMap() }
-
-        vaultLastSyncAt = prefs.getLong("cloudVault_lastSyncAt", 0L)
-
-        if (_cloudVaultEnabled.value && vaultTokenIssuedAt > 0 &&
-            System.currentTimeMillis() - vaultTokenIssuedAt > SIX_DAYS_MS) {
-            _cloudVaultTokenExpired.value = true
-            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
-        }
-    }
-
-    private fun saveCloudVaultConfig() {
-        prefs.edit()
-            .putBoolean("cloudVault_enabled", _cloudVaultEnabled.value)
-            .putString("cloudVault_username", _cloudVaultUsername.value)
-            .putString("cloudVault_lastUsername", _cloudVaultLastUsername.value)
-            .putString("cloudVault_token", vaultToken)
-            .putString("cloudVault_sessionId", vaultSessionId)
-            .putLong("cloudVault_tokenIssuedAt", vaultTokenIssuedAt)
-            .putBoolean("cloudVault_tokenExpired", _cloudVaultTokenExpired.value)
-            .apply()
-        saveVaultCredentialMap()
-    }
-
-    private fun saveVaultCredentialMap() {
-        val obj = JSONObject()
-        vaultCredentialMap.forEach { (k, v) -> obj.put(k, v) }
-        prefs.edit().putString("cloudVault_credentialMap", obj.toString()).apply()
-    }
-
-    private fun saveVaultCredentialMeta() {
-        val obj = JSONObject()
-        vaultCredentialMeta.forEach { (k, v) ->
-            obj.put(k, JSONObject()
-                .put("serverId", v.serverId)
-                .put("remoteUpdatedAt", v.remoteUpdatedAt))
-        }
-        prefs.edit().putString("cloudVault_credentialMeta", obj.toString()).apply()
-    }
-
-    private fun saveVaultLastSyncAt() {
-        prefs.edit().putLong("cloudVault_lastSyncAt", vaultLastSyncAt).apply()
-    }
-
-    private fun persistVaultKey(password: String, encryptionSalt: String) {
-        val saltBytes = try { Base64.decode(encryptionSalt, Base64.NO_WRAP) } catch (_: Exception) { return }
-        val key = CryptoService.deriveVaultKey(password, saltBytes)
-        vaultKey = key
-        val rawB64 = Base64.encodeToString(key.encoded, Base64.NO_WRAP)
-        prefs.edit().putString("cloudVault_vaultKey", rawB64).apply()
-    }
-
-    private fun loadVaultKey(): javax.crypto.spec.SecretKeySpec? {
-        vaultKey?.let { return it }
-        val rawB64 = prefs.getString("cloudVault_vaultKey", null) ?: return null
-        val rawBytes = try { Base64.decode(rawB64, Base64.NO_WRAP) } catch (_: Exception) { return null }
-        val key = javax.crypto.spec.SecretKeySpec(rawBytes, "AES")
-        vaultKey = key
-        return key
-    }
-
-    private fun vaultRequest(
-        path: String,
-        method: String,
-        body: JSONObject? = null,
-        token: String? = null,
-    ): Triple<Boolean, Int, JSONObject> {
-        return try {
-            val builder = Request.Builder().url("$VAULT_URL$path")
-            token?.let { builder.addHeader("Authorization", "Bearer $it") }
-
-            when (method) {
-                "POST" -> {
-                    val reqBody = (body?.toString() ?: "{}").toRequestBody(JSON_MEDIA)
-                    builder.post(reqBody)
-                }
-                "PATCH" -> {
-                    val reqBody = (body?.toString() ?: "{}").toRequestBody(JSON_MEDIA)
-                    builder.patch(reqBody)
-                }
-                "DELETE" -> builder.delete()
-                else -> builder.get()
-            }
-
-            val response = vaultClient.newCall(builder.build()).execute()
-            val responseBody = response.body?.string() ?: "{}"
-            val json = try { JSONObject(responseBody) } catch (_: Exception) { JSONObject() }
-            Triple(response.isSuccessful, response.code, json)
-        } catch (_: Exception) {
-            Triple(false, 0, JSONObject())
-        }
-    }
-
-    // Every vault-touching entry point wraps its body in `withContext(Dispatchers.IO)`
-    // so callers can invoke these from any coroutine scope — including a
-    // Compose `scope.launch {}` defaulting to Main — without blocking the
-    // UI thread on OkHttp. `vaultRequest` swallows all exceptions (including
-    // NetworkOnMainThreadException) into Triple(false, 0, {}), so the Main-
-    // thread misuse silently reports "operation failed" rather than crashing.
-    // Enforcing IO dispatch here makes call sites impossible to get wrong.
-
-    data class VaultAppSession(val vaultUrl: String, val appSessionToken: String, val providers: JSONObject)
-
-    suspend fun createVaultAppSession(appOrigin: String, providerIds: List<String>): VaultAppSession? =
-        withContext(Dispatchers.IO) {
-            if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return@withContext null
-            val token = vaultToken ?: return@withContext null
-            val providers = JSONArray()
-            for (id in providerIds) {
-                providers.put(JSONObject().put("id", id))
-            }
-            val body = JSONObject()
-                .put("appOrigin", appOrigin)
-                .put("providers", providers)
-            val (ok, status, data) = vaultRequest("/connect", "POST", body, token)
-            if (status == 401) {
-                _cloudVaultTokenExpired.value = true
-                prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
-                return@withContext null
-            }
-            if (!ok) return@withContext null
-            val ast = data.optString("appSessionToken", "")
-            if (ast.isEmpty()) return@withContext null
-            val providersMap = data.optJSONObject("providers") ?: JSONObject()
-            VaultAppSession(VAULT_URL, ast, providersMap)
-        }
-
-    suspend fun checkUsernameAvailability(username: String): Pair<Boolean, String?> =
-        withContext(Dispatchers.IO) {
-            val encoded = java.net.URLEncoder.encode(username, "UTF-8")
-            val (ok, _, data) = vaultRequest("/auth/check-username/$encoded", "GET")
-            if (!ok) return@withContext Pair(false, null)
-            val available = data.optBoolean("available", false)
-            val reason = data.optString("reason", "").takeIf { it.isNotEmpty() }
-            Pair(available, reason)
-        }
-
-    suspend fun enableCloudVault(username: String, password: String, isSignup: Boolean) {
-        withContext(Dispatchers.IO) {
-            val path = if (isSignup) "/auth/signup" else "/auth/login"
-            val body = JSONObject().put("username", username).put("password", password)
-            val (ok, _, data) = vaultRequest(path, "POST", body)
-            if (!ok) {
-                val err = data.optJSONObject("error")
-                throw IllegalStateException(err?.optString("message") ?: if (isSignup) "Signup failed" else "Login failed")
-            }
-            val token = data.getString("token")
-            val sessionId = data.getString("sessionId")
-            val encryptionSalt = data.optString("encryptionSalt", "")
-            if (encryptionSalt.isEmpty()) {
-                throw IllegalStateException("Invalid server response")
-            }
-
-            persistVaultKey(password, encryptionSalt)
-            vaultToken = token
-            vaultSessionId = sessionId
-            vaultTokenIssuedAt = System.currentTimeMillis()
-            _cloudVaultEnabled.value = true
-            _cloudVaultUsername.value = username
-            _cloudVaultLastUsername.value = username
-            _cloudVaultTokenExpired.value = false
-            // Signup creates a fresh vault — wipe any stale map/meta.
-            // Login keeps existing map/meta so we don't re-upload rows we
-            // already own; lastSyncAt reset forces a full pull for merge.
-            if (isSignup) {
-                vaultCredentialMap.clear()
-                vaultCredentialMeta.clear()
-            }
-            vaultLastSyncAt = 0L
-            saveCloudVaultConfig()
-            saveVaultCredentialMeta()
-            saveVaultLastSyncAt()
-
-            if (!isSignup) {
-                pullFromVault()
-            }
-            syncAllCredentialsToVault()
-            syncPendingGroups()
-            syncPendingGifts()
-        }
-    }
-
-    suspend fun vaultBootstrapSignup(username: String, password: String) {
-        withContext(Dispatchers.IO) {
-            createPassword(password)
-            enableCloudVault(username, password, isSignup = true)
-        }
-    }
-
-    suspend fun vaultBootstrapLogin(username: String, password: String) {
-        withContext(Dispatchers.IO) {
-            // Validate vault credentials before creating any local wallet state.
-            // Previously createPassword ran first, which meant a wrong password
-            // silently initialized the local wallet with that password.
-            enableCloudVault(username, password, isSignup = false)
-            createPassword(password)
-        }
-    }
-
-    private val _vaultBannerDismissedAt = MutableStateFlow(
-        prefs.getLong("vaultBannerDismissedAt", 0L).let { if (it > 0) it else 0L }
-    )
-    val vaultBannerDismissedAt: StateFlow<Long> = _vaultBannerDismissedAt.asStateFlow()
-
-    fun dismissVaultBanner() {
-        val now = System.currentTimeMillis()
-        _vaultBannerDismissedAt.value = now
-        prefs.edit().putLong("vaultBannerDismissedAt", now).apply()
-    }
-
-    suspend fun disableCloudVault() {
-        withContext(Dispatchers.IO) {
-            val token = vaultToken
-            if (token != null && !_cloudVaultTokenExpired.value) {
-                try { vaultRequest("/auth/logout", "POST", token = token) } catch (_: Exception) {}
-            }
-
-            _cloudVaultEnabled.value = false
-            _cloudVaultUsername.value = null
-            _cloudVaultTokenExpired.value = false
-            vaultToken = null
-            vaultSessionId = null
-            vaultTokenIssuedAt = 0
-            vaultCredentialMap.clear()
-            vaultCredentialMeta.clear()
-            vaultLastSyncAt = 0L
-            vaultKey = null
-            prefs.edit()
-                .remove("cloudVault_enabled")
-                .remove("cloudVault_username")
-                .remove("cloudVault_token")
-                .remove("cloudVault_sessionId")
-                .remove("cloudVault_tokenIssuedAt")
-                .remove("cloudVault_tokenExpired")
-                .remove("cloudVault_credentialMap")
-                .remove("cloudVault_credentialMeta")
-                .remove("cloudVault_lastSyncAt")
-                .remove("cloudVault_vaultKey")
-                .apply()
-        }
-    }
-
-    suspend fun deleteVaultAccount() {
-        withContext(Dispatchers.IO) {
-            val token = vaultToken ?: throw IllegalStateException("No active vault session")
-            if (_cloudVaultTokenExpired.value) throw IllegalStateException("Vault session expired")
-            val (ok, _, data) = vaultRequest("/auth/account", "DELETE", token = token)
-            if (!ok) {
-                val err = data.optJSONObject("error")
-                throw IllegalStateException(err?.optString("message") ?: "Failed to delete vault account")
-            }
-            resetWallet()
-        }
-    }
-
-    suspend fun reloginCloudVault(password: String) {
-        withContext(Dispatchers.IO) {
-            val username = _cloudVaultUsername.value ?: throw IllegalStateException("No vault account configured")
-            val body = JSONObject().put("username", username).put("password", password)
-            val (ok, _, data) = vaultRequest("/auth/login", "POST", body)
-            if (!ok) {
-                val err = data.optJSONObject("error")
-                throw IllegalStateException(err?.optString("message") ?: "Login failed")
-            }
-            val encryptionSalt = data.optString("encryptionSalt", "")
-            if (encryptionSalt.isEmpty()) {
-                throw IllegalStateException("Invalid server response")
-            }
-            persistVaultKey(password, encryptionSalt)
-            vaultToken = data.getString("token")
-            vaultSessionId = data.getString("sessionId")
-            vaultTokenIssuedAt = System.currentTimeMillis()
-            _cloudVaultTokenExpired.value = false
-            saveCloudVaultConfig()
-
-            pullFromVault()
-            syncPendingCredentials()
-            syncPendingGroups()
-            syncPendingGifts()
-            reconcileGiftUsageWithVault()
-        }
-    }
-
-    private fun syncAddToVault(localId: String, providerId: String, label: String, authMethod: String, plainKey: String, baseUrl: String? = null) {
-        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
-        val token = vaultToken ?: return
-        val vk = loadVaultKey() ?: return
-        val encryptedApiKey = try { CryptoService.encryptWithKey(plainKey, vk) } catch (_: Exception) { return }
-
-        val body = JSONObject()
-            .put("providerId", providerId)
-            .put("encryptedApiKey", encryptedApiKey)
-            .put("label", label)
-            .put("authMethod", authMethod)
-        if (baseUrl != null) body.put("baseUrl", baseUrl)
-        val (ok, status, data) = vaultRequest("/credentials", "POST", body, token)
-
-        if (status == 401) {
-            _cloudVaultTokenExpired.value = true
-            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
-            return
-        }
-        if (ok) {
-            val cred = data.optJSONObject("credential")
-            val vaultId = cred?.optString("id")
-            if (vaultId != null && vaultId.isNotEmpty()) {
-                vaultCredentialMap[localId] = vaultId
-                saveVaultCredentialMap()
-                val updatedAt = cred.optLong("updatedAt", System.currentTimeMillis())
-                vaultCredentialMeta[localId] = VaultCredentialMeta(vaultId, updatedAt)
-                saveVaultCredentialMeta()
-            }
-        }
-    }
-
-    private fun syncRemoveFromVault(localId: String) {
-        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
-        val token = vaultToken ?: return
-        val vaultId = vaultCredentialMap[localId] ?: return
-
-        val (_, status, _) = vaultRequest("/credentials/$vaultId", "DELETE", token = token)
-
-        if (status == 401) {
-            _cloudVaultTokenExpired.value = true
-            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
-            return
-        }
-        vaultCredentialMap.remove(localId)
-        saveVaultCredentialMap()
-        vaultCredentialMeta.remove(localId)
-        saveVaultCredentialMeta()
-    }
-
-    private fun syncRenameToVault(localId: String, newLabel: String) {
-        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
-        val token = vaultToken ?: return
-        val vaultId = vaultCredentialMap[localId] ?: return
-
-        val body = JSONObject().put("label", newLabel)
-        val (ok, status, data) = vaultRequest("/credentials/$vaultId", "PATCH", body = body, token = token)
-
-        if (status == 401) {
-            _cloudVaultTokenExpired.value = true
-            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
-            return
-        }
-        if (ok) {
-            val updatedAt = data.optLong("updatedAt", System.currentTimeMillis())
-            vaultCredentialMeta[localId] = VaultCredentialMeta(vaultId, updatedAt)
-            saveVaultCredentialMeta()
-        }
-    }
-
-    private fun syncPendingCredentials() {
-        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
-        if (vaultTokenIssuedAt > 0 && System.currentTimeMillis() - vaultTokenIssuedAt > SIX_DAYS_MS) {
-            _cloudVaultTokenExpired.value = true
-            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
-            return
-        }
-        val pw = masterPassword ?: return
-        for (cred in _credentials.value) {
-            if (vaultCredentialMap.containsKey(cred.id)) continue
-            try {
-                val storedKey = prefs.getString("key_${cred.id}", null)
-                val isLocalProvider = cred.providerId == "ollama" || cred.providerId == "lm_studio"
-                val plainKey = when {
-                    storedKey != null -> CryptoService.decrypt(storedKey, pw)
-                    isLocalProvider -> ""
-                    else -> continue
-                }
-                syncAddToVault(cred.id, cred.providerId, cred.label, cred.authMethod.name.lowercase(), plainKey, cred.baseUrl)
-            } catch (_: Exception) {}
-        }
-    }
-
-    private fun syncAllCredentialsToVault() {
-        val pw = masterPassword ?: return
-        for (cred in _credentials.value) {
-            // Skip rows already on the server (post-pull) — mirrors the
-            // extension's behavior to prevent duplicate uploads.
-            if (vaultCredentialMap.containsKey(cred.id)) continue
-            try {
-                val storedKey = prefs.getString("key_${cred.id}", null)
-                val isLocalProvider = cred.providerId == "ollama" || cred.providerId == "lm_studio"
-                val plainKey = when {
-                    storedKey != null -> CryptoService.decrypt(storedKey, pw)
-                    isLocalProvider -> ""
-                    else -> continue
-                }
-                syncAddToVault(cred.id, cred.providerId, cred.label, cred.authMethod.name.lowercase(), plainKey, cred.baseUrl)
-            } catch (_: Exception) {}
-        }
-    }
-
-    // ─── Vault pull + merge ────────────────────────────────────────────
-    //
-    // Mirrors the extension's pullFromVault: fetches /credentials/sync with
-    // vaultLastSyncAt as `since`, applies tombstones, and upserts new rows
-    // with last-write-wins on updatedAt. Credentials new to this device are
-    // re-encrypted under the local master password.
-    private fun pullFromVault() {
-        val pw = masterPassword ?: return
-        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
-        val token = vaultToken ?: return
-
-        val (ok, status, data) = vaultRequest("/credentials/sync?since=$vaultLastSyncAt", "GET", token = token)
-        if (status == 401) {
-            _cloudVaultTokenExpired.value = true
-            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
-            return
-        }
-        if (!ok) return
-
-        val serverTime = data.optLong("serverTime", System.currentTimeMillis())
-        val remoteArr = data.optJSONArray("credentials") ?: run {
-            vaultLastSyncAt = serverTime
-            saveVaultLastSyncAt()
-            return
-        }
-
-        if (remoteArr.length() == 0) {
-            vaultLastSyncAt = serverTime
-            saveVaultLastSyncAt()
-            return
-        }
-
-        // Backfill meta from legacy credentialMap so pre-sync installs still
-        // merge correctly (remoteUpdatedAt=0 lets the first pull win).
-        for ((localId, serverId) in vaultCredentialMap) {
-            if (!vaultCredentialMeta.containsKey(localId)) {
-                vaultCredentialMeta[localId] = VaultCredentialMeta(serverId, 0L)
-            }
-        }
-
-        val serverToLocal = HashMap<String, String>()
-        vaultCredentialMeta.forEach { (localId, m) -> serverToLocal[m.serverId] = localId }
-
-        // Content-based adoption index for rows the server sends us that
-        // aren't in meta (e.g. after a disable/re-enable cycle wiped it).
-        // Match by providerId + plaintext key so we adopt the existing
-        // local row instead of creating a duplicate.
-        val localByContent = HashMap<String, String>()
-        val claimed = vaultCredentialMeta.keys
-        for (cred in _credentials.value) {
-            if (claimed.contains(cred.id)) continue
-            val plain = try {
-                CryptoService.decrypt(
-                    prefs.getString("key_${cred.id}", null) ?: continue, pw,
-                )
-            } catch (_: Exception) { continue }
-            localByContent["${cred.providerId}|$plain"] = cred.id
-        }
-
-        val updated = _credentials.value.toMutableList()
-        var didMutate = false
-
-        for (i in 0 until remoteArr.length()) {
-            val remote = remoteArr.optJSONObject(i) ?: continue
-            val serverId = remote.optString("id", "")
-            if (serverId.isEmpty()) continue
-            val providerId = remote.optString("providerId", "")
-            val label = remote.optString("label", "")
-            val authMethodRaw = remote.optString("authMethod", "api_key")
-            val updatedAt = remote.optLong("updatedAt", 0L)
-            val deletedAt = if (remote.isNull("deletedAt")) null else remote.optLong("deletedAt")
-
-            val authMethod = try {
-                AuthMethod.valueOf(authMethodRaw.uppercase())
-            } catch (_: Exception) { AuthMethod.API_KEY }
-
-            val remoteBaseUrl = if (remote.isNull("baseUrl")) null else remote.optString("baseUrl", "").ifEmpty { null }
-            val existingLocalId = serverToLocal[serverId]
-
-            if (deletedAt != null) {
-                if (existingLocalId != null) {
-                    prefs.edit().remove("key_$existingLocalId").apply()
-                    updated.removeAll { it.id == existingLocalId }
-                    vaultCredentialMap.remove(existingLocalId)
-                    vaultCredentialMeta.remove(existingLocalId)
-                    didMutate = true
-                }
-                continue
-            }
-
-            val encryptedApiKey = if (remote.isNull("encryptedApiKey")) null else remote.optString("encryptedApiKey", "")
-            val isLocalProvider = providerId == "ollama" || providerId == "lm_studio"
-            val apiKey: String = if (encryptedApiKey.isNullOrEmpty()) {
-                // Local providers may have been stored with no key at all.
-                // Anything else with no ciphertext is corrupt; skip.
-                if (!isLocalProvider) continue
-                ""
-            } else {
-                val vk = loadVaultKey() ?: continue
-                try { CryptoService.decryptWithKey(encryptedApiKey, vk) } catch (_: Exception) { continue }
-            }
-
-            if (existingLocalId != null) {
-                val currentMeta = vaultCredentialMeta[existingLocalId]
-                if (currentMeta != null && updatedAt <= currentMeta.remoteUpdatedAt) continue
-                val idx = updated.indexOfFirst { it.id == existingLocalId }
-                if (idx >= 0) {
-                    val encrypted = try {
-                        CryptoService.encrypt(apiKey, pw)
-                    } catch (_: Exception) { continue }
-                    prefs.edit().putString("key_$existingLocalId", encrypted).apply()
-                    updated[idx] = updated[idx].copy(
-                        providerId = providerId,
-                        label = label,
-                        authMethod = authMethod,
-                        baseUrl = remoteBaseUrl,
-                    )
-                }
-                vaultCredentialMeta[existingLocalId] = VaultCredentialMeta(serverId, updatedAt)
-                vaultCredentialMap[existingLocalId] = serverId
-                didMutate = true
-            } else {
-                val adoptId = localByContent["$providerId|$apiKey"]
-                if (adoptId != null) {
-                    val idx = updated.indexOfFirst { it.id == adoptId }
-                    if (idx >= 0) {
-                        updated[idx] = updated[idx].copy(
-                            providerId = providerId,
-                            label = label,
-                            authMethod = authMethod,
-                            baseUrl = remoteBaseUrl,
-                        )
-                    }
-                    vaultCredentialMap[adoptId] = serverId
-                    vaultCredentialMeta[adoptId] = VaultCredentialMeta(serverId, updatedAt)
-                    serverToLocal[serverId] = adoptId
-                    localByContent.remove("$providerId|$apiKey")
-                    didMutate = true
-                } else {
-                    val encrypted = try {
-                        CryptoService.encrypt(apiKey, pw)
-                    } catch (_: Exception) { continue }
-                    val newId = java.util.UUID.randomUUID().toString()
-                    prefs.edit().putString("key_$newId", encrypted).apply()
-                    val createdAt = remote.optLong("createdAt", System.currentTimeMillis())
-                    updated.add(Credential(
-                        id = newId,
-                        providerId = providerId,
-                        label = label,
-                        authMethod = authMethod,
-                        createdAt = createdAt,
-                        baseUrl = remoteBaseUrl,
-                    ))
-                    vaultCredentialMap[newId] = serverId
-                    vaultCredentialMeta[newId] = VaultCredentialMeta(serverId, updatedAt)
-                    serverToLocal[serverId] = newId
-                    didMutate = true
-                }
-            }
-        }
-
-        vaultLastSyncAt = serverTime
-        saveVaultLastSyncAt()
-
-        if (didMutate) {
-            _credentials.value = updated
-            saveCredentials()
-            saveVaultCredentialMap()
-            saveVaultCredentialMeta()
-        }
-    }
-
-    // ─── Vault group sync ────────────────────────────────────────────────
-
-    /**
-     * Push a single group to the cloud vault. Called on createGroup /
-     * updateGroup so the offline vault's routing rules stay in lockstep with
-     * the phone's local state. No-op when cloud vault is disabled.
-     *
-     * The vault keys credential pins by its own credential ids (returned at
-     * sync time and stored in vaultCredentialMap). Translate the local pin
-     * id to the vault id before sending — a stale local pin maps to null
-     * which the vault treats as "no pin".
-     */
-    private fun syncGroupToVault(group: Group) {
-        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
-        val token = vaultToken ?: return
-
-        val vaultCredentialId = group.credentialId?.let { vaultCredentialMap[it] }
-        val body = JSONObject()
-            .put("name", group.name)
-            .put("providerId", group.providerId)
-            .put("credentialId", vaultCredentialId ?: JSONObject.NULL)
-            .put("giftId", group.giftId ?: JSONObject.NULL)
-            .put("model", group.model ?: JSONObject.NULL)
-
-        val encoded = java.net.URLEncoder.encode(group.id, "UTF-8")
-        val (_, status, _) = vaultRequest("/groups/$encoded", "PUT", body, token)
-
-        if (status == 401) {
-            _cloudVaultTokenExpired.value = true
-            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
-        }
-    }
-
-    /** Remove a group from the cloud vault. Called on deleteGroup. */
-    private fun syncGroupDeleteToVault(groupId: String) {
-        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
-        val token = vaultToken ?: return
-        val encoded = java.net.URLEncoder.encode(groupId, "UTF-8")
-        val (_, status, _) = vaultRequest("/groups/$encoded", "DELETE", token = token)
-        if (status == 401) {
-            _cloudVaultTokenExpired.value = true
-            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
-        }
-    }
-
-    /**
-     * Push an app→group binding to the vault. Called on setAppGroup and on
-     * reassignment when a group is deleted.
-     */
-    private fun syncAppGroupToVault(origin: String, groupId: String) {
-        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
-        val token = vaultToken ?: return
-        val encoded = java.net.URLEncoder.encode(origin, "UTF-8")
-        val body = JSONObject().put("groupId", groupId)
-        val (_, status, _) = vaultRequest("/groups/apps/$encoded", "PUT", body, token)
-        if (status == 401) {
-            _cloudVaultTokenExpired.value = true
-            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
-        }
-    }
-
-    /**
-     * Backfill all local groups + app→group bindings to the vault. Runs on
-     * initial cloud-vault enable and on unlock when a vault session is
-     * already configured. Idempotent — the vault endpoints are upserts.
-     *
-     * Sequencing: MUST run after syncPendingCredentials so that any
-     * credential pins in local groups have a corresponding entry in
-     * vaultCredentialMap. Callers enforce this ordering.
-     */
-    private fun syncPendingGroups() {
-        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
-        if (vaultTokenIssuedAt > 0 && System.currentTimeMillis() - vaultTokenIssuedAt > SIX_DAYS_MS) {
-            _cloudVaultTokenExpired.value = true
-            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
-            return
-        }
-
-        for (group in _groups.value) {
-            syncGroupToVault(group)
-        }
-        for ((origin, groupId) in _appGroups.value) {
-            syncAppGroupToVault(origin, groupId)
-        }
-    }
-
-    // ─── Vault gift relay ────────────────────────────────────────────────
-
-    /**
-     * Upload a gift to the cloud vault so it can act as a priority-0 fallback
-     * sender when this device is backgrounded / offline. Mirrors the browser
-     * extension's registerGiftWithVault.
-     */
-    private fun registerGiftWithVault(gift: Gift) {
-        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
-        if (vaultTokenIssuedAt > 0 && System.currentTimeMillis() - vaultTokenIssuedAt > SIX_DAYS_MS) {
-            _cloudVaultTokenExpired.value = true
-            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
-            return
-        }
-        val token = vaultToken ?: return
-        val credential = _credentials.value.firstOrNull { it.id == gift.credentialId } ?: return
-        val apiKey = try { decryptKey(credential) } catch (_: Exception) { return }
-
-        val body = JSONObject()
-            .put("giftId", gift.id)
-            .put("providerId", gift.providerId)
-            .put("authMethod", credential.authMethod.name.lowercase())
-            .put("apiKey", apiKey)
-            .put("relayAuthToken", gift.authToken)
-            .put("relayUrl", gift.relayUrl)
-            .put("maxTokens", gift.maxTokens)
-            .put("usedTokens", gift.usedTokens)
-            .put("expiresAt", gift.expiresAt)
-            .put("listed", gift.listed)
-        if (gift.description != null) {
-            body.put("description", gift.description)
-        }
-        if (gift.giftShortId != null) {
-            body.put("giftShortId", gift.giftShortId)
-        }
-
-        val (_, status, _) = vaultRequest("/gifts", "POST", body, token)
-        if (status == 401) {
-            _cloudVaultTokenExpired.value = true
-            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
-        }
-    }
-
-    /**
-     * Ask the vault to allocate a short id for an encoded gift blob.
-     * Returns the short id, or null if the user isn't signed into cloud
-     * vault or the request fails — caller falls back to the long URL.
-     */
-    suspend fun createGiftShortLink(encoded: String, expiresAt: Long): String? =
-        withContext(Dispatchers.IO) {
-            if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) {
-                return@withContext null
-            }
-            val token = vaultToken ?: return@withContext null
-            val body = JSONObject()
-                .put("encoded", encoded)
-                .put("expiresAt", expiresAt)
-            val (ok, status, data) = vaultRequest("/gift-links", "POST", body, token)
-            if (status == 401) {
-                _cloudVaultTokenExpired.value = true
-                prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
-                return@withContext null
-            }
-            if (!ok) return@withContext null
-            data.optString("shortId", "").takeIf { it.isNotEmpty() }
-        }
-
-    /**
-     * Resolve a short id to its encoded payload. Returns null for
-     * 404/410 (unknown/expired). Throws on transport errors so the UI can
-     * distinguish "gift gone" from "network down".
-     */
-    suspend fun resolveGiftShortLink(shortId: String): String? =
-        withContext(Dispatchers.IO) {
-            val (ok, status, data) = vaultRequest("/gift-links/$shortId", "GET")
-            if (status == 404 || status == 410) return@withContext null
-            if (!ok) throw java.io.IOException("Vault unreachable (status=$status)")
-            data.optString("encoded", "").takeIf { it.isNotEmpty() }
-        }
-
-    /**
-     * Persist a short-link id on the local gift and push the new listing
-     * payload to the vault so /pool can surface it for redemption.
-     */
-    fun setGiftShortId(giftId: String, shortId: String) {
-        val list = _gifts.value.toMutableList()
-        val idx = list.indexOfFirst { it.id == giftId }
-        if (idx < 0) return
-        val updated = list[idx].copy(giftShortId = shortId)
-        list[idx] = updated
-        _gifts.value = list
-        saveGifts()
-        vaultScope.launch {
-            if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return@launch
-            val token = vaultToken ?: return@launch
-            val body = JSONObject()
-                .put("listed", updated.listed)
-                .put("giftShortId", shortId)
-            if (updated.description != null) body.put("description", updated.description)
-            val encoded = java.net.URLEncoder.encode(giftId, "UTF-8")
-            val (_, status, _) = vaultRequest("/gifts/$encoded/listing", "PATCH", body, token)
-            if (status == 401) {
-                _cloudVaultTokenExpired.value = true
-                prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
-            }
-        }
-    }
-
-    private fun unregisterGiftFromVault(giftId: String) {
-        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
-        val token = vaultToken ?: return
-        val (_, status, _) = vaultRequest("/gifts/$giftId", "DELETE", token = token)
-        if (status == 401) {
-            _cloudVaultTokenExpired.value = true
-            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
-        }
-    }
-
-    /**
-     * If the vault serviced requests while this device was offline, its
-     * usedTokens may be ahead of ours. Pull and clamp-up the local copy.
-     */
-    private fun syncGiftUsageFromVault(giftId: String) {
-        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
-        val token = vaultToken ?: return
-        val (ok, status, data) = vaultRequest("/gifts/$giftId", "GET", token = token)
-        if (status == 401) {
-            _cloudVaultTokenExpired.value = true
-            prefs.edit().putBoolean("cloudVault_tokenExpired", true).apply()
-            return
-        }
-        if (!ok) return
-        val vaultGift = data.optJSONObject("gift") ?: return
-        if (!vaultGift.has("usedTokens")) return
-        val vaultUsed = vaultGift.optInt("usedTokens", -1)
-        if (vaultUsed < 0) return
-
-        val list = _gifts.value.toMutableList()
-        val idx = list.indexOfFirst { it.id == giftId }
-        if (idx < 0) return
-        val gift = list[idx]
-        if (vaultUsed > gift.usedTokens) {
-            list[idx] = gift.copy(usedTokens = vaultUsed)
-            _gifts.value = list
-            saveGifts()
-        }
-    }
-
-    private fun syncPendingGifts() {
-        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
-        val now = System.currentTimeMillis()
-        for (gift in _gifts.value) {
-            if (!gift.active || gift.expiresAt <= now) continue
-            registerGiftWithVault(gift)
-        }
-    }
-
-    /**
-     * Reconcile `usedTokens` for every active gift against the vault. Called
-     * when the app returns to the foreground so the UI reflects usage the
-     * vault billed while we were backgrounded. Runs blocking IO — callers
-     * must already be off the Main dispatcher.
-     */
-    private fun reconcileGiftUsageWithVault() {
-        if (!_cloudVaultEnabled.value || vaultToken == null || _cloudVaultTokenExpired.value) return
-        val now = System.currentTimeMillis()
-        for (gift in _gifts.value) {
-            if (!gift.active || gift.expiresAt <= now) continue
-            syncGiftUsageFromVault(gift.id)
-        }
-    }
-
-    /** Main-thread-safe entry point for the Activity lifecycle callback. */
-    fun reconcileGiftUsageOnForeground() {
-        vaultScope.launch { reconcileGiftUsageWithVault() }
-    }
-
 }

@@ -34,13 +34,13 @@ import com.byoky.app.data.WalletStore
 import com.byoky.app.data.capabilityGaps
 import com.byoky.app.data.capabilityLabel
 import com.byoky.app.data.detectAppCapabilities
-import com.byoky.app.data.giftBudgetRemaining
-import com.byoky.app.data.isGiftExpired
+import com.byoky.app.data.formatTokens
 import com.byoky.app.proxy.TranslationEngine
 import com.byoky.app.ui.theme.*
 
 /**
- * The Apps screen — connected apps bucketed by group, with per-app routing
+ * The Connected tab — apps that connected to the wallet (from the in-wallet
+ * browser), bucketed by group, with per-app routing
  * (assign an app to a group → its requests use that group's credential and,
  * when the group's destination is in a different family, get translated on
  * the fly). Mirrors the extension's `ConnectedApps.tsx` page; the mobile
@@ -68,7 +68,6 @@ fun AppsScreen(wallet: WalletStore) {
     val sessions by wallet.sessions.collectAsState()
     val groups by wallet.groups.collectAsState()
     val appGroups by wallet.appGroups.collectAsState()
-    val cloudVaultEnabled by wallet.cloudVaultEnabled.collectAsState()
     val allowances by wallet.tokenAllowances.collectAsState()
     val requestLogs by wallet.requestLogs.collectAsState()
     val context = LocalContext.current
@@ -89,7 +88,7 @@ fun AppsScreen(wallet: WalletStore) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Apps") },
+                title = { Text("Connected") },
                 actions = {
                     if (sessions.size > 1) {
                         IconButton(onClick = {
@@ -112,27 +111,6 @@ fun AppsScreen(wallet: WalletStore) {
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (!cloudVaultEnabled && sessions.isNotEmpty()) {
-                item {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = Warning.copy(alpha = 0.1f)),
-                        shape = RoundedCornerShape(12.dp),
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Icon(Icons.Default.Wifi, null, tint = Warning, modifier = Modifier.size(16.dp))
-                            Text(
-                                "Your device must stay online for connected apps to work. Enable Cloud Sync in Settings for offline access.",
-                                color = Warning,
-                                fontSize = 12.sp,
-                            )
-                        }
-                    }
-                }
-            }
-
             item {
                 OutlinedButton(
                     onClick = { creatingGroup = true },
@@ -181,7 +159,7 @@ fun AppsScreen(wallet: WalletStore) {
                         Text("No Apps Connected", fontWeight = FontWeight.SemiBold, color = TextPrimary)
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            "Pair an app via the Connect tab. Connected apps appear here, where you can group them, set token limits, and reroute requests across providers.",
+                            "Apps you open from the Apps tab appear here once they connect. Group them, set token limits, and reroute their requests across providers.",
                             color = TextSecondary,
                             textAlign = TextAlign.Center,
                             fontSize = 13.sp,
@@ -300,9 +278,6 @@ private fun GroupBucket(
     val pinnedCred = group.credentialId?.let { id ->
         wallet.credentials.value.firstOrNull { it.id == id }
     }
-    val pinnedGift = group.giftId?.let { gid ->
-        wallet.giftedCredentials.value.firstOrNull { it.giftId == gid }
-    }
     var menuOpen by remember { mutableStateOf(false) }
 
     Card(
@@ -357,7 +332,6 @@ private fun GroupBucket(
                     Text(
                         when {
                             group.providerId.isEmpty() -> "No routing — apps use the provider they request"
-                            pinnedGift != null -> "Using gift from ${pinnedGift.senderLabel} · ${formatTokens(giftBudgetRemaining(pinnedGift.usedTokens, pinnedGift.maxTokens))} left"
                             pinnedCred != null -> "Using ${pinnedCred.label}"
                             else -> "Any ${provider?.name ?: group.providerId} credential"
                         },
@@ -685,51 +659,24 @@ private fun GroupEditorDialog(
 ) {
     val context = LocalContext.current
     val credentials by wallet.credentials.collectAsState()
-    val giftedCredentials by wallet.giftedCredentials.collectAsState()
     val isDefault = existing?.id == DEFAULT_GROUP_ID
 
     var name by remember { mutableStateOf(existing?.name ?: "") }
     var providerId by remember { mutableStateOf(existing?.providerId ?: "anthropic") }
-    // Unified pin value: "", "cred:<id>", or "gift:<giftId>".
-    var pinValue by remember {
-        mutableStateOf(
-            when {
-                existing?.giftId != null -> "gift:${existing.giftId}"
-                existing?.credentialId != null -> "cred:${existing.credentialId}"
-                else -> ""
-            }
-        )
-    }
+    // Pinned credential id, or null for "any credential of the provider".
+    var pinnedCredentialId by remember { mutableStateOf(existing?.credentialId) }
     var model by remember { mutableStateOf(existing?.model ?: "") }
     var error by remember { mutableStateOf<String?>(null) }
     var providerExpanded by remember { mutableStateOf(false) }
     var credentialExpanded by remember { mutableStateOf(false) }
 
     val matchingCreds = credentials.filter { it.providerId == providerId }
-    val matchingGifts = giftedCredentials.filter {
-        it.providerId == providerId
-                && !isGiftExpired(it.expiresAt)
-                && it.usedTokens < it.maxTokens
-    }
-    val hasAnyPinnable = matchingCreds.isNotEmpty() || matchingGifts.isNotEmpty()
     val providerName = Provider.find(providerId)?.name ?: providerId
 
     // Resolve the current pin to a display label for the dropdown anchor.
-    val pinnedLabel: String = remember(pinValue, matchingCreds, matchingGifts) {
-        when {
-            pinValue.startsWith("cred:") -> {
-                val id = pinValue.removePrefix("cred:")
-                matchingCreds.firstOrNull { it.id == id }?.label
-                    ?: "Any $providerName credential"
-            }
-            pinValue.startsWith("gift:") -> {
-                val gid = pinValue.removePrefix("gift:")
-                matchingGifts.firstOrNull { it.giftId == gid }?.let { gc ->
-                    "🎁 ${gc.senderLabel} · ${formatTokens(giftBudgetRemaining(gc.usedTokens, gc.maxTokens))} left"
-                } ?: "Any $providerName credential"
-            }
-            else -> "Any $providerName credential"
-        }
+    val pinnedLabel: String = remember(pinnedCredentialId, matchingCreds) {
+        matchingCreds.firstOrNull { it.id == pinnedCredentialId }?.label
+            ?: "Any $providerName credential"
     }
 
     val engine = remember { TranslationEngine.get(context) }
@@ -814,7 +761,7 @@ private fun GroupEditorDialog(
                                 text = { Text(provider.name) },
                                 onClick = {
                                     providerId = provider.id
-                                    pinValue = ""  // provider change invalidates any pin
+                                    pinnedCredentialId = null  // provider change invalidates any pin
                                     providerExpanded = false
                                 },
                             )
@@ -822,7 +769,7 @@ private fun GroupEditorDialog(
                     }
                 }
 
-                if (hasAnyPinnable) {
+                if (matchingCreds.isNotEmpty()) {
                     ExposedDropdownMenuBox(
                         expanded = credentialExpanded,
                         onExpandedChange = { credentialExpanded = !credentialExpanded },
@@ -844,51 +791,26 @@ private fun GroupEditorDialog(
                             DropdownMenuItem(
                                 text = { Text("Any $providerName credential") },
                                 onClick = {
-                                    pinValue = ""
+                                    pinnedCredentialId = null
                                     credentialExpanded = false
                                 },
                             )
-                            if (matchingCreds.isNotEmpty()) {
+                            matchingCreds.forEach { c ->
                                 DropdownMenuItem(
-                                    enabled = false,
-                                    text = { Text("YOUR CREDENTIALS", color = TextMuted, fontSize = 10.sp) },
-                                    onClick = {},
+                                    text = { Text(c.label) },
+                                    onClick = {
+                                        pinnedCredentialId = c.id
+                                        credentialExpanded = false
+                                    },
                                 )
-                                matchingCreds.forEach { c ->
-                                    DropdownMenuItem(
-                                        text = { Text(c.label) },
-                                        onClick = {
-                                            pinValue = "cred:${c.id}"
-                                            credentialExpanded = false
-                                        },
-                                    )
-                                }
-                            }
-                            if (matchingGifts.isNotEmpty()) {
-                                DropdownMenuItem(
-                                    enabled = false,
-                                    text = { Text("GIFTS", color = TextMuted, fontSize = 10.sp) },
-                                    onClick = {},
-                                )
-                                matchingGifts.forEach { gc ->
-                                    val remaining = formatTokens(giftBudgetRemaining(gc.usedTokens, gc.maxTokens))
-                                    DropdownMenuItem(
-                                        text = { Text("🎁 ${gc.senderLabel} · $remaining left") },
-                                        onClick = {
-                                            pinValue = "gift:${gc.giftId}"
-                                            credentialExpanded = false
-                                        },
-                                    )
-                                }
                             }
                         }
                     }
                 } else {
                     // Inline warning when the chosen provider has no
-                    // credentials AND no active gifts. The save still
-                    // goes through (permissive mode) but the user is
-                    // told up front that this group won't actually work
-                    // until a credential is added or a gift is redeemed.
+                    // credential. The save still goes through (permissive
+                    // mode) but the user is told up front that this group
+                    // won't work until a matching key is added.
                     Surface(
                         color = BgMain,
                         shape = RoundedCornerShape(6.dp),
@@ -903,13 +825,13 @@ private fun GroupEditorDialog(
                             Text("⚠️", fontSize = 14.sp)
                             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Text(
-                                    "No $providerName credential or gift",
+                                    "No $providerName credential",
                                     color = TextPrimary,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Medium,
                                 )
                                 Text(
-                                    "This group can be saved, but apps using it will fail until you add a $providerName key or redeem a matching gift.",
+                                    "This group can be saved, but apps using it will fail until you add a $providerName key.",
                                     color = TextMuted,
                                     fontSize = 11.sp,
                                 )
@@ -972,14 +894,12 @@ private fun GroupEditorDialog(
             TextButton(
                 onClick = {
                     try {
-                        val credentialPin: String? = if (pinValue.startsWith("cred:")) pinValue.removePrefix("cred:") else null
-                        val giftPin: String? = if (pinValue.startsWith("gift:")) pinValue.removePrefix("gift:") else null
+                        val credentialPin = pinnedCredentialId?.takeIf { id -> matchingCreds.any { it.id == id } }
                         if (existing == null) {
                             wallet.createGroup(
                                 name = name,
                                 providerId = providerId,
                                 credentialId = credentialPin,
-                                giftId = giftPin,
                                 model = model.ifEmpty { null },
                             )
                         } else {
@@ -989,8 +909,6 @@ private fun GroupEditorDialog(
                                 providerId = providerId,
                                 credentialId = credentialPin,
                                 unsetCredentialId = credentialPin == null,
-                                giftId = giftPin,
-                                unsetGiftId = giftPin == null,
                                 model = model.ifEmpty { null },
                                 unsetModel = model.isEmpty(),
                             )
@@ -1086,12 +1004,4 @@ private fun AllowanceDialog(
             }
         },
     )
-}
-
-private fun formatTokens(count: Int): String {
-    return when {
-        count >= 1_000_000 -> String.format("%.1fM", count / 1_000_000.0)
-        count >= 1_000 -> String.format("%.0fK", count / 1_000.0)
-        else -> count.toString()
-    }
 }
