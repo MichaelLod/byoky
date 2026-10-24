@@ -258,8 +258,14 @@ OLD_VERSION_CODE=$(grep 'versionCode = ' "$ANDROID_GRADLE" | head -1 | sed 's/[^
 NEW_VERSION_CODE=$((OLD_VERSION_CODE + 1))
 
 OLD_NATIVE_VERSION=$(grep 'versionName = ' "$ANDROID_GRADLE" | head -1 | sed 's/.*"\(.*\)".*/\1/')
-IFS='.' read -r NV_MAJOR NV_MINOR NV_PATCH <<< "$OLD_NATIVE_VERSION"
-NEW_NATIVE_VERSION="${NV_MAJOR}.${NV_MINOR}.$((NV_PATCH + 1))"
+# One version for everything (since 1.1.0). The stores only accept a higher
+# native version than the last one shipped.
+NEW_NATIVE_VERSION="$NEW_VERSION"
+if [ "$NEW_NATIVE_VERSION" = "$OLD_NATIVE_VERSION" ] || \
+   [ "$(printf '%s\n%s\n' "$OLD_NATIVE_VERSION" "$NEW_NATIVE_VERSION" | sort -V | tail -1)" != "$NEW_NATIVE_VERSION" ]; then
+  echo "Error: $NEW_VERSION must be higher than the native apps' current $OLD_NATIVE_VERSION"
+  exit 1
+fi
 
 # --- Check store statuses ---
 echo "==> Checking store statuses..."
@@ -328,8 +334,10 @@ PACKAGE_JSONS=(
   packages/create-byoky-app/package.json
 )
 
+# Match whatever top-level version each package has: they can drift (e.g. an
+# extension-only bump), and an unbumped package makes pnpm publish fail.
 for f in "${PACKAGE_JSONS[@]}"; do
-  sed -i '' "s/\"version\": \"$OLD_VERSION\"/\"version\": \"$NEW_VERSION\"/" "$f"
+  sed -i '' -E "s/^  \"version\": \"[^\"]+\"/  \"version\": \"$NEW_VERSION\"/" "$f"
 done
 
 echo "  Bumping Android version..."
