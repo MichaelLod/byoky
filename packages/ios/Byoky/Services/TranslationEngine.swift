@@ -89,6 +89,7 @@ final class TranslationEngine {
             captured = exception?.toString() ?? "unknown JS error"
         }
 
+        Self.installURLPolyfill(in: ctx)
         ctx.evaluateScript(source)
         if let err = captured {
             throw EngineError.bundleLoadFailed(err)
@@ -102,6 +103,88 @@ final class TranslationEngine {
 
         self.context = ctx
         self.bridge = global
+    }
+
+    // MARK: - URL polyfill
+    //
+    // JavaScriptCore has no WHATWG `URL`. The core bundle uses it to vet
+    // credential base URLs (`resolveProviderBaseUrl`) and to match endpoints;
+    // without it every `new URL()` throws, so e.g. Azure rewrites come back
+    // null. This installs a minimal Foundation-backed stand-in exposing the
+    // fields the bundle reads (single-argument constructor only).
+
+    private static func installURLPolyfill(in ctx: JSContext) {
+        let parse: @convention(block) (String) -> NSDictionary? = { input in
+            urlParts(input).map { $0 as NSDictionary }
+        }
+        ctx.setObject(parse, forKeyedSubscript: "__byokyParseURL" as NSString)
+        ctx.evaluateScript("""
+        (function (g) {
+            if (typeof g.URL !== 'undefined') return;
+            function URL(input, base) {
+                if (base !== undefined) throw new TypeError('URL: base argument not supported');
+                var s = String(input);
+                var parts = g.__byokyParseURL(s);
+                // No input in the message: Gemini keys travel in the query.
+                if (!parts) throw new TypeError('Invalid URL');
+                for (var k in parts) this[k] = parts[k];
+            }
+            URL.prototype.toString = function () { return this.href; };
+            URL.prototype.toJSON = function () { return this.href; };
+            g.URL = URL;
+        })(this);
+        """)
+    }
+
+    private static let defaultPorts = ["http": 80, "https": 443, "ws": 80, "wss": 443, "ftp": 21]
+
+    /// WHATWG-style components (`protocol` with its colon, `hostname`
+    /// lowercased with IPv6 brackets, `port` empty when default, `search` /
+    /// `hash` with their prefix or empty, `origin`). Nil when the string isn't
+    /// an absolute URL, or a special-scheme URL has no host.
+    static func urlParts(_ input: String) -> [String: String]? {
+        // Fail closed like core's url-fallback: reject whitespace and control
+        // characters rather than trimming them away.
+        guard input.unicodeScalars.allSatisfy({ !CharacterSet.whitespacesAndNewlines.contains($0) && !CharacterSet.controlCharacters.contains($0) }),
+              let components = URLComponents(string: input),
+              let scheme = components.scheme?.lowercased(), !scheme.isEmpty else { return nil }
+        let isSpecial = defaultPorts[scheme] != nil
+
+        var hostname = (components.percentEncodedHost ?? "").lowercased()
+        if hostname.contains(":") && !hostname.hasPrefix("[") { hostname = "[\(hostname)]" }
+        if isSpecial && hostname.isEmpty { return nil }
+
+        var port = ""
+        if let value = components.port, value != defaultPorts[scheme] { port = String(value) }
+        let host = port.isEmpty ? hostname : "\(hostname):\(port)"
+
+        var pathname = components.percentEncodedPath
+        if pathname.isEmpty && isSpecial { pathname = "/" }
+        let query = components.percentEncodedQuery ?? ""
+        let fragment = components.percentEncodedFragment ?? ""
+        let search = query.isEmpty ? "" : "?\(query)"
+        let hash = fragment.isEmpty ? "" : "#\(fragment)"
+        let username = components.percentEncodedUser ?? ""
+        let password = components.percentEncodedPassword ?? ""
+
+        var userinfo = ""
+        if !username.isEmpty || !password.isEmpty {
+            userinfo = username + (password.isEmpty ? "" : ":\(password)") + "@"
+        }
+        let authority = components.percentEncodedHost == nil ? "" : "//\(userinfo)\(host)"
+        return [
+            "href": "\(scheme):\(authority)\(pathname)\(search)\(hash)",
+            "protocol": "\(scheme):",
+            "username": username,
+            "password": password,
+            "host": host,
+            "hostname": hostname,
+            "port": port,
+            "pathname": pathname,
+            "search": search,
+            "hash": hash,
+            "origin": isSpecial ? "\(scheme)://\(host)" : "null",
+        ]
     }
 
     // MARK: - Translation API

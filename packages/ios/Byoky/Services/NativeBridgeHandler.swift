@@ -3,8 +3,8 @@ import WebKit
 
 /// Handles messages from the injected JavaScript bridge in app WebViews,
 /// mimicking the browser extension's content script + background proxy.
-/// This lets embedded web apps (e.g. Byoky Chat) auto-connect to the
-/// local wallet without relay pairing.
+/// This lets web apps opened in the in-wallet browser auto-connect to the
+/// local wallet; their requests are proxied on-device with the user's keys.
 @MainActor
 final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
     private let wallet: WalletStore
@@ -23,39 +23,103 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
 
     // MARK: - WKScriptMessageHandler
 
+    /// WebKit exposes the message handler to every frame, including
+    /// sandboxed iframes and `about:srcdoc` content an app embeds. Only the
+    /// app's own top-level page may talk to the wallet.
     nonisolated func userContentController(
         _ userContentController: WKUserContentController,
         didReceive message: WKScriptMessage
     ) {
-        Task { @MainActor in
-            guard let body = message.body as? [String: Any],
-                  let type = body["type"] as? String else { return }
-            self.handleMessage(type: type, body: body)
+        MainActor.assumeIsolated {
+            let frame = message.frameInfo
+            let origin = frame.securityOrigin
+            guard Self.isTrustedFrame(
+                isMainFrame: frame.isMainFrame,
+                scheme: origin.protocol,
+                host: origin.host,
+                port: origin.port,
+                appOrigin: appOrigin
+            ),
+            let body = message.body as? [String: Any],
+            let type = body["type"] as? String else { return }
+            handleMessage(type: type, body: body)
         }
+    }
+
+    /// The sender is the main frame of the app's own https origin (scheme,
+    /// host and port). `port` is WebKit's: 0 means the scheme's default.
+    nonisolated static func isTrustedFrame(isMainFrame: Bool, scheme: String, host: String, port: Int, appOrigin: String) -> Bool {
+        guard isMainFrame, scheme.lowercased() == "https",
+              let app = URL(string: appOrigin), app.scheme == "https",
+              let appHost = app.host else { return false }
+        let expectedPort = app.port.map { $0 == 443 ? 0 : $0 } ?? 0
+        let actualPort = port == 443 ? 0 : port
+        return host.lowercased() == appHost.lowercased() && actualPort == expectedPort
+    }
+
+    /// Request ids are page-supplied; only accept the SDK's shape (UUIDs and
+    /// similar) so nothing odd ever reaches the reply path.
+    nonisolated static func isValidRequestId(_ requestId: String) -> Bool {
+        requestId.range(of: #"^[A-Za-z0-9_-]{1,128}$"#, options: .regularExpression) != nil
     }
 
     private func handleMessage(type: String, body: [String: Any]) {
         let requestId = body["requestId"] as? String ?? ""
+        let payload = body["payload"] as? [String: Any]
+
+        // Disconnect has no reply; everything else needs a usable request id.
+        if type == "BYOKY_DISCONNECT" {
+            handleDisconnect(payload: payload)
+            return
+        }
+        guard Self.isValidRequestId(requestId) else { return }
 
         switch type {
         case "BYOKY_CONNECT_REQUEST":
-            handleConnect(requestId: requestId)
+            handleConnect(requestId: requestId, reconnectOnly: payload?["reconnectOnly"] as? Bool == true)
         case "BYOKY_PROXY_REQUEST":
             handleProxy(body)
         case "BYOKY_SESSION_STATUS":
-            handleSessionStatus(requestId: requestId)
+            handleSessionStatus(requestId: requestId, payload: payload)
         case "BYOKY_SESSION_USAGE":
             handleSessionUsage(requestId: requestId)
-        case "BYOKY_DISCONNECT":
-            sessionKey = nil
         default:
             break
         }
     }
 
+    // MARK: - Session
+
+    /// The page holds the current session key and the session still exists
+    /// (not revoked in Connected Apps, not expired, not disconnected).
+    private func isSessionValid(_ presentedKey: String?) -> Bool {
+        guard let sessionKey, let presentedKey, presentedKey == sessionKey else { return false }
+        return wallet.hasActiveSession(appOrigin: appOrigin)
+    }
+
+    private func handleDisconnect(payload: [String: Any]?) {
+        guard isSessionValid(payload?["sessionKey"] as? String) else { return }
+        sessionKey = nil
+        wallet.endSession(appOrigin: appOrigin)
+    }
+
     // MARK: - Connect
 
-    private func handleConnect(requestId: String) {
+    private func handleConnect(requestId: String, reconnectOnly: Bool) {
+        // Revoked in Connected Apps: no silent reconnect until the user opens
+        // the app from the Apps grid again.
+        if wallet.isAppAccessRevoked(origin: appOrigin) {
+            sessionKey = nil
+            deliver(requestId: requestId, message: [
+                "type": "BYOKY_ERROR",
+                "requestId": requestId,
+                "payload": reconnectOnly
+                    ? ["code": "NO_SESSION", "message": "No active session for this origin"]
+                    : ["code": "USER_REJECTED", "message": "Access to this wallet was revoked. Open the app from Byoky's Apps tab to reconnect."],
+            ])
+            return
+        }
+
         var providers: [String: [String: Any]] = [:]
         for credential in wallet.credentials {
             providers[credential.providerId] = [
@@ -63,15 +127,8 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
                 "authMethod": credential.authMethod == .apiKey ? "api_key" : "oauth",
             ]
         }
-        for gc in wallet.giftedCredentials where providers[gc.providerId] == nil
-            && !isGiftedCredentialExpired(gc) && gc.usedTokens < gc.maxTokens {
-            providers[gc.providerId] = [
-                "available": true,
-                "authMethod": "api_key",
-            ]
-        }
 
-        let key = "native_\(UUID().uuidString.prefix(8))"
+        let key = "byk_" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
         sessionKey = key
 
         let providerIds = Array(Set(wallet.credentials.map(\.providerId)))
@@ -95,6 +152,11 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
               let providerId = msg["providerId"] as? String,
               let urlString = msg["url"] as? String,
               let method = msg["method"] as? String else { return }
+
+        guard isSessionValid(msg["sessionKey"] as? String) else {
+            deliverProxyError(requestId: requestId, code: "SESSION_EXPIRED", message: "Invalid or expired session")
+            return
+        }
 
         // For requiresCustomBaseUrl providers (Azure, Ollama, LM Studio) we
         // can't validate the URL against a fixed host — the real host lives
@@ -130,8 +192,6 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
         // Capture wallet state before entering Task
         let group = wallet.groupForOrigin(appOrigin)
         let allCreds = wallet.credentials
-        let prefs = wallet.giftPreferences
-        let giftedCreds = wallet.giftedCredentials
 
         Task {
             let srcModel = RoutingResolver.parseModel(from: bodyString?.data(using: .utf8))
@@ -167,35 +227,10 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
                 return
             }
 
-            // 3. Pass-through (with gift preference check)
-            let ownCred = routing?.credential
-
-            var useGift: GiftedCredential?
-            if let preferredGiftId = prefs[providerId],
-               let gc = giftedCreds.first(where: {
-                   $0.giftId == preferredGiftId && $0.providerId == providerId
-                   && !isGiftedCredentialExpired($0) && $0.usedTokens < $0.maxTokens
-               }) {
-                useGift = gc
-            } else if ownCred == nil {
-                useGift = giftedCreds.first(where: {
-                    $0.providerId == providerId && !isGiftedCredentialExpired($0) && $0.usedTokens < $0.maxTokens
-                })
-            }
-
-            if let gc = useGift {
-                await proxyViaGift(
-                    requestId: requestId, providerId: providerId,
-                    urlString: urlString, method: method,
-                    headers: headers.filter { !["host", "authorization", "x-api-key"].contains($0.key.lowercased()) },
-                    bodyString: bodyString, gift: gc
-                )
-                return
-            }
-
-            guard let credential = ownCred else {
+            // 3. Pass-through
+            guard let credential = routing?.credential else {
                 let uniqueCreds = Array(Set(allCreds.map(\.providerId))).sorted()
-                let message = RelayPairService.buildNoCredentialMessage(
+                let message = RoutingResolver.noCredentialMessage(
                     requestedProviderId: providerId,
                     userCredentialProviderIds: uniqueCreds,
                     group: group
@@ -236,6 +271,10 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             // the credential and can enforce that the URL actually points
             // at the credential's registered host.
             if Provider.find(providerId)?.requiresCustomBaseUrl == true {
+                if let message = Provider.missingEndpointMessage(providerId: providerId, credentialBaseUrl: credential.baseUrl) {
+                    deliverProxyError(requestId: requestId, code: "ENDPOINT_REQUIRED", message: message)
+                    return
+                }
                 if Provider.validateUrl(urlString, for: providerId, credentialBaseUrl: credential.baseUrl) == nil {
                     deliverProxyError(requestId: requestId, code: "INVALID_URL",
                                        message: "URL doesn't match credential's registered base URL")
@@ -249,7 +288,14 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             request.httpMethod = method
             request.timeoutInterval = 120
 
-            let finalBody = injectStreamUsageOptions(providerId: providerId, body: bodyString)
+            // Setup tokens only work for Claude-Code-shaped requests.
+            var forwardedBody = bodyString
+            var toolNameMap: [String: String] = [:]
+            if ClaudeCodeShaping.applies(providerId: providerId, authMethod: credential.authMethod) {
+                (forwardedBody, toolNameMap) = ClaudeCodeShaping.shape(body: bodyString)
+            }
+
+            let finalBody = injectStreamUsageOptions(providerId: providerId, body: forwardedBody)
             if let finalBody { request.httpBody = finalBody.data(using: .utf8) }
 
             for (key, value) in headers {
@@ -265,7 +311,11 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
                 return
             }
 
-            await streamResponse(requestId: requestId, httpResponse: httpResponse, bytes: bytes)
+            // Give the app back its own tool names.
+            let toolNameRewriter = (200..<300).contains(httpResponse.statusCode)
+                ? ClaudeCodeResponseRewriter(toolNameMap: toolNameMap, streaming: isEventStream(httpResponse))
+                : nil
+            await streamResponse(requestId: requestId, httpResponse: httpResponse, bytes: bytes, rewriter: toolNameRewriter)
 
             wallet.logRequest(
                 appOrigin: appOrigin, providerId: providerId,
@@ -300,22 +350,41 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             )
             let translatedBody = try engine.translateRequest(contextJson: ctxJson, body: bodyString ?? "")
 
+            if let message = Provider.missingEndpointMessage(providerId: translation.dstProviderId, credentialBaseUrl: credential.baseUrl) {
+                deliverProxyError(requestId: requestId, code: "ENDPOINT_REQUIRED", message: message)
+                return
+            }
             guard let urlString = engine.rewriteProxyUrl(
                 dstProviderId: translation.dstProviderId,
                 model: translation.dstModel,
                 stream: isStreaming,
-                overrideBaseUrl: credential.baseUrl
-            ), let url = URL(string: urlString) else {
+                overrideBaseUrl: Provider.baseUrlOverride(for: translation.dstProviderId, credentialBaseUrl: credential.baseUrl)
+            ) else {
                 deliverProxyError(requestId: requestId, code: "TRANSLATION_FAILED", message: "rewriteProxyUrl returned null")
+                return
+            }
+            // Check the destination before any key is attached.
+            guard let url = Provider.validateUrl(urlString, for: translation.dstProviderId, credentialBaseUrl: credential.baseUrl) else {
+                deliverProxyError(requestId: requestId, code: "INVALID_URL", message: "Destination URL doesn't match the provider")
                 return
             }
 
             let dstApiKey = try wallet.decryptKey(for: credential)
 
+            // A setup-token destination needs the translated (now Anthropic-
+            // shaped) body in Claude Code shape too.
+            var outboundBody = translatedBody
+            var toolNameMap: [String: String] = [:]
+            if ClaudeCodeShaping.applies(providerId: translation.dstProviderId, authMethod: credential.authMethod) {
+                let shaped = ClaudeCodeShaping.shape(body: translatedBody)
+                outboundBody = shaped.body ?? translatedBody
+                toolNameMap = shaped.toolNameMap
+            }
+
             var request = URLRequest(url: url)
             request.httpMethod = method
             request.timeoutInterval = 120
-            let injected = injectStreamUsageOptions(providerId: translation.dstProviderId, body: translatedBody) ?? translatedBody
+            let injected = injectStreamUsageOptions(providerId: translation.dstProviderId, body: outboundBody) ?? outboundBody
             request.httpBody = injected.data(using: .utf8)
 
             for (key, value) in headers {
@@ -336,46 +405,45 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             if !(200..<300).contains(httpResponse.statusCode) {
                 await streamRawBytes(requestId: requestId, bytes: bytes)
             } else if isStreaming {
+                // Undo tool renames on the Anthropic stream first, then
+                // translate it back to the app's dialect.
+                let toolNameRewriter = ClaudeCodeResponseRewriter(toolNameMap: toolNameMap, streaming: true)
                 let streamHandle = try engine.createStreamTranslator(contextJson: ctxJson)
                 var releasedExplicitly = false
                 var buffer = Data()
+                var decoder = UTF8ChunkDecoder()
                 defer { if !releasedExplicitly { engine.releaseStreamTranslator(handle: streamHandle) } }
+                func translateAndDeliver(_ upstream: String) throws {
+                    guard !upstream.isEmpty else { return }
+                    deliverChunk(requestId, try engine.processStreamChunk(handle: streamHandle, chunk: upstream))
+                }
+                func rewriteAndTranslate(_ text: String) throws {
+                    guard !text.isEmpty else { return }
+                    try translateAndDeliver(toolNameRewriter?.process(text) ?? text)
+                }
                 for try await byte in bytes {
                     buffer.append(byte)
                     if buffer.count >= 4096 || byte == 0x0A {
-                        if let s = String(data: buffer, encoding: .utf8) {
-                            let translated = try engine.processStreamChunk(handle: streamHandle, chunk: s)
-                            if !translated.isEmpty {
-                                deliver(requestId: requestId, message: [
-                                    "type": "BYOKY_PROXY_RESPONSE_CHUNK",
-                                    "requestId": requestId, "chunk": translated,
-                                ])
-                            }
-                        }
+                        try rewriteAndTranslate(decoder.decode(buffer))
                         buffer.removeAll(keepingCapacity: true)
                     }
                 }
-                if !buffer.isEmpty, let s = String(data: buffer, encoding: .utf8) {
-                    let translated = try engine.processStreamChunk(handle: streamHandle, chunk: s)
-                    if !translated.isEmpty {
-                        deliver(requestId: requestId, message: [
-                            "type": "BYOKY_PROXY_RESPONSE_CHUNK",
-                            "requestId": requestId, "chunk": translated,
-                        ])
-                    }
+                try rewriteAndTranslate(decoder.decode(buffer))
+                try rewriteAndTranslate(decoder.finish())
+                if let tail = toolNameRewriter?.finish() {
+                    try translateAndDeliver(tail)
                 }
                 let trailing = try engine.flushStreamTranslator(handle: streamHandle)
                 releasedExplicitly = true
-                if !trailing.isEmpty {
-                    deliver(requestId: requestId, message: [
-                        "type": "BYOKY_PROXY_RESPONSE_CHUNK",
-                        "requestId": requestId, "chunk": trailing,
-                    ])
-                }
+                deliverChunk(requestId, trailing)
             } else {
                 var accumulated = Data()
                 for try await byte in bytes { accumulated.append(byte) }
-                let upstreamBody = String(data: accumulated, encoding: .utf8) ?? ""
+                var upstreamBody = String(decoding: accumulated, as: UTF8.self)
+                if let toolNameRewriter = ClaudeCodeResponseRewriter(toolNameMap: toolNameMap, streaming: false) {
+                    _ = toolNameRewriter.process(upstreamBody)
+                    upstreamBody = toolNameRewriter.finish()
+                }
                 let translated = try engine.translateResponse(contextJson: ctxJson, body: upstreamBody)
                 deliver(requestId: requestId, message: [
                     "type": "BYOKY_PROXY_RESPONSE_CHUNK",
@@ -415,12 +483,21 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
         let modelForUrl = swapDstModel ?? RoutingResolver.parseModel(from: bodyData) ?? ""
 
         do {
+            if let message = Provider.missingEndpointMessage(providerId: swapToProviderId, credentialBaseUrl: credential.baseUrl) {
+                deliverProxyError(requestId: requestId, code: "ENDPOINT_REQUIRED", message: message)
+                return
+            }
             guard let rewrittenUrlString = engine.rewriteProxyUrl(
                 dstProviderId: swapToProviderId, model: modelForUrl, stream: isStreaming,
-                overrideBaseUrl: credential.baseUrl
-            ), let url = URL(string: rewrittenUrlString) else {
+                overrideBaseUrl: Provider.baseUrlOverride(for: swapToProviderId, credentialBaseUrl: credential.baseUrl)
+            ) else {
                 deliverProxyError(requestId: requestId, code: "SWAP_FAILED",
                                   message: "rewriteProxyUrl returned null for \(swapToProviderId)")
+                return
+            }
+            // Check the destination before any key is attached.
+            guard let url = Provider.validateUrl(rewrittenUrlString, for: swapToProviderId, credentialBaseUrl: credential.baseUrl) else {
+                deliverProxyError(requestId: requestId, code: "INVALID_URL", message: "Destination URL doesn't match the provider")
                 return
             }
 
@@ -466,62 +543,13 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
         }
     }
 
-    // MARK: - Gift proxy
-
-    private func proxyViaGift(
-        requestId: String, providerId: String,
-        urlString: String, method: String,
-        headers: [String: String], bodyString: String?,
-        gift: GiftedCredential
-    ) async {
-        do {
-            for try await event in proxyViaGiftRelay(
-                giftedCredential: gift, requestId: requestId,
-                providerId: providerId, url: urlString,
-                method: method, headers: headers, body: bodyString
-            ) {
-                switch event {
-                case .meta(let status, let statusText, let hdrs):
-                    var filtered = hdrs
-                    for h in sensitiveResponseHeaders { filtered.removeValue(forKey: h) }
-                    deliver(requestId: requestId, message: [
-                        "type": "BYOKY_PROXY_RESPONSE_META", "requestId": requestId,
-                        "status": status, "statusText": statusText, "headers": filtered,
-                    ])
-                case .chunk(let chunk):
-                    deliver(requestId: requestId, message: [
-                        "type": "BYOKY_PROXY_RESPONSE_CHUNK", "requestId": requestId, "chunk": chunk,
-                    ])
-                case .done:
-                    deliver(requestId: requestId, message: [
-                        "type": "BYOKY_PROXY_RESPONSE_DONE", "requestId": requestId,
-                    ])
-                case .usage(let giftId, let usedTokens):
-                    wallet.updateGiftedCredentialUsage(giftId: giftId, usedTokens: usedTokens)
-                }
-            }
-            wallet.logRequest(
-                appOrigin: appOrigin, providerId: providerId,
-                method: method, url: urlString,
-                statusCode: 0, requestBody: bodyString?.data(using: .utf8),
-                responseBody: nil
-            )
-        } catch {
-            if case .relayError(let code, _) = error as? GiftRelayError ?? .invalidRelayUrl,
-               code == "GIFT_EXPIRED" {
-                await MainActor.run { wallet.removeGiftedCredential(id: gift.id) }
-            }
-            deliverProxyError(requestId: requestId, code: "PROXY_ERROR", message: error.localizedDescription)
-        }
-    }
-
     // MARK: - Session status / usage
 
-    private func handleSessionStatus(requestId: String) {
+    private func handleSessionStatus(requestId: String, payload: [String: Any]?) {
         deliver(requestId: requestId, message: [
             "type": "BYOKY_SESSION_STATUS_RESPONSE",
             "requestId": requestId,
-            "payload": ["connected": sessionKey != nil],
+            "payload": ["connected": isSessionValid(payload?["sessionKey"] as? String)],
         ])
     }
 
@@ -541,12 +569,25 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
     private func streamResponse(
         requestId: String,
         httpResponse: HTTPURLResponse,
-        bytes: URLSession.AsyncBytes
+        bytes: URLSession.AsyncBytes,
+        rewriter: ClaudeCodeResponseRewriter? = nil
     ) async {
         deliverResponseHeaders(requestId: requestId, httpResponse: httpResponse)
-        await streamRawBytes(requestId: requestId, bytes: bytes)
+        await streamRawBytes(requestId: requestId, bytes: bytes, rewriter: rewriter)
         deliver(requestId: requestId, message: [
             "type": "BYOKY_PROXY_RESPONSE_DONE", "requestId": requestId,
+        ])
+    }
+
+    private func isEventStream(_ httpResponse: HTTPURLResponse) -> Bool {
+        (httpResponse.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased().contains("text/event-stream")
+    }
+
+    private func deliverChunk(_ requestId: String, _ chunk: String) {
+        guard !chunk.isEmpty else { return }
+        deliver(requestId: requestId, message: [
+            "type": "BYOKY_PROXY_RESPONSE_CHUNK",
+            "requestId": requestId, "chunk": chunk,
         ])
     }
 
@@ -565,43 +606,61 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
         ])
     }
 
-    private func streamRawBytes(requestId: String, bytes: URLSession.AsyncBytes) async {
+    private func streamRawBytes(
+        requestId: String,
+        bytes: URLSession.AsyncBytes,
+        rewriter: ClaudeCodeResponseRewriter? = nil
+    ) async {
         var buffer = Data()
+        // Reads are cut at 4 KB or a newline; the decoder carries a split
+        // multi-byte character over to the next read instead of dropping it.
+        var decoder = UTF8ChunkDecoder()
+        func emit(_ text: String) {
+            guard !text.isEmpty else { return }
+            deliverChunk(requestId, rewriter?.process(text) ?? text)
+        }
         do {
             for try await byte in bytes {
                 buffer.append(byte)
                 if buffer.count >= 4096 || byte == 0x0A {
-                    if let chunk = String(data: buffer, encoding: .utf8) {
-                        deliver(requestId: requestId, message: [
-                            "type": "BYOKY_PROXY_RESPONSE_CHUNK",
-                            "requestId": requestId, "chunk": chunk,
-                        ])
-                    }
-                    buffer.removeAll()
+                    emit(decoder.decode(buffer))
+                    buffer.removeAll(keepingCapacity: true)
                 }
             }
         } catch {}
-        if !buffer.isEmpty, let chunk = String(data: buffer, encoding: .utf8) {
-            deliver(requestId: requestId, message: [
-                "type": "BYOKY_PROXY_RESPONSE_CHUNK",
-                "requestId": requestId, "chunk": chunk,
-            ])
+        emit(decoder.decode(buffer))
+        emit(decoder.finish())
+        if let tail = rewriter?.finish() {
+            deliverChunk(requestId, tail)
         }
     }
 
     // MARK: - Bridge delivery
 
+    /// Hand a reply to the bridge script in the app's main frame. The request
+    /// id and message travel as arguments (never spliced into script text),
+    /// and the message is a JSON string, so any Unicode arrives intact.
     private func deliver(requestId: String, message: [String: Any]) {
-        guard let data = try? JSONSerialization.data(withJSONObject: message) else { return }
-        let base64 = data.base64EncodedString()
-        webView?.evaluateJavaScript(
-            "window.__byokyBridge._deliver('\(requestId)', '\(base64)')"
-        ) { _, _ in }
+        guard Self.isValidRequestId(requestId),
+              let json = Self.encodeMessage(message) else { return }
+        webView?.callAsyncJavaScript(
+            "if (window.__byokyBridge) { window.__byokyBridge._deliver(requestId, message); }",
+            arguments: ["requestId": requestId, "message": json],
+            in: nil,
+            in: .page,
+            completionHandler: nil
+        )
+    }
+
+    nonisolated static func encodeMessage(_ message: [String: Any]) -> String? {
+        guard let data = try? JSONSerialization.data(withJSONObject: message) else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     private func deliverProxyError(requestId: String, code: String, message: String) {
         let status: Int = switch code {
-        case "NO_CREDENTIAL": 403
+        case "SESSION_EXPIRED": 401
+        case "NO_CREDENTIAL", "INVALID_URL", "ENDPOINT_REQUIRED": 403
         case "QUOTA_EXCEEDED": 429
         default: 500
         }
@@ -626,4 +685,35 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
         }
         return str
     }
+}
+
+// MARK: - Proxy helpers
+
+/// Upstream response headers that are never forwarded to the web app.
+private let sensitiveResponseHeaders: Set<String> = [
+    "server", "x-request-id", "x-cloud-trace-context",
+    "set-cookie", "set-cookie2", "alt-svc", "via",
+]
+
+/// Providers that need `stream_options.include_usage` injected for streaming.
+private let streamUsageProviders: Set<String> = [
+    "openai", "azure-openai", "together", "deepseek",
+]
+
+/// Inject `stream_options.include_usage` into a streaming request body for
+/// providers that don't report token usage in streaming responses by default,
+/// so the wallet's usage stats stay accurate.
+private func injectStreamUsageOptions(providerId: String, body: String?) -> String? {
+    guard let body else { return nil }
+    guard streamUsageProviders.contains(providerId),
+          let data = body.data(using: .utf8),
+          var parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          parsed["stream"] as? Bool == true else { return body }
+    var streamOptions = parsed["stream_options"] as? [String: Any] ?? [:]
+    guard streamOptions["include_usage"] as? Bool != true else { return body }
+    streamOptions["include_usage"] = true
+    parsed["stream_options"] = streamOptions
+    guard let injected = try? JSONSerialization.data(withJSONObject: parsed),
+          let result = String(data: injected, encoding: .utf8) else { return body }
+    return result
 }

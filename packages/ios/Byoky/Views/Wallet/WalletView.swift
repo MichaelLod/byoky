@@ -2,12 +2,10 @@ import SwiftUI
 
 enum WalletStatsTarget: Identifiable, Equatable {
     case credential(String)
-    case gift(String)
 
     var id: String {
         switch self {
         case .credential(let id): return "cred:\(id)"
-        case .gift(let id): return "gift:\(id)"
         }
     }
 }
@@ -16,41 +14,24 @@ struct WalletView: View {
     @EnvironmentObject var wallet: WalletStore
     @State private var showAddCredential = false
     @State private var showSettings = false
-    @State private var showCloudVaultSetup = false
-    @State private var showDisableCloudVaultConfirm = false
-    @State private var showRedeemGift = false
     @State private var statsTarget: WalletStatsTarget?
     @State private var renamingCredential: Credential?
+    @State private var editingEndpointFor: Credential?
     @State private var renameDraft: String = ""
-
-    private var activeGifts: [GiftedCredential] {
-        wallet.giftedCredentials.filter { !isGiftedCredentialExpired($0) }
-    }
-
-    private var hasAny: Bool {
-        !wallet.credentials.isEmpty || !activeGifts.isEmpty
-    }
 
     var body: some View {
         NavigationStack {
             SwiftUI.Group {
-                if !hasAny {
+                if wallet.credentials.isEmpty {
                     VStack {
-                        OfflineUpgradeBanner(onActivate: { showCloudVaultSetup = true })
-                            .padding(.horizontal)
+                        retiredFeaturesBanner
                         emptyState
                     }
                 } else {
                     VStack(spacing: 0) {
-                        if !wallet.cloudVaultEnabled {
-                            OfflineUpgradeBanner(onActivate: { showCloudVaultSetup = true })
-                                .padding(.horizontal)
-                        }
+                        retiredFeaturesBanner
                         List {
                             credentialsSection
-                            if !activeGifts.isEmpty {
-                                giftsSection
-                            }
                         }
                         .scrollContentBackground(.hidden)
                         .background(Theme.bgMain)
@@ -69,58 +50,14 @@ struct WalletView: View {
                     }
                     .accessibilityIdentifier("wallet.settings")
                 }
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        if wallet.cloudVaultEnabled {
-                            showDisableCloudVaultConfirm = true
-                        } else {
-                            showCloudVaultSetup = true
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text("Cloud Sync")
-                                .font(.subheadline)
-                            Image(systemName: wallet.cloudVaultEnabled ? "cloud.fill" : "icloud.slash")
-                        }
-                        .foregroundStyle(wallet.cloudVaultEnabled ? Theme.accent : .secondary)
-                    }
-                    .accessibilityIdentifier("wallet.vaultToggle")
-                }
             }
             .sheet(isPresented: $showAddCredential) {
                 AddCredentialView()
-            }
-            .sheet(isPresented: $showRedeemGift, onDismiss: {
-                wallet.pendingGiftLink = nil
-            }) {
-                NavigationStack {
-                    RedeemGiftView(prefilledLink: wallet.pendingGiftLink)
-                }
-                .environmentObject(wallet)
-            }
-            .onChange(of: wallet.pendingGiftLink) { _, newValue in
-                if newValue != nil { showRedeemGift = true }
             }
             .sheet(isPresented: $showSettings) {
                 NavigationStack {
                     SettingsView()
                 }
-            }
-            .sheet(isPresented: $showCloudVaultSetup) {
-                CloudVaultSetupView(lastUsername: wallet.cloudVaultLastUsername)
-                    .environmentObject(wallet)
-            }
-            .confirmationDialog(
-                "Turn off Cloud Sync?",
-                isPresented: $showDisableCloudVaultConfirm,
-                titleVisibility: .visible
-            ) {
-                Button("Turn off Cloud Sync", role: .destructive) {
-                    Task { await wallet.disableCloudVault() }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("Your keys stay on this device. They remain on the server under your account — sign back in anytime to restore sync.")
             }
             .sheet(item: $statsTarget) { target in
                 NavigationStack {
@@ -128,6 +65,10 @@ struct WalletView: View {
                         .environmentObject(wallet)
                 }
                 .presentationDetents([.medium, .large])
+            }
+            .sheet(item: $editingEndpointFor) { credential in
+                EndpointEditorView(credential: credential)
+                    .environmentObject(wallet)
             }
             .alert("Rename credential", isPresented: Binding(
                 get: { renamingCredential != nil },
@@ -143,12 +84,14 @@ struct WalletView: View {
                     renamingCredential = nil
                 }
             }
-            .task {
-                while !Task.isCancelled {
-                    wallet.probeGiftPeers()
-                    try? await Task.sleep(for: .seconds(15))
-                }
-            }
+        }
+    }
+
+    @ViewBuilder
+    private var retiredFeaturesBanner: some View {
+        if wallet.showRetiredFeaturesNotice {
+            RetiredFeaturesBanner(onDismiss: { wallet.dismissRetiredFeaturesNotice() })
+                .padding(.horizontal)
         }
     }
 
@@ -158,34 +101,23 @@ struct WalletView: View {
                 .font(.system(size: 40))
                 .foregroundStyle(Color(.systemGray3))
 
-            Text("No credentials or gifts")
+            Text("No keys yet")
                 .font(.headline)
 
-            Text("Add your first API key or redeem a gift to get started. Keys are encrypted with your master password and stored in the iOS Keychain.")
+            Text("Add your first API key to get started. Keys are encrypted with your master password and stored in the iOS Keychain on this device.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
 
-            HStack(spacing: 12) {
-                Button {
-                    showAddCredential = true
-                } label: {
-                    Label("Add API Key", systemImage: "plus")
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.accent)
-                .accessibilityIdentifier("wallet.addCredentialEmpty")
-
-                Button {
-                    showRedeemGift = true
-                } label: {
-                    Label("Redeem Gift", systemImage: "gift")
-                }
-                .buttonStyle(.bordered)
-                .tint(Theme.accent)
-                .accessibilityIdentifier("wallet.redeemGiftEmpty")
+            Button {
+                showAddCredential = true
+            } label: {
+                Label("Add API Key", systemImage: "plus")
             }
+            .buttonStyle(.borderedProminent)
+            .tint(Theme.accent)
+            .accessibilityIdentifier("wallet.addCredentialEmpty")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -196,8 +128,8 @@ struct WalletView: View {
                 CredentialRow(
                     credential: credential,
                     usage: providerUsage(for: credential.providerId),
-                    gifted: giftedSpend(for: credential.id),
                     onOpenStats: { statsTarget = .credential(credential.id) },
+                    onEditEndpoint: { editingEndpointFor = credential },
                     onRename: {
                         renameDraft = credential.label
                         renamingCredential = credential
@@ -230,32 +162,113 @@ struct WalletView: View {
         }
         return usage
     }
+}
 
-    private func giftedSpend(for credentialId: String) -> GiftedSpend {
-        var spend = GiftedSpend(count: 0, used: 0)
-        for g in wallet.gifts where g.credentialId == credentialId {
-            spend.count += 1
-            spend.used += g.usedTokens
-        }
-        return spend
-    }
+/// One-time notice for users who relied on cloud sync, gifts or pairing
+/// before Byoky became a purely local wallet. Dismissing it is permanent.
+private struct RetiredFeaturesBanner: View {
+    let onDismiss: () -> Void
 
-    private var giftsSection: some View {
-        Section {
-            ForEach(activeGifts) { gc in
-                GiftCredentialRow(
-                    credential: gc,
-                    onOpenStats: { statsTarget = .gift(gc.id) }
-                )
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Byoky is now fully local")
+                    .font(.subheadline.bold())
+                    .foregroundStyle(Theme.textPrimary)
+                Text("Cloud sync, gifts and phone pairing have been retired. Your keys on this device are untouched. To move keys to another device, use Export in Settings.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .onDelete { offsets in
-                let items = activeGifts
-                for index in offsets {
-                    wallet.removeGiftedCredential(id: items[index].id)
+            Spacer()
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.caption)
+                    .foregroundStyle(Theme.textMuted)
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss")
+            .accessibilityIdentifier("wallet.retiredNotice.dismiss")
+        }
+        .padding(12)
+        .background(Theme.accent.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(Theme.accent, lineWidth: 1)
+        )
+        .padding(.bottom, 12)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("wallet.retiredNotice")
+    }
+}
+
+/// Set the endpoint (Azure) or server URL (Ollama, LM Studio) of an existing
+/// credential. Validated with the same rules as import and Add Credential.
+struct EndpointEditorView: View {
+    @EnvironmentObject var wallet: WalletStore
+    @Environment(\.dismiss) private var dismiss
+    let credential: Credential
+
+    @State private var endpoint = ""
+    @State private var error: String?
+
+    private var isAzure: Bool { credential.providerId == "azure_openai" }
+    private var isValid: Bool { Provider.normalizedEndpoint(endpoint, for: credential.providerId) != nil }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField(isAzure ? "https://<resource>.openai.azure.com" : "http://localhost:11434", text: $endpoint)
+                        .keyboardType(.URL)
+                        .textContentType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .fontDesign(.monospaced)
+                        .accessibilityIdentifier("endpointEditor.field")
+                    if !endpoint.trimmingCharacters(in: .whitespaces).isEmpty && !isValid {
+                        Text(isAzure
+                             ? "Use your resource endpoint, like https://contoso.openai.azure.com"
+                             : "Use http://localhost:<port>, http://127.0.0.1:<port>, or an https:// address")
+                            .font(.caption)
+                            .foregroundStyle(Theme.danger)
+                    }
+                } header: {
+                    Text(credential.label)
+                } footer: {
+                    Text(isAzure
+                         ? "Your Azure OpenAI resource endpoint, from Keys and Endpoint in the Azure portal. This key is only ever sent to this endpoint."
+                         : "Where this server is running. This key is only ever sent there.")
+                }
+
+                if let error {
+                    Section {
+                        Text(error).foregroundStyle(Theme.danger)
+                    }
                 }
             }
-        } header: {
-            Text("\(activeGifts.count) gift\(activeGifts.count == 1 ? "" : "s")")
+            .navigationTitle(isAzure ? "Azure Endpoint" : "Server URL")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        do {
+                            try wallet.updateCredentialEndpoint(id: credential.id, endpoint: endpoint)
+                            dismiss()
+                        } catch {
+                            self.error = error.localizedDescription
+                        }
+                    }
+                    .disabled(!isValid)
+                    .accessibilityIdentifier("endpointEditor.save")
+                }
+            }
+            .onAppear { endpoint = credential.baseUrl ?? "" }
         }
     }
 }
@@ -266,17 +279,20 @@ struct CredentialUsage {
     var outputTokens: Int
 }
 
-struct GiftedSpend {
-    var count: Int
-    var used: Int
-}
-
 struct CredentialRow: View {
     let credential: Credential
     let usage: CredentialUsage
-    let gifted: GiftedSpend
     let onOpenStats: () -> Void
+    let onEditEndpoint: () -> Void
     let onRename: () -> Void
+
+    private var needsEndpoint: Bool {
+        Provider.find(credential.providerId)?.requiresCustomBaseUrl == true
+    }
+
+    private var missingEndpoint: Bool {
+        Provider.missingEndpointMessage(providerId: credential.providerId, credentialBaseUrl: credential.baseUrl) != nil
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -317,6 +333,30 @@ struct CredentialRow: View {
                     .clipShape(Capsule())
             }
 
+            if needsEndpoint {
+                if missingEndpoint {
+                    // Keys without their own endpoint are never sent anywhere.
+                    Button(action: onEditEndpoint) {
+                        Label(credential.providerId == "azure_openai" ? "Add endpoint" : "Add server URL",
+                              systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.orange)
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityIdentifier("wallet.credential.addEndpoint")
+                } else if let endpoint = credential.baseUrl {
+                    Button(action: onEditEndpoint) {
+                        Text(endpoint)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Endpoint \(endpoint). Edit")
+                }
+            }
+
             Divider()
 
             VStack(alignment: .leading, spacing: 8) {
@@ -329,22 +369,6 @@ struct CredentialRow: View {
                     statColumn(value: formatWalletTokens(usage.inputTokens), label: "input")
                     statColumn(value: formatWalletTokens(usage.outputTokens), label: "output")
                 }
-
-                HStack {
-                    Text("Spent on gifts")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    if gifted.used > 0 {
-                        Text("\(formatWalletTokens(gifted.used)) · \(gifted.count) gift\(gifted.count == 1 ? "" : "s")")
-                            .font(.caption.weight(.semibold))
-                    } else {
-                        Text("None")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.top, 4)
             }
         }
         .padding(.vertical, 4)
@@ -358,111 +382,6 @@ struct CredentialRow: View {
             Text(label).font(.caption2).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-/// Inline row for a received gift. Same shape as `CredentialRow` plus a sender
-/// label, peer online dot, tokens-remaining bar, and a gift badge. Tapping
-/// opens the gift stats sheet.
-struct GiftCredentialRow: View {
-    @EnvironmentObject var wallet: WalletStore
-    let credential: GiftedCredential
-    let onOpenStats: () -> Void
-
-    private var providerName: String {
-        Provider.find(credential.providerId)?.name ?? credential.providerName
-    }
-
-    private var remaining: Int { giftedBudgetRemaining(credential) }
-    private var percent: Double { giftedBudgetPercent(credential) }
-
-    private var expiryText: String {
-        if isGiftedCredentialExpired(credential) { return "Expired" }
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: credential.expiresAt, relativeTo: Date())
-    }
-
-    private var onlineState: Bool? { wallet.giftPeerOnline[credential.giftId] }
-    private var hasOwnKey: Bool { wallet.credentials.contains { $0.providerId == credential.providerId } }
-    private var isPreferred: Bool { wallet.giftPreferences[credential.providerId] == credential.giftId }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 14) {
-                ProviderIcon(providerId: credential.providerId, size: 18)
-                    .foregroundStyle(Color.white)
-                    .frame(width: 36, height: 36)
-                    .background(Color.black)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(onlineColor)
-                            .frame(width: 6, height: 6)
-                            .help(onlineHelpText)
-                        Text(providerName)
-                            .font(.body.weight(.medium))
-                    }
-                    Text("Gift from \(credential.senderLabel)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                Text("Gift")
-                    .font(.caption2.weight(.medium))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Theme.accent.opacity(0.15))
-                    .foregroundStyle(Theme.accent)
-                    .clipShape(Capsule())
-            }
-
-            ProgressView(value: percent)
-                .tint(percent > 0.9 ? .red : Theme.accent)
-
-            HStack {
-                Text("\(formatWalletTokens(remaining)) / \(formatWalletTokens(credential.maxTokens)) left")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text(expiryText)
-                    .font(.caption2)
-                    .foregroundStyle(isGiftedCredentialExpired(credential) ? .red : .secondary)
-            }
-
-            if hasOwnKey && !isGiftedCredentialExpired(credential) {
-                Toggle("Use instead of own key", isOn: Binding(
-                    get: { isPreferred },
-                    set: { wallet.setGiftPreference(providerId: credential.providerId, giftId: $0 ? credential.giftId : nil) }
-                ))
-                .font(.caption)
-                .tint(Theme.accent)
-                .onTapGesture { /* swallow taps so row onTapGesture doesn't fire */ }
-            }
-        }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
-        .onTapGesture { onOpenStats() }
-    }
-
-    private var onlineColor: Color {
-        switch onlineState {
-        case .some(true): return .green
-        case .some(false): return .red
-        case nil: return .orange
-        }
-    }
-
-    private var onlineHelpText: String {
-        switch onlineState {
-        case .some(true): return "Sender online — gift can be used"
-        case .some(false): return "Sender offline — gift will fail until sender reconnects"
-        case nil: return "Checking sender status…"
-        }
     }
 }
 

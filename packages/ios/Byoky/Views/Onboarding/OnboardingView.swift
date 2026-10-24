@@ -2,8 +2,7 @@ import SwiftUI
 
 enum OnboardingStep {
     case welcome
-    case vaultAuth
-    case offlineSetup
+    case createPassword
 }
 
 struct OnboardingView: View {
@@ -12,7 +11,6 @@ struct OnboardingView: View {
     @State private var confirmPassword = ""
     @State private var error: String?
     @State private var step: OnboardingStep = .welcome
-    @State private var vaultMode: AuthMode = .signup
 
     var body: some View {
         ZStack {
@@ -24,12 +22,7 @@ struct OnboardingView: View {
                 switch step {
                 case .welcome:
                     welcomeStep
-                case .vaultAuth:
-                    VaultAuthView(
-                        initialMode: vaultMode,
-                        onBack: { withAnimation { step = .welcome } },
-                    )
-                case .offlineSetup:
+                case .createPassword:
                     passwordStep
                 }
 
@@ -48,15 +41,14 @@ struct OnboardingView: View {
                 .font(.system(size: 32, weight: .bold))
                 .foregroundStyle(Theme.textPrimary)
 
-            Text("Your encrypted wallet for AI API keys. Sync across devices, end-to-end encrypted.")
+            Text("Your encrypted wallet for AI API keys. Keys stay on this device — apps use them without ever seeing them.")
                 .font(.body)
                 .foregroundStyle(Theme.textSecondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 16)
 
             Button {
-                vaultMode = .signup
-                withAnimation { step = .vaultAuth }
+                withAnimation { step = .createPassword }
             } label: {
                 Text("Get Started")
                     .font(.headline)
@@ -68,15 +60,6 @@ struct OnboardingView: View {
             }
             .padding(.top, 8)
             .accessibilityIdentifier("onboarding.getStarted")
-
-            Button {
-                withAnimation { step = .offlineSetup }
-            } label: {
-                Text("Continue with your API keys")
-                    .font(.footnote)
-                    .foregroundStyle(Theme.textMuted)
-            }
-            .accessibilityIdentifier("onboarding.byokMode")
         }
     }
 

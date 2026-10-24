@@ -20,20 +20,8 @@ struct RootView: View {
             switch newPhase {
             case .background:
                 wallet.recordBackgroundTime()
-                // iOS suspends URLSessionWebSocketTask in the background, so
-                // drop every gift relay socket explicitly. They'll be reopened
-                // when we return to .active.
-                GiftRelayHost.shared.disconnectAll()
             case .active:
                 wallet.checkAutoLock()
-                if wallet.status == .unlocked {
-                    GiftRelayHost.shared.reconnectAll()
-                    // Also reconnect any active pair session — without this,
-                    // recipients (browser SDKs, the OpenClaw bridge) see the
-                    // phone as offline forever after the first background.
-                    RelayPairService.shared.reconnectIfNeeded()
-                    Task { await wallet.reconcileGiftUsageWithVault() }
-                }
             default:
                 break
             }

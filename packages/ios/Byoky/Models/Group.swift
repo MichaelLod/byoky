@@ -19,26 +19,19 @@ struct Group: Identifiable, Codable, Equatable {
     var name: String
     var providerId: String
     var credentialId: String?
-    /// Optional pin to a received gift (matches `GiftedCredential.giftId`).
-    /// Mutually exclusive with `credentialId` — setting one clears the other.
-    /// When set, the routing resolver short-circuits to the gift and sends
-    /// the request through that gift's relay instead of using an owned key.
-    var giftId: String?
     var model: String?
     let createdAt: Date
 
     /// The default group is a sentinel bucket for apps with no explicit
     /// binding. It carries no routing (empty providerId), so unbound apps
     /// fall through to direct credential lookup for the provider they
-    /// actually request. Mirrors the vault's default group seeding and
-    /// the extension's ensureDefaultGroup.
+    /// actually request. Mirrors the extension's ensureDefaultGroup.
     static func makeDefault() -> Group {
         Group(
             id: defaultGroupId,
             name: "Default",
             providerId: "",
             credentialId: nil,
-            giftId: nil,
             model: nil,
             createdAt: Date()
         )

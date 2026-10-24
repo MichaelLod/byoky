@@ -30,12 +30,6 @@ struct WalletStatsSheet: View {
                 } else {
                     missing
                 }
-            case .gift(let id):
-                if let gc = wallet.giftedCredentials.first(where: { $0.id == id }) {
-                    GiftStatsView(credential: gc)
-                } else {
-                    missing
-                }
             }
         }
         .background(Theme.bgMain)
@@ -93,12 +87,6 @@ private struct CredentialStatsView: View {
             .sorted { $0.total > $1.total }
     }
 
-    private var gifts: [Gift] {
-        wallet.gifts.filter { $0.credentialId == credential.id }
-    }
-
-    private var giftUsedTotal: Int { gifts.reduce(0) { $0 + $1.usedTokens } }
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -133,23 +121,6 @@ private struct CredentialStatsView: View {
                                 subtitle: "\(row.requests) request\(row.requests == 1 ? "" : "s")",
                                 trailing: formatWalletTokens(row.total) + " tokens"
                             )
-                        }
-                    }
-                }
-
-                section("Gifts from this credential") {
-                    if gifts.isEmpty {
-                        Text("No gifts created from this credential.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.vertical, 4)
-                    } else {
-                        Text("\(formatWalletTokens(giftUsedTotal)) tokens redeemed across \(gifts.count) gift\(gifts.count == 1 ? "" : "s")")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.bottom, 4)
-                        ForEach(gifts) { g in
-                            GiftSummaryRow(gift: g)
                         }
                     }
                 }
@@ -224,84 +195,6 @@ private struct CredentialStatsView: View {
     }
 }
 
-private struct GiftStatsView: View {
-    @EnvironmentObject var wallet: WalletStore
-    let credential: GiftedCredential
-
-    private var provider: Provider? { Provider.find(credential.providerId) }
-    private var remaining: Int { giftedBudgetRemaining(credential) }
-    private var percent: Double { giftedBudgetPercent(credential) }
-    private var onlineState: Bool? { wallet.giftPeerOnline[credential.giftId] }
-
-    private var onlineText: String {
-        switch onlineState {
-        case .some(true): return "Online"
-        case .some(false): return "Offline"
-        case nil: return "Checking…"
-        }
-    }
-
-    private var onlineColor: Color {
-        switch onlineState {
-        case .some(true): return .green
-        case .some(false): return .red
-        case nil: return .orange
-        }
-    }
-
-    private var expiryText: String {
-        if isGiftedCredentialExpired(credential) { return "Expired" }
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: credential.expiresAt, relativeTo: Date())
-    }
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(provider?.name ?? credential.providerId)
-                        .font(.subheadline.weight(.semibold))
-                    Text("From \(credential.senderLabel)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                HStack(spacing: 12) {
-                    StatCard(value: formatWalletTokens(credential.usedTokens), label: "Used")
-                    StatCard(value: formatWalletTokens(remaining), label: "Remaining")
-                    StatCard(value: formatWalletTokens(credential.maxTokens), label: "Budget")
-                }
-
-                ProgressView(value: percent)
-                    .tint(percent > 0.9 ? .red : Theme.accent)
-
-                VStack(spacing: 0) {
-                    StatRow(title: "Sender",
-                            subtitle: nil,
-                            trailing: onlineText,
-                            trailingColor: onlineColor)
-                    Divider()
-                    StatRow(title: "Expires",
-                            subtitle: nil,
-                            trailing: expiryText)
-                    Divider()
-                    StatRow(title: "Received",
-                            subtitle: nil,
-                            trailing: credential.createdAt.formatted(date: .abbreviated, time: .omitted))
-                }
-                .padding(14)
-                .background(Theme.bgCard)
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-            }
-            .padding()
-        }
-        .navigationTitle("Gift")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
 private struct StatCard: View {
     let value: String
     let label: String
@@ -326,7 +219,6 @@ private struct StatRow: View {
     let title: String
     var subtitle: String? = nil
     let trailing: String
-    var trailingColor: Color? = nil
     var monospace: Bool = false
 
     var body: some View {
@@ -345,48 +237,7 @@ private struct StatRow: View {
             Spacer()
             Text(trailing)
                 .font(.callout.monospacedDigit())
-                .foregroundStyle(trailingColor ?? .primary)
-        }
-        .padding(.vertical, 6)
-    }
-}
-
-private struct GiftSummaryRow: View {
-    let gift: Gift
-
-    private var percent: Double {
-        guard gift.maxTokens > 0 else { return 0 }
-        return min(1, Double(gift.usedTokens) / Double(gift.maxTokens))
-    }
-
-    private var expiryText: String {
-        if !gift.active || Date() > gift.expiresAt { return "Inactive" }
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return "Expires " + formatter.localizedString(for: gift.expiresAt, relativeTo: Date())
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(gift.label.isEmpty ? "Unnamed gift" : gift.label)
-                    .font(.callout.weight(.medium))
-                Spacer()
-                Text(expiryText)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            ProgressView(value: percent)
-                .tint(percent > 0.9 ? .red : Theme.accent)
-            HStack {
-                Text("\(formatWalletTokens(gift.usedTokens)) used")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text("/ \(formatWalletTokens(gift.maxTokens))")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
+                .foregroundStyle(.primary)
         }
         .padding(.vertical, 6)
     }

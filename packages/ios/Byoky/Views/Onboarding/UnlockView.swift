@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 struct UnlockView: View {
@@ -29,21 +30,9 @@ struct UnlockView: View {
                     .font(.system(size: 28, weight: .bold))
                     .foregroundStyle(Theme.textPrimary)
 
-                if let username = wallet.cloudVaultUsername ?? wallet.cloudVaultLastUsername {
-                    VStack(spacing: 4) {
-                        Text(username)
-                            .font(.callout)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(Theme.textPrimary)
-                        Text("Enter your master password to unlock")
-                            .font(.callout)
-                            .foregroundStyle(Theme.textSecondary)
-                    }
-                } else {
-                    Text("Enter your master password to unlock")
-                        .font(.callout)
-                        .foregroundStyle(Theme.textSecondary)
-                }
+                Text("Enter your master password to unlock")
+                    .font(.callout)
+                    .foregroundStyle(Theme.textSecondary)
 
                 VStack(spacing: 16) {
                     HStack(spacing: 10) {

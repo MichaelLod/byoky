@@ -10,31 +10,17 @@ final class WalletStore: ObservableObject {
     @Published var credentials: [Credential] = []
     @Published var sessions: [Session] = []
     @Published var requestLogs: [RequestLog] = []
-    @Published var gifts: [Gift] = []
-    @Published var giftedCredentials: [GiftedCredential] = []
-    /// Last-known online status per received gift, keyed by giftId. Filled in
-    /// by `probeGiftPeers()` which the Wallet screen calls on appear. Treated
-    /// as transient — we don't persist it; if it's missing, the UI shows a
-    /// "checking" state until the probe lands.
-    @Published var giftPeerOnline: [String: Bool] = [:]
-    @Published var giftPreferences: [String: String] = [:]  // providerId -> giftId
     @Published var tokenAllowances: [TokenAllowance] = []
     @Published var groups: [Group] = []
     @Published var appGroups: AppGroups = [:]
     @Published var lockoutEndTime: Date?
     @Published var installedApps: [InstalledApp] = []
-    @Published var cloudVaultEnabled = false
-    @Published var cloudVaultUsername: String?
-    @Published var cloudVaultLastUsername: String?
-    @Published var cloudVaultTokenExpired = false
-    /// Set by ByokyApp.onOpenURL when a byoky://gift/<payload> deep link
-    /// fires. WalletView observes this and presents the redeem sheet with
-    /// the link pre-filled.
-    @Published var pendingGiftLink: String?
-    /// Set by ByokyApp.onOpenURL when a byoky://pair/<payload> deep link
-    /// fires. MainTabView switches to the Connect tab and PairView auto-
-    /// kicks off the relay handshake with the decoded payload.
-    @Published var pendingPairLink: String?
+    /// One-time Wallet banner for users who relied on cloud sync, gifts or
+    /// pairing before those features were retired.
+    @Published var showRetiredFeaturesNotice = false
+    /// A `.byoky` file opened from Files, AirDrop or Mail, waiting for the
+    /// user to enter its password (MainTabView shows the import sheet).
+    @Published var pendingBackupFile: PendingBackupFile?
 
     private let keychain = KeychainService.shared
     private let crypto = CryptoService.shared
@@ -45,34 +31,12 @@ final class WalletStore: ObservableObject {
     private let credentialsKey = "credentials"
     private let sessionsKey = "sessions"
     private let requestLogKey = "requestLog"
-    private let giftsKey = "gifts"
-    private let giftedCredentialsKey = "giftedCredentials"
-    private let giftPreferencesKey = "giftPreferences"
     private let tokenAllowancesKey = "tokenAllowances"
     private let groupsKey = "groups"
     private let appGroupsKey = "appGroups"
     private let installedAppsKey = "installedApps"
 
-    private static let vaultURL = "https://vault.byoky.com"
-    private var vaultToken: String?
-    private var vaultSessionId: String?
-    private var vaultTokenIssuedAt: Date?
-    private var vaultCredentialMap: [String: String] = [:]
-    // Per-credential sync metadata for last-write-wins merging. Parallel to
-    // vaultCredentialMap so the two stay in lockstep; group sync still reads
-    // the legacy map directly, but pullFromVault needs the remote updatedAt
-    // to decide conflicts.
-    private struct VaultCredentialMeta: Codable {
-        let serverId: String
-        let remoteUpdatedAt: Int64
-    }
-    private var vaultCredentialMeta: [String: VaultCredentialMeta] = [:]
-    private var vaultLastSyncAt: Int64 = 0
-    // AES-GCM key derived from (vault password, encryptionSalt). Used to
-    // encrypt apiKey before upload and decrypt on sync pull, so plaintext
-    // never crosses the wire. Held in memory after login; raw bytes are
-    // persisted in the keychain for relock survival.
-    private var vaultKey: SymmetricKey?
+    private let appConsent = AppConsentStore()
 
     private let autoLockTimeout: TimeInterval = 900
     private var backgroundTime: Date?
@@ -83,14 +47,13 @@ final class WalletStore: ObservableObject {
     }
 
     private init() {
+        // Drop data left behind by the retired cloud vault, gift and relay
+        // pairing features before anything else reads the keychain.
+        LegacyDataCleanup.runIfNeeded()
+        showRetiredFeaturesNotice = LegacyDataCleanup.shouldShowRetiredNotice()
         checkInitialized()
         restoreLockoutState()
         loadInstalledApps()
-        // Read username from keychain at init so UnlockView can show it
-        // before the wallet is unlocked. Full cloud-vault state (tokens,
-        // credential maps) still loads in loadCloudVaultState() on unlock.
-        cloudVaultUsername = try? keychain.loadString(key: "cloudVault_username")
-        cloudVaultLastUsername = try? keychain.loadString(key: "cloudVault_lastUsername")
     }
 
     // MARK: - Initialization
@@ -138,12 +101,6 @@ final class WalletStore: ObservableObject {
         status = .unlocked
 
         AppGroupSync.shared.syncWalletState(isUnlocked: true, providers: [])
-
-        // Without this attach, gifts created before the user's first
-        // lock+unlock cycle never open their sender-side relay socket —
-        // recipients hit 503 GIFT_SENDER_OFFLINE. See COD-13.
-        GiftRelayHost.shared.attach(wallet: self)
-        GiftRelayHost.shared.reconnectAll()
     }
 
     func unlock(password: String) throws {
@@ -179,43 +136,26 @@ final class WalletStore: ObservableObject {
         try pruneRemovedProviders()
         try loadSessions()
         loadRequestLogs()
-        loadGifts()
-        loadGiftedCredentials()
-        loadGiftPreferences()
         loadTokenAllowances()
         loadGroups()
         loadAppGroups()
+        // lock() clears the in-memory list, so reload it on every unlock —
+        // otherwise the Apps tab stays empty until the next cold start.
+        loadInstalledApps()
         try ensureDefaultGroup()
         try migrateCredentials(password: password)
-        loadCloudVaultState()
-        Task {
-            if cloudVaultEnabled, vaultToken != nil, !cloudVaultTokenExpired {
-                await pullFromVault()
-            }
-            await syncPendingCredentials()
-            await syncPendingGroups()
-            await syncPendingGifts()
-            await reconcileGiftUsageWithVault()
-        }
 
         AppGroupSync.shared.syncWalletState(
             isUnlocked: true,
             providers: credentials.map(\.providerId)
         )
-
-        GiftRelayHost.shared.attach(wallet: self)
-        GiftRelayHost.shared.reconnectAll()
     }
 
     func lock() {
-        GiftRelayHost.shared.disconnectAll()
         masterKey = nil
         credentials = []
         sessions = []
         requestLogs = []
-        gifts = []
-        giftedCredentials = []
-        giftPreferences = [:]
         tokenAllowances = []
         groups = []
         appGroups = [:]
@@ -247,24 +187,24 @@ final class WalletStore: ObservableObject {
         try? keychain.delete(key: credentialsKey)
         try? keychain.delete(key: sessionsKey)
         try? keychain.delete(key: requestLogKey)
-        try? keychain.delete(key: giftsKey)
-        try? keychain.delete(key: giftedCredentialsKey)
         try? keychain.delete(key: tokenAllowancesKey)
         try? keychain.delete(key: groupsKey)
         try? keychain.delete(key: appGroupsKey)
-        clearCloudVaultState(clearLastUsername: true)
+        // A full reset also removes anything the retired features left behind,
+        // and the notice about them no longer applies to a fresh wallet.
+        LegacyDataCleanup.purge()
+        dismissRetiredFeaturesNotice()
 
         // Clear in-memory state
         credentials = []
         sessions = []
         requestLogs = []
-        gifts = []
-        giftedCredentials = []
         tokenAllowances = []
         groups = []
         appGroups = [:]
         installedApps = []
         UserDefaults.standard.removeObject(forKey: installedAppsKey)
+        appConsent.clear()
 
         // Reset brute-force state
         failedAttempts = 0
@@ -275,7 +215,16 @@ final class WalletStore: ObservableObject {
         status = .uninitialized
     }
 
-    // MARK: - Marketplace Apps
+    func dismissRetiredFeaturesNotice() {
+        LegacyDataCleanup.dismissRetiredNotice()
+        showRetiredFeaturesNotice = false
+    }
+
+    // MARK: - Installed Apps
+    //
+    // Web apps the user added by URL. They open in the in-wallet browser
+    // (AppRuntimeView), where NativeBridgeHandler serves their requests with
+    // the keys in this wallet.
 
     func loadInstalledApps() {
         guard let data = UserDefaults.standard.data(forKey: installedAppsKey),
@@ -289,26 +238,18 @@ final class WalletStore: ObservableObject {
         }
     }
 
-    func installApp(_ app: MarketplaceApp) {
-        guard let url = URL(string: app.url), url.scheme == "https" else { return }
-
-        let installed = InstalledApp(
-            id: app.id,
-            slug: app.slug,
-            name: app.name,
-            url: url.absoluteString,
-            icon: app.icon,
-            description: app.description,
-            category: app.category,
-            providers: app.providers,
-            authorName: app.author.name,
-            authorWebsite: app.author.website,
-            verified: app.verified,
-            installedAt: Date(),
-            enabled: true
-        )
-        installedApps.append(installed)
+    /// Add a web app by URL. The input is normalized and must be https; when
+    /// `name` is empty a name is derived from the host. Throws
+    /// `InstalledApp.AddError` for invalid or already-added URLs.
+    @discardableResult
+    func addApp(urlString: String, name: String? = nil) throws -> InstalledApp {
+        let app = try InstalledApp.make(from: urlString, name: name)
+        if installedApps.contains(where: { $0.url == app.url }) {
+            throw InstalledApp.AddError.duplicate
+        }
+        installedApps.append(app)
         saveInstalledApps()
+        return app
     }
 
     func uninstallApp(_ id: String) {
@@ -321,6 +262,182 @@ final class WalletStore: ObservableObject {
             installedApps[idx].enabled.toggle()
             saveInstalledApps()
         }
+    }
+
+    // MARK: - Backup (.byoky)
+
+    /// Encrypt every credential into the contents of a `.byoky` file. Requires
+    /// the wallet's master password again (an unlocked phone alone must not be
+    /// enough to walk away with every key). Wrong attempts count toward the
+    /// same lockout as unlocking. The PBKDF2-heavy work runs off the main
+    /// actor; `progress` (0 → 1) is called from a background thread.
+    func exportBackup(
+        masterPassword: String,
+        exportPassword: String,
+        progress: @escaping @Sendable (Double) -> Void = { _ in }
+    ) async throws -> String {
+        guard masterKey != nil else { throw WalletError.locked }
+        if let endTime = lockoutEndTime, Date() < endTime {
+            throw WalletError.lockedOut(max(1, Int(endTime.timeIntervalSinceNow)))
+        }
+        let storedHash = try keychain.loadString(key: passwordHashKey)
+        let verified = await Task.detached(priority: .userInitiated) {
+            CryptoService.shared.verifyPassword(masterPassword, hash: storedHash)
+        }.value
+        guard verified else {
+            handleFailedAttempt()
+            throw WalletError.wrongPassword
+        }
+        resetFailedAttempts()
+        guard masterKey != nil else { throw WalletError.locked }
+
+        let entries = try credentials.map { credential in
+            BackupFile.Entry(
+                id: credential.id,
+                providerId: credential.providerId,
+                label: credential.label,
+                authMethod: credential.authMethod,
+                createdAt: credential.createdAt,
+                baseUrl: credential.baseUrl,
+                secret: try decryptKey(for: credential)
+            )
+        }
+        return try await Task.detached(priority: .userInitiated) {
+            try BackupFile.export(entries, password: exportPassword, progress: progress)
+        }.value
+    }
+
+    /// A decrypted, validated backup waiting for the user to confirm.
+    struct BackupImportPreview: Equatable {
+        let contents: BackupFile.Contents
+        /// What would be added right now (duplicates already removed).
+        let toAdd: [BackupFile.Entry]
+        let duplicates: Int
+        var unsupported: Int { contents.unsupportedCount }
+    }
+
+    struct BackupImportSummary: Equatable {
+        var added: Int
+        var duplicates: Int
+        var unsupported: Int
+    }
+
+    /// Step 1 of an import: decrypt and validate the file off the main actor
+    /// and work out what would be added. Nothing is stored. Cancelling the
+    /// calling task stops between keys.
+    func prepareBackupImport(
+        contents: String,
+        password: String,
+        progress: @escaping @Sendable (Double) -> Void = { _ in }
+    ) async throws -> BackupImportPreview {
+        guard masterKey != nil else { throw WalletError.locked }
+        let work = Task.detached(priority: .userInitiated) {
+            try BackupFile.open(contents, password: password, progress: progress)
+        }
+        let opened = try await withTaskCancellationHandler {
+            try await work.value
+        } onCancel: {
+            work.cancel()
+        }
+        try Task.checkCancellation()
+        let plan = BackupFile.plan(opened.entries, existing: try existingBackupEntries())
+        return BackupImportPreview(contents: opened, toAdd: plan.toAdd, duplicates: plan.duplicateCount)
+    }
+
+    /// Step 2: store what the user confirmed. The merge is recomputed against
+    /// the wallet as it is now; new keys get fresh ids, duplicates are
+    /// skipped, nothing existing is changed or removed, and either every new
+    /// key is stored or none is.
+    func commitBackupImport(_ preview: BackupImportPreview) throws -> BackupImportSummary {
+        guard let key = masterKey else { throw WalletError.locked }
+        let plan = BackupFile.plan(preview.contents.entries, existing: try existingBackupEntries())
+
+        let original = credentials
+        var added: [Credential] = []
+        var writtenKeys: [String] = []
+        do {
+            for entry in plan.toAdd {
+                let credential = Credential(
+                    id: UUID().uuidString,
+                    providerId: entry.providerId,
+                    label: entry.label,
+                    authMethod: entry.authMethod,
+                    createdAt: entry.createdAt,
+                    baseUrl: entry.baseUrl
+                )
+                if !entry.secret.isEmpty {
+                    let encrypted = try crypto.encrypt(plaintext: entry.secret, key: key)
+                    try keychain.saveString(key: "key_\(credential.id)", value: "v2:" + encrypted)
+                    writtenKeys.append(credential.id)
+                }
+                added.append(credential)
+            }
+            if !added.isEmpty {
+                credentials = original + added
+                try saveCredentials()
+            }
+        } catch {
+            // Put the credential index back exactly as it was, so a failed
+            // write can't lose existing keys, then drop the new key entries.
+            credentials = original
+            try? keychain.saveCodable(key: credentialsKey, value: original)
+            for id in writtenKeys { try? keychain.delete(key: "key_\(id)") }
+            throw error
+        }
+
+        if !added.isEmpty {
+            AppGroupSync.shared.syncWalletState(
+                isUnlocked: true,
+                providers: credentials.map(\.providerId)
+            )
+        }
+        return BackupImportSummary(
+            added: added.count,
+            duplicates: plan.duplicateCount,
+            unsupported: preview.unsupported
+        )
+    }
+
+    /// The wallet's keys in backup form, for duplicate detection. A stored
+    /// key that can't be read can't be matched; it doesn't block the import.
+    private func existingBackupEntries() throws -> [BackupFile.Entry] {
+        guard masterKey != nil else { throw WalletError.locked }
+        return credentials.compactMap { credential in
+            guard let secret = try? decryptKey(for: credential) else { return nil }
+            return BackupFile.Entry(
+                providerId: credential.providerId,
+                label: credential.label,
+                authMethod: credential.authMethod,
+                createdAt: credential.createdAt,
+                baseUrl: Provider.find(credential.providerId)?.requiresCustomBaseUrl == true ? credential.baseUrl : nil,
+                secret: secret
+            )
+        }
+    }
+
+    /// Called when the system hands Byoky a `.byoky` file. Reads it right away
+    /// and queues the import sheet. The incoming copy is deleted afterwards
+    /// when it lives in this app's own container (Documents/Inbox,
+    /// tmp/<bundle>-Inbox, …); files elsewhere are never touched.
+    func receiveBackupFile(at url: URL) {
+        defer {
+            if Self.isInsideAppContainer(url) {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+        do {
+            let contents = try BackupFile.readFile(at: url)
+            pendingBackupFile = PendingBackupFile(fileName: url.lastPathComponent, contents: contents)
+        } catch {
+            pendingBackupFile = PendingBackupFile(fileName: url.lastPathComponent, contents: "", readError: error.localizedDescription)
+        }
+    }
+
+    nonisolated static func isInsideAppContainer(_ url: URL, home: URL = URL(fileURLWithPath: NSHomeDirectory())) -> Bool {
+        guard url.isFileURL else { return false }
+        let path = url.standardizedFileURL.resolvingSymlinksInPath().path
+        let root = home.standardizedFileURL.resolvingSymlinksInPath().path
+        return path.hasPrefix(root.hasSuffix("/") ? root : root + "/")
     }
 
     // MARK: - Brute-Force Protection
@@ -383,9 +500,6 @@ final class WalletStore: ObservableObject {
             isUnlocked: true,
             providers: credentials.map(\.providerId)
         )
-
-        let localId = credential.id
-        Task { await syncAddToVault(localId: localId, providerId: providerId, label: label, authMethod: authMethod.rawValue, plainKey: apiKey, baseUrl: baseUrl) }
     }
 
     func updateCredentialLabel(id: String, newLabel: String) throws {
@@ -395,11 +509,20 @@ final class WalletStore: ObservableObject {
         guard credentials[idx].label != trimmed else { return }
         credentials[idx].label = trimmed
         try saveCredentials()
-        Task { await syncRenameToVault(localId: id, newLabel: trimmed) }
+    }
+
+    /// Set the endpoint / server URL of an Azure, Ollama or LM Studio
+    /// credential (e.g. an Azure key added before endpoints were required).
+    func updateCredentialEndpoint(id: String, endpoint: String) throws {
+        guard let idx = credentials.firstIndex(where: { $0.id == id }) else { throw WalletError.credentialNotFound }
+        guard let normalized = Provider.normalizedEndpoint(endpoint, for: credentials[idx].providerId) else {
+            throw WalletError.invalidEndpoint
+        }
+        credentials[idx].baseUrl = normalized
+        try saveCredentials()
     }
 
     func removeCredential(_ credential: Credential) throws {
-        let localId = credential.id
         try keychain.delete(key: "key_\(credential.id)")
         credentials.removeAll { $0.id == credential.id }
         try saveCredentials()
@@ -408,8 +531,6 @@ final class WalletStore: ObservableObject {
             isUnlocked: true,
             providers: credentials.map(\.providerId)
         )
-
-        Task { await syncRemoveFromVault(localId: localId) }
     }
 
     func decryptKey(for credential: Credential) throws -> String {
@@ -468,20 +589,20 @@ final class WalletStore: ObservableObject {
 
     // MARK: - Sessions
 
-    /// Default expiry window for relay-paired sessions. The pair stays in the
-    /// Apps screen for 30 days even if the WebSocket drops between requests —
-    /// the user revokes explicitly when they're done. Lines up with how the
-    /// extension treats sessions as durable trust records, not live sockets.
-    private static let relaySessionTTL: TimeInterval = 30 * 24 * 60 * 60
+    /// Default expiry window for connected-app sessions. An app stays in the
+    /// Connected Apps screen for 30 days after it last connected — the user
+    /// revokes explicitly when they're done. Lines up with how the extension
+    /// treats sessions as durable trust records, not live connections.
+    private static let sessionTTL: TimeInterval = 30 * 24 * 60 * 60
 
-    /// Upsert a session for `appOrigin`. Used by `RelayPairService` when a
-    /// pair handshake completes — durable record so the app shows up in the
-    /// Apps screen across reconnects. Re-pairing the same origin updates the
+    /// Upsert a session for `appOrigin`. Called by `NativeBridgeHandler` when
+    /// an app in the in-wallet browser connects, so it shows up in Connected
+    /// Apps across launches. Reconnecting the same origin updates the
     /// providers list and resets the expiry, but keeps the existing session id.
     @discardableResult
     func upsertSession(appOrigin: String, providers: [String]) throws -> Session {
         let now = Date()
-        let expiresAt = now.addingTimeInterval(Self.relaySessionTTL)
+        let expiresAt = now.addingTimeInterval(Self.sessionTTL)
 
         if let idx = sessions.firstIndex(where: { $0.appOrigin == appOrigin }) {
             let existing = sessions[idx]
@@ -511,9 +632,35 @@ final class WalletStore: ObservableObject {
         return session
     }
 
+    /// User revoked an app in Connected Apps: drop its session and block
+    /// silent reconnects from that origin until the user opens the app again
+    /// from the Apps grid (`grantAppAccess`).
     func revokeSession(_ session: Session) throws {
+        appConsent.revoke(session.appOrigin)
         sessions.removeAll { $0.id == session.id }
         try saveSessions()
+    }
+
+    /// The app itself disconnected (BYOKY_DISCONNECT): end the session, but
+    /// don't block it from connecting again.
+    func endSession(appOrigin: String) {
+        guard sessions.contains(where: { $0.appOrigin == appOrigin }) else { return }
+        sessions.removeAll { $0.appOrigin == appOrigin }
+        try? saveSessions()
+    }
+
+    /// Opening an app from the Apps grid is consent for it to connect.
+    func grantAppAccess(origin: String) {
+        appConsent.grant(origin)
+    }
+
+    func isAppAccessRevoked(origin: String) -> Bool {
+        appConsent.isRevoked(origin)
+    }
+
+    /// The app has a live (connected, unexpired) session.
+    func hasActiveSession(appOrigin: String) -> Bool {
+        sessions.contains { $0.appOrigin == appOrigin && !$0.isExpired }
     }
 
     func cleanExpiredSessions() throws {
@@ -663,10 +810,10 @@ final class WalletStore: ObservableObject {
     // MARK: - Groups
     //
     // Groups are routing rules. Each app origin is bound to a group via
-    // `appGroups` (origin → groupId), set from the Apps screen. The default
-    // group catches anything not explicitly bound. RoutingResolver looks up
-    // `groupForOrigin(_:)` on every request to decide credentials + (when
-    // cross-family) translation destination.
+    // `appGroups` (origin → groupId), set from the Connected Apps screen. The
+    // default group catches anything not explicitly bound. RoutingResolver
+    // looks up `groupForOrigin(_:)` on every request to decide credentials +
+    // (when cross-family) translation destination.
 
     private func loadGroups() {
         do {
@@ -712,7 +859,7 @@ final class WalletStore: ObservableObject {
 
     /// Returns the group that should route this origin's requests — the user's
     /// per-app binding from `appGroups`, falling back to the default group when
-    /// no binding exists. Used by `RelayPairService` before each upstream call.
+    /// no binding exists. Used by `NativeBridgeHandler` before each upstream call.
     func groupForOrigin(_ origin: String) -> Group? {
         if let bound = appGroups[origin], let group = groups.first(where: { $0.id == bound }) {
             return group
@@ -720,15 +867,14 @@ final class WalletStore: ObservableObject {
         return groups.first(where: { $0.id == defaultGroupId })
     }
 
-    /// Bind an app origin to a group. Called from the Apps screen when the
-    /// user assigns a connected app to a group (the per-app routing knob).
+    /// Bind an app origin to a group. Called from the Connected Apps screen
+    /// when the user assigns an app to a group (the per-app routing knob).
     /// `RoutingResolver` picks this up on the next request via
     /// `groupForOrigin(_:)` — no other plumbing required.
     func setAppGroup(origin: String, groupId: String) throws {
         guard groups.contains(where: { $0.id == groupId }) else { throw GroupError.notFound }
         appGroups[origin] = groupId
         try saveAppGroups()
-        Task { await syncAppGroupToVault(origin: origin, groupId: groupId) }
     }
 
     enum GroupError: LocalizedError {
@@ -737,9 +883,6 @@ final class WalletStore: ObservableObject {
         case providerInvalid
         case credentialNotFound
         case credentialMismatch
-        case giftNotFound
-        case giftMismatch
-        case pinConflict
         case notFound
         case cannotDeleteDefault
 
@@ -750,9 +893,6 @@ final class WalletStore: ObservableObject {
             case .providerInvalid: return "Invalid provider"
             case .credentialNotFound: return "Credential not found"
             case .credentialMismatch: return "Credential does not match provider"
-            case .giftNotFound: return "Gift not found"
-            case .giftMismatch: return "Gift does not match provider"
-            case .pinConflict: return "Credential and gift are mutually exclusive"
             case .notFound: return "Group not found"
             case .cannotDeleteDefault: return "Cannot delete the default group"
             }
@@ -764,22 +904,14 @@ final class WalletStore: ObservableObject {
         name: String,
         providerId: String,
         credentialId: String? = nil,
-        giftId: String? = nil,
         model: String? = nil
     ) throws -> Group {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty, trimmed.count <= 200 else { throw GroupError.nameInvalid }
         guard Provider.find(providerId) != nil else { throw GroupError.providerInvalid }
-        if credentialId != nil && giftId != nil {
-            throw GroupError.pinConflict
-        }
         if let credentialId {
             guard let cred = credentials.first(where: { $0.id == credentialId }) else { throw GroupError.credentialNotFound }
             guard cred.providerId == providerId else { throw GroupError.credentialMismatch }
-        }
-        if let giftId {
-            guard let gc = giftedCredentials.first(where: { $0.giftId == giftId }) else { throw GroupError.giftNotFound }
-            guard gc.providerId == providerId else { throw GroupError.giftMismatch }
         }
         if groups.contains(where: { $0.name.lowercased() == trimmed.lowercased() }) {
             throw GroupError.nameDuplicate
@@ -789,13 +921,11 @@ final class WalletStore: ObservableObject {
             name: trimmed,
             providerId: providerId,
             credentialId: credentialId,
-            giftId: giftId,
             model: model?.trimmingCharacters(in: .whitespaces).nilIfEmpty,
             createdAt: Date()
         )
         groups.append(group)
         try saveGroups()
-        Task { await syncGroupToVault(group) }
         return group
     }
 
@@ -805,7 +935,6 @@ final class WalletStore: ObservableObject {
         name: String? = nil,
         providerId: String? = nil,
         credentialId: String?? = nil, // double optional: nil = no change, .some(nil) = unset
-        giftId: String?? = nil,       // same sentinel convention as credentialId
         model: String?? = nil
     ) throws -> Group {
         guard let idx = groups.firstIndex(where: { $0.id == id }) else { throw GroupError.notFound }
@@ -823,30 +952,16 @@ final class WalletStore: ObservableObject {
         if let providerId {
             guard Provider.find(providerId) != nil else { throw GroupError.providerInvalid }
             next.providerId = providerId
-            // Provider change invalidates both pins unless this same patch sets one.
+            // Provider change invalidates the pin unless this same patch sets one.
             if credentialId == nil { next.credentialId = nil }
-            if giftId == nil { next.giftId = nil }
         }
         if case .some(let value) = credentialId {
             if let value {
                 guard let cred = credentials.first(where: { $0.id == value }) else { throw GroupError.credentialNotFound }
                 guard cred.providerId == next.providerId else { throw GroupError.credentialMismatch }
                 next.credentialId = value
-                // Setting a credential pin clears any gift pin (mutual exclusion).
-                next.giftId = nil
             } else {
                 next.credentialId = nil
-            }
-        }
-        if case .some(let value) = giftId {
-            if let value {
-                guard let gc = giftedCredentials.first(where: { $0.giftId == value }) else { throw GroupError.giftNotFound }
-                guard gc.providerId == next.providerId else { throw GroupError.giftMismatch }
-                next.giftId = value
-                // Setting a gift pin clears any credential pin (mutual exclusion).
-                next.credentialId = nil
-            } else {
-                next.giftId = nil
             }
         }
         if case .some(let value) = model {
@@ -855,7 +970,6 @@ final class WalletStore: ObservableObject {
 
         groups[idx] = next
         try saveGroups()
-        Task { await syncGroupToVault(next) }
         return next
     }
 
@@ -865,1004 +979,53 @@ final class WalletStore: ObservableObject {
         groups.removeAll { $0.id == id }
         try saveGroups()
         // Reassign any apps that pointed at this group back to the default.
-        var reassignedOrigins: [String] = []
+        var reassigned = false
         for (origin, gid) in appGroups where gid == id {
             appGroups[origin] = defaultGroupId
-            reassignedOrigins.append(origin)
+            reassigned = true
         }
-        if !reassignedOrigins.isEmpty { try saveAppGroups() }
-        Task {
-            await syncGroupDeleteToVault(groupId: id)
-            for origin in reassignedOrigins {
-                await syncAppGroupToVault(origin: origin, groupId: defaultGroupId)
-            }
-        }
+        if reassigned { try saveAppGroups() }
+    }
+}
+
+/// Origins whose access the user revoked in Connected Apps. They can't
+/// reconnect silently until the user opens the app from the Apps grid again.
+struct AppConsentStore {
+    static let defaultsKey = "byoky_revokedAppOrigins"
+    var defaults: UserDefaults = .standard
+
+    func isRevoked(_ origin: String) -> Bool {
+        revoked.contains(origin)
     }
 
-    // MARK: - Gifts (Sender)
-
-    func createGift(
-        credentialId: String,
-        providerId: String,
-        label: String,
-        maxTokens: Int,
-        expiresInMs: TimeInterval,
-        relayUrl: String,
-        listPublicly: Bool = false,
-        description: String? = nil
-    ) -> Gift {
-        let trimmed = description?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let gift = Gift(
-            id: UUID().uuidString,
-            credentialId: credentialId,
-            providerId: providerId,
-            label: label,
-            authToken: generateSecureToken(),
-            maxTokens: maxTokens,
-            usedTokens: 0,
-            expiresAt: Date(timeIntervalSinceNow: expiresInMs / 1000),
-            createdAt: Date(),
-            active: true,
-            relayUrl: relayUrl,
-            listed: listPublicly,
-            description: (trimmed?.isEmpty == false) ? trimmed : nil
-        )
-        gifts.append(gift)
-        saveGifts()
-        GiftRelayHost.shared.connect(gift: gift)
-        Task { await registerGiftWithVault(gift) }
-        return gift
+    func revoke(_ origin: String) {
+        var set = revoked
+        set.insert(origin)
+        defaults.set(Array(set).sorted(), forKey: Self.defaultsKey)
     }
 
-    func revokeGift(id: String) {
-        guard let index = gifts.firstIndex(where: { $0.id == id }) else { return }
-        gifts[index].active = false
-        saveGifts()
-        GiftRelayHost.shared.disconnect(giftId: id)
-        Task { await unregisterGiftFromVault(giftId: id) }
+    func grant(_ origin: String) {
+        var set = revoked
+        guard set.remove(origin) != nil else { return }
+        defaults.set(Array(set).sorted(), forKey: Self.defaultsKey)
     }
 
-    /// Increment `gifts[giftId].usedTokens` from the sender-side gift relay
-    /// after a successful proxied request. Clamps to `maxTokens` and returns
-    /// the new value, or `nil` if the gift is gone / already at its cap.
-    func addGiftSenderUsage(giftId: String, tokens: Int) -> Int? {
-        guard tokens > 0,
-              let idx = gifts.firstIndex(where: { $0.id == giftId }) else {
-            return nil
-        }
-        let current = gifts[idx].usedTokens
-        let cap = gifts[idx].maxTokens
-        if current >= cap { return nil }
-        let next = min(cap, current + tokens)
-        gifts[idx].usedTokens = next
-        saveGifts()
-        return next
+    func clear() {
+        defaults.removeObject(forKey: Self.defaultsKey)
     }
 
-    func redeemGift(encoded: String) throws {
-        let link = try decodeGiftLink(encoded)
-        try validateGiftLink(link)
-
-        if giftedCredentials.contains(where: { $0.giftId == link.id }) {
-            throw GiftError.alreadyRedeemed
-        }
-
-        let credential = GiftedCredential(
-            id: UUID().uuidString,
-            giftId: link.id,
-            providerId: link.p,
-            providerName: link.n,
-            senderLabel: link.s,
-            authToken: link.t,
-            maxTokens: link.m,
-            usedTokens: 0,
-            expiresAt: Date(timeIntervalSince1970: link.e / 1000),
-            relayUrl: link.r,
-            createdAt: Date()
-        )
-        giftedCredentials.append(credential)
-        saveGiftedCredentials()
-        // Fire-and-forget: register the redemption with the vault so the
-        // bridge→vault fallback path (phone offline) can still serve this
-        // gift's provider. Failure is non-fatal — the local gift works
-        // regardless; only the remote fallback requires the vault record.
-        let giftIdForSync = link.id
-        Task { await self.syncRedeemedGiftToVault(giftId: giftIdForSync) }
+    private var revoked: Set<String> {
+        Set(defaults.stringArray(forKey: Self.defaultsKey) ?? [])
     }
-
-    private func syncRedeemedGiftToVault(giftId: String) async {
-        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
-        let result = await vaultRequest(
-            path: "/gifts/redeemed",
-            method: "POST",
-            body: ["giftId": giftId],
-            token: token
-        )
-        if result.status == 401 {
-            await MainActor.run {
-                self.cloudVaultTokenExpired = true
-                try? self.keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
-            }
-        }
-    }
-
-    private func syncRedeemedGiftDeleteToVault(giftId: String) async {
-        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
-        let encoded = giftId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? giftId
-        let result = await vaultRequest(
-            path: "/gifts/redeemed/\(encoded)",
-            method: "DELETE",
-            token: token
-        )
-        if result.status == 401 {
-            await MainActor.run {
-                self.cloudVaultTokenExpired = true
-                try? self.keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
-            }
-        }
-    }
-
-    func removeGiftedCredential(id: String) {
-        var removedGiftId: String? = nil
-        if let gc = giftedCredentials.first(where: { $0.id == id }) {
-            removedGiftId = gc.giftId
-            if giftPreferences[gc.providerId] == gc.giftId {
-                giftPreferences.removeValue(forKey: gc.providerId)
-                saveGiftPreferences()
-            }
-            // Unpin any group that was bound to this gift — avoids a dangling
-            // reference that the routing resolver would silently fall through.
-            var groupsChanged = false
-            for idx in groups.indices where groups[idx].giftId == gc.giftId {
-                groups[idx].giftId = nil
-                groupsChanged = true
-                let snapshot = groups[idx]
-                Task { await syncGroupToVault(snapshot) }
-            }
-            if groupsChanged {
-                try? saveGroups()
-            }
-        }
-        giftedCredentials.removeAll { $0.id == id }
-        saveGiftedCredentials()
-        if let removedGiftId {
-            Task { await self.syncRedeemedGiftDeleteToVault(giftId: removedGiftId) }
-        }
-    }
-
-    func setGiftPreference(providerId: String, giftId: String?) {
-        if let giftId {
-            giftPreferences[providerId] = giftId
-        } else {
-            giftPreferences.removeValue(forKey: providerId)
-        }
-        saveGiftPreferences()
-    }
-
-    func updateGiftedCredentialUsage(giftId: String, usedTokens: Int) {
-        if let idx = giftedCredentials.firstIndex(where: { $0.giftId == giftId }) {
-            giftedCredentials[idx].usedTokens = usedTokens
-            saveGiftedCredentials()
-        }
-    }
-
-    /// Probe each non-expired received gift's relay to check whether the
-    /// sender peer is online. Runs probes in parallel and fills in
-    /// `giftPeerOnline` as each completes. Called from the Wallet screen on
-    /// appear so the online dot reflects current state each time the user
-    /// opens the tab.
-    func probeGiftPeers() {
-        let active = giftedCredentials.filter { !isGiftedCredentialExpired($0) && $0.usedTokens < $0.maxTokens }
-        guard !active.isEmpty else {
-            giftPeerOnline = [:]
-            return
-        }
-        // Snapshot the set of active giftIds so we can prune stale entries
-        // after probes complete.
-        let activeIds = Set(active.map { $0.giftId })
-        for gc in active {
-            Task { [weak self] in
-                let online = await probeGiftPeerOnline(giftedCredential: gc)
-                await MainActor.run {
-                    guard let self else { return }
-                    // Drop probes for gifts that were removed while we waited.
-                    guard activeIds.contains(gc.giftId) else { return }
-                    self.giftPeerOnline[gc.giftId] = online
-                }
-            }
-        }
-    }
-
-    private func loadGifts() {
-        do {
-            gifts = try keychain.loadCodable(key: giftsKey, as: [Gift].self)
-        } catch {
-            gifts = []
-        }
-    }
-
-    private func saveGifts() {
-        try? keychain.saveCodable(key: giftsKey, value: gifts)
-    }
-
-    private func loadGiftedCredentials() {
-        do {
-            giftedCredentials = try keychain.loadCodable(key: giftedCredentialsKey, as: [GiftedCredential].self)
-        } catch {
-            giftedCredentials = []
-        }
-    }
-
-    private func saveGiftedCredentials() {
-        try? keychain.saveCodable(key: giftedCredentialsKey, value: giftedCredentials)
-    }
-
-    private func loadGiftPreferences() {
-        do {
-            giftPreferences = try keychain.loadCodable(key: giftPreferencesKey, as: [String: String].self)
-        } catch {
-            giftPreferences = [:]
-        }
-    }
-
-    private func saveGiftPreferences() {
-        try? keychain.saveCodable(key: giftPreferencesKey, value: giftPreferences)
-    }
-
-    // MARK: - Cloud Vault
-
-    private func loadCloudVaultState() {
-        cloudVaultEnabled = (try? keychain.loadString(key: "cloudVault_enabled")) == "true"
-        cloudVaultUsername = try? keychain.loadString(key: "cloudVault_username")
-        cloudVaultLastUsername = try? keychain.loadString(key: "cloudVault_lastUsername")
-        vaultToken = try? keychain.loadString(key: "cloudVault_token")
-        vaultSessionId = try? keychain.loadString(key: "cloudVault_sessionId")
-        cloudVaultTokenExpired = (try? keychain.loadString(key: "cloudVault_tokenExpired")) == "true"
-        if let ts = try? keychain.loadString(key: "cloudVault_tokenIssuedAt"), let epoch = Double(ts) {
-            vaultTokenIssuedAt = Date(timeIntervalSince1970: epoch)
-        }
-        if let mapJson = try? keychain.loadString(key: "cloudVault_credentialMap"),
-           let data = mapJson.data(using: .utf8),
-           let map = try? JSONDecoder().decode([String: String].self, from: data) {
-            vaultCredentialMap = map
-        } else {
-            vaultCredentialMap = [:]
-        }
-        if let metaJson = try? keychain.loadString(key: "cloudVault_credentialMeta"),
-           let data = metaJson.data(using: .utf8),
-           let meta = try? JSONDecoder().decode([String: VaultCredentialMeta].self, from: data) {
-            vaultCredentialMeta = meta
-        } else {
-            vaultCredentialMeta = [:]
-        }
-        if let ts = try? keychain.loadString(key: "cloudVault_lastSyncAt"), let v = Int64(ts) {
-            vaultLastSyncAt = v
-        } else {
-            vaultLastSyncAt = 0
-        }
-
-        if cloudVaultEnabled, let issued = vaultTokenIssuedAt, Date().timeIntervalSince(issued) > 6 * 24 * 3600 {
-            cloudVaultTokenExpired = true
-            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
-        }
-    }
-
-    private func saveCloudVaultConfig() {
-        try? keychain.saveString(key: "cloudVault_enabled", value: cloudVaultEnabled ? "true" : "false")
-        if let username = cloudVaultUsername { try? keychain.saveString(key: "cloudVault_username", value: username) }
-        if let lastUsername = cloudVaultLastUsername { try? keychain.saveString(key: "cloudVault_lastUsername", value: lastUsername) }
-        if let token = vaultToken { try? keychain.saveString(key: "cloudVault_token", value: token) }
-        if let sid = vaultSessionId { try? keychain.saveString(key: "cloudVault_sessionId", value: sid) }
-        if let issued = vaultTokenIssuedAt {
-            try? keychain.saveString(key: "cloudVault_tokenIssuedAt", value: String(issued.timeIntervalSince1970))
-        }
-        try? keychain.saveString(key: "cloudVault_tokenExpired", value: cloudVaultTokenExpired ? "true" : "false")
-        saveVaultCredentialMap()
-    }
-
-    private func saveVaultCredentialMap() {
-        if let data = try? JSONEncoder().encode(vaultCredentialMap), let json = String(data: data, encoding: .utf8) {
-            try? keychain.saveString(key: "cloudVault_credentialMap", value: json)
-        }
-    }
-
-    private func saveVaultCredentialMeta() {
-        if let data = try? JSONEncoder().encode(vaultCredentialMeta), let json = String(data: data, encoding: .utf8) {
-            try? keychain.saveString(key: "cloudVault_credentialMeta", value: json)
-        }
-    }
-
-    private func saveVaultLastSyncAt() {
-        try? keychain.saveString(key: "cloudVault_lastSyncAt", value: String(vaultLastSyncAt))
-    }
-
-    private func persistVaultKey(password: String, encryptionSalt: String) {
-        guard let saltBytes = Data(base64Encoded: encryptionSalt),
-              let key = crypto.deriveKey(password: password, salt: saltBytes) else { return }
-        vaultKey = key
-        let rawBytes = key.withUnsafeBytes { Data($0) }
-        try? keychain.save(key: "cloudVault_vaultKey", data: rawBytes)
-    }
-
-    private func loadVaultKey() -> SymmetricKey? {
-        if let vaultKey { return vaultKey }
-        guard let data = try? keychain.load(key: "cloudVault_vaultKey") else { return nil }
-        let key = SymmetricKey(data: data)
-        vaultKey = key
-        return key
-    }
-
-    private func clearCloudVaultState(clearLastUsername: Bool = false) {
-        cloudVaultEnabled = false
-        cloudVaultUsername = nil
-        cloudVaultTokenExpired = false
-        vaultToken = nil
-        vaultSessionId = nil
-        vaultTokenIssuedAt = nil
-        vaultCredentialMap = [:]
-        vaultCredentialMeta = [:]
-        vaultLastSyncAt = 0
-        vaultKey = nil
-        for key in ["cloudVault_enabled", "cloudVault_username", "cloudVault_token", "cloudVault_sessionId",
-                     "cloudVault_tokenIssuedAt", "cloudVault_tokenExpired", "cloudVault_credentialMap",
-                     "cloudVault_credentialMeta", "cloudVault_lastSyncAt", "cloudVault_vaultKey"] {
-            try? keychain.delete(key: key)
-        }
-        if clearLastUsername {
-            cloudVaultLastUsername = nil
-            try? keychain.delete(key: "cloudVault_lastUsername")
-        }
-    }
-
-    private func vaultRequest(path: String, method: String, body: [String: Any]? = nil, token: String? = nil) async -> (ok: Bool, status: Int, data: [String: Any]) {
-        guard let url = URL(string: Self.vaultURL + path) else { return (false, 0, [:]) }
-        var request = URLRequest(url: url, timeoutInterval: 10)
-        request.httpMethod = method
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-        if let body { request.httpBody = try? JSONSerialization.data(withJSONObject: body) }
-
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            let json = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
-            return (200..<300 ~= status, status, json)
-        } catch {
-            return (false, 0, [:])
-        }
-    }
-
-    func createVaultAppSession(appOrigin: String, providerIds: [String]) async -> (vaultUrl: String, appSessionToken: String, providers: [String: [String: Any]])? {
-        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return nil }
-        let providers = providerIds.map { ["id": $0] }
-        let body: [String: Any] = ["appOrigin": appOrigin, "providers": providers]
-        let result = await vaultRequest(path: "/connect", method: "POST", body: body, token: token)
-        if result.status == 401 {
-            await MainActor.run { cloudVaultTokenExpired = true }
-            return nil
-        }
-        guard result.ok, let ast = result.data["appSessionToken"] as? String else { return nil }
-        let providersMap = (result.data["providers"] as? [String: [String: Any]]) ?? [:]
-        return (Self.vaultURL, ast, providersMap)
-    }
-
-    func checkUsernameAvailability(_ username: String) async -> (available: Bool, reason: String?) {
-        let result = await vaultRequest(path: "/auth/check-username/\(username.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? username)", method: "GET")
-        if !result.ok { return (false, nil) }
-        let available = result.data["available"] as? Bool ?? false
-        let reason = result.data["reason"] as? String
-        return (available, reason)
-    }
-
-    func enableCloudVault(username: String, password: String, isSignup: Bool) async throws {
-        let path = isSignup ? "/auth/signup" : "/auth/login"
-        let result = await vaultRequest(path: path, method: "POST", body: ["username": username, "password": password])
-        if !result.ok {
-            let err = result.data["error"] as? [String: Any]
-            throw CloudVaultError.authFailed(err?["message"] as? String ?? (isSignup ? "Signup failed" : "Login failed"))
-        }
-        guard let token = result.data["token"] as? String,
-              let sessionId = result.data["sessionId"] as? String,
-              let encryptionSalt = result.data["encryptionSalt"] as? String else {
-            throw CloudVaultError.authFailed("Invalid server response")
-        }
-
-        persistVaultKey(password: password, encryptionSalt: encryptionSalt)
-        vaultToken = token
-        vaultSessionId = sessionId
-        vaultTokenIssuedAt = Date()
-        cloudVaultEnabled = true
-        cloudVaultUsername = username
-        cloudVaultLastUsername = username
-        cloudVaultTokenExpired = false
-        // Signup: fresh vault account, nothing to merge from — wipe meta
-        // too so there's no stale tracking. Login: keep any existing meta/
-        // map so we don't re-upload rows we already own; force a full pull
-        // by resetting only lastSyncAt.
-        if isSignup {
-            vaultCredentialMap = [:]
-            vaultCredentialMeta = [:]
-        }
-        vaultLastSyncAt = 0
-        saveCloudVaultConfig()
-        saveVaultCredentialMeta()
-        saveVaultLastSyncAt()
-
-        if !isSignup {
-            await pullFromVault()
-        }
-        await syncAllCredentialsToVault()
-        await syncPendingGroups()
-        await syncPendingGifts()
-    }
-
-    func vaultBootstrapSignup(username: String, password: String) async throws {
-        try createPassword(password)
-        try await enableCloudVault(username: username, password: password, isSignup: true)
-    }
-
-    func vaultBootstrapLogin(username: String, password: String) async throws {
-        // Validate vault credentials before creating any local wallet state.
-        // Previously createPassword ran first, which meant a wrong password
-        // silently initialized the local wallet with that password.
-        try await enableCloudVault(username: username, password: password, isSignup: false)
-        try createPassword(password)
-    }
-
-    var vaultBannerDismissedAt: Date? {
-        get {
-            let ts = UserDefaults.standard.double(forKey: "vaultBannerDismissedAt")
-            return ts > 0 ? Date(timeIntervalSince1970: ts) : nil
-        }
-        set {
-            if let d = newValue {
-                UserDefaults.standard.set(d.timeIntervalSince1970, forKey: "vaultBannerDismissedAt")
-            } else {
-                UserDefaults.standard.removeObject(forKey: "vaultBannerDismissedAt")
-            }
-        }
-    }
-
-    func dismissVaultBanner() {
-        vaultBannerDismissedAt = Date()
-        objectWillChange.send()
-    }
-
-    func disableCloudVault() async {
-        if let token = vaultToken, !cloudVaultTokenExpired {
-            _ = await vaultRequest(path: "/auth/logout", method: "POST", token: token)
-        }
-        clearCloudVaultState()
-    }
-
-    func deleteVaultAccount() async throws {
-        guard let token = vaultToken, !cloudVaultTokenExpired else {
-            throw CloudVaultError.authFailed("No active vault session")
-        }
-        let result = await vaultRequest(path: "/auth/account", method: "DELETE", token: token)
-        if !result.ok {
-            let err = result.data["error"] as? [String: Any]
-            throw CloudVaultError.authFailed(err?["message"] as? String ?? "Failed to delete vault account")
-        }
-        resetWallet()
-    }
-
-    func reloginCloudVault(password: String) async throws {
-        guard let username = cloudVaultUsername else {
-            throw CloudVaultError.authFailed("No vault account configured")
-        }
-        let result = await vaultRequest(path: "/auth/login", method: "POST", body: ["username": username, "password": password])
-        if !result.ok {
-            let err = result.data["error"] as? [String: Any]
-            throw CloudVaultError.authFailed(err?["message"] as? String ?? "Login failed")
-        }
-        guard let token = result.data["token"] as? String,
-              let sessionId = result.data["sessionId"] as? String,
-              let encryptionSalt = result.data["encryptionSalt"] as? String else {
-            throw CloudVaultError.authFailed("Invalid server response")
-        }
-
-        persistVaultKey(password: password, encryptionSalt: encryptionSalt)
-        vaultToken = token
-        vaultSessionId = sessionId
-        vaultTokenIssuedAt = Date()
-        cloudVaultTokenExpired = false
-        saveCloudVaultConfig()
-
-        await pullFromVault()
-        await syncPendingCredentials()
-        await syncPendingGroups()
-        await syncPendingGifts()
-        await reconcileGiftUsageWithVault()
-    }
-
-    private func syncAddToVault(localId: String, providerId: String, label: String, authMethod: String, plainKey: String, baseUrl: String? = nil) async {
-        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
-        guard let vk = loadVaultKey(),
-              let encryptedApiKey = try? crypto.encrypt(plaintext: plainKey, key: vk) else { return }
-
-        var body: [String: Any] = [
-            "providerId": providerId, "encryptedApiKey": encryptedApiKey, "label": label, "authMethod": authMethod,
-        ]
-        if let baseUrl = baseUrl { body["baseUrl"] = baseUrl }
-        let result = await vaultRequest(path: "/credentials", method: "POST", body: body, token: token)
-
-        if result.status == 401 {
-            cloudVaultTokenExpired = true
-            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
-            return
-        }
-        if result.ok, let cred = result.data["credential"] as? [String: Any], let vaultId = cred["id"] as? String {
-            vaultCredentialMap[localId] = vaultId
-            saveVaultCredentialMap()
-            let updatedAt = (cred["updatedAt"] as? NSNumber)?.int64Value ?? Int64(Date().timeIntervalSince1970 * 1000)
-            vaultCredentialMeta[localId] = VaultCredentialMeta(serverId: vaultId, remoteUpdatedAt: updatedAt)
-            saveVaultCredentialMeta()
-        }
-    }
-
-    private func syncRemoveFromVault(localId: String) async {
-        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
-        guard let vaultId = vaultCredentialMap[localId] else { return }
-
-        let result = await vaultRequest(path: "/credentials/\(vaultId)", method: "DELETE", token: token)
-
-        if result.status == 401 {
-            cloudVaultTokenExpired = true
-            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
-            return
-        }
-        vaultCredentialMap.removeValue(forKey: localId)
-        saveVaultCredentialMap()
-        vaultCredentialMeta.removeValue(forKey: localId)
-        saveVaultCredentialMeta()
-    }
-
-    private func syncRenameToVault(localId: String, newLabel: String) async {
-        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
-        guard let vaultId = vaultCredentialMap[localId] else { return }
-
-        let result = await vaultRequest(path: "/credentials/\(vaultId)", method: "PATCH", body: ["label": newLabel], token: token)
-
-        if result.status == 401 {
-            cloudVaultTokenExpired = true
-            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
-            return
-        }
-        if result.ok {
-            let updatedAt = (result.data["updatedAt"] as? NSNumber)?.int64Value ?? Int64(Date().timeIntervalSince1970 * 1000)
-            vaultCredentialMeta[localId] = VaultCredentialMeta(serverId: vaultId, remoteUpdatedAt: updatedAt)
-            saveVaultCredentialMeta()
-        }
-    }
-
-    private func syncPendingCredentials() async {
-        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
-        if let issued = vaultTokenIssuedAt, Date().timeIntervalSince(issued) > 6 * 24 * 3600 {
-            cloudVaultTokenExpired = true
-            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
-            return
-        }
-        _ = token // suppress unused warning since used via syncAddToVault
-
-        for credential in credentials {
-            guard vaultCredentialMap[credential.id] == nil else { continue }
-            guard let plainKey = try? decryptKey(for: credential) else { continue }
-            await syncAddToVault(localId: credential.id, providerId: credential.providerId, label: credential.label, authMethod: credential.authMethod.rawValue, plainKey: plainKey, baseUrl: credential.baseUrl)
-        }
-    }
-
-    private func syncAllCredentialsToVault() async {
-        for credential in credentials {
-            // Skip rows already represented on the server (post-pull): the
-            // extension does the same check to avoid creating duplicates.
-            guard vaultCredentialMap[credential.id] == nil else { continue }
-            guard let plainKey = try? decryptKey(for: credential) else { continue }
-            await syncAddToVault(localId: credential.id, providerId: credential.providerId, label: credential.label, authMethod: credential.authMethod.rawValue, plainKey: plainKey, baseUrl: credential.baseUrl)
-        }
-    }
-
-    // MARK: - Vault pull + merge
-    //
-    // Mirrors the extension's pullFromVault: fetches /credentials/sync with
-    // the stored lastSyncAt as `since`, applies tombstones, and upserts
-    // non-tombstone rows with last-write-wins on updatedAt. New rows from
-    // other devices land as fresh local credentials (re-encrypted under the
-    // local master key).
-    private func pullFromVault() async {
-        guard let masterKey = masterKey else { return }
-        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
-
-        let result = await vaultRequest(path: "/credentials/sync?since=\(vaultLastSyncAt)", method: "GET", token: token)
-        if result.status == 401 {
-            cloudVaultTokenExpired = true
-            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
-            return
-        }
-        guard result.ok else { return }
-
-        let serverTime = (result.data["serverTime"] as? NSNumber)?.int64Value ?? Int64(Date().timeIntervalSince1970 * 1000)
-        let remoteCreds = (result.data["credentials"] as? [[String: Any]]) ?? []
-
-        if remoteCreds.isEmpty {
-            vaultLastSyncAt = serverTime
-            saveVaultLastSyncAt()
-            return
-        }
-
-        // Backfill meta from legacy credentialMap so pre-sync installs get a
-        // well-formed LWW baseline (remoteUpdatedAt=0 → first pull wins).
-        for (localId, serverId) in vaultCredentialMap {
-            if vaultCredentialMeta[localId] == nil {
-                vaultCredentialMeta[localId] = VaultCredentialMeta(serverId: serverId, remoteUpdatedAt: 0)
-            }
-        }
-
-        var serverToLocal: [String: String] = [:]
-        for (localId, meta) in vaultCredentialMeta {
-            serverToLocal[meta.serverId] = localId
-        }
-
-        // Content-based adoption index: when meta has been wiped (e.g. after
-        // a disable/re-enable cycle) the server row won't match by serverId
-        // but an identical local row likely still exists. Match by provider
-        // + plaintext key to adopt it instead of creating a duplicate.
-        var localByContent: [String: String] = [:]
-        let claimedLocalIds = Set(vaultCredentialMeta.keys)
-        for cred in credentials where !claimedLocalIds.contains(cred.id) {
-            guard let plain = try? decryptKey(for: cred) else { continue }
-            localByContent["\(cred.providerId)|\(plain)"] = cred.id
-        }
-
-        var didMutate = false
-
-        for remote in remoteCreds {
-            guard let serverId = remote["id"] as? String,
-                  let providerId = remote["providerId"] as? String,
-                  let label = remote["label"] as? String,
-                  let authMethodRaw = remote["authMethod"] as? String,
-                  let updatedAt = (remote["updatedAt"] as? NSNumber)?.int64Value else { continue }
-            let deletedAt = (remote["deletedAt"] as? NSNumber)?.int64Value
-
-            let authMethod = AuthMethod(rawValue: authMethodRaw) ?? .apiKey
-            let remoteBaseUrl = remote["baseUrl"] as? String
-            let existingLocalId = serverToLocal[serverId]
-
-            if deletedAt != nil {
-                if let localId = existingLocalId {
-                    try? keychain.delete(key: "key_\(localId)")
-                    credentials.removeAll { $0.id == localId }
-                    vaultCredentialMap.removeValue(forKey: localId)
-                    vaultCredentialMeta.removeValue(forKey: localId)
-                    didMutate = true
-                }
-                continue
-            }
-
-            let encryptedApiKey = remote["encryptedApiKey"] as? String ?? ""
-            let isLocalProvider = providerId == "ollama" || providerId == "lm_studio"
-            let apiKey: String
-            if encryptedApiKey.isEmpty {
-                // Local providers may be stored with no key at all.
-                if !isLocalProvider { continue }
-                apiKey = ""
-            } else {
-                guard let vk = loadVaultKey(),
-                      let decoded = try? crypto.decrypt(encoded: encryptedApiKey, key: vk) else { continue }
-                apiKey = decoded
-            }
-
-            if let localId = existingLocalId {
-                let currentMeta = vaultCredentialMeta[localId]
-                if let m = currentMeta, updatedAt <= m.remoteUpdatedAt { continue }
-                if let idx = credentials.firstIndex(where: { $0.id == localId }) {
-                    guard let encrypted = try? crypto.encrypt(plaintext: apiKey, key: masterKey) else { continue }
-                    try? keychain.saveString(key: "key_\(localId)", value: "v2:" + encrypted)
-                    let preserved = credentials[idx].createdAt
-                    credentials[idx] = Credential(
-                        id: localId,
-                        providerId: providerId,
-                        label: label,
-                        authMethod: authMethod,
-                        createdAt: preserved,
-                        baseUrl: remoteBaseUrl
-                    )
-                }
-                vaultCredentialMeta[localId] = VaultCredentialMeta(serverId: serverId, remoteUpdatedAt: updatedAt)
-                vaultCredentialMap[localId] = serverId
-                didMutate = true
-            } else if let adoptId = localByContent["\(providerId)|\(apiKey)"] {
-                // Same provider + same plaintext key already exists locally.
-                // Adopt that row under this serverId instead of duplicating.
-                if let idx = credentials.firstIndex(where: { $0.id == adoptId }) {
-                    credentials[idx] = Credential(
-                        id: adoptId,
-                        providerId: providerId,
-                        label: label,
-                        authMethod: authMethod,
-                        createdAt: credentials[idx].createdAt,
-                        baseUrl: remoteBaseUrl
-                    )
-                }
-                vaultCredentialMap[adoptId] = serverId
-                vaultCredentialMeta[adoptId] = VaultCredentialMeta(serverId: serverId, remoteUpdatedAt: updatedAt)
-                serverToLocal[serverId] = adoptId
-                localByContent.removeValue(forKey: "\(providerId)|\(apiKey)")
-                didMutate = true
-            } else {
-                guard let encrypted = try? crypto.encrypt(plaintext: apiKey, key: masterKey) else { continue }
-                let newId = UUID().uuidString
-                try? keychain.saveString(key: "key_\(newId)", value: "v2:" + encrypted)
-                let createdAtMs = (remote["createdAt"] as? NSNumber)?.int64Value
-                let createdAt = createdAtMs.flatMap { Date(timeIntervalSince1970: TimeInterval($0) / 1000) } ?? Date()
-                credentials.append(Credential(
-                    id: newId,
-                    providerId: providerId,
-                    label: label,
-                    authMethod: authMethod,
-                    createdAt: createdAt,
-                    baseUrl: remoteBaseUrl
-                ))
-                vaultCredentialMap[newId] = serverId
-                vaultCredentialMeta[newId] = VaultCredentialMeta(serverId: serverId, remoteUpdatedAt: updatedAt)
-                serverToLocal[serverId] = newId
-                didMutate = true
-            }
-        }
-
-        vaultLastSyncAt = serverTime
-        saveVaultLastSyncAt()
-
-        if didMutate {
-            try? saveCredentials()
-            saveVaultCredentialMap()
-            saveVaultCredentialMeta()
-            AppGroupSync.shared.syncWalletState(
-                isUnlocked: true,
-                providers: credentials.map(\.providerId)
-            )
-        }
-    }
-
-    // MARK: - Vault group sync
-
-    /// Push a single group to the cloud vault. Called on every createGroup /
-    /// updateGroup so the offline vault's routing rules stay in lockstep with
-    /// the phone's local state. No-op when cloud vault is disabled.
-    ///
-    /// The vault keys credential pins by its own credential ids (returned at
-    /// sync time and stored in `vaultCredentialMap`). Translate the local
-    /// pin id to the vault id before sending — a stale local pin maps to
-    /// nil which the vault treats as "no pin".
-    private func syncGroupToVault(_ group: Group) async {
-        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
-        let vaultCredentialId: Any = group.credentialId.flatMap { vaultCredentialMap[$0] } ?? NSNull()
-        let vaultGiftId: Any = group.giftId as Any? ?? NSNull()
-        let result = await vaultRequest(
-            path: "/groups/\(group.id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? group.id)",
-            method: "PUT",
-            body: [
-                "name": group.name,
-                "providerId": group.providerId,
-                "credentialId": vaultCredentialId,
-                "giftId": vaultGiftId,
-                "model": group.model as Any? ?? NSNull(),
-            ],
-            token: token
-        )
-        if result.status == 401 {
-            cloudVaultTokenExpired = true
-            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
-        }
-    }
-
-    /// Remove a group from the cloud vault. Called on deleteGroup.
-    private func syncGroupDeleteToVault(groupId: String) async {
-        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
-        let encoded = groupId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? groupId
-        let result = await vaultRequest(path: "/groups/\(encoded)", method: "DELETE", token: token)
-        if result.status == 401 {
-            cloudVaultTokenExpired = true
-            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
-        }
-    }
-
-    /// Push an app→group binding to the vault. Called on setAppGroup and on
-    /// reassignment when a group is deleted.
-    private func syncAppGroupToVault(origin: String, groupId: String) async {
-        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
-        let encoded = origin.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? origin
-        let result = await vaultRequest(
-            path: "/groups/apps/\(encoded)",
-            method: "PUT",
-            body: ["groupId": groupId],
-            token: token
-        )
-        if result.status == 401 {
-            cloudVaultTokenExpired = true
-            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
-        }
-    }
-
-    /// Backfill all local groups + app→group bindings to the vault. Runs on
-    /// initial cloud-vault enable and on unlock when a vault session is
-    /// already configured. Idempotent — the vault endpoints are upserts.
-    ///
-    /// Sequencing: MUST run after syncPendingCredentials so that any
-    /// credential pins in local groups have a corresponding entry in
-    /// vaultCredentialMap. Callers enforce this ordering.
-    private func syncPendingGroups() async {
-        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
-        if let issued = vaultTokenIssuedAt, Date().timeIntervalSince(issued) > 6 * 24 * 3600 {
-            cloudVaultTokenExpired = true
-            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
-            return
-        }
-        _ = token // used via the sync helpers below
-
-        for group in groups {
-            await syncGroupToVault(group)
-        }
-        for (origin, groupId) in appGroups {
-            await syncAppGroupToVault(origin: origin, groupId: groupId)
-        }
-    }
-
-    // MARK: - Vault gift relay
-
-    /// Upload a gift to the cloud vault so it can act as a priority-0 fallback
-    /// sender when this device is backgrounded / offline. Mirrors the browser
-    /// extension's `registerGiftWithVault`.
-    func registerGiftWithVault(_ gift: Gift) async {
-        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
-        if let issued = vaultTokenIssuedAt, Date().timeIntervalSince(issued) > 6 * 24 * 3600 {
-            cloudVaultTokenExpired = true
-            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
-            return
-        }
-        guard let credential = credentials.first(where: { $0.id == gift.credentialId }) else { return }
-        guard let apiKey = try? decryptKey(for: credential) else { return }
-
-        var body: [String: Any] = [
-            "giftId": gift.id,
-            "providerId": gift.providerId,
-            "authMethod": credential.authMethod.rawValue,
-            "apiKey": apiKey,
-            "relayAuthToken": gift.authToken,
-            "relayUrl": gift.relayUrl,
-            "maxTokens": gift.maxTokens,
-            "usedTokens": gift.usedTokens,
-            "expiresAt": Int(gift.expiresAt.timeIntervalSince1970 * 1000),
-            "listed": gift.listed ?? false,
-        ]
-        if let description = gift.description {
-            body["description"] = description
-        }
-        if let giftShortId = gift.giftShortId {
-            body["giftShortId"] = giftShortId
-        }
-        let result = await vaultRequest(path: "/gifts", method: "POST", body: body, token: token)
-        if result.status == 401 {
-            cloudVaultTokenExpired = true
-            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
-        }
-    }
-
-    /// Persist a short-link id on the local gift and send the same value to
-    /// the vault so /pool can expose it. Called once `createGiftShortLink`
-    /// succeeds after gift creation.
-    func setGiftShortId(giftId: String, shortId: String) {
-        guard let idx = gifts.firstIndex(where: { $0.id == giftId }) else { return }
-        gifts[idx].giftShortId = shortId
-        saveGifts()
-        Task {
-            guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
-            let gift = gifts[idx]
-            var body: [String: Any] = [
-                "listed": gift.listed ?? false,
-                "giftShortId": shortId,
-            ]
-            if let description = gift.description {
-                body["description"] = description
-            }
-            let result = await vaultRequest(
-                path: "/gifts/\(giftId)/listing",
-                method: "PATCH",
-                body: body,
-                token: token
-            )
-            if result.status == 401 {
-                cloudVaultTokenExpired = true
-                try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
-            }
-        }
-    }
-
-    /// Allocate a short link on the vault for an encoded gift blob. Returns
-    /// the short id on success, or nil if the user isn't signed into cloud
-    /// vault, the token is expired, or the vault is unreachable — in every
-    /// such case the caller should fall back to the long URL so gift
-    /// creation never fails.
-    func createGiftShortLink(encoded: String, expiresAt: Date) async -> String? {
-        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return nil }
-        let body: [String: Any] = [
-            "encoded": encoded,
-            "expiresAt": Int(expiresAt.timeIntervalSince1970 * 1000),
-        ]
-        let result = await vaultRequest(path: "/gift-links", method: "POST", body: body, token: token)
-        if result.status == 401 {
-            cloudVaultTokenExpired = true
-            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
-            return nil
-        }
-        guard result.ok, let shortId = result.data["shortId"] as? String else { return nil }
-        return shortId
-    }
-
-    /// Resolve a short id to its encoded blob via the vault. Returns nil for
-    /// 404/410 (unknown/expired) and throws on transport failures so the UI
-    /// can distinguish "gift gone" from "network down".
-    func resolveGiftShortLink(shortId: String) async throws -> String? {
-        let result = await vaultRequest(path: "/gift-links/\(shortId)", method: "GET")
-        if result.status == 404 || result.status == 410 { return nil }
-        guard result.ok else {
-            throw NSError(domain: "ByokyShortLink", code: result.status, userInfo: [
-                NSLocalizedDescriptionKey: "Could not reach vault to resolve gift link",
-            ])
-        }
-        return result.data["encoded"] as? String
-    }
-
-    func unregisterGiftFromVault(giftId: String) async {
-        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
-        let result = await vaultRequest(path: "/gifts/\(giftId)", method: "DELETE", token: token)
-        if result.status == 401 {
-            cloudVaultTokenExpired = true
-            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
-        }
-    }
-
-    /// If the vault serviced requests while this device was offline, its
-    /// `usedTokens` may be ahead of ours. Pull and clamp-up the local copy.
-    func syncGiftUsageFromVault(giftId: String) async {
-        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
-        let result = await vaultRequest(path: "/gifts/\(giftId)", method: "GET", token: token)
-        if result.status == 401 {
-            cloudVaultTokenExpired = true
-            try? keychain.saveString(key: "cloudVault_tokenExpired", value: "true")
-            return
-        }
-        guard result.ok,
-              let vaultGift = result.data["gift"] as? [String: Any],
-              let vaultUsed = vaultGift["usedTokens"] as? Int else { return }
-        guard let idx = gifts.firstIndex(where: { $0.id == giftId }) else { return }
-        if vaultUsed > gifts[idx].usedTokens {
-            gifts[idx].usedTokens = vaultUsed
-            saveGifts()
-        }
-    }
-
-    /// Backfill every active, non-expired gift to the vault. Runs on
-    /// vault-enable and unlock. The vault's `POST /gifts` returns 409 for
-    /// gifts it already has, which we tolerate.
-    private func syncPendingGifts() async {
-        guard cloudVaultEnabled, let token = vaultToken, !cloudVaultTokenExpired else { return }
-        _ = token
-        for gift in gifts where gift.active && Date() < gift.expiresAt {
-            await registerGiftWithVault(gift)
-        }
-    }
-
-    /// Reconcile `usedTokens` for every active gift against the vault. Called
-    /// when the app returns to the foreground so the UI reflects usage the
-    /// vault billed while we were backgrounded.
-    func reconcileGiftUsageWithVault() async {
-        guard cloudVaultEnabled, vaultToken != nil, !cloudVaultTokenExpired else { return }
-        for gift in gifts where gift.active && Date() < gift.expiresAt {
-            await syncGiftUsageFromVault(giftId: gift.id)
-        }
-    }
-
+}
+
+/// A `.byoky` file picked or opened for import.
+struct PendingBackupFile: Identifiable, Equatable {
+    let id = UUID()
+    let fileName: String
+    let contents: String
+    /// Set when the file couldn't be read (too large, not text, …).
+    var readError: String?
 }
 
 enum WalletError: LocalizedError {
@@ -1872,6 +1035,7 @@ enum WalletError: LocalizedError {
     case credentialNotFound
     case lockedOut(Int)
     case invalidInput
+    case invalidEndpoint
 
     var errorDescription: String? {
         switch self {
@@ -1881,16 +1045,7 @@ enum WalletError: LocalizedError {
         case .credentialNotFound: return "Credential not found"
         case .lockedOut(let seconds): return "Too many attempts. Try again in \(seconds)s"
         case .invalidInput: return "Invalid input"
-        }
-    }
-}
-
-enum CloudVaultError: LocalizedError {
-    case authFailed(String)
-
-    var errorDescription: String? {
-        switch self {
-        case .authFailed(let message): return message
+        case .invalidEndpoint: return "Enter a valid endpoint address"
         }
     }
 }

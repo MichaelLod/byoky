@@ -9,8 +9,8 @@ struct AppRuntimeView: View {
     var body: some View {
         NavigationStack {
             SwiftUI.Group {
-                if let url = URL(string: app.url), url.scheme == "https" {
-                    AppWebView(url: url, allowedHost: url.host ?? "", wallet: wallet)
+                if let url = URL(string: app.url), url.scheme == "https", url.host != nil {
+                    AppWebView(url: url, allowedOrigin: InstalledApp.origin(of: url), wallet: wallet)
                         .ignoresSafeArea(edges: .bottom)
                 } else {
                     VStack(spacing: 8) {
@@ -31,6 +31,8 @@ struct AppRuntimeView: View {
                     } label: {
                         Image(systemName: "xmark")
                     }
+                    .accessibilityLabel("Close")
+                    .accessibilityIdentifier("appRuntime.close")
                 }
             }
         }
@@ -39,11 +41,12 @@ struct AppRuntimeView: View {
 
 struct AppWebView: UIViewRepresentable {
     let url: URL
-    let allowedHost: String
+    /// `https://host[:port]` of the app; the only origin it may navigate to.
+    let allowedOrigin: String
     let wallet: WalletStore
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(allowedHost: allowedHost, wallet: wallet)
+        Coordinator(allowedOrigin: allowedOrigin)
     }
 
     func makeUIView(context: Context) -> WKWebView {
@@ -59,8 +62,9 @@ struct AppWebView: UIViewRepresentable {
         )
         config.userContentController.addUserScript(bridgeScript)
 
-        let origin = "https://\(url.host ?? allowedHost)"
-        let handler = NativeBridgeHandler(wallet: wallet, appOrigin: origin)
+        // WebKit exposes the handler to every frame; NativeBridgeHandler only
+        // accepts messages from the app's own main frame.
+        let handler = NativeBridgeHandler(wallet: wallet, appOrigin: allowedOrigin)
         context.coordinator.bridgeHandler = handler
         config.userContentController.add(handler, name: "byoky")
 
@@ -70,6 +74,10 @@ struct AppWebView: UIViewRepresentable {
         webView.allowsBackForwardNavigationGestures = false
         webView.navigationDelegate = context.coordinator
         handler.attach(to: webView)
+        // The user opened this app (from the Apps grid, or right after adding
+        // it): that is consent for it to connect, including after a revoke in
+        // Connected Apps. Granted before the page loads so it can't race.
+        wallet.grantAppAccess(origin: allowedOrigin)
         webView.load(URLRequest(url: url))
         return webView
     }
@@ -77,16 +85,17 @@ struct AppWebView: UIViewRepresentable {
     func updateUIView(_ uiView: WKWebView, context: Context) {}
 
     /// JavaScript injected at document_start to bridge the Byoky SDK
-    /// protocol to the native wallet via webkit.messageHandlers.
+    /// protocol to the native wallet via webkit.messageHandlers. Replies come
+    /// back through `_deliver(requestId, json)`, called by
+    /// NativeBridgeHandler with both values passed as arguments.
     static let bridgeJavaScript = """
     (function() {
         window.__byoky__ = true;
         var pendingPorts = {};
         window.__byokyBridge = {
-            _deliver: function(requestId, base64) {
+            _deliver: function(requestId, json) {
                 try {
-                    var json = atob(base64);
-                    var msg = JSON.parse(json);
+                    var msg = typeof json === 'string' ? JSON.parse(json) : json;
                     var port = pendingPorts[requestId];
                     if (port) {
                         port.postMessage(msg);
@@ -129,14 +138,28 @@ struct AppWebView: UIViewRepresentable {
     })();
     """
 
+    /// Navigation policy. The app's main frame may only load its own https
+    /// origin (scheme, host and port). Subframes may load that origin too, and
+    /// `about:` / `blob:` documents (srcdoc and generated content), which get
+    /// no bridge: the script is main-frame only and NativeBridgeHandler
+    /// ignores messages from other frames.
+    static func allowsNavigation(to url: URL, isMainFrame: Bool, allowedOrigin: String) -> Bool {
+        if url.scheme?.lowercased() == "https", url.host != nil,
+           InstalledApp.origin(of: url) == allowedOrigin {
+            return true
+        }
+        if !isMainFrame, let scheme = url.scheme?.lowercased(), scheme == "about" || scheme == "blob" {
+            return true
+        }
+        return false
+    }
+
     class Coordinator: NSObject, WKNavigationDelegate {
-        let allowedHost: String
-        let wallet: WalletStore
+        let allowedOrigin: String
         var bridgeHandler: NativeBridgeHandler?
 
-        init(allowedHost: String, wallet: WalletStore) {
-            self.allowedHost = allowedHost
-            self.wallet = wallet
+        init(allowedOrigin: String) {
+            self.allowedOrigin = allowedOrigin
         }
 
         func webView(
@@ -144,25 +167,19 @@ struct AppWebView: UIViewRepresentable {
             decidePolicyFor navigationAction: WKNavigationAction,
             decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
         ) {
-            guard let url = navigationAction.request.url else {
+            // No target frame means a new window (target=_blank, window.open):
+            // not supported, so blocked.
+            guard let url = navigationAction.request.url,
+                  let targetFrame = navigationAction.targetFrame else {
                 decisionHandler(.cancel)
                 return
             }
-
-            // Allow HTTPS navigations to the app's own host
-            if url.scheme == "https" && url.host == allowedHost {
-                decisionHandler(.allow)
-                return
-            }
-
-            // Allow about:blank and blob: for internal frames
-            if url.scheme == "about" || url.scheme == "blob" {
-                decisionHandler(.allow)
-                return
-            }
-
-            // Block everything else
-            decisionHandler(.cancel)
+            let allowed = AppWebView.allowsNavigation(
+                to: url,
+                isMainFrame: targetFrame.isMainFrame,
+                allowedOrigin: allowedOrigin
+            )
+            decisionHandler(allowed ? .allow : .cancel)
         }
     }
 }

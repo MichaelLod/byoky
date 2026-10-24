@@ -65,6 +65,20 @@ struct CredentialEntryView: View {
         provider.id == "ollama" || provider.id == "lm_studio"
     }
 
+    private var isAzure: Bool { provider.id == "azure_openai" }
+
+    /// Azure, Ollama and LM Studio have no fixed host: the key is only ever
+    /// sent to the endpoint stored with it.
+    private var requiresEndpoint: Bool { provider.requiresCustomBaseUrl }
+
+    private var normalizedEndpoint: String? {
+        Provider.normalizedEndpoint(baseUrl, for: provider.id)
+    }
+
+    private var showsEndpointError: Bool {
+        requiresEndpoint && !baseUrl.trimmingCharacters(in: .whitespaces).isEmpty && normalizedEndpoint == nil
+    }
+
     private var defaultBaseUrlForProvider: String {
         switch provider.id {
         case "ollama": return "http://localhost:11434"
@@ -75,12 +89,9 @@ struct CredentialEntryView: View {
 
     private var isValid: Bool {
         if label.isEmpty { return false }
-        if isLocalProvider {
-            // Local providers can have an empty API key (unauthenticated
-            // server) but require a baseUrl.
-            return !baseUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
-        return !apiKey.isEmpty
+        if requiresEndpoint && normalizedEndpoint == nil { return false }
+        // Local servers may run without auth, so their key is optional.
+        return isLocalProvider || !apiKey.isEmpty
     }
 
     var body: some View {
@@ -100,6 +111,27 @@ struct CredentialEntryView: View {
                 }
             }
 
+            if isAzure {
+                Section {
+                    TextField("https://<resource>.openai.azure.com", text: $baseUrl)
+                        .keyboardType(.URL)
+                        .textContentType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .fontDesign(.monospaced)
+                        .accessibilityIdentifier("credentialEntry.endpoint")
+                    if showsEndpointError {
+                        Text("Use your resource endpoint, like https://contoso.openai.azure.com")
+                            .font(.caption)
+                            .foregroundStyle(Theme.danger)
+                    }
+                } header: {
+                    Text("Endpoint")
+                } footer: {
+                    Text("Your Azure OpenAI resource endpoint, from Keys and Endpoint in the Azure portal. This key is only ever sent to this endpoint.")
+                }
+            }
+
             if isLocalProvider {
                 Section {
                     TextField("http://localhost:11434", text: $baseUrl)
@@ -108,6 +140,11 @@ struct CredentialEntryView: View {
                         .autocorrectionDisabled()
                         .fontDesign(.monospaced)
                         .accessibilityIdentifier("credentialEntry.baseUrl")
+                    if showsEndpointError {
+                        Text("Use http://localhost:<port>, http://127.0.0.1:<port>, or an https:// address")
+                            .font(.caption)
+                            .foregroundStyle(Theme.danger)
+                    }
                 } header: {
                     Text("Server URL")
                 } footer: {
@@ -116,7 +153,7 @@ struct CredentialEntryView: View {
                              ? "Where your Ollama server is running. Make sure `ollama serve` is active."
                              : "Where your LM Studio server is running. Start the \"Local Server\" in LM Studio.")
                         Label {
-                            Text("Your computer must stay online. This credential only works while your machine is running. Gift recipients will see it as offline whenever your machine sleeps or disconnects.")
+                            Text("The server must be reachable from this device. Apps using this credential fail whenever the server is offline.")
                         } icon: {
                             Image(systemName: "exclamationmark.triangle.fill")
                         }
@@ -144,24 +181,7 @@ struct CredentialEntryView: View {
                 if authMethod == .oauth {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Run `claude setup-token` in your terminal to get a token.")
-                        Text("Setup tokens use your Claude Pro/Max subscription. API requests route through the app with native networking.")
-                        if wallet.cloudVaultEnabled {
-                            Label {
-                                Text("Cloud Sync enabled — setup-token requests are served by Byoky's residential-proxy gateway when your phone is closed or asleep.")
-                            } icon: {
-                                Image(systemName: "cloud.fill")
-                            }
-                            .foregroundStyle(Theme.accent)
-                            .padding(.top, 4)
-                        } else {
-                            Label {
-                                Text("Online only — without Cloud Sync, setup tokens require the Byoky app to be open. Apps using this credential will fail if the phone is closed or asleep.")
-                            } icon: {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                            }
-                            .foregroundStyle(.orange)
-                            .padding(.top, 4)
-                        }
+                        Text("Setup tokens use your Claude Pro/Max subscription. Requests are sent directly from this device with native networking.")
                     }
                 } else if isLocalProvider {
                     Text("Leave blank if your local server has no auth. Any key you enter is stored encrypted in the iOS Keychain and forwarded as a Bearer token.")
@@ -197,15 +217,18 @@ struct CredentialEntryView: View {
 
     private func save() {
         let cleanKey = apiKey.filter { !$0.isWhitespace && !$0.isNewline }
-        let trimmedBase = baseUrl.trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let endpoint = normalizedEndpoint
+        if requiresEndpoint && endpoint == nil {
+            error = WalletError.invalidEndpoint.localizedDescription
+            return
+        }
         do {
             try wallet.addCredential(
                 providerId: provider.id,
                 label: label,
                 apiKey: cleanKey,
                 authMethod: authMethod,
-                baseUrl: isLocalProvider ? trimmedBase : nil
+                baseUrl: requiresEndpoint ? endpoint : nil
             )
             onSaved()
         } catch {

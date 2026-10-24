@@ -64,67 +64,79 @@ final class ByokyMarketingTests: XCTestCase {
         XCTAssertTrue(appearedGemini || appearedEmpty, "Dashboard never rendered")
         phase("02-dashboard", sleep: 2.0)
 
-        // ── 03: open Settings tab if it exists ──────────────────────────
-        if app.tabBars.buttons["Settings"].exists {
-            app.tabBars.buttons["Settings"].tap()
-            phase("03-settings", sleep: 1.5)
-            // Back to wallet tab
-            (app.tabBars.buttons["Wallet"].exists
-                ? app.tabBars.buttons["Wallet"]
-                : app.tabBars.buttons.firstMatch).tap()
-            Thread.sleep(forTimeInterval: 0.6)
-        }
+        // ── 03: Settings (from the wallet toolbar), Backup section on top ─
+        let settingsButton = app.buttons["wallet.settings"]
+        if settingsButton.waitForExistence(timeout: 5.0) {
+            settingsButton.tap()
+            let exportButton = app.buttons["settings.exportBackup"]
+            if exportButton.waitForExistence(timeout: 5.0) {
+                phase("03-settings-backup", sleep: 1.5)
 
-        // ── 04: Gifts tab ──────────────────────────────────────────────
-        let giftsTab = app.tabBars.buttons["Gifts"]
-        XCTAssertTrue(giftsTab.waitForExistence(timeout: 5.0), "Gifts tab missing")
-        giftsTab.tap()
-        Thread.sleep(forTimeInterval: 1.0)
-        phase("04-gifts-empty", sleep: 1.5)
-
-        // ── 05: open Create Gift sheet ──────────────────────────────────
-        let createGift = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label CONTAINS[c] 'Create Gift'"))
-            .firstMatch
-        XCTAssertTrue(createGift.waitForExistence(timeout: 5.0))
-        createGift.tap()
-        Thread.sleep(forTimeInterval: 1.0)
-        phase("05-create-gift-form", sleep: 2.0)
-
-        // ── 06: pick custom budget 500 tokens ───────────────────────────
-        let customToggle = app.buttons["createGift.customToggle"]
-        if customToggle.waitForExistence(timeout: 5.0) {
-            customToggle.tap()
-            let customField = app.textFields["createGift.customTokens"]
-            if customField.waitForExistence(timeout: 2.0) {
-                customField.tap()
-                customField.typeText("500")
-                if app.keyboards.element.exists {
-                    app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.1)).tap()
+                // ── 03b: Export Backup sheet ───────────────────────────
+                exportButton.tap()
+                let masterField = app.secureTextFields["exportBackup.masterPassword"]
+                if masterField.waitForExistence(timeout: 5.0) {
+                    phase("03b-export-backup", sleep: 1.5)
+                    let close = app.buttons["exportBackup.close"]
+                    if close.exists { close.tap() }
+                    Thread.sleep(forTimeInterval: 0.8)
                 }
             }
-        }
-        phase("06-create-gift-filled", sleep: 1.5)
-
-        // ── 07: submit + show generated link ────────────────────────────
-        let submitBtn = app.buttons["createGift.submit"]
-        for _ in 0..<6 where !submitBtn.waitForExistence(timeout: 0.5) {
-            app.swipeUp()
-        }
-        if submitBtn.waitForExistence(timeout: 3.0) {
-            submitBtn.tap()
-            let linkText = app.staticTexts["createGift.link"]
-            if linkText.waitForExistence(timeout: 15.0) {
-                phase("07-gift-link-ready", sleep: 2.5)
-                if app.buttons["createGift.done"].exists {
-                    app.buttons["createGift.done"].tap()
-                    Thread.sleep(forTimeInterval: 1.0)
-                }
+            let done = app.buttons["settings.done"]
+            if done.waitForExistence(timeout: 3.0) {
+                done.tap()
+                Thread.sleep(forTimeInterval: 0.8)
             }
         }
 
-        // ── 08: gifts list with the new sent gift ───────────────────────
-        phase("08-gifts-with-sent-gift", sleep: 2.0)
+        // ── 04: Apps tab (empty) ───────────────────────────────────────
+        let appsTab = app.tabBars.buttons["Apps"]
+        XCTAssertTrue(appsTab.waitForExistence(timeout: 5.0), "Apps tab missing")
+        appsTab.tap()
+        Thread.sleep(forTimeInterval: 1.0)
+        phase("04-apps-empty", sleep: 1.5)
+
+        // ── 05: Add app by URL ─────────────────────────────────────────
+        let addEmpty = app.buttons["apps.addAppEmpty"]
+        let addToolbar = app.buttons["apps.addApp"]
+        if addEmpty.waitForExistence(timeout: 3.0) {
+            addEmpty.tap()
+        } else {
+            XCTAssertTrue(addToolbar.waitForExistence(timeout: 3.0), "Add app button missing")
+            addToolbar.tap()
+        }
+        let urlField = app.textFields["addApp.url"]
+        XCTAssertTrue(urlField.waitForExistence(timeout: 5.0), "Add app sheet missing")
+        urlField.tap()
+        urlField.typeText("byoky.com/chat")
+        let nameField = app.textFields["addApp.name"]
+        if nameField.waitForExistence(timeout: 2.0) {
+            nameField.tap()
+            nameField.typeText("Byoky Chat")
+        }
+        phase("05-add-app-form", sleep: 1.5)
+
+        // ── 06: the new app opens in the in-wallet browser ─────────────
+        let submit = app.buttons["addApp.submit"]
+        XCTAssertTrue(submit.waitForExistence(timeout: 3.0))
+        submit.tap()
+        let closeRuntime = app.buttons["appRuntime.close"]
+        if closeRuntime.waitForExistence(timeout: 10.0) {
+            Thread.sleep(forTimeInterval: 3.0) // let the page load
+            phase("06-app-runtime", sleep: 1.5)
+            closeRuntime.tap()
+            Thread.sleep(forTimeInterval: 1.0)
+        }
+
+        // ── 07: Apps grid with the added app ───────────────────────────
+        phase("07-apps-grid", sleep: 1.5)
+
+        // ── 08: Connected apps + routing groups ────────────────────────
+        let connectedTab = app.tabBars.buttons["Connected"]
+        XCTAssertTrue(connectedTab.waitForExistence(timeout: 5.0), "Connected tab missing")
+        connectedTab.tap()
+        Thread.sleep(forTimeInterval: 1.0)
+        phase("08-connected-apps", sleep: 1.5)
 
         // ── 09: back to dashboard ───────────────────────────────────────
         (app.tabBars.buttons["Wallet"].exists

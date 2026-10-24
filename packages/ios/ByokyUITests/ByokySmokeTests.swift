@@ -1,10 +1,8 @@
 import XCTest
 
 /// Smoke test — proves the XCUITest target boots and the Byoky app launches
-/// to the welcome screen. This is deliberately minimal. The real cross-device
-/// flow (wallet create → credentials → groups → gift → redeem) lives in
-/// ByokyLiveFlowTests, which is driven from the node/Playwright harness
-/// that coordinates the desktop extension wallet on the other side.
+/// to a known entry screen. This is deliberately minimal; the screen walk
+/// (wallet, apps, connected apps) lives in ByokyMarketingTests.
 final class ByokySmokeTests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false

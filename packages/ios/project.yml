@@ -31,12 +31,45 @@ targets:
     deploymentTarget: "17.0"
     sources:
       - path: SafariExtension
+        excludes:
+          - Resources
+    postBuildScripts:
+      - name: Copy web extension
+        basedOnDependencyAnalysis: false
+        script: |
+          # Copy the WXT Safari build with its folder structure intact.
+          # Listing the files as sources flattens chunks/, assets/ etc. into
+          # one directory, which breaks every path in manifest.json and the
+          # HTML pages (and the hashed names change on every build).
+          set -euo pipefail
+          SRC="${SRCROOT}/SafariExtension/Resources"
+          DST="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}"
+          if [ ! -f "$SRC/manifest.json" ]; then
+            echo "error: $SRC/manifest.json not found. Run: pnpm --filter @byoky/extension exec wxt build --browser safari && packages/ios/Scripts/copy-wxt-output.sh"
+            exit 1
+          fi
+          mkdir -p "$DST"
+          rsync -a --exclude .gitkeep "$SRC/" "$DST/"
     settings:
       base:
         INFOPLIST_FILE: SafariExtension/Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: com.byoky.app.extension
         CODE_SIGN_ENTITLEMENTS: SafariExtension/SafariExtension.entitlements
         OTHER_LDFLAGS: ["-framework", "SafariServices"]
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+
+  ByokyTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: ByokyTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.byoky.app.tests
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: Byoky
 
   ByokyUITests:
     type: bundle.ui-testing
@@ -55,7 +88,7 @@ targets:
   Byoky (macOS):
     type: application
     platform: macOS
-    deploymentTarget: "11.0"
+    deploymentTarget: "12.0"
     sources:
       - path: macOS
         excludes:
@@ -79,16 +112,33 @@ targets:
   ByokySafariExtension (macOS):
     type: app-extension
     platform: macOS
-    deploymentTarget: "11.0"
+    deploymentTarget: "12.0"
     sources:
       - path: SafariExtension
         excludes:
           - Info.plist
           - SafariExtension.entitlements
           - Resources
-      - path: SafariExtension/Resources
+    postBuildScripts:
+      - name: Copy web extension
+        basedOnDependencyAnalysis: false
+        script: |
+          # Copy the WXT Safari build with its folder structure intact.
+          # Listing the files as sources flattens chunks/, assets/ etc. into
+          # one directory, which breaks every path in manifest.json and the
+          # HTML pages (and the hashed names change on every build).
+          set -euo pipefail
+          SRC="${SRCROOT}/SafariExtension/Resources"
+          DST="${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}"
+          if [ ! -f "$SRC/manifest.json" ]; then
+            echo "error: $SRC/manifest.json not found. Run: pnpm --filter @byoky/extension exec wxt build --browser safari && packages/ios/Scripts/copy-wxt-output.sh"
+            exit 1
+          fi
+          mkdir -p "$DST"
+          rsync -a --exclude .gitkeep "$SRC/" "$DST/"
     settings:
       base:
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
         INFOPLIST_FILE: macOS/SafariExtension-macOS-Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: com.byoky.app.extension
         CODE_SIGN_ENTITLEMENTS: macOS/SafariExtension-macOS.entitlements
@@ -104,12 +154,14 @@ schemes:
       targets:
         Byoky: all
         ByokySafariExtension: all
+        ByokyTests: [test]
         ByokyUITests: [test]
     run:
       config: Debug
     test:
       config: Debug
       targets:
+        - ByokyTests
         - ByokyUITests
     archive:
       config: Release

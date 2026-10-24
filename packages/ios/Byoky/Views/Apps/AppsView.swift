@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The Apps screen — connected apps bucketed by group, with per-app routing
+/// The Connected Apps screen — connected apps bucketed by group, with per-app routing
 /// (assign an app to a group → its requests use that group's credential and,
 /// when the group's destination is in a different family, get translated on
 /// the fly). Mirrors the extension's `ConnectedApps.tsx` page; the mobile
@@ -29,10 +29,6 @@ struct AppsView: View {
     var body: some View {
         NavigationStack {
             List {
-                if !wallet.cloudVaultEnabled && !wallet.sessions.isEmpty {
-                    cloudVaultWarning
-                }
-
                 Section {
                     Button {
                         showCreateGroup = true
@@ -55,7 +51,7 @@ struct AppsView: View {
             .scrollContentBackground(.hidden)
             .background(Theme.bgMain)
             .toolbarBackground(Theme.bgMain, for: .navigationBar)
-            .navigationTitle("Apps")
+            .navigationTitle("Connected Apps")
             .toolbar {
                 if wallet.sessions.count > 1 {
                     ToolbarItem(placement: .topBarLeading) {
@@ -103,9 +99,6 @@ struct AppsView: View {
         let isDefault = group.id == defaultGroupId
         let pinnedCred = group.credentialId.flatMap { id in
             wallet.credentials.first { $0.id == id }
-        }
-        let pinnedGift = group.giftId.flatMap { gid in
-            wallet.giftedCredentials.first { $0.giftId == gid }
         }
 
         Section {
@@ -200,8 +193,6 @@ struct AppsView: View {
         } footer: {
             if group.providerId.isEmpty {
                 Text("No routing — apps use the provider they request")
-            } else if let pinnedGift {
-                Text("Using gift from \(pinnedGift.senderLabel) · \(formatTokens(giftedBudgetRemaining(pinnedGift))) left")
             } else if let pinnedCred {
                 Text("Using \(pinnedCred.label)")
             } else {
@@ -220,24 +211,13 @@ struct AppsView: View {
                 Text("No Apps Connected")
                     .font(.headline)
 
-                Text("Pair an app via the Connect tab. Connected apps appear here, where you can group them, set token limits, and reroute requests across providers.")
+                Text("Apps you open from the Apps tab appear here once they connect. Group them, set token limits, and reroute their requests across providers.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }
             .padding(.vertical, 32)
             .frame(maxWidth: .infinity)
-        }
-    }
-
-    private var cloudVaultWarning: some View {
-        Section {
-            Label(
-                "Your device must stay online for connected apps to work. Enable Cloud Sync in Settings for offline access.",
-                systemImage: "wifi"
-            )
-            .font(.caption)
-            .foregroundStyle(.orange)
         }
     }
 }
@@ -484,7 +464,7 @@ struct GroupEditorSheet: View {
 
     @State private var name: String = ""
     @State private var providerId: String = "anthropic"
-    /// Unified pin value: `""` (any), `"cred:<id>"`, or `"gift:<giftId>"`.
+    /// Pinned credential id; `""` means any credential of the provider.
     @State private var pinValue: String = ""
     @State private var model: String = ""
     @State private var error: String?
@@ -493,18 +473,6 @@ struct GroupEditorSheet: View {
 
     private var matchingCredentials: [Credential] {
         wallet.credentials.filter { $0.providerId == providerId }
-    }
-
-    private var matchingGifts: [GiftedCredential] {
-        wallet.giftedCredentials.filter {
-            $0.providerId == providerId
-            && !isGiftedCredentialExpired($0)
-            && $0.usedTokens < $0.maxTokens
-        }
-    }
-
-    private var hasAnyPinnable: Bool {
-        !matchingCredentials.isEmpty || !matchingGifts.isEmpty
     }
 
     private var navTitle: String {
@@ -542,41 +510,28 @@ struct GroupEditorSheet: View {
                         loadSuggestedModels(for: newValue)
                     }
 
-                    if hasAnyPinnable {
+                    if !matchingCredentials.isEmpty {
                         Picker("Credential", selection: $pinValue) {
                             Text("Any \(Provider.find(providerId)?.name ?? providerId) credential").tag("")
-                            if !matchingCredentials.isEmpty {
-                                Section("Your credentials") {
-                                    ForEach(matchingCredentials, id: \.id) { c in
-                                        Text(c.label).tag("cred:\(c.id)")
-                                    }
-                                }
-                            }
-                            if !matchingGifts.isEmpty {
-                                Section("Gifts") {
-                                    ForEach(matchingGifts, id: \.giftId) { gc in
-                                        let remainingLabel = "\(formatTokens(giftedBudgetRemaining(gc))) left"
-                                        Text("🎁 \(gc.senderLabel) · \(remainingLabel)").tag("gift:\(gc.giftId)")
-                                    }
-                                }
+                            ForEach(matchingCredentials, id: \.id) { c in
+                                Text(c.label).tag(c.id)
                             }
                         }
                     } else {
                         // Inline warning when the chosen provider has no
-                        // credentials AND no active gifts. The save still
-                        // goes through (permissive mode) but the user is
-                        // told up front that this group won't actually
-                        // work until a credential is added or a gift is
-                        // redeemed.
+                        // credentials. The save still goes through
+                        // (permissive mode) but the user is told up front
+                        // that this group won't actually work until a
+                        // credential is added.
                         HStack(alignment: .top, spacing: 8) {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .foregroundStyle(.orange)
                                 .imageScale(.medium)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("No \(Provider.find(providerId)?.name ?? providerId) credential or gift")
+                                Text("No \(Provider.find(providerId)?.name ?? providerId) credential")
                                     .font(.subheadline)
                                     .fontWeight(.medium)
-                                Text("This group can be saved, but apps using it will fail until you add a \(Provider.find(providerId)?.name ?? providerId) key or redeem a matching gift.")
+                                Text("This group can be saved, but apps using it will fail until you add a \(Provider.find(providerId)?.name ?? providerId) key.")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -586,7 +541,7 @@ struct GroupEditorSheet: View {
                 } header: {
                     Text("Destination")
                 } footer: {
-                    Text("Apps assigned to this group will route their requests through this provider. Pin a credential or a gift to lock the choice; leave it as \"Any\" to use any credential of that provider.")
+                    Text("Apps assigned to this group will route their requests through this provider. Pin a credential to lock the choice; leave it as \"Any\" to use any credential of that provider.")
                 }
 
                 Section {
@@ -651,13 +606,7 @@ struct GroupEditorSheet: View {
                 if let existing = mode.existingGroup {
                     name = existing.name
                     providerId = existing.providerId
-                    if let gid = existing.giftId {
-                        pinValue = "gift:\(gid)"
-                    } else if let cid = existing.credentialId {
-                        pinValue = "cred:\(cid)"
-                    } else {
-                        pinValue = ""
-                    }
+                    pinValue = existing.credentialId ?? ""
                     model = existing.model ?? ""
                 }
                 loadSuggestedModels(for: providerId)
@@ -707,15 +656,13 @@ struct GroupEditorSheet: View {
 
     private func save() {
         do {
-            let credentialPin: String? = pinValue.hasPrefix("cred:") ? String(pinValue.dropFirst(5)) : nil
-            let giftPin: String? = pinValue.hasPrefix("gift:") ? String(pinValue.dropFirst(5)) : nil
+            let credentialPin: String? = pinValue.nilIfEmpty
             switch mode {
             case .create:
                 try wallet.createGroup(
                     name: name,
                     providerId: providerId,
                     credentialId: credentialPin,
-                    giftId: giftPin,
                     model: model.nilIfEmpty
                 )
             case .edit(let g):
@@ -724,7 +671,6 @@ struct GroupEditorSheet: View {
                     name: mode.isDefault ? nil : name,
                     providerId: providerId,
                     credentialId: .some(credentialPin),
-                    giftId: .some(giftPin),
                     model: .some(model.nilIfEmpty)
                 )
             }

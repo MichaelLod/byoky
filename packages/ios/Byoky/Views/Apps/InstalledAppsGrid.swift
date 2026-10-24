@@ -2,21 +2,16 @@ import SwiftUI
 
 struct InstalledAppsGrid: View {
     @EnvironmentObject var wallet: WalletStore
-    let onBrowseStore: () -> Void
-    @State private var popularApps: [MarketplaceApp] = []
+    let onAddApp: () -> Void
 
     private var enabledApps: [InstalledApp] { wallet.installedApps.filter(\.enabled) }
     private var disabledApps: [InstalledApp] { wallet.installedApps.filter { !$0.enabled } }
-    private var installedIds: Set<String> { Set(wallet.installedApps.map(\.id)) }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 if wallet.installedApps.isEmpty {
                     emptyState
-                    if !popularApps.isEmpty {
-                        popularSection
-                    }
                 } else {
                     appGrid(apps: enabledApps)
 
@@ -34,11 +29,6 @@ struct InstalledAppsGrid: View {
             }
             .padding(.top, 16)
         }
-        .task {
-            if wallet.installedApps.isEmpty && popularApps.isEmpty {
-                await fetchPopular()
-            }
-        }
     }
 
     private var emptyState: some View {
@@ -46,48 +36,21 @@ struct InstalledAppsGrid: View {
             Image(systemName: "square.grid.2x2")
                 .font(.system(size: 40))
                 .foregroundStyle(Theme.textMuted)
-            Text("No apps installed")
+            Text("No apps yet")
                 .foregroundStyle(Theme.textSecondary)
-            Text("Browse the store to find apps that use your API keys.")
+            Text("Add a web app that supports Byoky by its address. It opens in the built-in browser and uses the keys in this wallet without ever seeing them.")
                 .font(.caption)
                 .foregroundStyle(Theme.textMuted)
                 .multilineTextAlignment(.center)
-            Button("Browse Store", action: onBrowseStore)
+                .padding(.horizontal, 32)
+            Button("Add App by URL", action: onAddApp)
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accent)
                 .padding(.top, 4)
+                .accessibilityIdentifier("apps.addAppEmpty")
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 40)
-    }
-
-    private var popularSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("POPULAR APPS")
-                .font(.caption2)
-                .fontWeight(.semibold)
-                .foregroundStyle(Theme.textMuted)
-                .padding(.horizontal)
-            VStack(spacing: 8) {
-                ForEach(popularApps) { app in
-                    StoreAppRow(app: app, installed: installedIds.contains(app.id)) {
-                        wallet.installApp(app)
-                    }
-                    .padding(.horizontal)
-                }
-            }
-        }
-    }
-
-    private func fetchPopular() async {
-        do {
-            let url = URL(string: marketplaceURL)!
-            let (data, _) = try await URLSession.shared.data(from: url)
-            let response = try JSONDecoder().decode(MarketplaceResponse.self, from: data)
-            popularApps = Array(response.apps.prefix(10))
-        } catch {
-            // Silent — empty state already shown above.
-        }
     }
 
     private func appGrid(apps: [InstalledApp]) -> some View {
@@ -142,7 +105,7 @@ struct AppIconView: View {
             Button(role: .destructive) {
                 wallet.uninstallApp(app.id)
             } label: {
-                Label("Uninstall", systemImage: "trash")
+                Label("Remove", systemImage: "trash")
             }
         }
         .fullScreenCover(isPresented: $showRuntime) {

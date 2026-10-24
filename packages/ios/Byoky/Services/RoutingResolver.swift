@@ -200,11 +200,14 @@ struct RoutingResolver {
             return nil
         }
 
+        // A future createdAt (e.g. from a hand-edited backup) must not let a
+        // credential jump the queue: treat it as "now".
+        let now = Date()
         let sorted = credentials.sorted { a, b in
             let ao = familyOrder(for: a.providerId)
             let bo = familyOrder(for: b.providerId)
             if ao != bo { return ao < bo }
-            return a.createdAt > b.createdAt
+            return min(a.createdAt, now) > min(b.createdAt, now)
         }
 
         guard let srcModel = requestedModel, !srcModel.isEmpty else {
@@ -265,6 +268,27 @@ struct RoutingResolver {
         default:
             return nil
         }
+    }
+
+    /// Human-readable message for a NO_CREDENTIAL proxy error. Three cases:
+    ///   1. The app's group routes to a provider the user has no key for.
+    ///   2. The user has keys, just not for the requested provider.
+    ///   3. The wallet holds no keys at all.
+    static func noCredentialMessage(
+        requestedProviderId: String,
+        userCredentialProviderIds: [String],
+        group: Group?
+    ) -> String {
+        let req = requestedProviderId
+        // An empty providerId means the sentinel default group — no routing,
+        // so treat as if no group were set.
+        if let groupBinding = group?.providerId.nilIfEmpty, groupBinding != req {
+            return "No \(groupBinding) API key found. Add a \(groupBinding) key to your wallet, or assign this app to a provider you already have a key for."
+        }
+        if !userCredentialProviderIds.isEmpty {
+            return "No \(req) API key found. Keys: \(userCredentialProviderIds.joined(separator: ", ")). Add a \(req) key, or assign this app to one of those providers."
+        }
+        return "No API keys in your wallet. Add a key for any provider to get started."
     }
 
     /// Best-effort `model` extraction from a JSON request body. Returns nil

@@ -127,9 +127,31 @@ final class CryptoService {
         return result
     }
 
-    // MARK: - Legacy password-based decrypt (v1 migration)
+    // MARK: - Password-based AES-256-GCM (@byoky/core format)
+    //
+    // Byte-compatible with `encrypt`/`decrypt` in packages/core/src/crypto.ts:
+    // base64( salt[16] ‖ iv[12] ‖ ciphertext ‖ tag[16] ), key = PBKDF2-HMAC-
+    // SHA256(UTF-8 password, salt, 600,000 iterations, 256 bits), UTF-8
+    // plaintext. Used for `.byoky` backup files and the v1 key migration.
+    // Every call runs a full PBKDF2, so keep these off the main thread.
 
-    func decryptLegacy(encoded: String, password: String) throws -> String {
+    func encrypt(plaintext: String, password: String) throws -> String {
+        let salt = randomBytes(count: saltLength)
+        guard let key = deriveKey(password: password, salt: salt) else {
+            throw CryptoError.keyDerivationFailed
+        }
+        let nonce = try AES.GCM.Nonce(data: randomBytes(count: nonceLength))
+        let sealed = try AES.GCM.seal(Data(plaintext.utf8), using: key, nonce: nonce)
+
+        var combined = Data()
+        combined.append(salt)
+        combined.append(Data(nonce))
+        combined.append(sealed.ciphertext)
+        combined.append(sealed.tag)
+        return combined.base64EncodedString()
+    }
+
+    func decrypt(encoded: String, password: String) throws -> String {
         guard let combined = Data(base64Encoded: encoded) else {
             throw CryptoError.invalidData
         }
@@ -151,15 +173,25 @@ final class CryptoService {
         let ciphertext = ciphertextAndTag.prefix(tagStart)
         let tag = ciphertextAndTag.suffix(16)
 
-        let nonce = try AES.GCM.Nonce(data: nonceData)
-        let sealedBox = try AES.GCM.SealedBox(nonce: nonce, ciphertext: ciphertext, tag: tag)
-        let decrypted = try AES.GCM.open(sealedBox, using: key)
+        let decrypted: Data
+        do {
+            let nonce = try AES.GCM.Nonce(data: nonceData)
+            let sealedBox = try AES.GCM.SealedBox(nonce: nonce, ciphertext: ciphertext, tag: tag)
+            decrypted = try AES.GCM.open(sealedBox, using: key)
+        } catch {
+            throw CryptoError.decryptionFailed
+        }
 
         guard let result = String(data: decrypted, encoding: .utf8) else {
             throw CryptoError.decryptionFailed
         }
 
         return result
+    }
+
+    /// v1 keys were stored in the core password-based format.
+    func decryptLegacy(encoded: String, password: String) throws -> String {
+        try decrypt(encoded: encoded, password: password)
     }
 
     // MARK: - Helpers

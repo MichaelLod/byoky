@@ -4,11 +4,12 @@ struct MainTabView: View {
     @EnvironmentObject var wallet: WalletStore
     @State private var selectedTab: Int = 0
     @State private var showAddCredential = false
-    @State private var showRedeemGift = false
-    @State private var showAppStore = false
+    @State private var showAddApp = false
+    @State private var justAdded: InstalledApp?
+    @State private var launchingApp: InstalledApp?
 
-    private static let appsTabIndex = 2
-    private static let connectTabIndex = 3
+    private static let appsTabIndex = 1
+    private static let connectedTabIndex = 2
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -20,33 +21,25 @@ struct MainTabView: View {
                     .accessibilityIdentifier("tab.wallet")
                     .tag(0)
 
-                GiftsView()
-                    .tabItem {
-                        Label("Gifts", systemImage: "gift")
-                    }
-                    .accessibilityIdentifier("tab.gifts")
-                    .tag(1)
-
-                MarketplaceTabView()
+                AppsTabView()
                     .tabItem {
                         Label("Apps", systemImage: "square.grid.2x2")
                     }
                     .accessibilityIdentifier("tab.apps")
                     .tag(MainTabView.appsTabIndex)
 
-                ConnectView()
+                AppsView()
                     .tabItem {
-                        Label("Connect", systemImage: "antenna.radiowaves.left.and.right")
+                        Label("Connected", systemImage: "link")
                     }
-                    .accessibilityIdentifier("tab.connect")
-                    .tag(MainTabView.connectTabIndex)
+                    .accessibilityIdentifier("tab.connected")
+                    .tag(MainTabView.connectedTabIndex)
             }
             .tint(Theme.accent)
 
             FloatingActionMenu(
                 onAddCredential: { showAddCredential = true },
-                onRedeemGift: { showRedeemGift = true },
-                onAddApp: { showAppStore = true }
+                onAddApp: { showAddApp = true }
             )
             // Lift above the tab bar (49pt standard + safe-area inset).
             .padding(.trailing, 18)
@@ -56,27 +49,29 @@ struct MainTabView: View {
             AddCredentialView()
                 .environmentObject(wallet)
         }
-        .sheet(isPresented: $showRedeemGift, onDismiss: {
-            wallet.pendingGiftLink = nil
+        .sheet(isPresented: $showAddApp, onDismiss: {
+            guard let app = justAdded else { return }
+            justAdded = nil
+            selectedTab = MainTabView.appsTabIndex
+            launchingApp = app
         }) {
-            NavigationStack {
-                RedeemGiftView(prefilledLink: wallet.pendingGiftLink)
-            }
-            .environmentObject(wallet)
-        }
-        .sheet(isPresented: $showAppStore) {
-            AppStoreView()
+            AddAppView(onAdded: { justAdded = $0 })
                 .environmentObject(wallet)
         }
-        .onChange(of: wallet.pendingPairLink) { _, newValue in
-            if newValue != nil { selectedTab = MainTabView.connectTabIndex }
+        .fullScreenCover(item: $launchingApp) { app in
+            AppRuntimeView(app: app)
+                .environmentObject(wallet)
+        }
+        // A .byoky file opened from Files, AirDrop or Mail.
+        .sheet(item: $wallet.pendingBackupFile) { file in
+            ImportBackupView(file: file)
+                .environmentObject(wallet)
         }
     }
 }
 
 struct FloatingActionMenu: View {
     let onAddCredential: () -> Void
-    let onRedeemGift: () -> Void
     let onAddApp: () -> Void
 
     var body: some View {
@@ -89,16 +84,9 @@ struct FloatingActionMenu: View {
             .accessibilityIdentifier("fab.menu.addCredential")
 
             Button {
-                onRedeemGift()
-            } label: {
-                Label("Redeem gift", systemImage: "gift.fill")
-            }
-            .accessibilityIdentifier("fab.menu.redeemGift")
-
-            Button {
                 onAddApp()
             } label: {
-                Label("Install app", systemImage: "square.grid.2x2.fill")
+                Label("Add app", systemImage: "square.grid.2x2.fill")
             }
             .accessibilityIdentifier("fab.menu.addApp")
         } label: {

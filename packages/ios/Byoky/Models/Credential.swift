@@ -28,7 +28,8 @@ struct Credential: Identifiable, Codable {
         )
     }
 
-    /// Apply auth headers and body modifications for this credential's auth method.
+    /// Apply the provider's auth headers for this credential. Setup-token
+    /// bodies are shaped separately by `ClaudeCodeShaping`.
     static func applyAuth(to request: inout URLRequest, providerId: String, authMethod: AuthMethod, apiKey: String) {
         // Azure OpenAI uses an `api-key` header, not `Authorization: Bearer`.
         // This matches the extension behavior in proxy-utils.ts:71. Without
@@ -52,42 +53,49 @@ struct Credential: Identifiable, Codable {
             }
             return
         }
-        if providerId == "anthropic" && authMethod == .oauth {
-            // Setup tokens require CLI-like headers and Bearer auth
+        if providerId == "anthropic" {
+            applyAnthropicAuth(to: &request, authMethod: authMethod, apiKey: apiKey)
+            return
+        }
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+    }
+
+    /// Mirrors the anthropic branch of `buildHeaders` in
+    /// packages/core/src/proxy-utils.ts. URLRequest header names are
+    /// case-insensitive, so values set here replace the app's, never duplicate.
+    private static func applyAnthropicAuth(to request: inout URLRequest, authMethod: AuthMethod, apiKey: String) {
+        // Betas that opt every request into a tier most plans can't bill
+        // (long context) — dropped for API keys and setup tokens alike.
+        let incompatibleBetas: Set<String> = ["context-1m-2025-08-07"]
+        var betas = (request.value(forHTTPHeaderField: "anthropic-beta") ?? "")
+            .components(separatedBy: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !incompatibleBetas.contains($0) }
+
+        if authMethod == .oauth {
+            // Setup tokens: Claude-CLI-like headers and Bearer auth. The body
+            // is shaped separately (ClaudeCodeShaping).
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
             request.setValue("claude-cli/2.1.76", forHTTPHeaderField: "User-Agent")
             request.setValue("cli", forHTTPHeaderField: "x-app")
             if request.value(forHTTPHeaderField: "Accept") == nil {
                 request.setValue("application/json", forHTTPHeaderField: "Accept")
             }
-            // Merge app's beta flags with OAuth-required flags
-            let oauthBeta = ["claude-code-20250219", "oauth-2025-04-20", "fine-grained-tool-streaming-2025-05-14", "interleaved-thinking-2025-05-14"]
-            let existing = request.value(forHTTPHeaderField: "anthropic-beta")?
-                .components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) } ?? []
-            let merged = Array(Set(existing + oauthBeta)).sorted()
-            request.setValue(merged.joined(separator: ","), forHTTPHeaderField: "anthropic-beta")
-            request.setValue("true", forHTTPHeaderField: "anthropic-dangerous-direct-browser-access")
-            // Setup tokens require the Claude Code system prompt. If the
-            // caller has already run the full Claude-Code request-shape
-            // transform via TranslationEngine.prepareClaudeCodeBody (relay
-            // path), the system field is already set to the bare prefix —
-            // don't append it again.
-            if let body = request.httpBody,
-               var parsed = try? JSONSerialization.jsonObject(with: body) as? [String: Any] {
-                let prefix = "You are Claude Code, Anthropic's official CLI for Claude."
-                if parsed["system"] == nil {
-                    parsed["system"] = prefix
-                } else if let existing = parsed["system"] as? String,
-                          !existing.hasPrefix(prefix) {
-                    parsed["system"] = "\(prefix)\n\n\(existing)"
-                }
-                request.httpBody = try? JSONSerialization.data(withJSONObject: parsed)
+            for beta in ["claude-code-20250219", "oauth-2025-04-20", "fine-grained-tool-streaming-2025-05-14", "interleaved-thinking-2025-05-14"]
+            where !betas.contains(beta) {
+                betas.append(beta)
             }
-        } else if providerId == "anthropic" {
-            request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         } else {
-            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         }
+
+        request.setValue(betas.isEmpty ? nil : betas.joined(separator: ","), forHTTPHeaderField: "anthropic-beta")
+        // Translated requests drop the app's anthropic-version (it belonged
+        // to the source dialect), so always make sure one is present.
+        if request.value(forHTTPHeaderField: "anthropic-version") == nil {
+            request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        }
+        request.setValue("true", forHTTPHeaderField: "anthropic-dangerous-direct-browser-access")
     }
 }
 
@@ -148,38 +156,110 @@ struct Provider: Identifiable, Hashable {
         return url
     }
 
-    static func validateUrl(_ urlString: String, for providerId: String, credentialBaseUrl: String? = nil) -> URL? {
-        guard let provider = find(providerId),
-              let url = URL(string: urlString),
-              let urlHost = url.host else {
+    // MARK: - Upstream URL rules (mirror packages/core/src/proxy-utils.ts)
+
+    static func isLocal(_ providerId: String) -> Bool {
+        providerId == "ollama" || providerId == "lm_studio"
+    }
+
+    static func isLoopbackHost(_ host: String) -> Bool {
+        ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host.lowercased())
+    }
+
+    /// https always; plain http only to a loopback host for local providers.
+    static func isAllowedScheme(_ url: URL, for providerId: String) -> Bool {
+        switch url.scheme?.lowercased() {
+        case "https": return true
+        case "http": return isLocal(providerId) && isLoopbackHost(url.host ?? "")
+        default: return false
+        }
+    }
+
+    /// A credential's own base URL, if the provider uses one and it is safe:
+    /// only providers without a fixed host (Azure, Ollama, LM Studio) use it;
+    /// it must pass `isAllowedScheme`, carry no user:password, query or
+    /// fragment, and for Azure point at an `*.openai.azure.com` resource.
+    /// Mirrors core's `resolveProviderBaseUrl`, plus the Azure host rule this
+    /// app has always enforced for Azure requests.
+    static func customBaseUrl(for providerId: String, credentialBaseUrl: String?) -> URL? {
+        guard let provider = find(providerId), provider.requiresCustomBaseUrl,
+              let raw = credentialBaseUrl, !raw.isEmpty,
+              let components = URLComponents(string: raw),
+              let host = components.host, !host.isEmpty,
+              components.user == nil, components.password == nil,
+              components.query == nil, components.fragment == nil,
+              let url = components.url,
+              isAllowedScheme(url, for: providerId) else {
             return nil
         }
-        let isLocalProvider = providerId == "ollama" || providerId == "lm_studio"
-        let isLoopbackHost = urlHost == "localhost" || urlHost == "127.0.0.1" || urlHost == "::1"
-        let schemeOk = url.scheme == "https" || (url.scheme == "http" && isLocalProvider && isLoopbackHost)
-        guard schemeOk else { return nil }
-
-        // Azure OpenAI uses per-resource subdomains like
-        // `mycompany.openai.azure.com`. Strict host equality against the
-        // placeholder baseUrl `openai.azure.com` would reject every real
-        // Azure URL. Allow any host that ends in `.openai.azure.com`.
-        // Mirrors the extension's wildcard `*.openai.azure.com/*` host
-        // pattern in wxt.config.ts:40.
-        if providerId == "azure_openai" {
-            return urlHost.hasSuffix(".openai.azure.com") ? url : nil
-        }
-        // Local providers: the host must match the credential's stored
-        // baseUrl (the user-configured loopback endpoint). Fall through to
-        // the generic path if somehow no credential baseUrl is supplied —
-        // the loopback scheme check above already limits the surface.
-        if isLocalProvider, let credBase = credentialBaseUrl, let credUrl = URL(string: credBase), let credHost = credUrl.host {
-            return urlHost == credHost && url.port == credUrl.port ? url : nil
-        }
-        guard let providerUrl = URL(string: provider.baseUrl),
-              let providerHost = providerUrl.host,
-              urlHost == providerHost else {
+        if providerId == "azure_openai" && !host.lowercased().hasSuffix(".openai.azure.com") {
             return nil
         }
         return url
+    }
+
+    /// The base-URL override to hand to `rewriteProxyUrl`: the credential's
+    /// own base URL for custom-host providers, never anything for fixed-host
+    /// ones (so a tampered credential can't redirect a fixed provider).
+    static func baseUrlOverride(for providerId: String, credentialBaseUrl: String?) -> String? {
+        customBaseUrl(for: providerId, credentialBaseUrl: credentialBaseUrl) != nil ? credentialBaseUrl : nil
+    }
+
+    /// Normalize and validate an endpoint / server URL the user typed for a
+    /// custom-host provider, with the same rules as import. Trailing slashes
+    /// are dropped; an Azure endpoint typed without a scheme gets https://.
+    static func normalizedEndpoint(_ input: String, for providerId: String) -> String? {
+        var value = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        while value.hasSuffix("/") { value.removeLast() }
+        guard !value.isEmpty else { return nil }
+        if providerId == "azure_openai" && !value.contains("://") { value = "https://" + value }
+        return customBaseUrl(for: providerId, credentialBaseUrl: value) != nil ? value : nil
+    }
+
+    /// Why a custom-host credential can't be used yet (no safe endpoint), or
+    /// nil when it can. Keys are never sent anywhere but their own endpoint.
+    static func missingEndpointMessage(providerId: String, credentialBaseUrl: String?) -> String? {
+        guard find(providerId)?.requiresCustomBaseUrl == true,
+              customBaseUrl(for: providerId, credentialBaseUrl: credentialBaseUrl) == nil else { return nil }
+        return providerId == "azure_openai"
+            ? "Add your Azure endpoint in the wallet"
+            : "Add your server URL in the wallet"
+    }
+
+    /// Same scheme, host and port (default ports filled in).
+    static func sameOrigin(_ a: URL, _ b: URL) -> Bool {
+        func port(_ url: URL) -> Int? {
+            if let port = url.port { return port }
+            switch url.scheme?.lowercased() {
+            case "https": return 443
+            case "http": return 80
+            default: return nil
+            }
+        }
+        return a.scheme?.lowercased() == b.scheme?.lowercased()
+            && a.host?.lowercased() == b.host?.lowercased()
+            && port(a) == port(b)
+    }
+
+    /// Check that a request URL targets the provider's upstream before any
+    /// key is attached. Fixed-host providers must hit their registered origin
+    /// (a credential base URL is ignored); custom-host providers must hit
+    /// the origin of the credential's (safe) base URL.
+    static func validateUrl(_ urlString: String, for providerId: String, credentialBaseUrl: String? = nil) -> URL? {
+        guard let provider = find(providerId),
+              let url = URL(string: urlString),
+              let host = url.host, !host.isEmpty,
+              isAllowedScheme(url, for: providerId) else {
+            return nil
+        }
+
+        if provider.requiresCustomBaseUrl {
+            // Only ever the credential's own endpoint; none means no request.
+            guard let base = customBaseUrl(for: providerId, credentialBaseUrl: credentialBaseUrl) else { return nil }
+            return sameOrigin(url, base) ? url : nil
+        }
+
+        guard let base = URL(string: provider.baseUrl) else { return nil }
+        return sameOrigin(url, base) ? url : nil
     }
 }
