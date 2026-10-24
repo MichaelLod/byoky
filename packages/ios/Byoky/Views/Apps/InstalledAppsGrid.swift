@@ -66,12 +66,12 @@ struct InstalledAppsGrid: View {
 struct AppIconView: View {
     let app: InstalledApp
     @EnvironmentObject var wallet: WalletStore
-    @State private var showRuntime = false
+    @State private var openRequest: InstalledApp?
 
     var body: some View {
         VStack(spacing: 6) {
             Button {
-                if app.enabled { showRuntime = true }
+                if app.enabled { openRequest = app }
             } label: {
                 AsyncImage(url: URL(string: app.icon)) { image in
                     image.resizable().aspectRatio(contentMode: .fill)
@@ -109,8 +109,6 @@ struct AppIconView: View {
                 Label("Remove", systemImage: "trash")
             }
         }
-        .fullScreenCover(isPresented: $showRuntime) {
-            AppRuntimeView(app: app)
-        }
+        .opensInstalledApp($openRequest)
     }
 }

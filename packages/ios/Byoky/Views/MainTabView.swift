@@ -58,10 +58,7 @@ struct MainTabView: View {
             AddAppView(onAdded: { justAdded = $0 })
                 .environmentObject(wallet)
         }
-        .fullScreenCover(item: $launchingApp) { app in
-            AppRuntimeView(app: app)
-                .environmentObject(wallet)
-        }
+        .opensInstalledApp($launchingApp)
         // A .byoky file opened from Files, AirDrop or Mail.
         .sheet(item: $wallet.pendingBackupFile) { file in
             ImportBackupView(file: file)

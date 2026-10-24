@@ -92,6 +92,8 @@ struct WalletView: View {
         if wallet.showRetiredFeaturesNotice {
             RetiredFeaturesBanner(onDismiss: { wallet.dismissRetiredFeaturesNotice() })
                 .padding(.horizontal)
+                // Shown once: seen now means gone on the next launch.
+                .onAppear { wallet.markRetiredFeaturesNoticeShown() }
         }
     }
 
@@ -165,7 +167,8 @@ struct WalletView: View {
 }
 
 /// One-time notice for users who relied on cloud sync, gifts or pairing
-/// before Byoky became a purely local wallet. Dismissing it is permanent.
+/// before Byoky became a purely local wallet. It appears on one launch only;
+/// within that session it stays until dismissed.
 private struct RetiredFeaturesBanner: View {
     let onDismiss: () -> Void
 

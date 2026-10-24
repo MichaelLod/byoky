@@ -35,10 +35,7 @@ struct AppsTabView: View {
                     AddAppView(onAdded: { justAdded = $0 })
                         .environmentObject(wallet)
                 }
-                .fullScreenCover(item: $launchingApp) { app in
-                    AppRuntimeView(app: app)
-                        .environmentObject(wallet)
-                }
+                .opensInstalledApp($launchingApp)
         }
     }
 }

@@ -220,6 +220,12 @@ final class WalletStore: ObservableObject {
         showRetiredFeaturesNotice = false
     }
 
+    /// The notice is on screen: it won't come back on a later launch, but
+    /// stays up for the rest of this session unless dismissed.
+    func markRetiredFeaturesNoticeShown() {
+        LegacyDataCleanup.markRetiredNoticeShown()
+    }
+
     // MARK: - Installed Apps
     //
     // Web apps the user added by URL. They open in the in-wallet browser
@@ -633,8 +639,8 @@ final class WalletStore: ObservableObject {
     }
 
     /// User revoked an app in Connected Apps: drop its session and block
-    /// silent reconnects from that origin until the user opens the app again
-    /// from the Apps grid (`grantAppAccess`).
+    /// reconnects from that origin until the user confirms "Reconnect" when
+    /// opening the app again (`needsReapproval` / `grantAppAccess`).
     func revokeSession(_ session: Session) throws {
         appConsent.revoke(session.appOrigin)
         sessions.removeAll { $0.id == session.id }
@@ -649,9 +655,15 @@ final class WalletStore: ObservableObject {
         try? saveSessions()
     }
 
-    /// Opening an app from the Apps grid is consent for it to connect.
+    /// The user confirmed "Reconnect" for a revoked app: it may connect again.
     func grantAppAccess(origin: String) {
         appConsent.grant(origin)
+    }
+
+    /// Opening `app` must ask "Reconnect?" first: the user revoked its origin
+    /// in Connected Apps. Apps that disconnected themselves open as usual.
+    func needsReapproval(_ app: InstalledApp) -> Bool {
+        appConsent.needsReapproval(appURL: app.url)
     }
 
     func isAppAccessRevoked(origin: String) -> Bool {
@@ -989,7 +1001,7 @@ final class WalletStore: ObservableObject {
 }
 
 /// Origins whose access the user revoked in Connected Apps. They can't
-/// reconnect silently until the user opens the app from the Apps grid again.
+/// reconnect until the user opens the app again and confirms "Reconnect".
 struct AppConsentStore {
     static let defaultsKey = "byoky_revokedAppOrigins"
     var defaults: UserDefaults = .standard
@@ -1012,6 +1024,13 @@ struct AppConsentStore {
 
     func clear() {
         defaults.removeObject(forKey: Self.defaultsKey)
+    }
+
+    /// The app at `appURL` belongs to a revoked origin, so opening it needs
+    /// the user's explicit "Reconnect" first.
+    func needsReapproval(appURL: String) -> Bool {
+        guard let url = URL(string: appURL), url.host != nil else { return false }
+        return isRevoked(InstalledApp.origin(of: url))
     }
 
     private var revoked: Set<String> {

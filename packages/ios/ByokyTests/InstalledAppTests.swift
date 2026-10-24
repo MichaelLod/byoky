@@ -160,6 +160,38 @@ final class InstalledAppTests: XCTestCase {
         XCTAssertFalse(LegacyDataCleanup.shouldShowRetiredNotice(defaults: used))
     }
 
+    func testRetiredNoticeShowsOnlyOnce() throws {
+        let keychain = KeychainService.shared
+        let originalSessions = try? keychain.load(key: "sessions")
+        defer {
+            if let originalSessions { try? keychain.save(key: "sessions", data: originalSessions) }
+            try? keychain.delete(key: "giftedCredentials")
+        }
+        try? keychain.delete(key: "sessions")
+
+        let suite = "byoky.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        try keychain.saveString(key: "giftedCredentials", value: #"[{"giftId":"g1"}]"#)
+        LegacyDataCleanup.runIfNeeded(defaults: defaults, keychain: keychain)
+
+        // Queued but not displayed yet (e.g. the wallet stayed locked): it
+        // is still there on the next launch.
+        XCTAssertTrue(LegacyDataCleanup.shouldShowRetiredNotice(defaults: defaults))
+        LegacyDataCleanup.runIfNeeded(defaults: defaults, keychain: keychain)
+        XCTAssertTrue(LegacyDataCleanup.shouldShowRetiredNotice(defaults: defaults))
+
+        // Displayed once, never dismissed: gone on every later launch.
+        LegacyDataCleanup.markRetiredNoticeShown(defaults: defaults)
+        XCTAssertFalse(LegacyDataCleanup.shouldShowRetiredNotice(defaults: defaults))
+
+        // Not even a cleanup retry that finds leftovers brings it back.
+        defaults.set(0, forKey: LegacyDataCleanup.versionDefaultsKey)
+        try keychain.saveString(key: "giftedCredentials", value: #"[{"giftId":"g1"}]"#)
+        LegacyDataCleanup.runIfNeeded(defaults: defaults, keychain: keychain)
+        XCTAssertFalse(LegacyDataCleanup.shouldShowRetiredNotice(defaults: defaults))
+    }
+
     func testRunIfNeededRecordsVersion() throws {
         let keychain = KeychainService.shared
         let suiteName = "byoky.tests.\(UUID().uuidString)"

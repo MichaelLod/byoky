@@ -110,6 +110,46 @@ final class BridgeSecurityTests: XCTestCase {
         XCTAssertFalse(store.isRevoked("https://a.example"))
     }
 
+    func testOpeningAWalletRevokedAppNeedsReapproval() throws {
+        let suite = "byoky.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = AppConsentStore(defaults: defaults)
+
+        // Never revoked: opens without asking.
+        XCTAssertFalse(store.needsReapproval(appURL: "https://chat.example.com/app"))
+
+        // Revoked in Connected Apps: every page of that origin asks first.
+        store.revoke("https://chat.example.com")
+        XCTAssertTrue(store.needsReapproval(appURL: "https://chat.example.com/app"))
+        XCTAssertTrue(store.needsReapproval(appURL: "https://chat.example.com/other?x=1#y"))
+        // Other origins, including another port on the same host, don't.
+        XCTAssertFalse(store.needsReapproval(appURL: "https://chat.example.com:8443/app"))
+        XCTAssertFalse(store.needsReapproval(appURL: "https://other.example.com/"))
+        XCTAssertFalse(store.needsReapproval(appURL: "not a url"))
+
+        store.revoke("https://h.example:8443")
+        XCTAssertTrue(store.needsReapproval(appURL: "https://h.example:8443/x"))
+        XCTAssertFalse(store.needsReapproval(appURL: "https://h.example/x"))
+
+        // "Reconnect" lifts it, and it stays lifted across a relaunch.
+        store.grant("https://chat.example.com")
+        XCTAssertFalse(store.needsReapproval(appURL: "https://chat.example.com/app"))
+        XCTAssertFalse(AppConsentStore(defaults: defaults).needsReapproval(appURL: "https://chat.example.com/app"))
+    }
+
+    /// An app that disconnected itself (BYOKY_DISCONNECT) ends its session
+    /// but is not revoked, so it opens again without a prompt.
+    @MainActor
+    func testAppSideDisconnectDoesNotNeedReapproval() throws {
+        let wallet = WalletStore.shared
+        let app = try InstalledApp.make(from: "https://self-\(UUID().uuidString.prefix(8).lowercased()).example/app", name: nil)
+        let origin = InstalledApp.origin(of: try XCTUnwrap(URL(string: app.url)))
+        wallet.endSession(appOrigin: origin)
+        XCTAssertFalse(wallet.isAppAccessRevoked(origin: origin))
+        XCTAssertFalse(wallet.needsReapproval(app))
+    }
+
     // MARK: - Shared hosting, incoming files
 
     func testSharedHostingOrigins() {

@@ -39,6 +39,69 @@ struct AppRuntimeView: View {
     }
 }
 
+// MARK: - Opening an app
+
+extension View {
+    /// Opens `app` in the in-wallet browser whenever it is set (then resets
+    /// it). An app whose site the user disconnected in Connected Apps asks
+    /// "Reconnect?" first: Reconnect lifts the revoke and opens it, Cancel
+    /// leaves it closed and disconnected. Other apps open right away.
+    func opensInstalledApp(_ app: Binding<InstalledApp?>) -> some View {
+        modifier(InstalledAppLauncher(request: app))
+    }
+}
+
+private struct InstalledAppLauncher: ViewModifier {
+    @EnvironmentObject var wallet: WalletStore
+    @Binding var request: InstalledApp?
+    @State private var reconnecting: InstalledApp?
+    @State private var reconnectTitle = ""
+    @State private var open: InstalledApp?
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: request) { _, app in
+                guard let app else { return }
+                request = nil
+                if wallet.needsReapproval(app) {
+                    reconnectTitle = "Reconnect \(app.name)?"
+                    reconnecting = app
+                } else {
+                    open = app
+                }
+            }
+            .alert(
+                reconnectTitle,
+                isPresented: Binding(
+                    get: { reconnecting != nil },
+                    set: { if !$0 { reconnecting = nil } }
+                ),
+                presenting: reconnecting
+            ) { app in
+                Button("Cancel", role: .cancel) {}
+                Button("Reconnect") {
+                    if let url = URL(string: app.url), url.host != nil {
+                        wallet.grantAppAccess(origin: InstalledApp.origin(of: url))
+                    }
+                    open = app
+                }
+            } message: { app in
+                Text("You disconnected \(Self.displayHost(app)). Reconnecting lets it send AI requests through your keys again. It never sees the keys.")
+            }
+            .fullScreenCover(item: $open) { app in
+                AppRuntimeView(app: app)
+                    .environmentObject(wallet)
+            }
+    }
+
+    /// `host[:port]` of the app, as the user knows the site.
+    static func displayHost(_ app: InstalledApp) -> String {
+        guard let url = URL(string: app.url), let host = url.host else { return app.name }
+        if let port = url.port, port != 443 { return "\(host):\(port)" }
+        return host
+    }
+}
+
 struct AppWebView: UIViewRepresentable {
     let url: URL
     /// `https://host[:port]` of the app; the only origin it may navigate to.
@@ -74,10 +137,9 @@ struct AppWebView: UIViewRepresentable {
         webView.allowsBackForwardNavigationGestures = false
         webView.navigationDelegate = context.coordinator
         handler.attach(to: webView)
-        // The user opened this app (from the Apps grid, or right after adding
-        // it): that is consent for it to connect, including after a revoke in
-        // Connected Apps. Granted before the page loads so it can't race.
-        wallet.grantAppAccess(origin: allowedOrigin)
+        // Opening never lifts a revoke by itself: an app the user disconnected
+        // in Connected Apps only gets here after "Reconnect" (see
+        // `opensInstalledApp`); otherwise the bridge keeps refusing it.
         webView.load(URLRequest(url: url))
         return webView
     }

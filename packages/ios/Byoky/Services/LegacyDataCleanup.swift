@@ -17,7 +17,7 @@ enum LegacyDataCleanup {
     static let versionDefaultsKey = "byoky_legacyCleanupVersion"
 
     /// Tri-state: absent = never used a retired feature (no notice),
-    /// true = notice pending, false = notice dismissed.
+    /// true = notice pending (not shown yet), false = shown or dismissed.
     static let retiredNoticeDefaultsKey = "byoky_showRetiredFeaturesNotice"
 
     /// Keychain accounts written only by the retired features.
@@ -86,6 +86,14 @@ enum LegacyDataCleanup {
     }
 
     static func dismissRetiredNotice(defaults: UserDefaults = .standard) {
+        defaults.set(false, forKey: retiredNoticeDefaultsKey)
+    }
+
+    /// The notice was displayed. It is shown once: later launches skip it
+    /// whether or not the user dismissed it. Recorded when it renders, not
+    /// at launch, so a launch that never gets past the lock screen doesn't
+    /// use it up unseen.
+    static func markRetiredNoticeShown(defaults: UserDefaults = .standard) {
         defaults.set(false, forKey: retiredNoticeDefaultsKey)
     }
 
