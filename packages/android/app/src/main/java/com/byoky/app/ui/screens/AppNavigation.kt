@@ -18,15 +18,20 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.byoky.app.data.AppOpenGate
 import com.byoky.app.data.InstalledApp
 import com.byoky.app.data.WalletStatus
 import com.byoky.app.data.WalletStore
 import com.byoky.app.ui.theme.Accent
 import com.byoky.app.ui.theme.AccentHover
+import com.byoky.app.ui.theme.BgCard
+import com.byoky.app.ui.theme.TextPrimary
+import com.byoky.app.ui.theme.TextSecondary
 
 private const val APP_RUNTIME_ROUTE = "app/{appId}"
 
@@ -62,10 +67,16 @@ private fun MainScreen(wallet: WalletStore) {
         .takeIf { it >= 0 } ?: if (currentRoute == "settings") 0 else -1
     val showFab = !inAppRuntime && currentRoute != "settings"
 
-    // Opening an app is explicit consent: lift any revoke block for its origin.
+    // Set while asking to reconnect an app the user disconnected.
+    var reconnectPrompt by remember { mutableStateOf<AppOpenGate.Decision.ConfirmReconnect?>(null) }
+
+    // Opening an app is consent to connect it, unless the user revoked its
+    // origin in Connected Apps: then they confirm the reconnect first.
     fun openApp(app: InstalledApp) {
-        wallet.allowOrigin(app.origin)
-        navController.navigate("app/${app.id}") { launchSingleTop = true }
+        when (val decision = wallet.openDecision(app)) {
+            AppOpenGate.Decision.Open -> navController.navigate("app/${app.id}") { launchSingleTop = true }
+            is AppOpenGate.Decision.ConfirmReconnect -> reconnectPrompt = decision
+        }
     }
 
     Scaffold(
@@ -181,4 +192,43 @@ private fun MainScreen(wallet: WalletStore) {
             },
         )
     }
+
+    reconnectPrompt?.let { prompt ->
+        ReconnectAppDialog(
+            prompt = prompt,
+            onReconnect = {
+                reconnectPrompt = null
+                wallet.allowOrigin(prompt.app.origin)
+                navController.navigate("app/${prompt.app.id}") { launchSingleTop = true }
+            },
+            onDismiss = { reconnectPrompt = null },
+        )
+    }
+}
+
+/** Asked before reopening an app whose access the user revoked. */
+@Composable
+private fun ReconnectAppDialog(
+    prompt: AppOpenGate.Decision.ConfirmReconnect,
+    onReconnect: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = BgCard,
+        title = { Text("Reconnect ${prompt.app.name}?", color = TextPrimary) },
+        text = {
+            Text(
+                "You disconnected ${prompt.host}. Reconnecting lets it send AI requests through your keys again. It never sees the keys.",
+                color = TextSecondary,
+                fontSize = 13.sp,
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onReconnect) { Text("Reconnect", color = Accent) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
 }

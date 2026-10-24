@@ -11,6 +11,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -23,8 +24,9 @@ import com.byoky.app.ui.theme.*
 
 /**
  * One-time notice for people who used cloud sync, gifts or phone pairing
- * before they were retired. Renders nothing for everyone else, and nothing
- * once dismissed.
+ * before they were retired. Renders nothing for everyone else. It shows on
+ * one launch only: marked seen as soon as it appears, it stays up for that
+ * session until dismissed.
  */
 @Composable
 fun RetiredFeaturesNotice(
@@ -33,6 +35,9 @@ fun RetiredFeaturesNotice(
     onOpenSettings: (() -> Unit)? = null,
 ) {
     val visible by wallet.retiredFeaturesNotice.collectAsState()
+    LaunchedEffect(visible) {
+        if (visible) wallet.markRetiredFeaturesNoticeShown()
+    }
     if (!visible) return
 
     Row(

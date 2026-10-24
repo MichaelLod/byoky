@@ -45,6 +45,7 @@ fun WalletScreen(
     var showAddSheet by remember { mutableStateOf(false) }
     var statsCredentialId by remember { mutableStateOf<String?>(null) }
     var renameTarget by remember { mutableStateOf<Credential?>(null) }
+    var removeTarget by remember { mutableStateOf<Credential?>(null) }
 
     // Aggregate the last 7 days of successful requests per provider. Per-credential
     // granularity isn't possible (request log only carries providerId, not a
@@ -115,7 +116,7 @@ fun WalletScreen(
                         usage = usageByProvider[credential.providerId],
                         onOpenStats = { statsCredentialId = credential.id },
                         onRename = { renameTarget = credential },
-                        onDelete = { wallet.removeCredential(credential) },
+                        onDelete = { removeTarget = credential },
                     )
                 }
             }
@@ -136,6 +137,17 @@ fun WalletScreen(
             )
         }
 
+        removeTarget?.let { target ->
+            RemoveCredentialDialog(
+                label = target.label,
+                onDismiss = { removeTarget = null },
+                onConfirm = {
+                    wallet.removeCredential(target)
+                    removeTarget = null
+                },
+            )
+        }
+
         statsCredentialId?.let { id ->
             WalletStatsSheet(
                 credentialId = id,
@@ -145,6 +157,33 @@ fun WalletScreen(
             )
         }
     }
+}
+
+/** Asked before a key is deleted from the wallet. */
+@Composable
+private fun RemoveCredentialDialog(
+    label: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Remove $label?", color = TextPrimary) },
+        text = {
+            Text(
+                "Apps using this key lose access to it. This can't be undone unless you have a backup that includes it.",
+                color = TextSecondary,
+                fontSize = 13.sp,
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text("Remove", color = Danger) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+        containerColor = BgCard,
+    )
 }
 
 @Composable

@@ -83,17 +83,21 @@ class WalletStore(context: Context) {
 
     /**
      * Origins whose access the user revoked. They can't silently reconnect;
-     * opening the app again from the Apps tab (fresh consent) lifts the block.
+     * reopening the app from the Apps tab asks the user first, and confirming
+     * lifts the block (see [openDecision]).
      */
     private val _blockedOrigins = MutableStateFlow<Set<String>>(emptySet())
 
     /**
-     * True when this install used cloud sync, gifts or relay pairing before
-     * those were retired, and the user hasn't dismissed the one-time notice
-     * yet. Filled in by the launch cleanup.
+     * The one-time notice for installs that used cloud sync, gifts or relay
+     * pairing before those were retired. The launch cleanup raises the flag;
+     * it shows on one launch only.
      */
-    private val _retiredFeaturesNotice = MutableStateFlow(false)
-    val retiredFeaturesNotice: StateFlow<Boolean> = _retiredFeaturesNotice.asStateFlow()
+    private val retiredNotice = OneTimeNotice(
+        isPending = { plainPrefs.getBoolean(RETIRED_FEATURES_NOTICE_FLAG, false) },
+        clearPending = { plainPrefs.edit().remove(RETIRED_FEATURES_NOTICE_FLAG).apply() },
+    )
+    val retiredFeaturesNotice: StateFlow<Boolean> = retiredNotice.visible
 
     /** Released once the launch cleanup has finished (or given up). */
     private val launchCleanupDone = CountDownLatch(1)
@@ -108,7 +112,7 @@ class WalletStore(context: Context) {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 purgeRetiredServiceData()
-                _retiredFeaturesNotice.value = plainPrefs.getBoolean(RETIRED_FEATURES_NOTICE_FLAG, false)
+                retiredNotice.load()
             } catch (_: Exception) {
                 // Best-effort; retried next launch.
             } finally {
@@ -434,7 +438,7 @@ class WalletStore(context: Context) {
 
     /**
      * Disconnect an app. Its origin is also blocked from reconnecting on its
-     * own until the user reopens it from the Apps tab ([allowOrigin]).
+     * own until the user confirms reopening it from the Apps tab ([allowOrigin]).
      */
     fun revokeSession(session: Session) {
         _sessions.value = _sessions.value.filter { it.id != session.id }
@@ -444,7 +448,10 @@ class WalletStore(context: Context) {
 
     fun isOriginBlocked(origin: String): Boolean = origin in _blockedOrigins.value
 
-    /** The user opened this app themselves: that is fresh consent to connect. */
+    /** Whether [app] opens right away or first asks to reconnect (revoked origin). */
+    fun openDecision(app: InstalledApp): AppOpenGate.Decision = AppOpenGate.decide(app, _blockedOrigins.value)
+
+    /** The user confirmed reconnecting this app: lift the revoke. */
     fun allowOrigin(origin: String) {
         if (origin in _blockedOrigins.value) setBlockedOrigins(_blockedOrigins.value - origin)
     }
@@ -493,12 +500,11 @@ class WalletStore(context: Context) {
         _groups.value = emptyList()
         _appGroups.value = emptyMap()
         _installedApps.value = emptyList()
-        _retiredFeaturesNotice.value = false
+        retiredNotice.dismiss()
         _blockedOrigins.value = emptySet()
         plainPrefs.edit()
             .remove("installed_apps")
             .remove(BLOCKED_ORIGINS_KEY)
-            .remove(RETIRED_FEATURES_NOTICE_FLAG)
             .apply()
 
         // Reset brute-force state
@@ -1192,11 +1198,14 @@ class WalletStore(context: Context) {
         try { launchCleanupDone.await(5, TimeUnit.SECONDS) } catch (_: InterruptedException) {}
     }
 
+    /**
+     * The retired-features notice is on screen: no later launch shows it
+     * again. It stays up for this session until dismissed.
+     */
+    fun markRetiredFeaturesNoticeShown() = retiredNotice.markShown()
+
     /** Hide the one-time retired-features notice for good. */
-    fun dismissRetiredFeaturesNotice() {
-        _retiredFeaturesNotice.value = false
-        plainPrefs.edit().remove(RETIRED_FEATURES_NOTICE_FLAG).apply()
-    }
+    fun dismissRetiredFeaturesNotice() = retiredNotice.dismiss()
 
     companion object {
         /** Name of the EncryptedSharedPreferences file holding local wallet data. */
