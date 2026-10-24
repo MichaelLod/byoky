@@ -100,7 +100,7 @@ fun SettingsScreen(wallet: WalletStore) {
                     Text("About", fontWeight = FontWeight.SemiBold, color = TextPrimary)
                     Spacer(Modifier.height(16.dp))
 
-                    InfoRow("Version", "1.0.0")
+                    InfoRow("Version", BuildConfig.VERSION_NAME)
 
                     Spacer(Modifier.height(8.dp))
 

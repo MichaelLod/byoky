@@ -25,18 +25,12 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // Live-provider smoke tests pull API keys from environment variables at
-        // build time. Empty strings when not set — tests then call assumeTrue()
-        // to skip cleanly. Never commit real keys; export them in your shell
-        // before running ./gradlew connectedAndroidTest:
-        //   export BYOKY_TEST_ANTHROPIC_KEY=sk-ant-...
-        //   export BYOKY_TEST_OPENAI_KEY=sk-...
-        //   export BYOKY_TEST_GEMINI_KEY=AIza...
-        //   export BYOKY_TEST_COHERE_KEY=...
-        buildConfigField("String", "TEST_ANTHROPIC_KEY", "\"${System.getenv("BYOKY_TEST_ANTHROPIC_KEY") ?: ""}\"")
-        buildConfigField("String", "TEST_OPENAI_KEY", "\"${System.getenv("BYOKY_TEST_OPENAI_KEY") ?: ""}\"")
-        buildConfigField("String", "TEST_GEMINI_KEY", "\"${System.getenv("BYOKY_TEST_GEMINI_KEY") ?: ""}\"")
-        buildConfigField("String", "TEST_COHERE_KEY", "\"${System.getenv("BYOKY_TEST_COHERE_KEY") ?: ""}\"")
+        // Live-provider smoke tests read API keys from the environment, in debug
+        // builds only (see buildTypes): a release build never embeds them, even
+        // if they're exported in the shell that runs scripts/release.sh.
+        for (name in listOf("ANTHROPIC", "OPENAI", "GEMINI", "COHERE")) {
+            buildConfigField("String", "TEST_${name}_KEY", "\"\"")
+        }
     }
 
     if (keystorePropsFile.exists()) {
@@ -51,6 +45,17 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Never commit real keys; export them before ./gradlew connectedAndroidTest:
+            //   export BYOKY_TEST_ANTHROPIC_KEY=sk-ant-...
+            //   export BYOKY_TEST_OPENAI_KEY=sk-...
+            //   export BYOKY_TEST_GEMINI_KEY=AIza...
+            //   export BYOKY_TEST_COHERE_KEY=...
+            // Unset keys stay empty and the tests skip via assumeTrue().
+            for (name in listOf("ANTHROPIC", "OPENAI", "GEMINI", "COHERE")) {
+                buildConfigField("String", "TEST_${name}_KEY", "\"${System.getenv("BYOKY_TEST_${name}_KEY") ?: ""}\"")
+            }
+        }
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
