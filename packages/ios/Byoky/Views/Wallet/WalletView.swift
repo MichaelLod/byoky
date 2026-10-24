@@ -18,6 +18,8 @@ struct WalletView: View {
     @State private var renamingCredential: Credential?
     @State private var editingEndpointFor: Credential?
     @State private var renameDraft: String = ""
+    @State private var removingCredential: Credential?
+    @State private var removeTitle = ""
 
     var body: some View {
         NavigationStack {
@@ -84,6 +86,20 @@ struct WalletView: View {
                     renamingCredential = nil
                 }
             }
+            .alert(removeTitle, isPresented: Binding(
+                get: { removingCredential != nil },
+                set: { if !$0 { removingCredential = nil } }
+            ), presenting: removingCredential) { credential in
+                Button("Remove", role: .destructive) {
+                    try? wallet.removeCredential(credential)
+                    removingCredential = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    removingCredential = nil
+                }
+            } message: { _ in
+                Text("Apps using this key lose access to it. This can't be undone unless you have a backup that includes it.")
+            }
         }
     }
 
@@ -138,10 +154,12 @@ struct WalletView: View {
                     }
                 )
             }
+            // Swipe-to-delete asks first; a full swipe used to remove the key
+            // straight away.
             .onDelete { offsets in
-                for index in offsets {
-                    try? wallet.removeCredential(wallet.credentials[index])
-                }
+                guard let credential = offsets.first.map({ wallet.credentials[$0] }) else { return }
+                removeTitle = "Remove \(credential.label)?"
+                removingCredential = credential
             }
         } header: {
             Text("\(wallet.credentials.count) credential\(wallet.credentials.count == 1 ? "" : "s")")
