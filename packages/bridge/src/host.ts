@@ -282,6 +282,9 @@ async function handleStreamingFetch(
       headers,
       body: body || undefined,
       signal: controller.signal,
+      // Provider auth headers (x-api-key etc.) would survive a cross-host
+      // redirect, so never follow one.
+      redirect: 'error',
     });
 
     const resHeaders: Record<string, string> = {};
@@ -349,7 +352,7 @@ function handleStartProxy(req: StartProxyRequest, opts: { silent?: boolean } = {
 
   // Different session/port → tear down the old listener so we don't keep
   // forwarding requests with a stale (likely revoked) sessionKey. Without
-  // this the persistent-session feature would shadow a fresh re-pair from
+  // this the persistent-session feature would shadow a fresh reconnect from
   // `byoky-bridge connect` and every request would 401.
   if (runningProxy) {
     try { runningProxy.server.close(); } catch { /* best-effort */ }

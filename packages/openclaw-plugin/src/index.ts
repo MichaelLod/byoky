@@ -51,7 +51,7 @@ const DEFAULT_BRIDGE_PORT = 19280;
 
 // Native max_tokens per model. Overwritten at auth time by
 // `plugins.entries.byoky.config.anthropicMaxTokens` (default 4096) so
-// gift-tier keys aren't pre-rejected by Anthropic's OTPM gate.
+// Tier-1 keys aren't pre-rejected by Anthropic's OTPM gate.
 const ANTHROPIC_MODELS: ModelDef[] = [
   {
     id: 'claude-opus-4-7',
@@ -460,7 +460,7 @@ async function checkBridgeHealth(): Promise<{ providers: string[] } | null> {
 // not that its sessionKey still matches the extension's authorizedBridgeSessionKey
 // (which gets rotated on extension reload, wallet unlock, or a newer auth).
 // Returns true if the bridge can actually relay to the extension, false if the
-// session is stale and re-pairing is required.
+// session is stale and the wallet must be reconnected.
 async function probeBridgeSession(port: number, providerId: string): Promise<boolean> {
   try {
     const controller = new AbortController();
@@ -474,16 +474,6 @@ async function probeBridgeSession(port: number, providerId: string): Promise<boo
     if (res.status === 502) {
       const text = await res.text().catch(() => '');
       if (text.includes('Unauthorized session key') || text.includes('Session not found')) {
-        return false;
-      }
-    }
-    // Relay-mode bridge returns 500 with a NO_SENDER body when the mobile
-    // wallet sender is offline. Treat that as a stale session so we force a
-    // fresh pairing flow (opening the app so the user can re-connect) rather
-    // than silently reusing the dead bridge.
-    if (res.status === 500) {
-      const text = await res.text().catch(() => '');
-      if (text.includes('NO_SENDER') || text.includes('No wallet sender')) {
         return false;
       }
     }
@@ -617,7 +607,7 @@ async function runProviderAuth(
         return buildAuthResult(selected, DEFAULT_BRIDGE_PORT, provider, overrides);
       }
       await ctx.prompter.note(
-        'Byoky Bridge is running but its session key no longer matches the extension (the extension was reloaded or the wallet was re-locked). Opening the wallet to re-pair.',
+        'Byoky Bridge is running but its session key no longer matches the extension (the extension was reloaded or the wallet was re-locked). Opening the wallet to reconnect.',
       );
     }
   }
@@ -642,103 +632,15 @@ async function runProviderAuth(
       throw new Error('No providers found in your Byoky wallet');
     }
 
-    if (result.relay) {
-      await startBridgeRelayMode(ctx, {
-        port: result.port,
-        relayUrl: result.relay.url,
-        roomId: result.relay.roomId,
-        authToken: result.relay.authToken,
-        providers: selected,
-      });
-    }
-
     return buildAuthResult(selected, result.port, provider, overrides);
   } finally {
     result.server.close();
   }
 }
 
-// --- Bridge relay-mode spawner ---
-
-interface RelaySpawnConfig {
-  port: number;
-  relayUrl: string;
-  roomId: string;
-  authToken: string;
-  providers: string[];
-}
-
-async function startBridgeRelayMode(
-  ctx: ProviderAuthContext,
-  cfg: RelaySpawnConfig,
-): Promise<void> {
-  // If a bridge is already running on the port, it is almost certainly a
-  // stale one we spawned in a previous session, bound to an old relay room.
-  // Replace it: ask it to shut down cleanly (POST /_shutdown — 127.0.0.1-
-  // only, enforced by the bridge's Host-header check), wait for the socket
-  // to actually release, then spawn the fresh one.
-  const existing = await checkBridgeHealth();
-  if (existing) {
-    try {
-      await fetch(`http://127.0.0.1:${cfg.port}/_shutdown`, { method: 'POST' });
-    } catch {
-      // Older bridges without /_shutdown — best-effort; the wait below will
-      // still time out loudly if the port does not free.
-    }
-    const shutdownStart = Date.now();
-    while (Date.now() - shutdownStart < 5_000) {
-      const still = await checkBridgeHealth();
-      if (!still) break;
-      await sleep(100);
-    }
-    const stillAlive = await checkBridgeHealth();
-    if (stillAlive) {
-      await ctx.prompter.note(
-        `Port ${cfg.port} is still held by an older Byoky Bridge that does not honour /_shutdown. Upgrade with \`openclaw plugins install @byoky/openclaw-plugin\` and retry, or kill the stale process manually.`,
-      );
-      throw new Error('Bridge port still in use after shutdown request');
-    }
-  }
-
-  const progress = ctx.prompter.progress('Starting Byoky Bridge in relay mode…');
-
-  // The actual process-spawn lives in @byoky/bridge/spawner so the plugin
-  // bundle never imports `child_process` itself — the OpenClaw plugin
-  // scanner rejects any plugin file that combines `fetch` with
-  // `child_process`. The helper is resolved at runtime from the installed
-  // bridge package (a declared dependency of this plugin).
-  const spawner = await import('@byoky/bridge/spawner') as typeof import('@byoky/bridge/spawner');
-  spawner.spawnRelay({
-    port: cfg.port,
-    relayUrl: cfg.relayUrl,
-    roomId: cfg.roomId,
-    authToken: cfg.authToken,
-    providers: cfg.providers,
-  });
-
-  // Poll /health until the HTTP proxy is listening. The WS to the relay may
-  // still be warming up at that point — we just need the local port open.
-  const start = Date.now();
-  while (Date.now() - start < 10_000) {
-    const health = await checkBridgeHealth();
-    if (health) {
-      progress.stop(`Bridge ready on port ${cfg.port}`);
-      return;
-    }
-    await sleep(200);
-  }
-
-  progress.stop('Bridge failed to start within 10s');
-  throw new Error('Byoky Bridge (relay-mode) did not become healthy within 10s');
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
 interface PluginOverrides {
   // Cap max_tokens for every Anthropic model. Default 4096 — low enough to
-  // stay under Tier-1/gift OTPM gates (Anthropic pre-rejects requests whose
+  // stay under Tier-1 OTPM gates (Anthropic pre-rejects requests whose
   // declared max_tokens exceed the remaining output-tokens-per-minute budget).
   // Users on Tier 3+ keys can raise it via
   //   plugins.entries.byoky.config.anthropicMaxTokens
@@ -824,7 +726,7 @@ function buildAuthResult(
         .join(', ')}.`,
     );
   }
-  notes.push('Keys stay in your Byoky wallet (extension or mobile app) — the bridge only relays requests.');
+  notes.push('Keys stay in your Byoky wallet — the bridge only relays requests.');
   notes.push('The bridge must be running for API calls to work.');
   if (defaultModel) notes.push(`Default model set to ${defaultModel}.`);
   notes.push('Run `/byoky` inside OpenClaw anytime to check bridge status.');
@@ -850,12 +752,6 @@ interface AuthResult {
   providers: string[];
   port: number;
   server: Server;
-  /**
-   * Populated only when the browser paired via QR to the mobile app (no
-   * extension detected). The plugin starts the bridge in relay-mode itself
-   * with these coordinates — there is no extension to delegate to.
-   */
-  relay?: { url: string; roomId: string; authToken: string };
 }
 
 async function startCallbackServer(
@@ -899,18 +795,10 @@ async function startCallbackServer(
             res.end(JSON.stringify({ ok: true }));
             if (!resolved) {
               resolved = true;
-              const relayRaw = data.relay;
-              const relay = (relayRaw && typeof relayRaw === 'object' &&
-                  typeof relayRaw.url === 'string' &&
-                  typeof relayRaw.roomId === 'string' &&
-                  typeof relayRaw.authToken === 'string')
-                ? { url: relayRaw.url as string, roomId: relayRaw.roomId as string, authToken: relayRaw.authToken as string }
-                : undefined;
               resolve({
                 providers: Array.isArray(data.providers) ? data.providers : [],
                 port: typeof data.bridgePort === 'number' ? data.bridgePort : DEFAULT_BRIDGE_PORT,
                 server,
-                relay,
               });
             }
           } catch {
@@ -1203,7 +1091,7 @@ function buildAuthPage(requestProviderId: string | null): string {
     </div>
     <button id="connect-btn" class="connect-btn" type="button">Connect wallet</button>
     <p class="info">
-      Connect via the <strong>Byoky extension</strong> (auto-detected) or scan a QR with the <strong>Byoky mobile app</strong>.<br />
+      The <strong>Byoky extension</strong> must be installed in this browser.<br />
       The <strong>Byoky Bridge</strong> must be installed for the OpenClaw proxy to work.
     </p>
     <p class="security">
@@ -1269,35 +1157,11 @@ function buildAuthPage(requestProviderId: string | null): string {
           }
 
           const sessionKey = session.sessionKey || '';
-          const relay = session.relay || null;
-          const isRelay = !!relay || sessionKey.startsWith('relay_');
-          const isVault = sessionKey.startsWith('vault_');
-          if (isVault) {
-            throw new Error(
-              'Vault-mode sessions aren\\'t supported by OpenClaw yet — ' +
-              'please pair with the Byoky extension or mobile app.',
-            );
-          }
 
-          let bridgePort = ${DEFAULT_BRIDGE_PORT};
-          let callbackBody;
-
-          if (isRelay) {
-            if (!relay) {
-              throw new Error('Relay session missing coordinates — update your Byoky SDK');
-            }
-            setStatus('Mobile wallet paired — starting local bridge…', 'waiting');
-            callbackBody = {
-              providers: available,
-              bridgePort,
-              relay: { url: relay.url, roomId: relay.roomId, authToken: relay.authToken },
-            };
-          } else {
-            setStatus('Wallet connected — starting bridge proxy…', 'waiting');
-            const bridgeResult = await startBridge(sessionKey);
-            bridgePort = (bridgeResult && bridgeResult.port) || ${DEFAULT_BRIDGE_PORT};
-            callbackBody = { providers: available, bridgePort };
-          }
+          setStatus('Wallet connected — starting bridge proxy…', 'waiting');
+          const bridgeResult = await startBridge(sessionKey);
+          const bridgePort = (bridgeResult && bridgeResult.port) || ${DEFAULT_BRIDGE_PORT};
+          const callbackBody = { providers: available, bridgePort };
 
           setStatus(
             'Bridge active on port ' + bridgePort + '. Connected ' + available.length +

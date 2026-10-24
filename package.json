@@ -3,7 +3,7 @@
   "version": "0.9.13",
   "private": true,
   "packageManager": "pnpm@9.15.9",
-  "description": "Bring Your Own Key — Secure wallet for your AI credentials",
+  "description": "Byoky — the MetaMask for API keys. Keep your AI API keys in one local wallet; apps connect to it and never see the key.",
   "scripts": {
     "dev": "pnpm --filter @byoky/extension dev",
     "build": "pnpm -r build",

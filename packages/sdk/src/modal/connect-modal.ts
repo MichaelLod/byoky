@@ -1,6 +1,5 @@
 import { ByokyError } from '@byoky/core';
 import type { ByokySession } from '../byoky.js';
-import { encode, toSvg } from './qr.js';
 
 export interface ModalOptions {
   container?: HTMLElement;
@@ -13,15 +12,12 @@ export interface ModalOptions {
 }
 
 export interface ConnectFunctions {
-  hasExtension: boolean;
+  isExtensionInstalled: () => boolean;
   connectExtension: () => Promise<ByokySession>;
-  connectRelay: (onPairingReady: (code: string) => void) => Promise<ByokySession>;
   getStoreUrl: () => string | null;
 }
 
-type ModalState = 'connecting' | 'relay-connecting' | 'pairing' | 'success' | 'error';
-
-const PAIR_URL_BASE = 'https://byoky.com/pair';
+type ModalState = 'connecting' | 'not-installed' | 'success' | 'error';
 
 let activeModal: ConnectModal | null = null;
 
@@ -111,40 +107,12 @@ const STYLES = /* css */ `
     margin-bottom: 8px;
   }
   a.install-link:hover { background: #f5f5f4; border-color: var(--byoky-border-strong); }
-
-  .qr {
-    margin: 20px auto; width: 220px; height: 220px;
-    border-radius: 12px; overflow: hidden;
-    background: #fff;
-    border: 1px solid var(--byoky-border);
-    padding: 10px;
-  }
-  .qr svg { display: block; width: 100%; height: 100%; }
-
-  .code-box {
-    display: flex; align-items: flex-start; gap: 8px;
-    background: var(--byoky-bg-elevated); border: 1px solid var(--byoky-border);
-    border-radius: 8px;
-    padding: 10px 12px; margin-bottom: 16px;
-  }
-  .code-box code {
-    flex: 1; font-size: 11px; line-height: 1.5; color: var(--byoky-text-secondary);
-    font-family: 'SF Mono', Menlo, Consolas, monospace;
-    text-align: left;
-    word-break: break-all;
-    max-height: 4.5em; overflow: hidden;
-  }
-  .copy-btn {
-    background: none; border: 1px solid var(--byoky-border-strong);
-    color: var(--byoky-text-secondary); font-size: 12px; font-weight: 600;
-    padding: 4px 10px; border-radius: 6px;
-    cursor: pointer; flex-shrink: 0;
-  }
-  .copy-btn:hover { color: var(--byoky-accent); border-color: var(--byoky-accent); }
+  a.install-link.primary { background: var(--byoky-accent); color: #fff; border-color: transparent; }
+  a.install-link.primary:hover { background: var(--byoky-accent-hover); transform: translateY(-1px); }
 
   .hint {
-    font-size: 11px; color: var(--byoky-text-muted);
-    text-align: center; line-height: 1.5; margin: -4px 0 12px;
+    font-size: 12px; color: var(--byoky-text-muted);
+    text-align: center; line-height: 1.5; margin: 4px 0 12px;
   }
 
   .status {
@@ -176,7 +144,6 @@ const STYLES = /* css */ `
 `;
 
 const ICON_SHIELD = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>';
-const ICON_PHONE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>';
 const ICON_EXT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>';
 const ICON_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
 const ICON_CLOCK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>';
@@ -186,7 +153,7 @@ export class ConnectModal {
   private shadow: ShadowRoot;
   private card!: HTMLElement;
   private state: ModalState;
-  private pairingCode: string | null = null;
+  private hintMessage: string | null = null;
   private errorMessage: string | null = null;
   private errorCode: string | null = null;
   private retryAfter: number | null = null;
@@ -221,20 +188,16 @@ export class ConnectModal {
     if (activeModal) activeModal.destroy();
     activeModal = this;
     this.fns = fns;
-    this.state = fns.hasExtension ? 'connecting' : 'relay-connecting';
+    this.state = fns.isExtensionInstalled() ? 'connecting' : 'not-installed';
     this.container.appendChild(this.host);
 
     return new Promise<ByokySession>((resolve, reject) => {
       this.resolve = resolve;
       this.reject = reject;
       this.render();
-      // Skip the choose step: if the extension is present we auto-connect,
-      // otherwise we go straight to relay pairing (QR + app-store fallback).
-      if (fns.hasExtension) {
-        this.handleExtension();
-      } else {
-        this.handleRelay();
-      }
+      // Skip the choose step: if the wallet is present we auto-connect,
+      // otherwise we show install guidance until the user retries or cancels.
+      if (this.state === 'connecting') this.handleExtension();
     });
   }
 
@@ -271,8 +234,7 @@ export class ConnectModal {
 
     switch (this.state) {
       case 'connecting': this.renderConnecting(); break;
-      case 'relay-connecting': this.renderRelayConnecting(); break;
-      case 'pairing': this.renderPairing(); break;
+      case 'not-installed': this.renderNotInstalled(); break;
       case 'success': this.renderSuccess(); break;
       case 'error': this.renderError(); break;
     }
@@ -285,75 +247,40 @@ export class ConnectModal {
     this.addStatus('Waiting for wallet approval');
   }
 
-  private renderRelayConnecting() {
+  private renderNotInstalled() {
     this.card.innerHTML = '';
-    this.addIcon(ICON_PHONE);
-    this.addHeading('Connecting to relay...');
-    this.addStatus('Establishing secure channel');
-  }
+    this.addIcon(ICON_EXT);
+    this.addHeading('Byoky wallet not found');
+    this.addText('This app uses your own API keys through the Byoky wallet. Your keys stay in the wallet; the app never sees them.');
 
-  private renderPairing() {
-    this.card.innerHTML = '';
-    this.addIcon(ICON_PHONE);
-    this.addHeading('Scan to connect');
-    this.addText('Scan the QR with your phone\'s Camera app, or paste the code below into Byoky on your phone.');
-
-    const pairingCode = this.pairingCode;
-    const qrUrl = pairingCode ? `${PAIR_URL_BASE}#${pairingCode}` : null;
-
-    if (pairingCode && qrUrl) {
-      const qrDiv = document.createElement('div');
-      qrDiv.className = 'qr';
-      try {
-        const matrix = encode(qrUrl);
-        qrDiv.innerHTML = toSvg(matrix, { size: 200, margin: 2, darkColor: '#1c1917', lightColor: '#ffffff' });
-      } catch {
-        // Fallback if pairing code is too large for QR
-      }
-      this.card.appendChild(qrDiv);
-
-      // Display/copy the raw code (not the URL): App Store builds of the mobile app only accept the raw code in manual entry.
-      const codeBox = document.createElement('div');
-      codeBox.className = 'code-box';
-      const code = document.createElement('code');
-      code.textContent = pairingCode;
-      const copyBtn = document.createElement('button');
-      copyBtn.className = 'copy-btn';
-      copyBtn.textContent = 'Copy';
-      copyBtn.addEventListener('click', () => {
-        navigator.clipboard.writeText(pairingCode);
-        copyBtn.textContent = 'Copied!';
-        setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
-      });
-      codeBox.appendChild(code);
-      codeBox.appendChild(copyBtn);
-      this.card.appendChild(codeBox);
-
-      const hint = document.createElement('p');
-      hint.className = 'hint';
-      hint.textContent = 'Tip: scan the QR with your phone\'s Camera app. The in-app QR scanner is getting an upgrade in the next Byoky release.';
-      this.card.appendChild(hint);
-    }
-
-    this.addStatus('Waiting for phone...');
+    const options = document.createElement('div');
+    options.className = 'options';
 
     const storeUrl = this.fns.getStoreUrl();
     if (storeUrl) {
-      const extBtn = document.createElement('a');
-      extBtn.className = 'btn-secondary install-link';
-      extBtn.href = storeUrl;
-      extBtn.target = '_blank';
-      extBtn.rel = 'noopener noreferrer';
+      const installLink = document.createElement('a');
+      installLink.className = 'install-link primary';
+      installLink.href = storeUrl;
+      installLink.target = '_blank';
+      installLink.rel = 'noopener noreferrer';
       const iconSpan = document.createElement('span');
       iconSpan.innerHTML = ICON_EXT;
       iconSpan.querySelector('svg')?.setAttribute('width', '18');
       iconSpan.querySelector('svg')?.setAttribute('height', '18');
       const label = document.createElement('span');
-      label.textContent = 'Install the Byoky extension';
-      extBtn.appendChild(iconSpan);
-      extBtn.appendChild(label);
-      this.card.appendChild(extBtn);
+      label.textContent = 'Install Byoky';
+      installLink.appendChild(iconSpan);
+      installLink.appendChild(label);
+      options.appendChild(installLink);
     }
+
+    options.appendChild(this.createButton('I\'ve installed it', 'btn-secondary', null, () => this.handleRecheck()));
+    this.card.appendChild(options);
+
+    const hint = document.createElement('p');
+    hint.className = 'hint';
+    hint.textContent = this.hintMessage ?? 'On a phone, open this page in the Byoky app\'s built-in browser.';
+    this.card.appendChild(hint);
 
     this.card.appendChild(this.createButton('Cancel', 'btn-ghost', null, () => this.handleCancel()));
   }
@@ -385,16 +312,13 @@ export class ConnectModal {
     this.card.appendChild(msg);
 
     const retry = () => {
-      this.pairingCode = null;
       this.errorMessage = null;
       this.errorCode = null;
       this.retryAfter = null;
-      if (this.fns.hasExtension) {
-        this.setState('connecting');
+      if (this.fns.isExtensionInstalled()) {
         this.handleExtension();
       } else {
-        this.setState('relay-connecting');
-        this.handleRelay();
+        this.setState('not-installed');
       }
     };
 
@@ -506,24 +430,21 @@ export class ConnectModal {
     }
   }
 
-  private async handleRelay() {
-    this.setState('relay-connecting');
-    try {
-      const session = await this.fns.connectRelay((code) => {
-        this.pairingCode = code;
-        this.setState('pairing');
-      });
-      this.setState('success');
-      setTimeout(() => { this.destroy(); this.resolve(session); }, 800);
-    } catch (err) {
-      if (this.destroyed) return;
-      this.captureError(err, 'Failed to connect via relay');
-      this.setState('error');
+  private handleRecheck() {
+    if (this.fns.isExtensionInstalled()) {
+      this.hintMessage = null;
+      this.handleExtension();
+      return;
     }
+    // Content scripts only reach pages loaded after the extension was
+    // installed, so a fresh install usually needs a reload to be detected.
+    this.hintMessage = 'Still not detected. If you just installed Byoky, reload this page.';
+    this.render();
   }
 
   private handleCancel() {
+    const noWallet = this.state === 'not-installed';
     this.destroy();
-    this.reject(new Error('User cancelled'));
+    this.reject(noWallet ? ByokyError.walletNotInstalled() : new Error('User cancelled'));
   }
 }

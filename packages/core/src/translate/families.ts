@@ -2,6 +2,7 @@ import type { ProviderId } from '../types.js';
 import type { ModelFamily } from '../models.js';
 import { PROVIDERS } from '../providers.js';
 import { getAdapter, hasAdapter } from './adapter.js';
+import { resolveProviderBaseUrl } from '../proxy-utils.js';
 
 /**
  * Translation family detection.
@@ -116,11 +117,11 @@ export function rewriteProxyUrl(
   const family = familyOf(dstProviderId);
   if (!family || !hasAdapter(family)) return null;
 
-  // Providers without a fixed host (Azure OpenAI) can only be targeted if
-  // the caller hands in the real tenant baseUrl from the credential row.
-  if (provider.requiresCustomBaseUrl && !overrideBaseUrl) return null;
-
-  const rawBase = overrideBaseUrl ?? provider.baseUrl;
+  // Fixed-host providers always use their registered base URL. Providers
+  // without one (Azure OpenAI, Ollama, LM Studio) need the credential's
+  // baseUrl, and only a safe one (see resolveProviderBaseUrl).
+  const rawBase = resolveProviderBaseUrl(dstProviderId, overrideBaseUrl);
+  if (!rawBase) return null;
   const base = rawBase.replace(/\/$/, '');
   // Providers that diverge from the openai adapter's default chat path
   // (`/v1/chat/completions`) declare the real path via chatPath — e.g. groq

@@ -63,12 +63,6 @@ interface ProxyConfig {
   sessionKey: string;
   providers: string[];
   sendToExtension: (msg: ProxyRequestOut) => void;
-  /**
-   * Optional request validator. Receives the outbound provider URL and can
-   * return a string error to reject the request with 400. Used by relay-mode
-   * to apply the same URL hygiene the SDK enforces on the browser side.
-   */
-  validateUrl?: (providerId: string, url: string) => string | null;
 }
 
 type PendingResponse = {
@@ -86,7 +80,7 @@ const pendingRequests = new Map<string, PendingResponse>();
  * page on any site can POST to http://127.0.0.1:<port>/... as a "simple
  * request" (no preflight) and the browser sets a passing `Host` itself.
  * Without this gate every visited website could drive the user's wallet
- * (burning their API quota) or POST /_shutdown to kill the bridge.
+ * and burn their API quota.
  *
  * Two signals, both set by the browser and unforgeable from script:
  *   - `Origin`: present on every cross-origin fetch/XHR. Local CLI clients
@@ -135,7 +129,7 @@ export function handleProxyResponse(msg: ProxyResponseMessage): void {
   } else if (msg.type === 'proxy_http_error') {
     // Translate the extension's "Unauthorized session key" into a clearer 401
     // and drop the persisted session — the cached key is dead and the user
-    // needs to re-pair via `byoky-bridge connect`.
+    // needs to reconnect via `byoky-bridge connect`.
     const isStaleSession =
       typeof msg.error === 'string' && /unauthorized session key/i.test(msg.error);
     if (!pending.res.headersSent) {
@@ -144,7 +138,7 @@ export function handleProxyResponse(msg: ProxyResponseMessage): void {
         pending.res.writeHead(401, { 'Content-Type': 'application/json' });
         pending.res.end(JSON.stringify({
           error: 'Byoky bridge session expired or revoked',
-          hint: 'Run `byoky-bridge connect` to re-pair the wallet.',
+          hint: 'Run `byoky-bridge connect` to reconnect the wallet.',
         }));
       } else {
         pending.res.writeHead(502, { 'Content-Type': 'application/json' });
@@ -159,7 +153,7 @@ export function handleProxyResponse(msg: ProxyResponseMessage): void {
 }
 
 export function startProxyServer(config: ProxyConfig): Server {
-  const { port, sessionKey, providers, sendToExtension, validateUrl } = config;
+  const { port, sessionKey, providers, sendToExtension } = config;
 
   // Node does not catch rejections thrown out of an async request listener,
   // and an unhandled rejection terminates the process by default. Wrapping
@@ -187,7 +181,7 @@ export function startProxyServer(config: ProxyConfig): Server {
     }
 
     // CSRF: refuse anything a browser issued for a web page. Checked before
-    // every route, including /health and /_shutdown.
+    // every route, including /health.
     if (isBrowserCrossSiteRequest(req)) {
       res.writeHead(403, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Forbidden: cross-site request' }));
@@ -207,20 +201,6 @@ export function startProxyServer(config: ProxyConfig): Server {
     if (req.url === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ status: 'ok', providers }));
-      return;
-    }
-
-    // Graceful shutdown — used by the OpenClaw plugin to replace a stale
-    // bridge bound to an old relay room. Reachable only from a local process:
-    // the Host-header check pins it to loopback and isBrowserCrossSiteRequest
-    // rejects the browser-driven CSRF path (any visited page could otherwise
-    // POST here and kill the bridge). POST only — avoids link-preview
-    // fetches tripping it.
-    if (req.method === 'POST' && req.url === '/_shutdown') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true }));
-      // Let the response flush before exiting.
-      setTimeout(() => process.exit(0), 50);
       return;
     }
 
@@ -296,15 +276,6 @@ export function startProxyServer(config: ProxyConfig): Server {
     }
 
     const realUrl = `${baseUrl}${path}`;
-
-    if (validateUrl) {
-      const err = validateUrl(providerId, realUrl);
-      if (err) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: err }));
-        return;
-      }
-    }
 
     const requestId = `proxy-${crypto.randomUUID()}`;
 

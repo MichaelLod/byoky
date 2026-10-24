@@ -60,7 +60,7 @@ byoky-bridge connect --providers anthropic,openai
 
 The bridge is a native messaging host — Chrome spawns it as a subprocess when the extension needs it. When `byoky-bridge connect` runs, the extension sends a `start-proxy` message telling the bridge to listen on `127.0.0.1:<port>`. Requests hit the proxy, get relayed to the extension over native messaging, and the extension injects the real API key before calling the provider API.
 
-The bridge never sees your API keys.
+The bridge never sees your API keys, and everything stays on your machine: the proxy only listens on `127.0.0.1` and talks to no Byoky-hosted service.
 
 ## Usage from the browser
 
@@ -93,7 +93,7 @@ curl http://127.0.0.1:19280/anthropic/v1/messages \
 | `byoky-bridge uninstall` | Remove native messaging registration |
 | `byoky-bridge status` | Check registration status |
 | `byoky-bridge connect` | Open browser, approve a session, start the proxy on `:19280` |
-| `byoky-bridge relay` | Run the proxy against a mobile wallet via the Byoky relay |
+| `byoky-bridge hermes-setup` | Patch `~/.hermes/config.yaml` so Hermes Agent routes through the bridge |
 
 ## Supported Providers
 

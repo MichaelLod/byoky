@@ -73,18 +73,81 @@ describe('security invariants', () => {
     });
 
     it('calls validateProxyUrl before fetch with API keys', () => {
-      // Every fetch(msg.url or fetch(url that injects API keys must be preceded by validateProxyUrl
-      const fetchCalls = bg.match(/await fetch\((msg\.url|url),/g) || [];
+      // Every fetch that injects API keys must be preceded by validateProxyUrl.
+      // The proxy paths fetch `translatedUrl`: the validated request URL, or
+      // the destination URL built by rewriteProxyUrl.
+      const fetchCalls = bg.match(/await fetch\((msg\.url|url|translatedUrl),/g) || [];
+      expect(fetchCalls.length).toBeGreaterThan(0);
       const validateCalls = bg.match(/validateProxyUrl/g) || [];
       expect(validateCalls.length).toBeGreaterThanOrEqual(fetchCalls.length);
     });
 
     it('uses deny-by-default for the proxy port origin', () => {
-      // The check reads `!effectiveOrigin || effectiveOrigin !== ...` since
-      // popup-relayed requests resolve their origin before comparison. What
-      // matters is that a missing origin denies rather than falls through.
-      expect(bg).toContain('!effectiveOrigin ||');
-      expect(bg).not.toMatch(/effectiveOrigin && effectiveOrigin !== session\.appOrigin/);
+      // A missing origin must deny rather than fall through.
+      expect(bg).toContain('!portOrigin ||');
+      expect(bg).not.toMatch(/portOrigin && portOrigin !== session\.appOrigin/);
+    });
+
+    it('takes the app origin from the browser-set sender, never from the message', () => {
+      // Extension pages used to be able to declare an `appOrigin` on behalf
+      // of an iframe they hosted. Nothing hosts apps any more, so no message
+      // field may override the sender's origin.
+      expect(bg).not.toContain('resolveAppOrigin');
+      expect(bg).not.toContain('msg.appOrigin');
+      expect(bg).not.toContain('message.appOrigin');
+    });
+
+    it('derives sender origins from the sending frame, never the top-level tab', () => {
+      // sender.tab.url is the page embedding an iframe; using it would let
+      // a frame act with its parent's origin.
+      expect(bg).not.toMatch(/tab\??\.url/);
+      expect(bg).toContain('const portOrigin = senderOrigin(port.sender);');
+      const fn = bg.slice(bg.indexOf('function senderOrigin'), bg.indexOf('function resolveOrigin'));
+      expect(fn).toContain('sender.url');
+      expect(fn).toContain("origin !== 'null'");
+    });
+
+    it('only sends session notifications to frames of the session origin', () => {
+      // Notifications carry the session key.
+      expect(bg).not.toMatch(/for \(const port of notifyPorts\)/);
+      const notify = bg.slice(bg.indexOf('function notifyOrigin'), bg.indexOf('function broadcastRevocation'));
+      expect(notify).toContain('if (portOrigin !== origin) continue;');
+      expect(bg).toContain("notifyOrigin(session.appOrigin, { type: 'BYOKY_SESSION_REVOKED'");
+      expect(bg).toContain("notifyOrigin(session.appOrigin, { type: 'BYOKY_PROVIDERS_UPDATED'");
+      expect(bg.match(/type: 'BYOKY_(SESSION_REVOKED|PROVIDERS_UPDATED)'/g)).toHaveLength(2);
+    });
+
+    it('requires the caller to own the session before starting the bridge proxy', () => {
+      const section = bg.slice(bg.indexOf("case 'startBridgeProxy'"), bg.indexOf("case 'startOAuth'"));
+      expect(section).toContain('resolveOrigin(sender) !== bridgeSession.appOrigin');
+      expect(section.indexOf('appOrigin')).toBeLessThan(section.indexOf('return startBridgeProxy('));
+    });
+
+    it('does not follow redirects on proxied provider requests', () => {
+      // Injected API key headers would otherwise follow a redirect off-host.
+      const proxyFetches = bg.match(/await fetch\(translatedUrl, \{[\s\S]*?\}\);/g) || [];
+      expect(proxyFetches.length).toBeGreaterThan(0);
+      for (const call of proxyFetches) expect(call).toContain("redirect: 'error'");
+    });
+
+    it('re-verifies the wallet password before exporting keys', () => {
+      const section = bg.slice(bg.indexOf("case 'exportVault'"), bg.indexOf("case 'importVault'"));
+      const verify = section.indexOf('verifyPassword(currentPassword, stored.passwordHash');
+      expect(verify).toBeGreaterThan(-1);
+      // Checked before any key is decrypted, and throttled like unlock.
+      expect(verify).toBeLessThan(section.indexOf('exportVaultFile('));
+      expect(section).toContain('passwordLockoutError()');
+      expect(section).toContain('recordPasswordFailure()');
+    });
+
+    it('retired-feature storage cleanup never targets wallet data', () => {
+      const list = bg.match(/RETIRED_STORAGE_KEYS = \[([\s\S]*?)\];/);
+      expect(list).not.toBeNull();
+      for (const key of ['credentials', 'passwordHash', 'groups', 'appGroups', 'trustedSites', 'tokenAllowances', 'requestLog']) {
+        expect(list![1]).not.toContain(`'${key}'`);
+      }
+      // The only prefix swept is the retired cloud-sync namespace.
+      expect(bg).toContain("RETIRED_STORAGE_PREFIX = 'cloudVault.'");
     });
 
     it('strips sessionKey from getSessions response', () => {
@@ -148,17 +211,6 @@ describe('security invariants', () => {
       const fn = bg.slice(bg.indexOf('async function decryptCredentialKey'));
       expect(fn).toContain('try {');
       expect(fn).toContain('Failed to decrypt credential');
-    });
-
-    it('strips sensitive headers from relay responses on recipient side', () => {
-      const relayHandler = bg.slice(bg.indexOf('function proxyViaGiftRelay'));
-      expect(relayHandler).toContain("delete relayHeaders[");
-      expect(relayHandler).toContain("'server'");
-    });
-
-    it('strips sensitive headers from relay responses on sender side', () => {
-      const handler = bg.slice(bg.indexOf('function handleGiftProxyRequest'));
-      expect(handler).toContain("delete respHeaders[");
     });
 
     it('clears authorizedBridgeSessionKey on session revocation', () => {
@@ -236,6 +288,12 @@ describe('security invariants', () => {
       // Should not include raw error body from provider
       expect(bg).not.toContain('Token exchange failed: ${err}');
     });
+
+    it('does not leak raw error messages in any proxy responses', () => {
+      // No proxy/bridge error path should expose raw Error.message to clients
+      expect(bg).not.toContain("code: 'PROXY_ERROR', message: (error as Error).message");
+      expect(bg).not.toContain("message: response.error ||");
+    });
   });
 
   describe('proxy-utils', () => {
@@ -249,6 +307,17 @@ describe('security invariants', () => {
       expect(proxyUtils).toContain("u.protocol === 'https:'");
       expect(proxyUtils).toContain('LOCAL_HTTP_PROVIDERS');
       expect(proxyUtils).toContain('isLoopbackHost');
+    });
+
+    it('never lets a credential baseUrl override a fixed-host provider', () => {
+      const resolver = proxyUtils.slice(proxyUtils.indexOf('export function resolveProviderBaseUrl'));
+      expect(resolver).toContain('if (!provider.requiresCustomBaseUrl) return provider.baseUrl;');
+      const validator = proxyUtils.slice(proxyUtils.indexOf('export function validateProxyUrl'));
+      expect(validator).toContain('resolveProviderBaseUrl(providerId, overrideBaseUrl)');
+      expect(proxyUtils).not.toContain('overrideBaseUrl ?? provider.baseUrl');
+      const families = readFile('packages/core/src/translate/families.ts');
+      expect(families).toContain('resolveProviderBaseUrl(dstProviderId, overrideBaseUrl)');
+      expect(families).not.toContain('overrideBaseUrl ?? provider.baseUrl');
     });
 
     it('buildHeaders normalizes keys to lowercase', () => {
@@ -305,17 +374,28 @@ describe('security invariants', () => {
     });
 
     it('sets CryptoKey as non-extractable', () => {
-      // deriveKey extractable param must be false
+      // deriveKey extractable param must be false, and not caller-controllable
       expect(crypto).toMatch(/deriveKey\(\s*\{[^}]+\}[\s\S]*?false\s*,/m);
+      expect(crypto).not.toContain('extractable');
     });
   });
 
   describe('sdk', () => {
     const sdk = readFile('packages/sdk/src/byoky.ts');
+    const proxyFetch = readFile('packages/sdk/src/proxy-fetch.ts');
+    const detect = readFile('packages/sdk/src/detect.ts');
 
     it('uses window.location.origin instead of wildcard for postMessage', () => {
-      expect(sdk).not.toContain("'*'");
-      expect(sdk).toContain('window.location.origin');
+      // BYOKY_* messages carry session keys and request bodies. They must
+      // go to the origin resolved by resolveMessageTarget, never to '*'.
+      for (const src of [sdk, proxyFetch]) {
+        expect(src).not.toContain("'*'");
+        expect(src).toContain('resolveMessageTarget()');
+      }
+      const resolver = detect.slice(detect.indexOf('export async function resolveMessageTarget'));
+      expect(resolver).toContain('window.location.origin');
+      // Messages only ever go to this window, never to a parent frame.
+      expect(detect).not.toContain('window.parent');
     });
   });
 
@@ -398,89 +478,6 @@ describe('security invariants', () => {
       expect(manifest).toContain('content_security_policy');
       expect(manifest).toContain("script-src 'self'");
       expect(manifest).toContain("object-src 'self'");
-    });
-  });
-
-  describe('gift relay security', () => {
-    const bg = readFile('packages/extension/entrypoints/background.ts');
-
-    it('validates relay URL protocol before connecting', () => {
-      // connectGiftRelay must validate wss:// or localhost ws://
-      const relaySection = bg.slice(bg.indexOf('function connectGiftRelay'));
-      expect(relaySection).toContain("parsed.protocol === 'wss:'");
-      expect(relaySection).toContain("parsed.hostname === 'localhost'");
-    });
-
-    it('validates gift creation inputs', () => {
-      const createSection = bg.slice(bg.indexOf("case 'createGift'"), bg.indexOf("case 'getGifts'"));
-      expect(createSection).toContain('Invalid provider');
-      expect(createSection).toContain('Invalid maxTokens');
-      expect(createSection).toContain('Invalid expiry');
-      expect(createSection).toContain('Invalid relay URL');
-    });
-
-    it('checks gift budget before proxying', () => {
-      const handler = bg.slice(bg.indexOf('handleGiftProxyRequest'));
-      expect(handler).toContain('usedTokens >= c.maxTokens');
-      expect(handler).toContain('GIFT_BUDGET_EXHAUSTED');
-    });
-
-    it('checks gift expiry before proxying', () => {
-      const handler = bg.slice(bg.indexOf('handleGiftProxyRequest'));
-      expect(handler).toContain('current.expiresAt');
-      expect(handler).toContain('GIFT_EXPIRED');
-    });
-
-    it('validates URL in gift proxy requests', () => {
-      const handler = bg.slice(bg.indexOf('handleGiftProxyRequest'));
-      expect(handler).toContain('validateProxyUrl');
-    });
-
-    it('uses atomic gift budget updates with re-check under lock', () => {
-      expect(bg).toContain('giftBudgetLocks');
-      // Must re-validate budget inside the locked section to prevent overspend
-      const lockSection = bg.slice(bg.indexOf('giftBudgetLocks.get(gift.id)'));
-      expect(lockSection).toContain('usedTokens + totalTokens');
-    });
-
-    it('serializes entire gift request lifecycle under one lock', () => {
-      const handler = bg.slice(bg.indexOf('handleGiftProxyRequest'));
-      // Budget check, API call, and usage update must all run under one lock
-      // to prevent concurrent requests from both passing the budget check
-      expect(handler).toContain('prev = giftBudgetLocks.get(gift.id)');
-      expect(handler).toContain('Serialize the entire request lifecycle');
-    });
-
-    it('has request timeout on gift proxy fetch', () => {
-      const handler = bg.slice(bg.indexOf('handleGiftProxyRequest'));
-      expect(handler).toContain('AbortController');
-      expect(handler).toContain('controller.abort()');
-    });
-
-    it('does not leak error details in gift proxy responses', () => {
-      const handler = bg.slice(bg.indexOf('handleGiftProxyRequest'));
-      const catchBlock = handler.slice(handler.lastIndexOf('catch ('));
-      expect(catchBlock).not.toContain('(error as Error).message');
-    });
-
-    it('does not leak raw error messages in any proxy responses', () => {
-      // No proxy/bridge error path should expose raw Error.message to clients
-      expect(bg).not.toContain("code: 'PROXY_ERROR', message: (error as Error).message");
-      expect(bg).not.toContain("message: response.error ||");
-    });
-
-    it('validates relay URL on recipient side too', () => {
-      const recipientHandler = bg.slice(bg.indexOf('proxyViaGiftRelay'));
-      expect(recipientHandler).toContain("relayParsed.protocol === 'wss:'");
-      expect(recipientHandler).toContain('Insecure relay URL rejected');
-    });
-
-    it('has request-level timeout on recipient gift relay', () => {
-      const recipientHandler = bg.slice(bg.indexOf('proxyViaGiftRelay'));
-      // Must have both auth phase timeout AND request phase timeout
-      expect(recipientHandler).toContain('Gift relay connection timed out');
-      expect(recipientHandler).toContain('Gift relay request timed out');
-      expect(recipientHandler).toContain('120_000');
     });
   });
 

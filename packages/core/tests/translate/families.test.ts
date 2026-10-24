@@ -121,4 +121,19 @@ describe('rewriteProxyUrl', () => {
   it('returns null for unknown providers', () => {
     expect(rewriteProxyUrl('not-a-provider', 'any-model', false)).toBeNull();
   });
+
+  it('ignores a credential baseUrl override for fixed-host providers', () => {
+    expect(rewriteProxyUrl('anthropic', 'claude-sonnet-4-6', false, 'https://evil.example'))
+      .toBe('https://api.anthropic.com/v1/messages');
+    expect(rewriteProxyUrl('openai', 'gpt-4o', false, 'https://evil.example'))
+      .toBe('https://api.openai.com/v1/chat/completions');
+  });
+
+  it('uses a safe override for custom-host providers and refuses an unsafe one', () => {
+    expect(rewriteProxyUrl('azure_openai', 'gpt-4o', false, 'https://myres.openai.azure.com'))
+      .toBe('https://myres.openai.azure.com/v1/chat/completions');
+    expect(rewriteProxyUrl('azure_openai', 'gpt-4o', false)).toBeNull();
+    expect(rewriteProxyUrl('azure_openai', 'gpt-4o', false, 'http://myres.openai.azure.com')).toBeNull();
+    expect(rewriteProxyUrl('azure_openai', 'gpt-4o', false, 'https://u:p@myres.openai.azure.com')).toBeNull();
+  });
 });

@@ -7,6 +7,7 @@ import {
   injectStreamUsageOptions,
   computeAllowanceCheck,
   validateProxyUrl,
+  resolveProviderBaseUrl,
   detectRequestCapabilities,
   rewriteToolNamesInJSONBody,
 } from '../src/proxy-utils.js';
@@ -52,6 +53,52 @@ describe('validateProxyUrl', () => {
 
   it('accepts URL with query params', () => {
     expect(validateProxyUrl('gemini', 'https://generativelanguage.googleapis.com/v1/models?key=test')).toBe(true);
+  });
+
+  // A credential's baseUrl comes from storage or an imported .byoky file, so
+  // it must never move a fixed-host provider's traffic (and key) elsewhere.
+  it('ignores a credential baseUrl override for fixed-host providers', () => {
+    expect(validateProxyUrl('anthropic', 'https://evil.example/v1/messages', 'https://evil.example')).toBe(false);
+    expect(validateProxyUrl('openai', 'https://evil.example/v1/chat/completions', 'https://evil.example')).toBe(false);
+    // The registered origin still validates, whatever the override says.
+    expect(validateProxyUrl('anthropic', 'https://api.anthropic.com/v1/messages', 'https://evil.example')).toBe(true);
+  });
+
+  it('requires a matching, safe override for custom-host providers', () => {
+    const azure = 'https://myres.openai.azure.com';
+    expect(validateProxyUrl('azure_openai', `${azure}/openai/deployments/x/chat/completions`, azure)).toBe(true);
+    expect(validateProxyUrl('azure_openai', `${azure}/openai/deployments/x/chat/completions`)).toBe(false);
+    expect(validateProxyUrl('azure_openai', 'https://evil.example/x', azure)).toBe(false);
+    expect(validateProxyUrl('azure_openai', 'http://myres.openai.azure.com/x', 'http://myres.openai.azure.com')).toBe(false);
+  });
+
+  it('allows http only to loopback for local providers', () => {
+    expect(validateProxyUrl('ollama', 'http://localhost:11434/v1/chat/completions', 'http://localhost:11434')).toBe(true);
+    expect(validateProxyUrl('ollama', 'http://[::1]:11434/v1/chat/completions', 'http://[::1]:11434')).toBe(true);
+    expect(validateProxyUrl('ollama', 'http://192.168.1.5:11434/v1/chat/completions', 'http://192.168.1.5:11434')).toBe(false);
+    expect(validateProxyUrl('lm_studio', 'http://evil.example:1234/v1/chat/completions', 'http://evil.example:1234')).toBe(false);
+  });
+});
+
+describe('resolveProviderBaseUrl', () => {
+  it('returns the registered base URL for fixed-host providers, ignoring overrides', () => {
+    expect(resolveProviderBaseUrl('anthropic')).toBe('https://api.anthropic.com');
+    expect(resolveProviderBaseUrl('anthropic', 'https://evil.example')).toBe('https://api.anthropic.com');
+  });
+
+  it('returns a valid override for custom-host providers', () => {
+    expect(resolveProviderBaseUrl('azure_openai', 'https://myres.openai.azure.com')).toBe('https://myres.openai.azure.com');
+    expect(resolveProviderBaseUrl('ollama', 'http://127.0.0.1:11434')).toBe('http://127.0.0.1:11434');
+  });
+
+  it('rejects missing or unsafe overrides for custom-host providers', () => {
+    expect(resolveProviderBaseUrl('azure_openai')).toBeNull();
+    expect(resolveProviderBaseUrl('azure_openai', 'not a url')).toBeNull();
+    expect(resolveProviderBaseUrl('azure_openai', 'http://myres.openai.azure.com')).toBeNull();
+    expect(resolveProviderBaseUrl('azure_openai', 'https://user:pw@myres.openai.azure.com')).toBeNull();
+    expect(resolveProviderBaseUrl('azure_openai', 'https://myres.openai.azure.com?x=1')).toBeNull();
+    expect(resolveProviderBaseUrl('ollama', 'http://10.0.0.2:11434')).toBeNull();
+    expect(resolveProviderBaseUrl('nonexistent', 'https://x.example')).toBeNull();
   });
 });
 

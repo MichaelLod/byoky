@@ -4,8 +4,14 @@
  * This file is the entry for the IIFE bundle shipped to iOS / Android. It
  * wraps the translate layer's pure functions in a string-in / string-out
  * interface and assigns it to globalThis.BYOKY_TRANSLATE so the host JS
- * engine (JavaScriptCore on iOS, Hermes on Android) can call them across the
- * native bridge.
+ * engine (JavaScriptCore on iOS, androidx JavaScriptSandbox / V8 on Android)
+ * can call them across the native bridge.
+ *
+ * Neither host provides Web APIs. Android's JavaScriptSandbox has no global
+ * `URL`, which core uses to vet credential base URLs and match endpoints, so
+ * we install a fail-closed fallback (./url-fallback.ts) when — and only
+ * when — `URL` is undefined. iOS installs its own Foundation-backed shim
+ * before loading this bundle, and that one is left alone.
  *
  * The wrapper:
  *   - takes JSON-encoded TranslationContext + body strings (no native object
@@ -15,7 +21,7 @@
  *   - surfaces JS errors as thrown exceptions which both engines convert to
  *     native errors (NSError on iOS, RuntimeException on Android).
  *
- * Anything beyond translation stays native: HTTP, credentials, UI, vault.
+ * Anything beyond translation stays native: HTTP, credentials, UI, storage.
  */
 
 import {
@@ -28,7 +34,9 @@ import {
   shouldTranslate as _shouldTranslate,
   sameFamily as _sameFamily,
   rewriteProxyUrl as _rewriteProxyUrl,
+  isChatCompletionsEndpoint,
 } from './families.js';
+import { installURLFallback } from './url-fallback.js';
 import { modelsForProvider, getModel } from '../models.js';
 import {
   detectRequestCapabilities as _detectRequestCapabilities,
@@ -38,6 +46,10 @@ import {
   rewriteToolNamesInJSONBody as _rewriteToolNamesInJSONBody,
 } from '../proxy-utils.js';
 import type { TranslationContext } from './types.js';
+
+// Must run before anything calls `new URL()`. No module above uses URL at
+// load time, so installing here (after the imports are evaluated) is enough.
+const urlImpl: 'native' | 'fallback' = installURLFallback() ? 'fallback' : 'native';
 
 interface StreamHandle {
   process(chunk: string): string;
@@ -117,6 +129,14 @@ interface MobileBridge {
   rewriteProxyUrl(dstProviderId: string, model: string, stream: boolean, overrideBaseUrl?: string): string | null;
 
   /**
+   * True iff `url` targets the chat endpoint of `providerId`'s family (the
+   * only surface translation handles). False for unknown providers and for
+   * URLs the host's `URL` cannot parse. Also lets native tests prove URL
+   * parsing works inside the host engine.
+   */
+  isChatEndpoint(providerId: string, url: string): boolean;
+
+  /**
    * Return JSON-encoded model entries for a provider, or "[]" if the
    * registry has no entries for it. Used by the routing editor to suggest
    * destination models. Each entry: `{id, displayName, contextWindow,
@@ -188,6 +208,13 @@ interface MobileBridge {
 
   /** Bundle version, for native side to assert against expected core version. */
   readonly version: string;
+
+  /**
+   * Which `URL` implementation the bundle runs on: 'native' when the host
+   * already had one (browsers, the iOS shim), 'fallback' when the bundle
+   * installed its own (Android JavaScriptSandbox). For debug surfaces.
+   */
+  readonly urlImpl: 'native' | 'fallback';
 }
 
 const bridge: MobileBridge = {
@@ -245,6 +272,10 @@ const bridge: MobileBridge = {
     const override = overrideBaseUrl && overrideBaseUrl.length > 0 ? overrideBaseUrl : undefined;
     return _rewriteProxyUrl(dstProviderId, model, stream, override);
   },
+  isChatEndpoint(providerId, url) {
+    const family = familyOf(providerId);
+    return family ? isChatCompletionsEndpoint(family, url) : false;
+  },
   getModelsForProvider(providerId) {
     const list = modelsForProvider(providerId).map((m) => ({
       id: m.id,
@@ -301,7 +332,8 @@ const bridge: MobileBridge = {
     const map = JSON.parse(mapJson) as Record<string, string>;
     return _rewriteToolNamesInJSONBody(body, map);
   },
-  version: '0.5.2',
+  version: '0.5.3',
+  urlImpl,
 };
 
 (globalThis as Record<string, unknown>).BYOKY_TRANSLATE = bridge;

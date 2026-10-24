@@ -100,38 +100,6 @@ if (command === 'install' || command === 'uninstall' || command === 'status') {
     console.error(`✗ ${(e && e.message) ? e.message : String(e)}`);
     process.exit(1);
   }
-} else if (command === 'relay') {
-  // Mobile-pairing mode: open a WebSocket to the Byoky relay as a
-  // recipient and expose the same HTTP proxy on 127.0.0.1:<port> that
-  // OpenClaw already talks to. Used when the user paired via QR with
-  // the mobile app instead of the browser extension.
-  //
-  //   byoky-bridge relay \
-  //     --port 19280 \
-  //     --relay-url wss://relay.byoky.com \
-  //     --room-id <uuid> \
-  //     --auth-token <hex> \
-  //     --providers anthropic,openai,gemini
-  const args = process.argv.slice(3);
-  const opt = (name) => {
-    const i = args.indexOf(name);
-    if (i < 0) return undefined;
-    return args[i + 1];
-  };
-  const port = parseInt(opt('--port') ?? '19280', 10);
-  const relayUrl = opt('--relay-url');
-  const roomId = opt('--room-id');
-  const authToken = opt('--auth-token');
-  const providersArg = opt('--providers') ?? '';
-  const providers = providersArg.split(',').map((s) => s.trim()).filter(Boolean);
-
-  if (!relayUrl || !roomId || !authToken || providers.length === 0) {
-    console.error('Usage: byoky-bridge relay --port <n> --relay-url <wss://...> --room-id <id> --auth-token <token> --providers <a,b,c>');
-    process.exit(1);
-  }
-
-  const { startRelayMode } = await import('../dist/relay-mode.js');
-  startRelayMode({ port, relayUrl, roomId, authToken, providers });
 } else if (!command || command === 'host') {
   // Native messaging host mode (called by browser)
   await import('../dist/host.js');
@@ -144,7 +112,6 @@ Commands:
   status         Check registration status
   connect        Open browser, approve a session, start the HTTP proxy on :19280
   hermes-setup   Patch ~/.hermes/config.yaml so Hermes Agent routes through the bridge
-  relay          Run the HTTP proxy against the mobile wallet via the relay
 
 The bridge runs automatically when called by the Byoky extension.
 Use \`connect\` for CLI tools like Claude Code that need the proxy running on demand.`);

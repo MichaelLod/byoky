@@ -1,6 +1,6 @@
 # @byoky/sdk
 
-JavaScript SDK for [Byoky](https://byoky.com) -- connect to the wallet extension, proxy AI API calls, and manage sessions. Your users' API keys never leave their device.
+JavaScript SDK for [Byoky](https://byoky.com) -- connect to the user's Byoky wallet, proxy AI API calls through it, and manage sessions. Your users' API keys never leave their wallet, and no Byoky-hosted service sits in between.
 
 ## Install
 
@@ -16,7 +16,7 @@ import { Byoky } from '@byoky/sdk';
 const byoky = new Byoky();
 const session = await byoky.connect({
   providers: [{ id: 'anthropic', required: true }],
-  modal: true, // built-in connect UI with QR code
+  modal: true, // built-in connect UI with install guidance
 });
 
 // Use any provider SDK -- keys never touch your app
@@ -36,9 +36,13 @@ const msg = await client.messages.create({
 
 ## Connection Modes
 
-### Browser Extension
+### Wallet in the browser
 
-The default path. The SDK communicates with the Byoky extension via `postMessage`:
+The SDK talks to the wallet via `window.postMessage`. The same protocol is served by:
+
+- the Byoky browser extension (Chrome, Firefox),
+- the Byoky Safari extension that ships with the iOS app,
+- the built-in browser of the Byoky iOS and Android apps.
 
 ```typescript
 const session = await byoky.connect({
@@ -46,21 +50,11 @@ const session = await byoky.connect({
 });
 ```
 
-### Mobile Wallet (Relay)
-
-For users without the extension. Shows a QR code they scan with the Byoky mobile app:
-
-```typescript
-const session = await byoky.connect({
-  providers: [{ id: 'anthropic', required: true }],
-  useRelay: true,
-  modal: true, // shows QR code
-});
-```
+If no wallet is detected, `connect()` throws `WALLET_NOT_INSTALLED` (and opens the matching store page). With `modal: true` the SDK shows install guidance instead.
 
 ### Backend Relay
 
-Your server makes LLM calls through the user's browser. Keys never leave the extension, even server-side:
+Your server makes LLM calls through the user's browser session. The WebSocket goes to your own server, and keys never leave the wallet, even server-side:
 
 ```typescript
 // Server (Node.js)
@@ -86,7 +80,6 @@ const relay = session.createRelay('wss://your-server.com/ws/relay');
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `timeout` | `number` | `60000` | Connection timeout in ms |
-| `relayUrl` | `string` | `'wss://relay.byoky.com'` | WebSocket relay server URL |
 
 ### `byoky.connect(request)`
 
@@ -106,12 +99,10 @@ const session = await byoky.connect({
 |--------|------|-------------|
 | `providers` | `ProviderRequirement[]` | Providers to request access to |
 | `modal` | `boolean \| ModalOptions` | Show built-in connect UI |
-| `useRelay` | `boolean` | Skip extension, go to relay pairing |
-| `onPairingReady` | `(code: string) => void` | Custom pairing code handler |
 
 ### `byoky.tryReconnect()`
 
-Silently restore a previous session. Returns `null` if no session exists.
+Silently restore a previous session for this origin from the wallet. Returns `null` if no session exists.
 
 ```typescript
 const session = await byoky.tryReconnect();
@@ -125,7 +116,7 @@ const session = await byoky.tryReconnect();
 | `providers` | Map of available providers with auth method |
 | `createFetch(providerId)` | Create a proxied `fetch` function |
 | `listModels(providerId)` | Discover models available to the user's credential (live, per provider) |
-| `createRelay(wsUrl)` | Open WebSocket relay for backend use |
+| `createRelay(wsUrl)` | Open a WebSocket relay to your backend |
 | `disconnect()` | End the session |
 | `isConnected()` | Check if session is still valid |
 | `getUsage()` | Get token usage stats (input/output tokens) |
@@ -168,7 +159,7 @@ client.onClose(() => { ... });       // Disconnect callback
 
 ### Connect Modal
 
-The built-in modal handles extension detection, relay fallback, and QR code display:
+The built-in modal connects to the wallet when one is present, and otherwise shows install guidance (store link for the current browser, a hint to use the Byoky app's built-in browser on phones). If the user dismisses it without a wallet, `connect()` rejects with `WALLET_NOT_INSTALLED`; a cancelled approval rejects with `Error('User cancelled')`.
 
 ```typescript
 const session = await byoky.connect({

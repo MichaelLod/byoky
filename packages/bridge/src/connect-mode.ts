@@ -401,9 +401,6 @@ function buildConnectPage(opts: ConnectOptions): string {
             throw new Error('No matching providers in your wallet');
           }
           const sessionKey = session.sessionKey || '';
-          if (sessionKey.startsWith('relay_') || sessionKey.startsWith('vault_')) {
-            throw new Error('Relay/vault sessions aren\\'t supported by byoky-bridge connect yet — pair with the browser extension directly.');
-          }
           setStatus('Wallet connected — starting bridge proxy…');
           const bridgeResult = await startBridge(sessionKey);
           const port = (bridgeResult && bridgeResult.port) || ${portJson};

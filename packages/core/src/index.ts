@@ -6,7 +6,6 @@ export * from './providers.js';
 export * from './relay.js';
 export * from './password-strength.js';
 export * from './proxy-utils.js';
-export * from './gift.js';
 export * from './models.js';
 export * from './list-models.js';
 export * from './routing.js';

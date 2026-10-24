@@ -2,15 +2,6 @@ import type { RequestLogEntry, TokenAllowance, CapabilitySet } from './types.js'
 import { PROVIDERS } from './providers.js';
 
 /**
- * Validate that a proxy request URL targets the registered provider's base URL.
- * Prevents API key exfiltration by rejecting requests to arbitrary domains.
- *
- * `overrideBaseUrl` lets the caller supply a per-credential base URL for
- * providers whose host isn't fixed globally (e.g. Azure OpenAI, where every
- * tenant has its own `<resource>.openai.azure.com`). Strictly honored for
- * `requiresCustomBaseUrl` providers — absent override means reject.
- */
-/**
  * Providers whose upstream is a user-run local server (Ollama, LM Studio).
  * For these we allow `http://` — but only when the hostname is a loopback
  * address, to prevent a malicious credential from pointing at an arbitrary
@@ -19,7 +10,8 @@ import { PROVIDERS } from './providers.js';
 const LOCAL_HTTP_PROVIDERS = new Set(['ollama', 'lm_studio']);
 
 function isLoopbackHost(hostname: string): boolean {
-  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+  // URL.hostname keeps the brackets on IPv6 literals.
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]' || hostname === '::1';
 }
 
 function isAllowedProtocol(providerId: string, u: URL): boolean {
@@ -30,29 +22,57 @@ function isAllowedProtocol(providerId: string, u: URL): boolean {
   return false;
 }
 
+/**
+ * The upstream base URL to use for a provider, given an optional
+ * per-credential override.
+ *
+ * Fixed-host providers (Anthropic, OpenAI, …) always use their registered
+ * base URL and the override is ignored: a tampered or imported credential
+ * must not be able to send prompts and the API key somewhere else.
+ *
+ * `requiresCustomBaseUrl` providers (Azure OpenAI, Ollama, LM Studio) have no
+ * fixed host, so the override is required. It must be https, or http to a
+ * loopback host for local providers, and may not carry credentials, a query
+ * or a fragment. Returns null when there is no usable base URL.
+ */
+export function resolveProviderBaseUrl(
+  providerId: string,
+  overrideBaseUrl?: string,
+): string | null {
+  const provider = PROVIDERS[providerId];
+  if (!provider) return null;
+  if (!provider.requiresCustomBaseUrl) return provider.baseUrl;
+  if (!overrideBaseUrl) return null;
+  try {
+    const base = new URL(overrideBaseUrl);
+    if (!isAllowedProtocol(providerId, base)) return null;
+    if (base.username || base.password || base.search || base.hash) return null;
+    return overrideBaseUrl;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Validate that a proxy request URL targets the provider's base URL, as
+ * resolved by resolveProviderBaseUrl. Prevents API key exfiltration by
+ * rejecting requests to arbitrary domains.
+ *
+ * `overrideBaseUrl` is the credential's own base URL. It only counts for
+ * `requiresCustomBaseUrl` providers (and is required there); fixed-host
+ * providers are always checked against their registered origin.
+ */
 export function validateProxyUrl(
   providerId: string,
   url: string,
   overrideBaseUrl?: string,
 ): boolean {
-  const provider = PROVIDERS[providerId];
-  if (!provider) return false;
+  const baseUrl = resolveProviderBaseUrl(providerId, overrideBaseUrl);
+  if (!baseUrl) return false;
   try {
     const target = new URL(url);
     if (!isAllowedProtocol(providerId, target)) return false;
-
-    if (provider.requiresCustomBaseUrl) {
-      if (!overrideBaseUrl) return false;
-      const base = new URL(overrideBaseUrl);
-      if (!isAllowedProtocol(providerId, base)) return false;
-      return target.origin === base.origin;
-    }
-
-    // If a trusted override is supplied for a fixed-host provider, it must
-    // still match that provider's registered origin — we refuse to trust a
-    // per-credential baseUrl that would redirect traffic elsewhere.
-    const base = new URL(overrideBaseUrl ?? provider.baseUrl);
-    return target.origin === base.origin;
+    return target.origin === new URL(baseUrl).origin;
   } catch {
     return false;
   }

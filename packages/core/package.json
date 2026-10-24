@@ -1,6 +1,6 @@
 {
   "name": "@byoky/core",
-  "description": "Shared types, crypto, and protocol for Byoky — the BYOK wallet for AI credentials",
+  "description": "Shared types, crypto, protocol and translation for Byoky — the MetaMask for API keys",
   "version": "0.9.12",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -26,10 +26,8 @@
     "directory": "packages/core"
   },
   "homepage": "https://byoky.com",
-  "keywords": ["byoky", "ai", "api-keys", "wallet", "encryption", "llm"],
+  "keywords": ["byoky", "byok", "ai", "api-keys", "wallet", "encryption", "llm"],
   "devDependencies": {
-    "@types/ws": "^8.5.10",
-    "typescript": "^5.7.0",
-    "ws": "^8.21.0"
+    "typescript": "^5.7.0"
   }
 }

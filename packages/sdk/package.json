@@ -1,6 +1,6 @@
 {
   "name": "@byoky/sdk",
-  "description": "JavaScript SDK for Byoky — connect to the wallet extension, proxy AI API calls, and show a connect modal",
+  "description": "JavaScript SDK for Byoky, the MetaMask for API keys — connect your app to the user's wallet and make AI API calls without ever seeing their key",
   "version": "0.9.12",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -31,7 +31,7 @@
     "directory": "packages/sdk"
   },
   "homepage": "https://byoky.com",
-  "keywords": ["byoky", "ai", "api-keys", "wallet", "sdk", "llm", "openai", "anthropic", "gemini"],
+  "keywords": ["byoky", "byok", "ai", "api-keys", "wallet", "metamask", "sdk", "llm", "openai", "anthropic", "gemini"],
   "dependencies": {
     "@byoky/core": "workspace:*"
   },

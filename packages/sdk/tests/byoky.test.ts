@@ -421,6 +421,19 @@ describe('Byoky', () => {
       payload: { code: 'NO_SESSION', message: 'No active session' },
     });
 
+    await new Promise((r) => setTimeout(r, 10));
+
+    // NO_SESSION falls back to a full connect; the user rejects that too
+    const fullConnectMsg = postedMessages.find(
+      (m) => m.data.type === 'BYOKY_CONNECT_REQUEST' && m.data !== connectMsg && m.data !== reconnectMsg!.data,
+    );
+    expect((fullConnectMsg!.data.payload as Record<string, unknown>).reconnectOnly).toBeUndefined();
+    fullConnectMsg!.port!.postMessage({
+      type: 'BYOKY_ERROR',
+      requestId: fullConnectMsg!.data.requestId,
+      payload: { code: 'USER_REJECTED', message: 'User rejected the connection request' },
+    });
+
     const response = await fetchPromise;
     expect(response.status).toBe(401);
     expect(disconnectCb).toHaveBeenCalledTimes(1);
@@ -555,59 +568,14 @@ describe('Byoky', () => {
       expect(sessionStorage.getItem('byoky:session')).not.toBeNull();
     });
 
-    it('tryReconnect restores persisted vault session', async () => {
-      // Create a non-expired JWT (exp far in the future)
-      const header = btoa(JSON.stringify({ alg: 'HS256' }));
-      const payload = btoa(JSON.stringify({ sub: 'user1', exp: Math.floor(Date.now() / 1000) + 3600 }));
-      const fakeJwt = `${header}.${payload}.sig`;
-
-      sessionStorage.setItem('byoky:vault-session', JSON.stringify({
-        appSessionToken: fakeJwt,
-        vaultUrl: 'https://vault.byoky.com',
-        sessionKey: 'vault_test123',
-        proxyUrl: 'https://vault.byoky.com/proxy',
-        providers: { anthropic: { available: true, authMethod: 'api_key' as const } },
-        expiresAt: Math.floor(Date.now() / 1000) + 3600,
-      }));
-
-      const byoky = new Byoky();
-      const session = await byoky.tryReconnect();
-
-      expect(session).not.toBeNull();
-      expect(session!.sessionKey).toBe('vault_test123');
-      expect(typeof session!.createFetch).toBe('function');
-    });
-
-    it('tryReconnect skips expired vault session', async () => {
-      sessionStorage.setItem('byoky:vault-session', JSON.stringify({
-        appSessionToken: 'expired.token.sig',
-        vaultUrl: 'https://vault.byoky.com',
-        sessionKey: 'vault_expired',
-        proxyUrl: 'https://vault.byoky.com/proxy',
-        providers: {},
-        expiresAt: Math.floor(Date.now() / 1000) - 100,
-      }));
-
+    it('tryReconnect returns null without a wallet and posts nothing', async () => {
+      delete (window as Record<string, unknown>).__byoky__;
       const byoky = new Byoky({ timeout: 100 });
 
-      // tryReconnect should skip the expired vault session and try extension
-      const reconnectPromise = byoky.tryReconnect();
-      await new Promise((r) => setTimeout(r, 10));
+      const result = await byoky.tryReconnect();
 
-      // Extension reconnectOnly should fail
-      const msg = postedMessages.find(
-        (m) => m.data.type === 'BYOKY_CONNECT_REQUEST',
-      );
-      if (msg) {
-        msg.port!.postMessage({
-          type: 'BYOKY_ERROR',
-          requestId: msg.data.requestId,
-          payload: { code: 'NO_SESSION', message: 'No active session' },
-        });
-      }
-
-      const result = await reconnectPromise;
       expect(result).toBeNull();
+      expect(postedMessages).toHaveLength(0);
     });
 
     it('updates sessionStorage on auto-reconnect', async () => {
@@ -690,6 +658,73 @@ describe('Byoky', () => {
       // sessionStorage should now have the new key
       const stored = JSON.parse(sessionStorage.getItem('byoky:session')!);
       expect(stored.sessionKey).toBe('byk_new_key');
+    });
+  });
+
+  describe('connect modal', () => {
+    function modalCard(): HTMLElement | null {
+      for (const el of Array.from(document.body.children)) {
+        const card = el.shadowRoot?.querySelector('.card');
+        if (card) return card as HTMLElement;
+      }
+      return null;
+    }
+
+    function clickButton(label: string) {
+      const btn = Array.from(modalCard()!.querySelectorAll('button'))
+        .find((b) => b.textContent === label);
+      expect(btn).toBeDefined();
+      btn!.click();
+    }
+
+    afterEach(() => {
+      document.body.innerHTML = '';
+    });
+
+    it('shows install guidance without a wallet and rejects with WALLET_NOT_INSTALLED on cancel', async () => {
+      delete (window as Record<string, unknown>).__byoky__;
+      const byoky = new Byoky();
+
+      const connectPromise = byoky.connect({ modal: true });
+
+      expect(modalCard()!.textContent).toContain('Byoky wallet not found');
+      expect(postedMessages).toHaveLength(0);
+
+      clickButton('Cancel');
+      await expect(connectPromise).rejects.toMatchObject({
+        code: ByokyErrorCode.WALLET_NOT_INSTALLED,
+      });
+      expect(modalCard()).toBeNull();
+    });
+
+    it('connects once the wallet is detected on recheck', async () => {
+      delete (window as Record<string, unknown>).__byoky__;
+      const byoky = new Byoky();
+
+      const connectPromise = byoky.connect({ modal: true });
+
+      clickButton('I\'ve installed it');
+      expect(modalCard()!.textContent).toContain('reload this page');
+      expect(postedMessages).toHaveLength(0);
+
+      (window as Record<string, unknown>).__byoky__ = { isByoky: true };
+      clickButton('I\'ve installed it');
+      await new Promise((r) => setTimeout(r, 10));
+
+      const connectMsg = postedMessages.find((m) => m.data.type === 'BYOKY_CONNECT_REQUEST');
+      expect(connectMsg).toBeDefined();
+      simulateResponse({
+        type: 'BYOKY_CONNECT_RESPONSE',
+        requestId: connectMsg!.data.requestId,
+        payload: {
+          sessionKey: 'byk_modal',
+          proxyUrl: 'extension-proxy',
+          providers: { anthropic: { available: true, authMethod: 'api_key' as const } },
+        },
+      });
+
+      const session = await connectPromise;
+      expect(session.sessionKey).toBe('byk_modal');
     });
   });
 

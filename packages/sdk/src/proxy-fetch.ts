@@ -98,9 +98,7 @@ export function createProxyFetch(
       }
 
       // This message carries the session key and the full request body, so
-      // it must never go to an unverified parent frame. resolveMessageTarget
-      // returns the self/content-script route unless the parent has proven
-      // itself an extension origin.
+      // it only ever goes to this window (see resolveMessageTarget).
       void resolveMessageTarget().then(({ target, origin }) => {
         target.postMessage(
           {

@@ -73,15 +73,6 @@ export interface CredentialMeta {
   createdAt: number;
   lastUsedAt?: number;
   maskedKey?: string;
-  /**
-   * True when this is an `oauth` credential that carries a refresh token —
-   * i.e. a real browser-OAuth access token that expires in hours and can only
-   * be refreshed by the extension (the Bridge holds the refresh call).
-   * False/absent for Anthropic setup tokens (sk-ant-oat01-…), which are
-   * static ~1-year Bearer tokens and can be served by any Node process with
-   * residential egress (e.g. the vault gift-relay).
-   */
-  hasRefreshToken?: boolean;
 }
 
 // --- Sessions ---
@@ -102,9 +93,6 @@ export interface SessionProvider {
   credentialId: string;
   available: boolean;
   authMethod: AuthMethod;
-  giftId?: string;
-  giftRelayUrl?: string;
-  giftAuthToken?: string;
   /**
    * Cross-family translation routing. Set when the resolved group binds the
    * app's requested provider to a credential in a different provider family
@@ -181,7 +169,6 @@ export interface ConnectResponse {
     {
       available: boolean;
       authMethod: AuthMethod;
-      gift?: boolean;
     }
   >;
 }
@@ -368,54 +355,10 @@ export interface Group {
   id: string;            // stable id; DEFAULT_GROUP_ID is reserved for the default group
   name: string;          // user-facing label
   providerId: ProviderId;
-  credentialId?: string; // optional pin to an owned credential; mutually exclusive with giftId
-  giftId?: string;       // optional pin to a received gift (giftedCredential.giftId); mutually exclusive with credentialId
+  credentialId?: string; // optional pin to an owned credential
   model?: string;        // optional default model; phase 1 informational, phase 2 substituted into requests
   createdAt: number;
 }
 
 // origin → group id; absence means the app belongs to DEFAULT_GROUP_ID
 export type AppGroups = Record<string, string>;
-
-// --- Marketplace Apps ---
-
-export type AppCategory = 'chat' | 'coding' | 'trading' | 'productivity' | 'research' | 'creative' | 'other';
-
-export type AppStatus = 'pending' | 'approved' | 'rejected' | 'suspended';
-
-export interface MarketplaceApp {
-  id: string;
-  name: string;
-  slug: string;
-  url: string;
-  icon: string;
-  description: string;
-  category: AppCategory;
-  providers: ProviderId[];
-  author: {
-    name: string;
-    website?: string;
-  };
-  status: AppStatus;
-  verified: boolean;
-  featured: boolean;
-  createdAt: number;
-}
-
-export interface InstalledApp {
-  id: string;
-  slug: string;
-  name: string;
-  url: string;
-  icon: string;
-  description: string;
-  category: AppCategory;
-  providers: ProviderId[];
-  author: {
-    name: string;
-    website?: string;
-  };
-  verified: boolean;
-  installedAt: number;
-  enabled: boolean;
-}

@@ -10,10 +10,6 @@
       "types": "./dist/installer.d.ts",
       "import": "./dist/installer.js"
     },
-    "./spawner": {
-      "types": "./dist/spawner.d.ts",
-      "import": "./dist/spawner.js"
-    },
     "./package.json": "./package.json"
   },
   "bin": {
@@ -41,12 +37,10 @@
   },
   "dependencies": {
     "@byoky/core": "workspace:*",
-    "@byoky/sdk": "workspace:*",
-    "ws": "^8.21.0"
+    "@byoky/sdk": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "25.5.0",
-    "@types/ws": "^8.5.12",
     "tsup": "^8.0.0",
     "typescript": "^5.5.0"
   }

@@ -1,7 +1,7 @@
 /**
- * Shared helper for `session.listModels()`. Used by extension, vault, relay,
- * and mock session paths so they all share one parser layer + one URL map
- * (defined in @byoky/core).
+ * Shared helper for `session.listModels()`. Used by the extension and mock
+ * session paths so they share one parser layer + one URL map (defined in
+ * @byoky/core).
  */
 
 import {

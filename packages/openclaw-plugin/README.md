@@ -75,7 +75,7 @@ The plugin adds an OpenClaw command:
 4. The extension injects the real API key and calls the provider API
 5. The response streams back through the same path
 
-Your API keys exist only inside the extension's encrypted vault.
+Your API keys exist only inside the extension's encrypted local storage. Nothing passes through a Byoky-hosted service.
 
 ## License
 
