@@ -9,21 +9,10 @@ import { ConnectedApps } from './pages/ConnectedApps';
 import { ApprovalRequest } from './pages/ApprovalRequest';
 import { RequestHistory } from './pages/RequestHistory';
 import { Settings } from './pages/Settings';
-import { Gifts } from './pages/Gifts';
-import { CreateGift } from './pages/CreateGift';
-import { RedeemGift } from './pages/RedeemGift';
-import { Apps } from './pages/Apps';
-import { AppStore } from './pages/AppStore';
-import { AppView } from './pages/AppView';
 import { FloatingActionMenu } from './components/FloatingActionMenu';
 
 export default function App() {
-  const { currentPage, modal, sessions, pendingApprovals, loading, pendingGiftLink, init, closeModal, dismissPendingGift } = useWalletStore();
-
-  const handleCloseModal = () => {
-    if (pendingGiftLink) dismissPendingGift();
-    closeModal();
-  };
+  const { currentPage, modal, sessions, loading, init, closeModal } = useWalletStore();
 
   useEffect(() => {
     init();
@@ -42,8 +31,6 @@ export default function App() {
         });
       } else if (msg.action === 'sessionChanged' || msg.action === 'usageUpdated') {
         useWalletStore.getState().refreshData();
-      } else if (msg.action === 'giftStaged') {
-        useWalletStore.getState().loadPendingGift();
       }
     }
     try {
@@ -67,12 +54,7 @@ export default function App() {
     currentPage !== 'unlock' &&
     currentPage !== 'approval';
 
-  const showFab =
-    showNav &&
-    currentPage !== 'create-gift' &&
-    currentPage !== 'app-store' &&
-    currentPage !== 'app-view' &&
-    !modal;
+  const showFab = showNav && !modal;
 
   return (
     <div className="app">
@@ -92,31 +74,6 @@ export default function App() {
                 <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" />
                 <path d="M3 5v14a2 2 0 0 0 2 2h16v-5" />
                 <path d="M18 12a2 2 0 0 0 0 4h4v-4z" />
-              </svg>
-            </button>
-            <button
-              className={currentPage === 'gifts' || currentPage === 'create-gift' || currentPage === 'redeem-gift' ? 'active' : ''}
-              onClick={() => useWalletStore.getState().navigate('gifts')}
-              title="Gifts"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M20 12v10H4V12" />
-                <path d="M2 7h20v5H2z" />
-                <path d="M12 22V7" />
-                <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z" />
-                <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" />
-              </svg>
-            </button>
-            <button
-              className={currentPage === 'apps' || currentPage === 'app-store' || currentPage === 'app-view' ? 'active' : ''}
-              onClick={() => useWalletStore.getState().navigate('apps')}
-              title="Apps"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="2" y="2" width="9" height="9" rx="2" />
-                <rect x="13" y="2" width="9" height="9" rx="2" />
-                <rect x="2" y="13" width="9" height="9" rx="2" />
-                <rect x="13" y="13" width="9" height="9" rx="2" />
               </svg>
             </button>
             <button
@@ -157,21 +114,12 @@ export default function App() {
           {currentPage === 'approval' && <ApprovalRequest />}
           {currentPage === 'request-history' && <RequestHistory />}
           {currentPage === 'settings' && <Settings />}
-          {currentPage === 'gifts' && <Gifts />}
-          {currentPage === 'create-gift' && <CreateGift />}
-          {currentPage === 'apps' && <Apps />}
-          {currentPage === 'app-store' && <AppStore />}
-          {currentPage === 'app-view' && <AppView />}
         </div>
       </main>
       {showFab && <FloatingActionMenu />}
-      {modal && (
-        <Modal
-          title={modal === 'add-credential' ? 'Add credential' : 'Redeem gift'}
-          onClose={handleCloseModal}
-        >
-          {modal === 'add-credential' && <AddCredential />}
-          {modal === 'redeem-gift' && <RedeemGift />}
+      {modal === 'add-credential' && (
+        <Modal title="Add credential" onClose={closeModal}>
+          <AddCredential />
         </Modal>
       )}
     </div>

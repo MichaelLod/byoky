@@ -1,17 +1,14 @@
 import { useWalletStore } from '../store';
 
-const DISMISS_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
+/**
+ * One-time notice for users who relied on cloud sync or gifts before the
+ * wallet became purely local. The background only raises the flag when its
+ * upgrade cleanup found state from those features.
+ */
+export function RetiredFeaturesNotice() {
+  const { showRetiredFeaturesNotice, dismissRetiredFeaturesNotice, navigate } = useWalletStore();
 
-export function OfflineUpgradeBanner() {
-  const {
-    cloudVaultEnabled,
-    vaultBannerDismissedAt,
-    dismissVaultBanner,
-    openSettingsCloudVault,
-  } = useWalletStore();
-
-  if (cloudVaultEnabled) return null;
-  if (vaultBannerDismissedAt && Date.now() - vaultBannerDismissedAt < DISMISS_COOLDOWN_MS) return null;
+  if (!showRetiredFeaturesNotice) return null;
 
   return (
     <div
@@ -27,7 +24,7 @@ export function OfflineUpgradeBanner() {
       <button
         type="button"
         aria-label="Dismiss"
-        onClick={() => dismissVaultBanner()}
+        onClick={() => dismissRetiredFeaturesNotice()}
         style={{
           position: 'absolute',
           top: '6px',
@@ -44,19 +41,23 @@ export function OfflineUpgradeBanner() {
       </button>
 
       <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '4px' }}>
-        Sync across devices
+        Byoky is now fully local
       </div>
-      <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
-        Turn on Cloud Sync to access your keys on any device. Encrypted with your password.
+      <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px', lineHeight: 1.5 }}>
+        Cloud sync and gifts have been retired. Your keys on this device are untouched.
+        To move keys to another device, use Export in Settings.
       </div>
 
       <button
         type="button"
         className="btn btn-primary"
         style={{ fontSize: '12px', padding: '6px 12px' }}
-        onClick={openSettingsCloudVault}
+        onClick={() => {
+          dismissRetiredFeaturesNotice();
+          navigate('settings');
+        }}
       >
-        Activate Cloud Sync
+        Open Settings
       </button>
     </div>
   );

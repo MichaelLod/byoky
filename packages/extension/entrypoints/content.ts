@@ -112,34 +112,12 @@ export default defineContentScript({
         if (replyPort) {
           notifyPorts.add(replyPort);
         }
-      } else if (data.type === 'BYOKY_STAGE_GIFT') {
-        // Only accept staging requests from byoky.com — any other origin
-        // could push an attacker-controlled gift link into the user's
-        // extension and prompt them to redeem a hostile relay.
-        const host = window.location.hostname;
-        if (host !== 'byoky.com' && host !== 'www.byoky.com') return;
-        if (typeof data.giftLink !== 'string' || data.giftLink.length > 16_000) return;
-        browser.runtime.sendMessage({
-          type: 'BYOKY_INTERNAL',
-          action: 'stagePendingGift',
-          payload: { giftLink: data.giftLink },
-        }).then((response) => {
-          reply({
-            type: 'BYOKY_STAGE_GIFT_ACK',
-            requestId: data.requestId,
-            payload: response,
-          });
-        }).catch(() => {
-          reply({
-            type: 'BYOKY_STAGE_GIFT_ACK',
-            requestId: data.requestId,
-            payload: { ok: false, error: 'Extension unavailable' },
-          });
-        });
       }
     });
 
-    // Persistent port for receiving notifications (revocations) from background
+    // Persistent port for receiving notifications (revocations, provider
+    // updates) from background. They carry a session key, so the background
+    // only sends this frame the ones for sessions of its own origin.
     const notifyPort = browser.runtime.connect({ name: 'byoky-notify' });
     notifyPort.onMessage.addListener((msg) => {
       // Push to registered SDK notification ports (secure channel)

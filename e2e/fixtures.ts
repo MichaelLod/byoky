@@ -24,18 +24,16 @@ export interface ApiKeys {
 
 interface TestFixtures {
   walletA: Wallet;
-  walletB: Wallet;
   apiKeys: ApiKeys;
 }
 
 let sharedA: Wallet | null = null;
-let sharedB: Wallet | null = null;
 let sharedApiKeys: ApiKeys | null = null;
 let server: http.Server | null = null;
 let serverPort = 0;
 
-// Exported helpers so a second spec file (vault-flow.spec.ts) can stand up
-// its own pair of fresh wallets without touching the offline fixture state.
+// Exported so a spec (openclaw-flow.spec.ts) can stand up its own fresh
+// wallet without touching the shared fixture state.
 export { launchWallet, loadApiKeys, startServer };
 
 function parseEnvFile(filePath: string): Record<string, string> {
@@ -209,25 +207,20 @@ async function launchWallet(label: string, port: number): Promise<Wallet> {
   return { ctx, popup, page, extensionId };
 }
 
-async function ensureWallets() {
+async function ensureWallet() {
   if (sharedA) return;
   sharedApiKeys = loadApiKeys();
   const port = await startServer();
   sharedA = await launchWallet('A', port);
-  sharedB = await launchWallet('B', port);
 }
 
 export const test = base.extend<TestFixtures>({
   walletA: async ({}, use) => {
-    await ensureWallets();
+    await ensureWallet();
     await use(sharedA!);
   },
-  walletB: async ({}, use) => {
-    await ensureWallets();
-    await use(sharedB!);
-  },
   apiKeys: async ({}, use) => {
-    await ensureWallets();
+    await ensureWallet();
     await use(sharedApiKeys!);
   },
 });
@@ -236,7 +229,6 @@ export { expect } from '@playwright/test';
 
 test.afterAll(async () => {
   if (sharedA) { await sharedA.ctx.close(); sharedA = null; }
-  if (sharedB) { await sharedB.ctx.close(); sharedB = null; }
   if (server) { server.close(); server = null; }
   sharedApiKeys = null;
 });

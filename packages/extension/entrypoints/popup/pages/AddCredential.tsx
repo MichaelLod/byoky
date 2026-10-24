@@ -196,8 +196,7 @@ export function AddCredential() {
               <div className="warning-note" style={{ marginTop: '10px', marginBottom: '12px' }}>
                 <strong>Your computer must stay online.</strong> This credential
                 only works while your machine is running and the Byoky Bridge is
-                connected. If you gift it to someone, they'll see it go offline
-                whenever your machine sleeps or you disconnect.
+                connected.
               </div>
             )}
           </>

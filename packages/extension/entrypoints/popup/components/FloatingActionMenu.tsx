@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useWalletStore } from '../store';
 
 export function FloatingActionMenu() {
-  const { navigate, openModal } = useWalletStore();
+  const { openModal } = useWalletStore();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
@@ -22,14 +22,9 @@ export function FloatingActionMenu() {
     };
   }, [open]);
 
-  function pickModal(target: 'add-credential' | 'redeem-gift') {
+  function pickModal(target: 'add-credential') {
     setOpen(false);
     openModal(target);
-  }
-
-  function pickPage(target: 'app-store') {
-    setOpen(false);
-    navigate(target);
   }
 
   return (
@@ -44,29 +39,6 @@ export function FloatingActionMenu() {
               </svg>
             </span>
             <span>Add credential</span>
-          </button>
-          <button className="fab-menu-item" role="menuitem" onClick={() => pickModal('redeem-gift')}>
-            <span className="fab-menu-icon">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M20 12v10H4V12" />
-                <path d="M2 7h20v5H2z" />
-                <path d="M12 22V7" />
-                <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z" />
-                <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z" />
-              </svg>
-            </span>
-            <span>Redeem gift</span>
-          </button>
-          <button className="fab-menu-item" role="menuitem" onClick={() => pickPage('app-store')}>
-            <span className="fab-menu-icon">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="2" y="2" width="9" height="9" rx="2" />
-                <rect x="13" y="2" width="9" height="9" rx="2" />
-                <rect x="2" y="13" width="9" height="9" rx="2" />
-                <rect x="13" y="13" width="9" height="9" rx="2" />
-              </svg>
-            </span>
-            <span>Add app</span>
           </button>
         </div>
       )}

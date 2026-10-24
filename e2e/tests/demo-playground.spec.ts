@@ -56,15 +56,15 @@ async function checkDemoReachable(url: string): Promise<void> {
 
 async function setupWallet(w: Wallet) {
   await w.popup.bringToFront();
-  await expect(w.popup.locator('button:has-text("Continue with your API keys")')).toBeVisible({ timeout: 15_000 });
-  await w.popup.click('button:has-text("Continue with your API keys")');
+  await expect(w.popup.locator('button:has-text("Get Started")')).toBeVisible({ timeout: 15_000 });
+  await w.popup.click('button:has-text("Get Started")');
   await w.popup.waitForSelector('#password', { timeout: 15_000 });
   await w.popup.fill('#password', PASSWORD);
   await w.popup.click('button:has-text("Continue")');
   await w.popup.waitForSelector('#confirm', { timeout: 10_000 });
   await w.popup.fill('#confirm', PASSWORD);
   await w.popup.click('button:has-text("Create wallet")');
-  await expect(w.popup.locator('text=No API keys, tokens, or gifts yet')).toBeVisible({ timeout: 30_000 });
+  await expect(w.popup.locator('text=No API keys or tokens yet')).toBeVisible({ timeout: 30_000 });
 }
 
 async function addCredential(w: Wallet, providerId: string, label: string, apiKey: string) {
@@ -96,13 +96,14 @@ async function approveConnectInPopup(w: Wallet) {
 
 /**
  * Demo uses the SDK's built-in ConnectModal (rendered in a shadow DOM
- * overlay inside the page). The user must pick "Connect with Extension"
- * inside the modal before the extension popup's approve/reject screen
- * shows. Playwright's text locators pierce shadow DOM by default.
+ * overlay inside the page). With the extension installed the modal skips
+ * any choice step and goes straight to "Waiting for wallet approval" while
+ * the extension popup shows its approve/reject screen. Playwright's text
+ * locators pierce shadow DOM by default.
  */
 async function clickDemoConnectWallet(w: Wallet) {
   await w.page.click('button:has-text("Connect Wallet")');
-  await w.page.getByText('Connect with Extension', { exact: true }).click({ timeout: 15_000 });
+  await expect(w.page.getByText('Waiting for wallet approval')).toBeVisible({ timeout: 15_000 });
 }
 
 async function selectProvider(w: Wallet, selector: string, providerId: string) {

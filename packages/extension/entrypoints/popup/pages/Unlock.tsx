@@ -2,10 +2,9 @@ import { useState, type FormEvent } from 'react';
 import { useWalletStore } from '../store';
 
 export function Unlock() {
-  const { unlock, resetWallet, error, cloudVaultUsername, cloudVaultLastUsername } = useWalletStore();
+  const { unlock, resetWallet, error } = useWalletStore();
   const [password, setPassword] = useState('');
   const [showReset, setShowReset] = useState(false);
-  const displayUsername = cloudVaultUsername ?? cloudVaultLastUsername;
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -19,14 +18,7 @@ export function Unlock() {
         <img src="/icon.svg" alt="" />
       </div>
       <div className="logo-large">Byoky</div>
-      {displayUsername ? (
-        <>
-          <div className="unlock-username">{displayUsername}</div>
-          <div className="tagline">Enter your password to unlock</div>
-        </>
-      ) : (
-        <div className="tagline">Welcome back</div>
-      )}
+      <div className="tagline">Welcome back</div>
 
       {!showReset ? (
         <>

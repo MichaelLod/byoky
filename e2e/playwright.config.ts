@@ -5,8 +5,8 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: 0,
-  // Real API calls + cross-wallet gift relay roundtrips — give each test
-  // enough headroom that a slow cold-start doesn't flake.
+  // Real API calls + bridge spawns — give each test enough headroom that a
+  // slow cold-start doesn't flake.
   timeout: 180_000,
   expect: { timeout: 15_000 },
   use: {

@@ -13,9 +13,6 @@ import {
   type ConnectResponse,
   type ProviderRequirement,
   type ProxyRequest,
-  type Gift,
-  type GiftedCredential,
-  type GiftLink,
   type SerializedFormDataEntry,
   type Group,
   type AppGroups,
@@ -25,9 +22,6 @@ import {
   DEFAULT_GROUP_ID,
   decrypt,
   encrypt,
-  deriveKey,
-  encryptWithKey,
-  decryptWithKey,
   verifyPassword,
   PROVIDERS,
   buildHeaders,
@@ -37,11 +31,9 @@ import {
   injectStreamUsageOptions,
   computeAllowanceCheck,
   validateProxyUrl,
+  resolveProviderBaseUrl,
   injectClaudeCodeSystemPrompt,
   rewriteToolNamesForClaudeCode,
-  createGiftLink,
-  decodeGiftLink,
-  validateGiftLink,
   familyOf,
   rewriteProxyUrl,
   translateRequest,
@@ -49,12 +41,12 @@ import {
   createStreamTranslator,
   TranslationError,
   resolveCrossFamilyRoute,
-  resolveCrossFamilyGiftRoute,
   resolveSameFamilySwapRoute,
   resolveAutoCrossFamilyRoute,
   buildNoCredentialMessage,
 } from '@byoky/core';
 import type { Runtime } from 'wxt/browser';
+import { exportVaultFile, importVaultFile } from '../lib/vault-file';
 
 declare const chrome: {
   sidePanel?: {
@@ -133,21 +125,22 @@ export default defineBackground(() => {
   let unlockFailures = 0;
   let unlockLockedUntil = 0;
 
-  // Bootstrap-login stash. `vaultBootstrapLogin` in the popup validates the
-  // vault password against the server BEFORE creating local wallet state, so
-  // `cloudVaultLogin` runs while `masterPassword` is still null. In that
-  // window we can't wrap the vault AES key or the session token with
-  // masterPassword, so instead of silently no-opping (or worse, writing the
-  // token to storage in plaintext) we hold the materials in memory and drain
-  // them during the subsequent `unlock`. Memory-only: if the service worker
-  // dies between login and unlock the binding is lost and the user retries.
-  let pendingVaultBinding: {
-    username: string;
-    password: string;
-    encryptionSalt: string;
-    token: string;
-    sessionId: string;
-  } | null = null;
+  // Unlock and re-authentication (before export) share one lockout, so
+  // neither is an unthrottled oracle for the master password.
+  function passwordLockoutError(): string | null {
+    if (Date.now() >= unlockLockedUntil) return null;
+    const remaining = Math.ceil((unlockLockedUntil - Date.now()) / 1000);
+    return `Too many attempts. Try again in ${remaining}s`;
+  }
+
+  function recordPasswordFailure() {
+    unlockFailures++;
+    if (unlockFailures >= 5) {
+      // Exponential backoff: 1m, 2m, 4m, 8m, ... capped at 60m
+      const exponent = Math.min(unlockFailures - 5, 5);
+      unlockLockedUntil = Date.now() + 60_000 * Math.pow(2, exponent);
+    }
+  }
 
   // Persist masterPassword across MV3 service worker restarts using session storage.
   // session storage is memory-only (not written to disk) and cleared when the browser closes.
@@ -175,8 +168,6 @@ export default defineBackground(() => {
       if (data._mp) {
         masterPassword = data._mp as string;
         resetIdleTimer();
-        await migrateGiftTokens(data._mp as string);
-        reconnectGiftRelays();
       }
     } catch {}
   }
@@ -281,13 +272,11 @@ export default defineBackground(() => {
   function autoLock() {
     if (!masterPassword) return;
     masterPassword = null;
-    pendingVaultBinding = null;
     sessions.clear();
     clearPersistedSessions();
     authorizedBridgeSessionKey = null;
     authorizedBridgePort = null;
     persistAuthorizedBridgeSessionKey();
-    disconnectAllGiftRelays();
     clearSessionStorage();
     browser.runtime.sendMessage({
       type: 'BYOKY_INTERNAL',
@@ -340,9 +329,6 @@ export default defineBackground(() => {
     return false;
   }
 
-  // Mutex for gift budget updates to prevent concurrent overwrites
-  const giftBudgetLocks = new Map<string, Promise<void>>();
-
   // Restore session after MV3 service worker restart. Capture the sessions
   // promise so port handlers can await it — otherwise a proxy request that
   // arrives during the SW boot window would miss the in-flight rehydrate
@@ -354,6 +340,78 @@ export default defineBackground(() => {
   const sessionsRestored = Promise.all([sessionRestored, restoreSessions()])
     .then(() => restoreAuthorizedBridgeSessionKey())
     .then(() => maybeAutoStartBridgeProxy());
+
+  // --- Retired features: one-time storage cleanup ---
+  //
+  // Cloud sync, gifts and the in-wallet app store were removed when the
+  // wallet became purely local. Their state is dead weight in storage.local
+  // (for cloud sync it includes a bearer token and a wrapped key for a
+  // service that no longer exists). Swept on update, and defensively on
+  // every service-worker start in case the update event was missed.
+  //
+  // Only the keys listed here (plus anything under `cloudVault.`) are
+  // touched. Credentials, the password hash, groups, app→group bindings,
+  // trusted sites, allowances and the request log are never written.
+  const RETIRED_STORAGE_KEYS = [
+    'cloudVault.enabled',
+    'cloudVault.username',
+    'cloudVault.email',
+    'cloudVault.token',
+    'cloudVault.sessionId',
+    'cloudVault.tokenIssuedAt',
+    'cloudVault.tokenExpired',
+    'cloudVault.credentialMap',
+    'cloudVault.credentialMeta',
+    'cloudVault.lastSyncAt',
+    'cloudVault.lastUsername',
+    'cloudVault.vaultKey',
+    'vaultBannerDismissedAt',
+    'gifts',
+    'giftedCredentials',
+    'giftPreferences',
+    'pendingGiftLink',
+    'installedApps',
+  ];
+  const RETIRED_STORAGE_PREFIX = 'cloudVault.';
+  const RETIRED_RELAY_ALARM = 'byoky:relay-reconnect';
+  // Set when the sweep finds that the user relied on cloud sync or gifts, so
+  // the popup can explain once where they went.
+  const RETIRED_FEATURES_NOTICE_KEY = 'retiredFeaturesNotice';
+
+  function usedRetiredFeatures(data: Record<string, unknown>): boolean {
+    const nonEmpty = (v: unknown) => Array.isArray(v) && v.length > 0;
+    return data['cloudVault.enabled'] === true
+      || typeof data['cloudVault.username'] === 'string'
+      || typeof data['cloudVault.lastUsername'] === 'string'
+      || nonEmpty(data.gifts)
+      || nonEmpty(data.giftedCredentials);
+  }
+
+  async function removeRetiredFeatureState(sweepPrefix: boolean): Promise<void> {
+    browser.alarms.clear(RETIRED_RELAY_ALARM).catch(() => {});
+    try {
+      // The full read is only needed to catch `cloudVault.*` keys that are
+      // not in the list; the startup pass reads just the known keys.
+      const data = sweepPrefix
+        ? await browser.storage.local.get(null)
+        : await browser.storage.local.get(RETIRED_STORAGE_KEYS);
+      const stale = Object.keys(data).filter(
+        (key) => RETIRED_STORAGE_KEYS.includes(key) || key.startsWith(RETIRED_STORAGE_PREFIX),
+      );
+      if (stale.length === 0) return;
+      // Record the notice before deleting, so an interrupted sweep can't
+      // drop it.
+      if (usedRetiredFeatures(data)) {
+        await browser.storage.local.set({ [RETIRED_FEATURES_NOTICE_KEY]: true });
+      }
+      await browser.storage.local.remove(stale);
+    } catch {}
+  }
+
+  browser.runtime.onInstalled.addListener(({ reason }) => {
+    if (reason === 'update') removeRetiredFeatureState(true);
+  });
+  removeRetiredFeatureState(false);
 
   // --- Open side panel on icon click (Chrome) / sidebar (Firefox) ---
 
@@ -383,22 +441,25 @@ export default defineBackground(() => {
       const extensionOrigin = new URL(browser.runtime.getURL('/popup.html')).origin;
       const isExtensionPage = senderUrl.startsWith(extensionOrigin + '/');
       if (!isExtensionPage) {
-        const ALLOWED_CONTENT_ACTIONS = ['startBridgeProxy', 'checkBridge', 'startOAuth', 'stagePendingGift'];
+        const ALLOWED_CONTENT_ACTIONS = ['startBridgeProxy', 'checkBridge', 'startOAuth'];
         if (!ALLOWED_CONTENT_ACTIONS.includes((message as { action: string }).action)) return;
       }
       return handleInternal(message as { action: string; payload?: unknown }, senderInfo);
     }
   });
 
-  // --- Notification ports (for broadcasting revocations to content scripts) ---
+  // --- Notification ports (session revocations / provider updates) ---
 
-  const notifyPorts = new Set<Runtime.Port>();
+  // Each content script's notify port, with the origin of the frame it runs
+  // in. Notifications carry a session key, so they only go to frames of the
+  // session's own origin (see notifyOrigin).
+  const notifyPorts = new Map<Runtime.Port, string | null>();
 
   // --- Proxy via Port (streaming) ---
 
   browser.runtime.onConnect.addListener((port) => {
     if (port.name === 'byoky-notify') {
-      notifyPorts.add(port);
+      notifyPorts.set(port, senderOrigin(port.sender));
       port.onDisconnect.addListener(() => notifyPorts.delete(port));
       return;
     }
@@ -419,7 +480,7 @@ export default defineBackground(() => {
           const { sessionKey } = message.payload as { sessionKey: string };
           const session = sessions.get(sessionKey);
           if (session) {
-            const disconnectOrigin = resolveAppOrigin(sender, message);
+            const disconnectOrigin = resolveOrigin(sender);
             if (disconnectOrigin === session.appOrigin) {
               sessions.delete(sessionKey);
               persistSessions();
@@ -437,7 +498,7 @@ export default defineBackground(() => {
         } else if (message.type === 'BYOKY_SESSION_STATUS') {
           const { sessionKey } = message.payload as { sessionKey: string };
           const session = sessions.get(sessionKey);
-          const statusOrigin = resolveAppOrigin(sender, message);
+          const statusOrigin = resolveOrigin(sender);
           if (!session || !statusOrigin || statusOrigin === 'unknown' || statusOrigin !== session.appOrigin) {
             response = {
               type: 'BYOKY_SESSION_STATUS_RESPONSE',
@@ -457,7 +518,7 @@ export default defineBackground(() => {
         } else if (message.type === 'BYOKY_SESSION_USAGE') {
           const { sessionKey } = message.payload as { sessionKey: string };
           const session = sessions.get(sessionKey);
-          const usageOrigin = resolveAppOrigin(sender, message);
+          const usageOrigin = resolveOrigin(sender);
           if (!session || !usageOrigin || usageOrigin === 'unknown' || usageOrigin !== session.appOrigin) {
             response = {
               type: 'BYOKY_SESSION_USAGE_RESPONSE',
@@ -483,20 +544,13 @@ export default defineBackground(() => {
 
     if (port.name !== 'byoky-proxy') return;
 
-    // Capture the origin from the port sender (set by Chrome, can't be spoofed).
-    // For extension-popup-relayed requests, each message declares its own
-    // `appOrigin` (trusted because only self-pages can open this port).
-    const senderUrl = port.sender?.url || port.sender?.tab?.url;
-    const portOrigin = senderUrl ? new URL(senderUrl).origin : null;
-    const popupRelay = isSelfSender(port.sender);
+    // The sending frame's origin, set by the browser (can't be spoofed).
+    const portOrigin = senderOrigin(port.sender);
 
     port.onMessage.addListener(async (raw: unknown) => {
       await sessionsRestored;
-      const msg = raw as ProxyRequest & { appOrigin?: string };
+      const msg = raw as ProxyRequest;
       if (msg.sessionKey == null) return;
-      const effectiveOrigin = popupRelay && typeof msg.appOrigin === 'string'
-        ? (() => { try { return new URL(msg.appOrigin).origin; } catch { return portOrigin; } })()
-        : portOrigin;
 
       resetIdleTimer();
 
@@ -525,7 +579,7 @@ export default defineBackground(() => {
       }
 
       // Verify the requesting origin matches the session's approved origin
-      if (!effectiveOrigin || effectiveOrigin !== session.appOrigin) {
+      if (!portOrigin || portOrigin !== session.appOrigin) {
         port.postMessage({
           type: 'BYOKY_PROXY_RESPONSE_ERROR',
           requestId: msg.requestId,
@@ -557,68 +611,56 @@ export default defineBackground(() => {
         return;
       }
 
-      // Identify the session provider and whether this request will route
-      // through a gift relay. Gift handling is deferred until AFTER request
-      // translation so cross-family-via-gift can translate the request body
-      // up-front and hand the translated body/URL to proxyViaGiftRelay.
       const sessionProvider = session.providers.find((sp) => sp.providerId === msg.providerId);
-      const isGift = !!(sessionProvider?.giftId && sessionProvider.giftRelayUrl && sessionProvider.giftAuthToken);
 
       // Cross-family translation context (set when the resolved group routes
-      // this app to a credential — owned or gifted — in a different provider family).
+      // this app to a credential in a different provider family).
       const translation = sessionProvider?.translation;
       // Same-family swap context (set when the resolved group routes this
       // app to a different provider in the same translation family — no
       // translation needed, just URL rewrite + credential swap + optional
-      // body.model override). Not applicable to gifts today.
+      // body.model override).
       const swap = sessionProvider?.swap;
       // The "effective" provider id is the one we actually call upstream:
       // the destination if translation or swap is on, otherwise the source.
       const effectiveProviderId = translation?.dstProviderId ?? swap?.dstProviderId ?? msg.providerId;
 
-      // Gift path skips owned-credential resolution entirely — the gift
-      // carries its own auth via the relay. For own-key requests we look
-      // up and refresh the credential before entering the try/catch below.
-      let credential: Credential | undefined;
-      if (!isGift) {
-        credential = await resolveCredential(session, msg.providerId);
-        if (!credential) {
-          const allCreds = await getStoredCredentials();
-          const group = await getGroupForOrigin(session.appOrigin);
-          const message = buildNoCredentialMessage(
-            msg.providerId,
-            Array.from(new Set(allCreds.map((c) => c.providerId))).sort(),
-            group,
-          );
-          port.postMessage({
-            type: 'BYOKY_PROXY_RESPONSE_ERROR',
-            requestId: msg.requestId,
-            status: 403,
-            error: { code: 'PROVIDER_UNAVAILABLE', message },
-          });
-          return;
-        }
+      // Look up and refresh the credential before entering the try/catch below.
+      let credential = await resolveCredential(session, msg.providerId);
+      if (!credential) {
+        const allCreds = await getStoredCredentials();
+        const group = await getGroupForOrigin(session.appOrigin);
+        const message = buildNoCredentialMessage(
+          msg.providerId,
+          Array.from(new Set(allCreds.map((c) => c.providerId))).sort(),
+          group,
+        );
+        port.postMessage({
+          type: 'BYOKY_PROXY_RESPONSE_ERROR',
+          requestId: msg.requestId,
+          status: 403,
+          error: { code: 'PROVIDER_UNAVAILABLE', message },
+        });
+        return;
+      }
 
-        // Refresh OAuth token if expired or about to expire. Key off the
-        // credential's own providerId so cross-family routing still refreshes
-        // a destination-side OAuth token correctly.
-        if (
-          credential.authMethod === 'oauth' &&
-          (credential as { expiresAt?: number }).expiresAt &&
-          (credential as { expiresAt: number }).expiresAt < Date.now() + 60_000 &&
-          PROVIDERS[credential.providerId]?.oauthConfig
-        ) {
-          const refreshed = await refreshOAuthToken(credential);
-          if (refreshed) {
-            credential = (await resolveCredential(session, msg.providerId))!;
-          }
+      // Refresh OAuth token if expired or about to expire. Key off the
+      // credential's own providerId so cross-family routing still refreshes
+      // a destination-side OAuth token correctly.
+      if (
+        credential.authMethod === 'oauth' &&
+        (credential as { expiresAt?: number }).expiresAt &&
+        (credential as { expiresAt: number }).expiresAt < Date.now() + 60_000 &&
+        PROVIDERS[credential.providerId]?.oauthConfig
+      ) {
+        const refreshed = await refreshOAuthToken(credential);
+        if (refreshed) {
+          credential = (await resolveCredential(session, msg.providerId))!;
         }
       }
 
       try {
-        // Gift requests don't need a decrypted key — the sender holds the
-        // key and applies it on their side of the relay.
-        const apiKey = isGift ? '' : await decryptCredentialKey(credential!);
+        const apiKey = await decryptCredentialKey(credential);
 
         // The URL the SDK sent must match the SOURCE provider's base URL.
         // (After translation we issue against the destination's URL — see
@@ -627,7 +669,7 @@ export default defineBackground(() => {
         // the credential is the source credential (no translation/swap), so
         // we don't accidentally validate the source URL against the
         // destination's tenant/loopback origin.
-        const sourceBaseUrl = (!translation && !swap && credential?.providerId === msg.providerId)
+        const sourceBaseUrl = (!translation && !swap && credential.providerId === msg.providerId)
           ? credential.baseUrl
           : undefined;
         if (!validateProxyUrl(msg.providerId, msg.url, sourceBaseUrl)) {
@@ -668,7 +710,7 @@ export default defineBackground(() => {
             return;
           }
           const isStreaming = detectStreamingRequest(msg.body);
-          const rewritten = rewriteProxyUrl(translation.dstProviderId, translation.dstModel, isStreaming, credential?.baseUrl);
+          const rewritten = rewriteProxyUrl(translation.dstProviderId, translation.dstModel, isStreaming, credential.baseUrl);
           if (!rewritten) {
             port.postMessage({
               type: 'BYOKY_PROXY_RESPONSE_ERROR',
@@ -684,7 +726,7 @@ export default defineBackground(() => {
           // optional body.model override. Binary bodies pass through
           // unchanged (we only touch the JSON when swap.dstModel is set).
           const isStreaming = detectStreamingRequest(msg.body);
-          const rewritten = rewriteProxyUrl(swap.dstProviderId, swap.dstModel ?? '', isStreaming, credential?.baseUrl);
+          const rewritten = rewriteProxyUrl(swap.dstProviderId, swap.dstModel ?? '', isStreaming, credential.baseUrl);
           if (!rewritten) {
             port.postMessage({
               type: 'BYOKY_PROXY_RESPONSE_ERROR',
@@ -704,22 +746,7 @@ export default defineBackground(() => {
           translatedBody = rewriteModelInJsonBody(msg.body, sessionProvider.modelOverride);
         }
 
-        // Gift path: hand the translated body/URL to the gift relay, along
-        // with the translation context so proxyViaGiftRelay can translate
-        // response chunks back to the source dialect before returning to
-        // the caller. Bypasses OAuth bridge and direct fetch entirely.
-        if (isGift) {
-          await proxyViaGiftRelay(
-            port,
-            { ...msg, body: translatedBody, url: translatedUrl },
-            sessionProvider!,
-            session,
-            translation ? { translation, originalBody: msg.body } : undefined,
-          );
-          return;
-        }
-
-        const realHeaders = buildHeaders(effectiveProviderId, msg.headers, apiKey, credential!.authMethod);
+        const realHeaders = buildHeaders(effectiveProviderId, msg.headers, apiKey, credential.authMethod);
 
         // OAuth tokens for Anthropic route through the bridge (Node.js) to bypass TLS fingerprint detection.
         // Setup tokens require the Claude Code system prompt + Claude-Code-shaped tool names.
@@ -727,7 +754,7 @@ export default defineBackground(() => {
         // After translation, the body is already in Anthropic shape — the
         // Claude Code injection still applies because the bridge expects an
         // Anthropic-shaped request.
-        if (credential!.authMethod === 'oauth' && effectiveProviderId === 'anthropic') {
+        if (credential.authMethod === 'oauth' && effectiveProviderId === 'anthropic') {
           const { body: rewrittenBody, toolNameMap } = rewriteToolNamesForClaudeCode(translatedBody);
           const isThirdParty = Object.keys(toolNameMap).length > 0;
           const body = injectClaudeCodeSystemPrompt(rewrittenBody, {
@@ -754,10 +781,13 @@ export default defineBackground(() => {
         const fetchHeaders = { ...realHeaders };
         if (reconstructed.stripContentType) delete fetchHeaders['content-type'];
 
+        // redirect: 'error' — a redirect would carry the injected API key
+        // headers to wherever the upstream points.
         const response = await fetch(translatedUrl, {
           method: msg.method,
           headers: fetchHeaders,
           body: reconstructed.body,
+          redirect: 'error',
         });
 
         const respHeaders: Record<string, string> = {};
@@ -880,35 +910,28 @@ export default defineBackground(() => {
 
   // --- Helpers ---
 
-  function resolveOrigin(sender: Runtime.MessageSender): string {
-    // sender.url is always available for content scripts (no tabs permission needed)
-    const url = sender.url || sender.tab?.url;
-    return url ? new URL(url).origin : 'unknown';
-  }
-
-  /** True when the port/message comes from one of the extension's own pages
-   * (popup, sidepanel). Only those pages can declare an `appOrigin` on
-   * behalf of an iframe they host. */
-  function isSelfSender(sender: Runtime.MessageSender | undefined): boolean {
-    const url = sender?.url;
-    if (!url) return false;
-    return url.startsWith(`chrome-extension://${browser.runtime.id}/`)
-      || url.startsWith(`moz-extension://${browser.runtime.id}/`)
-      || url.startsWith(`safari-web-extension://${browser.runtime.id}/`);
-  }
-
-  /** When the message is relayed by the extension's own popup on behalf of
-   * an iframe it hosts, trust the declared `appOrigin`. Otherwise use the
-   * sender's real origin. Matches the iOS bridge semantic where the wallet
-   * app injects session context for iframes it opens. */
-  function resolveAppOrigin(
-    sender: Runtime.MessageSender,
-    message: { appOrigin?: unknown },
-  ): string {
-    if (isSelfSender(sender) && typeof message.appOrigin === 'string') {
-      try { return new URL(message.appOrigin).origin; } catch {}
+  /**
+   * Origin of the frame that sent a message or opened a port. Chrome sets
+   * `sender.origin`; elsewhere `sender.url` is the sending frame's own URL
+   * (content scripts get it without the tabs permission). Never falls back
+   * to the tab's URL: that is the top-level page, so an iframe would act
+   * with the origin of whatever page embeds it. Opaque origins yield null.
+   */
+  function senderOrigin(sender: Runtime.MessageSender | undefined): string | null {
+    if (!sender) return null;
+    // Not in the polyfill's MessageSender type, but set by Chrome.
+    const declared = (sender as { origin?: unknown }).origin;
+    let origin: string | undefined;
+    if (typeof declared === 'string' && declared) {
+      origin = declared;
+    } else if (sender.url) {
+      try { origin = new URL(sender.url).origin; } catch { return null; }
     }
-    return resolveOrigin(sender);
+    return origin && origin !== 'null' ? origin : null;
+  }
+
+  function resolveOrigin(sender: Runtime.MessageSender): string {
+    return senderOrigin(sender) ?? 'unknown';
   }
 
   function findActiveSession(origin: string): Session | undefined {
@@ -924,7 +947,7 @@ export default defineBackground(() => {
   function buildSessionResponse(session: Session, requestId: string) {
     const providerMap: ConnectResponse['providers'] = {};
     for (const sp of session.providers) {
-      providerMap[sp.providerId] = { available: sp.available, authMethod: sp.authMethod, ...(sp.giftId ? { gift: true } : {}) };
+      providerMap[sp.providerId] = { available: sp.available, authMethod: sp.authMethod };
     }
     return {
       type: 'BYOKY_CONNECT_RESPONSE',
@@ -938,11 +961,10 @@ export default defineBackground(() => {
   }
 
   async function handleConnect(
-    message: { id: string; payload: ConnectRequest; appOrigin?: string },
+    message: { id: string; payload: ConnectRequest },
     sender: Runtime.MessageSender,
   ): Promise<unknown> {
-    const origin = resolveAppOrigin(sender, message);
-    const fromPopup = isSelfSender(sender);
+    const origin = resolveOrigin(sender);
 
     // Cheap path: reuse an active session for this origin. Don't gate on
     // the rate limit — every page load calls connect(), and reusing the
@@ -976,15 +998,6 @@ export default defineBackground(() => {
           retryAfter: rl.retryAfter,
         },
       };
-    }
-
-    // Popup-relayed connect: the wallet itself is opening this app, so
-    // auto-create a session with no approval prompt (iOS-equivalent).
-    if (fromPopup && masterPassword) {
-      return await createSession(
-        { id: message.id, payload: message.payload },
-        origin,
-      );
     }
 
     // If there's already a pending approval for this origin, wait for its result
@@ -1122,23 +1135,9 @@ export default defineBackground(() => {
     sessionProvider: Session['providers'][number];
   }>> {
     const credentials = await getStoredCredentials();
-    const gcData = await browser.storage.local.get('giftedCredentials');
-    const giftedCreds = (gcData.giftedCredentials ?? []) as GiftedCredential[];
-    const giftPrefs = await getGiftPreferences();
     const result: Array<{ id: string; authMethod: AuthMethod; sessionProvider: Session['providers'][number] }> = [];
-    const seen = new Set<string>();
-
-    // First pass: check if any provider should prefer a gift
-    const preferredGiftProviders = new Set<string>();
-    for (const gc of giftedCreds) {
-      if (gc.expiresAt > Date.now() && gc.usedTokens < gc.maxTokens && giftPrefs[gc.providerId] === gc.giftId) {
-        preferredGiftProviders.add(gc.providerId);
-      }
-    }
 
     for (const cred of credentials) {
-      if (preferredGiftProviders.has(cred.providerId)) continue; // gift preferred, skip own key
-      seen.add(cred.providerId);
       result.push({
         id: cred.providerId,
         authMethod: cred.authMethod,
@@ -1149,24 +1148,6 @@ export default defineBackground(() => {
           authMethod: cred.authMethod,
         },
       });
-    }
-    for (const gc of giftedCreds) {
-      if (gc.expiresAt > Date.now() && gc.usedTokens < gc.maxTokens && !seen.has(gc.providerId)) {
-        seen.add(gc.providerId);
-        result.push({
-          id: gc.providerId,
-          authMethod: 'api_key',
-          sessionProvider: {
-            providerId: gc.providerId,
-            credentialId: gc.id,
-            available: true,
-            authMethod: 'api_key',
-            giftId: gc.giftId,
-            giftRelayUrl: gc.relayUrl,
-            giftAuthToken: gc.authToken,
-          },
-        });
-      }
     }
     return result;
   }
@@ -1182,15 +1163,12 @@ export default defineBackground(() => {
     }
 
     const credentials = await getStoredCredentials();
-    const gcData = await browser.storage.local.get('giftedCredentials');
-    const giftedCreds = (gcData.giftedCredentials ?? []) as GiftedCredential[];
     const request = message.payload;
     const sessionKey = `byk_${crypto.randomUUID().replace(/-/g, '')}`;
 
     const providerMap: ConnectResponse['providers'] = {};
     const sessionProviders: Session['providers'] = [];
 
-    const giftPrefs = await getGiftPreferences();
     // Resolve the group this app belongs to (auto-assigns to default if first contact)
     const group = await getGroupForOrigin(origin);
 
@@ -1202,33 +1180,19 @@ export default defineBackground(() => {
           ? credentials.find((c) => c.id === group.credentialId)
           : undefined;
 
-      // If the group pins a received gift for this provider, it overrides
-      // both credential lookup and translation routing — the gift carries
-      // its own auth + relay and the app talks to the sender's key.
-      const groupPinnedGift =
-        group && group.providerId === req.id && group.giftId
-          ? giftedCreds.find((g) => g.giftId === group.giftId && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens)
-          : undefined;
-
-      // Cross-family routing via gift: group pins a gift whose provider
-      // differs from the app's request, and the provider pair is
-      // translatable with a destination model set. Recipient translates
-      // request/response; sender sees a native dst-provider request.
-      const crossGiftRoute = groupPinnedGift ? undefined : resolveCrossFamilyGiftRoute(group, req.id, giftedCreds);
-
-      // Cross-family routing via owned credential: the group's bound
+      // Cross-family routing: the group's bound
       // provider differs from what the app asked for, both providers are
       // in known translation families, and a credential resolves for the
       // destination. Record translation metadata so the proxy handler
       // knows to translate.
-      const crossRoute = groupPinnedGift || crossGiftRoute ? undefined : resolveCrossFamilyRoute(group, req.id, credentials);
+      const crossRoute = resolveCrossFamilyRoute(group, req.id, credentials);
 
       // Same-family swap: the group's bound provider differs from what the
       // app asked for, and both providers are in the SAME family (identical
       // wire format). No translation needed — just URL rewrite + credential
       // swap + optional model override. Only consulted when cross-family
       // routing doesn't apply, so the branches are mutually exclusive.
-      const swapRoute = !crossRoute && !groupPinnedGift && !crossGiftRoute
+      const swapRoute = !crossRoute
         ? resolveSameFamilySwapRoute(group, req.id, credentials)
         : undefined;
 
@@ -1243,35 +1207,14 @@ export default defineBackground(() => {
         ? resolveAutoCrossFamilyRoute(req.id, credentials)
         : undefined;
 
+      // Group credential pin wins over everything. Cross-family routing and
+      // same-family swap beat own-key direct lookup.
       const cred = groupPinnedCred ?? crossRoute?.cred ?? swapRoute?.cred ?? directCred ?? autoRoute?.cred;
-      const gc = groupPinnedGift ?? crossGiftRoute?.gc ?? giftedCreds.find((g) => g.providerId === req.id && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens);
-      // Group gift pin wins over everything. Cross-family gift route is
-      // next. Otherwise group credential pin wins over gift preference.
-      // Cross-family routing and same-family swap beat own-key direct
-      // lookup. Otherwise prefer gift if user explicitly chose it, else
-      // prefer own key.
-      const preferGift = !!groupPinnedGift || !!crossGiftRoute || (!groupPinnedCred && !crossRoute && !swapRoute && gc && giftPrefs[req.id] === gc.giftId);
-      const useGift = preferGift || (!cred && gc);
       providerMap[req.id] = {
-        available: !!(cred || gc),
-        authMethod: useGift ? 'api_key' : (cred?.authMethod ?? 'api_key'),
-        ...(useGift ? { gift: true } : {}),
+        available: !!cred,
+        authMethod: cred?.authMethod ?? 'api_key',
       };
-      if (useGift && gc) {
-        const sp: SessionProvider = {
-          providerId: req.id,
-          credentialId: gc.id,
-          available: true,
-          authMethod: 'api_key',
-          giftId: gc.giftId,
-          giftRelayUrl: gc.relayUrl,
-          giftAuthToken: gc.authToken,
-        };
-        // Cross-family gift carries translation context alongside the
-        // relay fields so the proxy handler translates request/response.
-        if (crossGiftRoute) sp.translation = crossGiftRoute.translation;
-        sessionProviders.push(sp);
-      } else if (cred) {
+      if (cred) {
         const sp: SessionProvider = {
           providerId: req.id,
           credentialId: cred.id,
@@ -1294,7 +1237,7 @@ export default defineBackground(() => {
       // auto-approvals always scope providers before calling createSession.
       const resolved = await resolveAllProviders();
       for (const rp of resolved) {
-        providerMap[rp.id] = { available: true, authMethod: rp.authMethod, ...(rp.sessionProvider.giftId ? { gift: true } : {}) };
+        providerMap[rp.id] = { available: true, authMethod: rp.authMethod };
         sessionProviders.push(rp.sessionProvider);
       }
     }
@@ -1329,10 +1272,8 @@ export default defineBackground(() => {
   ): Promise<unknown> {
     switch (message.action) {
       case 'unlock': {
-        if (Date.now() < unlockLockedUntil) {
-          const remaining = Math.ceil((unlockLockedUntil - Date.now()) / 1000);
-          return { success: false, error: `Too many attempts. Try again in ${remaining}s` };
-        }
+        const lockout = passwordLockoutError();
+        if (lockout) return { success: false, error: lockout };
         const { password } = message.payload as { password: string };
         const data = await browser.storage.local.get('passwordHash');
         if (!data.passwordHash) return { success: false };
@@ -1344,65 +1285,19 @@ export default defineBackground(() => {
           persistSession();
           resetIdleTimer();
           processPendingAfterUnlock();
-          await migrateGiftTokens(password);
-          reconnectGiftRelays();
-
-          // Drain any bootstrap-login stash. The popup flow uses one
-          // password for both vault and local wallet so the passwords must
-          // match; reject otherwise as defense-in-depth against a diverging
-          // caller (a mismatch means the stashed vault session was
-          // validated with a different password than this unlock, so we
-          // must not persist a vault key that can't decrypt the user's
-          // later-encrypted rows).
-          if (pendingVaultBinding) {
-            if (pendingVaultBinding.password === password) {
-              const p = pendingVaultBinding;
-              pendingVaultBinding = null;
-              await persistVaultKey(p.password, p.encryptionSalt);
-              await saveCloudVaultState({
-                enabled: true,
-                username: p.username,
-                token: p.token,
-                sessionId: p.sessionId,
-                tokenIssuedAt: Date.now(),
-                tokenExpired: false,
-              });
-              await browser.storage.local.set({ 'cloudVault.lastUsername': p.username });
-              await browser.storage.local.remove('cloudVault.lastSyncAt');
-            } else {
-              pendingVaultBinding = null;
-            }
-          }
-
-          enqueueVaultSync(async () => {
-            const cvState = await getCloudVaultState();
-            if (cvState.enabled && cvState.token && !cvState.tokenExpired) {
-              await pullFromVault(cvState.token);
-            }
-            await syncPendingCredentials();
-            await syncPendingGroups();
-            await syncPendingGifts();
-          });
         } else {
-          unlockFailures++;
-          if (unlockFailures >= 5) {
-            // Exponential backoff: 1m, 2m, 4m, 8m, ... capped at 60m
-            const exponent = Math.min(unlockFailures - 5, 5);
-            unlockLockedUntil = Date.now() + 60_000 * Math.pow(2, exponent);
-          }
+          recordPasswordFailure();
         }
         return { success: valid };
       }
 
       case 'lock':
         masterPassword = null;
-        pendingVaultBinding = null;
         sessions.clear();
         clearPersistedSessions();
         authorizedBridgeSessionKey = null;
         authorizedBridgePort = null;
         persistAuthorizedBridgeSessionKey();
-        disconnectAllGiftRelays();
         clearSessionStorage();
         if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
         return { success: true };
@@ -1423,6 +1318,14 @@ export default defineBackground(() => {
         const { providerId: cpId, label: cLabel, value: cValue, authMethod: cAuth, baseUrl: cBaseUrl } = message.payload as {
           providerId: string; label: string; value: string; authMethod: 'api_key' | 'oauth'; baseUrl?: string;
         };
+        // A baseUrl only applies to providers without a fixed host, and has to
+        // be safe to send the key to (see resolveProviderBaseUrl).
+        let storedBaseUrl: string | undefined;
+        if (PROVIDERS[cpId]?.requiresCustomBaseUrl) {
+          const resolved = cBaseUrl ? resolveProviderBaseUrl(cpId, cBaseUrl) : null;
+          if (!resolved) return { error: 'Base URL must use https:// (or http://localhost for a local server)' };
+          storedBaseUrl = resolved;
+        }
         const cleanValue = cValue.replace(/\s+/g, '');
         // Local providers run unauthenticated — empty key is allowed and we skip
         // the encryption step entirely, storing an empty string as the marker.
@@ -1437,7 +1340,7 @@ export default defineBackground(() => {
           authMethod: cAuth,
           createdAt: Date.now(),
         };
-        if (cBaseUrl) newCred.baseUrl = cBaseUrl;
+        if (storedBaseUrl) newCred.baseUrl = storedBaseUrl;
         if (cAuth === 'api_key') {
           newCred.encryptedKey = encValue;
         } else {
@@ -1469,7 +1372,6 @@ export default defineBackground(() => {
         }
 
         refreshSessionProviders();
-        fireVaultSync(newCred.id as string, cpId, cLabel, cAuth, cleanValue, cBaseUrl).catch(() => {});
         return { success: true };
       }
 
@@ -1483,7 +1385,6 @@ export default defineBackground(() => {
         if (rnIdx < 0) return { error: 'Credential not found' };
         rnCreds[rnIdx] = { ...rnCreds[rnIdx], label: newLabel };
         await browser.storage.local.set({ credentials: rnCreds });
-        fireVaultRename(rnId, newLabel).catch(() => {});
         return { success: true };
       }
 
@@ -1505,7 +1406,6 @@ export default defineBackground(() => {
         }
         if (mutated) await setGroups(groups);
         refreshSessionProviders();
-        fireVaultRemove(rmId).catch(() => {});
         return { success: true };
       }
 
@@ -1521,13 +1421,11 @@ export default defineBackground(() => {
 
       case 'resetWallet': {
         masterPassword = null;
-        pendingVaultBinding = null;
         sessions.clear();
         clearPersistedSessions();
         authorizedBridgeSessionKey = null;
         authorizedBridgePort = null;
         persistAuthorizedBridgeSessionKey();
-        disconnectAllGiftRelays();
         clearSessionStorage();
         if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
         unlockFailures = 0;
@@ -1560,7 +1458,7 @@ export default defineBackground(() => {
               authorizedBridgePort = null;
               persistAuthorizedBridgeSessionKey();
             }
-            broadcastRevocation(key);
+            broadcastRevocation(s);
             break;
           }
         }
@@ -1577,6 +1475,12 @@ export default defineBackground(() => {
           sessionKey: string;
           port: number;
         };
+        // Reachable from localhost pages via the content script. Only the
+        // app that owns the session may bind the bridge to it.
+        const bridgeSession = sessions.get(sessionKey);
+        if (!bridgeSession || !sender || resolveOrigin(sender) !== bridgeSession.appOrigin) {
+          return { success: false, error: 'Invalid session' };
+        }
         return startBridgeProxy(sessionKey, port ?? 19280);
       }
 
@@ -1655,151 +1559,43 @@ export default defineBackground(() => {
 
       case 'exportVault': {
         if (!masterPassword) return { error: 'Wallet is locked' };
-        const { exportPassword } = message.payload as { exportPassword: string };
-        const pw = masterPassword;
-        const allCreds = await getStoredCredentials();
-        const reEncrypted = await Promise.all(
-          allCreds.map(async (c) => {
-            const result: Record<string, unknown> = { ...c };
-            if ('encryptedKey' in c && typeof c.encryptedKey === 'string') {
-              const plain = await decrypt(c.encryptedKey, pw);
-              result.encryptedKey = await encrypt(plain, exportPassword);
-            }
-            if ('encryptedAccessToken' in c && typeof c.encryptedAccessToken === 'string') {
-              const plain = await decrypt(c.encryptedAccessToken, pw);
-              result.encryptedAccessToken = await encrypt(plain, exportPassword);
-            }
-            return result;
-          }),
-        );
-        // Export gifts (sender side) — re-encrypt authToken with export password
-        const giftsData = await browser.storage.local.get('gifts');
-        const storedGifts = (giftsData.gifts ?? []) as Gift[];
-        const exportedGifts = await Promise.all(
-          storedGifts.map(async (g) => {
-            const result = { ...g };
-            if (g.authToken) {
-              try {
-                const plain = g.authToken.startsWith('gft_') ? g.authToken : await decrypt(g.authToken, pw);
-                result.authToken = await encrypt(plain, exportPassword);
-              } catch {
-                result.authToken = await encrypt(g.authToken, exportPassword);
-              }
-            }
-            return result;
-          }),
-        );
-        // Export gifted credentials (recipient side) — encrypt authToken for export
-        const gcData = await browser.storage.local.get('giftedCredentials');
-        const storedGifted = (gcData.giftedCredentials ?? []) as GiftedCredential[];
-        const exportedGifted = await Promise.all(
-          storedGifted.map(async (gc) => {
-            const result = { ...gc };
-            if (gc.authToken) {
-              result.authToken = await encrypt(gc.authToken, exportPassword);
-            }
-            return result;
-          }),
-        );
-        const vault = {
-          version: 2, exportedAt: Date.now(), credentials: reEncrypted,
-          gifts: exportedGifts, giftedCredentials: exportedGifted,
+        const { exportPassword, currentPassword } = message.payload as {
+          exportPassword: string; currentPassword?: string;
         };
-        const vaultJson = JSON.stringify(vault);
-        const encryptedVault = await encrypt(vaultJson, exportPassword);
+        // The file hands out every key at once, so an unlocked wallet isn't
+        // enough: the user re-enters the wallet password, checked against the
+        // stored hash.
+        if (typeof currentPassword !== 'string' || !currentPassword) {
+          return { error: 'Enter your wallet password to export' };
+        }
+        const exportLockout = passwordLockoutError();
+        if (exportLockout) return { error: exportLockout };
+        const stored = await browser.storage.local.get('passwordHash');
+        if (!stored.passwordHash || !(await verifyPassword(currentPassword, stored.passwordHash as string))) {
+          recordPasswordFailure();
+          return { error: 'Incorrect wallet password' };
+        }
+        unlockFailures = 0;
+        unlockLockedUntil = 0;
+        const encryptedVault = await exportVaultFile(await getStoredCredentials(), masterPassword, exportPassword);
         return { encryptedVault };
       }
 
       case 'importVault': {
         if (!masterPassword) return { error: 'Wallet is locked' };
-        const pw = masterPassword;
         const { encryptedVault: impVault, importPassword: impPw } = message.payload as {
           encryptedVault: string; importPassword: string;
         };
-        let vaultJson: string;
-        try {
-          vaultJson = await decrypt(impVault.trim(), impPw);
-        } catch {
-          return { error: 'Wrong password or corrupted file' };
+        // Merge, never replace: existing credentials (and the group pins that
+        // reference them) stay untouched; duplicates of them are skipped.
+        const result = await importVaultFile(impVault, impPw, await getStoredCredentials(), masterPassword);
+        if (!result.ok) return { error: result.error };
+        if (result.added.length > 0) {
+          const latest = await getStoredCredentials();
+          await browser.storage.local.set({ credentials: [...latest, ...result.added] });
+          refreshSessionProviders();
         }
-        if (vaultJson.length > 10_485_760) {
-          return { error: 'Vault file too large' };
-        }
-        const vault = JSON.parse(vaultJson) as {
-          version?: number; credentials?: unknown[];
-          gifts?: unknown[]; giftedCredentials?: unknown[];
-        };
-        if (!vault.version || !vault.credentials) {
-          return { error: 'Invalid vault file format' };
-        }
-        const imported = await Promise.all(
-          vault.credentials.map(async (cred: unknown) => {
-            const c = cred as Record<string, unknown>;
-            const result: Record<string, unknown> = { ...c, id: crypto.randomUUID() };
-            if (c.encryptedKey && typeof c.encryptedKey === 'string') {
-              const plain = await decrypt(c.encryptedKey, impPw);
-              result.encryptedKey = await encrypt(plain, pw);
-            }
-            if (c.encryptedAccessToken && typeof c.encryptedAccessToken === 'string') {
-              const plain = await decrypt(c.encryptedAccessToken, impPw);
-              result.encryptedAccessToken = await encrypt(plain, pw);
-            }
-            return result;
-          }),
-        );
-        await browser.storage.local.set({ credentials: imported });
-        // Import gifts (sender side) — re-encrypt authToken with master password
-        if (vault.gifts && Array.isArray(vault.gifts)) {
-          disconnectAllGiftRelays();
-          const importedGifts = await Promise.all(
-            vault.gifts.map(async (g: unknown) => {
-              const gift = g as Record<string, unknown>;
-              if (gift.authToken && typeof gift.authToken === 'string') {
-                try {
-                  const plain = await decrypt(gift.authToken, impPw);
-                  gift.authToken = await encrypt(plain, pw);
-                } catch {
-                  // Leave as-is if decryption fails
-                }
-              }
-              return gift;
-            }),
-          );
-          await browser.storage.local.set({ gifts: importedGifts });
-          reconnectGiftRelays();
-        }
-        // Import gifted credentials (recipient side) — decrypt authToken back to plaintext
-        if (vault.giftedCredentials && Array.isArray(vault.giftedCredentials)) {
-          const importedGifted = await Promise.all(
-            vault.giftedCredentials.map(async (gc: unknown) => {
-              const cred = gc as Record<string, unknown>;
-              if (cred.authToken && typeof cred.authToken === 'string') {
-                try {
-                  cred.authToken = await decrypt(cred.authToken, impPw);
-                } catch {
-                  // Leave as-is if decryption fails
-                }
-              }
-              return cred;
-            }),
-          );
-          await browser.storage.local.set({ giftedCredentials: importedGifted });
-        }
-        // Re-sync all imported credentials to cloud vault. Import replaces
-        // the local vault wholesale, so we wipe sync meta and force the
-        // first post-import pull to be a full snapshot — then push any
-        // imported rows that aren't already on the server.
-        const cvState = await getCloudVaultState();
-        if (cvState.enabled && cvState.token && !cvState.tokenExpired) {
-          await saveCloudVaultState({ credentialMap: {} });
-          await browser.storage.local.remove(['cloudVault.credentialMeta', 'cloudVault.lastSyncAt']);
-          enqueueVaultSync(async () => {
-            await pullFromVault(cvState.token!);
-            await syncAllCredentialsToVault(cvState.token!);
-          });
-        }
-        refreshSessionProviders();
-        return { success: true, count: imported.length };
+        return { success: true, count: result.added.length, skipped: result.skipped, rejected: result.rejected };
       }
 
       case 'encryptValue': {
@@ -1835,230 +1631,14 @@ export default defineBackground(() => {
         return { success: true };
       }
 
-      // --- Token gifts ---
-
-      case 'createGift': {
-        if (!masterPassword) return { error: 'Wallet is locked' };
-        const { credentialId, providerId, label, maxTokens, expiresInMs, relayUrl, listPublicly, description } = message.payload as {
-          credentialId: string; providerId: string; label: string; maxTokens: number; expiresInMs: number; relayUrl: string;
-          listPublicly?: boolean; description?: string;
-        };
-        if (!PROVIDERS[providerId]) return { error: 'Invalid provider' };
-        if (!label || label.length > 200) return { error: 'Label must be 1-200 characters' };
-        if (!Number.isFinite(maxTokens) || maxTokens <= 0 || maxTokens > 100_000_000) return { error: 'Invalid maxTokens' };
-        if (!Number.isFinite(expiresInMs) || expiresInMs <= 0 || expiresInMs > 90 * 24 * 60 * 60_000) return { error: 'Invalid expiry (max 90 days)' };
-        try {
-          const parsed = new URL(relayUrl);
-          if (parsed.protocol !== 'wss:' && parsed.protocol !== 'ws:') return { error: 'Relay URL must use ws:// or wss://' };
-        } catch { return { error: 'Invalid relay URL' }; }
-        const authToken = `gft_${crypto.randomUUID().replace(/-/g, '')}`;
-        const trimmedDescription = description?.trim() || undefined;
-        const gift: Gift = {
-          id: crypto.randomUUID(),
-          credentialId,
-          providerId,
-          label,
-          authToken,
-          maxTokens,
-          usedTokens: 0,
-          expiresAt: Date.now() + expiresInMs,
-          createdAt: Date.now(),
-          active: true,
-          relayUrl,
-          listed: listPublicly === true,
-          description: trimmedDescription,
-        };
-        // Encrypt authToken at rest for defense-in-depth (protects against local storage exfiltration)
-        const encryptedAuthToken = await encrypt(authToken, masterPassword!);
-        const { encoded } = createGiftLink(gift);
-        connectGiftRelay(gift);
-
-        // Allocate a short link first so we can pass its id to the vault when
-        // registering the gift — the pool endpoint needs it for redemption.
-        // Requires vault auth; silent no-op if the user isn't signed in, in
-        // which case the long URL is still returned.
-        let shortId: string | undefined;
-        try {
-          const cv = await getCloudVaultState();
-          if (cv.enabled && cv.token && !cv.tokenExpired) {
-            const res = await vaultFetch('/gift-links', 'POST', {
-              encoded,
-              expiresAt: gift.expiresAt,
-            }, cv.token);
-            if (res.ok && typeof res.data.shortId === 'string') {
-              shortId = res.data.shortId;
-            }
-          }
-        } catch {
-          // Network error — fall back to long URL silently.
-        }
-        if (shortId) gift.giftShortId = shortId;
-
-        const storageGift = { ...gift, authToken: encryptedAuthToken };
-        const data = await browser.storage.local.get('gifts');
-        const gifts = (data.gifts ?? []) as Gift[];
-        gifts.push(storageGift);
-        await browser.storage.local.set({ gifts });
-
-        // Register with Cloud Vault as fallback sender (and, when listed,
-        // make the gift visible on /token-pool).
-        registerGiftWithVault(gift, credentialId).catch(() => {});
-
-        return { success: true, giftLink: encoded, giftId: gift.id, shortId };
+      case 'getRetiredFeaturesNotice': {
+        const data = await browser.storage.local.get(RETIRED_FEATURES_NOTICE_KEY);
+        return { show: data[RETIRED_FEATURES_NOTICE_KEY] === true };
       }
 
-      case 'getGifts': {
-        const gifts = await getGiftsFromStorage();
-        return { gifts };
-      }
-
-      case 'revokeGift': {
-        const { giftId } = message.payload as { giftId: string };
-        const data = await browser.storage.local.get('gifts');
-        const gifts = (data.gifts ?? []) as Gift[];
-        const idx = gifts.findIndex((g) => g.id === giftId);
-        if (idx !== -1) {
-          gifts[idx].active = false;
-          await browser.storage.local.set({ gifts });
-          disconnectGiftRelay(giftId);
-          unregisterGiftFromVault(giftId).catch(() => {});
-        }
+      case 'dismissRetiredFeaturesNotice':
+        await browser.storage.local.remove(RETIRED_FEATURES_NOTICE_KEY);
         return { success: true };
-      }
-
-      case 'resolveGiftShortLink': {
-        const { shortId } = (message.payload ?? {}) as { shortId?: string };
-        if (typeof shortId !== 'string' || !/^[A-Za-z0-9]{8,32}$/.test(shortId)) {
-          return { error: 'Invalid short id' };
-        }
-        try {
-          const res = await vaultFetch(`/gift-links/${encodeURIComponent(shortId)}`, 'GET');
-          if (res.status === 404 || res.status === 410) return { error: 'Gift link not found or expired' };
-          if (!res.ok) return { error: 'Could not resolve gift link' };
-          const encoded = typeof res.data.encoded === 'string' ? res.data.encoded : null;
-          if (!encoded) return { error: 'Could not resolve gift link' };
-          return { success: true, encoded };
-        } catch {
-          return { error: 'Network error resolving gift link' };
-        }
-      }
-
-      case 'stagePendingGift': {
-        const { giftLink } = (message.payload ?? {}) as { giftLink?: string };
-        if (typeof giftLink !== 'string' || giftLink.length === 0 || giftLink.length > 16_000) {
-          return { ok: false, error: 'Invalid gift link' };
-        }
-        await browser.storage.local.set({
-          pendingGiftLink: { link: giftLink, ts: Date.now() },
-        });
-        browser.runtime.sendMessage({
-          type: 'BYOKY_INTERNAL',
-          action: 'giftStaged',
-        }).catch(() => {});
-        openWalletUI(sender?.tab?.id);
-        return { ok: true };
-      }
-
-      case 'getPendingGift': {
-        const data = await browser.storage.local.get('pendingGiftLink');
-        const stored = data.pendingGiftLink as
-          | { link?: string; ts?: number }
-          | string
-          | undefined;
-        if (typeof stored === 'string') {
-          // Legacy shape from older builds — accept once, then upgrade on next stage.
-          return { giftLink: stored };
-        }
-        // 15 minutes — enough to bridge a tab/store roundtrip, short enough
-        // that a stale link doesn't re-prompt the user days later.
-        const PENDING_GIFT_TTL_MS = 15 * 60 * 1000;
-        if (!stored || typeof stored.link !== 'string' || typeof stored.ts !== 'number') {
-          return { giftLink: null };
-        }
-        if (Date.now() - stored.ts > PENDING_GIFT_TTL_MS) {
-          await browser.storage.local.remove('pendingGiftLink');
-          return { giftLink: null };
-        }
-        return { giftLink: stored.link };
-      }
-
-      case 'clearPendingGift': {
-        await browser.storage.local.remove('pendingGiftLink');
-        return { ok: true };
-      }
-
-      case 'redeemGift': {
-        const { giftLinkEncoded } = message.payload as { giftLinkEncoded: string };
-        const link = decodeGiftLink(giftLinkEncoded);
-        if (!link) return { error: 'Invalid gift link' };
-        const validation = validateGiftLink(link);
-        if (!validation.valid) return { error: validation.reason };
-        const giftedCred: GiftedCredential = {
-          id: crypto.randomUUID(),
-          giftId: link.id,
-          providerId: link.p,
-          providerName: link.n,
-          senderLabel: link.s,
-          authToken: link.t,
-          maxTokens: link.m,
-          usedTokens: 0,
-          expiresAt: link.e,
-          relayUrl: link.r,
-          createdAt: Date.now(),
-        };
-        const gcData = await browser.storage.local.get('giftedCredentials');
-        const giftedCreds = (gcData.giftedCredentials ?? []) as GiftedCredential[];
-        if (giftedCreds.some((gc) => gc.giftId === link.id)) {
-          return { error: 'Gift already redeemed' };
-        }
-        giftedCreds.push(giftedCred);
-        await browser.storage.local.set({ giftedCredentials: giftedCreds });
-        refreshSessionProviders();
-        return { success: true };
-      }
-
-      case 'getGiftedCredentials': {
-        const data = await browser.storage.local.get('giftedCredentials');
-        return { giftedCredentials: (data.giftedCredentials ?? []) as GiftedCredential[] };
-      }
-
-      case 'probeGiftPeers': {
-        // Open short WebSockets to each non-expired gift's relay, auth as
-        // recipient, and read peerOnline from relay:auth:result. Used by the
-        // popup to show an online/offline dot next to each received gift.
-        // Probes run in parallel with a 5s cap each so a dead relay doesn't
-        // block the rest.
-        const data = await browser.storage.local.get('giftedCredentials');
-        const giftedCreds = (data.giftedCredentials ?? []) as GiftedCredential[];
-        const active = giftedCreds.filter((gc) => gc.expiresAt > Date.now() && gc.usedTokens < gc.maxTokens);
-        const results = await Promise.all(active.map((gc) => probeGiftPeerOnline(gc)));
-        const online: Record<string, boolean> = {};
-        active.forEach((gc, i) => { online[gc.giftId] = results[i]; });
-        return { online };
-      }
-
-      case 'removeGiftedCredential': {
-        const { id } = message.payload as { id: string };
-        await removeGiftedCredentialById(id);
-        return { success: true };
-      }
-
-      case 'getGiftPreferences': {
-        return { preferences: await getGiftPreferences() };
-      }
-
-      case 'setGiftPreference': {
-        const { providerId, giftId } = message.payload as { providerId: string; giftId: string | null };
-        const prefs = await getGiftPreferences();
-        if (giftId) {
-          prefs[providerId] = giftId;
-        } else {
-          delete prefs[providerId];
-        }
-        await browser.storage.local.set({ giftPreferences: prefs });
-        refreshSessionProviders();
-        return { success: true };
-      }
 
       // --- Groups (alias layer) ---
 
@@ -2070,7 +1650,7 @@ export default defineBackground(() => {
 
       case 'createGroup': {
         const result = await createGroup(message.payload as {
-          name: string; providerId: string; credentialId?: string; giftId?: string; model?: string;
+          name: string; providerId: string; credentialId?: string; model?: string;
         });
         if (result.error) return { error: result.error };
         return { group: result.group };
@@ -2079,7 +1659,7 @@ export default defineBackground(() => {
       case 'updateGroup': {
         const { id, patch } = message.payload as {
           id: string;
-          patch: { name?: string; providerId?: string; credentialId?: string | null; giftId?: string | null; model?: string | null };
+          patch: { name?: string; providerId?: string; credentialId?: string | null; model?: string | null };
         };
         const result = await updateGroup(id, patch);
         if (result.error) return { error: result.error };
@@ -2100,198 +1680,6 @@ export default defineBackground(() => {
         const result = await setAppGroup(origin, groupId);
         if (result.error) return { error: result.error };
         refreshSessionProviders();
-        return { success: true };
-      }
-
-      // --- Installed Apps ---
-
-      case 'getInstalledApps': {
-        const stored = await browser.storage.local.get('installedApps');
-        return { apps: (stored.installedApps ?? []) as unknown[] };
-      }
-
-      case 'setInstalledApps': {
-        if (!masterPassword) return { error: 'Wallet is locked' };
-        const { apps } = message.payload as { apps: unknown[] };
-        await browser.storage.local.set({ installedApps: apps });
-        return { success: true };
-      }
-
-      // --- Cloud Vault ---
-
-      case 'cloudVaultCheckUsername': {
-        const { username } = message.payload as { username: string };
-        const result = await vaultFetch(`/auth/check-username/${encodeURIComponent(username)}`, 'GET');
-        if (!result.ok) return { available: false };
-        return result.data as { available: boolean; reason?: string };
-      }
-
-      case 'cloudVaultSignup': {
-        const rlErr = checkVaultAuthRate(); if (rlErr) return rlErr;
-        if (!masterPassword) return { error: 'Wallet is locked' };
-        const { username, password } = message.payload as { username: string; password: string };
-        const result = await vaultFetch('/auth/signup', 'POST', { username, password });
-        if (!result.ok) {
-          const err = result.data.error as Record<string, string> | undefined;
-          return { error: err?.message ?? 'Signup failed' };
-        }
-        const token = result.data.token as string;
-        const sessionId = result.data.sessionId as string;
-        const encryptionSalt = result.data.encryptionSalt as string;
-        await persistVaultKey(password, encryptionSalt);
-        await saveCloudVaultState({
-          enabled: true,
-          username,
-          token,
-          sessionId,
-          tokenIssuedAt: Date.now(),
-          tokenExpired: false,
-          credentialMap: {},
-        });
-        await browser.storage.local.set({ 'cloudVault.lastUsername': username });
-        await browser.storage.local.remove(['cloudVault.credentialMeta', 'cloudVault.lastSyncAt']);
-        enqueueVaultSync(async () => {
-          // Signup creates an empty vault account; no server rows to pull.
-          await syncAllCredentialsToVault(token);
-          await syncPendingGifts();
-        });
-        return { success: true };
-      }
-
-      case 'getVaultBannerDismissedAt': {
-        const data = await browser.storage.local.get('vaultBannerDismissedAt');
-        return { dismissedAt: (data.vaultBannerDismissedAt as number | null) ?? null };
-      }
-
-      case 'setVaultBannerDismissedAt': {
-        const { dismissedAt } = message.payload as { dismissedAt: number };
-        await browser.storage.local.set({ vaultBannerDismissedAt: dismissedAt });
-        return { success: true };
-      }
-
-      case 'cloudVaultLogin': {
-        const rlErr = checkVaultAuthRate(); if (rlErr) return rlErr;
-        const { username, password } = message.payload as { username: string; password: string };
-        const result = await vaultFetch('/auth/login', 'POST', { username, password });
-        if (!result.ok) {
-          const err = result.data.error as Record<string, string> | undefined;
-          return { error: err?.message ?? 'Login failed' };
-        }
-        const token = result.data.token as string;
-        const sessionId = result.data.sessionId as string;
-        const encryptionSalt = result.data.encryptionSalt as string;
-
-        // Bootstrap-login (fresh install with existing vault account): the
-        // popup validates the vault password before calling `setupWallet` +
-        // `unlock`, so `masterPassword` is null here. persistVaultKey and
-        // the token encryption in saveCloudVaultState both depend on
-        // masterPassword — without this guard persistVaultKey silently
-        // no-ops and saveCloudVaultState writes the bearer token in
-        // plaintext. Stash in memory; `unlock` drains it.
-        if (!masterPassword) {
-          pendingVaultBinding = { username, password, encryptionSalt, token, sessionId };
-          return { success: true };
-        }
-
-        await persistVaultKey(password, encryptionSalt);
-        // Login from a different device (or after a re-install): the server
-        // may already hold credentials this device has never seen. Reset
-        // lastSyncAt so the first pull is a full snapshot, but keep any
-        // existing credentialMap / credentialMeta so we don't re-upload
-        // rows we already own. The pull step reconciles the rest.
-        await saveCloudVaultState({
-          enabled: true,
-          username,
-          token,
-          sessionId,
-          tokenIssuedAt: Date.now(),
-          tokenExpired: false,
-        });
-        await browser.storage.local.set({ 'cloudVault.lastUsername': username });
-        await browser.storage.local.remove('cloudVault.lastSyncAt');
-        enqueueVaultSync(async () => {
-          await pullFromVault(token);
-          await syncPendingCredentials();
-          await syncPendingGifts();
-        });
-        return { success: true };
-      }
-
-      case 'cloudVaultDisable': {
-        // Rollback path for the bootstrap-login flow: if the popup aborts
-        // after cloudVaultLogin succeeded but before unlock, the session
-        // still lives only in memory — log it out from here too.
-        const stashedToken = pendingVaultBinding?.token ?? null;
-        pendingVaultBinding = null;
-        const state = await getCloudVaultState();
-        const logoutToken = state.token && !state.tokenExpired ? state.token : stashedToken;
-        if (logoutToken) {
-          vaultFetch('/auth/logout', 'POST', undefined, logoutToken).catch(() => {});
-        }
-        await clearCloudVaultState();
-        return { success: true };
-      }
-
-      case 'cloudVaultDeleteAccount': {
-        const state = await getCloudVaultState();
-        if (!state.enabled || !state.token || state.tokenExpired) {
-          return { error: 'No active vault session' };
-        }
-        const result = await vaultFetch('/auth/account', 'DELETE', undefined, state.token);
-        if (!result.ok) {
-          const err = result.data.error as Record<string, string> | undefined;
-          return { error: err?.message ?? 'Failed to delete vault account' };
-        }
-        await clearCloudVaultState();
-        await browser.storage.local.remove('cloudVault.lastUsername');
-        return { success: true };
-      }
-
-      case 'cloudVaultStatus': {
-        const state = await getCloudVaultState();
-        const lastUsernameData = await browser.storage.local.get('cloudVault.lastUsername');
-        const lastUsername = (lastUsernameData['cloudVault.lastUsername'] as string) ?? null;
-        let pendingCount = 0;
-        if (state.enabled) {
-          const credentials = await getStoredCredentials();
-          pendingCount = credentials.filter((c) => !state.credentialMap[c.id]).length;
-        }
-        return {
-          enabled: state.enabled,
-          username: state.username,
-          lastUsername,
-          tokenExpired: state.tokenExpired || (state.enabled && state.tokenIssuedAt > 0 && isVaultTokenExpired(state.tokenIssuedAt)),
-          pendingCount,
-        };
-      }
-
-      case 'cloudVaultRelogin': {
-        const rlErr = checkVaultAuthRate(); if (rlErr) return rlErr;
-        if (!masterPassword) return { error: 'Wallet is locked' };
-        const { password } = message.payload as { password: string };
-        const state = await getCloudVaultState();
-        if (!state.username) return { error: 'No vault account configured' };
-        const result = await vaultFetch('/auth/login', 'POST', { username: state.username, password });
-        if (!result.ok) {
-          const err = result.data.error as Record<string, string> | undefined;
-          return { error: err?.message ?? 'Login failed' };
-        }
-        const token = result.data.token as string;
-        const sessionId = result.data.sessionId as string;
-        const encryptionSalt = result.data.encryptionSalt as string;
-        await persistVaultKey(password, encryptionSalt);
-        await saveCloudVaultState({
-          token,
-          sessionId,
-          tokenIssuedAt: Date.now(),
-          tokenExpired: false,
-        });
-        enqueueVaultSync(async () => {
-          await pullFromVault(token);
-          await syncPendingCredentials();
-          await syncPendingGroups();
-          await syncPendingGifts();
-        });
         return { success: true };
       }
 
@@ -2518,453 +1906,6 @@ export default defineBackground(() => {
       return true;
     } catch {
       return false;
-    }
-  }
-
-  // --- Gift relay proxy (recipient side) ---
-
-  /**
-   * Briefly connects to a received gift's relay to check whether the sender
-   * peer is currently online. Returns true/false; treats any error or
-   * timeout as offline. Intentionally keeps the connection short — the
-   * relay reports `peerOnline` in `relay:auth:result`, so we can close as
-   * soon as we read that field.
-   */
-  async function probeGiftPeerOnline(gc: GiftedCredential): Promise<boolean> {
-    try {
-      const parsed = new URL(gc.relayUrl);
-      const isSecure = parsed.protocol === 'wss:';
-      const isLocalWs = parsed.protocol === 'ws:' &&
-        (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.hostname === '[::1]');
-      if (!isSecure && !isLocalWs) return false;
-    } catch {
-      return false;
-    }
-
-    return new Promise<boolean>((resolve) => {
-      let settled = false;
-      const done = (online: boolean) => {
-        if (settled) return;
-        settled = true;
-        try { ws.close(); } catch { /* already closed */ }
-        clearTimeout(timer);
-        resolve(online);
-      };
-      const timer = setTimeout(() => done(false), 5_000);
-
-      let ws: WebSocket;
-      try {
-        ws = new WebSocket(gc.relayUrl);
-      } catch {
-        done(false);
-        return;
-      }
-
-      ws.onopen = () => {
-        try {
-          ws.send(JSON.stringify({
-            type: 'relay:auth',
-            roomId: gc.giftId,
-            authToken: gc.authToken,
-            role: 'recipient',
-          }));
-        } catch {
-          done(false);
-        }
-      };
-      ws.onmessage = (event) => {
-        try {
-          const raw = typeof event.data === 'string' ? event.data : '';
-          if (raw.length > 65_536) return;
-          const data = JSON.parse(raw);
-          if (data.type === 'relay:auth:result') {
-            done(data.success === true && data.peerOnline === true);
-          }
-        } catch {
-          // Ignore parse errors — timeout will resolve false
-        }
-      };
-      ws.onerror = () => done(false);
-      ws.onclose = () => done(false);
-    });
-  }
-
-  // Structural sink so both the regular extension Runtime.Port and a bridge
-  // adapter can receive the relay's response events. The bridge transport
-  // uses a different wire protocol than the popup port, so a thin adapter
-  // (see makeBridgeGiftResponseSink) translates the message types.
-  type ProxyResponseSink = { postMessage(msg: unknown): void };
-
-  async function proxyViaGiftRelay(
-    responsePort: ProxyResponseSink,
-    msg: ProxyRequest,
-    sp: { giftId?: string; giftRelayUrl?: string; giftAuthToken?: string },
-    session: Session,
-    translateCtx?: { translation: SessionTranslation; originalBody: string | undefined },
-  ): Promise<void> {
-    if (!sp.giftRelayUrl || !sp.giftAuthToken || !sp.giftId) {
-      responsePort.postMessage({
-        type: 'BYOKY_PROXY_RESPONSE_ERROR',
-        requestId: msg.requestId,
-        status: 500,
-        error: { code: 'GIFT_ERROR', message: 'Missing gift relay configuration' },
-      });
-      return;
-    }
-
-    // Validate relay URL uses TLS (wss://) or is localhost
-    try {
-      const relayParsed = new URL(sp.giftRelayUrl);
-      const isSecure = relayParsed.protocol === 'wss:';
-      const isLocalWs = relayParsed.protocol === 'ws:' &&
-        (relayParsed.hostname === 'localhost' || relayParsed.hostname === '127.0.0.1' || relayParsed.hostname === '[::1]');
-      if (!isSecure && !isLocalWs) {
-        responsePort.postMessage({
-          type: 'BYOKY_PROXY_RESPONSE_ERROR',
-          requestId: msg.requestId,
-          status: 400,
-          error: { code: 'GIFT_ERROR', message: 'Insecure relay URL rejected' },
-        });
-        return;
-      }
-    } catch {
-      responsePort.postMessage({
-        type: 'BYOKY_PROXY_RESPONSE_ERROR',
-        requestId: msg.requestId,
-        status: 400,
-        error: { code: 'GIFT_ERROR', message: 'Invalid relay URL' },
-      });
-      return;
-    }
-
-    try {
-      const ws = new WebSocket(sp.giftRelayUrl);
-      let authenticated = false;
-      let activeTimeout: ReturnType<typeof setTimeout> | null = null;
-      let logEntryId: string | undefined;
-      const chunks: string[] = [];
-      // Translation state: when the group routes this request cross-family
-      // through a gift, the request body has already been translated
-      // src→dst before we got here. We now also need to translate the
-      // response back dst→src before emitting it to the caller. For
-      // streaming responses that means an SSE rewriter; for non-streaming
-      // we buffer the whole body and translate once at DONE time.
-      let isStreamingResponse = false;
-      let sseRewriter: { process(s: string): string; flush(): string } | undefined;
-      // Gate the pass-through chunk emission: when translation is on we
-      // don't forward raw chunks to the caller (the caller is expecting
-      // src-dialect bytes, not dst-dialect).
-      const passThrough = !translateCtx;
-
-      function setPhaseTimeout(ms: number, code: string, message: string, status: number) {
-        if (activeTimeout) clearTimeout(activeTimeout);
-        activeTimeout = setTimeout(() => {
-          ws.close();
-          responsePort.postMessage({
-            type: 'BYOKY_PROXY_RESPONSE_ERROR',
-            requestId: msg.requestId,
-            status,
-            error: { code, message },
-          });
-        }, ms);
-      }
-
-      function clearActiveTimeout() {
-        if (activeTimeout) { clearTimeout(activeTimeout); activeTimeout = null; }
-      }
-
-      // Auth phase timeout: 30 seconds
-      setPhaseTimeout(30_000, 'GIFT_TIMEOUT', 'Gift relay connection timed out', 504);
-
-      ws.onopen = () => {
-        ws.send(JSON.stringify({
-          type: 'relay:auth',
-          roomId: sp.giftId,
-          authToken: sp.giftAuthToken,
-          role: 'recipient',
-        }));
-      };
-
-      let requestSent = false;
-
-      function sendRelayRequest() {
-        if (requestSent) return;
-        requestSent = true;
-        ws.send(JSON.stringify({
-          type: 'relay:request',
-          requestId: msg.requestId,
-          providerId: msg.providerId,
-          url: msg.url,
-          method: msg.method,
-          headers: msg.headers,
-          body: msg.body,
-        }));
-        // Request phase timeout: 2 minutes
-        setPhaseTimeout(120_000, 'GIFT_TIMEOUT', 'Gift relay request timed out', 504);
-      }
-
-      ws.onmessage = (event) => {
-        try {
-          const raw = typeof event.data === 'string' ? event.data : '';
-          // Match the server's maxPayload (20 MB). If a frame arrives that
-          // is too large, fail the in-flight request loudly instead of
-          // letting it hang on the phase timeout.
-          if (raw.length > 20 * 1024 * 1024) {
-            clearActiveTimeout();
-            ws.close();
-            responsePort.postMessage({
-              type: 'BYOKY_PROXY_RESPONSE_ERROR',
-              requestId: msg.requestId,
-              status: 502,
-              error: { code: 'GIFT_RELAY_ERROR', message: 'Relay frame exceeded size limit' },
-            });
-            return;
-          }
-          const data = JSON.parse(raw);
-
-          if (data.type === 'relay:auth:result') {
-            if (!data.success) {
-              clearActiveTimeout();
-              ws.close();
-              responsePort.postMessage({
-                type: 'BYOKY_PROXY_RESPONSE_ERROR',
-                requestId: msg.requestId,
-                status: 403,
-                error: { code: 'GIFT_AUTH_FAILED', message: `Gift authentication failed: ${data.error ?? 'unknown'}` },
-              });
-              return;
-            }
-            authenticated = true;
-            if (data.peerOnline) {
-              sendRelayRequest();
-            } else {
-              // Wait up to 15s for sender to come online
-              setPhaseTimeout(15_000, 'GIFT_SENDER_OFFLINE', 'Gift sender is not online', 503);
-            }
-          }
-
-          // Sender came online while we were waiting
-          if (data.type === 'relay:peer:status' && data.online && authenticated && !requestSent) {
-            sendRelayRequest();
-          }
-
-          // Forward relay responses to the port
-          if (data.type === 'relay:response:meta' && data.requestId === msg.requestId) {
-            clearActiveTimeout();
-            // Strip potentially sensitive upstream headers from relay responses
-            const relayHeaders = { ...(data.headers ?? {}) };
-            for (const h of ['server', 'x-request-id', 'x-cloud-trace-context', 'set-cookie', 'set-cookie2', 'alt-svc', 'via']) {
-              delete relayHeaders[h];
-            }
-            // Decide streaming vs single-shot from Content-Type. When
-            // translation is on, build the SSE rewriter now so the first
-            // chunk can be processed without a race.
-            const contentType = (relayHeaders['content-type'] ?? relayHeaders['Content-Type'] ?? '') as string;
-            isStreamingResponse = contentType.includes('text/event-stream');
-            if (translateCtx && isStreamingResponse) {
-              sseRewriter = buildResponseStreamRewriter(translateCtx.translation, msg.requestId);
-            }
-            responsePort.postMessage({
-              type: 'BYOKY_PROXY_RESPONSE_META',
-              requestId: msg.requestId,
-              status: data.status,
-              statusText: data.statusText,
-              headers: relayHeaders,
-            });
-            logRequest(session, msg, data.status ?? 0).then((id) => { logEntryId = id; });
-          }
-
-          if (data.type === 'relay:response:chunk' && data.requestId === msg.requestId) {
-            const chunk = data.chunk ?? '';
-            chunks.push(chunk);
-            if (sseRewriter) {
-              // Streaming + translation: rewrite each chunk before
-              // forwarding so the caller sees src-dialect SSE.
-              const rewritten = sseRewriter.process(chunk);
-              if (rewritten) {
-                responsePort.postMessage({
-                  type: 'BYOKY_PROXY_RESPONSE_CHUNK',
-                  requestId: msg.requestId,
-                  chunk: rewritten,
-                });
-              }
-            } else if (passThrough) {
-              responsePort.postMessage({
-                type: 'BYOKY_PROXY_RESPONSE_CHUNK',
-                requestId: msg.requestId,
-                chunk,
-              });
-            }
-            // Non-streaming + translation: buffer until DONE, translate once.
-          }
-
-          if (data.type === 'relay:response:done' && data.requestId === msg.requestId) {
-            clearActiveTimeout();
-            if (sseRewriter) {
-              const tail = sseRewriter.flush();
-              if (tail) {
-                responsePort.postMessage({
-                  type: 'BYOKY_PROXY_RESPONSE_CHUNK',
-                  requestId: msg.requestId,
-                  chunk: tail,
-                });
-              }
-            } else if (translateCtx && !isStreamingResponse) {
-              // Non-streaming + translation: translate the buffered body
-              // once, emit as a single chunk to the caller.
-              try {
-                const translated = applyResponseTranslation(
-                  translateCtx.translation,
-                  translateCtx.originalBody,
-                  msg.requestId,
-                  chunks.join(''),
-                );
-                responsePort.postMessage({
-                  type: 'BYOKY_PROXY_RESPONSE_CHUNK',
-                  requestId: msg.requestId,
-                  chunk: translated,
-                });
-              } catch (err) {
-                responsePort.postMessage({
-                  type: 'BYOKY_PROXY_RESPONSE_ERROR',
-                  requestId: msg.requestId,
-                  status: 502,
-                  error: { code: 'TRANSLATION_FAILED', message: err instanceof Error ? err.message : 'Response translation failed' },
-                });
-                ws.close();
-                return;
-              }
-            }
-            responsePort.postMessage({
-              type: 'BYOKY_PROXY_RESPONSE_DONE',
-              requestId: msg.requestId,
-            });
-            // Delay close to allow relay:usage message to arrive from sender
-            setTimeout(() => ws.close(), 2000);
-            const fullBody = chunks.join('');
-            // Parse usage/model from the upstream (dst) body when
-            // translation is on — chunks[] holds the untranslated bytes.
-            // effectiveProviderId for parseUsage is translateCtx's dst, or
-            // the original msg.providerId otherwise.
-            const effectiveProvider = translateCtx?.translation.dstProviderId ?? msg.providerId;
-            const model = parseModel(msg.body);
-            const usage = parseUsage(effectiveProvider, fullBody);
-            if (logEntryId && (usage || model)) {
-              updateLogEntry(logEntryId, {
-                inputTokens: usage?.inputTokens,
-                outputTokens: usage?.outputTokens,
-                model,
-              });
-              browser.runtime.sendMessage({
-                type: 'BYOKY_INTERNAL',
-                action: 'usageUpdated',
-              }).catch(() => {});
-            }
-          }
-
-          if (data.type === 'relay:response:error' && data.requestId === msg.requestId) {
-            clearActiveTimeout();
-            responsePort.postMessage({
-              type: 'BYOKY_PROXY_RESPONSE_ERROR',
-              requestId: msg.requestId,
-              status: data.error?.code === 'GIFT_BUDGET_EXHAUSTED' ? 429 : 502,
-              error: data.error ?? { code: 'GIFT_ERROR', message: 'Gift relay error' },
-            });
-            ws.close();
-            if (data.error?.code === 'GIFT_EXPIRED' && sp.giftId) {
-              void autoCleanupDeadGift(sp.giftId);
-            }
-          }
-
-          // Update local gifted credential usage
-          if (data.type === 'relay:usage' && data.giftId === sp.giftId) {
-            updateGiftedCredentialUsage(sp.giftId!, data.usedTokens);
-          }
-        } catch {
-          // Ignore parse errors
-        }
-      };
-
-      ws.onerror = () => {
-        clearActiveTimeout();
-        responsePort.postMessage({
-          type: 'BYOKY_PROXY_RESPONSE_ERROR',
-          requestId: msg.requestId,
-          status: 502,
-          error: { code: 'GIFT_RELAY_ERROR', message: 'Failed to connect to gift relay' },
-        });
-      };
-
-      ws.onclose = () => {
-        clearActiveTimeout();
-      };
-    } catch {
-      responsePort.postMessage({
-        type: 'BYOKY_PROXY_RESPONSE_ERROR',
-        requestId: msg.requestId,
-        status: 502,
-        error: { code: 'GIFT_RELAY_ERROR', message: 'Failed to connect to gift relay' },
-      });
-    }
-  }
-
-  async function removeGiftedCredentialById(id: string): Promise<GiftedCredential | undefined> {
-    const data = await browser.storage.local.get('giftedCredentials');
-    const giftedCreds = (data.giftedCredentials ?? []) as GiftedCredential[];
-    const removed = giftedCreds.find((gc) => gc.id === id);
-    if (!removed) return undefined;
-    await browser.storage.local.set({
-      giftedCredentials: giftedCreds.filter((gc) => gc.id !== id),
-    });
-    const prefs = await getGiftPreferences();
-    if (prefs[removed.providerId] === removed.giftId) {
-      delete prefs[removed.providerId];
-      await browser.storage.local.set({ giftPreferences: prefs });
-    }
-    const localGroups = await getGroups();
-    let groupsChanged = false;
-    for (const g of localGroups) {
-      if (g.giftId === removed.giftId) {
-        g.giftId = undefined;
-        groupsChanged = true;
-        void fireVaultGroupSave(g);
-      }
-    }
-    if (groupsChanged) await setGroups(localGroups);
-    refreshSessionProviders();
-    return removed;
-  }
-
-  // Auto-cleanup when a relay reports a gift as permanently dead. Fires after
-  // GIFT_EXPIRED from a proxy request — which is what the vault emits when
-  // the gift row is gone (sender deleted their vault account, revoked the
-  // gift, or natural expiry). Silent: recipient sees the original error for
-  // the in-flight request; subsequent wallet views just won't show the gift.
-  async function autoCleanupDeadGift(giftId: string): Promise<void> {
-    const data = await browser.storage.local.get('giftedCredentials');
-    const giftedCreds = (data.giftedCredentials ?? []) as GiftedCredential[];
-    const gc = giftedCreds.find((c) => c.giftId === giftId);
-    if (!gc) return;
-    await removeGiftedCredentialById(gc.id);
-    browser.runtime.sendMessage({
-      type: 'BYOKY_INTERNAL',
-      action: 'usageUpdated',
-    }).catch(() => {});
-  }
-
-  async function updateGiftedCredentialUsage(giftId: string, usedTokens: number) {
-    const data = await browser.storage.local.get('giftedCredentials');
-    const giftedCreds = (data.giftedCredentials ?? []) as GiftedCredential[];
-    const idx = giftedCreds.findIndex((gc) => gc.giftId === giftId);
-    if (idx !== -1 && giftedCreds[idx].usedTokens !== usedTokens) {
-      giftedCreds[idx].usedTokens = usedTokens;
-      await browser.storage.local.set({ giftedCredentials: giftedCreds });
-      // Notify the popup so the remaining-tokens bar updates live instead
-      // of waiting for the next navigation.
-      browser.runtime.sendMessage({
-        type: 'BYOKY_INTERNAL',
-        action: 'usageUpdated',
-      }).catch(() => {});
     }
   }
 
@@ -3261,57 +2202,6 @@ export default defineBackground(() => {
     }
   }
 
-  /**
-   * Adapter that lets proxyViaGiftRelay emit into the bridge's native-messaging
-   * wire protocol. The regular port uses BYOKY_PROXY_RESPONSE_* messages; the
-   * bridge expects proxy_http_* messages. Keep translation straight-through —
-   * every field the relay produces maps 1:1, only the envelope changes.
-   */
-  function makeBridgeGiftResponseSink(): ProxyResponseSink {
-    return {
-      postMessage(raw: unknown) {
-        const m = raw as {
-          type: string;
-          requestId: string;
-          status?: number;
-          headers?: Record<string, string>;
-          chunk?: string;
-          error?: { code?: string; message?: string };
-        };
-        switch (m.type) {
-          case 'BYOKY_PROXY_RESPONSE_META':
-            bridgeProxyPort?.postMessage({
-              type: 'proxy_http_response_meta',
-              requestId: m.requestId,
-              status: m.status ?? 200,
-              headers: m.headers ?? {},
-            });
-            return;
-          case 'BYOKY_PROXY_RESPONSE_CHUNK':
-            bridgeProxyPort?.postMessage({
-              type: 'proxy_http_response_chunk',
-              requestId: m.requestId,
-              chunk: m.chunk ?? '',
-            });
-            return;
-          case 'BYOKY_PROXY_RESPONSE_DONE':
-            bridgeProxyPort?.postMessage({
-              type: 'proxy_http_response_done',
-              requestId: m.requestId,
-            });
-            return;
-          case 'BYOKY_PROXY_RESPONSE_ERROR':
-            bridgeProxyPort?.postMessage({
-              type: 'proxy_http_error',
-              requestId: m.requestId,
-              error: m.error?.message ?? 'Gift relay error',
-            });
-            return;
-        }
-      },
-    };
-  }
-
   async function handleBridgeProxyRequest(msg: Record<string, unknown>): Promise<void> {
     if (typeof msg.requestId !== 'string' || typeof msg.sessionKey !== 'string' ||
         typeof msg.providerId !== 'string' || typeof msg.url !== 'string' ||
@@ -3383,20 +2273,12 @@ export default defineBackground(() => {
       return;
     }
 
-    // Gift path: the bridge transport previously only consulted
-    // resolveCredential (owned credentials) and bailed with "No API keys in
-    // your wallet" when the session's only route was a gift. That excluded
-    // OpenClaw/CLI clients from consuming gifted credentials. Detect the
-    // gift route up front and forward through the relay just like the
-    // popup-port proxy handler does at line ~603.
     const sessionProvider = session.providers.find((sp) => sp.providerId === providerId);
-    const isGift = !!(sessionProvider?.giftId && sessionProvider.giftRelayUrl && sessionProvider.giftAuthToken);
 
     // For requiresCustomBaseUrl providers (Azure, Ollama, LM Studio) we can't
     // validate here yet — we need the credential's baseUrl, which isn't
     // resolved until below. Skip the pre-flight validate for those; direct-
-    // path calls revalidate after resolveCredential with the override. Gift
-    // path defers to the sender, which runs its own validate.
+    // path calls revalidate after resolveCredential with the override.
     const providerCfg = PROVIDERS[providerId];
     if (!providerCfg?.requiresCustomBaseUrl && !validateProxyUrl(providerId, url)) {
       bridgeProxyPort?.postMessage({
@@ -3404,22 +2286,6 @@ export default defineBackground(() => {
         requestId,
         error: 'Request URL does not match the provider\'s registered base URL',
       });
-      return;
-    }
-
-    if (isGift) {
-      const sink = makeBridgeGiftResponseSink();
-      await proxyViaGiftRelay(
-        sink,
-        { requestId, sessionKey, providerId, url, method, headers, body },
-        sessionProvider!,
-        session,
-        // Cross-family gift translation through the bridge is out of scope
-        // for v1 — the simple same-family gift case is what the OpenClaw
-        // e2e test hit. Extend here when a bridge client needs cross-family
-        // routing; mirror the popup path's translation context building.
-        undefined,
-      );
       return;
     }
 
@@ -3565,10 +2431,12 @@ export default defineBackground(() => {
       }
 
       const bridgeBody = injectStreamUsageOptions(effectiveProviderId, translatedBody);
+      // redirect: 'error' — see the extension-port proxy path.
       const response = await fetch(translatedUrl, {
         method,
         headers: realHeaders,
         body: bridgeBody || undefined,
+        redirect: 'error',
       });
 
       const responseHeaders: Record<string, string> = {};
@@ -3694,11 +2562,6 @@ export default defineBackground(() => {
   async function getStoredCredentials(): Promise<Credential[]> {
     const data = await browser.storage.local.get('credentials');
     return (data.credentials as Credential[]) ?? [];
-  }
-
-  async function getGiftPreferences(): Promise<Record<string, string>> {
-    const data = await browser.storage.local.get('giftPreferences');
-    return (data.giftPreferences as Record<string, string>) ?? {};
   }
 
   async function resolveCredential(
@@ -3978,24 +2841,26 @@ export default defineBackground(() => {
     }
   }
 
-  function broadcastRevocation(sessionKey: string) {
-    const msg = { type: 'BYOKY_SESSION_REVOKED', payload: { sessionKey } };
-    for (const port of notifyPorts) {
+  /** Post to the notify ports of frames whose origin is `origin`, and no others. */
+  function notifyOrigin(origin: string, msg: unknown) {
+    for (const [port, portOrigin] of notifyPorts) {
+      if (portOrigin !== origin) continue;
       try { port.postMessage(msg); } catch { /* port may have disconnected */ }
     }
+  }
+
+  function broadcastRevocation(session: Session) {
+    notifyOrigin(session.appOrigin, { type: 'BYOKY_SESSION_REVOKED', payload: { sessionKey: session.sessionKey } });
   }
 
   async function refreshSessionProviders() {
     if (sessions.size === 0) return;
     const credentials = await getStoredCredentials();
-    const gcData = await browser.storage.local.get('giftedCredentials');
-    const giftedCreds = (gcData.giftedCredentials ?? []) as GiftedCredential[];
-    const giftPrefs = await getGiftPreferences();
 
     for (const [sessionKey, session] of sessions) {
       const requested = session.requestedProviders;
       const providerIds = requested.length > 0 ? requested : [
-        ...new Set([...credentials.map(c => c.providerId), ...giftedCreds.filter(g => g.expiresAt > Date.now() && g.usedTokens < g.maxTokens).map(g => g.providerId)]),
+        ...new Set(credentials.map(c => c.providerId)),
       ];
 
       // Re-resolve group binding for this session's origin (may have changed)
@@ -4009,13 +2874,8 @@ export default defineBackground(() => {
           group && group.providerId === providerId && group.credentialId
             ? credentials.find(c => c.id === group.credentialId)
             : undefined;
-        const groupPinnedGift =
-          group && group.providerId === providerId && group.giftId
-            ? giftedCreds.find(g => g.giftId === group.giftId && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens)
-            : undefined;
-        const crossGiftRoute = groupPinnedGift ? undefined : resolveCrossFamilyGiftRoute(group, providerId, giftedCreds);
-        const crossRoute = groupPinnedGift || crossGiftRoute ? undefined : resolveCrossFamilyRoute(group, providerId, credentials);
-        const swapRoute = !crossRoute && !groupPinnedGift && !crossGiftRoute
+        const crossRoute = resolveCrossFamilyRoute(group, providerId, credentials);
+        const swapRoute = !crossRoute
           ? resolveSameFamilySwapRoute(group, providerId, credentials)
           : undefined;
         const directCred = credentials.find(c => c.providerId === providerId);
@@ -4023,15 +2883,8 @@ export default defineBackground(() => {
           ? resolveAutoCrossFamilyRoute(providerId, credentials)
           : undefined;
         const cred = groupPinnedCred ?? crossRoute?.cred ?? swapRoute?.cred ?? directCred ?? autoRoute?.cred;
-        const gc = groupPinnedGift ?? crossGiftRoute?.gc ?? giftedCreds.find(g => g.providerId === providerId && g.expiresAt > Date.now() && g.usedTokens < g.maxTokens);
-        const preferGift = !!groupPinnedGift || !!crossGiftRoute || (!groupPinnedCred && !crossRoute && !swapRoute && gc && giftPrefs[providerId] === gc.giftId);
-        const useGift = preferGift || (!cred && gc);
-        providerMap[providerId] = { available: !!(cred || gc), authMethod: useGift ? 'api_key' : (cred?.authMethod ?? 'api_key'), ...(useGift ? { gift: true } : {}) };
-        if (useGift && gc) {
-          const sp: SessionProvider = { providerId, credentialId: gc.id, available: true, authMethod: 'api_key', giftId: gc.giftId, giftRelayUrl: gc.relayUrl, giftAuthToken: gc.authToken };
-          if (crossGiftRoute) sp.translation = crossGiftRoute.translation;
-          newSessionProviders.push(sp);
-        } else if (cred) {
+        providerMap[providerId] = { available: !!cred, authMethod: cred?.authMethod ?? 'api_key' };
+        if (cred) {
           const sp: SessionProvider = { providerId, credentialId: cred.id, available: true, authMethod: cred.authMethod };
           if (crossRoute) sp.translation = crossRoute.translation;
           else if (swapRoute) sp.swap = swapRoute.swap;
@@ -4046,10 +2899,7 @@ export default defineBackground(() => {
       session.providers = newSessionProviders;
       persistSessions();
 
-      const msg = { type: 'BYOKY_PROVIDERS_UPDATED', payload: { sessionKey, providers: providerMap } };
-      for (const port of notifyPorts) {
-        try { port.postMessage(msg); } catch { /* port may have disconnected */ }
-      }
+      notifyOrigin(session.appOrigin, { type: 'BYOKY_PROVIDERS_UPDATED', payload: { sessionKey, providers: providerMap } });
     }
   }
 
@@ -4123,8 +2973,7 @@ export default defineBackground(() => {
   // Ensures the default group exists. The default group is a sentinel bucket
   // for apps with no explicit binding — it carries no routing (empty
   // providerId), so unbound apps fall through to direct credential lookup
-  // for the provider they actually request. Mirrors the vault's default
-  // group seeding.
+  // for the provider they actually request.
   async function ensureDefaultGroup(): Promise<Group> {
     const groups = await getGroups();
     const existing = groups.find((g) => g.id === DEFAULT_GROUP_ID);
@@ -4182,27 +3031,16 @@ export default defineBackground(() => {
     name: string;
     providerId: string;
     credentialId?: string;
-    giftId?: string;
     model?: string;
   }): Promise<{ group?: Group; error?: string }> {
     const name = input.name?.trim();
     if (!name || name.length > 200) return { error: 'Group name must be 1-200 characters' };
     if (!PROVIDERS[input.providerId]) return { error: 'Invalid provider' };
-    if (input.credentialId && input.giftId) {
-      return { error: 'Credential and gift are mutually exclusive' };
-    }
     if (input.credentialId) {
       const creds = await getStoredCredentials();
       const cred = creds.find((c) => c.id === input.credentialId);
       if (!cred) return { error: 'Credential not found' };
       if (cred.providerId !== input.providerId) return { error: 'Credential does not match provider' };
-    }
-    if (input.giftId) {
-      const gcData = await browser.storage.local.get('giftedCredentials');
-      const giftedCreds = (gcData.giftedCredentials ?? []) as GiftedCredential[];
-      const gc = giftedCreds.find((g) => g.giftId === input.giftId);
-      if (!gc) return { error: 'Gift not found' };
-      if (gc.providerId !== input.providerId) return { error: 'Gift does not match provider' };
     }
     const groups = await getGroups();
     if (groups.some((g) => g.name.toLowerCase() === name.toLowerCase())) {
@@ -4213,19 +3051,17 @@ export default defineBackground(() => {
       name,
       providerId: input.providerId,
       credentialId: input.credentialId,
-      giftId: input.giftId,
       model: input.model?.trim() || undefined,
       createdAt: Date.now(),
     };
     groups.push(group);
     await setGroups(groups);
-    void fireVaultGroupSave(group);
     return { group };
   }
 
   async function updateGroup(
     id: string,
-    patch: { name?: string; providerId?: string; credentialId?: string | null; giftId?: string | null; model?: string | null },
+    patch: { name?: string; providerId?: string; credentialId?: string | null; model?: string | null },
   ): Promise<{ group?: Group; error?: string }> {
     const groups = await getGroups();
     const idx = groups.findIndex((g) => g.id === id);
@@ -4244,9 +3080,8 @@ export default defineBackground(() => {
     if (patch.providerId !== undefined) {
       if (!PROVIDERS[patch.providerId]) return { error: 'Invalid provider' };
       next.providerId = patch.providerId;
-      // Provider change invalidates both pins unless explicitly set in this patch
+      // Provider change invalidates the pin unless explicitly set in this patch
       if (patch.credentialId === undefined) next.credentialId = undefined;
-      if (patch.giftId === undefined) next.giftId = undefined;
     }
     if (patch.credentialId !== undefined) {
       if (patch.credentialId === null) {
@@ -4257,22 +3092,6 @@ export default defineBackground(() => {
         if (!cred) return { error: 'Credential not found' };
         if (cred.providerId !== next.providerId) return { error: 'Credential does not match provider' };
         next.credentialId = patch.credentialId;
-        // Setting a credential pin clears any gift pin
-        next.giftId = undefined;
-      }
-    }
-    if (patch.giftId !== undefined) {
-      if (patch.giftId === null) {
-        next.giftId = undefined;
-      } else {
-        const gcData = await browser.storage.local.get('giftedCredentials');
-        const giftedCreds = (gcData.giftedCredentials ?? []) as GiftedCredential[];
-        const gc = giftedCreds.find((g) => g.giftId === patch.giftId);
-        if (!gc) return { error: 'Gift not found' };
-        if (gc.providerId !== next.providerId) return { error: 'Gift does not match provider' };
-        next.giftId = patch.giftId;
-        // Setting a gift pin clears any credential pin
-        next.credentialId = undefined;
       }
     }
     if (patch.model !== undefined) {
@@ -4280,7 +3099,6 @@ export default defineBackground(() => {
     }
     groups[idx] = next;
     await setGroups(groups);
-    void fireVaultGroupSave(next);
     return { group: next };
   }
 
@@ -4291,18 +3109,14 @@ export default defineBackground(() => {
     await setGroups(groups.filter((g) => g.id !== id));
     // Reassign any apps that pointed at this group back to the default
     const appGroups = await getAppGroups();
-    const reassignedOrigins: string[] = [];
+    let reassigned = false;
     for (const origin of Object.keys(appGroups)) {
       if (appGroups[origin] === id) {
         appGroups[origin] = DEFAULT_GROUP_ID;
-        reassignedOrigins.push(origin);
+        reassigned = true;
       }
     }
-    if (reassignedOrigins.length > 0) await setAppGroups(appGroups);
-    void fireVaultGroupDelete(id);
-    for (const origin of reassignedOrigins) {
-      void fireVaultAppGroupSet(origin, DEFAULT_GROUP_ID);
-    }
+    if (reassigned) await setAppGroups(appGroups);
     return { success: true };
   }
 
@@ -4312,7 +3126,6 @@ export default defineBackground(() => {
     const appGroups = await getAppGroups();
     appGroups[origin] = groupId;
     await setAppGroups(appGroups);
-    void fireVaultAppGroupSet(origin, groupId);
     return { success: true };
   }
 
@@ -4331,1263 +3144,16 @@ export default defineBackground(() => {
     return computeAllowanceCheck(allowance, entries, providerId);
   }
 
-  // --- Gift relay (sender side) ---
-
-  const giftRelayConnections = new Map<string, WebSocket>();
-
-  async function connectGiftRelay(gift: Gift) {
-    if (giftRelayConnections.has(gift.id)) return;
-    if (!gift.active || gift.expiresAt <= Date.now()) return;
-
-    // Validate relay URL uses TLS (wss://) or is localhost
-    try {
-      const parsed = new URL(gift.relayUrl);
-      const isSecure = parsed.protocol === 'wss:';
-      const isLocalWs = parsed.protocol === 'ws:' &&
-        (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.hostname === '[::1]');
-      if (!isSecure && !isLocalWs) return;
-    } catch {
-      return;
-    }
-
-    // Setup-token gifts can't be served from the extension without a running
-    // Bridge (Chrome fetch is fingerprinted; the Bridge routes through Node).
-    // If Cloud Vault is enabled the vault's priority-0 socket already covers
-    // this gift via the residential proxy — so don't connect here, otherwise
-    // we'd claim priority-1 and drop every request with BRIDGE_UNAVAILABLE.
-    // With no vault fallback we still connect at priority 1 so recipients see
-    // a loud error instead of a silent black hole.
-    if (masterPassword) {
-      try {
-        const credentials = await getStoredCredentials();
-        const credential = credentials.find((c) => c.id === gift.credentialId);
-        if (credential?.authMethod === 'oauth') {
-          const bridgeOk = await checkBridgeAvailable();
-          if (!bridgeOk) {
-            const vault = await getCloudVaultState();
-            const vaultServing = vault.enabled && !!vault.token && !vault.tokenExpired;
-            if (vaultServing) return;
-          }
-        }
-      } catch {
-        // If the preflight fails we fall through and connect — safer to
-        // surface errors than to silently skip.
-      }
-    }
-
-    try {
-      const ws = new WebSocket(gift.relayUrl);
-
-      let pingInterval: ReturnType<typeof setInterval> | null = null;
-
-      ws.onopen = () => {
-        ws.send(JSON.stringify({
-          type: 'relay:auth',
-          roomId: gift.id,
-          authToken: gift.authToken,
-          role: 'sender',
-          priority: 1, // primary — takes over from vault fallback (priority 0)
-        }));
-        // Keep connection alive — relay has 5min idle timeout
-        pingInterval = setInterval(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'relay:ping' }));
-          }
-        }, 2 * 60 * 1000);
-      };
-
-      ws.onmessage = async (event) => {
-        try {
-          const raw = typeof event.data === 'string' ? event.data : '';
-          if (raw.length > 20 * 1024 * 1024) return;
-          const msg = JSON.parse(raw);
-
-          if (msg.type === 'relay:auth:result') {
-            if (!msg.success) {
-              ws.close();
-              giftRelayConnections.delete(gift.id);
-              return;
-            }
-          }
-
-          // Proxy request from recipient
-          if (msg.type === 'relay:request') {
-            await handleGiftProxyRequest(gift, ws, msg);
-          }
-
-          // Usage update authored by another sender in the same room
-          // (typically the vault fallback). Treat as monotonic floor on
-          // local usedTokens so the next budget check reflects spend we
-          // didn't author ourselves.
-          if (msg.type === 'relay:usage' && msg.giftId === gift.id && typeof msg.usedTokens === 'number') {
-            await applyExternalGiftUsage(gift.id, msg.usedTokens);
-          }
-        } catch {
-          // ignore parse errors
-        }
-      };
-
-      ws.onclose = () => {
-        if (pingInterval) clearInterval(pingInterval);
-        giftRelayConnections.delete(gift.id);
-        // Reconnect if gift is still active and wallet is unlocked
-        setTimeout(async () => {
-          if (!masterPassword) return;
-          const gifts = await getGiftsFromStorage();
-          const current = gifts.find((g) => g.id === gift.id);
-          if (current?.active && current.expiresAt > Date.now()) {
-            connectGiftRelay(current);
-          }
-        }, 5000);
-      };
-
-      ws.onerror = () => {
-        // onclose will fire after onerror
-      };
-
-      giftRelayConnections.set(gift.id, ws);
-    } catch {
-      // WebSocket construction failed
-    }
-  }
-
-  function disconnectGiftRelay(giftId: string) {
-    const ws = giftRelayConnections.get(giftId);
-    if (ws) {
-      ws.close();
-      giftRelayConnections.delete(giftId);
-    }
-  }
-
-  function disconnectAllGiftRelays() {
-    for (const [id, ws] of giftRelayConnections) {
-      ws.close();
-      giftRelayConnections.delete(id);
-    }
-  }
-
-  async function getGiftsFromStorage(): Promise<Gift[]> {
-    if (!masterPassword) return [];
-    const data = await browser.storage.local.get('gifts');
-    const stored = (data.gifts ?? []) as Gift[];
-    const result: Gift[] = [];
-    for (const gift of stored) {
-      if (!gift.active || gift.expiresAt <= Date.now()) {
-        result.push(gift);
-        continue;
-      }
-      try {
-        const decryptedToken = await decrypt(gift.authToken, masterPassword);
-        result.push({ ...gift, authToken: decryptedToken });
-      } catch {
-        result.push(gift);
-      }
-    }
-    return result;
-  }
-
-  // Migrate old plaintext authTokens (gft_*) to encrypted
-  async function migrateGiftTokens(password: string) {
-    const data = await browser.storage.local.get('gifts');
-    const gifts = (data.gifts ?? []) as Gift[];
-    let changed = false;
-    for (const gift of gifts) {
-      if (gift.authToken && gift.authToken.startsWith('gft_')) {
-        try {
-          gift.authToken = await encrypt(gift.authToken, password);
-          changed = true;
-        } catch {
-          // Can't encrypt — leave as-is
-        }
-      }
-    }
-    if (changed) {
-      await browser.storage.local.set({ gifts });
-    }
-  }
-
-  async function handleGiftProxyRequest(
-    gift: Gift,
-    ws: WebSocket,
-    msg: { requestId: string; providerId: string; url: string; method: string; headers: Record<string, string>; body?: string },
-  ) {
-    if (!masterPassword) {
-      ws.send(JSON.stringify({
-        type: 'relay:response:error',
-        requestId: msg.requestId,
-        error: { code: 'WALLET_LOCKED', message: 'Sender wallet is locked' },
-      }));
-      return;
-    }
-
-    // Serialize the entire request lifecycle per gift under one lock so budget
-    // check → API call → usage update are atomic (prevents concurrent overspend).
-    const prev = giftBudgetLocks.get(gift.id) ?? Promise.resolve();
-    const lock = prev.then(async () => {
-      // Budget check
-      const d = await browser.storage.local.get('gifts');
-      const g = (d.gifts ?? []) as Gift[];
-      const c = g.find((x) => x.id === gift.id);
-      if (!c || !c.active || c.expiresAt <= Date.now()) {
-        ws.send(JSON.stringify({
-          type: 'relay:response:error',
-          requestId: msg.requestId,
-          error: { code: 'GIFT_EXPIRED', message: 'Gift has expired or been revoked' },
-        }));
-        return;
-      }
-      if (c.usedTokens >= c.maxTokens) {
-        ws.send(JSON.stringify({
-          type: 'relay:response:error',
-          requestId: msg.requestId,
-          error: { code: 'GIFT_BUDGET_EXHAUSTED', message: 'Gift token budget exhausted' },
-        }));
-        return;
-      }
-
-      // Resolve credential
-      const credentials = await getStoredCredentials();
-      const credential = credentials.find((cr) => cr.id === gift.credentialId);
-      if (!credential) {
-        ws.send(JSON.stringify({
-          type: 'relay:response:error',
-          requestId: msg.requestId,
-          error: { code: 'PROVIDER_UNAVAILABLE', message: 'Credential no longer available' },
-        }));
-        return;
-      }
-
-      if (!validateProxyUrl(gift.providerId, msg.url)) {
-        ws.send(JSON.stringify({
-          type: 'relay:response:error',
-          requestId: msg.requestId,
-          error: { code: 'INVALID_URL', message: 'Request URL does not match provider' },
-        }));
-        return;
-      }
-
-      try {
-        const apiKey = await decryptCredentialKey(credential);
-        const realHeaders = buildHeaders(gift.providerId, msg.headers, apiKey, credential.authMethod);
-
-        // OAuth tokens route through Bridge (native messaging) to avoid CORS restrictions
-        if (credential.authMethod === 'oauth') {
-          const bridgeOk = await checkBridgeAvailable();
-          if (!bridgeOk) {
-            // Bridge died since we opened this socket. If the vault can cover
-            // this gift, drop our connection so the relay's priority-0 vault
-            // sender takes over on the next retry. Otherwise tell the
-            // recipient loudly — there's nothing else that can serve them.
-            const vault = await getCloudVaultState();
-            const vaultServing = vault.enabled && !!vault.token && !vault.tokenExpired;
-            if (vaultServing) {
-              ws.close();
-              return;
-            }
-            ws.send(JSON.stringify({
-              type: 'relay:response:error',
-              requestId: msg.requestId,
-              error: { code: 'BRIDGE_UNAVAILABLE', message: 'Gift sender needs Byoky Bridge installed for OAuth credentials' },
-            }));
-            return;
-          }
-
-          await new Promise<void>((resolve) => {
-            const nativePort = browser.runtime.connectNative(BRIDGE_HOST);
-            let body = injectStreamUsageOptions(gift.providerId, msg.body);
-            let toolNameMap: Record<string, string> = {};
-            if (gift.providerId === 'anthropic') {
-              const rewritten = rewriteToolNamesForClaudeCode(body);
-              const isThirdParty = Object.keys(rewritten.toolNameMap).length > 0;
-              body = injectClaudeCodeSystemPrompt(rewritten.body, {
-                relocateExisting: isThirdParty,
-              });
-              toolNameMap = rewritten.toolNameMap;
-            }
-            nativePort.postMessage({
-              type: 'proxy',
-              requestId: msg.requestId,
-              url: msg.url,
-              method: msg.method,
-              headers: realHeaders,
-              body,
-              toolNameMap,
-            });
-
-            const chunks: string[] = [];
-            let responded = false;
-
-            nativePort.onMessage.addListener((raw: unknown) => {
-              const resp = raw as { type: string; requestId: string; status?: number; headers?: Record<string, string>; chunk?: string };
-              if (resp.requestId !== msg.requestId) return;
-
-              if (resp.type === 'proxy_response_meta') {
-                responded = true;
-                ws.send(JSON.stringify({
-                  type: 'relay:response:meta',
-                  requestId: msg.requestId,
-                  status: resp.status,
-                  statusText: resp.status === 200 ? 'OK' : 'Error',
-                  headers: resp.headers ?? {},
-                }));
-              } else if (resp.type === 'proxy_response_chunk') {
-                chunks.push(resp.chunk ?? '');
-                ws.send(JSON.stringify({
-                  type: 'relay:response:chunk',
-                  requestId: msg.requestId,
-                  chunk: resp.chunk,
-                }));
-              } else if (resp.type === 'proxy_response_done') {
-                ws.send(JSON.stringify({
-                  type: 'relay:response:done',
-                  requestId: msg.requestId,
-                }));
-                nativePort.disconnect();
-                updateGiftUsage(gift, gift.providerId, chunks.join(''), ws);
-                resolve();
-              } else if (resp.type === 'proxy_error') {
-                responded = true;
-                ws.send(JSON.stringify({
-                  type: 'relay:response:error',
-                  requestId: msg.requestId,
-                  error: { code: 'BRIDGE_ERROR', message: 'Bridge request failed' },
-                }));
-                nativePort.disconnect();
-                resolve();
-              }
-            });
-
-            nativePort.onDisconnect.addListener(() => {
-              if (!responded) {
-                ws.send(JSON.stringify({
-                  type: 'relay:response:error',
-                  requestId: msg.requestId,
-                  error: { code: 'BRIDGE_ERROR', message: 'Bridge disconnected unexpectedly' },
-                }));
-              }
-              resolve();
-            });
-          });
-          return;
-        }
-
-        const controller = new AbortController();
-        const requestTimeout = setTimeout(() => controller.abort(), 120_000);
-
-        const giftBody = injectStreamUsageOptions(gift.providerId, msg.body);
-        const giftReconstructed = reconstructBody(giftBody, undefined);
-        const giftFetchHeaders = { ...realHeaders };
-        if (giftReconstructed.stripContentType) delete giftFetchHeaders['content-type'];
-
-        const response = await fetch(msg.url, {
-          method: msg.method,
-          headers: giftFetchHeaders,
-          body: giftReconstructed.body,
-          signal: controller.signal,
-        });
-
-        const respHeaders: Record<string, string> = {};
-        response.headers.forEach((v, k) => { respHeaders[k] = v; });
-        for (const h of ['server', 'x-request-id', 'x-cloud-trace-context', 'set-cookie', 'set-cookie2', 'alt-svc', 'via']) {
-          delete respHeaders[h];
-        }
-
-        ws.send(JSON.stringify({
-          type: 'relay:response:meta',
-          requestId: msg.requestId,
-          status: response.status,
-          statusText: response.statusText,
-          headers: respHeaders,
-        }));
-
-        const chunks: string[] = [];
-        if (response.body) {
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          try {
-            for (;;) {
-              // Bail out if the relay dropped mid-stream — otherwise we
-              // keep draining the upstream for nothing and hold the fetch
-              // open well past the point the recipient could see it.
-              if (ws.readyState !== WebSocket.OPEN) {
-                controller.abort();
-                break;
-              }
-              const { done, value } = await reader.read();
-              if (done) break;
-              const text = decoder.decode(value, { stream: true });
-              chunks.push(text);
-              ws.send(JSON.stringify({
-                type: 'relay:response:chunk',
-                requestId: msg.requestId,
-                chunk: text,
-              }));
-            }
-          } finally {
-            try { reader.releaseLock(); } catch { /* already released */ }
-          }
-        }
-
-        clearTimeout(requestTimeout);
-        if (ws.readyState !== WebSocket.OPEN) return;
-
-        ws.send(JSON.stringify({
-          type: 'relay:response:done',
-          requestId: msg.requestId,
-        }));
-
-        await updateGiftUsage(gift, gift.providerId, chunks.join(''), ws);
-      } catch {
-        ws.send(JSON.stringify({
-          type: 'relay:response:error',
-          requestId: msg.requestId,
-          error: { code: 'PROXY_ERROR', message: 'Request failed' },
-        }));
-      }
-    });
-    giftBudgetLocks.set(gift.id, lock.catch(() => {}));
-    await lock;
-  }
-
-  async function updateGiftUsage(gift: Gift, providerId: string, fullBody: string, ws: WebSocket) {
-    const usage = parseUsage(providerId, fullBody);
-    if (!usage) return;
-    const totalTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
-    if (totalTokens <= 0) return;
-    const refreshData = await browser.storage.local.get('gifts');
-    const refreshGifts = (refreshData.gifts ?? []) as Gift[];
-    const gIdx = refreshGifts.findIndex((rg) => rg.id === gift.id);
-    if (gIdx === -1) return;
-    // Always record what was actually consumed, but cap the stored value
-    // at maxTokens so UI never shows "105K / 100K". The over-budget case
-    // is handled server-side at budget check time; this is just a mirror.
-    const next = Math.min(
-      refreshGifts[gIdx].maxTokens,
-      refreshGifts[gIdx].usedTokens + totalTokens,
-    );
-    if (next === refreshGifts[gIdx].usedTokens) return;
-    refreshGifts[gIdx].usedTokens = next;
-    await browser.storage.local.set({ gifts: refreshGifts });
-    ws.send(JSON.stringify({
-      type: 'relay:usage',
-      giftId: gift.id,
-      usedTokens: next,
-    }));
-    browser.runtime.sendMessage({
-      type: 'BYOKY_INTERNAL',
-      action: 'usageUpdated',
-    }).catch(() => {});
-  }
-
-  // Serialize under the same per-gift mutex as updateGiftUsage / budget
-  // checks so a co-sender's broadcast can't interleave with our own
-  // read-modify-write.
-  async function applyExternalGiftUsage(giftId: string, usedTokens: number) {
-    const prev = giftBudgetLocks.get(giftId) ?? Promise.resolve();
-    const next = prev.then(async () => {
-      const d = await browser.storage.local.get('gifts');
-      const gifts = (d.gifts ?? []) as Gift[];
-      const idx = gifts.findIndex((g) => g.id === giftId);
-      if (idx === -1) return;
-      const floor = Math.min(gifts[idx].maxTokens, Math.max(gifts[idx].usedTokens, usedTokens));
-      if (floor === gifts[idx].usedTokens) return;
-      gifts[idx].usedTokens = floor;
-      await browser.storage.local.set({ gifts });
-      browser.runtime.sendMessage({
-        type: 'BYOKY_INTERNAL',
-        action: 'usageUpdated',
-      }).catch(() => {});
-    });
-    giftBudgetLocks.set(giftId, next.catch(() => {}));
-    await next;
-  }
-
-  async function reconnectGiftRelays() {
-    if (!masterPassword) return;
-    const gifts = await getGiftsFromStorage();
-    for (const gift of gifts) {
-      if (gift.active && gift.expiresAt > Date.now()) {
-        // Sync usage from vault before reconnecting (vault may have handled requests while we were offline)
-        syncGiftUsageFromVault(gift.id).catch(() => {});
-        connectGiftRelay(gift);
-      }
-    }
-  }
-
-  // --- Cloud Vault sync ---
-
-  const VAULT_URL = 'https://vault.byoky.com';
-  let vaultSyncQueue: Promise<void> = Promise.resolve();
-  let vaultAuthAttempts: number[] = [];
-
-  function checkVaultAuthRate(): { error: string } | null {
-    const now = Date.now();
-    vaultAuthAttempts = vaultAuthAttempts.filter((t) => now - t < 60_000);
-    if (vaultAuthAttempts.length >= 5) {
-      return { error: 'Too many auth attempts — try again in a minute' };
-    }
-    vaultAuthAttempts.push(now);
-    return null;
-  }
-
-  function enqueueVaultSync<T>(fn: () => Promise<T>): Promise<T> {
-    const result = vaultSyncQueue.then(fn, fn);
-    vaultSyncQueue = result.then(() => {}, () => {});
-    return result;
-  }
-
-  async function vaultFetch(
-    path: string,
-    method: string,
-    body?: Record<string, unknown>,
-    token?: string,
-  ): Promise<{ ok: boolean; status: number; data: Record<string, unknown> }> {
-    const headers: Record<string, string> = { 'content-type': 'application/json' };
-    if (token) headers['authorization'] = `Bearer ${token}`;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10_000);
-    try {
-      const resp = await fetch(`${VAULT_URL}${path}`, {
-        method,
-        headers,
-        body: body ? JSON.stringify(body) : undefined,
-        signal: controller.signal,
-      });
-      const data = await resp.json().catch(() => ({})) as Record<string, unknown>;
-      return { ok: resp.ok, status: resp.status, data };
-    } finally {
-      clearTimeout(timeout);
-    }
-  }
-
-  async function getCloudVaultState(): Promise<{
-    enabled: boolean;
-    username: string | null;
-    token: string | null;
-    sessionId: string | null;
-    tokenIssuedAt: number;
-    tokenExpired: boolean;
-    credentialMap: Record<string, string>;
-  }> {
-    const data = await browser.storage.local.get([
-      'cloudVault.enabled',
-      'cloudVault.username',
-      'cloudVault.token',
-      'cloudVault.sessionId',
-      'cloudVault.tokenIssuedAt',
-      'cloudVault.tokenExpired',
-      'cloudVault.credentialMap',
-    ]);
-    let token: string | null = data['cloudVault.token'] as string ?? null;
-    if (token && masterPassword) {
-      try { token = await decrypt(token, masterPassword); } catch { token = null; }
-    }
-    return {
-      enabled: data['cloudVault.enabled'] as boolean ?? false,
-      username: data['cloudVault.username'] as string ?? null,
-      token,
-      sessionId: data['cloudVault.sessionId'] as string ?? null,
-      tokenIssuedAt: data['cloudVault.tokenIssuedAt'] as number ?? 0,
-      tokenExpired: data['cloudVault.tokenExpired'] as boolean ?? false,
-      credentialMap: (data['cloudVault.credentialMap'] as Record<string, string>) ?? {},
-    };
-  }
-
-  async function saveCloudVaultState(
-    updates: Record<string, unknown>,
-  ): Promise<void> {
-    const storageUpdates: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(updates)) {
-      if (key === 'token' && typeof value === 'string' && masterPassword) {
-        storageUpdates['cloudVault.token'] = await encrypt(value, masterPassword);
-      } else {
-        storageUpdates[`cloudVault.${key}`] = value;
-      }
-    }
-    await browser.storage.local.set(storageUpdates);
-  }
-
-  async function clearCloudVaultState(): Promise<void> {
-    await browser.storage.local.remove([
-      'cloudVault.enabled',
-      'cloudVault.username',
-      'cloudVault.token',
-      'cloudVault.sessionId',
-      'cloudVault.tokenIssuedAt',
-      'cloudVault.tokenExpired',
-      'cloudVault.credentialMap',
-      'cloudVault.credentialMeta',
-      'cloudVault.lastSyncAt',
-      'cloudVault.vaultKey',
-    ]);
-  }
-
-  // Derive the vault's AES-GCM key from (vault password, server-returned
-  // encryptionSalt) and persist it — encrypted at rest with the local
-  // masterPassword — so later credential uploads/pulls can encrypt/decrypt
-  // without needing the vault password again.
-  async function persistVaultKey(vaultPassword: string, encryptionSalt: string): Promise<void> {
-    if (!masterPassword) return;
-    const saltBytes = Uint8Array.from(atob(encryptionSalt), (c) => c.charCodeAt(0));
-    const key = await deriveKey(vaultPassword, saltBytes, true);
-    const rawBytes = new Uint8Array(await crypto.subtle.exportKey('raw', key));
-    const rawB64 = btoa(String.fromCharCode(...rawBytes));
-    const wrapped = await encrypt(rawB64, masterPassword);
-    await browser.storage.local.set({ 'cloudVault.vaultKey': wrapped });
-  }
-
-  async function getVaultKey(): Promise<CryptoKey | null> {
-    if (!masterPassword) return null;
-    const data = await browser.storage.local.get('cloudVault.vaultKey');
-    const wrapped = data['cloudVault.vaultKey'] as string | undefined;
-    if (!wrapped) return null;
-    try {
-      const rawB64 = await decrypt(wrapped, masterPassword);
-      const rawBytes = Uint8Array.from(atob(rawB64), (c) => c.charCodeAt(0));
-      return await crypto.subtle.importKey('raw', rawBytes, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
-    } catch {
-      return null;
-    }
-  }
-
-  function isVaultTokenExpired(tokenIssuedAt: number): boolean {
-    return Date.now() - tokenIssuedAt > 6 * 24 * 60 * 60 * 1000; // 6 days
-  }
-
-  async function handleVaultAuthError(): Promise<void> {
-    await saveCloudVaultState({ tokenExpired: true });
-  }
-
-  // ─── Cloud Vault: per-credential sync metadata ────────────────────────
-  //
-  // credentialMeta parallels credentialMap but also remembers the server's
-  // updatedAt for each credential. pullFromVault uses it for last-write-wins
-  // when merging remote state into local. credentialMap is retained because
-  // group sync (and legacy code) reads it directly; both are updated in
-  // lockstep.
-
-  type CredentialMeta = { serverId: string; remoteUpdatedAt: number };
-
-  async function getCredentialMeta(): Promise<Record<string, CredentialMeta>> {
-    const data = await browser.storage.local.get('cloudVault.credentialMeta');
-    return (data['cloudVault.credentialMeta'] as Record<string, CredentialMeta>) ?? {};
-  }
-
-  async function setCredentialMeta(meta: Record<string, CredentialMeta>): Promise<void> {
-    await browser.storage.local.set({ 'cloudVault.credentialMeta': meta });
-  }
-
-  async function upsertCredentialMeta(localId: string, serverId: string, remoteUpdatedAt: number): Promise<void> {
-    const meta = await getCredentialMeta();
-    meta[localId] = { serverId, remoteUpdatedAt };
-    await setCredentialMeta(meta);
-  }
-
-  async function deleteCredentialMeta(localId: string): Promise<void> {
-    const meta = await getCredentialMeta();
-    delete meta[localId];
-    await setCredentialMeta(meta);
-  }
-
-  async function syncCredentialToVault(
-    localId: string,
-    providerId: string,
-    label: string,
-    authMethod: string,
-    plainKey: string,
-    token: string,
-    baseUrl?: string,
-  ): Promise<void> {
-    const vaultKey = await getVaultKey();
-    if (!vaultKey) return;
-    const encryptedApiKey = await encryptWithKey(plainKey, vaultKey);
-    const result = await vaultFetch('/credentials', 'POST', {
-      providerId,
-      encryptedApiKey,
-      label,
-      authMethod,
-      baseUrl,
-    }, token);
-
-    if (result.status === 401) {
-      await handleVaultAuthError();
-      return;
-    }
-
-    if (result.ok) {
-      const vaultCred = result.data.credential as Record<string, unknown>;
-      const vaultId = vaultCred.id as string;
-      const updatedAt = (vaultCred.updatedAt as number | undefined) ?? Date.now();
-      const state = await getCloudVaultState();
-      state.credentialMap[localId] = vaultId;
-      await saveCloudVaultState({ credentialMap: state.credentialMap });
-      await upsertCredentialMeta(localId, vaultId, updatedAt);
-    }
-  }
-
-  async function syncRemoveFromVault(
-    localId: string,
-    token: string,
-  ): Promise<void> {
-    const state = await getCloudVaultState();
-    const vaultId = state.credentialMap[localId];
-    if (!vaultId) return;
-
-    const result = await vaultFetch(`/credentials/${vaultId}`, 'DELETE', undefined, token);
-
-    if (result.status === 401) {
-      await handleVaultAuthError();
-      return;
-    }
-
-    delete state.credentialMap[localId];
-    await saveCloudVaultState({ credentialMap: state.credentialMap });
-    await deleteCredentialMeta(localId);
-  }
-
-  async function syncRenameToVault(
-    localId: string,
-    label: string,
-    token: string,
-  ): Promise<void> {
-    const state = await getCloudVaultState();
-    const vaultId = state.credentialMap[localId];
-    if (!vaultId) return;
-
-    const result = await vaultFetch(`/credentials/${vaultId}`, 'PATCH', { label }, token);
-
-    if (result.status === 401) {
-      await handleVaultAuthError();
-      return;
-    }
-
-    if (result.ok) {
-      const updatedAt = (result.data.updatedAt as number | undefined) ?? Date.now();
-      await upsertCredentialMeta(localId, vaultId, updatedAt);
-    }
-  }
-
-  // ─── Cloud Vault: pull + merge ────────────────────────────────────────
-  //
-  // Incrementally pulls credentials from the vault and merges them into
-  // local state. Conflict resolution is last-write-wins on updatedAt.
-  // Tombstones (remote.deletedAt != null) remove the local copy.
-  //
-  // Runs on: login, relogin, wallet-unlock with an active vault session,
-  // and after initial enable. Each pull uses the server's returned
-  // serverTime as the next `since` cursor — server is the clock authority
-  // to avoid device-clock skew pitfalls.
-  async function pullFromVault(token: string): Promise<void> {
-    if (!masterPassword) return;
-    const state = await getCloudVaultState();
-    if (!state.enabled || state.tokenExpired) return;
-
-    const lastSyncData = await browser.storage.local.get('cloudVault.lastSyncAt');
-    const since = (lastSyncData['cloudVault.lastSyncAt'] as number) ?? 0;
-
-    const result = await vaultFetch(`/credentials/sync?since=${since}`, 'GET', undefined, token);
-    if (result.status === 401) {
-      await handleVaultAuthError();
-      return;
-    }
-    if (!result.ok) return;
-
-    const serverTime = result.data.serverTime as number;
-    const remoteCreds = (result.data.credentials ?? []) as Array<{
-      id: string;
-      providerId: string;
-      label: string;
-      authMethod: string;
-      encryptedApiKey?: string;
-      baseUrl?: string;
-      createdAt: number;
-      updatedAt: number;
-      deletedAt: number | null;
-    }>;
-
-    if (remoteCreds.length === 0) {
-      await browser.storage.local.set({ 'cloudVault.lastSyncAt': serverTime });
-      return;
-    }
-
-    const vaultKey = await getVaultKey();
-    if (!vaultKey) return;
-
-    const currentState = await getCloudVaultState();
-    const meta = await getCredentialMeta();
-
-    // Backfill meta from legacy credentialMap so devices upgrading from
-    // pre-sync versions still get LWW working (remoteUpdatedAt starts at 0
-    // so the first pull always wins).
-    for (const [localId, serverId] of Object.entries(currentState.credentialMap)) {
-      if (!meta[localId]) meta[localId] = { serverId, remoteUpdatedAt: 0 };
-    }
-
-    const serverToLocal: Record<string, string> = {};
-    for (const [localId, m] of Object.entries(meta)) {
-      serverToLocal[m.serverId] = localId;
-    }
-
-    const localData = await browser.storage.local.get('credentials');
-    const localCreds = ((localData.credentials ?? []) as Array<Record<string, unknown>>).slice();
-
-    // Content-based adoption index for locals not claimed by meta. When
-    // meta was wiped (e.g. disable/re-enable of Cloud Sync) the server
-    // would otherwise send back rows we already own and we'd create
-    // duplicates. Matching providerId + plaintext key adopts the local.
-    const localByContent: Record<string, string> = {};
-    for (const cred of localCreds) {
-      const localId = cred.id as string;
-      if (meta[localId]) continue;
-      const encrypted =
-        (cred.authMethod === 'api_key'
-          ? (cred.encryptedKey as string | undefined)
-          : (cred.encryptedAccessToken as string | undefined)) ?? undefined;
-      if (!encrypted) continue;
-      let plain: string;
-      try {
-        plain = await decrypt(encrypted, masterPassword);
-      } catch {
-        continue;
-      }
-      localByContent[`${cred.providerId}|${plain}`] = localId;
-    }
-
-    for (const remote of remoteCreds) {
-      const existingLocalId = serverToLocal[remote.id];
-
-      if (remote.deletedAt) {
-        if (existingLocalId) {
-          const idx = localCreds.findIndex((c) => c.id === existingLocalId);
-          if (idx >= 0) localCreds.splice(idx, 1);
-          delete meta[existingLocalId];
-          delete currentState.credentialMap[existingLocalId];
-        }
-        continue;
-      }
-
-      if (!remote.encryptedApiKey) continue; // corrupt/missing; skip
-
-      let remoteApiKey: string;
-      try {
-        remoteApiKey = await decryptWithKey(remote.encryptedApiKey, vaultKey);
-      } catch {
-        continue; // can't decrypt this row; skip without poisoning local state
-      }
-
-      if (existingLocalId) {
-        const currentMeta = meta[existingLocalId];
-        if (remote.updatedAt <= currentMeta.remoteUpdatedAt) continue; // local already newer
-        const idx = localCreds.findIndex((c) => c.id === existingLocalId);
-        if (idx >= 0) {
-          const encrypted = await encrypt(remoteApiKey, masterPassword);
-          const base = localCreds[idx];
-          const updated: Record<string, unknown> = {
-            ...base,
-            providerId: remote.providerId,
-            label: remote.label,
-            authMethod: remote.authMethod,
-          };
-          if (remote.baseUrl) updated.baseUrl = remote.baseUrl; else delete updated.baseUrl;
-          if (remote.authMethod === 'api_key') {
-            updated.encryptedKey = encrypted;
-            delete updated.encryptedAccessToken;
-          } else {
-            updated.encryptedAccessToken = encrypted;
-            delete updated.encryptedKey;
-          }
-          localCreds[idx] = updated;
-        }
-        meta[existingLocalId] = { serverId: remote.id, remoteUpdatedAt: remote.updatedAt };
-      } else {
-        const adoptKey = `${remote.providerId}|${remoteApiKey}`;
-        const adoptId = localByContent[adoptKey];
-        if (adoptId) {
-          const idx = localCreds.findIndex((c) => c.id === adoptId);
-          if (idx >= 0) {
-            const encrypted = await encrypt(remoteApiKey, masterPassword);
-            const base = localCreds[idx];
-            const updated: Record<string, unknown> = {
-              ...base,
-              providerId: remote.providerId,
-              label: remote.label,
-              authMethod: remote.authMethod,
-            };
-            if (remote.baseUrl) updated.baseUrl = remote.baseUrl; else delete updated.baseUrl;
-            if (remote.authMethod === 'api_key') {
-              updated.encryptedKey = encrypted;
-              delete updated.encryptedAccessToken;
-            } else {
-              updated.encryptedAccessToken = encrypted;
-              delete updated.encryptedKey;
-            }
-            localCreds[idx] = updated;
-          }
-          meta[adoptId] = { serverId: remote.id, remoteUpdatedAt: remote.updatedAt };
-          currentState.credentialMap[adoptId] = remote.id;
-          serverToLocal[remote.id] = adoptId;
-          delete localByContent[adoptKey];
-        } else {
-          const localId = crypto.randomUUID();
-          const encrypted = await encrypt(remoteApiKey, masterPassword);
-          const newCred: Record<string, unknown> = {
-            id: localId,
-            providerId: remote.providerId,
-            label: remote.label,
-            authMethod: remote.authMethod,
-            createdAt: remote.createdAt,
-          };
-          if (remote.baseUrl) newCred.baseUrl = remote.baseUrl;
-          if (remote.authMethod === 'api_key') {
-            newCred.encryptedKey = encrypted;
-          } else {
-            newCred.encryptedAccessToken = encrypted;
-          }
-          localCreds.push(newCred);
-          meta[localId] = { serverId: remote.id, remoteUpdatedAt: remote.updatedAt };
-          currentState.credentialMap[localId] = remote.id;
-          serverToLocal[remote.id] = localId;
-        }
-      }
-    }
-
-    await browser.storage.local.set({
-      credentials: localCreds,
-      'cloudVault.lastSyncAt': serverTime,
-    });
-    await setCredentialMeta(meta);
-    await saveCloudVaultState({ credentialMap: currentState.credentialMap });
-    refreshSessionProviders();
-  }
-
-  /**
-   * Backfill local groups + app→group bindings to the cloud vault.
-   *
-   * Runs on two triggers: (1) initial cloud-vault enable, (2) wallet unlock
-   * when a vault session is already configured. Idempotent — the vault
-   * endpoints are upserts, so re-pushing existing rows is a no-op.
-   *
-   * Sequencing: credentials must sync BEFORE groups, because group rows
-   * may carry a credential pin that resolves via state.credentialMap
-   * (local id → vault id). Callers should await syncPendingCredentials()
-   * first. If they don't, pinned groups will be pushed with credentialId
-   * null and the user would need to re-save the group to fix it.
-   */
-  async function syncPendingGroups(): Promise<void> {
-    const state = await getCloudVaultState();
-    if (!state.enabled || !state.token || state.tokenExpired) return;
-    if (isVaultTokenExpired(state.tokenIssuedAt)) {
-      await handleVaultAuthError();
-      return;
-    }
-
-    const groups = await getGroups();
-    for (const group of groups) {
-      const vaultCredentialId = group.credentialId
-        ? state.credentialMap[group.credentialId]
-        : undefined;
-      try {
-        const result = await vaultFetch(
-          `/groups/${encodeURIComponent(group.id)}`,
-          'PUT',
-          {
-            name: group.name,
-            providerId: group.providerId,
-            credentialId: vaultCredentialId ?? null,
-            giftId: group.giftId ?? null,
-            model: group.model ?? null,
-          },
-          state.token,
-        );
-        if (result.status === 401) {
-          await handleVaultAuthError();
-          return;
-        }
-      } catch {
-        // Non-blocking — will retry next enable/unlock
-      }
-    }
-
-    const appGroups = await getAppGroups();
-    for (const [origin, groupId] of Object.entries(appGroups)) {
-      try {
-        const result = await vaultFetch(
-          `/groups/apps/${encodeURIComponent(origin)}`,
-          'PUT',
-          { groupId },
-          state.token,
-        );
-        if (result.status === 401) {
-          await handleVaultAuthError();
-          return;
-        }
-      } catch {
-        // Non-blocking
-      }
-    }
-  }
-
-  async function syncPendingCredentials(): Promise<void> {
-    if (!masterPassword) return;
-    const state = await getCloudVaultState();
-    if (!state.enabled || !state.token || state.tokenExpired) return;
-    if (isVaultTokenExpired(state.tokenIssuedAt)) {
-      await handleVaultAuthError();
-      return;
-    }
-
-    const credentials = await getStoredCredentials();
-    for (const cred of credentials) {
-      if (state.credentialMap[cred.id]) continue;
-      try {
-        const plainKey = await decryptCredentialKey(cred);
-        await syncCredentialToVault(
-          cred.id, cred.providerId, cred.label, cred.authMethod, plainKey, state.token, cred.baseUrl,
-        );
-      } catch {
-        // Non-blocking — will retry next time
-      }
-    }
-  }
-
-  async function syncAllCredentialsToVault(token: string): Promise<void> {
-    if (!masterPassword) return;
-    const state = await getCloudVaultState();
-    const credentials = await getStoredCredentials();
-    for (const cred of credentials) {
-      // Skip rows already represented on the server (either pushed earlier
-      // or just pulled in pullFromVault). syncPendingCredentials does the
-      // same check; mirrored here so a post-pull "push all" doesn't create
-      // duplicates.
-      if (state.credentialMap[cred.id]) continue;
-      try {
-        const plainKey = await decryptCredentialKey(cred);
-        await syncCredentialToVault(
-          cred.id, cred.providerId, cred.label, cred.authMethod, plainKey, token, cred.baseUrl,
-        );
-      } catch {
-        // Non-blocking — pending sync will pick these up
-      }
-    }
-  }
-
-  async function fireVaultSync(localId: string, providerId: string, label: string, authMethod: string, plainKey: string, baseUrl?: string): Promise<void> {
-    const state = await getCloudVaultState();
-    if (!state.enabled || !state.token || state.tokenExpired) return;
-    if (isVaultTokenExpired(state.tokenIssuedAt)) {
-      await handleVaultAuthError();
-      return;
-    }
-    enqueueVaultSync(() => syncCredentialToVault(localId, providerId, label, authMethod, plainKey, state.token!, baseUrl));
-  }
-
-  async function fireVaultRemove(localId: string): Promise<void> {
-    const state = await getCloudVaultState();
-    if (!state.enabled || !state.token || state.tokenExpired) return;
-    if (isVaultTokenExpired(state.tokenIssuedAt)) {
-      await handleVaultAuthError();
-      return;
-    }
-    enqueueVaultSync(() => syncRemoveFromVault(localId, state.token!));
-  }
-
-  async function fireVaultRename(localId: string, label: string): Promise<void> {
-    const state = await getCloudVaultState();
-    if (!state.enabled || !state.token || state.tokenExpired) return;
-    if (isVaultTokenExpired(state.tokenIssuedAt)) {
-      await handleVaultAuthError();
-      return;
-    }
-    enqueueVaultSync(() => syncRenameToVault(localId, label, state.token!));
-  }
-
-  // ─── Cloud Vault group sync ─────────────────────────────────────────
-  //
-  // Mirrors the user's group/app-group state to the vault so the vault can
-  // serve as an offline replacement for the extension. Eager: every
-  // mutation that lands in browser.storage.local also fires a vault sync.
-  // Gated on cloudVaultEnabled and a non-expired token; failures don't
-  // block the user (they get retried by syncPendingCredentials' sibling
-  // syncPendingGroups on next opportunity).
-
-  async function fireVaultGroupSave(group: Group): Promise<void> {
-    const state = await getCloudVaultState();
-    if (!state.enabled || !state.token || state.tokenExpired) return;
-    if (isVaultTokenExpired(state.tokenIssuedAt)) {
-      await handleVaultAuthError();
-      return;
-    }
-    // The vault keys credentialId by its own credential id (returned at
-    // sync time and stored in credentialMap). Translate the local pin
-    // before sending — a stale local pin maps to undefined which the
-    // vault treats as "no pin".
-    const vaultCredentialId = group.credentialId
-      ? state.credentialMap[group.credentialId]
-      : undefined;
-    enqueueVaultSync(async () => {
-      const result = await vaultFetch(`/groups/${encodeURIComponent(group.id)}`, 'PUT', {
-        name: group.name,
-        providerId: group.providerId,
-        credentialId: vaultCredentialId ?? null,
-        giftId: group.giftId ?? null,
-        model: group.model ?? null,
-      }, state.token!);
-      if (result.status === 401) await handleVaultAuthError();
-    });
-  }
-
-  async function fireVaultGroupDelete(groupId: string): Promise<void> {
-    const state = await getCloudVaultState();
-    if (!state.enabled || !state.token || state.tokenExpired) return;
-    if (isVaultTokenExpired(state.tokenIssuedAt)) {
-      await handleVaultAuthError();
-      return;
-    }
-    enqueueVaultSync(async () => {
-      const result = await vaultFetch(`/groups/${encodeURIComponent(groupId)}`, 'DELETE', undefined, state.token!);
-      if (result.status === 401) await handleVaultAuthError();
-    });
-  }
-
-  async function fireVaultAppGroupSet(origin: string, groupId: string): Promise<void> {
-    const state = await getCloudVaultState();
-    if (!state.enabled || !state.token || state.tokenExpired) return;
-    if (isVaultTokenExpired(state.tokenIssuedAt)) {
-      await handleVaultAuthError();
-      return;
-    }
-    enqueueVaultSync(async () => {
-      const result = await vaultFetch(
-        `/groups/apps/${encodeURIComponent(origin)}`,
-        'PUT',
-        { groupId },
-        state.token!,
-      );
-      if (result.status === 401) await handleVaultAuthError();
-    });
-  }
-
-  // --- Cloud Vault gift relay ---
-
-  async function registerGiftWithVault(gift: Gift, credentialId: string): Promise<void> {
-    const state = await getCloudVaultState();
-    if (!state.enabled || !state.token || state.tokenExpired) return;
-    if (isVaultTokenExpired(state.tokenIssuedAt)) {
-      await handleVaultAuthError();
-      return;
-    }
-    if (!masterPassword) return;
-
-    const credentials = await getStoredCredentials();
-    const credential = credentials.find((c) => c.id === credentialId);
-    if (!credential) return;
-
-    let apiKey: string;
-    try {
-      apiKey = await decryptCredentialKey(credential);
-    } catch {
-      return;
-    }
-
-    enqueueVaultSync(async () => {
-      const result = await vaultFetch('/gifts', 'POST', {
-        giftId: gift.id,
-        providerId: gift.providerId,
-        authMethod: credential.authMethod,
-        apiKey,
-        relayAuthToken: gift.authToken,
-        relayUrl: gift.relayUrl,
-        maxTokens: gift.maxTokens,
-        usedTokens: gift.usedTokens,
-        expiresAt: gift.expiresAt,
-        listed: gift.listed === true,
-        description: gift.description,
-        giftShortId: gift.giftShortId,
-      }, state.token!);
-
-      if (result.status === 401) {
-        await handleVaultAuthError();
-      }
-    });
-  }
-
-  async function unregisterGiftFromVault(giftId: string): Promise<void> {
-    const state = await getCloudVaultState();
-    if (!state.enabled || !state.token || state.tokenExpired) return;
-    if (isVaultTokenExpired(state.tokenIssuedAt)) {
-      await handleVaultAuthError();
-      return;
-    }
-
-    enqueueVaultSync(async () => {
-      const result = await vaultFetch(`/gifts/${giftId}`, 'DELETE', undefined, state.token!);
-      if (result.status === 401) {
-        await handleVaultAuthError();
-      }
-    });
-  }
-
-  async function syncPendingGifts(): Promise<void> {
-    const state = await getCloudVaultState();
-    if (!state.enabled || !state.token || state.tokenExpired) return;
-    if (isVaultTokenExpired(state.tokenIssuedAt)) {
-      await handleVaultAuthError();
-      return;
-    }
-    if (!masterPassword) return;
-
-    const gifts = await getGiftsFromStorage();
-    for (const gift of gifts) {
-      if (!gift.active || gift.expiresAt <= Date.now()) continue;
-      try {
-        await registerGiftWithVault(gift, gift.credentialId);
-      } catch {
-        // Non-blocking — retry next opportunity
-      }
-    }
-  }
-
-  async function syncGiftUsageFromVault(giftId: string): Promise<void> {
-    const state = await getCloudVaultState();
-    if (!state.enabled || !state.token || state.tokenExpired) return;
-    if (isVaultTokenExpired(state.tokenIssuedAt)) {
-      await handleVaultAuthError();
-      return;
-    }
-
-    const result = await vaultFetch(`/gifts/${giftId}`, 'GET', undefined, state.token!);
-    if (result.status === 401) {
-      await handleVaultAuthError();
-      return;
-    }
-    if (!result.ok) return;
-
-    const vaultGift = result.data.gift as { usedTokens: number } | undefined;
-    if (!vaultGift) return;
-
-    // If vault tracked more usage, update local
-    const data = await browser.storage.local.get('gifts');
-    const gifts = (data.gifts ?? []) as Gift[];
-    const idx = gifts.findIndex((g) => g.id === giftId);
-    if (idx !== -1 && vaultGift.usedTokens > gifts[idx].usedTokens) {
-      gifts[idx].usedTokens = vaultGift.usedTokens;
-      await browser.storage.local.set({ gifts });
-    }
-  }
-
-  // Wake the SW every minute to re-open any relay WS that MV3 idle-killed —
-  // without this the vault fallback would be the only live sender for most
-  // of the idle window. Same wake-up also re-spawns the byoky-bridge native
-  // host if it died with the SW (Hermes/OpenClaw need :19280 stable).
-  const RELAY_RECONNECT_ALARM = 'byoky:relay-reconnect';
-  browser.alarms.create(RELAY_RECONNECT_ALARM, {
+  // Wake the SW every minute to re-spawn the byoky-bridge native host if it
+  // died with the SW (Hermes/OpenClaw need :19280 stable).
+  const BRIDGE_KEEPALIVE_ALARM = 'byoky:bridge-keepalive';
+  browser.alarms.create(BRIDGE_KEEPALIVE_ALARM, {
     periodInMinutes: 1,
     delayInMinutes: 0,
   });
 
   browser.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name === RELAY_RECONNECT_ALARM) {
-      reconnectGiftRelays().catch(() => {});
+    if (alarm.name === BRIDGE_KEEPALIVE_ALARM) {
       maybeAutoStartBridgeProxy().catch(() => {});
     }
   });

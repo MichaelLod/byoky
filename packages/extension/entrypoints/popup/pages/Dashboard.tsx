@@ -2,30 +2,16 @@ import { useState, useMemo, useRef, useEffect, type KeyboardEvent } from 'react'
 import { useWalletStore } from '../store';
 import {
   PROVIDERS,
-  isGiftExpired,
-  giftBudgetRemaining,
-  giftBudgetPercent,
   type RequestLogEntry,
   type CredentialMeta,
-  type Gift,
-  type GiftedCredential,
 } from '@byoky/core';
-import { OfflineUpgradeBanner } from '../components/OfflineUpgradeBanner';
+import { RetiredFeaturesNotice } from '../components/RetiredFeaturesNotice';
 import { ProviderIcon } from '../components/ProviderIcon';
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
   return String(n);
-}
-
-function formatExpiry(ms: number): string {
-  const diff = ms - Date.now();
-  if (diff <= 0) return 'Expired';
-  const days = Math.floor(diff / (24 * 60 * 60 * 1000));
-  const hours = Math.floor((diff % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
-  if (days > 0) return `${days}d ${hours}h`;
-  return `${hours}h`;
 }
 
 function formatHostname(origin: string): string {
@@ -60,181 +46,46 @@ function computeUsageByProvider(log: RequestLogEntry[]): Map<string, ProviderUsa
   return byProvider;
 }
 
-type StatsTarget =
-  | { kind: 'credential'; credentialId: string }
-  | { kind: 'gift'; giftedId: string };
-
 export function Dashboard() {
-  const {
-    credentials, gifts, giftedCredentials, giftPreferences, giftPeerOnline, requestLog,
-    navigate, lock, removeCredential, removeGiftedCredential,
-    setGiftPreference, cloudVaultEnabled, disableCloudVault,
-  } = useWalletStore();
-  const activeGifts = giftedCredentials.filter((gc) => !isGiftExpired(gc));
-  const ownProviderIds = new Set(credentials.map((c) => c.providerId));
-  const hasAny = credentials.length > 0 || activeGifts.length > 0;
+  const { credentials, requestLog, lock, removeCredential } = useWalletStore();
   const usageByProvider = useMemo(() => computeUsageByProvider(requestLog), [requestLog]);
-  const giftedByCredential = useMemo(() => {
-    const map = new Map<string, { count: number; used: number }>();
-    for (const g of gifts) {
-      const entry = map.get(g.credentialId) ?? { count: 0, used: 0 };
-      entry.count++;
-      entry.used += g.usedTokens;
-      map.set(g.credentialId, entry);
-    }
-    return map;
-  }, [gifts]);
-
-  const [stats, setStats] = useState<StatsTarget | null>(null);
+  const [statsCredentialId, setStatsCredentialId] = useState<string | null>(null);
 
   return (
     <div>
-      <OfflineUpgradeBanner />
+      <RetiredFeaturesNotice />
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <h2 className="page-title" style={{ marginBottom: 0 }}>Credentials</h2>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <span style={{ fontSize: '12px', color: cloudVaultEnabled ? 'var(--accent)' : 'var(--text-muted)' }}>Cloud Sync</span>
-          <label className="toggle-switch" title={cloudVaultEnabled ? 'Cloud Sync on' : 'Cloud Sync off'}>
-            <input
-              type="checkbox"
-              checked={cloudVaultEnabled}
-              onChange={() => {
-                if (cloudVaultEnabled) {
-                  if (confirm('Turn off Cloud Sync? Your keys stay on this device and remain on the server under your account — sign back in anytime to restore sync.')) {
-                    disableCloudVault();
-                  }
-                } else {
-                  navigate('settings');
-                }
-              }}
-            />
-            <span className="toggle-slider" />
-          </label>
-          <button className="text-link" onClick={() => lock()}>
-            Lock
-          </button>
-        </div>
+        <button className="text-link" onClick={() => lock()}>
+          Lock
+        </button>
       </div>
 
-      {!hasAny ? (
+      {credentials.length === 0 ? (
         <div className="empty-state">
-          <p>No API keys, tokens, or gifts yet.</p>
+          <p>No API keys or tokens yet.</p>
           <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '8px' }}>
-            Tap the + button to add a credential or redeem a gift.
+            Tap the + button to add a credential. Apps you connect use it through the wallet and never see the key.
           </p>
         </div>
       ) : (
-        <>
-          {credentials.map((cred) => (
-            <CredentialCard
-              key={cred.id}
-              cred={cred}
-              usage={usageByProvider.get(cred.providerId)}
-              gifted={giftedByCredential.get(cred.id)}
-              onOpenStats={() => setStats({ kind: 'credential', credentialId: cred.id })}
-              onRemove={() => removeCredential(cred.id)}
-            />
-          ))}
-
-          {activeGifts.map((gc) => {
-            const pct = giftBudgetPercent(gc);
-            const remaining = giftBudgetRemaining(gc);
-            const hasOwnKey = ownProviderIds.has(gc.providerId);
-            const isPreferred = giftPreferences[gc.providerId] === gc.giftId;
-            const onlineState = giftPeerOnline[gc.giftId];
-            const dotClass = onlineState === true
-              ? 'status-dot success'
-              : onlineState === false
-                ? 'status-dot error'
-                : 'status-dot warning';
-            const dotTitle = onlineState === true
-              ? 'Sender online — gift can be used'
-              : onlineState === false
-                ? 'Sender offline — gift will fail until sender reconnects'
-                : 'Checking sender status…';
-            return (
-              <div
-                key={gc.id}
-                className="card gift-card tappable"
-                role="button"
-                tabIndex={0}
-                onClick={() => setStats({ kind: 'gift', giftedId: gc.id })}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    setStats({ kind: 'gift', giftedId: gc.id });
-                  }
-                }}
-              >
-                <div className="card-header">
-                  <div className="credential-card-heading">
-                    <div className="provider-icon-box provider-icon-box-sm">
-                      <ProviderIcon providerId={gc.providerId} size={18} />
-                    </div>
-                    <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span className={dotClass} title={dotTitle} />
-                      {gc.providerName}
-                    </span>
-                  </div>
-                  <div className="card-actions" onClick={(e) => e.stopPropagation()}>
-                    <button
-                      className="btn btn-danger btn-sm"
-                      onClick={() => removeGiftedCredential(gc.id)}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
-                  <span className="badge badge-provider">
-                    {PROVIDERS[gc.providerId]?.name ?? gc.providerId}
-                  </span>
-                  <span className="badge badge-gift">Gift · from {gc.senderLabel}</span>
-                </div>
-                <div className="gift-budget" style={{ marginTop: '8px' }}>
-                  <div className="gift-budget-text">
-                    <span>{formatTokens(remaining)} remaining</span>
-                    <span className="gift-budget-total">/ {formatTokens(gc.maxTokens)}</span>
-                  </div>
-                  <div className="allowance-bar">
-                    <div
-                      className={`allowance-bar-fill ${pct >= 90 ? 'over' : ''}`}
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                </div>
-                {hasOwnKey && (
-                  <label
-                    style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px', cursor: 'pointer', fontSize: '12px', color: 'var(--text-secondary)' }}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={isPreferred}
-                      onChange={() => setGiftPreference(gc.providerId, isPreferred ? null : gc.giftId)}
-                      style={{ margin: 0 }}
-                    />
-                    Use instead of own key
-                  </label>
-                )}
-                <div className="card-subtitle" style={{ marginTop: '6px' }}>
-                  Expires in {formatExpiry(gc.expiresAt)}
-                </div>
-              </div>
-            );
-          })}
-        </>
+        credentials.map((cred) => (
+          <CredentialCard
+            key={cred.id}
+            cred={cred}
+            usage={usageByProvider.get(cred.providerId)}
+            onOpenStats={() => setStatsCredentialId(cred.id)}
+            onRemove={() => removeCredential(cred.id)}
+          />
+        ))
       )}
 
-      {stats && (
+      {statsCredentialId && (
         <StatsSheet
-          target={stats}
+          credentialId={statsCredentialId}
           credentials={credentials}
-          gifts={gifts}
-          giftedCredentials={giftedCredentials}
           requestLog={requestLog}
-          giftPeerOnline={giftPeerOnline}
-          onClose={() => setStats(null)}
+          onClose={() => setStatsCredentialId(null)}
         />
       )}
     </div>
@@ -244,12 +95,11 @@ export function Dashboard() {
 interface CredentialCardProps {
   cred: CredentialMeta;
   usage: ProviderUsage | undefined;
-  gifted: { count: number; used: number } | undefined;
   onOpenStats: () => void;
   onRemove: () => void;
 }
 
-function CredentialCard({ cred, usage, gifted, onOpenStats, onRemove }: CredentialCardProps) {
+function CredentialCard({ cred, usage, onOpenStats, onRemove }: CredentialCardProps) {
   const { renameCredential } = useWalletStore();
   const provider = PROVIDERS[cred.providerId];
   const [editing, setEditing] = useState(false);
@@ -299,7 +149,6 @@ function CredentialCard({ cred, usage, gifted, onOpenStats, onRemove }: Credenti
   }
 
   const hasUsage = usage && usage.requests > 0;
-  const hasGifted = gifted && gifted.used > 0;
 
   return (
     <div
@@ -383,12 +232,6 @@ function CredentialCard({ cred, usage, gifted, onOpenStats, onRemove }: Credenti
             <div className="usage-mini-tag">output</div>
           </div>
         </div>
-        <div className="credential-gifted-row">
-          <span className="usage-mini-tag">Spent on gifts</span>
-          <span className="credential-gifted-value">
-            {hasGifted ? `${formatTokens(gifted!.used)} · ${gifted!.count} gift${gifted!.count !== 1 ? 's' : ''}` : 'None'}
-          </span>
-        </div>
       </div>
     </div>
   );
@@ -406,16 +249,13 @@ function filterByTime(log: RequestLogEntry[], range: TimeRange): RequestLogEntry
 }
 
 interface StatsSheetProps {
-  target: StatsTarget;
+  credentialId: string;
   credentials: CredentialMeta[];
-  gifts: Gift[];
-  giftedCredentials: GiftedCredential[];
   requestLog: RequestLogEntry[];
-  giftPeerOnline: Record<string, boolean>;
   onClose: () => void;
 }
 
-function StatsSheet({ target, credentials, gifts, giftedCredentials, requestLog, giftPeerOnline, onClose }: StatsSheetProps) {
+function StatsSheet({ credentialId, credentials, requestLog, onClose }: StatsSheetProps) {
   useEffect(() => {
     function onKey(e: globalThis.KeyboardEvent) {
       if (e.key === 'Escape') onClose();
@@ -424,27 +264,8 @@ function StatsSheet({ target, credentials, gifts, giftedCredentials, requestLog,
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  let title = 'Stats';
-  let body: React.ReactNode = null;
-  if (target.kind === 'credential') {
-    const cred = credentials.find((c) => c.id === target.credentialId);
-    if (cred) {
-      title = cred.label;
-      body = (
-        <CredentialStats
-          cred={cred}
-          gifts={gifts.filter((g) => g.credentialId === cred.id)}
-          requestLog={requestLog}
-        />
-      );
-    }
-  } else {
-    const gc = giftedCredentials.find((g) => g.id === target.giftedId);
-    if (gc) {
-      title = `Gift from ${gc.senderLabel}`;
-      body = <GiftStats gc={gc} online={giftPeerOnline[gc.giftId]} />;
-    }
-  }
+  const cred = credentials.find((c) => c.id === credentialId);
+  const title = cred?.label ?? 'Stats';
 
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
@@ -458,13 +279,15 @@ function StatsSheet({ target, credentials, gifts, giftedCredentials, requestLog,
             </svg>
           </button>
         </div>
-        <div className="modal-body">{body}</div>
+        <div className="modal-body">
+          {cred && <CredentialStats cred={cred} requestLog={requestLog} />}
+        </div>
       </div>
     </div>
   );
 }
 
-function CredentialStats({ cred, gifts, requestLog }: { cred: CredentialMeta; gifts: Gift[]; requestLog: RequestLogEntry[] }) {
+function CredentialStats({ cred, requestLog }: { cred: CredentialMeta; requestLog: RequestLogEntry[] }) {
   const [range, setRange] = useState<TimeRange>('7d');
   const provider = PROVIDERS[cred.providerId];
   const filtered = useMemo(
@@ -494,7 +317,6 @@ function CredentialStats({ cred, gifts, requestLog }: { cred: CredentialMeta; gi
   }
   const apps = [...byApp.values()].sort((a, b) => (b.inputTokens + b.outputTokens) - (a.inputTokens + a.outputTokens));
   const models = [...byModel.entries()].sort((a, b) => (b[1].inputTokens + b[1].outputTokens) - (a[1].inputTokens + a[1].outputTokens));
-  const giftUsedTotal = gifts.reduce((s, g) => s + g.usedTokens, 0);
 
   return (
     <>
@@ -568,92 +390,6 @@ function CredentialStats({ cred, gifts, requestLog }: { cred: CredentialMeta; gi
           ))}
         </>
       )}
-
-      <h3 className="usage-section-title">Gifts from this credential</h3>
-      {gifts.length === 0 ? (
-        <div className="empty-state"><p>No gifts created from this credential.</p></div>
-      ) : (
-        <>
-          <p className="card-subtitle" style={{ marginBottom: '8px' }}>
-            {formatTokens(giftUsedTotal)} tokens redeemed across {gifts.length} gift{gifts.length !== 1 ? 's' : ''}
-          </p>
-          {gifts.map((g) => {
-            const pct = g.maxTokens > 0 ? Math.min(100, (g.usedTokens / g.maxTokens) * 100) : 0;
-            const expired = g.expiresAt <= Date.now() || !g.active;
-            return (
-              <div key={g.id} className="card usage-card">
-                <div className="card-header" style={{ marginBottom: '6px' }}>
-                  <span className="card-title">{g.label || 'Unnamed gift'}</span>
-                  <span className="card-subtitle">{expired ? 'Inactive' : `Expires in ${formatExpiry(g.expiresAt)}`}</span>
-                </div>
-                <div className="gift-budget">
-                  <div className="gift-budget-text">
-                    <span>{formatTokens(g.usedTokens)} used</span>
-                    <span className="gift-budget-total">/ {formatTokens(g.maxTokens)}</span>
-                  </div>
-                  <div className="allowance-bar">
-                    <div className={`allowance-bar-fill ${pct >= 90 ? 'over' : ''}`} style={{ width: `${pct}%` }} />
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </>
-      )}
-    </>
-  );
-}
-
-function GiftStats({ gc, online }: { gc: GiftedCredential; online: boolean | undefined }) {
-  const remaining = giftBudgetRemaining(gc);
-  const pct = giftBudgetPercent(gc);
-  const provider = PROVIDERS[gc.providerId];
-  const status = online === true ? 'Online' : online === false ? 'Offline' : 'Checking…';
-  const statusClass = online === true ? 'success' : online === false ? 'error' : 'warning';
-
-  return (
-    <>
-      <p className="card-subtitle" style={{ marginBottom: '12px' }}>
-        {provider?.name ?? gc.providerId} · from {gc.senderLabel}
-      </p>
-
-      <div className="usage-totals">
-        <div className="usage-stat-card">
-          <div className="usage-stat-value">{formatTokens(gc.usedTokens)}</div>
-          <div className="usage-stat-label">Used</div>
-        </div>
-        <div className="usage-stat-card">
-          <div className="usage-stat-value">{formatTokens(remaining)}</div>
-          <div className="usage-stat-label">Remaining</div>
-        </div>
-        <div className="usage-stat-card">
-          <div className="usage-stat-value">{formatTokens(gc.maxTokens)}</div>
-          <div className="usage-stat-label">Budget</div>
-        </div>
-      </div>
-
-      <div className="gift-budget" style={{ marginTop: '4px', marginBottom: '16px' }}>
-        <div className="allowance-bar">
-          <div className={`allowance-bar-fill ${pct >= 90 ? 'over' : ''}`} style={{ width: `${pct}%` }} />
-        </div>
-      </div>
-
-      <div className="card usage-card">
-        <div className="usage-model-row">
-          <span className="usage-model-name" style={{ fontFamily: 'inherit', fontSize: '12px' }}>Sender</span>
-          <span className="usage-model-tokens" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span className={`status-dot ${statusClass}`} />{status}
-          </span>
-        </div>
-        <div className="usage-model-row">
-          <span className="usage-model-name" style={{ fontFamily: 'inherit', fontSize: '12px' }}>Expires</span>
-          <span className="usage-model-tokens">{formatExpiry(gc.expiresAt)}</span>
-        </div>
-        <div className="usage-model-row">
-          <span className="usage-model-name" style={{ fontFamily: 'inherit', fontSize: '12px' }}>Received</span>
-          <span className="usage-model-tokens">{new Date(gc.createdAt).toLocaleDateString()}</span>
-        </div>
-      </div>
     </>
   );
 }

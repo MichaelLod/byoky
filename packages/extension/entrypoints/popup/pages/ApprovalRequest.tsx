@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useWalletStore } from '../store';
-import { PROVIDERS, isGiftExpired } from '@byoky/core';
+import { PROVIDERS } from '@byoky/core';
 
 function formatHostname(origin: string): string {
   try {
@@ -11,11 +11,8 @@ function formatHostname(origin: string): string {
 }
 
 export function ApprovalRequest() {
-  const { pendingApprovals, credentials, giftedCredentials, approveConnect, rejectConnect } =
+  const { pendingApprovals, credentials, approveConnect, rejectConnect } =
     useWalletStore();
-  const activeGiftProviders = new Set(
-    giftedCredentials.filter((gc) => !isGiftExpired(gc) && gc.usedTokens < gc.maxTokens).map((gc) => gc.providerId),
-  );
   const [trust, setTrust] = useState(false);
 
   if (pendingApprovals.length === 0) {
@@ -56,16 +53,12 @@ export function ApprovalRequest() {
           {requestedProviders.map((p) => {
             const provider = PROVIDERS[p.id];
             const hasCred = credentials.some((c) => c.providerId === p.id);
-            const hasGift = !hasCred && activeGiftProviders.has(p.id);
             return (
               <div key={p.id} className="approval-provider-row">
                 <span className="badge badge-provider">
                   {provider?.name ?? p.id}
                 </span>
-                {hasGift && (
-                  <span className="badge badge-gift" style={{ fontSize: '10px' }}>Gift</span>
-                )}
-                {!hasCred && !hasGift && (
+                {!hasCred && (
                   <span className="approval-no-cred">no key added</span>
                 )}
                 {p.required && hasCred && (

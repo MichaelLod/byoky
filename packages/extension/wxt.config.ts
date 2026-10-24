@@ -18,7 +18,8 @@ export default defineConfig({
   },
   manifest: {
     name: 'Byoky',
-    description: 'Encrypt your AI API keys locally. Never trust another extension with your OpenAI, Anthropic, or Gemini keys.',
+    // Chrome Web Store caps this at 132 characters.
+    description: 'A wallet for your AI API keys. Apps connect to it and send their AI requests through it. Your keys never leave the wallet.',
     // Pin the extension ID for unpacked / sideloaded builds so the Byoky
     // Bridge's native-messaging `allowed_origins` can whitelist a stable ID.
     // Chrome Web Store ignores this when signing the published extension, so
