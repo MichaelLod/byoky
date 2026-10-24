@@ -180,7 +180,7 @@ struct SettingsView: View {
 
     private var aboutSection: some View {
         Section("About") {
-            LabeledContent("Version", value: "1.0.0")
+            LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")
 
             Link(destination: URL(string: "https://github.com/MichaelLod/byoky")!) {
                 Label("GitHub", systemImage: "link")

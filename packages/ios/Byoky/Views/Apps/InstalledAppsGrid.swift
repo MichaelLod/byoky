@@ -89,6 +89,7 @@ struct AppIconView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 14))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(app.name)
 
             Text(app.name)
                 .font(.system(size: 11))

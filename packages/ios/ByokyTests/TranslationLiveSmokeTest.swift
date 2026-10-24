@@ -109,7 +109,7 @@ final class TranslationLiveSmokeTest: XCTestCase {
         let ctxJson = """
         {"srcFamily":"anthropic","dstFamily":"cohere",\
         "srcProviderId":"anthropic","dstProviderId":"cohere",\
-        "srcModel":"claude-haiku-4-5-20251001","dstModel":"command-r-plus"}
+        "srcModel":"claude-haiku-4-5-20251001","dstModel":"command-a-03-2025"}
         """
 
         let translatedReq = try TranslationEngine.shared.translateRequest(

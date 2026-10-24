@@ -5,6 +5,9 @@ struct ByokyApp: App {
     @StateObject private var wallet: WalletStore
 
     init() {
+        // UI-test launch hooks; compiled out of release builds so no launch
+        // argument can wipe or pre-fill a shipped wallet.
+        #if DEBUG
         let args = CommandLine.arguments
         let isUITest = args.contains("-byokyUITest")
         let shouldReset = args.contains("-byokyResetOnLaunch")
@@ -21,10 +24,12 @@ struct ByokyApp: App {
         if isUITest {
             Self.autoSetupIfNeeded()
         }
+        #endif
 
         _wallet = StateObject(wrappedValue: WalletStore.shared)
     }
 
+    #if DEBUG
     private static func autoSetupIfNeeded() {
         let configPath = "/tmp/byoky-ios-test-config.json"
         guard let data = FileManager.default.contents(atPath: configPath),
@@ -48,6 +53,7 @@ struct ByokyApp: App {
             }
         }
     }
+    #endif
 
     var body: some Scene {
         WindowGroup {
