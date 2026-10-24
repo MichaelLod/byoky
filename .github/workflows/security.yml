@@ -13,38 +13,18 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: pnpm/action-setup@02f6c237bd2518259fed6c71566509edfb3f2b74 # v4
-        with:
-          version: 9
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Run pnpm audit --audit-level=high
-        run: |
-          # openclaw has no patched version for its advisories — skip for now
-          pnpm audit --audit-level=high || echo "::warning::Dependency audit found vulnerabilities — review above"
-          # Fail only if non-openclaw high/critical vulnerabilities exist
-          RESULT=$(pnpm audit --audit-level=high --json 2>/dev/null || true)
-          NON_OC=$(echo "$RESULT" | python3 -c "
-          import json, sys
-          data = json.load(sys.stdin)
-          count = 0
-          for aid, adv in data.get('advisories', {}).items():
-            if adv.get('severity') in ('high', 'critical') and adv.get('module_name') != 'openclaw':
-              via = set()
-              for f in adv.get('findings', []):
-                for p in f.get('paths', []):
-                  root = p.split('>')[1] if '>' in p else p
-                  via.add(root)
-              if 'openclaw' not in via:
-                count += 1
-          print(count)
-          " 2>/dev/null || echo "0")
-          if [ "$NON_OC" -gt 0 ]; then
-            echo "::error::$NON_OC high/critical vulnerabilities found outside openclaw"
-            exit 1
-          fi
+      # Dependencies that ship (SDK, bridge, plugin, website) must be clean.
+      - name: Audit production dependencies
+        run: pnpm audit --prod --audit-level=high
+      # Build and test tooling (wxt, web-ext, vitest, the openclaw e2e target)
+      # never reaches users; report it without failing the run.
+      - name: Audit development tooling (report only)
+        run: pnpm audit --audit-level=high || echo "::warning::Development tooling has high/critical advisories; review above"
 
   security-tests:
     name: Security tests
@@ -52,8 +32,6 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: pnpm/action-setup@02f6c237bd2518259fed6c71566509edfb3f2b74 # v4
-        with:
-          version: 9
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
