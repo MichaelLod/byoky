@@ -57,6 +57,7 @@ export function InstallWalletButton({
   const versionLabel = (name: string) => {
     const p = find(name);
     if (!p) return '';
+    if (p.status === 'unavailable') return 'unavailable';
     if (p.pending) return `v${p.pending} pending`;
     return p.version ? `v${p.version}` : '';
   };

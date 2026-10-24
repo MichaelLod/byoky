@@ -43,11 +43,11 @@ export function VersionStatus() {
         {data.platforms.map((p) => (
           <div key={p.platform} className="version-status-item">
             <span className="version-status-platform">
-              <span className={`version-status-dot ${p.pending ? 'pending' : 'live'}`} />
+              <span className={`version-status-dot ${p.status === 'unavailable' ? 'unavailable' : p.pending ? 'pending' : 'live'}`} />
               {p.platform}
             </span>
             <span className="version-status-version">
-              {p.version ? `v${p.version}` : '—'}
+              {p.status === 'unavailable' ? 'unavailable' : p.version ? `v${p.version}` : '—'}
               {p.pending && (
                 <span className="version-status-pending" title={`v${p.pending} pending review`}>
                   {' '}

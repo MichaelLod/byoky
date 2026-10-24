@@ -57,6 +57,14 @@ async function getChromeVersion() {
 }
 
 async function getFirefoxVersion() {
+  // A disabled add-on can't be installed; the public endpoint says so even
+  // though it no longer returns the listing.
+  const pub = await fetchSafe('https://addons.mozilla.org/api/v5/addons/addon/byoky%40byoky.com/')
+  const pubData = pub ? await pub.json().catch(() => ({})) : {}
+  if (pubData.is_disabled_by_mozilla || pubData.is_disabled_by_developer) {
+    return { platform: 'Firefox', version: null, status: 'unavailable' }
+  }
+
   const { AMO_API_KEY, AMO_API_SECRET } = process.env
   if (!AMO_API_KEY || !AMO_API_SECRET) return { platform: 'Firefox', version: null, status: 'unknown' }
   const h = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url')

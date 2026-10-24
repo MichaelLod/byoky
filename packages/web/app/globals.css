@@ -880,6 +880,10 @@ body.has-ph-banner .navbar {
   box-shadow: 0 0 6px rgba(245, 158, 11, 0.4);
 }
 
+.version-status-dot.unavailable {
+  background: #6b7280;
+}
+
 .version-status-version {
   font-size: 13px;
   font-weight: 600;

@@ -138,7 +138,9 @@ export function Navbar() {
               <div className="install-dropdown-menu">
                 {installOptions.map((opt) => {
                   const p = versions?.platforms.find((x) => x.platform === opt.key);
-                  const versionLabel = p?.pending
+                  const versionLabel = p?.status === 'unavailable'
+                    ? 'unavailable'
+                    : p?.pending
                     ? `v${p.pending} pending`
                     : p?.version
                       ? `v${p.version}`
