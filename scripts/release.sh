@@ -404,6 +404,10 @@ BUILD_DIR="$ROOT/build"
 mkdir -p "$BUILD_DIR"
 
 if [ "$SKIP_IOS" = false ]; then
+  # -allowProvisioningUpdates lets Xcode (via the account signed in under
+  # Settings > Accounts) renew expired development certificates and refresh
+  # the managed provisioning profiles; without it a yearly cert renewal stops
+  # the archive with a stale-profile error.
   echo "  Archiving iOS app..."
   xcodebuild archive \
     -project "$IOS_DIR/Byoky.xcodeproj" \
@@ -412,12 +416,14 @@ if [ "$SKIP_IOS" = false ]; then
     -archivePath "$BUILD_DIR/Byoky-iOS.xcarchive" \
     -destination "generic/platform=iOS" \
     CODE_SIGN_STYLE=Automatic \
+    -allowProvisioningUpdates \
     -quiet
 
   echo "  Exporting iOS IPA..."
   xcodebuild -exportArchive \
     -archivePath "$BUILD_DIR/Byoky-iOS.xcarchive" \
     -exportOptionsPlist "$IOS_DIR/ExportOptions.plist" \
+    -allowProvisioningUpdates \
     -exportPath "$BUILD_DIR/ios-export" \
     -quiet
 
@@ -429,12 +435,14 @@ if [ "$SKIP_IOS" = false ]; then
     -archivePath "$BUILD_DIR/Byoky-macOS.xcarchive" \
     -destination "generic/platform=macOS" \
     CODE_SIGN_STYLE=Automatic \
+    -allowProvisioningUpdates \
     -quiet
 
   echo "  Exporting macOS app..."
   xcodebuild -exportArchive \
     -archivePath "$BUILD_DIR/Byoky-macOS.xcarchive" \
     -exportOptionsPlist "$IOS_DIR/ExportOptions-macOS.plist" \
+    -allowProvisioningUpdates \
     -exportPath "$BUILD_DIR/macos-export" \
     -quiet
 fi
