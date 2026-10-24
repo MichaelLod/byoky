@@ -1,14 +1,19 @@
 import type { AuthMethod } from './types.js';
 
+// Handlers are checked bivariantly (method-style), so the browser's and the
+// `ws` library's WebSocket, whose handlers take their own richer event types,
+// stay assignable under strictFunctionTypes.
+type EventHandler<E> = { bivarianceHack(event: E): void }['bivarianceHack'];
+
 /** Minimal WebSocket interface — compatible with browser WebSocket and `ws` library. */
 export interface WebSocketLike {
   readonly readyState: number;
   send(data: string): void;
   close(code?: number, reason?: string): void;
-  onopen: ((event: unknown) => void) | null;
-  onmessage: ((event: { data: unknown }) => void) | null;
-  onclose: ((event: { code: number; reason: string }) => void) | null;
-  onerror: ((event: unknown) => void) | null;
+  onopen: EventHandler<unknown> | null;
+  onmessage: EventHandler<{ data: unknown }> | null;
+  onclose: EventHandler<{ code: number; reason: string }> | null;
+  onerror: EventHandler<unknown> | null;
 }
 
 export const WS_READY_STATE = {
