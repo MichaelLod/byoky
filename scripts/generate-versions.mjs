@@ -142,13 +142,26 @@ async function getNpmVersion() {
 }
 
 // --- Main ---
-const [chrome, firefox, ios, android, npm] = await Promise.all([
+const outPath = resolve(root, 'packages/web/public/versions.json')
+
+// A store that can't be reached this run (status "unknown") keeps its last
+// known entry, so one failed fetch doesn't reach the site as a blank version.
+const previous = existsSync(outPath) ? JSON.parse(readFileSync(outPath, 'utf8')).platforms ?? [] : []
+const orPrevious = (p) => {
+  if (p.status !== 'unknown') return p
+  const last = previous.find((q) => q.platform === p.platform)
+  if (!last) return p
+  const { pending, ...kept } = last
+  return kept
+}
+
+const [chrome, firefox, ios, android, npm] = (await Promise.all([
   getChromeVersion(),
   getFirefoxVersion(),
   getIOSVersion(),
   getAndroidVersion(),
   getNpmVersion(),
-])
+])).map(orPrevious)
 
 // Mark platforms as pending if their version is behind the local version
 for (const p of [chrome, firefox]) {
@@ -169,7 +182,6 @@ const output = {
   generatedAt: new Date().toISOString(),
 }
 
-const outPath = resolve(root, 'packages/web/public/versions.json')
 writeFileSync(outPath, JSON.stringify(output, null, 2) + '\n')
 console.log(`Generated ${outPath}`)
 console.log(JSON.stringify(output, null, 2))
