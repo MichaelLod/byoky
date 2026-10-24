@@ -1,12 +1,19 @@
+import { useEffect } from 'react';
 import { useWalletStore } from '../store';
 
 /**
  * One-time notice for users who relied on cloud sync or gifts before the
  * wallet became purely local. The background only raises the flag when its
- * upgrade cleanup found state from those features.
+ * upgrade cleanup found state from those features; the first time the notice
+ * is shown the flag is cleared, so it stays up for this session only.
  */
 export function RetiredFeaturesNotice() {
-  const { showRetiredFeaturesNotice, dismissRetiredFeaturesNotice, navigate } = useWalletStore();
+  const { showRetiredFeaturesNotice, dismissRetiredFeaturesNotice, markRetiredFeaturesNoticeSeen, navigate } =
+    useWalletStore();
+
+  useEffect(() => {
+    if (showRetiredFeaturesNotice) markRetiredFeaturesNoticeSeen();
+  }, [showRetiredFeaturesNotice, markRetiredFeaturesNoticeSeen]);
 
   if (!showRetiredFeaturesNotice) return null;
 

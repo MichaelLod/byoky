@@ -43,6 +43,7 @@ interface WalletState {
   init: () => Promise<void>;
   setup: (password: string) => Promise<void>;
   dismissRetiredFeaturesNotice: () => Promise<void>;
+  markRetiredFeaturesNoticeSeen: () => Promise<void>;
   unlock: (password: string) => Promise<boolean>;
   lock: () => Promise<void>;
   navigate: (page: Page) => void;
@@ -137,6 +138,12 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   dismissRetiredFeaturesNotice: async () => {
     await sendInternal('dismissRetiredFeaturesNotice');
     set({ showRetiredFeaturesNotice: false });
+  },
+
+  // Clears the stored flag but keeps the notice on screen for this session,
+  // so it shows once and doesn't return the next time the popup opens.
+  markRetiredFeaturesNoticeSeen: async () => {
+    await sendInternal('dismissRetiredFeaturesNotice');
   },
 
   unlock: async (password: string) => {
