@@ -66,11 +66,20 @@ async function main() {
   console.log(`  App: ${appId}`)
 
   // 2. Check for existing version in editable state
-  const versionsData = await api(`/apps/${appId}/appStoreVersions?filter[platform]=${platform}&limit=5`)
+  const versionsData = await api(`/apps/${appId}/appStoreVersions?filter[platform]=${platform}&limit=50`)
   const editableStates = ['PREPARE_FOR_SUBMISSION', 'DEVELOPER_REJECTED']
-  let ver = versionsData.data?.find(v =>
-    editableStates.includes(v.attributes.appStoreState) && v.attributes.versionString === version
-  )
+  let ver = versionsData.data?.find(v => editableStates.includes(v.attributes.appStoreState))
+
+  // App Store Connect allows one editable version per platform; an older one
+  // that never went out (macOS sat at "1.0" for months) blocks creating a new
+  // one, so rename it instead.
+  if (ver && ver.attributes.versionString !== version) {
+    console.log(`  Renaming editable version ${ver.attributes.versionString} to ${version}...`)
+    ver = (await api(`/appStoreVersions/${ver.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ data: { type: 'appStoreVersions', id: ver.id, attributes: { versionString: version } } }),
+    })).data
+  }
 
   if (!ver) {
     // Create new version
