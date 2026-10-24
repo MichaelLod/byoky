@@ -7,4 +7,9 @@ describe('manifest', () => {
     expect(typeof manifest.description).toBe('string');
     expect(manifest.description!.length).toBeLessThanOrEqual(112);
   });
+
+  it('names no other brand (stores block crypto-wallet impersonation)', () => {
+    const manifest = config.manifest as { description?: string };
+    expect(manifest.description).not.toMatch(/metamask/i);
+  });
 });

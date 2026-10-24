@@ -20,7 +20,8 @@ export default defineConfig({
     name: 'Byoky',
     // App Store validation rejects Safari extensions whose description is over
     // 112 characters (Chrome Web Store allows 132). tests/manifest.test.ts checks it.
-    description: 'The MetaMask for API keys. Keep your AI keys in one encrypted wallet. Apps connect to it and never see the key.',
+    // No other brand names here: stores block crypto-wallet impersonation.
+    description: 'Keep your AI API keys in one encrypted wallet. Apps connect to it and never see the key.',
     // Pin the extension ID for unpacked / sideloaded builds so the Byoky
     // Bridge's native-messaging `allowed_origins` can whitelist a stable ID.
     // Chrome Web Store ignores this when signing the published extension, so

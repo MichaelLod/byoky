@@ -1,6 +1,8 @@
 # Store listing copy
 
-Listing text for the local-only Byoky ("the MetaMask for API keys"). Store consoles don't read this file. Paste each block into the matching field. Character counts are noted where the store enforces a limit.
+Listing text for the local-only Byoky. Store consoles don't read this file. Paste each block into the matching field. Character counts are noted where the store enforces a limit.
+
+**Never name another brand in store text, the extension manifest or store release notes** ("MetaMask" above all). Mozilla disabled the Firefox add-on within a minute of its listing calling Byoky "the MetaMask for API keys" (2026-10-24). Stores block crypto-wallet impersonation automatically, and Google Play can strike the whole developer account. The tagline is fine on byoky.com and GitHub.
 
 ---
 
@@ -9,7 +11,7 @@ Listing text for the local-only Byoky ("the MetaMask for API keys"). Store conso
 Use it as-is for the Chrome Web Store and Firefox Add-ons. The App Store and Google Play versions below swap in the mobile-specific bullets.
 
 ```
-Byoky is the MetaMask for API keys.
+Byoky is a wallet for your AI API keys.
 
 Stop pasting API keys into every app. Byoky keeps your OpenAI, Anthropic, Gemini and other AI keys in one encrypted wallet. Apps connect to the wallet, you approve, and Byoky makes the API calls for them. The app never sees your key.
 
@@ -45,7 +47,7 @@ Add "Connect with Byoky" to your app in two lines with @byoky/sdk and keep using
 **Summary** (≤132 chars):
 
 ```
-The MetaMask for API keys. Keep your AI keys in one encrypted wallet. Apps connect to it and never see the key.
+Keep your AI API keys in one encrypted wallet. Apps connect to it and never see the key. No account, no cloud, open source.
 ```
 
 **Description:** the shared long description above.
@@ -67,7 +69,7 @@ The MetaMask for API keys. Keep your AI keys in one encrypted wallet. Apps conne
 **Summary** (≤250 chars):
 
 ```
-The MetaMask for API keys. Keep every AI API key in one encrypted wallet in your browser. Apps connect to it, you approve, and Byoky makes the calls. Your keys never leave the extension. No account, no cloud, open source.
+Keep every AI API key in one encrypted wallet in your browser. Apps connect to it, you approve, and Byoky makes the calls. Your keys never leave the extension. No account, no cloud, open source.
 ```
 
 **Description:** the shared long description above.
@@ -76,7 +78,7 @@ The MetaMask for API keys. Keep every AI API key in one encrypted wallet in your
 
 ## Apple App Store (iOS)
 
-**Subtitle** (≤30 chars; shared with the Mac app). Apple often rejects other brands' names in the name or subtitle (guideline 2.3.7), so the MetaMask line stays in the description:
+**Subtitle** (≤30 chars; shared with the Mac app):
 
 ```
 Wallet for your AI API keys
@@ -91,7 +93,7 @@ Keep every AI API key in one encrypted wallet. Apps connect to it, and your keys
 **Description:**
 
 ```
-Byoky is the MetaMask for API keys.
+Byoky is a wallet for your AI API keys.
 
 Keep your OpenAI, Anthropic, Gemini and other AI keys in one encrypted wallet on your iPhone or iPad. Apps connect to the wallet, you approve, and Byoky makes the API calls for them. The app never sees your key.
 
@@ -140,7 +142,7 @@ Keep every AI API key in one encrypted wallet in Safari. Websites connect to it,
 **Description:**
 
 ```
-Byoky is the MetaMask for API keys, in Safari on your Mac.
+Byoky is a wallet for your AI API keys, in Safari on your Mac.
 
 Stop pasting API keys into every app. Byoky keeps your OpenAI, Anthropic, Gemini and other AI keys in one encrypted wallet. Websites connect to the wallet, you approve, and Byoky makes the API calls for them. The site never sees your key.
 
@@ -177,13 +179,13 @@ Byoky: AI API Key Wallet
 **Short description** (≤80 chars):
 
 ```
-The MetaMask for API keys. Apps connect, and your keys never leave your phone.
+One encrypted wallet for your AI API keys. Apps never see the keys.
 ```
 
 **Full description:**
 
 ```
-Byoky is the MetaMask for API keys.
+Byoky is a wallet for your AI API keys.
 
 Keep your OpenAI, Anthropic, Gemini and other AI keys in one encrypted wallet on your phone. Apps connect to the wallet, you approve, and Byoky makes the API calls for them. The app never sees your key.
 
@@ -216,7 +218,7 @@ Permissions: re-check the declarations against the final manifest. If the camera
 Keep these short. The App Store and Play limits are generous, but users skim.
 
 ```
-Byoky is now fully local: the MetaMask for API keys.
+Byoky is now fully local.
 • Your keys live only on your device. No account, no cloud, no relay.
 • New: move keys between devices with encrypted .byoky backup files.
 • Removed: cloud sync, gifts, the token pool, phone pairing and the in-app app store. On mobile, open any web app by its address instead.
