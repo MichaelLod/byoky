@@ -117,11 +117,14 @@ async function main() {
     console.log(`  Release notes set (${notes.length} chars)`)
   }
 
-  // 4. Find the latest processed build for this platform
+  // 4. Find the latest processed build of this version for this platform.
+  // Without the version filter a build still processing would lose to the
+  // previous version's build, which App Store Connect refuses to attach.
   console.log(`  Looking for ${label} build...`)
   const buildsData = await api(
     `/builds?filter[app]=${appId}&filter[processingState]=VALID` +
     `&filter[preReleaseVersion.platform]=${platform}` +
+    `&filter[preReleaseVersion.version]=${version}` +
     `&sort=-uploadedDate&limit=1&fields[builds]=version,uploadedDate,processingState`
   )
   const build = buildsData.data?.[0]
@@ -153,10 +156,14 @@ async function main() {
     })
     console.log(`  Submitted for review`)
   } catch (e) {
-    // App Store Connect v1 submission endpoint may be deprecated in favor of v2
-    // Try the newer reviewSubmissions endpoint
+    // App Store Connect v1 submission endpoint may be deprecated in favor of v2.
+    // The newer flow is: open a review submission, add the version to it as an
+    // item, then mark the submission as submitted.
     try {
-      await api('/reviewSubmissions', {
+      const open = await api(
+        `/reviewSubmissions?filter[app]=${appId}&filter[platform]=${platform}&filter[state]=READY_FOR_REVIEW&limit=1`
+      )
+      const submission = open.data?.[0] ?? (await api('/reviewSubmissions', {
         method: 'POST',
         body: JSON.stringify({
           data: {
@@ -164,6 +171,24 @@ async function main() {
             attributes: { platform },
             relationships: { app: { data: { type: 'apps', id: appId } } },
           },
+        }),
+      })).data
+      await api('/reviewSubmissionItems', {
+        method: 'POST',
+        body: JSON.stringify({
+          data: {
+            type: 'reviewSubmissionItems',
+            relationships: {
+              reviewSubmission: { data: { type: 'reviewSubmissions', id: submission.id } },
+              appStoreVersion: { data: { type: 'appStoreVersions', id: ver.id } },
+            },
+          },
+        }),
+      })
+      await api(`/reviewSubmissions/${submission.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          data: { type: 'reviewSubmissions', id: submission.id, attributes: { submitted: true } },
         }),
       })
       console.log(`  Submitted for review (v2 API)`)
