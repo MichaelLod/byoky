@@ -118,8 +118,10 @@ test.describe('OpenClaw + byoky extension + bridge full flow', () => {
     });
 
     // Install @byoky/openclaw-plugin into the isolated openclaw config.
-    // --force makes the step idempotent across reruns.
-    execSync('openclaw plugins install @byoky/openclaw-plugin --force', {
+    // --force makes the step idempotent across reruns. Set
+    // BYOKY_OPENCLAW_PLUGIN to a packed tarball to test an unreleased build.
+    const pluginSpec = process.env.BYOKY_OPENCLAW_PLUGIN ?? '@byoky/openclaw-plugin';
+    execSync(`openclaw plugins install ${JSON.stringify(pluginSpec)} --force`, {
       env: openclawEnv(),
       stdio: 'inherit',
     });
@@ -184,7 +186,7 @@ test.describe('OpenClaw + byoky extension + bridge full flow', () => {
           });
           if (!res.ok) continue;
           const html = await res.text();
-          if (html.includes('Byoky') && html.includes('BYOKY_CONNECT_REQUEST')) {
+          if (html.includes('Byoky') && html.includes('/auth-sdk.js')) {
             authUrl = `http://127.0.0.1:${p}`;
             break;
           }
@@ -199,13 +201,16 @@ test.describe('OpenClaw + byoky extension + bridge full flow', () => {
     }
     process.stdout.write(`[diag] found plugin auth url: ${authUrl}\n`);
 
-    // Drive Playwright to the plugin's auth page. The page's inline script
-    // postMessages BYOKY_CONNECT_REQUEST — the extension content script
-    // relays it to the background, which pops "wants to connect" UI.
+    // Drive Playwright to the plugin's auth page. Its bundled SDK
+    // (/auth-sdk.js) postMessages BYOKY_CONNECT_REQUEST — the extension
+    // content script relays it to the background, which pops "wants to
+    // connect" UI.
     wallet.page.on('console', (msg) => process.stdout.write(`[auth page console] ${msg.type()}: ${msg.text()}\n`));
     wallet.page.on('pageerror', (err) => process.stderr.write(`[auth page err] ${err.message}\n`));
     await wallet.page.goto(authUrl);
     await wallet.page.waitForLoadState('domcontentloaded');
+    // The page starts the connect flow when the user clicks Connect.
+    await wallet.page.click('#connect-btn');
     // Give the extension content script + background a beat to process
     await new Promise((r) => setTimeout(r, 2000));
 

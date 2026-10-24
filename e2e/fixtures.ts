@@ -165,8 +165,12 @@ async function launchWallet(label: string, port: number): Promise<Wallet> {
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), `byoky-e2e-${label}-`));
   installBridgeManifest(userDataDir, EXPECTED_EXTENSION_ID);
 
+  // BYOKY_E2E_HEADLESS=1 uses Chromium's new headless mode, which still loads
+  // extensions, for machines without a usable display (locked, lid closed).
+  const headless = process.env.BYOKY_E2E_HEADLESS === '1';
   const ctx = await chromium.launchPersistentContext(userDataDir, {
-    headless: false,
+    headless,
+    ...(headless ? { channel: 'chromium' } : {}),
     args: [
       `--disable-extensions-except=${EXTENSION_PATH}`,
       `--load-extension=${EXTENSION_PATH}`,

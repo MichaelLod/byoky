@@ -109,7 +109,9 @@ async function clickDemoConnectWallet(w: Wallet) {
 async function selectProvider(w: Wallet, selector: string, providerId: string) {
   // Playground tabs use a named <select class="demo-provider-select"> for all
   // tabs except Chat, which uses `.provider-select select`. Pass the full CSS.
-  await w.page.locator(selector).selectOption(providerId);
+  // Each tab follows the provider select with a model select of the same
+  // class, so the provider is the first match.
+  await w.page.locator(selector).first().selectOption(providerId);
 }
 
 test.describe.configure({ mode: 'serial' });
