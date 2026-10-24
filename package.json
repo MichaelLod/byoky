@@ -1,6 +1,6 @@
 {
   "name": "byoky",
-  "version": "0.9.13",
+  "version": "1.1.0",
   "private": true,
   "packageManager": "pnpm@9.15.9",
   "description": "Byoky — the MetaMask for API keys. Keep your AI API keys in one local wallet; apps connect to it and never see the key.",
