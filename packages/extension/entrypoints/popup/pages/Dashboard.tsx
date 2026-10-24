@@ -104,6 +104,9 @@ function CredentialCard({ cred, usage, onOpenStats, onRemove }: CredentialCardPr
   const provider = PROVIDERS[cred.providerId];
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(cred.label);
+  // Removing a key asks first, inline: popups can't rely on window.confirm
+  // (Firefox doesn't show dialogs from extension popups).
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -198,12 +201,28 @@ function CredentialCard({ cred, usage, onOpenStats, onRemove }: CredentialCardPr
           </button>
           <button
             className="btn btn-danger btn-sm"
-            onClick={onRemove}
+            onClick={() => setConfirmingRemove(true)}
           >
             Remove
           </button>
         </div>
       </div>
+      {confirmingRemove && (
+        <div className="card-subtitle" style={{ marginTop: '8px' }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ marginBottom: '6px' }}>
+            Remove {cred.label}? Apps using this key lose access to it. This can't be undone unless you
+            have a backup that includes it.
+          </div>
+          <div style={{ display: 'flex', gap: '6px' }}>
+            <button className="btn btn-secondary btn-sm" onClick={() => setConfirmingRemove(false)}>
+              Cancel
+            </button>
+            <button className="btn btn-danger btn-sm" onClick={onRemove}>
+              Remove
+            </button>
+          </div>
+        </div>
+      )}
       <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
         <span className="badge badge-provider">
           {provider?.name ?? cred.providerId}
