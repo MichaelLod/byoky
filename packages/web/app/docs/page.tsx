@@ -1395,7 +1395,7 @@ function Bridge() {
 
       <h3>Setup</h3>
       <Code lang="bash">{`npm install -g @byoky/bridge
-byoky-bridge install   # register native messaging host`}</Code>
+byoky-bridge install   # register native messaging host (macOS, Linux)`}</Code>
 
       <h3>Usage</h3>
       <p>
@@ -1403,6 +1403,14 @@ byoky-bridge install   # register native messaging host`}</Code>
         (like OpenClaw) make HTTP requests to <code>http://127.0.0.1:19280/&#123;provider&#125;/</code>,
         which the bridge forwards to the extension.
       </p>
+      <p>
+        Every request must carry the bridge token, so other programs on the machine can&apos;t
+        spend the user&apos;s keys. <code>byoky-bridge token</code> prints it; send it wherever
+        your client puts an API key (<code>x-api-key</code>, <code>Authorization: Bearer</code>,{' '}
+        <code>x-goog-api-key</code> or <code>api-key</code>). Without it the bridge answers 401.
+      </p>
+      <Code lang="bash">{`export ANTHROPIC_BASE_URL=http://127.0.0.1:19280/anthropic
+export ANTHROPIC_API_KEY=$(byoky-bridge token)`}</Code>
     </Section>
   );
 }

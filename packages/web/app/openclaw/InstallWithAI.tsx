@@ -16,20 +16,21 @@ Your job — run these commands on my machine and report each step:
 
 2. Authenticate OpenClaw against Byoky. The default \`byoky\` meta-provider connects every provider I already have in the wallet (Anthropic, OpenAI, Gemini, etc.) in one shot:
      openclaw models auth login --provider byoky
-   On first run, OpenClaw will ask to register the native messaging host — accept (press Enter). Then it opens my browser so the wallet can approve the connection. Wait for me to confirm I approved it.
+   On first run, OpenClaw will ask to register the native messaging host — accept (press Enter). Then it opens my browser so the wallet can approve the connection. Wait for me to confirm I approved it. The plugin configures OpenClaw with the bridge token (a random secret in ~/.byoky-bridge/token that the bridge requires on every request) by itself — never print the token or paste it into this chat.
    If I'd rather connect only one specific provider, substitute e.g. \`--provider byoky-anthropic\` (other ids: byoky-openai, byoky-gemini, byoky-xai, byoky-deepseek, byoky-mistral, byoky-groq, byoky-cohere, byoky-perplexity, byoky-together, byoky-fireworks, byoky-openrouter, byoky-azure_openai).
 
 3. Set the OpenClaw agent's default model to a byoky one. The onboarding wizard picks \`openai/gpt-5.4\` (the direct \`openai\` plugin, which has no key) — that causes "No API key found for provider openai" errors on every run. Ask me which provider I want as the default, then run:
      openclaw models set byoky-anthropic/claude-sonnet-4-6
    (or byoky-openai/gpt-4.1, byoky-gemini/gemini-2.5-pro — \`openclaw models list --all\` shows every option.)
 
-4. Verify the bridge is up and lists the connected providers:
-     curl http://127.0.0.1:19280/health
+4. Verify the bridge is up and lists the connected providers (the token is passed via substitution, not pasted):
+     curl -H "x-api-key: $(byoky-bridge token)" http://127.0.0.1:19280/health
    Expected: {"status":"ok","providers":[...]}
 
 5. Inside OpenClaw I can run /byoky anytime to see bridge status and connected providers.
 
 Troubleshooting cheatsheet (only mention if the relevant error shows up):
+- HTTP 401 "Missing or invalid bridge token" → OpenClaw has an old placeholder instead of the bridge token. Re-run \`openclaw models auth login --provider byoky\`.
 - "invalid x-api-key" or "Invalid bearer token" → the key in the wallet is bad/expired. Ask me to swap it.
 - "rate_limit_error" on Anthropic → my Anthropic key or subscription is being throttled upstream; wait, or switch to another byoky provider.
 - "provider not available in this session" after I added a wallet key → re-run \`openclaw models auth login --provider byoky\`.

@@ -59,8 +59,9 @@ export default function ClaudeCodeTutorial() {
           </div>
           <p className="oc-note oc-note-muted">
             The iOS and Android wallets can&apos;t host Claude Code — the{' '}
-            <code>claude</code> CLI and the Byoky Bridge need a desktop OS and
-            the browser extension. The mobile wallets serve web apps on the
+            <code>claude</code> CLI and the Byoky Bridge need a desktop OS (macOS
+            or Linux; the bridge doesn&apos;t support Windows yet) and the
+            browser extension. The mobile wallets serve web apps on the
             phone itself.
           </p>
         </Step>
@@ -118,7 +119,7 @@ byoky-bridge install`}</Code>
           </p>
           <p>Verify it:</p>
           <Code>
-            {`curl http://127.0.0.1:19280/health
+            {`curl -H "x-api-key: $(byoky-bridge token)" http://127.0.0.1:19280/health
 # → {"status":"ok","providers":["anthropic",...]}`}
           </Code>
           <p className="oc-note oc-note-muted">
@@ -133,16 +134,19 @@ byoky-bridge install`}</Code>
           subtitle="Two env vars and you're done."
         >
           <Code>{`export ANTHROPIC_BASE_URL=http://127.0.0.1:19280/anthropic
-export ANTHROPIC_API_KEY=byoky
+export ANTHROPIC_API_KEY=$(byoky-bridge token)
 claude`}</Code>
           <p>
             Add the two <code>export</code> lines to <code>~/.zshrc</code> or{' '}
             <code>~/.bashrc</code> so new terminals pick them up. Use{' '}
             <code>ANTHROPIC_API_KEY</code> (not <code>AUTH_TOKEN</code>) — it&apos;s
             what Claude Code&apos;s first-run wizard checks to skip the OAuth
-            login prompt. The value doesn&apos;t matter; the bridge strips the
-            auth header and injects the real credential from your wallet. Token
-            usage shows up in the wallet&apos;s <strong>Sessions</strong> view.
+            login prompt. The key is the bridge token, a random secret stored
+            in <code>~/.byoky-bridge/token</code>: the bridge refuses requests
+            without it, so other programs on your machine can&apos;t spend your
+            keys. It then strips the header and the wallet injects the real
+            credential. Token usage shows up in the wallet&apos;s{' '}
+            <strong>Sessions</strong> view.
           </p>
           <p className="oc-note oc-note-muted">
             <strong>Fresh Claude Code install?</strong> The wizard may still
@@ -287,6 +291,14 @@ function Troubleshooting() {
       </>,
     ],
     [
+      'HTTP 401 "Missing or invalid bridge token"',
+      <>
+        <code>ANTHROPIC_API_KEY</code> isn&apos;t the bridge token in this
+        shell. Run{' '}
+        <code>export ANTHROPIC_API_KEY=$(byoky-bridge token)</code> and retry.
+      </>,
+    ],
+    [
       '"invalid x-api-key" or "Invalid bearer token"',
       <>
         The key stored in your wallet is wrong or revoked. Grab a fresh one
@@ -332,11 +344,10 @@ function Troubleshooting() {
     [
       'The bridge works but Chrome won’t talk to it on my unpacked build',
       <>
-        Bridge 0.9.2+ whitelists both the Web Store extension ID and the
-        pinned unpacked ID (0.9.1 shipped with the wrong unpacked ID).
-        Upgrade with{' '}
-        <code>npm i -g @byoky/bridge@latest &amp;&amp; byoky-bridge install</code>,
-        restart the browser, and reload the unpacked extension.
+        <code>byoky-bridge install</code> only lets the Web Store extension
+        launch the bridge. For the unpacked build, run{' '}
+        <code>byoky-bridge install --dev</code>, restart the browser, and
+        reload the unpacked extension.
       </>,
     ],
   ];
@@ -380,9 +391,9 @@ function HowItWorks() {
           <code>http://127.0.0.1:19280/anthropic</code>.
         </li>
         <li>
-          The bridge strips the placeholder <code>Authorization</code> header
-          and forwards the request to your Byoky extension via native
-          messaging.
+          The bridge checks the bridge token in <code>x-api-key</code>,
+          strips it, and forwards the request to your Byoky extension via
+          native messaging.
         </li>
         <li>
           The extension injects the real Anthropic credential (your own API

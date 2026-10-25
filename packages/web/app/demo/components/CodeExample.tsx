@@ -316,8 +316,10 @@ byoky-bridge install
 #
 # Keys NEVER leave the browser extension.
 #
+# Every request carries the bridge token as its API key.
 # Example with curl:
 curl http://127.0.0.1:19280/anthropic/v1/messages \\
+  -H "x-api-key: $(byoky-bridge token)" \\
   -H "content-type: application/json" \\
   -H "anthropic-version: 2023-06-01" \\
   -d '{

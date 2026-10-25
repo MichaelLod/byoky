@@ -105,7 +105,9 @@ export default function OpenClawTutorial() {
             (press <strong>Enter</strong> to accept), then opens your browser
             so the wallet can approve the connection. Every provider you have
             in the wallet — Anthropic, OpenAI, Gemini, whatever — gets
-            configured in one shot.
+            configured in one shot. The plugin also hands OpenClaw the bridge
+            token from <code>~/.byoky-bridge/token</code>, which the bridge
+            requires on every request, so there&apos;s no key to paste.
           </p>
           <p className="oc-note">
             Want just one provider? Use{' '}
@@ -115,7 +117,7 @@ export default function OpenClawTutorial() {
           </p>
           <p>Verify the bridge:</p>
           <Code>
-            {`curl http://127.0.0.1:19280/health
+            {`curl -H "x-api-key: $(byoky-bridge token)" http://127.0.0.1:19280/health
 # → {"status":"ok","providers":["anthropic","openai",...]}`}
           </Code>
           <p className="oc-note oc-note-muted">
@@ -289,6 +291,14 @@ function Troubleshooting() {
       </>,
     ],
     [
+      'HTTP 401 "Missing or invalid bridge token"',
+      <>
+        OpenClaw&apos;s byoky providers don&apos;t carry the current bridge
+        token (setups from older plugin versions sent a placeholder). Re-run{' '}
+        <code>openclaw models auth login --provider byoky</code> to write it.
+      </>,
+    ],
+    [
       '"No API key found for provider \\"openai\\""',
       <>
         OpenClaw is still pointing at the direct <code>openai</code> plugin's
@@ -403,8 +413,8 @@ function HowItWorks() {
       </Code>
       <ol className="oc-list">
         <li>The plugin registers each Byoky provider in OpenClaw, pointing at <code>http://127.0.0.1:19280/&lt;provider&gt;</code>.</li>
-        <li>OpenClaw sends an LLM request to the local bridge.</li>
-        <li>The bridge relays the request to your Byoky extension via native messaging.</li>
+        <li>OpenClaw sends an LLM request to the local bridge, with the bridge token as its API key.</li>
+        <li>The bridge checks the token and relays the request to your Byoky extension via native messaging.</li>
         <li>The extension injects the real API key and calls the provider directly.</li>
         <li>The response streams back through the same path.</li>
       </ol>

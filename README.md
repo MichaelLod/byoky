@@ -147,6 +147,11 @@ CLI app → HTTP → Bridge (localhost) → Native Messaging → Extension → L
 ```bash
 npm install -g @byoky/bridge
 byoky-bridge install   # register native messaging host
+byoky-bridge connect   # approve a session, start the proxy on 127.0.0.1:19280
+
+# Clients send the bridge token as their API key:
+export ANTHROPIC_BASE_URL=http://127.0.0.1:19280/anthropic
+export ANTHROPIC_API_KEY=$(byoky-bridge token)
 ```
 
 ### OpenClaw Integration

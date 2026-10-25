@@ -60,8 +60,9 @@ export default function HermesAgentTutorial() {
           </div>
           <p className="oc-note oc-note-muted">
             The iOS and Android wallets can&apos;t host Hermes — the{' '}
-            <code>hermes</code> CLI and the Byoky Bridge need a desktop OS and
-            the browser extension. The mobile wallets serve web apps on the
+            <code>hermes</code> CLI and the Byoky Bridge need a desktop OS (macOS
+            or Linux; the bridge doesn&apos;t support Windows yet) and the
+            browser extension. The mobile wallets serve web apps on the
             phone itself.
           </p>
         </Step>
@@ -133,7 +134,7 @@ byoky-bridge install`}</Code>
           </p>
           <p>Verify it:</p>
           <Code>
-            {`curl http://127.0.0.1:19280/health
+            {`curl -H "x-api-key: $(byoky-bridge token)" http://127.0.0.1:19280/health
 # → {"status":"ok","providers":["anthropic",...]}`}
           </Code>
           <p className="oc-note oc-note-muted">
@@ -151,7 +152,9 @@ byoky-bridge install`}</Code>
           <p>
             That writes a <code>byoky-anthropic</code> entry into{' '}
             <code>custom_providers</code> with{' '}
-            <code>api_mode: anthropic_messages</code>, flips{' '}
+            <code>api_mode: anthropic_messages</code> and the bridge token
+            (from <code>byoky-bridge token</code>) as its <code>api_key</code>,
+            flips{' '}
             <code>model.provider</code> to <code>byoky-anthropic</code>, and
             backs up the original to <code>config.yaml.bak</code>. Re-running
             is a no-op if the file is already configured.
@@ -173,7 +176,7 @@ model:
 custom_providers:
 - name: byoky-anthropic
   base_url: http://127.0.0.1:19280/anthropic
-  api_key: ''
+  api_key: '<output of byoky-bridge token>'
   api_mode: anthropic_messages`}</Code>
           </details>
           <p>
@@ -197,8 +200,9 @@ custom_providers:
             The migrator already drops a <code>byoky-anthropic</code> entry
             in <code>custom_providers</code>, but with{' '}
             <code>api_mode: chat_completions</code> — which yields a 404 from
-            the bridge. Change it to{' '}
-            <code>api_mode: anthropic_messages</code> and you&apos;re done.
+            the bridge. Run <code>byoky-bridge hermes-setup</code> to switch
+            it to <code>api_mode: anthropic_messages</code> and write the
+            bridge token as its <code>api_key</code>.
           </p>
           <p className="oc-note oc-note-muted">
             Pro tip: Hermes ships a 36KB system prompt (its “SOUL.md”). Byoky
@@ -406,6 +410,15 @@ function Troubleshooting() {
       </>,
     ],
     [
+      'HTTP 401 "Missing or invalid bridge token"',
+      <>
+        The <code>api_key</code> of the <code>byoky-anthropic</code> entry
+        isn&apos;t the current bridge token (older setups wrote{' '}
+        <code>api_key: &apos;&apos;</code>). Re-run{' '}
+        <code>byoky-bridge hermes-setup</code> to write it.
+      </>,
+    ],
+    [
       '"invalid x-api-key" or "Invalid bearer token"',
       <>
         The key stored in your wallet is wrong or revoked. Grab a fresh one
@@ -477,9 +490,9 @@ function HowItWorks() {
           <code>api.anthropic.com</code>.
         </li>
         <li>
-          The bridge receives the request on :19280, strips the placeholder
-          auth header, and forwards the body to your Byoky extension via
-          native messaging.
+          The bridge receives the request on :19280, checks the bridge token
+          Hermes sends as its API key, strips it, and forwards the body to
+          your Byoky extension via native messaging.
         </li>
         <li>
           The extension injects the real Anthropic credential (your own API
