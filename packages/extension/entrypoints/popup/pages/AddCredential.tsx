@@ -22,6 +22,15 @@ const LOCAL_PROVIDER_DEFAULT_BASE_URL: Record<string, string> = {
   lm_studio: 'http://localhost:1234',
 };
 
+// Keys must never reach a spellchecker (Chrome's enhanced spell check sends
+// text to Google) or an autocorrect dictionary.
+const SECRET_INPUT_PROPS = {
+  spellCheck: false,
+  autoComplete: 'off',
+  autoCorrect: 'off',
+  autoCapitalize: 'off',
+} as const;
+
 export function AddCredential() {
   const { addApiKey, addSetupToken, closeModal, error, loading, clearError } = useWalletStore();
   const [providerId, setProviderId] = useState('anthropic');
@@ -213,6 +222,7 @@ export function AddCredential() {
               id="apiKey"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
+              {...SECRET_INPUT_PROPS}
               placeholder={
                 providerId === 'anthropic' ? 'sk-ant-api03-...'
                 : providerId === 'openai' ? 'sk-...'
@@ -242,6 +252,7 @@ export function AddCredential() {
               id="apiKey"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
+              {...SECRET_INPUT_PROPS}
               placeholder="sk-ant-oat01-..."
               rows={3}
             />
