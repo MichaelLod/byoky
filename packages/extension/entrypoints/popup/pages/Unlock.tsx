@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { useWalletStore } from '../store';
+import { Raven } from '../components/Raven';
 
 export function Unlock() {
   const { unlock, resetWallet, error } = useWalletStore();
@@ -15,10 +16,10 @@ export function Unlock() {
   return (
     <div className="center-page">
       <div className="brand-mark">
-        <img src="/icon.svg" alt="" />
+        <Raven state="watching" size={showReset ? 150 : 220} />
       </div>
-      <div className="logo-large">Byoky</div>
-      <div className="tagline">Welcome back</div>
+      <div className="status-line">Wallet locked</div>
+      <h2 className="lock-title">Welcome back</h2>
 
       {!showReset ? (
         <>
@@ -44,34 +45,31 @@ export function Unlock() {
 
           <button
             type="button"
-            className="btn-link"
-            style={{ marginTop: 16, color: 'var(--text-muted)', fontSize: 13 }}
+            className="btn-link quiet-link"
             onClick={() => setShowReset(true)}
           >
             Forgot password?
           </button>
         </>
       ) : (
-        <div style={{ textAlign: 'center', padding: '0 8px' }}>
-          <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)', marginBottom: 8 }}>
+        <div className="center-body">
+          <div className="dialog-title danger">
             Reset Wallet?
           </div>
-          <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 20, lineHeight: 1.5 }}>
+          <div className="dialog-text">
             This will permanently delete all API keys, sessions, and settings. This cannot be undone.
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div className="dialog-actions">
             <button
               type="button"
               className="btn"
-              style={{ flex: 1 }}
               onClick={() => setShowReset(false)}
             >
               Cancel
             </button>
             <button
               type="button"
-              className="btn"
-              style={{ flex: 1, background: 'var(--danger)', color: '#fff' }}
+              className="btn btn-danger"
               onClick={() => resetWallet()}
             >
               Reset
@@ -79,6 +77,11 @@ export function Unlock() {
           </div>
         </div>
       )}
+
+      <div className="lock-footer">
+        <span>Keys stay on this device</span>
+        <span>AES-256-GCM</span>
+      </div>
     </div>
   );
 }

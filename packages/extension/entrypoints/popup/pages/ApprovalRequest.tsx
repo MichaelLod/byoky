@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useWalletStore } from '../store';
 import { PROVIDERS } from '@byoky/core';
+import { Raven } from '../components/Raven';
 
 function formatHostname(origin: string): string {
   try {
@@ -36,13 +37,16 @@ export function ApprovalRequest() {
       : credentials.map((c) => ({ id: c.providerId, required: false }));
 
   return (
-    <div>
-      <h2 className="page-title">Connection Request</h2>
+    <div className="approval-page">
+      <div className="approval-hero">
+        <Raven state="alert" view="bust" size={104} />
+        <div>
+          <div className="status-line">Incoming connection</div>
+          <h2 className="page-title">Connection Request</h2>
+        </div>
+      </div>
 
       <div className="approval-card">
-        <div className="approval-icon">
-          {hostname.charAt(0).toUpperCase()}
-        </div>
         <div className="approval-origin">{hostname}</div>
         <div className="approval-subtitle">wants to connect to your wallet</div>
       </div>
@@ -55,15 +59,11 @@ export function ApprovalRequest() {
             const hasCred = credentials.some((c) => c.providerId === p.id);
             return (
               <div key={p.id} className="approval-provider-row">
-                <span className="badge badge-provider">
-                  {provider?.name ?? p.id}
+                <span>{provider?.name ?? p.id}</span>
+                <span className={`result-tag ${hasCred ? 'ready' : 'missing'}${p.required ? ' required' : ''}`}>
+                  {hasCred ? 'Key ready' : 'No key'}
+                  {p.required && ' · required'}
                 </span>
-                {!hasCred && (
-                  <span className="approval-no-cred">no key added</span>
-                )}
-                {p.required && hasCred && (
-                  <span className="approval-required">required</span>
-                )}
               </div>
             );
           })}

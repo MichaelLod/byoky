@@ -14,38 +14,39 @@ export function RequestHistory() {
           <p>Requests made through byoky will appear here.</p>
         </div>
       ) : (
-        requestLog.map((entry) => {
-          const provider = PROVIDERS[entry.providerId];
-          const isError = entry.status >= 400;
-          const isRateLimit = entry.status === 429;
+        <div className="log-block">
+          {requestLog.map((entry) => {
+            const provider = PROVIDERS[entry.providerId];
+            const isError = entry.status >= 400;
+            const isRateLimit = entry.status === 429;
+            const statusClass = isError ? (isRateLimit ? 'rate-limited' : 'failed') : '';
 
-          return (
-            <div key={entry.id} className="log-entry">
-              <div
-                style={{ width: 6, height: 6, minWidth: 6, borderRadius: '50%', marginTop: 7, marginRight: 8, background: isError ? (isRateLimit ? 'var(--warning)' : 'var(--danger)') : 'var(--success)' }}
-              />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ fontWeight: 500, fontSize: '13px' }}>
-                    {entry.method} {provider?.name ?? entry.providerId}
-                  </span>
-                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                    {entry.status}
-                  </span>
-                </div>
-                <div className="log-meta">
-                  {entry.appOrigin} &middot;{' '}
-                  {new Date(entry.timestamp).toLocaleTimeString()}
-                </div>
-                {entry.error && (
-                  <div style={{ color: 'var(--danger)', fontSize: '12px', marginTop: '2px' }}>
-                    {entry.error}
+            return (
+              <div key={entry.id} className="log-entry">
+                <div className={`log-dot ${statusClass}`} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+                    <span style={{ color: 'var(--text)' }}>
+                      {entry.method} {provider?.name ?? entry.providerId}
+                    </span>
+                    <span className={`log-status ${statusClass}`}>
+                      {entry.status}
+                    </span>
                   </div>
-                )}
+                  <div className="log-meta">
+                    {entry.appOrigin} &middot;{' '}
+                    {new Date(entry.timestamp).toLocaleTimeString()}
+                  </div>
+                  {entry.error && (
+                    <div className="log-error">
+                      {entry.error}
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          );
-        })
+            );
+          })}
+        </div>
       )}
     </div>
   );

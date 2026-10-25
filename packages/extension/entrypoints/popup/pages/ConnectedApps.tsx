@@ -126,8 +126,8 @@ export function ConnectedApps() {
         <h2 className="page-title" style={{ marginBottom: 0 }}>Connected Apps</h2>
         {sessions.length > 1 && (
           <button
-            className="text-link"
-            style={{ color: 'var(--danger)', fontSize: '12px' }}
+            className="text-link bracket-link"
+            style={{ color: 'var(--danger)', fontSize: '11px' }}
             onClick={() => sessions.forEach((s) => revokeSession(s.id))}
           >
             Disconnect all
@@ -214,14 +214,6 @@ export function ConnectedApps() {
           <div
             key={group.id}
             className={`group-section${isDropTarget ? ' group-section--drop' : ''}`}
-            style={{
-              border: isDropTarget ? '2px dashed var(--accent)' : '1px solid var(--border)',
-              borderRadius: '8px',
-              padding: '10px',
-              marginBottom: '12px',
-              background: isDropTarget ? 'var(--accent-faint, rgba(99,102,241,0.06))' : 'transparent',
-              transition: 'background 0.1s, border-color 0.1s',
-            }}
             onDragOver={(e) => {
               if (e.dataTransfer.types.includes(DRAG_MIME)) {
                 e.preventDefault();
@@ -241,8 +233,8 @@ export function ConnectedApps() {
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
               <div style={{ minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <strong style={{ fontSize: '13px' }}>{group.name}</strong>
+                <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px' }}>
+                  <strong className="group-name">{group.name}</strong>
                   {group.providerId && <span className="badge badge-provider">{provider?.name ?? group.providerId}</span>}
                   {group.model && <span className="badge">{group.model}</span>}
                 </div>
@@ -258,12 +250,12 @@ export function ConnectedApps() {
                   resets it), so it has nothing to edit or delete. */}
               {!isDefault && (
                 <div style={{ display: 'flex', gap: '6px' }}>
-                  <button className="text-link" style={{ fontSize: '12px' }} onClick={() => setEditingGroupId(editingGroupId === group.id ? null : group.id)}>
+                  <button className="text-link bracket-link" style={{ fontSize: '11px' }} onClick={() => setEditingGroupId(editingGroupId === group.id ? null : group.id)}>
                     Edit
                   </button>
                   <button
-                    className="text-link"
-                    style={{ fontSize: '12px', color: 'var(--danger)' }}
+                    className="text-link bracket-link"
+                    style={{ fontSize: '11px', color: 'var(--danger)' }}
                     onClick={() => {
                       if (confirm(`Delete group "${group.name}"? Apps in this group will move back to Default.`)) {
                         deleteGroup(group.id);
@@ -289,7 +281,7 @@ export function ConnectedApps() {
             )}
 
             {groupSessions.length === 0 ? (
-              <div className="card-subtitle" style={{ padding: '8px 4px', fontStyle: 'italic' }}>
+              <div className="card-subtitle mono" style={{ padding: '8px 4px' }}>
                 {isDropTarget ? 'Drop to assign' : 'Drag an app here to assign it to this group'}
               </div>
             ) : (
@@ -321,7 +313,7 @@ export function ConnectedApps() {
                           <span className="card-title" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {formatOrigin(session.appOrigin)}
                           </span>
-                          <div className="card-subtitle">
+                          <div className="card-subtitle mono">
                             Connected {timeAgo(session.createdAt)}
                           </div>
                         </div>
@@ -408,7 +400,7 @@ export function ConnectedApps() {
 
       {trustedSites.length > 0 && (
         <div style={{ marginTop: sessions.length > 0 ? '24px' : '0' }}>
-          <h3 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+          <h3 className="section-label">
             Trusted Sites
           </h3>
           <p className="card-subtitle" style={{ marginBottom: '12px' }}>
@@ -421,7 +413,7 @@ export function ConnectedApps() {
                   <span className="card-title" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {formatOrigin(site.origin)}
                   </span>
-                  <div className="card-subtitle">
+                  <div className="card-subtitle mono">
                     Trusted {timeAgo(site.trustedAt)}
                   </div>
                 </div>
@@ -530,7 +522,7 @@ function GroupForm({
         // is told up front that this group won't actually work until a
         // credential is added — and is shown how to fix it.
         <div className="form-group group-warning">
-          <div className="group-warning-icon" aria-hidden>⚠️</div>
+          <div className="group-warning-icon" aria-hidden>!</div>
           <div className="group-warning-body">
             <div className="group-warning-title">
               No {PROVIDERS[providerId]?.name ?? providerId} credential

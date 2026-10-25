@@ -110,7 +110,7 @@ export default defineBackground(() => {
     const text = count > 0 ? String(count) : '';
     try {
       browser.action.setBadgeText({ text });
-      browser.action.setBadgeBackgroundColor({ color: '#FF4F00' });
+      browser.action.setBadgeBackgroundColor({ color: '#7C3AED' });
     } catch {
       // Fallback for older APIs
     }

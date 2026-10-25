@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { useWalletStore } from '../store';
 import { checkPasswordStrength, MIN_PASSWORD_LENGTH } from '@byoky/core';
 import { PasswordMeter } from '../components/PasswordMeter';
+import { Raven } from '../components/Raven';
 
 type Step = 'welcome' | 'password' | 'confirm';
 
@@ -57,13 +58,13 @@ export function Setup() {
     return (
       <div className="center-page">
         <div className="brand-mark">
-          <img src="/icon.svg" alt="" />
+          <Raven state="watching" size={210} />
         </div>
-        <div className="logo-large">Byoky</div>
-        <div className="tagline">Your wallet for AI API keys</div>
+        <div className="status-line">New wallet</div>
+        <h2 className="lock-title">Your wallet for AI API keys</h2>
 
-        <div style={{ marginTop: '24px', width: '100%' }}>
-          <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '0 0 20px', lineHeight: 1.5, textAlign: 'center' }}>
+        <div className="center-body">
+          <p className="setup-copy" style={{ textAlign: 'center' }}>
             Apps connect to your wallet and send their AI requests through it.
             Your keys stay encrypted on this device and never leave it.
           </p>
@@ -71,7 +72,6 @@ export function Setup() {
           <button
             type="button"
             className="btn btn-primary"
-            style={{ width: '100%' }}
             onClick={() => goTo('password')}
           >
             Get Started
@@ -85,13 +85,13 @@ export function Setup() {
     return (
       <div className="center-page">
         <div className="brand-mark">
-          <img src="/icon.svg" alt="" />
+          <Raven state="watching" size={120} />
         </div>
-        <div className="logo-large">Byoky</div>
-        <div className="tagline">Confirm your password</div>
+        <div className="status-line">Step 2 of 2</div>
+        <h2 className="lock-title">Confirm your password</h2>
 
-        <form onSubmit={handleConfirmSubmit} style={{ marginTop: '16px' }}>
-          <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '0 0 16px', lineHeight: 1.5 }}>
+        <form onSubmit={handleConfirmSubmit}>
+          <p className="setup-copy">
             Re-enter your password. It encrypts your keys on this device. If you
             lose it, your keys are gone.
           </p>
@@ -114,7 +114,6 @@ export function Setup() {
           <button
             type="submit"
             className="btn btn-primary"
-            style={{ width: '100%' }}
             disabled={loading || confirm.length === 0}
           >
             {loading ? 'Creating...' : 'Create wallet'}
@@ -122,17 +121,7 @@ export function Setup() {
 
           <button
             type="button"
-            className="text-link"
-            style={{
-              display: 'block',
-              width: '100%',
-              marginTop: '12px',
-              fontSize: '12px',
-              color: 'var(--text-muted)',
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-            }}
+            className="quiet-link"
             onClick={() => { setConfirm(''); goTo('password'); }}
           >
             ← Back
@@ -145,13 +134,13 @@ export function Setup() {
   return (
     <div className="center-page">
       <div className="brand-mark">
-        <img src="/icon.svg" alt="" />
+        <Raven state="watching" size={120} />
       </div>
-      <div className="logo-large">Byoky</div>
-      <div className="tagline">Set a password</div>
+      <div className="status-line">Step 1 of 2</div>
+      <h2 className="lock-title">Set a password</h2>
 
-      <form onSubmit={handlePasswordSubmit} style={{ marginTop: '16px' }}>
-        <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '0 0 16px', lineHeight: 1.5 }}>
+      <form onSubmit={handlePasswordSubmit}>
+        <p className="setup-copy">
           This password encrypts your keys on this device. Nothing leaves your browser.
         </p>
 
@@ -174,7 +163,6 @@ export function Setup() {
         <button
           type="submit"
           className="btn btn-primary"
-          style={{ width: '100%' }}
           disabled={!canSubmitPassword}
         >
           {loading ? 'Working...' : 'Continue'}
@@ -182,17 +170,7 @@ export function Setup() {
 
         <button
           type="button"
-          className="text-link"
-          style={{
-            display: 'block',
-            width: '100%',
-            marginTop: '12px',
-            fontSize: '12px',
-            color: 'var(--text-muted)',
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-          }}
+          className="quiet-link"
           onClick={() => goTo('welcome')}
         >
           ← Back

@@ -56,7 +56,7 @@ export function Dashboard() {
       <RetiredFeaturesNotice />
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <h2 className="page-title" style={{ marginBottom: 0 }}>Credentials</h2>
-        <button className="text-link" onClick={() => lock()}>
+        <button className="text-link bracket-link" onClick={() => lock()}>
           Lock
         </button>
       </div>
@@ -223,16 +223,16 @@ function CredentialCard({ cred, usage, onOpenStats, onRemove }: CredentialCardPr
           </div>
         </div>
       )}
-      <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+      <div className="credential-meta">
         <span className="badge badge-provider">
           {provider?.name ?? cred.providerId}
         </span>
         <span className="badge badge-method">
           {cred.authMethod === 'oauth' ? 'Setup Token' : 'API Key'}
         </span>
-      </div>
-      <div className="card-subtitle" style={{ marginTop: '8px' }}>
-        Added {new Date(cred.createdAt).toLocaleDateString()}
+        <span className="credential-added">
+          Added {new Date(cred.createdAt).toLocaleDateString()}
+        </span>
       </div>
 
       <div className="credential-usage-open">
@@ -395,13 +395,13 @@ function CredentialStats({ cred, requestLog }: { cred: CredentialMeta; requestLo
             <div key={a.origin} className="card usage-card">
               <div className="card-header" style={{ marginBottom: '0' }}>
                 <div style={{ minWidth: 0 }}>
-                  <span className="card-title" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span className="card-title mono" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 500 }}>
                     {formatHostname(a.origin)}
                   </span>
                   <div className="card-subtitle">{a.requests} request{a.requests !== 1 ? 's' : ''}</div>
                 </div>
                 <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                  <div style={{ fontSize: '14px', fontWeight: 600 }}>{formatTokens(a.inputTokens + a.outputTokens)}</div>
+                  <div className="mono" style={{ fontSize: '14px', fontWeight: 500 }}>{formatTokens(a.inputTokens + a.outputTokens)}</div>
                   <div className="card-subtitle">tokens</div>
                 </div>
               </div>

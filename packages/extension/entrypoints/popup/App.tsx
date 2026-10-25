@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useWalletStore } from './store';
 import { Setup } from './pages/Setup';
 import { Unlock } from './pages/Unlock';
@@ -10,9 +10,11 @@ import { ApprovalRequest } from './pages/ApprovalRequest';
 import { RequestHistory } from './pages/RequestHistory';
 import { Settings } from './pages/Settings';
 import { FloatingActionMenu } from './components/FloatingActionMenu';
+import { Raven } from './components/Raven';
 
 export default function App() {
-  const { currentPage, modal, sessions, loading, init, closeModal } = useWalletStore();
+  const { currentPage, modal, sessions, credentials, pendingApprovals, loading, init, closeModal } = useWalletStore();
+  const justUnlocked = useJustUnlocked(currentPage, loading);
 
   useEffect(() => {
     init();
@@ -51,6 +53,7 @@ export default function App() {
     return (
       <div className="app">
         <div className="loading">Loading...</div>
+        <div className="scanlines" aria-hidden="true" />
       </div>
     );
   }
@@ -61,16 +64,26 @@ export default function App() {
     currentPage !== 'approval';
 
   const showFab = showNav && !modal;
+  const locked = currentPage === 'setup' || currentPage === 'unlock';
 
   return (
-    <div className="app">
-      <header className="header">
+    <div className={`app ${locked ? 'app-locked' : ''}`}>
+      <header className={`header ${showNav ? 'header-bordered' : ''}`}>
         <h1 className="logo">
-          <img src="/icon.svg" alt="" className="logo-mark" />
+          <span className="logo-tile" aria-hidden="true">b</span>
           Byoky
         </h1>
+        {locked && (
+          <span className="status-pill">
+            <span className="status-dot" />
+            {currentPage === 'setup' ? 'Setup' : 'Locked'}
+          </span>
+        )}
+        {currentPage === 'approval' && pendingApprovals.length > 0 && (
+          <span className="pending-pill">{pendingApprovals.length} pending</span>
+        )}
         {showNav && (
-          <nav className="nav">
+          <nav className="nav" aria-label="Wallet sections">
             <button
               className={currentPage === 'dashboard' ? 'active' : ''}
               onClick={() => useWalletStore.getState().navigate('dashboard')}
@@ -110,6 +123,20 @@ export default function App() {
           </nav>
         )}
       </header>
+      {showNav && (
+        <div className="status-strip">
+          <span className="status-strip-state">
+            <span className="status-dot" />
+            Unlocked · {credentials.length} {credentials.length === 1 ? 'key' : 'keys'}
+          </span>
+          <Raven
+            view="head"
+            size={42}
+            state={justUnlocked ? 'nod-then-watching' : 'watching'}
+            label="Muninn is awake"
+          />
+        </div>
+      )}
       <main className={`content ${showFab ? 'has-fab' : ''}`}>
         <div key={currentPage} className="page-enter">
           {currentPage === 'setup' && <Setup />}
@@ -128,8 +155,32 @@ export default function App() {
           <AddCredential />
         </Modal>
       )}
+      <div className="scanlines" aria-hidden="true" />
     </div>
   );
+}
+
+/**
+ * True once the wallet goes from the setup or unlock page to an unlocked
+ * page, so the raven in the status strip can nod. Pages shown while the
+ * popup is still loading don't count: they aren't a real locked state.
+ */
+function useJustUnlocked(currentPage: string, loading: boolean): boolean {
+  const wasLocked = useRef(false);
+  const [justUnlocked, setJustUnlocked] = useState(false);
+
+  useEffect(() => {
+    if (loading) return;
+    if (currentPage === 'setup' || currentPage === 'unlock') {
+      wasLocked.current = true;
+      setJustUnlocked(false);
+    } else if (wasLocked.current) {
+      wasLocked.current = false;
+      setJustUnlocked(true);
+    }
+  }, [currentPage, loading]);
+
+  return justUnlocked;
 }
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {

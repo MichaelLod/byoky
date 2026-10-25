@@ -1,6 +1,6 @@
 import type { PasswordStrength } from '@byoky/core';
 
-const COLORS = ['var(--danger)', '#f97316', '#eab308', '#22c55e', '#16a34a'];
+const COLORS = ['var(--alarm)', 'var(--alarm)', 'var(--amber)', 'var(--signal)', 'var(--signal)'];
 
 export function PasswordMeter({ strength }: { strength: PasswordStrength }) {
   const color = COLORS[strength.score];
@@ -13,7 +13,7 @@ export function PasswordMeter({ strength }: { strength: PasswordStrength }) {
             key={i}
             className="password-meter-bar"
             style={{
-              background: i <= strength.score ? color : 'var(--bg-card)',
+              background: i <= strength.score ? color : 'var(--seam)',
             }}
           />
         ))}

@@ -9,32 +9,13 @@ export function Connect() {
 
   return (
     <div>
-      <div
-        role="tablist"
-        style={{
-          display: 'flex',
-          gap: '4px',
-          marginBottom: '12px',
-          borderBottom: '1px solid var(--border, #333)',
-        }}
-      >
+      <div role="tablist" className="tab-list">
         <button
           role="tab"
           type="button"
           aria-selected={tab === 'sessions'}
           className="tab-button"
           onClick={() => setTab('sessions')}
-          style={{
-            flex: 1,
-            padding: '10px 8px',
-            background: 'none',
-            border: 'none',
-            borderBottom: `2px solid ${tab === 'sessions' ? 'var(--accent)' : 'transparent'}`,
-            color: tab === 'sessions' ? 'var(--text)' : 'var(--text-muted)',
-            fontSize: '13px',
-            fontWeight: tab === 'sessions' ? 600 : 400,
-            cursor: 'pointer',
-          }}
         >
           Sessions
         </button>
@@ -44,17 +25,6 @@ export function Connect() {
           aria-selected={tab === 'history'}
           className="tab-button"
           onClick={() => setTab('history')}
-          style={{
-            flex: 1,
-            padding: '10px 8px',
-            background: 'none',
-            border: 'none',
-            borderBottom: `2px solid ${tab === 'history' ? 'var(--accent)' : 'transparent'}`,
-            color: tab === 'history' ? 'var(--text)' : 'var(--text-muted)',
-            fontSize: '13px',
-            fontWeight: tab === 'history' ? 600 : 400,
-            cursor: 'pointer',
-          }}
         >
           History
         </button>

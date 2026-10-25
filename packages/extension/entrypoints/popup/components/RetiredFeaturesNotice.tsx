@@ -18,47 +18,27 @@ export function RetiredFeaturesNotice() {
   if (!showRetiredFeaturesNotice) return null;
 
   return (
-    <div
-      style={{
-        background: 'var(--accent-bg, rgba(99, 102, 241, 0.08))',
-        border: '1px solid var(--accent, #6366f1)',
-        borderRadius: '8px',
-        padding: '12px',
-        marginBottom: '16px',
-        position: 'relative',
-      }}
-    >
+    <div className="notice">
       <button
         type="button"
         aria-label="Dismiss"
+        className="notice-dismiss"
         onClick={() => dismissRetiredFeaturesNotice()}
-        style={{
-          position: 'absolute',
-          top: '6px',
-          right: '6px',
-          background: 'none',
-          border: 'none',
-          color: 'var(--text-muted)',
-          cursor: 'pointer',
-          fontSize: '14px',
-          padding: '4px 8px',
-        }}
       >
         ×
       </button>
 
-      <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '4px' }}>
+      <div className="notice-title">
         Byoky is now fully local
       </div>
-      <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px', lineHeight: 1.5 }}>
+      <div className="notice-text">
         Cloud sync and gifts have been retired. Your keys on this device are untouched.
         To move keys to another device, use Export in Settings.
       </div>
 
       <button
         type="button"
-        className="btn btn-primary"
-        style={{ fontSize: '12px', padding: '6px 12px' }}
+        className="btn btn-primary btn-sm"
         onClick={() => {
           dismissRetiredFeaturesNotice();
           navigate('settings');

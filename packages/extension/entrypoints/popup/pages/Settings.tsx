@@ -48,7 +48,7 @@ export function Settings() {
             Import backup
           </button>
         </div>
-        <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
+        <p className="settings-note">
           {credentials.length === 0
             ? 'Add credentials before exporting.'
             : 'Keys live only on this device. Export an encrypted .byoky file to back them up or move them to another device.'}
@@ -65,18 +65,17 @@ export function Settings() {
       </div>
 
       <div className="settings-section">
-        <h3 style={{ color: 'var(--error, #ef4444)' }}>Danger Zone</h3>
-        <div className="settings-actions" style={{ flexDirection: 'column', gap: '8px' }}>
+        <h3 className="danger">Danger Zone</h3>
+        <div className="settings-actions">
           <button
-            className="btn btn-secondary"
-            style={{ borderColor: 'var(--error, #ef4444)', color: 'var(--error, #ef4444)' }}
+            className="btn btn-danger"
             onClick={() => setConfirmReset(true)}
             disabled={loading}
           >
             Reset Wallet
           </button>
         </div>
-        <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
+        <p className="settings-note">
           Reset wallet clears all keys on this device. This cannot be undone.
         </p>
       </div>
@@ -121,45 +120,19 @@ function ConfirmResetModal({
   }
 
   return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(0,0,0,0.6)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '16px',
-        zIndex: 1000,
-      }}
-    >
-      <div
-        style={{
-          background: 'var(--bg-card, #1a1a1a)',
-          border: '1px solid var(--border, #333)',
-          borderRadius: '10px',
-          padding: '16px',
-          maxWidth: '320px',
-          width: '100%',
-        }}
-      >
-        <h3 style={{ margin: '0 0 8px', color: 'var(--error, #ef4444)', fontSize: '15px' }}>Reset Wallet?</h3>
-        <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5, margin: '0 0 16px' }}>
+    <div className="dialog-backdrop">
+      <div className="dialog" role="alertdialog" aria-modal="true" aria-label="Reset Wallet?">
+        <h3 className="dialog-title danger">Reset Wallet?</h3>
+        <p className="dialog-text">
           All keys on this device will be permanently deleted. This cannot be undone.
         </p>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button type="button" className="btn btn-secondary" style={{ flex: 1 }} onClick={onCancel} disabled={busy}>
+        <div className="dialog-actions">
+          <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={busy}>
             Cancel
           </button>
           <button
             type="button"
-            className="btn"
-            style={{
-              flex: 1,
-              background: 'var(--error, #ef4444)',
-              color: 'white',
-              border: 'none',
-            }}
+            className="btn btn-danger"
             onClick={handleConfirm}
             disabled={busy}
           >
@@ -399,9 +372,8 @@ function ImportModal({ onClose }: { onClose: () => void }) {
           />
           <button
             type="button"
-            className="btn btn-secondary"
+            className="btn btn-secondary btn-file"
             onClick={() => fileRef.current?.click()}
-            style={{ width: '100%', fontSize: '13px' }}
           >
             {fileName || 'Choose .byoky file'}
           </button>
