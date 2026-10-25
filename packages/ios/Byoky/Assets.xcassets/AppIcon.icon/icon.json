@@ -1,19 +1,19 @@
 {
   "fill" : {
-    "automatic-gradient" : "display-p3:0.92474,0.96611,0.95234,1.00000"
+    "automatic-gradient" : "display-p3:0.06000,0.04500,0.10000,1.00000"
   },
   "groups" : [
     {
       "layers" : [
         {
           "glass" : true,
-          "image-name" : "byoky_logo.svg",
-          "name" : "byoky_logo",
+          "image-name" : "muninn.svg",
+          "name" : "muninn",
           "position" : {
-            "scale" : 2.4,
+            "scale" : 1.0,
             "translation-in-points" : [
               0,
-              -34.17134456096403
+              0
             ]
           }
         }
