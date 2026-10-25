@@ -17,8 +17,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import okhttp3.Call
 import org.json.JSONObject
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Native side of the in-wallet browser bridge. It plays the role the browser
@@ -49,6 +51,20 @@ class AppBridge(
     /** Issued on BYOKY_CONNECT_REQUEST. Main thread only. */
     private var sessionKey: String? = null
 
+    /** Proxy requests still running, by request id, so the app can cancel them. */
+    private val inFlight = ConcurrentHashMap<String, InFlight>()
+
+    private class InFlight {
+        @Volatile var call: Call? = null
+        @Volatile var cancelled = false
+
+        /** Abort the upstream call; usage up to here still counts (ProxyService). */
+        fun cancel() {
+            cancelled = true
+            call?.cancel()
+        }
+    }
+
     override fun onPostMessage(
         view: WebView,
         message: WebMessageCompat,
@@ -72,14 +88,17 @@ class AppBridge(
         when (type) {
             "BYOKY_CONNECT_REQUEST" -> handleConnect(requestId, replyProxy)
             "BYOKY_PROXY_REQUEST" -> handleProxy(msg, requestId, replyProxy)
+            "BYOKY_PROXY_CANCEL" -> inFlight[requestId]?.cancel()
             "BYOKY_SESSION_STATUS" -> handleSessionStatus(requestId, msg, replyProxy)
             "BYOKY_SESSION_USAGE" -> handleSessionUsage(requestId, msg, replyProxy)
-            "BYOKY_DISCONNECT" -> sessionKey = null
+            "BYOKY_DISCONNECT" -> handleDisconnect(msg)
         }
     }
 
     fun dispose() {
         disposed = true
+        // Stop upstream transfers now rather than at their next chunk.
+        inFlight.values.forEach { it.cancel() }
         scope.cancel()
     }
 
@@ -132,6 +151,21 @@ class AppBridge(
                 .put("message", message)))
     }
 
+    /**
+     * The app disconnected itself: forget its key and end its stored session
+     * (it leaves the Connected tab), as the extension does. Unlike a revoke
+     * by the user, the app may connect again.
+     */
+    private fun handleDisconnect(msg: JSONObject) {
+        val key = sessionKey ?: return
+        val presented = msg.optString("sessionKey", "").ifEmpty {
+            msg.optJSONObject("payload")?.optString("sessionKey", "") ?: ""
+        }
+        if (presented != key) return
+        sessionKey = null
+        wallet.endSession(appOrigin)
+    }
+
     /** True while this page holds the current key and the user hasn't revoked the app. */
     private fun isSessionLive(presentedKey: String): Boolean {
         val key = sessionKey ?: return false
@@ -172,7 +206,8 @@ class AppBridge(
         }
 
         val bodyText = if (msg.isNull("body")) null else msg.optString("body", "")
-        val body: ByteArray? = when (msg.optString("bodyEncoding", "")) {
+        val encoding = msg.optString("bodyEncoding", "")
+        val body: ByteArray? = when (encoding) {
             "base64" -> try {
                 bodyText?.let { Base64.decode(it, Base64.DEFAULT) }
             } catch (_: IllegalArgumentException) {
@@ -180,16 +215,32 @@ class AppBridge(
                 return
             }
             "formdata" -> {
-                deliverProxyError(reply, requestId, "PROXY_ERROR", "Multipart form bodies are not supported in the mobile wallet", 415)
-                return
+                val form = try {
+                    FormDataBody.encode(bodyText ?: "[]")
+                } catch (_: IllegalArgumentException) {
+                    deliverProxyError(reply, requestId, "PROXY_ERROR", "Invalid form data body", 400)
+                    return
+                }
+                // The multipart boundary is ours; drop any content type the app set.
+                headers.keys.filter { it.equals("content-type", ignoreCase = true) }.forEach { headers.remove(it) }
+                headers["content-type"] = form.contentType
+                form.bytes
             }
             else -> bodyText?.toByteArray(Charsets.UTF_8)
         }
+        val binaryBody = encoding == "base64" || encoding == "formdata"
 
+        val flight = InFlight()
+        inFlight[requestId] = flight
         scope.launch {
             val sink = object : ProxyService.ResponseSink {
+                override fun onCall(call: Call) {
+                    flight.call = call
+                    if (flight.cancelled) call.cancel()
+                }
+
                 override fun onMeta(status: Int, statusText: String, headers: Map<String, String>) {
-                    ensureActive()
+                    ensureActive(flight)
                     deliver(reply, JSONObject()
                         .put("type", "BYOKY_PROXY_RESPONSE_META")
                         .put("requestId", requestId)
@@ -199,7 +250,7 @@ class AppBridge(
                 }
 
                 override fun onChunk(chunk: String) {
-                    ensureActive()
+                    ensureActive(flight)
                     deliver(reply, JSONObject()
                         .put("type", "BYOKY_PROXY_RESPONSE_CHUNK")
                         .put("requestId", requestId)
@@ -214,19 +265,25 @@ class AppBridge(
             }
 
             try {
-                proxy.forward(appOrigin, providerId, url, method, headers, body, sink)
+                proxy.forward(appOrigin, providerId, url, method, headers, body, sink, binaryBody)
             } catch (e: CancellationException) {
                 // WebView closed; nothing left to deliver to.
-            } catch (e: ProxyService.ProxyError) {
-                deliverProxyError(reply, requestId, e.code, e.message ?: e.code, e.status)
             } catch (e: Exception) {
-                deliverProxyError(reply, requestId, "PROXY_ERROR", e.message ?: "Request failed", 502)
+                // Cancelled by the app: it stopped listening.
+                if (!flight.cancelled) {
+                    // Fixed codes and texts only: exception messages can quote headers (the key).
+                    val error = PageError.from(e)
+                    deliverProxyError(reply, requestId, error.code, error.message, error.status)
+                }
+            } finally {
+                inFlight.remove(requestId, flight)
             }
         }
     }
 
-    private fun ensureActive() {
+    private fun ensureActive(flight: InFlight) {
         if (disposed) throw CancellationException("App closed")
+        if (flight.cancelled) throw CancellationException("Cancelled by the app")
     }
 
     // ── Session status / usage ───────────────────────────────────────────
@@ -242,33 +299,19 @@ class AppBridge(
     private fun handleSessionUsage(requestId: String, msg: JSONObject, reply: JavaScriptReplyProxy) {
         val presented = msg.optJSONObject("payload")?.optString("sessionKey", "") ?: ""
         val payload: Any = if (isSessionLive(presented)) {
-            var requests = 0
-            var input = 0
-            var output = 0
-            val byProvider = mutableMapOf<String, IntArray>()
-            for (log in wallet.requestLogs.value) {
-                if (log.appOrigin != appOrigin || log.statusCode >= 400) continue
-                val i = log.inputTokens ?: 0
-                val o = log.outputTokens ?: 0
-                requests++
-                input += i
-                output += o
-                val acc = byProvider.getOrPut(log.providerId) { IntArray(3) }
-                acc[0]++
-                acc[1] += i
-                acc[2] += o
-            }
+            // The running totals allowances are enforced against, not the capped display log.
+            val total = wallet.usageTotal(appOrigin)
             val providersJson = JSONObject()
-            for ((id, acc) in byProvider) {
+            for ((id, usage) in wallet.usageByProvider(appOrigin)) {
                 providersJson.put(id, JSONObject()
-                    .put("requests", acc[0])
-                    .put("inputTokens", acc[1])
-                    .put("outputTokens", acc[2]))
+                    .put("requests", usage.requests)
+                    .put("inputTokens", usage.inputTokens)
+                    .put("outputTokens", usage.outputTokens))
             }
             JSONObject()
-                .put("requests", requests)
-                .put("inputTokens", input)
-                .put("outputTokens", output)
+                .put("requests", total.requests)
+                .put("inputTokens", total.inputTokens)
+                .put("outputTokens", total.outputTokens)
                 .put("byProvider", providersJson)
         } else JSONObject.NULL
         deliver(reply, JSONObject()
@@ -359,7 +402,9 @@ class AppBridge(
                 var requestId = data.requestId || data.id || '';
                 if (typeof requestId !== 'string') return;
                 if (data.type !== 'BYOKY_DISCONNECT' && !idOk.test(requestId)) return;
-                if (port && requestId) pending[requestId] = port;
+                // The app aborted the request: it no longer listens on that port.
+                if (data.type === 'BYOKY_PROXY_CANCEL') delete pending[requestId];
+                else if (port && requestId) pending[requestId] = port;
                 var payload = data.payload || null;
                 try {
                   native.postMessage(JSON.stringify({

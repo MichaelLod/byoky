@@ -19,8 +19,14 @@ class WalletBackup(private val wallet: WalletStore) {
      */
     data class Progress(val message: String, val done: Int, val total: Int, val cancellable: Boolean = true)
 
-    data class ImportSummary(val imported: Int, val duplicates: Int, val unsupported: Int) {
-        val skipped: Int get() = duplicates + unsupported
+    data class ImportSummary(
+        val imported: Int,
+        val duplicates: Int,
+        val unsupported: Int,
+        /** Keys with a character no API key has (see [ApiKeyFormat]), not imported. */
+        val invalidKeys: Int = 0,
+    ) {
+        val skipped: Int get() = duplicates + unsupported + invalidKeys
     }
 
     /** Contents of a `.byoky` file holding every credential in the wallet. */
@@ -55,8 +61,8 @@ class WalletBackup(private val wallet: WalletStore) {
 
     /**
      * Merge the credentials in a backup file into the wallet. Never deletes
-     * or replaces existing keys; exact duplicates and credentials Android
-     * can't use are skipped and counted. Throws [BackupFile.BackupException]
+     * or replaces existing keys; exact duplicates, credentials Android can't
+     * use and keys that aren't printable ASCII are skipped and counted. Throws [BackupFile.BackupException]
      * (for example [BackupFile.WRONG_PASSWORD]) without changing anything.
      */
     suspend fun import(contents: String, password: String, onProgress: (Progress) -> Unit = {}): ImportSummary {
@@ -74,16 +80,21 @@ class WalletBackup(private val wallet: WalletStore) {
         val secrets = BackupFile.decryptSecrets(usable.map { it.first }, password) {
             onProgress(Progress("Decrypting keys…", decrypted.incrementAndGet(), fileSecretCount))
         }
-        val candidates = usable.mapIndexed { i, (entry, safe) ->
+        // Keys are trimmed; one with a control or non-ASCII character can't
+        // go in an HTTP header, so it is skipped and reported instead.
+        val candidates = usable.mapIndexedNotNull { i, (entry, safe) ->
+            val secret = ApiKeyFormat.normalize(secrets[i]) ?: return@mapIndexedNotNull null
             BackupFile.PlainCredential(
                 providerId = entry.providerId,
                 label = entry.label,
                 authMethod = safe.authMethod,
                 createdAt = safe.createdAt,
                 baseUrl = safe.baseUrl,
-                secret = secrets[i],
+                secret = secret,
             )
         }
+        val invalidKeys = usable.size - candidates.size
+        if (candidates.isEmpty()) return ImportSummary(0, 0, unsupported, invalidKeys)
 
         // Only stored keys of the same providers can be duplicates.
         val providers = candidates.mapTo(HashSet()) { it.providerId }
@@ -105,6 +116,6 @@ class WalletBackup(private val wallet: WalletStore) {
         wallet.addImportedCredentials(plan.toAdd) {
             onProgress(Progress("Saving keys…", saved.incrementAndGet(), toEncrypt, cancellable = false))
         }
-        return ImportSummary(plan.toAdd.size, plan.duplicates, unsupported)
+        return ImportSummary(plan.toAdd.size, plan.duplicates, unsupported, invalidKeys)
     }
 }

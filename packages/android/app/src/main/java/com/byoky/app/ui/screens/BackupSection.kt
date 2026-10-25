@@ -221,6 +221,9 @@ private fun importSummaryText(summary: WalletBackup.ImportSummary): String {
     if (summary.unsupported > 0) {
         lines += "${summary.unsupported} not usable on Android (unknown provider, missing or unsafe server URL, or a sign-in that needs refreshing)."
     }
+    if (summary.invalidKeys > 0) {
+        lines += "${summary.invalidKeys} with a character API keys never have, often an invisible one picked up while copying. Add ${if (summary.invalidKeys == 1) "it" else "them"} again by hand."
+    }
     return lines.joinToString("\n")
 }
 

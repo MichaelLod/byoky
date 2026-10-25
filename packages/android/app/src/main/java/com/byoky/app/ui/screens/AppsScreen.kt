@@ -37,6 +37,9 @@ import com.byoky.app.data.detectAppCapabilities
 import com.byoky.app.data.formatTokens
 import com.byoky.app.proxy.TranslationEngine
 import com.byoky.app.ui.theme.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * The Connected tab — apps that connected to the wallet (from the in-wallet
@@ -72,6 +75,7 @@ fun AppsScreen(wallet: WalletStore) {
     val requestLogs by wallet.requestLogs.collectAsState()
     val context = LocalContext.current
     val engine = remember { TranslationEngine.get(context) }
+    val scope = rememberCoroutineScope()
 
     var movingApp by remember { mutableStateOf<Session?>(null) }
     var editingAllowanceFor by remember { mutableStateOf<Session?>(null) }
@@ -178,17 +182,19 @@ fun AppsScreen(wallet: WalletStore) {
             currentGroupId = appGroups[session.appOrigin] ?: DEFAULT_GROUP_ID,
             onSelect = { groupId ->
                 val targetGroup = orderedGroups.firstOrNull { it.id == groupId }
-                val pending = targetGroup?.let {
-                    capabilityPendingMove(session, it, requestLogs, engine)
-                }
-                if (pending != null) {
-                    // Defer the move — show the warning dialog. Keep movingApp
-                    // null so the bottom sheet closes; the dialog takes over.
-                    pendingMove = pending
-                    movingApp = null
-                } else {
-                    try { wallet.setAppGroup(session.appOrigin, groupId) } catch (_: Throwable) {}
-                    movingApp = null
+                val logs = requestLogs
+                movingApp = null
+                scope.launch {
+                    // describeModel blocks on the JS sandbox: off the main thread.
+                    val pending = targetGroup?.let {
+                        withContext(Dispatchers.IO) { capabilityPendingMove(session, it, logs, engine) }
+                    }
+                    if (pending != null) {
+                        // Defer the move: the warning dialog takes over.
+                        pendingMove = pending
+                    } else {
+                        try { wallet.setAppGroup(session.appOrigin, groupId) } catch (_: Throwable) {}
+                    }
                 }
             },
             onDismiss = { movingApp = null },
@@ -681,34 +687,44 @@ private fun GroupEditorDialog(
             ?: "Any $providerName credential"
     }
 
+    // Engine calls block on the JS sandbox, whose first connect is delivered
+    // on the main thread: they run on IO, and the results show up when ready.
     val engine = remember { TranslationEngine.get(context) }
-    val suggestedModels = remember(providerId, engine.isSupported) {
-        if (!engine.isSupported) return@remember emptyList<Pair<String, String>>()
-        try {
-            val json = org.json.JSONArray(engine.getModelsForProvider(providerId))
-            (0 until json.length()).map { i ->
-                val obj = json.getJSONObject(i)
-                obj.getString("id") to obj.getString("displayName")
-            }
-        } catch (_: Throwable) { emptyList() }
+    var suggestedModels by remember { mutableStateOf(emptyList<Pair<String, String>>()) }
+    LaunchedEffect(providerId, engine.isSupported) {
+        suggestedModels = emptyList()
+        if (!engine.isSupported) return@LaunchedEffect
+        suggestedModels = withContext(Dispatchers.IO) {
+            try {
+                val json = org.json.JSONArray(engine.getModelsForProvider(providerId))
+                (0 until json.length()).map { i ->
+                    val obj = json.getJSONObject(i)
+                    obj.getString("id") to obj.getString("displayName")
+                }
+            } catch (_: Throwable) { emptyList() }
+        }
     }
-    val modelInfo = remember(model, engine.isSupported) {
-        if (!engine.isSupported || model.isEmpty()) return@remember null as String?
-        try {
-            val raw = engine.describeModel(model) ?: return@remember null as String?
-            val parsed = org.json.JSONObject(raw)
-            val caps = parsed.getJSONObject("capabilities")
-            val bits = buildList {
-                if (caps.optBoolean("tools")) add("tools")
-                if (caps.optBoolean("vision")) add("vision")
-                if (caps.optBoolean("structuredOutput")) add("JSON schema")
-                if (caps.optBoolean("reasoning")) add("reasoning")
-            }
-            val display = parsed.optString("displayName", model)
-            val ctx = parsed.optInt("contextWindow", 0)
-            val ctxK = if (ctx >= 1000) "${ctx / 1000}K" else "$ctx"
-            "$display: $ctxK ctx · ${bits.joinToString(" · ")}"
-        } catch (_: Throwable) { null }
+    var modelInfo by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(model, engine.isSupported) {
+        modelInfo = null
+        if (!engine.isSupported || model.isEmpty()) return@LaunchedEffect
+        modelInfo = withContext(Dispatchers.IO) {
+            try {
+                val raw = engine.describeModel(model) ?: return@withContext null
+                val parsed = org.json.JSONObject(raw)
+                val caps = parsed.getJSONObject("capabilities")
+                val bits = buildList {
+                    if (caps.optBoolean("tools")) add("tools")
+                    if (caps.optBoolean("vision")) add("vision")
+                    if (caps.optBoolean("structuredOutput")) add("JSON schema")
+                    if (caps.optBoolean("reasoning")) add("reasoning")
+                }
+                val display = parsed.optString("displayName", model)
+                val ctx = parsed.optInt("contextWindow", 0)
+                val ctxK = if (ctx >= 1000) "${ctx / 1000}K" else "$ctx"
+                "$display: $ctxK ctx · ${bits.joinToString(" · ")}"
+            } catch (_: Throwable) { null }
+        }
     }
 
     AlertDialog(
@@ -851,8 +867,9 @@ private fun GroupEditorDialog(
                     singleLine = true,
                 )
 
-                if (modelInfo != null) {
-                    Text(modelInfo, color = TextMuted, fontSize = 11.sp)
+                val info = modelInfo
+                if (info != null) {
+                    Text(info, color = TextMuted, fontSize = 11.sp)
                 } else {
                     Text(
                         "Leave empty to pass through. Set to override (required for cross-family routing).",

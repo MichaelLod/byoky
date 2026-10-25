@@ -2,20 +2,27 @@ package com.byoky.app.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.Looper
+import android.os.SystemClock
+import android.provider.Settings
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.byoky.app.crypto.CryptoService
 import com.byoky.app.proxy.TranslationEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -75,8 +82,12 @@ class WalletStore(context: Context) {
     private val _appGroups = MutableStateFlow<Map<String, String>>(emptyMap())
     val appGroups: StateFlow<Map<String, String>> = _appGroups.asStateFlow()
 
-    private val _lockoutEndTime = MutableStateFlow<Long?>(null)
-    val lockoutEndTime: StateFlow<Long?> = _lockoutEndTime.asStateFlow()
+    /**
+     * End of the current unlock lockout on the `SystemClock.elapsedRealtime`
+     * clock (never the wall clock), or null when there is none.
+     */
+    private val _lockoutUntil = MutableStateFlow<Long?>(null)
+    val lockoutUntil: StateFlow<Long?> = _lockoutUntil.asStateFlow()
 
     private val _installedApps = MutableStateFlow<List<InstalledApp>>(emptyList())
     val installedApps: StateFlow<List<InstalledApp>> = _installedApps.asStateFlow()
@@ -102,10 +113,47 @@ class WalletStore(context: Context) {
     /** Released once the launch cleanup has finished (or given up). */
     private val launchCleanupDone = CountDownLatch(1)
 
-    private var masterPassword: String? = null
-    private var backgroundTime: Long? = null
+    @Volatile private var masterPassword: String? = null
 
-    private val autoLockTimeout = 900_000L // 15 minutes
+    /** Guards the request log: concurrent requests append to it from IO threads. */
+    private val logLock = Any()
+
+    /** Serializes ledger writes so the stored totals are never an older snapshot. */
+    private val usageLock = Any()
+
+    /**
+     * Running usage per app and provider; allowances are enforced against it.
+     * Independent of the lock state (an in-flight request may settle after a
+     * lock), so it is loaded once and kept.
+     */
+    private val ledger: UsageLedger by lazy {
+        val stored = prefs.getString(USAGE_KEY, null)
+        if (stored != null) UsageLedger.fromJson(stored) else UsageLedger.fromLog(parseRequestLogs(prefs.getString("requestLogs", null)))
+    }
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    private val autoLock = AutoLockTimer(AUTO_LOCK_TIMEOUT_MS) { SystemClock.elapsedRealtime() }
+    @Volatile private var idleWatch: Job? = null
+
+    private val throttle = UnlockThrottle(
+        store = object : UnlockThrottle.Store {
+            override fun getInt(key: String, default: Int) = plainPrefs.getInt(key, default)
+            override fun getLong(key: String, default: Long) = plainPrefs.getLong(key, default)
+            override fun write(ints: Map<String, Int>, longs: Map<String, Long>) {
+                val editor = plainPrefs.edit()
+                ints.forEach { (k, v) -> editor.putInt(k, v) }
+                longs.forEach { (k, v) -> editor.putLong(k, v) }
+                // Attempts are counted off the main thread and must reach disk
+                // before the password check; the main thread only does housekeeping.
+                if (Looper.myLooper() == Looper.getMainLooper()) editor.apply() else editor.commit()
+            }
+        },
+        elapsed = { SystemClock.elapsedRealtime() },
+        bootCount = {
+            try { Settings.Global.getInt(appContext.contentResolver, Settings.Global.BOOT_COUNT) } catch (_: Exception) { null }
+        },
+    )
 
     init {
         // Off the main thread: it reads and rewrites the encrypted store.
@@ -143,6 +191,7 @@ class WalletStore(context: Context) {
         ensureDefaultGroup()
         loadInstalledApps()
         _status.value = WalletStatus.UNLOCKED
+        onUnlocked()
     }
 
     /**
@@ -159,115 +208,119 @@ class WalletStore(context: Context) {
      * can't be used to guess the password. PBKDF2 runs on Dispatchers.Default.
      */
     suspend fun confirmMasterPassword(password: String): UnlockResult = withContext(Dispatchers.Default) {
-        val now = System.currentTimeMillis()
-        val endTime = _lockoutEndTime.value
-        if (endTime != null && now < endTime) {
-            return@withContext UnlockResult.LockedOut(maxOf(1, ((endTime - now) / 1000).toInt()))
+        checkPassword(password)
+    }
+
+    /** The password check shared by unlock and re-confirmation, with brute-force protection. */
+    private fun checkPassword(password: String): UnlockResult {
+        val remaining = throttle.remainingMs()
+        if (remaining > 0) {
+            publishLockout(remaining)
+            return UnlockResult.LockedOut(maxOf(1, ((remaining + 999) / 1000).toInt()))
         }
-        val hash = prefs.getString("password_hash", null) ?: return@withContext UnlockResult.WrongPassword
+        val hash = prefs.getString("password_hash", null) ?: return UnlockResult.WrongPassword
+        throttle.beginAttempt()
         if (!CryptoService.verifyPassword(password, hash)) {
-            handleFailedAttempt()
-            return@withContext UnlockResult.WrongPassword
+            throttle.recordFailure()
+            publishLockout(throttle.remainingMs())
+            return UnlockResult.WrongPassword
         }
-        resetFailedAttempts()
-        UnlockResult.Success
+        throttle.reset()
+        _lockoutUntil.value = null
+        return UnlockResult.Success
     }
 
     private fun unlockBlocking(password: String): UnlockResult {
-        val now = System.currentTimeMillis()
-        val endTime = _lockoutEndTime.value
-        if (endTime != null && now < endTime) {
-            return UnlockResult.LockedOut(maxOf(1, ((endTime - now) / 1000).toInt()))
-        }
+        val result = checkPassword(password)
+        if (result != UnlockResult.Success) return result
 
-        val hash = prefs.getString("password_hash", null) ?: return UnlockResult.WrongPassword
-        if (!CryptoService.verifyPassword(password, hash)) {
-            handleFailedAttempt()
-            return UnlockResult.WrongPassword
-        }
-
-        resetFailedAttempts()
         masterPassword = password
         awaitLaunchCleanup()
         loadCredentials()
         pruneRemovedProviders()
         loadGroups()
+        clearStalePins()
         loadAppGroups()
         ensureDefaultGroup()
         loadSessions()
         loadRequestLogs()
         loadTokenAllowances()
         loadInstalledApps()
+        ledger // load the usage totals now rather than on the first request
         _status.value = WalletStatus.UNLOCKED
+        onUnlocked()
         return UnlockResult.Success
     }
 
+    /** Start the idle watch and warm the translation sandbox off the main thread. */
+    private fun onUnlocked() {
+        startIdleWatch()
+        scope.launch(Dispatchers.IO) {
+            try {
+                val engine = TranslationEngine.get(appContext)
+                if (engine.isSupported) engine.warmUp()
+            } catch (_: Throwable) {
+                // Best-effort: the first routed request retries.
+            }
+        }
+    }
+
     fun lock() {
+        idleWatch?.cancel()
+        idleWatch = null
         masterPassword = null
         _credentials.value = emptyList()
         _sessions.value = emptyList()
-        _requestLogs.value = emptyList()
+        synchronized(logLock) {
+            _requestLogs.value = emptyList()
+            _status.value = WalletStatus.LOCKED
+        }
         _tokenAllowances.value = emptyList()
         _groups.value = emptyList()
         _appGroups.value = emptyMap()
         _installedApps.value = emptyList()
-        _status.value = WalletStatus.LOCKED
-        backgroundTime = null
     }
 
     // MARK: - Brute-Force Protection
 
-    private var failedAttempts: Int
-        get() = plainPrefs.getInt("failedUnlockAttempts", 0)
-        set(value) = plainPrefs.edit().putInt("failedUnlockAttempts", value).apply()
-
-    private fun handleFailedAttempt() {
-        failedAttempts++
-        val duration = lockoutDuration(failedAttempts)
-        if (duration != null) {
-            val endTime = System.currentTimeMillis() + duration
-            _lockoutEndTime.value = endTime
-            plainPrefs.edit().putLong("lockoutEndTime", endTime).apply()
-        }
-    }
-
-    private fun resetFailedAttempts() {
-        failedAttempts = 0
-        _lockoutEndTime.value = null
-        plainPrefs.edit().putLong("lockoutEndTime", 0L).apply()
+    private fun publishLockout(remainingMs: Long) {
+        _lockoutUntil.value = if (remainingMs > 0) SystemClock.elapsedRealtime() + remainingMs else null
     }
 
     private fun restoreLockoutState() {
-        val endTime = plainPrefs.getLong("lockoutEndTime", 0L)
-        if (endTime > 0 && System.currentTimeMillis() < endTime) {
-            _lockoutEndTime.value = endTime
-        } else {
-            plainPrefs.edit().putLong("lockoutEndTime", 0L).apply()
+        // Older builds stored a wall-clock end time.
+        val legacyEnd = plainPrefs.getLong(LEGACY_LOCKOUT_END_KEY, 0L)
+        if (legacyEnd > 0) {
+            throttle.migrateWallClockLockout(legacyEnd, System.currentTimeMillis())
+            plainPrefs.edit().remove(LEGACY_LOCKOUT_END_KEY).apply()
         }
-    }
-
-    private fun lockoutDuration(attempts: Int): Long? {
-        if (attempts < 5) return null
-        if (attempts < 10) return 30_000L
-        if (attempts < 15) return 300_000L
-        return 1_800_000L
+        publishLockout(throttle.remainingMs())
     }
 
     // MARK: - Auto-Lock
 
-    fun recordBackgroundTime() {
-        if (_status.value == WalletStatus.UNLOCKED) {
-            backgroundTime = System.currentTimeMillis()
-        }
+    /**
+     * Interaction with the app, or a request an app made through the wallet:
+     * restarts the idle timeout while in the foreground.
+     */
+    fun noteActivity() = autoLock.noteActivity()
+
+    fun recordBackgroundTime() = autoLock.enterBackground()
+
+    /** Back in the foreground: lock if the app was away longer than the timeout. */
+    fun checkAutoLock() {
+        if (autoLock.enterForeground() && isUnlocked) lock()
     }
 
-    fun checkAutoLock() {
-        val bg = backgroundTime
-        backgroundTime = null
-        if (_status.value == WalletStatus.UNLOCKED && bg != null &&
-            System.currentTimeMillis() - bg > autoLockTimeout
-        ) {
-            lock()
+    /** Locks the wallet once the idle (or background) timeout passes, also while the app is open. */
+    private fun startIdleWatch() {
+        autoLock.reset()
+        idleWatch?.cancel()
+        idleWatch = scope.launch {
+            while (isActive) {
+                delay(IDLE_CHECK_INTERVAL_MS)
+                if (isUnlocked && autoLock.isExpired()) lock()
+            }
         }
     }
 
@@ -279,6 +332,7 @@ class WalletStore(context: Context) {
      */
     suspend fun addCredential(providerId: String, label: String, apiKey: String, authMethod: AuthMethod = AuthMethod.API_KEY, baseUrl: String? = null) = withContext(Dispatchers.Default) {
         val password = masterPassword ?: throw IllegalStateException("Wallet locked")
+        val key = ApiKeyFormat.normalize(apiKey) ?: throw IllegalArgumentException(ApiKeyFormat.INVALID_MESSAGE)
         // Fixed-host providers never keep a base URL; the others must have a safe one.
         val safeBaseUrl = CredentialBaseUrl.normalize(providerId, baseUrl)
         if (CredentialBaseUrl.isRequired(providerId) && safeBaseUrl == null) {
@@ -288,8 +342,8 @@ class WalletStore(context: Context) {
         // Local providers may legitimately ship with an empty key
         // (unauthenticated server). Only persist ciphertext when a key was
         // actually supplied — decryptKey handles the missing-entry case.
-        if (apiKey.isNotEmpty()) {
-            val encrypted = CryptoService.encrypt(apiKey, password)
+        if (key.isNotEmpty()) {
+            val encrypted = CryptoService.encrypt(key, password)
             prefs.edit().putString("key_${credential.id}", encrypted).apply()
         }
         _credentials.update { it + credential }
@@ -300,6 +354,21 @@ class WalletStore(context: Context) {
         prefs.edit().remove("key_${credential.id}").apply()
         _credentials.value = _credentials.value.filter { it.id != credential.id }
         saveCredentials()
+        clearStalePins()
+    }
+
+    /**
+     * Unpin groups from keys that no longer exist, so they fall back to any
+     * key of their provider instead of failing (the extension does the same
+     * on removal).
+     */
+    private fun clearStalePins() {
+        val ids = _credentials.value.mapTo(HashSet()) { it.id }
+        if (_groups.value.none { it.credentialId != null && it.credentialId !in ids }) return
+        _groups.value = _groups.value.map {
+            if (it.credentialId != null && it.credentialId !in ids) it.copy(credentialId = null) else it
+        }
+        saveGroups()
     }
 
     fun updateCredentialLabel(credentialId: String, newLabel: String) {
@@ -366,6 +435,7 @@ class WalletStore(context: Context) {
             items.map { item ->
                 async(Dispatchers.Default) {
                     require(item.id !in existingIds) { "Credential id collision" }
+                    require(ApiKeyFormat.isValid(item.secret)) { ApiKeyFormat.INVALID_MESSAGE }
                     val safeBaseUrl = CredentialBaseUrl.normalize(item.providerId, item.baseUrl)
                     require(!CredentialBaseUrl.isRequired(item.providerId) || safeBaseUrl != null) { "Unsafe server URL" }
                     val credential = Credential(
@@ -446,6 +516,13 @@ class WalletStore(context: Context) {
         setBlockedOrigins(_blockedOrigins.value + session.appOrigin)
     }
 
+    /** The app disconnected itself: drop its session without blocking it from reconnecting. */
+    fun endSession(appOrigin: String) {
+        if (_sessions.value.none { it.appOrigin == appOrigin }) return
+        _sessions.value = _sessions.value.filter { it.appOrigin != appOrigin }
+        saveSessions()
+    }
+
     fun isOriginBlocked(origin: String): Boolean = origin in _blockedOrigins.value
 
     /** Whether [app] opens right away or first asks to reconnect (revoked origin). */
@@ -464,8 +541,9 @@ class WalletStore(context: Context) {
     // MARK: - Reset
 
     fun resetWallet() {
+        idleWatch?.cancel()
+        idleWatch = null
         masterPassword = null
-        backgroundTime = null
 
         // Load credential IDs from prefs even when locked,
         // so we can delete individual encrypted key entries
@@ -495,7 +573,12 @@ class WalletStore(context: Context) {
         // Clear in-memory state
         _credentials.value = emptyList()
         _sessions.value = emptyList()
-        _requestLogs.value = emptyList()
+        synchronized(logLock) { _requestLogs.value = emptyList() }
+        // Under the lock, so a request settling meanwhile can't write the old totals back.
+        synchronized(usageLock) {
+            ledger.clear()
+            prefs.edit().remove(USAGE_KEY).apply()
+        }
         _tokenAllowances.value = emptyList()
         _groups.value = emptyList()
         _appGroups.value = emptyMap()
@@ -508,12 +591,8 @@ class WalletStore(context: Context) {
             .apply()
 
         // Reset brute-force state
-        failedAttempts = 0
-        _lockoutEndTime.value = null
-        plainPrefs.edit()
-            .putLong("lockoutEndTime", 0L)
-            .putInt("failedUnlockAttempts", 0)
-            .apply()
+        throttle.reset()
+        _lockoutUntil.value = null
 
         _status.value = WalletStatus.UNINITIALIZED
     }
@@ -604,6 +683,11 @@ class WalletStore(context: Context) {
 
     // MARK: - Request Logging
 
+    /**
+     * Add an entry to the request log (display only, newest first, capped).
+     * [usage] is what the request counted against its allowance (see
+     * [settleUsage]), so the log and the totals agree.
+     */
     fun logRequest(
         appOrigin: String,
         providerId: String,
@@ -611,7 +695,7 @@ class WalletStore(context: Context) {
         url: String,
         statusCode: Int,
         requestBody: ByteArray?,
-        responseBody: String?,
+        usage: UsageLedger.Usage?,
         actualProviderId: String? = null,
         actualModel: String? = null,
         groupId: String? = null,
@@ -621,17 +705,8 @@ class WalletStore(context: Context) {
         if (queryIndex >= 0) sanitizedUrl = url.substring(0, queryIndex)
 
         val model = UsageParser.parseModel(requestBody)
-        var inputTokens: Int? = null
-        var outputTokens: Int? = null
-
-        if (responseBody != null) {
-            // Use upstream provider for usage parsing if we routed cross-family —
-            // the response shape matches the destination, not the source.
-            val parseProviderId = actualProviderId ?: providerId
-            val usage = UsageParser.parseUsage(parseProviderId, responseBody)
-            inputTokens = usage?.inputTokens
-            outputTokens = usage?.outputTokens
-        }
+        val inputTokens = usage?.inputTokens?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt()
+        val outputTokens = usage?.outputTokens?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt()
 
         // Tag the entry with the capability fingerprint of the source request
         // body (tools / vision / structured output / extended reasoning). The
@@ -667,10 +742,38 @@ class WalletStore(context: Context) {
             usedCapabilities = usedCapabilities,
         )
 
-        val logs = listOf(entry) + _requestLogs.value
-        _requestLogs.value = if (logs.size > 500) logs.take(500) else logs
-        saveRequestLogs()
+        synchronized(logLock) {
+            // Locked meanwhile: the stored log isn't loaded, so writing now would replace it.
+            if (!isUnlocked) return
+            _requestLogs.value = (listOf(entry) + _requestLogs.value).take(MAX_LOG_ENTRIES)
+            saveRequestLogs()
+        }
     }
+
+    // MARK: - Usage
+
+    /**
+     * Admit a request of [origin] to [providerId] under its allowance and
+     * reserve an estimate of its tokens, or deny it. Every admitted request
+     * must be settled with [settleUsage].
+     */
+    fun admitRequest(origin: String, providerId: String, body: ByteArray?, binaryBody: Boolean = false): UsageLedger.Admission {
+        val allowance = _tokenAllowances.value.firstOrNull { it.origin == origin }
+        return ledger.admit(allowance, origin, providerId) { UsageLedger.estimate(body, binaryBody) }
+    }
+
+    /** Release the reservation and add what the request [counted] to the persisted totals. */
+    fun settleUsage(reservation: UsageLedger.Reservation, counted: UsageLedger.Usage?) {
+        synchronized(usageLock) {
+            if (ledger.settle(reservation, counted)) {
+                prefs.edit().putString(USAGE_KEY, ledger.toJson()).apply()
+            }
+        }
+    }
+
+    fun usageTotal(origin: String): UsageLedger.Usage = ledger.total(origin)
+
+    fun usageByProvider(origin: String): Map<String, UsageLedger.Usage> = ledger.byProvider(origin)
 
     // MARK: - Persistence
 
@@ -992,8 +1095,13 @@ class WalletStore(context: Context) {
     }
 
     private fun loadRequestLogs() {
-        val json = prefs.getString("requestLogs", null) ?: return
-        try {
+        val list = parseRequestLogs(prefs.getString("requestLogs", null))
+        synchronized(logLock) { _requestLogs.value = list }
+    }
+
+    private fun parseRequestLogs(json: String?): List<RequestLog> {
+        if (json == null) return emptyList()
+        return try {
             val arr = JSONArray(json)
             val list = mutableListOf<RequestLog>()
             for (i in 0 until arr.length()) {
@@ -1017,13 +1125,16 @@ class WalletStore(context: Context) {
                         inputTokens = if (obj.has("inputTokens")) obj.optInt("inputTokens") else null,
                         outputTokens = if (obj.has("outputTokens")) obj.optInt("outputTokens") else null,
                         model = obj.optString("model", "").takeIf { it.isNotEmpty() },
+                        actualProviderId = obj.optString("actualProviderId", "").takeIf { it.isNotEmpty() },
+                        actualModel = obj.optString("actualModel", "").takeIf { it.isNotEmpty() },
+                        groupId = obj.optString("groupId", "").takeIf { it.isNotEmpty() },
                         usedCapabilities = caps,
                     )
                 )
             }
-            _requestLogs.value = list
+            list
         } catch (_: Exception) {
-            _requestLogs.value = emptyList()
+            emptyList()
         }
     }
 
@@ -1041,6 +1152,9 @@ class WalletStore(context: Context) {
                 r.inputTokens?.let { put("inputTokens", it) }
                 r.outputTokens?.let { put("outputTokens", it) }
                 r.model?.let { put("model", it) }
+                r.actualProviderId?.let { put("actualProviderId", it) }
+                r.actualModel?.let { put("actualModel", it) }
+                r.groupId?.let { put("groupId", it) }
                 r.usedCapabilities?.let { caps ->
                     put("usedCapabilities", JSONObject().apply {
                         put("tools", caps.tools)
@@ -1069,17 +1183,9 @@ class WalletStore(context: Context) {
         saveTokenAllowances()
     }
 
-    fun checkAllowance(origin: String, providerId: String): AllowanceCheck.Result {
-        val allowance = _tokenAllowances.value.firstOrNull { it.origin == origin }
-        val entries = _requestLogs.value.filter { it.appOrigin == origin && it.statusCode < 400 }
-        return AllowanceCheck.compute(allowance, entries, providerId)
-    }
-
-    fun tokenUsage(origin: String): Int {
-        return _requestLogs.value
-            .filter { it.appOrigin == origin && it.statusCode < 400 }
-            .sumOf { (it.inputTokens ?: 0) + (it.outputTokens ?: 0) }
-    }
+    /** Tokens [origin] has used in total, from the running totals (not the capped log). */
+    fun tokenUsage(origin: String): Int =
+        ledger.total(origin).tokens.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
 
     private fun loadTokenAllowances() {
         val json = prefs.getString("tokenAllowances", null) ?: return
@@ -1214,6 +1320,13 @@ class WalletStore(context: Context) {
         private const val RETIRED_DATA_PURGED_FLAG = "retiredServiceDataPurged_v1"
         private const val RETIRED_FEATURES_NOTICE_FLAG = "retiredFeaturesNoticePending"
         private const val BLOCKED_ORIGINS_KEY = "blockedOrigins"
+        private const val USAGE_KEY = "usageCounters"
+        private const val LEGACY_LOCKOUT_END_KEY = "lockoutEndTime"
+        private const val MAX_LOG_ENTRIES = 500
+
+        /** Lock after this long without interaction or wallet activity (or in the background). */
+        private const val AUTO_LOCK_TIMEOUT_MS = 15 * 60 * 1000L
+        private const val IDLE_CHECK_INTERVAL_MS = 10_000L
 
         private val RETIRED_ENCRYPTED_KEYS = listOf(
             // Cloud sync account

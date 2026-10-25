@@ -174,33 +174,6 @@ data class TokenAllowance(
     val providerLimits: Map<String, Int>? = null,
 )
 
-object AllowanceCheck {
-    data class Result(val allowed: Boolean, val reason: String? = null)
-
-    fun compute(allowance: TokenAllowance?, entries: List<RequestLog>, providerId: String): Result {
-        if (allowance == null) return Result(allowed = true)
-
-        var totalUsed = 0
-        val byProvider = mutableMapOf<String, Int>()
-        for (entry in entries) {
-            val tokens = (entry.inputTokens ?: 0) + (entry.outputTokens ?: 0)
-            totalUsed += tokens
-            byProvider[entry.providerId] = (byProvider[entry.providerId] ?: 0) + tokens
-        }
-
-        if (allowance.totalLimit != null && totalUsed >= allowance.totalLimit) {
-            return Result(allowed = false, reason = "Token allowance exceeded for ${allowance.origin}")
-        }
-
-        val providerLimit = allowance.providerLimits?.get(providerId)
-        if (providerLimit != null && (byProvider[providerId] ?: 0) >= providerLimit) {
-            return Result(allowed = false, reason = "Token allowance for $providerId exceeded")
-        }
-
-        return Result(allowed = true)
-    }
-}
-
 /**
  * Stable id for the always-present default group. Mirrors `DEFAULT_GROUP_ID`
  * in `packages/core/src/types.ts`. Apps with no explicit binding land here.

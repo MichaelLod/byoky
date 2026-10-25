@@ -21,6 +21,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.byoky.app.data.ApiKeyFormat
 import com.byoky.app.data.AuthMethod
 import com.byoky.app.data.Credential
 import com.byoky.app.data.CredentialBaseUrl
@@ -561,7 +562,7 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
 
                 OutlinedTextField(
                     value = apiKey,
-                    onValueChange = { apiKey = it },
+                    onValueChange = { apiKey = it; error = null },
                     label = {
                         Text(
                             when {
@@ -621,10 +622,15 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
             Button(
                 onClick = {
                     if (saving) return@Button
-                    saving = true
                     error = null
                     val providerId = selectedProvider!!.id
-                    val cleanKey = apiKey.filter { !it.isWhitespace() }
+                    // Keys travel in an HTTP header: printable ASCII only.
+                    val cleanKey = ApiKeyFormat.normalize(apiKey.filter { !it.isWhitespace() })
+                    if (cleanKey == null) {
+                        error = ApiKeyFormat.INVALID_MESSAGE
+                        return@Button
+                    }
+                    saving = true
                     val base = if (needsBaseUrl) normalizedBaseUrl else null
                     scope.launch {
                         // Encryption (PBKDF2) runs on Dispatchers.Default inside addCredential().

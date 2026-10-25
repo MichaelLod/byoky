@@ -1,9 +1,12 @@
 package com.byoky.app.proxy
 
 import android.content.Context
+import android.os.Looper
 import androidx.javascriptengine.IsolateStartupParameters
+import androidx.javascriptengine.IsolateTerminatedException
 import androidx.javascriptengine.JavaScriptIsolate
 import androidx.javascriptengine.JavaScriptSandbox
+import androidx.javascriptengine.SandboxDeadException
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.runBlocking
@@ -32,7 +35,10 @@ import java.util.concurrent.atomic.AtomicReference
  * We expose blocking methods because the proxy pipeline is already on
  * background threads (OkHttp call queue) and the translation step is a
  * single fast call. Internal sync uses kotlinx.coroutines runBlocking to
- * await the futures inside the bridge methods.
+ * await the futures inside the bridge methods. The sandbox's connect
+ * callback arrives on the main thread, so a cold engine never warms up from
+ * there: main-thread calls before [warmUp] finished throw
+ * [EngineException.NotReady] instead of deadlocking.
  *
  * Stream translators are stateful so we can't expose them as Kotlin objects.
  * The JS side holds them in a handle table; we pass integer handles back
@@ -51,6 +57,10 @@ class TranslationEngine private constructor(private val appContext: Context) {
         class BridgeNotInitialized : EngineException("BYOKY_TRANSLATE global not exposed by bundle")
         class TranslationFailed(msg: String) : EngineException(msg)
         class InvalidResult : EngineException("bridge returned an invalid result")
+        /** Called on the main thread before [warmUp] finished; see [evalSync]. */
+        class NotReady : EngineException("translation engine is not loaded yet")
+        /** Input too large for the isolate's heap; rejected before it reaches the sandbox. */
+        class TooLarge : EngineException("input too large for the translation engine")
     }
 
     private val initMutex = Mutex()
@@ -66,7 +76,12 @@ class TranslationEngine private constructor(private val appContext: Context) {
     val isSupported: Boolean
         get() = JavaScriptSandbox.isSupported()
 
-    /** Lazily create the sandbox + isolate and evaluate the bundle. Idempotent. */
+    /**
+     * Lazily create the sandbox + isolate and evaluate the bundle. Idempotent.
+     * After the isolate was lost (see [evalSync]) this builds a fresh one,
+     * reusing the sandbox when it is still alive. Must not be awaited on the
+     * main thread: the sandbox delivers its connect callback there.
+     */
     suspend fun warmUp() {
         if (loaded) return
         initMutex.withLock {
@@ -76,50 +91,50 @@ class TranslationEngine private constructor(private val appContext: Context) {
                     "JavaScriptSandbox unavailable on this device (requires WebView ≥ 110)"
                 )
             }
-            val sandbox: JavaScriptSandbox = try {
-                JavaScriptSandbox.createConnectedInstanceAsync(appContext).await()
-            } catch (t: Throwable) {
-                throw EngineException.BundleLoadFailed("sandbox connect failed: ${t.message}")
-            }
-            sandboxRef.set(sandbox)
+            val sandbox: JavaScriptSandbox = sandboxRef.get() ?: connectSandbox().also { sandboxRef.set(it) }
 
             val isolate: JavaScriptIsolate = try {
                 val params = IsolateStartupParameters().apply {
                     // Generous heap for translation; bundle is ~100 KB but
                     // request bodies can include base64 images.
-                    maxHeapSizeBytes = 32L * 1024 * 1024
+                    maxHeapSizeBytes = ISOLATE_HEAP_BYTES
                 }
                 sandbox.createIsolate(params)
             } catch (t: Throwable) {
+                // A sandbox that can't create isolates is gone: reconnect next time.
+                if (sandboxRef.compareAndSet(sandbox, null)) closeQuietly(sandbox)
                 throw EngineException.BundleLoadFailed("isolate create failed: ${t.message}")
             }
-            isolateRef.set(isolate)
 
-            // Load the bundle from assets/. The IIFE assigns globalThis.BYOKY_TRANSLATE
-            // when evaluated. We then verify it's present via a tiny probe script.
-            val bundleSource: String = try {
-                appContext.assets.open("mobile.js").bufferedReader().use { it.readText() }
-            } catch (t: Throwable) {
-                throw EngineException.BundleLoadFailed("read mobile.js failed: ${t.message}")
-            }
             try {
-                isolate.evaluateJavaScriptAsync(bundleSource).await()
+                loadBundle(isolate)
             } catch (t: Throwable) {
-                throw EngineException.BundleLoadFailed("evaluate bundle failed: ${t.message}")
+                closeQuietly(isolate)
+                if (t is SandboxDeadException && sandboxRef.compareAndSet(sandbox, null)) closeQuietly(sandbox)
+                throw t as? EngineException ?: EngineException.BundleLoadFailed("bundle load failed: ${t.message}")
             }
-            // Probe: confirm the global is wired up.
-            val probe: String? = try {
-                isolate.evaluateJavaScriptAsync(
-                    "typeof BYOKY_TRANSLATE === 'object' && typeof BYOKY_TRANSLATE.translateRequest === 'function' ? BYOKY_TRANSLATE.version : ''"
-                ).await()
-            } catch (t: Throwable) {
-                throw EngineException.BundleLoadFailed("probe failed: ${t.message}")
-            }
-            if (probe == null || probe.isEmpty()) {
-                throw EngineException.BridgeNotInitialized()
-            }
+            isolateRef.set(isolate)
             loaded = true
         }
+    }
+
+    private suspend fun connectSandbox(): JavaScriptSandbox = try {
+        JavaScriptSandbox.createConnectedInstanceAsync(appContext).await()
+    } catch (t: Throwable) {
+        throw EngineException.BundleLoadFailed("sandbox connect failed: ${t.message}")
+    }
+
+    /**
+     * Evaluate assets/mobile.js in [isolate]. The IIFE assigns
+     * globalThis.BYOKY_TRANSLATE; a tiny probe script confirms it.
+     */
+    private suspend fun loadBundle(isolate: JavaScriptIsolate) {
+        val bundleSource = appContext.assets.open("mobile.js").bufferedReader().use { it.readText() }
+        isolate.evaluateJavaScriptAsync(bundleSource).await()
+        val probe: String? = isolate.evaluateJavaScriptAsync(
+            "typeof BYOKY_TRANSLATE === 'object' && typeof BYOKY_TRANSLATE.translateRequest === 'function' ? BYOKY_TRANSLATE.version : ''"
+        ).await()
+        if (probe.isNullOrEmpty()) throw EngineException.BridgeNotInitialized()
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -208,6 +223,20 @@ class TranslationEngine private constructor(private val appContext: Context) {
     fun sameFamily(srcProviderId: String, dstProviderId: String): Boolean {
         return try {
             val expr = "BYOKY_TRANSLATE.sameFamily(${jsLiteral(srcProviderId)}, ${jsLiteral(dstProviderId)}) ? '1' : '0'"
+            evalSync(expr) == "1"
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    /**
+     * True iff `url` is the chat endpoint of `providerId`'s family, the only
+     * request shape translation and same-family swaps can route. False on
+     * errors / unknown providers.
+     */
+    fun isChatEndpoint(providerId: String, url: String): Boolean {
+        return try {
+            val expr = "BYOKY_TRANSLATE.isChatEndpoint(${jsLiteral(providerId)}, ${jsLiteral(url)}) ? '1' : '0'"
             evalSync(expr) == "1"
         } catch (_: Throwable) {
             false
@@ -413,20 +442,50 @@ class TranslationEngine private constructor(private val appContext: Context) {
     }
 
     private fun evalSync(expr: String): String {
-        if (!loaded) runBlocking { warmUp() }
+        // Oversized input would exhaust the isolate's heap and terminate it.
+        if (expr.length > MAX_EXPRESSION_CHARS) throw EngineException.TooLarge()
+        if (!loaded) {
+            // warmUp() waits for a callback delivered on the main looper, so
+            // blocking the main thread on it would never return.
+            if (Looper.myLooper() == Looper.getMainLooper()) throw EngineException.NotReady()
+            runBlocking { warmUp() }
+        }
         val isolate = isolateRef.get() ?: throw EngineException.BridgeNotInitialized()
         return try {
             runBlocking { isolate.evaluateJavaScriptAsync(expr).await() ?: "" }
+        } catch (t: IsolateTerminatedException) {
+            // Heap limit hit or sandbox process gone: every later call on this
+            // isolate would fail too. Drop it so the next call warms up anew.
+            discard(isolate, sandboxDead = t is SandboxDeadException)
+            throw EngineException.TranslationFailed("translation engine stopped and will restart on the next request")
         } catch (t: Throwable) {
             throw EngineException.TranslationFailed(t.message ?: "unknown JS error")
         }
     }
 
+    /**
+     * Forget a terminated [isolate] (and its sandbox when that died too).
+     * Only the caller that still finds [isolate] current does this, so a
+     * fresh isolate built in the meantime is never torn down. Lock-free on
+     * purpose: [initMutex] can be held by a warmUp() waiting on the main
+     * thread.
+     */
+    private fun discard(isolate: JavaScriptIsolate, sandboxDead: Boolean) {
+        if (!isolateRef.compareAndSet(isolate, null)) return
+        loaded = false
+        closeQuietly(isolate)
+        if (sandboxDead) closeQuietly(sandboxRef.getAndSet(null))
+    }
+
+    private fun closeQuietly(closeable: AutoCloseable?) {
+        try { closeable?.close() } catch (_: Throwable) {}
+    }
+
     /** Tear down the sandbox. App lifecycle should call this on full shutdown. */
     fun shutdown() {
-        try { isolateRef.getAndSet(null)?.close() } catch (_: Throwable) {}
-        try { sandboxRef.getAndSet(null)?.close() } catch (_: Throwable) {}
         loaded = false
+        closeQuietly(isolateRef.getAndSet(null))
+        closeQuietly(sandboxRef.getAndSet(null))
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -441,6 +500,9 @@ class TranslationEngine private constructor(private val appContext: Context) {
         try {
             if (!isSupported) {
                 return "✗ JavaScriptSandbox not supported on this device"
+            }
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                return "✗ self-test must run off the main thread"
             }
             runBlocking { warmUp() }
             lines += "✓ bundle loaded"
@@ -474,6 +536,16 @@ class TranslationEngine private constructor(private val appContext: Context) {
 
     companion object {
         @Volatile private var instance: TranslationEngine? = null
+
+        private const val ISOLATE_HEAP_BYTES = 32L * 1024 * 1024
+
+        /**
+         * Longest script evalSync hands to the isolate. The body is inlined
+         * as a string literal and then parsed, copied and re-serialized
+         * inside the 32 MiB isolate heap, so a few MiB of input can exhaust
+         * it and terminate the isolate.
+         */
+        private const val MAX_EXPRESSION_CHARS = 2 * 1024 * 1024
 
         /** Acquire the process-wide TranslationEngine. App context only. */
         fun get(context: Context): TranslationEngine {

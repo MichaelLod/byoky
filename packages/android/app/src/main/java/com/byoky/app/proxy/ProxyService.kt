@@ -1,13 +1,17 @@
 package com.byoky.app.proxy
 
 import android.content.Context
+import com.byoky.app.data.ApiKeyFormat
 import com.byoky.app.data.AuthMethod
 import com.byoky.app.data.Credential
 import com.byoky.app.data.Group
 import com.byoky.app.data.Provider
 import com.byoky.app.data.RoutingDecision
 import com.byoky.app.data.RoutingTranslation
+import com.byoky.app.data.UsageLedger
+import com.byoky.app.data.UsageMeter
 import com.byoky.app.data.WalletStore
+import okhttp3.Call
 import okhttp3.Headers.Companion.toHeaders
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -19,6 +23,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.json.JSONObject
+import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
@@ -67,6 +72,8 @@ class ProxyService(
      * connection.
      */
     interface ResponseSink {
+        /** The upstream call, before it starts; cancelling it aborts the transfer. */
+        fun onCall(call: Call) {}
         fun onMeta(status: Int, statusText: String, headers: Map<String, String>)
         fun onChunk(chunk: String)
         fun onDone()
@@ -77,12 +84,16 @@ class ProxyService(
 
     /**
      * Forward one request. `url` is the full provider URL the app asked for;
-     * it must belong to `providerId` (checked here). Routing uses the group
-     * bound to `appOrigin`, and the request is logged under that origin.
+     * it must belong to `providerId` and be an inference or model-listing
+     * endpoint (both checked here). Routing uses the group bound to
+     * `appOrigin`; usage counts against that origin's allowance and the
+     * request is logged under it. [binaryBody]: the body is base64 or form
+     * data from the app, which can't be translated.
      *
      * Throws [ProxyError] when the request can't be routed (unknown provider,
-     * URL mismatch, allowance exceeded, no credential). Any other exception
-     * is a transport or translation failure.
+     * URL mismatch, endpoint not allowed, allowance exceeded, no credential).
+     * Any other exception is a transport or translation failure; its text is
+     * never meant for the app (see `runtime/PageError`).
      */
     fun forward(
         appOrigin: String,
@@ -92,41 +103,161 @@ class ProxyService(
         headers: Map<String, String>,
         body: ByteArray?,
         sink: ResponseSink,
+        binaryBody: Boolean = false,
     ) {
+        wallet.noteActivity()
         val provider = Provider.find(providerId)
             ?: throw ProxyError("NO_PROVIDER", "Unknown provider: $providerId", 400)
 
         val parsedUrl = url.toHttpUrlOrNull()
             ?: throw ProxyError("INVALID_URL", "URL doesn't parse", 400)
-        val credentials = wallet.credentials.value
         // Host-only check for now; for providers without a fixed host the
         // URL is checked against the credential routing picks (forwardDirect).
         if (!UpstreamPolicy.requestUrlAllowed(provider, parsedUrl)) {
             throw ProxyError("INVALID_URL", "URL doesn't match provider $providerId", 400)
         }
+        if (!EndpointPolicy.isAllowed(method, url)) throw endpointNotAllowed()
 
-        val allowance = wallet.checkAllowance(appOrigin, providerId)
-        if (!allowance.allowed) {
-            throw ProxyError("QUOTA_EXCEEDED", allowance.reason ?: "Token allowance exceeded", 429)
+        // Admitting reserves an estimate, so parallel requests can't all pass
+        // the check against the same remaining allowance.
+        val reservation = when (val admission = wallet.admitRequest(appOrigin, providerId, body, binaryBody)) {
+            is UsageLedger.Admission.Denied -> throw ProxyError("QUOTA_EXCEEDED", admission.reason, 429)
+            is UsageLedger.Admission.Allowed -> admission.reservation
         }
-
         val group = wallet.groupForOrigin(appOrigin)
-        val routing = resolveRouting(providerId, body, group, credentials)
-            ?: throw ProxyError("NO_CREDENTIAL", noCredentialMessage(providerId, credentials, group), 403)
+        var routing: RoutingDecision? = null
+        var exchange: Exchange? = null
+        try {
+            val credentials = wallet.credentials.value
+            val decision = resolveRouting(providerId, parsedUrl, body, group, credentials)
+                ?: throw ProxyError("NO_CREDENTIAL", noCredentialMessage(providerId, credentials, group), 403)
+            routing = decision
+            val upstreamProviderId = decision.translation?.dstProviderId ?: decision.swapToProviderId ?: providerId
+            if (decision.translation != null || decision.swapToProviderId != null) {
+                // Routing rewrites the request onto the destination's chat
+                // endpoint, so only chat requests can be routed. Token counts,
+                // embeddings or model lists would turn into billed generations.
+                if (translationEngine?.isChatEndpoint(providerId, url) != true) {
+                    throw ProxyError(
+                        "ROUTING_UNSUPPORTED",
+                        "This app is routed to $upstreamProviderId, and only chat requests can be routed to another provider",
+                        400,
+                    )
+                }
+            }
+            if (decision.translation != null && binaryBody) {
+                throw ProxyError("TRANSLATION_NOT_SUPPORTED", "Cross-family routing does not support binary request bodies.", 400)
+            }
 
-        when {
-            routing.translation != null -> forwardTranslated(
-                appOrigin, providerId, routing.translation, routing.credential, method, headers, body, sink,
-            )
-            routing.swapToProviderId != null -> forwardSwapped(
-                appOrigin, providerId, routing.swapToProviderId, routing.swapDstModel,
-                routing.credential, method, headers, body, sink,
-            )
-            else -> forwardDirect(
-                appOrigin, provider, parsedUrl, routing.credential, routing.modelOverride,
-                method, headers, body, sink,
-            )
+            // Usage is read in the dialect of the provider actually called.
+            val ex = Exchange(UsageMeter(upstreamProviderId).also { it.requestBytes = body?.size?.toLong() ?: 0 })
+            exchange = ex
+            when {
+                decision.translation != null -> forwardTranslated(
+                    parsedUrl, decision.translation, decision.credential, method, headers, body, sink, ex,
+                )
+                decision.swapToProviderId != null -> forwardSwapped(
+                    providerId, parsedUrl, decision.swapToProviderId, decision.swapDstModel,
+                    decision.credential, method, headers, body, sink, ex,
+                )
+                else -> forwardDirect(
+                    provider, parsedUrl, decision.credential, decision.modelOverride,
+                    method, headers, body, sink, ex,
+                )
+            }
+        } finally {
+            // Also when the transfer failed part-way (app cancelled or closed,
+            // connection dropped, translation error): the provider bills
+            // whatever it already did.
+            settle(appOrigin, providerId, parsedUrl, method, body, binaryBody, group, routing, reservation, exchange)
         }
+    }
+
+    /** One upstream call and what is known about it so far. */
+    private class Exchange(val meter: UsageMeter) {
+        var call: Call? = null
+        var upstreamUrl: String? = null
+        /** The request went out (it wasn't cancelled before it started). */
+        var sent = false
+
+        /** Hand [call] to the sink (which may cancel it) and run it. */
+        fun execute(call: Call, url: String, sink: ResponseSink): Response {
+            this.call = call
+            upstreamUrl = url
+            sink.onCall(call)
+            if (call.isCanceled()) throw IOException("Canceled before sending")
+            sent = true
+            return call.execute().also { response ->
+                meter.status = response.code
+                meter.contentType = response.header("content-type").orEmpty()
+            }
+        }
+    }
+
+    /**
+     * Count what a finished, failed or cancelled request used against the
+     * app's allowance, release its reservation and log it. Totals first, so
+     * anything observing the log sees them updated. Mirrors the extension.
+     */
+    private fun settle(
+        appOrigin: String,
+        providerId: String,
+        appUrl: HttpUrl,
+        method: String,
+        body: ByteArray?,
+        binaryBody: Boolean,
+        group: Group?,
+        routing: RoutingDecision?,
+        reservation: UsageLedger.Reservation,
+        exchange: Exchange?,
+    ) {
+        val meter = exchange?.meter
+        val call = exchange?.call
+        val (status, counted) = when {
+            exchange == null || meter == null || call == null || !exchange.sent -> {
+                // Never reached the provider.
+                wallet.settleUsage(reservation, null)
+                return
+            }
+            meter.status != 0 -> {
+                val upstreamProviderId = routing?.translation?.dstProviderId ?: routing?.swapToProviderId ?: providerId
+                val estimate = EndpointPolicy.shouldEstimateUsage(upstreamProviderId, appUrl, meter.contentType)
+                meter.status to meter.counted(estimate)
+            }
+            // The app cancelled after the request went out but before the
+            // response headers (for a non-streaming reply, before generation
+            // ended): the provider still bills, so charge its estimate.
+            call.isCanceled() -> CANCELLED_STATUS to cancelledUsage(body, binaryBody)
+            else -> {
+                // Connection failed before any response.
+                wallet.settleUsage(reservation, null)
+                return
+            }
+        }
+        wallet.settleUsage(reservation, counted)
+        try {
+            wallet.logRequest(
+                appOrigin = appOrigin,
+                providerId = providerId,
+                method = method,
+                url = exchange.upstreamUrl ?: appUrl.toString(),
+                statusCode = status,
+                requestBody = if (binaryBody) null else body,
+                usage = counted,
+                actualProviderId = routing?.translation?.dstProviderId ?: routing?.swapToProviderId,
+                actualModel = routing?.translation?.dstModel ?: routing?.swapDstModel ?: routing?.modelOverride,
+                groupId = group?.id,
+            )
+        } catch (_: Exception) {
+            // The log is for display; it must not mask the request's outcome.
+        }
+    }
+
+    /** A request cancelled before any response: its prompt plus the output it asked for. */
+    private fun cancelledUsage(body: ByteArray?, binaryBody: Boolean): UsageLedger.Usage {
+        val total = UsageLedger.estimate(body, binaryBody)
+        val input = if (body == null || binaryBody) 0 else UsageLedger.promptTokens(body)
+        return UsageLedger.Usage(1, input, (total - input).coerceAtLeast(0))
     }
 
     /**
@@ -181,19 +312,39 @@ class ProxyService(
 
     private fun resolveRouting(
         providerId: String,
+        url: HttpUrl,
         body: ByteArray?,
         group: Group?,
         credentials: List<Credential>,
     ): RoutingDecision? {
         val engine = translationEngine
-        val srcModel = RoutingResolver.parseModel(body)
-        if (engine != null) {
-            return RoutingResolver.resolve(providerId, srcModel, group, credentials, engine)
+            // No engine: direct match only, still honoring the group's pinned key and model.
+            ?: return RoutingResolver.resolveDirect(providerId, group, credentials)
+        val srcModel = RoutingResolver.requestModel(providerId, url, body)
+        val families = object : RoutingResolver.Families {
+            override fun shouldTranslate(srcProviderId: String, dstProviderId: String) =
+                engine.shouldTranslate(srcProviderId, dstProviderId)
+            override fun sameFamily(srcProviderId: String, dstProviderId: String) =
+                engine.sameFamily(srcProviderId, dstProviderId)
         }
-        // No engine: direct match only, still honoring a group-pinned model.
-        val direct = credentials.firstOrNull { it.providerId == providerId } ?: return null
-        val override = if (group?.providerId == providerId) group.model?.takeIf { it.isNotEmpty() } else null
-        return RoutingDecision(direct, modelOverride = override)
+        return RoutingResolver.resolve(providerId, srcModel, group, credentials, families)
+    }
+
+    /**
+     * The decrypted key of [credential]. Keys added before printable ASCII
+     * was enforced may still hold a stray character; OkHttp would reject
+     * the header with an error quoting the value, so fail cleanly instead.
+     */
+    private fun apiKey(credential: Credential, providerName: String): String {
+        val key = wallet.decryptKey(credential)
+        if (!ApiKeyFormat.isValid(key)) {
+            throw ProxyError(
+                "INVALID_KEY",
+                "The $providerName key \"${credential.label}\" contains a character providers don't accept. Remove it and add it again.",
+                400,
+            )
+        }
+        return key
     }
 
     /** The URL a request may go to with [credential]'s key, or a [ProxyError]. */
@@ -218,11 +369,13 @@ class ProxyService(
      * Re-check a URL produced by the JS bundle's rewriteProxyUrl before any
      * key is attached, so a bundle that ignores the rules can't redirect it.
      */
-    private fun checkedRewrite(dstProviderId: String, rewritten: String?, credential: Credential, code: String): String {
+    private fun checkedRewrite(dstProviderId: String, rewritten: String?, credential: Credential, method: String, code: String): String {
         val provider = Provider.find(dstProviderId)
             ?: throw ProxyError(code, "Unknown destination provider $dstProviderId", 500)
         val parsed = rewritten?.toHttpUrlOrNull()
             ?: throw ProxyError(code, "No upstream URL for $dstProviderId", 500)
+        // The rewrite can carry the app's model into the path (Azure deployments).
+        if (!EndpointPolicy.isAllowed(method, rewritten)) throw endpointNotAllowed()
         return allowedTarget(provider, parsed, credential)
     }
 
@@ -238,7 +391,6 @@ class ProxyService(
 
     /** Pass-through: same provider the app called, the user's own key. */
     private fun forwardDirect(
-        appOrigin: String,
         provider: Provider,
         url: HttpUrl,
         credential: Credential,
@@ -247,10 +399,12 @@ class ProxyService(
         headers: Map<String, String>,
         body: ByteArray?,
         sink: ResponseSink,
+        exchange: Exchange,
     ) {
+        val meter = exchange.meter
         val providerId = provider.id
         val upstreamUrl = allowedTarget(provider, url, credential)
-        val apiKey = wallet.decryptKey(credential)
+        val apiKey = apiKey(credential, provider.name)
 
         val outHeaders = filterHeaders(headers, DIRECT_DROPPED_HEADERS)
         ProviderAuth.apply(outHeaders, providerId, credential.authMethod, apiKey)
@@ -271,21 +425,16 @@ class ProxyService(
         outBody = injectStreamUsageOptions(providerId, outBody)
 
         val request = buildRequest(upstreamUrl, method, outHeaders, outBody)
-        val capture = LogCapture()
-        val status = client.newCall(request).execute().use { response ->
+        exchange.execute(client.newCall(request), upstreamUrl, sink).use { response ->
             sink.onMeta(response.code, statusText(response), responseHeaders(response))
             val rewriter = if (toolNameMap.isNotEmpty() && engine != null && response.isSuccessful) engine else null
             when {
-                rewriter == null -> streamText(response) { text ->
-                    capture.append(text)
-                    sink.onChunk(text)
-                }
+                rewriter == null -> streamText(response, meter) { text -> sink.onChunk(text) }
                 isEventStream(response) -> {
                     val handle = rewriter.createClaudeCodeSSERewriter(toolNameMap)
                     var flushed = false
                     try {
-                        streamText(response) { text ->
-                            capture.append(text)
+                        streamText(response, meter) { text ->
                             val out = rewriter.processClaudeCodeSSE(handle, text)
                             if (out.isNotEmpty()) sink.onChunk(out)
                         }
@@ -297,25 +446,12 @@ class ProxyService(
                     }
                 }
                 else -> {
-                    val full = readText(response)
-                    capture.append(full)
+                    val full = readText(response, meter)
                     sink.onChunk(rewriter.rewriteClaudeCodeJSONBody(toolNameMap, full))
                 }
             }
             sink.onDone()
-            response.code
         }
-
-        wallet.logRequest(
-            appOrigin = appOrigin,
-            providerId = providerId,
-            method = method,
-            url = upstreamUrl,
-            statusCode = status,
-            requestBody = body,
-            responseBody = capture.textOrNull(),
-            groupId = wallet.groupForOrigin(appOrigin)?.id,
-        )
     }
 
     /**
@@ -325,18 +461,19 @@ class ProxyService(
      * dialect. Error responses pass through untranslated.
      */
     private fun forwardTranslated(
-        appOrigin: String,
-        originalProviderId: String,
+        url: HttpUrl,
         translation: RoutingTranslation,
         credential: Credential,
         method: String,
         headers: Map<String, String>,
         body: ByteArray?,
         sink: ResponseSink,
+        exchange: Exchange,
     ) {
+        val meter = exchange.meter
         val engine = translationEngine
             ?: throw ProxyError("TRANSLATION_FAILED", "Translation engine unavailable", 500)
-        val isStreaming = RoutingResolver.isStreamingRequest(body)
+        val isStreaming = RoutingResolver.isStreamingRequest(translation.srcProviderId, url, body)
 
         val ctxJson = engine.buildTranslationContext(
             srcProviderId = translation.srcProviderId,
@@ -351,10 +488,11 @@ class ProxyService(
             translation.dstProviderId,
             engine.rewriteProxyUrl(translation.dstProviderId, translation.dstModel, isStreaming, rewriteBase(translation.dstProviderId, credential)),
             credential,
+            method,
             "TRANSLATION_FAILED",
         )
 
-        val dstApiKey = wallet.decryptKey(credential)
+        val dstApiKey = apiKey(credential, Provider.find(translation.dstProviderId)?.name ?: translation.dstProviderId)
         val outHeaders = filterHeaders(headers, ROUTED_DROPPED_HEADERS)
         ProviderAuth.apply(outHeaders, translation.dstProviderId, credential.authMethod, dstApiKey)
 
@@ -373,22 +511,17 @@ class ProxyService(
         val unalias = toolNameMap.takeIf { it.isNotEmpty() && engine.isSupported }
 
         val request = buildRequest(upstreamUrl, method, outHeaders, outBody, defaultContentType = "application/json")
-        val capture = LogCapture()
-        val status = client.newCall(request).execute().use { response ->
+        exchange.execute(client.newCall(request), upstreamUrl, sink).use { response ->
             sink.onMeta(response.code, statusText(response), responseHeaders(response))
             when {
-                !response.isSuccessful -> streamText(response) { text ->
-                    capture.append(text)
-                    sink.onChunk(text)
-                }
+                !response.isSuccessful -> streamText(response, meter) { text -> sink.onChunk(text) }
                 isStreaming -> {
                     val handle = engine.createStreamTranslator(ctxJson)
                     val aliasHandle = unalias?.let { engine.createClaudeCodeSSERewriter(it) }
                     var flushed = false
                     var aliasFlushed = aliasHandle == null
                     try {
-                        streamText(response) { text ->
-                            capture.append(text)
+                        streamText(response, meter) { text ->
                             val restored = if (aliasHandle != null) engine.processClaudeCodeSSE(aliasHandle, text) else text
                             if (restored.isNotEmpty()) {
                                 val out = engine.processStreamChunk(handle, restored)
@@ -412,30 +545,13 @@ class ProxyService(
                     }
                 }
                 else -> {
-                    val full = readText(response)
-                    capture.append(full)
+                    val full = readText(response, meter)
                     val restored = if (unalias != null) engine.rewriteClaudeCodeJSONBody(unalias, full) else full
                     sink.onChunk(engine.translateResponse(ctxJson, restored))
                 }
             }
             sink.onDone()
-            response.code
         }
-
-        wallet.logRequest(
-            appOrigin = appOrigin,
-            providerId = originalProviderId,
-            method = method,
-            url = upstreamUrl,
-            statusCode = status,
-            requestBody = body,
-            // Upstream (destination-dialect) body: logRequest parses usage
-            // with the destination provider when actualProviderId is set.
-            responseBody = capture.textOrNull(),
-            actualProviderId = translation.dstProviderId,
-            actualModel = translation.dstModel,
-            groupId = wallet.groupForOrigin(appOrigin)?.id,
-        )
     }
 
     /**
@@ -444,8 +560,8 @@ class ProxyService(
      * response is forwarded verbatim.
      */
     private fun forwardSwapped(
-        appOrigin: String,
         originalProviderId: String,
+        url: HttpUrl,
         swapToProviderId: String,
         swapDstModel: String?,
         credential: Credential,
@@ -453,10 +569,12 @@ class ProxyService(
         headers: Map<String, String>,
         body: ByteArray?,
         sink: ResponseSink,
+        exchange: Exchange,
     ) {
+        val meter = exchange.meter
         val engine = translationEngine
             ?: throw ProxyError("SWAP_FAILED", "Translation engine unavailable", 500)
-        val isStreaming = RoutingResolver.isStreamingRequest(body)
+        val isStreaming = RoutingResolver.isStreamingRequest(originalProviderId, url, body)
         // rewriteProxyUrl needs a non-empty model even though most
         // openai-family providers read it from the body.
         val modelForUrl = swapDstModel ?: RoutingResolver.parseModel(body) ?: ""
@@ -464,39 +582,22 @@ class ProxyService(
             swapToProviderId,
             engine.rewriteProxyUrl(swapToProviderId, modelForUrl, isStreaming, rewriteBase(swapToProviderId, credential)),
             credential,
+            method,
             "SWAP_FAILED",
         )
 
-        val dstApiKey = wallet.decryptKey(credential)
+        val dstApiKey = apiKey(credential, Provider.find(swapToProviderId)?.name ?: swapToProviderId)
         val outHeaders = filterHeaders(headers, ROUTED_DROPPED_HEADERS)
         ProviderAuth.apply(outHeaders, swapToProviderId, credential.authMethod, dstApiKey)
         val swappedBody = if (!swapDstModel.isNullOrEmpty()) rewriteModel(body, swapDstModel) else body
         val outBody = injectStreamUsageOptions(swapToProviderId, swappedBody)
 
         val request = buildRequest(upstreamUrl, method, outHeaders, outBody)
-        val capture = LogCapture()
-        val status = client.newCall(request).execute().use { response ->
+        exchange.execute(client.newCall(request), upstreamUrl, sink).use { response ->
             sink.onMeta(response.code, statusText(response), responseHeaders(response))
-            streamText(response) { text ->
-                capture.append(text)
-                sink.onChunk(text)
-            }
+            streamText(response, meter) { text -> sink.onChunk(text) }
             sink.onDone()
-            response.code
         }
-
-        wallet.logRequest(
-            appOrigin = appOrigin,
-            providerId = originalProviderId,
-            method = method,
-            url = upstreamUrl,
-            statusCode = status,
-            requestBody = body,
-            responseBody = capture.textOrNull(),
-            actualProviderId = swapToProviderId,
-            actualModel = swapDstModel,
-            groupId = wallet.groupForOrigin(appOrigin)?.id,
-        )
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -561,8 +662,12 @@ class ProxyService(
     private fun isEventStream(response: Response): Boolean =
         response.header("content-type")?.lowercase()?.contains("text/event-stream") == true
 
-    /** Read the body incrementally as UTF-8 text, never splitting a multi-byte character. */
-    private fun streamText(response: Response, onText: (String) -> Unit) {
+    /**
+     * Read the body incrementally as UTF-8 text, never splitting a multi-byte
+     * character. [meter] sees all text before [onText] does, so usage still
+     * counts if [onText] throws (the app went away).
+     */
+    private fun streamText(response: Response, meter: UsageMeter, onText: (String) -> Unit) {
         val source = response.body?.source() ?: return
         val decoder = Utf8StreamDecoder()
         val buffer = ByteArray(8192)
@@ -571,16 +676,21 @@ class ProxyService(
             if (read == -1) break
             if (read > 0) {
                 val text = decoder.decode(buffer, read)
-                if (text.isNotEmpty()) onText(text)
+                if (text.isNotEmpty()) {
+                    meter.onText(text)
+                    onText(text)
+                }
             }
         }
         val tail = decoder.finish()
+        if (tail.isNotEmpty()) meter.onText(tail)
+        meter.complete = true
         if (tail.isNotEmpty()) onText(tail)
     }
 
-    private fun readText(response: Response): String {
+    private fun readText(response: Response, meter: UsageMeter): String {
         val sb = StringBuilder()
-        streamText(response) { sb.append(it) }
+        streamText(response, meter) { sb.append(it) }
         return sb.toString()
     }
 
@@ -618,6 +728,10 @@ class ProxyService(
      *   3. The wallet is empty → ask for any key.
      */
     private fun noCredentialMessage(providerId: String, credentials: List<Credential>, group: Group?): String {
+        val pin = group?.credentialId
+        if (group != null && pin != null && credentials.none { it.id == pin }) {
+            return "The key this app's group \"${group.name}\" is pinned to is no longer in your wallet. Edit the group and pick another key."
+        }
         // An empty providerId is the default sentinel group: no routing.
         val groupBinding = group?.providerId?.takeIf { it.isNotEmpty() }
         if (groupBinding != null && groupBinding != providerId) {
@@ -630,22 +744,6 @@ class ProxyService(
         return "No API keys in your wallet. Add a key for any provider to get started."
     }
 
-    /** Keeps the upstream body for usage parsing, up to a cap. */
-    private class LogCapture {
-        private val sb = StringBuilder()
-        private var overflowed = false
-        fun append(text: String) {
-            if (overflowed) return
-            if (sb.length + text.length > LOG_CAPTURE_LIMIT) {
-                overflowed = true
-                sb.setLength(0)
-                return
-            }
-            sb.append(text)
-        }
-        fun textOrNull(): String? = if (overflowed || sb.isEmpty()) null else sb.toString()
-    }
-
     companion object {
         /** Origin used for requests that don't come from an identified app. */
         const val DEFAULT_ORIGIN = "bridge"
@@ -656,7 +754,11 @@ class ProxyService(
         private val METHODS_WITH_BODY = setOf("POST", "PUT", "PATCH")
         private val DIRECT_DROPPED_HEADERS = setOf("host", "authorization", "x-api-key", "content-length")
         private val ROUTED_DROPPED_HEADERS = setOf("host", "authorization", "x-api-key", "anthropic-version", "content-length")
-        private const val LOG_CAPTURE_LIMIT = 1_048_576
+
+        /** Logged for requests the app cancelled before any response (nginx's "client closed request"). */
+        private const val CANCELLED_STATUS = 499
+
+        fun endpointNotAllowed() = ProxyError(EndpointPolicy.ERROR_CODE, EndpointPolicy.ERROR_MESSAGE, EndpointPolicy.ERROR_STATUS)
 
         val SENSITIVE_RESPONSE_HEADERS = setOf(
             "server", "x-request-id", "x-cloud-trace-context",

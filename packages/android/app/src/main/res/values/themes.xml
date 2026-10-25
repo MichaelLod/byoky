@@ -5,7 +5,7 @@
         <item name="android:navigationBarColor">#fafaf9</item>
         <item name="android:windowBackground">#fafaf9</item>
         <item name="android:windowLightStatusBar">true</item>
-        <item name="android:windowLightNavigationBar">true</item>
+        <!-- windowLightNavigationBar (API 27) is set in values-v27/themes.xml. -->
     </style>
 
     <style name="Theme.Byoky.Splash" parent="Theme.SplashScreen">

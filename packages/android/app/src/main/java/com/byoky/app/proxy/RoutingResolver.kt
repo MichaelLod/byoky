@@ -4,6 +4,7 @@ import com.byoky.app.data.Credential
 import com.byoky.app.data.Group
 import com.byoky.app.data.RoutingDecision
 import com.byoky.app.data.RoutingTranslation
+import okhttp3.HttpUrl
 import org.json.JSONObject
 
 /**
@@ -20,6 +21,15 @@ import org.json.JSONObject
  * browser passes each app's origin, so per-app group bindings apply.
  */
 object RoutingResolver {
+
+    /**
+     * Family questions answered by the bundled core (see [TranslationEngine]);
+     * an interface so the resolver can be unit-tested without the sandbox.
+     */
+    interface Families {
+        fun shouldTranslate(srcProviderId: String, dstProviderId: String): Boolean
+        fun sameFamily(srcProviderId: String, dstProviderId: String): Boolean
+    }
 
     /**
      * Resolve the routing decision for a request.
@@ -41,7 +51,7 @@ object RoutingResolver {
         requestedModel: String?,
         group: Group?,
         credentials: List<Credential>,
-        engine: TranslationEngine,
+        engine: Families,
     ): RoutingDecision? {
         // 1. Cross-family translation.
         val cross = tryCrossFamily(requestedProviderId, requestedModel, group, credentials, engine)
@@ -51,17 +61,8 @@ object RoutingResolver {
         val swap = trySameFamilySwap(requestedProviderId, group, credentials, engine)
         if (swap != null) return swap
 
-        // 3. Direct credential match. When the group also pins a model for
-        // this provider, surface it so the proxy rewrites the body — the
-        // group is the strongest routing force, stronger than the SDK's
-        // model choice.
-        val direct = credentials.firstOrNull { it.providerId == requestedProviderId }
-        if (direct != null) {
-            val override = if (group?.providerId == requestedProviderId) {
-                group.model?.takeIf { it.isNotEmpty() }
-            } else null
-            return RoutingDecision(direct, translation = null, modelOverride = override)
-        }
+        // 3. Direct credential, honoring the group's pinned key and model.
+        resolveDirect(requestedProviderId, group, credentials)?.let { return it }
 
         // 4. Auto cross-family translation. Fires only when the app has no
         //    explicit group binding — the default sentinel group (empty
@@ -76,6 +77,27 @@ object RoutingResolver {
         }
 
         return null
+    }
+
+    /**
+     * Direct credential for the provider the app called. Mirrors step 3 of
+     * `resolveRoute` in packages/core/src/routing.ts: when the app's group
+     * binds this same provider and pins a key, that key is used, and a pin
+     * whose key is gone gives null rather than silently switching to another
+     * key (pins are for cost attribution). Otherwise the first key of the
+     * provider. A model the group pins is surfaced as `modelOverride`: the
+     * group is the strongest routing force, stronger than the app's choice.
+     */
+    fun resolveDirect(requestedProviderId: String, group: Group?, credentials: List<Credential>): RoutingDecision? {
+        val bindsProvider = group != null && group.providerId == requestedProviderId
+        val override = if (bindsProvider) group?.model?.takeIf { it.isNotEmpty() } else null
+        val pin = if (bindsProvider) group?.credentialId else null
+        val credential = if (pin != null) {
+            credentials.firstOrNull { it.id == pin }
+        } else {
+            credentials.firstOrNull { it.providerId == requestedProviderId }
+        } ?: return null
+        return RoutingDecision(credential, translation = null, modelOverride = override)
     }
 
     /**
@@ -95,7 +117,7 @@ object RoutingResolver {
         requestedProviderId: String,
         requestedModel: String?,
         credentials: List<Credential>,
-        engine: TranslationEngine,
+        engine: Families,
     ): RoutingDecision? {
         // Defensive: the direct-match branch above would have taken it, but
         // guard for callers invoking this method in isolation.
@@ -166,7 +188,7 @@ object RoutingResolver {
         requestedModel: String?,
         group: Group?,
         credentials: List<Credential>,
-        engine: TranslationEngine,
+        engine: Families,
     ): RoutingDecision? {
         if (group == null) return null
         if (group.providerId == requestedProviderId) return null
@@ -219,7 +241,7 @@ object RoutingResolver {
         requestedProviderId: String,
         group: Group?,
         credentials: List<Credential>,
-        engine: TranslationEngine,
+        engine: Families,
     ): RoutingDecision? {
         if (group == null) return null
         if (group.providerId == requestedProviderId) return null
@@ -254,6 +276,34 @@ object RoutingResolver {
         } catch (_: Exception) {
             null
         }
+    }
+
+    /**
+     * The model a request names: the body's `model`, or for Gemini, whose
+     * body has none, the `{model}` of `…/models/{model}:{action}` in the URL.
+     */
+    fun requestModel(providerId: String, url: HttpUrl, body: ByteArray?): String? =
+        parseModel(body) ?: if (providerId == "gemini") geminiModel(url) else null
+
+    /** `gemini-2.5-pro` for `/v1beta/models/gemini-2.5-pro:generateContent`, else null. */
+    fun geminiModel(url: HttpUrl): String? {
+        val segments = url.pathSegments
+        val i = segments.indexOfLast { it == "models" }
+        if (i < 0 || i + 1 >= segments.size) return null
+        val model = segments[i + 1].substringBefore(':')
+        return model.takeIf { it.isNotEmpty() }
+    }
+
+    /**
+     * Whether the app asked for a streaming response. Gemini says so in the
+     * URL (`:streamGenerateContent`, usually with `?alt=sse`); everyone else
+     * with `"stream": true` in the body.
+     */
+    fun isStreamingRequest(providerId: String, url: HttpUrl, body: ByteArray?): Boolean {
+        if (providerId == "gemini") {
+            return url.pathSegments.lastOrNull()?.substringAfterLast(':', "") == "streamGenerateContent"
+        }
+        return isStreamingRequest(body)
     }
 
     /**

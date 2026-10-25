@@ -840,7 +840,7 @@ data: ${JSON.stringify(data)}
     matchesChatEndpoint(url) {
       try {
         const u = new URL(url);
-        return u.pathname === CHAT_ENDPOINT2 || u.pathname.endsWith(CHAT_ENDPOINT2);
+        return u.pathname.endsWith("/chat/completions");
       } catch {
         return false;
       }
@@ -3288,6 +3288,37 @@ data: [DONE]
       return null;
     }
   }
+  var GENERATION_PATH_SUFFIXES = [
+    "chat/completions",
+    "completions",
+    "responses",
+    "messages",
+    "chat",
+    "complete",
+    "generate"
+  ].map((s) => s.split("/"));
+  var POST_PATH_SUFFIXES = [
+    "chat/completions",
+    "completions",
+    "responses",
+    "responses/input_tokens",
+    "embeddings",
+    "moderations",
+    "audio/speech",
+    "audio/transcriptions",
+    "audio/translations",
+    "images/generations",
+    "images/edits",
+    "images/variations",
+    "messages",
+    "messages/count_tokens",
+    "complete",
+    "chat",
+    "embed",
+    "rerank",
+    "generate",
+    "api/show"
+  ].map((s) => s.split("/"));
   var MAX_BODY_PARSE_SIZE = 10485760;
   function detectRequestCapabilities(body) {
     const empty = {
@@ -3583,6 +3614,7 @@ ${systemText}
     const src = getAdapter(ctx.srcFamily);
     const dst = getAdapter(ctx.dstFamily);
     const ir = src.parseRequest(body);
+    if (ctx.isStreaming) ir.stream = true;
     return dst.serializeRequest(ctx, ir);
   }
   function translateResponse(ctx, body) {

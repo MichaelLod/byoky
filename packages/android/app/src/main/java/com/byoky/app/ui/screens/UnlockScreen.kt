@@ -1,5 +1,6 @@
 package com.byoky.app.ui.screens
 
+import android.os.SystemClock
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -31,7 +32,7 @@ fun UnlockScreen(wallet: WalletStore) {
     var showPassword by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var shakeOffset by remember { mutableFloatStateOf(0f) }
-    val lockoutEndTime by wallet.lockoutEndTime.collectAsState()
+    val lockoutUntil by wallet.lockoutUntil.collectAsState()
     var lockoutRemaining by remember { mutableIntStateOf(0) }
     var showResetDialog by remember { mutableStateOf(false) }
     var unlocking by remember { mutableStateOf(false) }
@@ -50,12 +51,12 @@ fun UnlockScreen(wallet: WalletStore) {
         }
     }
 
-    // Lockout countdown timer
-    LaunchedEffect(lockoutEndTime) {
-        val endTime = lockoutEndTime
-        if (endTime != null && endTime > System.currentTimeMillis()) {
+    // Lockout countdown timer, on the monotonic clock the lockout uses.
+    LaunchedEffect(lockoutUntil) {
+        val endTime = lockoutUntil
+        if (endTime != null && endTime > SystemClock.elapsedRealtime()) {
             while (true) {
-                val remaining = ((endTime - System.currentTimeMillis()) / 1000).toInt()
+                val remaining = ((endTime - SystemClock.elapsedRealtime() + 999) / 1000).toInt()
                 if (remaining <= 0) {
                     lockoutRemaining = 0
                     break

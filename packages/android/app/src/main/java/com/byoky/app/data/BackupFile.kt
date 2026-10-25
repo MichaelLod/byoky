@@ -134,7 +134,7 @@ object BackupFile {
      */
     fun decode(contents: String, password: String): List<FileEntry> {
         // atob() in the extension tolerates whitespace and line wrapping.
-        val compact = contents.removePrefix("﻿").filterNot { it.isWhitespace() }
+        val compact = contents.removePrefix("\uFEFF").filterNot { it.isWhitespace() }
         if (compact.isEmpty()) throw BackupException(INVALID_FORMAT)
         val json = try {
             CryptoService.decrypt(compact, password)
