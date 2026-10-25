@@ -40,6 +40,14 @@ export interface ProxyBodyChunkOut {
   chunk: string;
 }
 
+/** The client hung up before its response finished: stop the upstream call. */
+export interface ProxyCancelOut {
+  type: 'proxy_http_cancel';
+  requestId: string;
+}
+
+export type ProxyMessageOut = ProxyRequestOut | ProxyBodyChunkOut | ProxyCancelOut;
+
 // Streaming response messages from extension (or direct fetch)
 export interface ProxyResponseMetaIn {
   type: 'proxy_http_response_meta';
@@ -80,7 +88,7 @@ interface ProxyConfig {
   providers: string[];
   /** Bridge token every client must present (see token.ts). */
   token: string;
-  sendToExtension: (msg: ProxyRequestOut | ProxyBodyChunkOut) => void;
+  sendToExtension: (msg: ProxyMessageOut) => void;
 }
 
 type PendingResponse = {
@@ -435,6 +443,18 @@ export function startProxyServer(config: ProxyConfig): Promise<Server> {
     }, IDLE_TIMEOUT_MS);
 
     pendingRequests.set(requestId, { res, timeout });
+
+    // Still pending when the connection closes means the client hung up
+    // (Ctrl-C in Claude Code). Have the upstream call stopped rather than
+    // letting it run, and bill, to the end.
+    res.on('close', () => {
+      const pending = pendingRequests.get(requestId);
+      if (pending?.res !== res) return;
+      clearTimeout(pending.timeout);
+      pendingRequests.delete(requestId);
+      sendToExtension({ type: 'proxy_http_cancel', requestId });
+    });
+
     for (const msg of toNativeMessages(proxyMsg)) sendToExtension(msg);
   }
 

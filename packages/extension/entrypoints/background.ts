@@ -2109,8 +2109,10 @@ export default defineBackground(() => {
 
       // Listen for HTTP proxy requests from the bridge. A body too big for
       // one native message (1 MiB) arrives first in slices, then the
-      // request with `bodyChunked`.
+      // request with `bodyChunked`. `proxy_http_cancel` means the client
+      // hung up: abort that request's upstream fetch.
       const pendingBodies = new Map<string, string[]>();
+      const inFlight = new Map<string, AbortController>();
       nativePort.onMessage.addListener(async (raw: unknown) => {
         const msg = raw as Record<string, unknown>;
         if (msg.type === 'proxy_http_body_chunk') {
@@ -2118,12 +2120,22 @@ export default defineBackground(() => {
           const parts = pendingBodies.get(msg.requestId) ?? [];
           parts.push(msg.chunk);
           pendingBodies.set(msg.requestId, parts);
+        } else if (msg.type === 'proxy_http_cancel') {
+          if (typeof msg.requestId === 'string') inFlight.get(msg.requestId)?.abort();
         } else if (msg.type === 'proxy_http') {
-          if (msg.bodyChunked === true && typeof msg.requestId === 'string') {
-            msg.body = (pendingBodies.get(msg.requestId) ?? []).join('');
-            pendingBodies.delete(msg.requestId);
+          if (typeof msg.requestId !== 'string') return;
+          const requestId = msg.requestId;
+          if (msg.bodyChunked === true) {
+            msg.body = (pendingBodies.get(requestId) ?? []).join('');
+            pendingBodies.delete(requestId);
           }
-          await handleBridgeProxyRequest(msg);
+          const controller = new AbortController();
+          inFlight.set(requestId, controller);
+          try {
+            await handleBridgeProxyRequest(msg, controller.signal);
+          } finally {
+            inFlight.delete(requestId);
+          }
         }
       });
 
@@ -2153,7 +2165,8 @@ export default defineBackground(() => {
     }
   }
 
-  async function handleBridgeProxyRequest(msg: Record<string, unknown>): Promise<void> {
+  /** `signal` aborts when the bridge reports that the client hung up. */
+  async function handleBridgeProxyRequest(msg: Record<string, unknown>, signal: AbortSignal): Promise<void> {
     if (typeof msg.requestId !== 'string' || typeof msg.sessionKey !== 'string' ||
         typeof msg.providerId !== 'string' || typeof msg.url !== 'string' ||
         typeof msg.method !== 'string' || typeof msg.headers !== 'object' || !msg.headers ||
@@ -2381,6 +2394,12 @@ export default defineBackground(() => {
           nativePort.postMessage({ type: 'proxy_http_error', requestId, error: reservation.reason });
           return;
         }
+        // The client already hung up: don't start a call nobody will read.
+        // (Once it runs, the bridge aborts it on hang-up by itself.)
+        if (signal.aborted) {
+          reservation.release();
+          return;
+        }
         if (msg.reportsDirectFetch === true) {
           // Only the bridge sees this response. It reports the status and
           // usage once the response ends, also when it was cut off; log and
@@ -2461,12 +2480,15 @@ export default defineBackground(() => {
       let complete = false;
       const chunks: string[] = [];
       try {
-        // redirect: 'error' — see the extension-port proxy path.
+        // redirect: 'error' — see the extension-port proxy path. `signal`
+        // stops the upstream call when the client hangs up; the finally
+        // below still charges what it used.
         const response = await fetch(translatedUrl, {
           method,
           headers: realHeaders,
           body: bridgeBody || undefined,
           redirect: 'error',
+          signal,
         });
         responseStatus = response.status;
 

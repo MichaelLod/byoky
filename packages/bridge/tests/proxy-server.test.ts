@@ -11,6 +11,7 @@ import {
   sliceForNativeMessaging,
   type ProxyRequestOut,
   type ProxyBodyChunkOut,
+  type ProxyMessageOut,
 } from '../src/proxy-server.js';
 
 const TOKEN = 'k3Yh8vW2n0QpLr5sT7uX9zA1bC3dE5fG7hJ9kM1nP3q';
@@ -52,11 +53,22 @@ function send(
 
 // Stands in for the extension: records what the bridge sends over native
 // messaging and answers each request with a small JSON body.
-let sent: Array<ProxyRequestOut | ProxyBodyChunkOut> = [];
+let sent: ProxyMessageOut[] = [];
 
-function fakeExtension(msg: ProxyRequestOut | ProxyBodyChunkOut): void {
+function fakeExtension(msg: ProxyMessageOut): void {
   sent.push(msg);
   if (msg.type !== 'proxy_http') return;
+  if (msg.url.endsWith('/v1/stream')) {
+    // A stream that never finishes on its own.
+    handleProxyResponse({
+      type: 'proxy_http_response_meta',
+      requestId: msg.requestId,
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    });
+    handleProxyResponse({ type: 'proxy_http_response_chunk', requestId: msg.requestId, chunk: 'data: 1\n\n' });
+    return;
+  }
   if (msg.url.endsWith('/v1/models')) {
     handleProxyResponse({
       type: 'proxy_http_error',
@@ -167,6 +179,29 @@ describe('extension replies', () => {
       error: 'only chat requests can be routed to another provider',
       code: 'ROUTING_UNSUPPORTED',
     });
+  });
+});
+
+describe('client hang-up', () => {
+  it('tells the extension to cancel when the client leaves mid-stream', async () => {
+    await new Promise<void>((resolve, reject) => {
+      const req = request(
+        { host: '127.0.0.1', port, path: '/anthropic/v1/stream', method: 'POST', headers: { 'x-api-key': TOKEN } },
+        (res) => res.once('data', () => { req.destroy(); resolve(); }),
+      );
+      req.on('error', () => {});
+      req.once('error', reject);
+      req.end('{}');
+    });
+    const forwarded = sent.find((m): m is ProxyRequestOut => m.type === 'proxy_http');
+    await expect.poll(() => sent.find((m) => m.type === 'proxy_http_cancel'), { timeout: 2000 })
+      .toEqual({ type: 'proxy_http_cancel', requestId: forwarded?.requestId });
+  });
+
+  it('sends no cancel for a response that finished', async () => {
+    await send(port, '/anthropic/v1/messages', { headers: { 'x-api-key': TOKEN }, body: '{}' });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sent.some((m) => m.type === 'proxy_http_cancel')).toBe(false);
   });
 });
 

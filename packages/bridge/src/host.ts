@@ -143,11 +143,19 @@ async function handleMessage(msg: unknown): Promise<void> {
   // Direct fetch (CLI path — extension resolves creds, bridge does the fetch directly)
   if (message.type === 'proxy_direct_fetch') {
     const req = msg as DirectFetchRequest;
-    const outcome = await handleStreamingFetch(
-      req.requestId, req.url, req.method, req.headers, req.body, 'proxy_http', req.toolNameMap,
-    );
-    // Report what was seen, also when the client went away or the stream
-    // broke off. Usage is parsed the same way the extension parses it.
+    const controller = new AbortController();
+    directFetches.set(req.requestId, controller);
+    let outcome: FetchOutcome;
+    try {
+      outcome = await handleStreamingFetch(
+        req.requestId, req.url, req.method, req.headers, req.body, 'proxy_http', req.toolNameMap, controller,
+      );
+    } finally {
+      directFetches.delete(req.requestId);
+    }
+    // Report what was seen, also when the client hung up or the stream broke
+    // off; the extension then charges an estimate. Usage is parsed the same
+    // way the extension parses it.
     writeMessage({
       type: 'proxy_direct_done',
       requestId: req.requestId,
@@ -219,6 +227,9 @@ function stripIncompatibleBetas(url: string, headers: Record<string, string>): R
 
 const FETCH_IDLE_TIMEOUT_MS = 120_000;
 
+// Direct fetches in flight, so a client hang-up can abort the upstream call.
+const directFetches = new Map<string, AbortController>();
+
 interface FetchOutcome {
   /** Upstream status, or 502 when no response arrived. */
   status: number;
@@ -236,6 +247,7 @@ async function handleStreamingFetch(
   body: string | undefined,
   mode: 'bridge' | 'proxy_http',
   toolNameMap: Record<string, string> = {},
+  controller = new AbortController(),
 ): Promise<FetchOutcome> {
   const outcome: FetchOutcome = { status: 502, complete: false, responseText: '' };
   const seen: string[] = [];
@@ -268,7 +280,6 @@ async function handleStreamingFetch(
 
   // Idle timeout: refreshed whenever the upstream sends something, so only a
   // stalled request is aborted, never a long stream that is still flowing.
-  const controller = new AbortController();
   const idleTimeout = setTimeout(() => controller.abort(), FETCH_IDLE_TIMEOUT_MS);
 
   try {
@@ -374,7 +385,12 @@ async function handleStartProxy(req: StartProxyRequest): Promise<void> {
       sessionKey: req.sessionKey,
       providers: req.providers,
       token: loadOrCreateToken(),
-      sendToExtension: writeMessage,
+      sendToExtension: (msg) => {
+        // A hang-up also stops a fetch the bridge is making itself. The
+        // extension gets the cancel too; older ones ignore it.
+        if (msg.type === 'proxy_http_cancel') directFetches.get(msg.requestId)?.abort();
+        writeMessage(msg);
+      },
     });
     runningProxy = { server, sessionKey: req.sessionKey, port: req.port, providers: req.providers };
     writeMessage({ type: 'proxy-started', port: req.port } satisfies StartProxyResponse);
