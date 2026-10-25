@@ -4,5 +4,5 @@
     <color name="brand_void">#07060A</color>
     <!-- Background layer of the adaptive launcher icon. The launcher icon is not part of
          the 1.1.1 redesign yet, so it keeps its colour until the icon decision is made. -->
-    <color name="ic_launcher_background">#FF4F00</color>
+    <color name="ic_launcher_background">#0B0910</color>
 </resources>

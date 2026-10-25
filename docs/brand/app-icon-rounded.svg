@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Byoky app icon with rounded corners, for the browser toolbar and favicons. -->
+  <defs>
+    <radialGradient id="glow" cx="0.60" cy="0.32" r="0.66"><stop offset="0" stop-color="#7C3AED" stop-opacity="0.34"/><stop offset="1" stop-color="#7C3AED" stop-opacity="0"/></radialGradient>
+    <clipPath id="tile"><rect width="1024" height="1024" rx="230"/></clipPath>
+  </defs>
+  <g clip-path="url(#tile)">
+    <rect width="1024" height="1024" fill="#0B0910"/>
+    <rect width="1024" height="1024" fill="url(#glow)"/>
+    <g transform="translate(512 196) scale(6.3) translate(-162 -38)">
+    <polygon points="122,76 152,94 168,130 172,230 100,230 98,120" fill="#1C1529"/>
+    <polygon points="152,94 168,130 172,230 150,230 156,128" fill="#271E3A"/>
+    <polygon points="122,76 98,120 100,230 95,230 95,118" fill="#8B5CF6"/>
+    <polygon points="126,50 148,38 170,44 180,62 176,86 152,98 130,90 120,70" fill="#2E2344"/>
+    <polygon points="148,38 170,44 160,58" fill="#4A3970"/>
+    <polygon points="120,70 126,50 138,62" fill="#221A33"/>
+    <polygon points="130,90 152,98 176,86 152,80" fill="#221A33"/>
+    <polygon points="146,92 168,90 160,112" fill="#3A2C58"/>
+    <polygon points="158,90 178,86 172,104" fill="#2E2344"/>
+    <polygon points="138,94 152,98 146,116" fill="#2A2040"/>
+    <polygon points="172,52 226,72 212,78 176,70" fill="#A78BFA"/>
+    <polygon points="176,70 216,76 178,86" fill="#7C3AED"/>
+    <polygon points="126,50 148,38 149,42 129,54" fill="#C4B5FD"/>
+    <circle cx="160" cy="62" r="9.5" fill="#7C3AED" opacity="0.45"/>
+    <ellipse cx="160" cy="62" rx="6" ry="6" fill="#DDD6FE"/>
+    <circle cx="161.5" cy="62" r="3" fill="#07060A"/>
+    </g>
+  </g>
+</svg>
