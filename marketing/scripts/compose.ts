@@ -1,666 +1,371 @@
 /**
- * Marketing composite generator.
+ * Store images for Byoky 1.1.1 in the "retro security" design.
  *
- * Reads frames from marketing/raw/ and emits final store-spec images to
- * marketing/composites/:
+ * Inputs (fake data only; see each capture script's header):
+ *   raw/store-extension/  capture-extension-store.mjs   popup, 360×600 @3x
+ *   raw/store-ios/        store-capture/ios/run.sh      iPhone 6.9" + iPad 13"
+ *   raw/store-android/    store-capture/android/        Pixel-class phone
+ *   raw/store-mac/        store-capture/mac/run.sh      Mac app window page
+ *   raw/store-web/        capture-web-store.mjs         byoky.com/demo connect screen
  *
- *   chrome-store-1280x800-*.png       (Chrome Web Store + Firefox AMO)
- *   chrome-promo-small-440x280.png    (Chrome Web Store small promo)
- *   chrome-promo-marquee-1400x560.png (Chrome Web Store marquee)
- *   ios-app-store-1320x2868-*.png     (Apple App Store 6.9")
- *   google-play-1080x1920-*.png       (Google Play phone portrait)
- *   product-hunt-cover-1270x760.png   (Product Hunt gallery)
- *   product-hunt-header-1200x630.png  (Product Hunt header)
- *   product-hunt-thumb-240x240.png    (Product Hunt thumbnail)
- *   eye-catcher-multi-1920x1080.png   (3-screen montage for social/PH)
+ * Output: composites/1.1.1/<store>/NN-<slug>-WxH.png in upload order:
+ *   chrome/   5 screenshots 1280×800, promo tile 440×280, marquee 1400×560
+ *   firefox/  the same 5 screenshots
+ *   ios/      6 iPhone 1320×2868 (6.9") + 5 iPad 2064×2752 (13")
+ *   mac/      5 screenshots 2880×1800
+ *   play/     6 phone 1080×1920, feature graphic 1024×500, icon 512×512
+ *             (the last two from android-store-assets.ts)
+ * plus one contact sheet per store in composites/1.1.1-contact/ (or the
+ * directory given with --contact <dir>).
+ *
+ * Store rules (docs/store-listing.md): no other brand in headlines or outside
+ * the app UI, nothing from retired features, short true headlines, "Byoky".
+ *
+ *   cd marketing && pnpm compose [-- --only chrome,ios] [-- --contact <dir>]
+ *
+ * The pre-1.1.1 composer (old look, Product Hunt images) is compose-legacy.ts.
  */
-import sharp from 'sharp';
-import path from 'path';
 import fs from 'fs';
+import path from 'path';
+import { buildPlayAssets } from './android-store-assets';
+import {
+  APP_ICON, C, Kit, MARKETING, ROOT, Rendered, asset, brackets, esc, glow, headline, muninn, page, statusLine,
+} from './store-kit';
 
-const ROOT = path.resolve(__dirname, '../..');
-const RAW_POPUP = path.join(ROOT, 'marketing/raw/popup-frames');
-const RAW_WEB = path.join(ROOT, 'marketing/raw/web');
-const RAW_IOS = path.join(ROOT, 'marketing/raw/ios');
-const RAW_ANDROID = path.join(ROOT, 'marketing/raw/android');
-const OUT = path.join(ROOT, 'marketing/composites');
-const ASSETS = path.join(ROOT, 'marketing/assets');
-const LOGO = path.join(ROOT, 'packages/extension/public/icon.svg');
-
-fs.mkdirSync(OUT, { recursive: true });
-
-// ── Brand ────────────────────────────────────────────────────────────────
-const BRAND = {
-  bg: '#141418',
-  bgRaised: '#1c1c22',
-  accent: '#0ea5e9',
-  accentLight: '#7dd3fc',
-  text: '#f5f5f7',
-  textMuted: '#8e8e9a',
+const RAW = path.join(MARKETING, 'raw');
+const OUT = path.join(MARKETING, 'composites/1.1.1');
+const args = process.argv.slice(2);
+const argValue = (flag: string) => {
+  const i = args.indexOf(flag);
+  return i >= 0 ? args[i + 1] : undefined;
 };
+const ONLY = argValue('--only')?.split(',');
+const CONTACT = path.resolve(argValue('--contact') ?? path.join(MARKETING, 'composites/1.1.1-contact'));
 
-const FONT_STACK = '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", system-ui, sans-serif';
-
-// ── Helpers ──────────────────────────────────────────────────────────────
-function svgEscape(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+function raw(dir: string, name: string): string {
+  const p = path.join(RAW, dir, name);
+  if (!fs.existsSync(p)) throw new Error(`missing capture ${path.relative(ROOT, p)}; run its capture script first`);
+  return p;
 }
 
-interface Slide {
-  headline: string;
-  sub?: string;
-  popupFrame?: string;       // file in raw/popup-frames
-  webFrame?: string;         // file in raw/web
-  mobileFrame?: string;      // file in raw/ios or raw/android
-  device?: 'phone-ios' | 'phone-android' | 'browser';
+interface Copy {
+  status: string;
+  title: string;
+  sub: string;
 }
 
-/** Render a multi-line text block as SVG (used as Sharp overlay). */
-function textOverlay(opts: {
-  width: number;
-  height: number;
-  headline: string;
-  sub?: string;
-  align?: 'left' | 'center';
-  headlineSize?: number;
-  subSize?: number;
-  color?: string;
-  subColor?: string;
-}): Buffer {
-  const align = opts.align ?? 'center';
-  const x = align === 'left' ? 60 : opts.width / 2;
-  const anchor = align === 'left' ? 'start' : 'middle';
-  const hs = opts.headlineSize ?? 56;
-  const ss = opts.subSize ?? 24;
-  const color = opts.color ?? BRAND.text;
-  const subColor = opts.subColor ?? BRAND.textMuted;
+// ── Landscape: Chrome Web Store, Firefox Add-ons, Mac App Store ──────────
 
-  const headlineLines = opts.headline.split('\n');
-  const headlineY = opts.height / 2 - (headlineLines.length - 1) * hs * 0.6;
-  const headlineSvg = headlineLines
-    .map(
-      (line, i) =>
-        `<text x="${x}" y="${headlineY + i * hs * 1.2}" text-anchor="${anchor}" font-family='${FONT_STACK}' font-size="${hs}" font-weight="700" fill="${color}" letter-spacing="-1">${svgEscape(line)}</text>`,
-    )
-    .join('');
-  const subSvg = opts.sub
-    ? `<text x="${x}" y="${headlineY + headlineLines.length * hs * 1.2 + ss * 0.6}" text-anchor="${anchor}" font-family='${FONT_STACK}' font-size="${ss}" font-weight="400" fill="${subColor}">${svgEscape(opts.sub)}</text>`
-    : '';
-
-  const svg = `<svg width="${opts.width}" height="${opts.height}" xmlns="http://www.w3.org/2000/svg">${headlineSvg}${subSvg}</svg>`;
-  return Buffer.from(svg);
+function landscapeText(copy: Copy, o: { left: number; width: number; u: number; h: number; type?: number }): string {
+  const { u } = o;
+  const k = o.type ?? 1; // type scale on top of u
+  return `
+  <div style="position:absolute; left:${o.left}px; top:0; height:${o.h}px; width:${o.width}px; display:flex; flex-direction:column; justify-content:center;">
+    <div style="font-size:${15 * u * k}px">${statusLine(copy.status)}</div>
+    <h1 style="font-size:${60 * u * k}px; margin-top:${18 * u * k}px">${headline(copy.title)}</h1>
+    <p class="sub" style="font-size:${21 * u * k}px; margin-top:${22 * u * k}px; max-width:${450 * u * k}px">${esc(copy.sub)}</p>
+  </div>
+  <div class="lockup" style="position:absolute; left:${o.left}px; bottom:${52 * u}px; font-size:${19 * u}px">
+    <img src="${APP_ICON}" style="width:${32 * u}px; height:${32 * u}px">BYOKY
+  </div>`;
 }
 
-/** Gradient backdrop with subtle grid and a soft accent glow. */
-function backdrop(width: number, height: number): Buffer {
-  const svg = `
-<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <radialGradient id="glow" cx="50%" cy="40%" r="65%">
-      <stop offset="0%" stop-color="${BRAND.accent}" stop-opacity="0.25"/>
-      <stop offset="60%" stop-color="${BRAND.accent}" stop-opacity="0.04"/>
-      <stop offset="100%" stop-color="${BRAND.bg}" stop-opacity="0"/>
-    </radialGradient>
-    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="${BRAND.text}" stroke-opacity="0.04" stroke-width="1"/>
-    </pattern>
-  </defs>
-  <rect width="100%" height="100%" fill="${BRAND.bg}"/>
-  <rect width="100%" height="100%" fill="url(#grid)"/>
-  <rect width="100%" height="100%" fill="url(#glow)"/>
-</svg>`;
-  return Buffer.from(svg);
+/** The popup floating on the right, framed like the featured panel. */
+function chromeSlide(shot: string, copy: Copy): string {
+  const W = 1280, H = 800, u = 1;
+  const pw = 396, ph = 660; // 360×600 CSS px at 1.1
+  const px = 790, py = Math.round((H - ph) / 2);
+  const css = `.popup { position:absolute; left:${px}px; top:${py}px; width:${pw}px; height:${ph}px; border:1px solid ${C.seamStrong};
+      box-shadow: 0 0 0 1px rgba(124,58,237,0.28), 0 30px 90px rgba(124,58,237,0.22); }
+    .popup img { display:block; width:100%; height:100%; }`;
+  return page(W, H, u, css, `
+    <div class="layer dots"></div>
+    ${glow(px + pw / 2, H / 2, 560, 0.24)}
+    <div class="layer scan"></div>
+    ${landscapeText(copy, { left: 92, width: 600, u, h: H })}
+    <div class="popup"><img src="${asset(shot)}"></div>
+    ${brackets({ x: px, y: py, w: pw, h: ph }, 16)}`);
 }
 
-/** Round-rect shadowed device frame around a screenshot. Optionally caps the
- * resulting framed height — useful when laying out within a fixed canvas. */
-async function deviceFrame(
-  pngPath: string,
-  opts: { kind: 'browser' | 'phone-ios' | 'phone-android'; targetWidth: number; maxHeight?: number },
-): Promise<sharp.Sharp> {
-  const inner = sharp(pngPath);
-  const meta = await inner.metadata();
-  const innerW = meta.width!;
-  const innerH = meta.height!;
-  const ratio = innerH / innerW;
-  let w = opts.targetWidth;
-  let h = Math.round(w * ratio);
-
-  // Account for chrome / bezel additions when computing maxHeight.
-  if (opts.maxHeight) {
-    const overhead = opts.kind === 'browser' ? 32 : opts.kind === 'phone-ios' || opts.kind === 'phone-android' ? 36 : 0;
-    if (h + overhead > opts.maxHeight) {
-      h = opts.maxHeight - overhead;
-      w = Math.round(h / ratio);
-    }
-  }
-
-  // Resize the screenshot to target
-  const resized = await sharp(pngPath).resize(w, h, { fit: 'fill' }).png().toBuffer();
-
-  if (opts.kind === 'browser') {
-    // Add a tiny browser chrome with traffic lights
-    const chromeH = 32;
-    const totalH = h + chromeH;
-    const chromeSvg = `
-<svg width="${w}" height="${chromeH}" xmlns="http://www.w3.org/2000/svg">
-  <rect width="${w}" height="${chromeH}" fill="#2a2a34"/>
-  <circle cx="16" cy="${chromeH / 2}" r="6" fill="#ff5f57"/>
-  <circle cx="36" cy="${chromeH / 2}" r="6" fill="#febc2e"/>
-  <circle cx="56" cy="${chromeH / 2}" r="6" fill="#28c840"/>
-  <rect x="${w / 2 - 120}" y="${chromeH / 2 - 9}" width="240" height="18" rx="9" fill="#1c1c22"/>
-</svg>`;
-    return sharp({
-      create: {
-        width: w,
-        height: totalH,
-        channels: 4,
-        background: { r: 0, g: 0, b: 0, alpha: 0 },
-      },
-    })
-      .composite([
-        { input: Buffer.from(chromeSvg), top: 0, left: 0 },
-        { input: resized, top: chromeH, left: 0 },
-      ])
-      .png();
-  }
-
-  if (opts.kind === 'phone-ios' || opts.kind === 'phone-android') {
-    // Simulator screenshots already contain the iPhone-style rounded screen
-    // corners + status bar — adding a faux bezel on top looks like a frame
-    // around a frame. Instead: soft-round the outer corners (matches device
-    // display corner radius) and drop a subtle transparent shadow via a
-    // slightly larger transparent canvas. No gradient bezel rectangle.
-    const cornerRadius = Math.round(w * 0.06);
-    const pad = 6; // just enough breathing room for a drop-shadow halo
-    const totalW = w + pad * 2;
-    const totalH = h + pad * 2;
-
-    // Rounded-corner mask applied to the resized screenshot.
-    const maskSvg = `<svg width="${w}" height="${h}" xmlns="http://www.w3.org/2000/svg"><rect width="${w}" height="${h}" rx="${cornerRadius}" ry="${cornerRadius}" fill="white"/></svg>`;
-    const masked = await sharp(resized)
-      .composite([{ input: Buffer.from(maskSvg), blend: 'dest-in' }])
-      .png()
-      .toBuffer();
-
-    // Transparent canvas with subtle dark halo behind the phone.
-    const shadowSvg = `<svg width="${totalW}" height="${totalH}" xmlns="http://www.w3.org/2000/svg"><rect x="${pad}" y="${pad}" width="${w}" height="${h}" rx="${cornerRadius}" ry="${cornerRadius}" fill="black" fill-opacity="0.35"/></svg>`;
-    const shadow = await sharp(Buffer.from(shadowSvg)).blur(12).png().toBuffer();
-
-    return sharp({
-      create: {
-        width: totalW,
-        height: totalH,
-        channels: 4,
-        background: { r: 0, g: 0, b: 0, alpha: 0 },
-      },
-    })
-      .composite([
-        { input: shadow, top: 0, left: 0 },
-        { input: masked, top: pad, left: pad },
-      ])
-      .png();
-  }
-
-  return sharp(resized);
+/** A browser window on a Mac with the Byoky popup open over byoky.com/demo. */
+function macBrowserSlide(shot: string, copy: Copy, demo: string): string {
+  const W = 2880, H = 1800, u = 2.25;
+  const win = { x: 1190, y: 168, w: 1580, h: 1464 };
+  const bar = 104;
+  const pw = 720, ph = 1200; // the popup's real size on a 2x display
+  const px = win.x + win.w - pw - 34, py = win.y + bar + 14;
+  const iconX = px + pw - 70; // extension button, above the popup's right side
+  const visCenter = (win.x + px) / 2; // middle of the page area left of the popup
+  const demoW = 1960;
+  const css = `
+    .win { position:absolute; left:${win.x}px; top:${win.y}px; width:${win.w}px; height:${win.h}px; background:${C.void};
+      border:2px solid ${C.seamStrong}; border-radius:22px; overflow:hidden; box-shadow: 0 50px 160px rgba(0,0,0,0.6), 0 0 0 2px rgba(124,58,237,0.16); }
+    .bar { position:absolute; left:0; top:0; right:0; height:${bar}px; background:${C.crypt}; border-bottom:2px solid ${C.seam}; }
+    .lights { position:absolute; left:34px; top:${bar / 2 - 12}px; display:flex; gap:18px; }
+    .lights i { width:24px; height:24px; border-radius:50%; background:${C.seamStrong}; }
+    .nav { position:absolute; left:190px; top:${bar / 2 - 18}px; font: 500 34px "IBM Plex Mono", monospace; color:${C.dim}; letter-spacing:0.3em; }
+    .addr { position:absolute; left:${(win.w - 760) / 2}px; top:${bar / 2 - 30}px; width:760px; height:60px; background:${C.void}; border:2px solid ${C.seam};
+      display:flex; align-items:center; justify-content:center; gap:14px; font: 400 27px "IBM Plex Mono", monospace; color:${C.fog}; }
+    .addr svg { width:22px; height:26px; }
+    .ext { position:absolute; left:${iconX - win.x - 34}px; top:${bar / 2 - 34}px; width:68px; height:68px; background:rgba(124,58,237,0.18);
+      border:2px solid ${C.violet}; display:flex; align-items:center; justify-content:center; }
+    .ext img { width:46px; height:46px; }
+    .pagebg { position:absolute; left:0; top:${bar}px; right:0; bottom:0; overflow:hidden; }
+    .pagebg img { position:absolute; left:${Math.round(visCenter - win.x - demoW / 2)}px; top:40px; width:${demoW}px; height:auto; opacity:0.9;
+      -webkit-mask-image: linear-gradient(to bottom, #000 78%, transparent); }
+    .popup { position:absolute; left:${px}px; top:${py}px; width:${pw}px; height:${ph}px; border:2px solid ${C.seamStrong};
+      box-shadow: 0 0 0 2px rgba(124,58,237,0.3), 0 40px 120px rgba(0,0,0,0.65); }
+    .popup img { display:block; width:100%; height:100%; }`;
+  const lock = `<svg viewBox="0 0 22 26"><rect x="2" y="11" width="18" height="14" fill="${C.dim}"/><path d="M6 11V7a5 5 0 0 1 10 0v4" fill="none" stroke="${C.dim}" stroke-width="3"/></svg>`;
+  return page(W, H, u, css, `
+    <div class="layer dots"></div>
+    ${glow(win.x + win.w / 2, H / 2, 1300, 0.2)}
+    <div class="layer scan"></div>
+    ${landscapeText(copy, { left: 170, width: 1000, u, h: H, type: 0.8 })}
+    <div class="win">
+      <div class="pagebg"><img src="${asset(demo)}"></div>
+      <div class="bar"><div class="lights"><i></i><i></i><i></i></div><div class="nav">&lt; &gt;</div>
+        <div class="addr">${lock}byoky.com/demo</div>
+        <div class="ext"><img src="${APP_ICON}"></div></div>
+    </div>
+    <div class="popup"><img src="${asset(shot)}"></div>
+    ${brackets({ x: px, y: py, w: pw, h: ph }, 30)}`);
 }
 
-// ── Composers ────────────────────────────────────────────────────────────
+/** The Mac app's own window: Muninn and the extension switch. */
+function macAppSlide(shot: string, copy: Copy): string {
+  const W = 2880, H = 1800, u = 2.25;
+  const cw = 1360, ch = 1040; // 425×325 pt window content at 3.2x
+  const tb = 84;
+  const wx = 1300, wy = Math.round((H - ch - tb) / 2);
+  const css = `
+    .mwin { position:absolute; left:${wx}px; top:${wy}px; width:${cw}px; height:${ch + tb}px; border:2px solid ${C.seamStrong}; border-radius:26px; overflow:hidden;
+      background:${C.void}; box-shadow: 0 0 0 2px rgba(124,58,237,0.22), 0 50px 160px rgba(124,58,237,0.2); }
+    .tb { position:relative; height:${tb}px; background:${C.crypt}; border-bottom:2px solid ${C.seam}; display:flex; align-items:center; justify-content:center;
+      font: 600 30px "IBM Plex Sans", sans-serif; color:${C.fog}; }
+    .tb .lights { position:absolute; left:30px; top:${tb / 2 - 12}px; display:flex; gap:18px; }
+    .tb .lights i { width:24px; height:24px; border-radius:50%; background:${C.seamStrong}; }
+    .mwin > img { display:block; width:${cw}px; height:${ch}px; }`;
+  return page(W, H, u, css, `
+    <div class="layer dots"></div>
+    ${glow(wx + cw / 2, H / 2, 1100, 0.24)}
+    <div class="layer scan"></div>
+    ${landscapeText(copy, { left: 170, width: 1060, u, h: H, type: 0.8 })}
+    <div class="mwin"><div class="tb"><div class="lights"><i></i><i></i><i></i></div>Byoky</div><img src="${asset(shot)}"></div>
+    ${brackets({ x: wx, y: wy, w: cw, h: ch + tb }, 30)}`);
+}
 
-/**
- * Chrome Web Store / Firefox AMO screenshot — 1280×800.
- * Layout: 60% device frame (popup centered), 40% headline+sub on the right.
- */
-async function chromeStoreSlide(slide: Slide, idx: number, suffix = 'chrome-store') {
-  const W = 1280;
-  const H = 800;
-  if (!slide.popupFrame) return;
-  const popupPath = path.join(RAW_POPUP, slide.popupFrame);
-  if (!fs.existsSync(popupPath)) {
-    console.warn(`  ⚠ skipped slide ${idx} — missing ${slide.popupFrame}`);
-    return;
-  }
+// ── Portrait: App Store (iPhone, iPad), Google Play ──────────────────────
 
-  const back = await sharp(backdrop(W, H)).png().toBuffer();
-  // Popup at 520px wide → ~40% of the 1280 canvas. Previously 380 (30%)
-  // felt tiny in the video at any embed size; bigger popup means the UI
-  // inside is actually readable.
-  const popupFramed = await (await deviceFrame(popupPath, { kind: 'browser', targetWidth: 520, maxHeight: 760 })).toBuffer();
-  const popupMeta = await sharp(popupFramed).metadata();
+type Device = 'iphone' | 'ipad' | 'android';
 
-  const popupX = 100;
-  // Clamp Y to keep the framed popup inside the canvas
-  let popupY = Math.round((H - popupMeta.height!) / 2);
-  if (popupY < 0) popupY = 0;
-  // If popup taller than canvas, scale down further (defensive)
-  if (popupMeta.height! > H) {
-    const scale = (H - 20) / popupMeta.height!;
-    const newW = Math.round(popupMeta.width! * scale);
-    const newH = Math.round(popupMeta.height! * scale);
-    const rescaled = await sharp(popupFramed).resize(newW, newH).png().toBuffer();
-    return chromeStoreSlideFinal(rescaled, newW, newH, slide, idx, suffix, back, W, H, popupX);
-  }
+function portraitSlide(shot: string, copy: Copy, device: Device, W: number, H: number, srcW: number, srcH: number): string {
+  // Layout in points; u converts to pixels.
+  const layoutW = device === 'ipad' ? 640 : 440;
+  const u = W / layoutW;
+  const t = device === 'android'
+    ? { top: 46, status: 11, h1: 31, sub: 14, gap: 12, after: 26, bottom: 34, bezel: 5 }
+    : device === 'ipad'
+      ? { top: 54, status: 12, h1: 38, sub: 17, gap: 14, after: 34, bottom: 40, bezel: 9 }
+      : { top: 60, status: 12, h1: 36, sub: 16, gap: 14, after: 30, bottom: 40, bezel: 6 };
+  const headH = t.top + t.status * 1.4 + t.gap + t.h1 * 1.04 * 2 + t.gap + t.sub * 1.45 * 2 + t.after;
+  const frameH = H - (headH + t.bottom) * u;
+  const bezel = t.bezel * u;
+  const imgH = frameH - 2 * bezel;
+  const imgW = (imgH * srcW) / srcH;
+  const frameW = imgW + 2 * bezel;
+  const fx = (W - frameW) / 2;
+  const fy = headH * u;
+  const screenR = device === 'iphone' ? imgW * 0.135 : device === 'android' ? imgW * 0.085 : imgW * 0.035;
+  const camera =
+    device === 'iphone'
+      ? `<div style="position:absolute; left:${bezel + imgW * 0.3575}px; top:${bezel + imgW * 0.026}px; width:${imgW * 0.285}px; height:${imgW * 0.084}px; border-radius:${imgW}px; background:#000;"></div>`
+      : device === 'android'
+        ? `<div style="position:absolute; left:${bezel + imgW / 2 - imgW * 0.016}px; top:${bezel + imgW * 0.022}px; width:${imgW * 0.032}px; height:${imgW * 0.032}px; border-radius:50%; background:#000;"></div>`
+        : '';
+  const css = `
+    .head { position:absolute; left:0; right:0; top:${t.top * u}px; text-align:center; display:flex; flex-direction:column; align-items:center; }
+    .frame { position:absolute; left:${fx}px; top:${fy}px; width:${frameW}px; height:${frameH}px; padding:${bezel}px; background:${C.ink};
+      border:${Math.max(2, u)}px solid ${C.seamStrong}; border-radius:${screenR + bezel}px;
+      box-shadow: 0 0 0 ${u}px rgba(124,58,237,0.22), 0 ${30 * u}px ${110 * u}px rgba(124,58,237,0.2); }
+    .frame > img { display:block; width:${imgW}px; height:${imgH}px; border-radius:${screenR}px; }`;
+  return page(W, H, u, css, `
+    <div class="layer dots"></div>
+    ${glow(W / 2, fy + frameH * 0.45, Math.max(W, frameH) * 0.62, 0.24)}
+    <div class="layer scan"></div>
+    <div class="head">
+      <div style="font-size:${t.status * u}px">${statusLine(copy.status)}</div>
+      <h1 style="font-size:${t.h1 * u}px; margin-top:${t.gap * u}px">${headline(copy.title)}</h1>
+      <p class="sub" style="font-size:${t.sub * u}px; margin-top:${t.gap * u}px; max-width:${(layoutW - 70) * u}px">${esc(copy.sub)}</p>
+    </div>
+    <div class="frame"><img src="${asset(shot)}">${camera}</div>
+    ${brackets({ x: fx, y: fy, w: frameW, h: frameH }, 14 * u)}`);
+}
 
-  const text = textOverlay({
-    width: W - popupMeta.width! - popupX - 80,
-    height: H,
-    headline: slide.headline,
-    sub: slide.sub,
-    align: 'left',
-    headlineSize: 56,
-    subSize: 22,
-  });
+// ── Chrome promo tiles ───────────────────────────────────────────────────
 
-  const out = path.join(OUT, `${suffix}-${String(idx + 1).padStart(2, '0')}-1280x800.png`);
-  const composites = [
-    { input: popupFramed, top: popupY, left: popupX },
-    { input: text, top: 0, left: popupX + popupMeta.width! + 40 },
+function promoSmall(): string {
+  const W = 440, H = 280, u = 1;
+  return page(W, H, u, '', `
+    <div class="layer dots"></div>
+    ${glow(120, 150, 230, 0.32)}
+    <div class="layer scan"></div>
+    <div style="position:absolute; left:6px; top:36px">${muninn({ size: 210, look: 6 })}</div>
+    <div style="position:absolute; left:214px; top:0; bottom:0; display:flex; flex-direction:column; justify-content:center;">
+      <div class="lockup" style="font-size:40px; letter-spacing:0.08em">BYOKY</div>
+      <p class="sub" style="font-size:16px; line-height:1.35; margin-top:8px; color:${C.bone}">Wallet for your<br>AI API keys</p>
+      <div style="font-size:10.5px; margin-top:16px">${statusLine('Keys stay local')}</div>
+    </div>
+    ${brackets({ x: 14, y: 14, w: W - 28, h: H - 28 }, 0)}`);
+}
+
+function promoMarquee(popup: string): string {
+  const W = 1400, H = 560, u = 1;
+  const pw = 300, ph = 500, px = W - pw - 70, py = 30;
+  const css = `.popup { position:absolute; left:${px}px; top:${py}px; width:${pw}px; height:${ph}px; border:1px solid ${C.seamStrong};
+      box-shadow: 0 0 0 1px rgba(124,58,237,0.28), 0 30px 90px rgba(124,58,237,0.25); }
+    .popup img { display:block; width:100%; height:100%; }`;
+  return page(W, H, u, css, `
+    <div class="layer dots"></div>
+    ${glow(1000, 300, 520, 0.28)}
+    <div class="layer scan"></div>
+    <div style="position:absolute; left:84px; top:0; bottom:0; width:640px; display:flex; flex-direction:column; justify-content:center;">
+      <div style="font-size:15px">${statusLine('Wallet unlocked')}</div>
+      <h1 style="font-size:62px; margin-top:16px">${headline('One wallet for\nyour *AI keys*')}</h1>
+      <p class="sub" style="font-size:21px; margin-top:18px; max-width:600px">Apps connect to the wallet. Your keys stay encrypted on your device.</p>
+      <div class="lockup" style="font-size:19px; margin-top:34px"><img src="${APP_ICON}" style="width:32px; height:32px">BYOKY</div>
+    </div>
+    <div style="position:absolute; left:${px - 370}px; top:${H - 345}px">${muninn({ size: 330, look: -4 })}</div>
+    <div class="popup"><img src="${asset(popup)}"></div>
+    ${brackets({ x: px, y: py, w: pw, h: ph }, 12)}`);
+}
+
+// ── Copy ─────────────────────────────────────────────────────────────────
+
+const COPY = {
+  wallet: (where: string): Copy => ({ status: 'Wallet unlocked', title: 'One wallet for\nyour *AI keys*', sub: `Keys stay encrypted on ${where}. Apps connect to the wallet and never see them.` }),
+  approve: { status: 'Incoming connection', title: 'Approve every\n*connection*', sub: 'Every site asks first. Approve it once, or trust it for good.' },
+  limits: { status: 'Token limit', title: 'Set *limits*\nper app', sub: 'Cap the tokens each app can use, in total or per provider.' },
+  route: { status: 'Routing', title: 'Route between\n*providers*', sub: 'Move an app to another group. Its requests use that group’s key, translated on the fly.' },
+  locked: { status: 'Wallet locked', title: 'Locked tight,\n*AES-256-GCM*', sub: 'No account, no cloud. Keys are encrypted on this device with your password.' },
+  connected: { status: '2 apps connected', title: 'Apps connect.\n*Keys stay.*', sub: 'Web apps run in the built-in browser and use your wallet, never your keys.' },
+  reconnect: { status: 'Connection request', title: 'You decide\n*who connects*', sub: 'Disconnect an app any time. It has to ask before it comes back.' },
+  stats: { status: 'Usage · last 7 days', title: 'See every\n*request*', sub: 'Requests and tokens for each key, model and app.' },
+  macApp: { status: 'Extension on', title: 'Switch it\non *once*', sub: 'Open Byoky and turn on its extension. Then your wallet is one click away in the toolbar.' },
+} satisfies Record<string, Copy | ((s: string) => Copy)>;
+
+// ── Stores ───────────────────────────────────────────────────────────────
+
+const name = (n: number, slug: string, w: number, h: number) => `${String(n).padStart(2, '0')}-${slug}-${w}x${h}.png`;
+
+async function chrome(kit: Kit): Promise<Record<string, Rendered[]>> {
+  const ext = (f: string) => raw('store-extension', f);
+  const slides: [string, string, Copy][] = [
+    ['one-wallet', 'dashboard.png', COPY.wallet('your device')],
+    ['approve-connections', 'approval.png', COPY.approve],
+    ['limits-per-app', 'connected-apps-allowance.png', COPY.limits],
+    ['route-providers', 'connected-apps-drag.png', COPY.route],
+    ['locked-tight', 'unlock.png', COPY.locked],
   ];
-  await sharp(back).composite(composites).flatten({ background: BRAND.bg }).jpeg({ quality: 95 }).toFile(out.replace('.png', '.jpg'));
-  await sharp(back).composite(composites).png().toFile(out);
-  console.log(`  🎨 ${path.basename(out)}`);
+  const chromeOut: Rendered[] = [];
+  const firefoxOut: Rendered[] = [];
+  for (const [i, [slug, shot, copy]] of slides.entries()) {
+    const html = chromeSlide(ext(shot), copy);
+    chromeOut.push(await kit.render(path.join(OUT, 'chrome', name(i + 1, slug, 1280, 800)), 1280, 800, html));
+    firefoxOut.push(await kit.render(path.join(OUT, 'firefox', name(i + 1, slug, 1280, 800)), 1280, 800, html));
+  }
+  chromeOut.push(await kit.render(path.join(OUT, 'chrome', 'promo-small-440x280.png'), 440, 280, promoSmall()));
+  chromeOut.push(await kit.render(path.join(OUT, 'chrome', 'promo-marquee-1400x560.png'), 1400, 560, promoMarquee(ext('dashboard.png'))));
+  return { chrome: chromeOut, firefox: firefoxOut };
 }
 
-async function chromeStoreSlideFinal(
-  popupFramed: Buffer,
-  popupW: number,
-  popupH: number,
-  slide: Slide,
-  idx: number,
-  suffix: string,
-  back: Buffer,
-  W: number,
-  H: number,
-  popupX: number,
-) {
-  const popupY = Math.round((H - popupH) / 2);
-  const text = textOverlay({
-    width: W - popupW - popupX - 80,
-    height: H,
-    headline: slide.headline,
-    sub: slide.sub,
-    align: 'left',
-    headlineSize: 56,
-    subSize: 22,
-  });
-  const out = path.join(OUT, `${suffix}-${String(idx + 1).padStart(2, '0')}-1280x800.png`);
-  const composites = [
-    { input: popupFramed, top: popupY, left: popupX },
-    { input: text, top: 0, left: popupX + popupW + 40 },
+async function ios(kit: Kit): Promise<Rendered[]> {
+  const out: Rendered[] = [];
+  const iphone: [string, string, Copy][] = [
+    ['one-wallet', 'iphone-wallet.png', COPY.wallet('your iPhone')],
+    ['apps-connect', 'iphone-connected.png', COPY.connected],
+    ['who-connects', 'iphone-reconnect.png', COPY.reconnect],
+    ['limits-per-app', 'iphone-allowance.png', COPY.limits],
+    ['route-providers', 'iphone-move-to-group.png', COPY.route],
+    ['locked-tight', 'iphone-lock.png', COPY.locked],
   ];
-  await sharp(back).composite(composites).flatten({ background: BRAND.bg }).jpeg({ quality: 95 }).toFile(out.replace('.png', '.jpg'));
-  await sharp(back).composite(composites).png().toFile(out);
-  console.log(`  🎨 ${path.basename(out)}`);
+  for (const [i, [slug, shot, copy]] of iphone.entries()) {
+    out.push(await kit.render(path.join(OUT, 'ios', `iphone-${name(i + 1, slug, 1320, 2868)}`), 1320, 2868,
+      portraitSlide(raw('store-ios', shot), copy, 'iphone', 1320, 2868, 1320, 2868)));
+  }
+  const ipad: [string, string, Copy][] = [
+    ['one-wallet', 'ipad-wallet.png', COPY.wallet('your iPad')],
+    ['apps-connect', 'ipad-connected.png', COPY.connected],
+    ['every-request', 'ipad-stats.png', COPY.stats],
+    ['who-connects', 'ipad-reconnect.png', COPY.reconnect],
+    ['locked-tight', 'ipad-lock.png', COPY.locked],
+  ];
+  for (const [i, [slug, shot, copy]] of ipad.entries()) {
+    out.push(await kit.render(path.join(OUT, 'ios', `ipad-${name(i + 1, slug, 2064, 2752)}`), 2064, 2752,
+      portraitSlide(raw('store-ios', shot), copy, 'ipad', 2064, 2752, 2064, 2752)));
+  }
+  return out;
 }
 
-/**
- * Mobile App Store screenshot (iOS portrait 1320×2868 or Android 1080×1920).
- */
-async function mobileStoreSlide(slide: Slide, idx: number, kind: 'ios' | 'android') {
-  const W = kind === 'ios' ? 1320 : 1080;
-  const H = kind === 'ios' ? 2868 : 1920;
-  const sourceDir = kind === 'ios' ? RAW_IOS : RAW_ANDROID;
-  if (!slide.mobileFrame) return;
-  const framePath = path.join(sourceDir, slide.mobileFrame);
-  if (!fs.existsSync(framePath)) {
-    console.warn(`  ⚠ skipped ${kind} slide ${idx} — missing ${slide.mobileFrame}`);
-    return;
+async function mac(kit: Kit): Promise<Rendered[]> {
+  const ext = (f: string) => raw('store-extension', f);
+  const demo = raw('store-web', 'demo-connect.png');
+  const out: Rendered[] = [];
+  const slides: [string, string][] = [
+    ['one-wallet', macBrowserSlide(ext('dashboard.png'), COPY.wallet('your Mac'), demo)],
+    ['approve-connections', macBrowserSlide(ext('approval.png'), COPY.approve, demo)],
+    ['limits-per-app', macBrowserSlide(ext('connected-apps-allowance.png'), COPY.limits, demo)],
+    ['route-providers', macBrowserSlide(ext('connected-apps-groups.png'), COPY.route, demo)],
+    ['switch-on-once', macAppSlide(raw('store-mac', 'mac-app.png'), COPY.macApp)],
+  ];
+  for (const [i, [slug, html]] of slides.entries()) {
+    out.push(await kit.render(path.join(OUT, 'mac', name(i + 1, slug, 2880, 1800)), 2880, 1800, html));
   }
-
-  const back = await sharp(backdrop(W, H)).png().toBuffer();
-  // Headline at top
-  const headlineH = Math.round(H * 0.18);
-  const headline = textOverlay({
-    width: W,
-    height: headlineH,
-    headline: slide.headline,
-    sub: slide.sub,
-    align: 'center',
-    headlineSize: kind === 'ios' ? 96 : 76,
-    subSize: kind === 'ios' ? 40 : 32,
-  });
-
-  // Mobile screenshot fills the rest
-  const phoneTargetW = Math.round(W * 0.78);
-  const framed = await (
-    await deviceFrame(framePath, { kind: kind === 'ios' ? 'phone-ios' : 'phone-android', targetWidth: phoneTargetW })
-  ).toBuffer();
-  const framedMeta = await sharp(framed).metadata();
-  const phoneX = Math.round((W - framedMeta.width!) / 2);
-  const phoneY = headlineH + 40;
-
-  const filename = `${kind}-app-store-${String(idx + 1).padStart(2, '0')}-${W}x${H}.png`;
-  const out = path.join(OUT, filename);
-  await sharp(back)
-    .composite([
-      { input: headline, top: 0, left: 0 },
-      { input: framed, top: phoneY, left: phoneX },
-    ])
-    .flatten({ background: BRAND.bg })
-    .jpeg({ quality: 92 })
-    .toFile(out.replace('.png', '.jpg'));
-  await sharp(back)
-    .composite([
-      { input: headline, top: 0, left: 0 },
-      { input: framed, top: phoneY, left: phoneX },
-    ])
-    .png()
-    .toFile(out);
-  console.log(`  🎨 ${filename}`);
+  return out;
 }
 
-/**
- * Product Hunt gallery cover (1270×760) — three-screen montage.
- */
-async function productHuntCover() {
-  const W = 1270;
-  const H = 760;
-  const back = await sharp(backdrop(W, H)).png().toBuffer();
-
-  const overlays: sharp.OverlayOptions[] = [];
-
-  // Headline anchored top
-  const HEADLINE_BAND = 200;
-  const headline = textOverlay({
-    width: W,
-    height: HEADLINE_BAND,
-    headline: 'The MetaMask for API keys',
-    sub: 'Every AI key in one wallet. Apps connect, and your keys never leave it.',
-    align: 'center',
-    headlineSize: 56,
-    subSize: 20,
-  });
-  overlays.push({ input: headline, top: 0, left: 0 });
-
-  // Three devices: phone left, browser center (popup), phone right.
-  // If phones missing, use popup variants as stand-ins so we still render
-  // a 3-up montage instead of a lonely center.
-  const center = firstExisting([
-    path.join(RAW_POPUP, '09-dashboard-multi-provider.png'),
-    path.join(RAW_POPUP, '08-dashboard-with-anthropic.png'),
-    path.join(RAW_POPUP, '18-dashboard-final.png'),
-  ]) ?? path.join(RAW_POPUP, '09-dashboard-multi-provider.png');
-  const iosFrame = firstExisting([path.join(RAW_IOS, '02-dashboard.png'), path.join(RAW_IOS, '01-welcome.png')]);
-  const androidFrame = firstExisting([
-    path.join(RAW_ANDROID, '05-wallet-with-keys.png'),
-    path.join(RAW_ANDROID, '01-onboarding.png'),
-  ]);
-  const popupAlt1 = firstExisting([path.join(RAW_POPUP, '10-approval-request.png'), path.join(RAW_POPUP, '11-connected-apps.png')]);
-  const popupAlt2 = firstExisting([path.join(RAW_POPUP, '14-groups-routing.png'), path.join(RAW_POPUP, '15-request-history.png')]);
-  const left = iosFrame ?? popupAlt1 ?? center;
-  const right = androidFrame ?? popupAlt2 ?? center;
-  const leftKind: 'phone-ios' | 'browser' = iosFrame ? 'phone-ios' : 'browser';
-  const rightKind: 'phone-android' | 'browser' = androidFrame ? 'phone-android' : 'browser';
-
-  // Vertically position devices BELOW the headline band (top = HEADLINE_BAND)
-  const deviceBandTop = HEADLINE_BAND + 10;
-  const deviceBandHeight = H - deviceBandTop - 30;
-
-  if (fs.existsSync(center)) {
-    const framed = await (await deviceFrame(center, { kind: 'browser', targetWidth: 360, maxHeight: deviceBandHeight })).toBuffer();
-    const meta = await sharp(framed).metadata();
-    overlays.push({
-      input: framed,
-      top: deviceBandTop + Math.round((deviceBandHeight - meta.height!) / 2),
-      left: Math.round(W / 2 - meta.width! / 2),
-    });
+async function play(kit: Kit): Promise<Rendered[]> {
+  const out: Rendered[] = [];
+  const slides: [string, string, Copy][] = [
+    ['one-wallet', 'wallet.png', COPY.wallet('your phone')],
+    ['apps-connect', 'connected.png', COPY.connected],
+    ['who-connects', 'reconnect.png', COPY.reconnect],
+    ['limits-per-app', 'allowance.png', COPY.limits],
+    ['route-providers', 'move-to-group.png', COPY.route],
+    ['locked-tight', 'lock.png', COPY.locked],
+  ];
+  for (const [i, [slug, shot, copy]] of slides.entries()) {
+    out.push(await kit.render(path.join(OUT, 'play', `phone-${name(i + 1, slug, 1080, 1920)}`), 1080, 1920,
+      portraitSlide(raw('store-android', shot), copy, 'android', 1080, 1920, 1080, 2424)));
   }
-  if (left && fs.existsSync(left)) {
-    const framed = await (await deviceFrame(left, { kind: leftKind, targetWidth: 200, maxHeight: deviceBandHeight - 20 })).toBuffer();
-    const meta = await sharp(framed).metadata();
-    overlays.push({
-      input: framed,
-      top: deviceBandTop + Math.round((deviceBandHeight - meta.height!) / 2),
-      left: 60,
-    });
-  }
-  if (right && fs.existsSync(right)) {
-    const framed = await (await deviceFrame(right, { kind: rightKind, targetWidth: 200, maxHeight: deviceBandHeight - 20 })).toBuffer();
-    const meta = await sharp(framed).metadata();
-    overlays.push({
-      input: framed,
-      top: deviceBandTop + Math.round((deviceBandHeight - meta.height!) / 2),
-      left: W - meta.width! - 60,
-    });
-  }
-
-  // Logo bottom-right
-  if (fs.existsSync(LOGO)) {
-    const logo = await sharp(LOGO).resize(56, 56).png().toBuffer();
-    overlays.push({ input: logo, top: H - 80, left: W - 80 });
-  }
-
-  await sharp(back).composite(overlays).png().toFile(path.join(OUT, 'product-hunt-cover-1270x760.png'));
-  console.log('  🎨 product-hunt-cover-1270x760.png');
-
-  // Header (1200×630)
-  // Layout bands (top → bottom):
-  //   0..240   text band (headline + subtitle)
-  //   240..320 breathing room gap (~80px)
-  //   320..600 screenshot band (max 280 tall → leaves 30px bottom margin)
-  const HW = 1200;
-  const HH = 630;
-  const headerBack = await sharp(backdrop(HW, HH)).png().toBuffer();
-  const headerOverlays: sharp.OverlayOptions[] = [];
-  const headerText = textOverlay({
-    width: HW,
-    height: 240,
-    headline: 'The MetaMask for API keys',
-    sub: 'One wallet for every AI key. Apps connect, keys never leave.',
-    align: 'center',
-    headlineSize: 72,
-    subSize: 24,
-  });
-  headerOverlays.push({ input: headerText, top: 30, left: 0 });
-  if (fs.existsSync(center)) {
-    // Shrink + anchor to the bottom band; bottom margin 30px means top sits at
-    // (HH - meta.height - 30). With maxHeight=240 the screenshot can't
-    // protrude into the text band above (≤240 tall starting at ≥360 → bottom
-    // is ≤600, leaving ≥120px gap below text end at y=270).
-    const framed = await (await deviceFrame(center, { kind: 'browser', targetWidth: 200, maxHeight: 240 })).toBuffer();
-    const meta = await sharp(framed).metadata();
-    headerOverlays.push({ input: framed, top: HH - meta.height! - 30, left: Math.round(HW / 2 - meta.width! / 2) });
-  }
-  await sharp(headerBack).composite(headerOverlays).png().toFile(path.join(OUT, 'product-hunt-header-1200x630.png'));
-  console.log('  🎨 product-hunt-header-1200x630.png');
-
-  // Thumbnail (240×240)
-  const TW = 240;
-  const thumbBack = await sharp(backdrop(TW, TW)).png().toBuffer();
-  const thumbOverlays: sharp.OverlayOptions[] = [];
-  if (fs.existsSync(LOGO)) {
-    const logo = await sharp(LOGO).resize(160, 160).png().toBuffer();
-    thumbOverlays.push({ input: logo, top: 40, left: 40 });
-  }
-  await sharp(thumbBack).composite(thumbOverlays).png().toFile(path.join(OUT, 'product-hunt-thumb-240x240.png'));
-  console.log('  🎨 product-hunt-thumb-240x240.png');
-}
-
-/**
- * Eye-catcher — 1920×1080 multi-screen hero for social posts.
- * 3-up: phone (iOS) | browser (popup) | phone (Android).
- */
-async function eyeCatcher() {
-  const W = 1920;
-  const H = 1080;
-  const back = await sharp(backdrop(W, H)).png().toBuffer();
-
-  const overlays: sharp.OverlayOptions[] = [];
-
-  const headline = textOverlay({
-    width: W,
-    height: 220,
-    headline: 'One wallet. Every AI provider. Any device.',
-    sub: 'Apps connect to the wallet. Your API keys never leave it.',
-    align: 'center',
-    headlineSize: 64,
-    subSize: 26,
-  });
-  overlays.push({ input: headline, top: 30, left: 0 });
-
-  const popupApproval = firstExisting([path.join(RAW_POPUP, '10-approval-request.png'), path.join(RAW_POPUP, '11-connected-apps.png')]);
-  const popupRouting = firstExisting([path.join(RAW_POPUP, '14-groups-routing.png'), path.join(RAW_POPUP, '15-request-history.png')]);
-  const iosFrame = firstExisting([path.join(RAW_IOS, '06-app-runtime.png'), path.join(RAW_IOS, '02-dashboard.png')]);
-  const androidFrame = firstExisting([
-    path.join(RAW_ANDROID, '05-wallet-with-keys.png'),
-    path.join(RAW_ANDROID, '03-wallet-empty.png'),
-  ]);
-  // Fall back to popup variants when mobile frames not available
-  const ios = iosFrame ?? popupApproval;
-  const android = androidFrame ?? popupRouting;
-  const iosKind: 'phone-ios' | 'browser' = iosFrame ? 'phone-ios' : 'browser';
-  const androidKind: 'phone-android' | 'browser' = androidFrame ? 'phone-android' : 'browser';
-  const web = firstExisting([
-    path.join(RAW_WEB, 'demo-1920x1080-hero.png'),
-    path.join(RAW_WEB, 'landing-1920x1080-hero.png'),
-  ]);
-
-  // Center-large: web demo. Flanked by phones + popup.
-  if (web && fs.existsSync(web)) {
-    const framed = await (await deviceFrame(web, { kind: 'browser', targetWidth: 900, maxHeight: 760 })).toBuffer();
-    const meta = await sharp(framed).metadata();
-    overlays.push({
-      input: framed,
-      top: Math.round(H / 2 - meta.height! / 2 + 80),
-      left: Math.round(W / 2 - meta.width! / 2),
-    });
-  }
-
-  if (ios && fs.existsSync(ios)) {
-    const framed = await (await deviceFrame(ios, { kind: iosKind, targetWidth: 240, maxHeight: 720 })).toBuffer();
-    const meta = await sharp(framed).metadata();
-    overlays.push({ input: framed, top: Math.round(H / 2 - meta.height! / 2 + 100), left: 100 });
-  }
-
-  if (android && fs.existsSync(android)) {
-    const framed = await (await deviceFrame(android, { kind: androidKind, targetWidth: 240, maxHeight: 720 })).toBuffer();
-    const meta = await sharp(framed).metadata();
-    overlays.push({ input: framed, top: Math.round(H / 2 - meta.height! / 2 + 100), left: W - meta.width! - 100 });
-  }
-
-  await sharp(back).composite(overlays).png().toFile(path.join(OUT, 'eye-catcher-multi-1920x1080.png'));
-  console.log('  🎨 eye-catcher-multi-1920x1080.png');
-}
-
-/**
- * Chrome Web Store small promo tile (440×280) and marquee (1400×560).
- */
-async function chromePromo() {
-  for (const [w, h, name] of [[440, 280, 'small'], [1400, 560, 'marquee']] as const) {
-    const back = await sharp(backdrop(w, h)).png().toBuffer();
-    const overlays: sharp.OverlayOptions[] = [];
-
-    const fontHeadline = name === 'marquee' ? 80 : 36;
-    const fontSub = name === 'marquee' ? 28 : 14;
-    const text = textOverlay({
-      width: w,
-      height: h,
-      headline: name === 'marquee' ? 'One wallet for\nyour AI keys.' : 'Byoky',
-      sub: name === 'marquee' ? 'Apps connect to it. Your keys never leave.' : 'Wallet for your AI API keys',
-      align: name === 'marquee' ? 'left' : 'center',
-      headlineSize: fontHeadline,
-      subSize: fontSub,
-    });
-    overlays.push({ input: text, top: 0, left: 0 });
-
-    if (fs.existsSync(LOGO)) {
-      const logoSize = name === 'marquee' ? 120 : 64;
-      const logo = await sharp(LOGO).resize(logoSize, logoSize).png().toBuffer();
-      overlays.push({
-        input: logo,
-        top: Math.round((h - logoSize) / 2),
-        left: name === 'marquee' ? w - logoSize - 60 : 20,
-      });
-    }
-
-    await sharp(back).composite(overlays).png().toFile(path.join(OUT, `chrome-promo-${name}-${w}x${h}.png`));
-    console.log(`  🎨 chrome-promo-${name}-${w}x${h}.png`);
-  }
-}
-
-function firstExisting(paths: string[]): string | undefined {
-  return paths.find((p) => fs.existsSync(p));
+  out.push(...(await buildPlayAssets(kit, path.join(OUT, 'play'))));
+  return out;
 }
 
 // ── Run ──────────────────────────────────────────────────────────────────
+
 (async () => {
-  console.log('\n📐 Composing marketing assets...\n');
+  console.log('\nComposing Byoky 1.1.1 store images…\n');
+  const want = (s: string) => !ONLY || ONLY.includes(s);
+  const kit = await Kit.open();
+  const sets: Record<string, Rendered[]> = {};
+  try {
+    if (want('chrome') || want('firefox')) Object.assign(sets, await chrome(kit));
+    if (want('ios')) sets.ios = await ios(kit);
+    if (want('mac')) sets.mac = await mac(kit);
+    if (want('play')) sets.play = await play(kit);
 
-  // Chrome / Firefox Web Store slides — same 1280×800 spec. Story beats:
-  // one wallet for your AI keys → every provider → apps connect, keys never leave →
-  // you're in control → Claude-to-GPT routing → no servers, open source.
-  // Frames come from capture-extension.spec.ts (raw/popup-frames/).
-  // Subs are one unwrapped line: past ~60 characters they clip at the edge.
-  const chromeSlides: Slide[] = [
-    {
-      headline: 'One wallet for\nyour AI keys.',
-      sub: 'Encrypted on your device. Apps never see them.',
-      popupFrame: '09-dashboard-multi-provider.png',
-    },
-    {
-      headline: 'One wallet,\nevery provider.',
-      sub: 'Anthropic, OpenAI, Gemini, Mistral and nine more.',
-      popupFrame: '06-add-credential-form.png',
-    },
-    {
-      headline: 'Apps connect.\nKeys never leave.',
-      sub: 'The wallet makes the calls. The app never sees your key.',
-      popupFrame: '10-approval-request.png',
-    },
-    {
-      headline: "You're in control.",
-      sub: 'Approve apps, watch every request, cap tokens, revoke.',
-      popupFrame: '12-token-cap.png',
-    },
-    {
-      headline: 'Drag an app\nfrom Claude to GPT.',
-      sub: 'Groups reroute apps. The wallet translates on the fly.',
-      popupFrame: '14-groups-routing.png',
-    },
-    {
-      headline: 'No servers.\nNo account.',
-      sub: 'Fully local, open source. Encrypted .byoky backups.',
-      popupFrame: '16-settings.png',
-    },
-  ];
-  for (let i = 0; i < chromeSlides.length; i++) {
-    await chromeStoreSlide(chromeSlides[i], i, 'chrome-store');
-    await chromeStoreSlide(chromeSlides[i], i, 'firefox-amo');
+    const titles: Record<string, string> = {
+      chrome: 'Chrome Web Store', firefox: 'Firefox Add-ons', ios: 'App Store · iPhone 6.9" + iPad 13"', mac: 'Mac App Store', play: 'Google Play',
+    };
+    fs.mkdirSync(CONTACT, { recursive: true });
+    for (const [store, items] of Object.entries(sets)) {
+      await kit.contactSheet(path.join(CONTACT, `${store}-contact-sheet.png`), titles[store], items);
+    }
+  } finally {
+    await kit.close();
   }
-
-  // iOS App Store slides (Safari extension lives inside this app). Frames
-  // come from ByokyMarketingTests.swift via capture-ios.sh (raw/ios/).
-  const iosSlides: Slide[] = [
-    { headline: 'One wallet for\nyour AI keys.', sub: 'Encrypted on your iPhone. Apps never see them.', mobileFrame: '02-dashboard.png' },
-    { headline: 'Add any app\nby URL.', sub: 'Web apps run right inside your wallet.', mobileFrame: '05-add-app-form.png' },
-    { headline: 'Apps connect.\nKeys never leave.', sub: 'The wallet makes the calls for them.', mobileFrame: '06-app-runtime.png' },
-    { headline: 'All your apps,\none tap away.', sub: 'Plus a Safari extension for the web.', mobileFrame: '07-apps-grid.png' },
-    { headline: "You're in control.", sub: 'Groups, routing and one-tap revoke.', mobileFrame: '08-connected-apps.png' },
-    { headline: 'Encrypted\n.byoky backups.', sub: 'Move keys between devices. No cloud.', mobileFrame: '03-settings-backup.png' },
-  ];
-  for (let i = 0; i < iosSlides.length; i++) {
-    await mobileStoreSlide(iosSlides[i], i, 'ios');
-  }
-
-  // Android (Google Play) slides. Frames come from capture-android.sh
-  // (raw/android/).
-  const androidSlides: Slide[] = [
-    { headline: 'One wallet for\nyour AI keys.', sub: 'Encrypted on your phone. Apps never see them.', mobileFrame: '05-wallet-with-keys.png' },
-    { headline: 'One wallet,\nevery provider.', sub: 'Anthropic, OpenAI, Gemini and more.', mobileFrame: '04-add-credential.png' },
-    { headline: 'Add any app\nby URL.', sub: 'It opens in the in-wallet browser.', mobileFrame: '07-add-app-form.png' },
-    { headline: 'Apps connect.\nKeys never leave.', sub: 'The wallet makes the calls for them.', mobileFrame: '08-app-runtime.png' },
-    { headline: "You're in control.", sub: 'Groups, token caps, one-tap revoke.', mobileFrame: '10-connected-apps.png' },
-    { headline: 'No servers.\nNo account.', sub: 'Encrypted .byoky backups. Open source.', mobileFrame: '11-settings.png' },
-  ];
-  for (let i = 0; i < androidSlides.length; i++) {
-    await mobileStoreSlide(androidSlides[i], i, 'android');
-  }
-
-  await chromePromo();
-  await productHuntCover();
-  await eyeCatcher();
-
-  console.log(`\n✓ Composites written to ${OUT}\n`);
+  console.log(`\nDone: ${path.relative(ROOT, OUT)}/ (contact sheets in ${CONTACT})\n`);
 })().catch((err) => {
   console.error(err);
   process.exit(1);

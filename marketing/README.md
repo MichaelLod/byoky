@@ -7,6 +7,45 @@ simulators.
 Everything under `marketing/` *except* `scripts/`, `assets/`, and `fonts/` is
 gitignored. Outputs are deterministic from a single command.
 
+## Store images (1.1.1, retro security)
+
+The store set is built from fresh captures with fake data only (placeholder
+keys, byoky.com / example.com / localhost:3000 origins, made-up usage) and
+composed in the design from `docs/brand/README.md`. Store rules are in
+`docs/store-listing.md`: no other brand outside the app's own UI, nothing
+from retired features.
+
+```bash
+cd marketing
+pnpm store:build-extension     # popup build → raw/ext-build (not packages/extension/.output)
+pnpm store:capture:extension   # stubbed browser API → raw/store-extension/
+pnpm store:capture:web         # byoky.com/demo connect screen; serve packages/web on :3917 first
+pnpm store:capture:mac         # Mac app window page in a real WKWebView → raw/store-mac/
+pnpm store:capture:ios         # iPhone 18 Pro Max + iPad Pro 13" simulators → raw/store-ios/
+pnpm store:capture:android     # one emulator on `adb devices` → raw/store-android/
+pnpm compose                   # → composites/1.1.1/<store>/ + composites/1.1.1-contact/
+```
+
+The iOS and Android captures build from a scratch copy of the app under
+`marketing/.cache/` with a DEBUG-only seed (`store-capture/*/MarketingSeed.*`)
+that fills the wallet with fake keys, sessions, groups, limits and request
+history. The repo's app sources are never modified. `compose.ts` renders each
+image as HTML in Chromium (`store-kit.ts`) at the exact store size and writes
+RGB PNGs; `android-store-assets.ts` adds the Play feature graphic and copies
+the 512 px icon from `packages/android/` after checking it.
+
+| Store | Files |
+| --- | --- |
+| Chrome Web Store | 5 × 1280×800, promo tile 440×280, marquee 1400×560 |
+| Firefox Add-ons | the same 5 × 1280×800 |
+| App Store | 6 × iPhone 1320×2868 (6.9"), 5 × iPad 2064×2752 (13") |
+| Mac App Store | 5 × 2880×1800 |
+| Google Play | 6 × 1080×1920, feature graphic 1024×500, icon 512×512 |
+
+The pre-1.1.1 composer (old look, Product Hunt and social images that
+`make-producthunt*.ts` read) is kept as `compose-legacy.ts`
+(`pnpm compose:legacy`).
+
 ## Story
 
 Every surface tells the same pitch, in this order (see `scripts/compose.ts`
