@@ -18,6 +18,9 @@ const nextConfig: NextConfig = {
       { source: '/pair', destination: '/', permanent: true },
       { source: '/pair/:path*', destination: '/', permanent: true },
       { source: '/blog/v0-6-0-gifts-everywhere', destination: '/blog', permanent: true },
+      // The mini-app developer hub; READMEs scaffolded by create-byoky-app still link here.
+      { source: '/dev', destination: '/docs', permanent: true },
+      { source: '/dev/:path*', destination: '/docs', permanent: true },
     ];
   },
   async headers() {
@@ -35,18 +38,7 @@ const nextConfig: NextConfig = {
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           {
             key: 'Content-Security-Policy',
-            value: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://avatars.githubusercontent.com https://unpkg.com https://api.producthunt.com; connect-src 'self' https://api.github.com https://gist.githubusercontent.com; frame-ancestors 'none';",
-          },
-        ],
-      },
-      {
-        source: '/:path*',
-        has: [{ type: 'host', value: 'chat.byoky.com' }],
-        headers: [
-          { key: 'X-Frame-Options', value: 'ALLOWALL' },
-          {
-            key: 'Content-Security-Policy',
-            value: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://unpkg.com; connect-src 'self'; frame-ancestors * chrome-extension: moz-extension: safari-web-extension:;",
+            value: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://avatars.githubusercontent.com https://unpkg.com https://api.producthunt.com; connect-src 'self' https://api.github.com; frame-ancestors 'none';",
           },
         ],
       },

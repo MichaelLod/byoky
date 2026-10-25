@@ -279,8 +279,8 @@ anthropic-dangerous-direct-browser-access: true`}</code>
             <div className="blog-cta-label">OpenClaw users, start here</div>
             <h3>The 5-minute Byoky + OpenClaw guide</h3>
             <p>
-              Step-by-step install for Chrome, Firefox, iOS and Android, plus the exact OpenClaw
-              config to point at the Byoky bridge.
+              Step-by-step install for Chrome and Firefox, plus the exact OpenClaw config to point
+              at the Byoky bridge.
             </p>
             <Link href="/openclaw" className="blog-cta-button">
               Open the OpenClaw guide &rarr;

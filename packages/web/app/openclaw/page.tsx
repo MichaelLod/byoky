@@ -14,21 +14,12 @@ export const metadata: Metadata = {
       'Use OpenClaw with Claude, GPT, and Gemini through your Byoky wallet — your own API keys or your Claude Pro/Max subscription. Up in 5 minutes.',
     url: 'https://byoky.com/openclaw',
     type: 'article',
-    images: [
-      {
-        url: '/openclaw-og.png',
-        width: 1200,
-        height: 630,
-        alt: 'Run Claude Code, Codex, and Gemini in OpenClaw — with Byoky',
-      },
-    ],
   },
   twitter: {
     card: 'summary_large_image',
     title: 'Run OpenClaw with Byoky — your keys stay in your wallet',
     description:
       'Use OpenClaw with Claude, GPT, and Gemini through your Byoky wallet — your own API keys or your Claude Pro/Max subscription.',
-    images: ['/openclaw-og.png'],
   },
 };
 
