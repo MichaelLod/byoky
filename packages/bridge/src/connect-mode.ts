@@ -126,11 +126,15 @@ function runHandshake(opts: ConnectOptions): Promise<ConnectResult> {
       res.end();
     });
 
+    // close() waits for every open connection, and the browser keeps the
+    // tab's sockets alive, so drop them or the CLI never gets past here.
     finalize = (r) => {
       server.close(() => resolvePromise(r));
+      server.closeAllConnections();
     };
     fail = (err) => {
       server.close(() => rejectPromise(err));
+      server.closeAllConnections();
     };
 
     server.listen(0, '127.0.0.1', () => {

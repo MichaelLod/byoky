@@ -105,6 +105,10 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             handleConnect(requestId: requestId, reconnectOnly: payload?["reconnectOnly"] as? Bool == true)
         case "BYOKY_PROXY_REQUEST":
             handleProxy(body)
+        case "BYOKY_PROXY_CANCEL":
+            // The app aborted the request: stop the upstream call (usage up
+            // to here is still charged, as when the page closes).
+            inFlight[requestId]?.cancel()
         case "BYOKY_SESSION_STATUS":
             handleSessionStatus(requestId: requestId, payload: payload)
         case "BYOKY_SESSION_USAGE":

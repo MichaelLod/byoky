@@ -199,6 +199,8 @@ export default defineBackground(() => {
         const last = typeof data._lastActivity === 'number' ? data._lastActivity : 0;
         if (Date.now() - last >= IDLE_TIMEOUT_MS) {
           await browser.storage.session.remove(['_mp', '_lastActivity', '_sessions', '_bridgeKey', '_bridgePort']);
+          // An open side panel still shows the unlocked wallet; tell it.
+          browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'sessionChanged' }).catch(() => {});
           return;
         }
         masterPassword = data._mp as string;
@@ -1363,6 +1365,9 @@ export default defineBackground(() => {
 
     sessions.set(sessionKey, session);
     persistSessions();
+    // Trusted-site approvals create sessions without the popup's help; an
+    // open popup or side panel lists them only if told.
+    browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'sessionChanged' }).catch(() => {});
 
     return {
       type: 'BYOKY_CONNECT_RESPONSE',
@@ -2469,6 +2474,7 @@ export default defineBackground(() => {
         response.headers.forEach((value, key) => {
           responseHeaders[key] = value;
         });
+        responseContentType = responseHeaders['content-type'] ?? '';
 
         bridgeProxyPort?.postMessage({
           type: 'proxy_http_response_meta',
