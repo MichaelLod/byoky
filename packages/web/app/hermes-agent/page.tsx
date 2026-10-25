@@ -265,12 +265,10 @@ function VersionHint() {
         <path d="M12 8h.01" />
       </svg>
       <span>
-        Requires Byoky extension <strong>v0.9.13+</strong> and{' '}
-        <code>@byoky/bridge@0.9.12+</code> (session persistence,
-        the long-context billing fix, and bridge auto-recovery on
-        service-worker recycle — needed for long Hermes sessions).
-        v0.9.13 is live on the Chrome Web Store and Firefox — or grab the
-        extension from the{' '}
+        Requires the Byoky extension <strong>v1.1.1+</strong> and{' '}
+        <code>@byoky/bridge@1.1.1+</code> (the bridge token, streams longer
+        than two minutes, and auto-recovery when the browser restarts the
+        extension). Get the extension from the Chrome Web Store, or from the{' '}
         <a className="oc-link" href="https://github.com/MichaelLod/byoky/releases/latest">latest GitHub release</a>.
       </span>
     </div>

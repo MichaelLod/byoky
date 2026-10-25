@@ -14,6 +14,16 @@ import { createSign } from 'node:crypto'
 import { readFileSync, existsSync } from 'node:fs'
 
 const [version, platform, notesFile] = process.argv.slice(2)
+
+// The App Store keywords live in docs/store-listing.md, in the code block
+// after "**Keywords**" (shared by iOS and macOS). Set on every submission so
+// the listing follows the doc.
+function storeKeywords() {
+  const doc = new URL('../docs/store-listing.md', import.meta.url)
+  if (!existsSync(doc)) return undefined
+  const match = readFileSync(doc, 'utf8').match(/\*\*Keywords\*\*[^\n]*\n+```\n([^\n]+)\n```/)
+  return match?.[1].trim().slice(0, 100)
+}
 if (!version || !platform) {
   console.error('Usage: submit-appstore.mjs <version> <platform> [release-notes-file]')
   process.exit(1)
@@ -98,7 +108,23 @@ async function main() {
   }
   console.log(`  Version: ${ver.id} (${ver.attributes.appStoreState})`)
 
-  // 3. Set release notes if provided
+  // 3. Keywords from docs/store-listing.md
+  const keywords = storeKeywords()
+  if (keywords) {
+    const locs = await api(`/appStoreVersions/${ver.id}/appStoreVersionLocalizations`)
+    const loc = locs.data?.find(l => l.attributes.locale.startsWith('en'))
+    if (loc && loc.attributes.keywords !== keywords) {
+      await api(`/appStoreVersionLocalizations/${loc.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          data: { type: 'appStoreVersionLocalizations', id: loc.id, attributes: { keywords } },
+        }),
+      })
+      console.log(`  Keywords set: ${keywords}`)
+    }
+  }
+
+  // 4. Set release notes if provided
   if (notesFile && existsSync(notesFile)) {
     const notes = readFileSync(notesFile, 'utf8').slice(0, 4000)
     const locData = await api(`/appStoreVersions/${ver.id}/appStoreVersionLocalizations`)
@@ -134,7 +160,7 @@ async function main() {
     if (notesSet) console.log(`  Release notes set (${notes.length} chars)`)
   }
 
-  // 4. Find the latest processed build of this version for this platform.
+  // 5. Find the latest processed build of this version for this platform.
   // Without the version filter a build still processing would lose to the
   // previous version's build, which App Store Connect refuses to attach.
   console.log(`  Looking for ${label} build...`)
@@ -153,14 +179,14 @@ async function main() {
   }
   console.log(`  Build: ${build.id} (v${build.attributes.version})`)
 
-  // 5. Select build for this version
+  // 6. Select build for this version
   await api(`/appStoreVersions/${ver.id}/relationships/build`, {
     method: 'PATCH',
     body: JSON.stringify({ data: { type: 'builds', id: build.id } }),
   })
   console.log(`  Build selected`)
 
-  // 6. Submit for review
+  // 7. Submit for review
   try {
     await api('/appStoreVersionSubmissions', {
       method: 'POST',
