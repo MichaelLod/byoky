@@ -129,7 +129,7 @@ function renderProviders(): void {
         <span class="provider-name">${config.displayName}</span>
         <span class="badge ${available ? 'badge-available' : 'badge-unavailable'}">${available ? 'Available' : 'Not configured'}</span>
       </div>
-      ${available ? `<button class="test-btn" data-provider="${providerId}">Send test message</button>` : '<p style="color:var(--text-muted);font-size:0.9rem;">Add your ${config.displayName} API key in the Byoky wallet to use this provider.</p>'}
+      ${available ? `<button class="test-btn" data-provider="${providerId}">Send test message</button>` : `<p style="color:var(--text-muted);font-size:0.9rem;">Add your ${config.displayName} API key in the Byoky wallet to use this provider.</p>`}
       <div class="response" id="response-${providerId}"></div>
     `;
     container.appendChild(card);

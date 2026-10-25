@@ -12,7 +12,8 @@
  *      already trusts 127.0.0.1 for this action, so it forwards to the
  *      background script, which opens the native-messaging port and tells
  *      the bridge to `server.listen(port)`.
- *   6. Page POSTs /done — CLI resolves, polls /health, exits.
+ *   6. Page POSTs /done — CLI resolves, polls /health with the bridge
+ *      token, exits.
  *
  * The loopback server only lives for this handshake. The bridge proxy on
  * :19280 is held alive by the extension's service worker afterwards.
@@ -24,6 +25,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { platform } from 'node:os';
+import { loadOrCreateToken } from './token.js';
 
 export interface ConnectOptions {
   port: number;
@@ -152,20 +154,29 @@ function runHandshake(opts: ConnectOptions): Promise<ConnectResult> {
 
 async function pollHealth(port: number): Promise<string[]> {
   const deadline = Date.now() + HEALTH_POLL_TIMEOUT_MS;
+  const token = loadOrCreateToken();
   let lastErr: Error | null = null;
+  // /health only lists providers to a caller with the right token.
+  let tokenRejected = false;
   while (Date.now() < deadline) {
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/health`);
+      const res = await fetch(`http://127.0.0.1:${port}/health`, {
+        headers: { 'x-api-key': token },
+      });
       if (res.ok) {
         const json = await res.json() as { status?: string; providers?: unknown };
         if (json.status === 'ok' && Array.isArray(json.providers)) {
           return (json.providers as unknown[]).filter((v) => typeof v === 'string') as string[];
         }
+        tokenRejected = json.status === 'ok';
       }
     } catch (e) {
       lastErr = e as Error;
     }
     await new Promise((r) => setTimeout(r, HEALTH_POLL_INTERVAL_MS));
+  }
+  if (tokenRejected) {
+    throw new Error(`The bridge on 127.0.0.1:${port} uses a different token than ~/.byoky-bridge/token. Restart your browser and run \`byoky-bridge connect\` again.`);
   }
   throw new Error(`Bridge didn't come up on 127.0.0.1:${port} within ${Math.round(HEALTH_POLL_TIMEOUT_MS / 1000)}s${lastErr ? ` (${lastErr.message})` : ''}.`);
 }
@@ -403,7 +414,10 @@ function buildConnectPage(opts: ConnectOptions): string {
           const sessionKey = session.sessionKey || '';
           setStatus('Wallet connected — starting bridge proxy…');
           const bridgeResult = await startBridge(sessionKey);
-          const port = (bridgeResult && bridgeResult.port) || ${portJson};
+          if (!bridgeResult || !bridgeResult.success) {
+            throw new Error((bridgeResult && bridgeResult.error) || 'Bridge proxy failed to start');
+          }
+          const port = bridgeResult.port || ${portJson};
           setStatus('Bridge active on port ' + port + '. Connected ' + available.length + ' provider(s): ' + available.join(', '), 'success');
           btn.style.display = 'none';
           await reportDone({ providers: available, port: port });

@@ -5,12 +5,20 @@ import type {
 } from '@byoky/core';
 import {
   ByokyError,
+  MAX_RELAY_MESSAGE_SIZE,
   parseRelayMessage,
   WS_READY_STATE,
 } from '@byoky/core';
 import { createProxyFetch } from './proxy-fetch.js';
 
 export interface RelayConnection {
+  /**
+   * The ID this relay announces to your server in `relay:hello` (the
+   * server's `client.sessionId`). Send it with your app's requests so the
+   * backend can find this relay. The session key itself never goes to the
+   * relay server.
+   */
+  readonly relayId: string;
   readonly status: 'connecting' | 'connected' | 'disconnected';
   close(): void;
   onClose(callback: (reason?: string) => void): () => void;
@@ -21,6 +29,9 @@ export function createRelayClient(
   sessionKey: string,
   providers: Record<string, { available: boolean; authMethod: AuthMethod }>,
 ): RelayConnection {
+  // Relay-specific ID announced in relay:hello — the real session key is never
+  // exposed to the relay server.
+  const relayId = `relay_${crypto.randomUUID().replace(/-/g, '')}`;
   let status: 'connecting' | 'connected' | 'disconnected' = 'connecting';
   const closeCallbacks = new Set<(reason?: string) => void>();
   const inFlight = new Map<string, AbortController>();
@@ -36,6 +47,7 @@ export function createRelayClient(
     if (!isSecure && !isLocalWs) {
       status = 'disconnected';
       return {
+        relayId,
         get status() { return status; },
         close() {},
         onClose(cb) { cb('Insecure WebSocket URL rejected — use wss:// for non-localhost connections'); return () => {}; },
@@ -44,6 +56,7 @@ export function createRelayClient(
   } catch {
     status = 'disconnected';
     return {
+      relayId,
       get status() { return status; },
       close() {},
       onClose(cb) { cb('Invalid WebSocket URL'); return () => {}; },
@@ -55,6 +68,7 @@ export function createRelayClient(
   } catch {
     status = 'disconnected';
     return {
+      relayId,
       get status() { return status; },
       close() {},
       onClose(cb) { cb('Failed to create WebSocket'); return () => {}; },
@@ -64,8 +78,6 @@ export function createRelayClient(
   ws.onopen = () => {
     status = 'connected';
 
-    // Send hello with a relay-specific ID (never expose the real session key to the relay server)
-    const relayId = `relay_${crypto.randomUUID().replace(/-/g, '')}`;
     ws.send(JSON.stringify({
       type: 'relay:hello',
       sessionId: relayId,
@@ -143,11 +155,9 @@ export function createRelayClient(
           if (done) break;
           if (controller.signal.aborted) break;
 
-          send({
-            type: 'relay:response:chunk',
-            requestId,
-            chunk: decoder.decode(value, { stream: true }),
-          });
+          for (const chunk of splitChunk(decoder.decode(value, { stream: true }))) {
+            send({ type: 'relay:response:chunk', requestId, chunk });
+          }
         }
       }
 
@@ -189,6 +199,7 @@ export function createRelayClient(
   }
 
   return {
+    relayId,
     get status() { return status; },
     close() {
       if (ws.readyState === WS_READY_STATE.OPEN || ws.readyState === WS_READY_STATE.CONNECTING) {
@@ -201,4 +212,25 @@ export function createRelayClient(
       return () => { closeCallbacks.delete(callback); };
     },
   };
+}
+
+// The server drops relay messages over MAX_RELAY_MESSAGE_SIZE, which would
+// stall the response. JSON escaping can grow a string up to 6x (\u00XX), so
+// pieces of an eighth of the limit always fit, envelope included.
+const MAX_CHUNK_LENGTH = Math.floor(MAX_RELAY_MESSAGE_SIZE / 8);
+
+function splitChunk(text: string): string[] {
+  if (text.length <= MAX_CHUNK_LENGTH) return [text];
+  const pieces: string[] = [];
+  let start = 0;
+  while (start < text.length) {
+    let end = Math.min(start + MAX_CHUNK_LENGTH, text.length);
+    // Never split a surrogate pair: the server encodes each chunk on its
+    // own, and a lone half would turn into U+FFFD.
+    const last = text.charCodeAt(end - 1);
+    if (end < text.length && last >= 0xd800 && last <= 0xdbff) end--;
+    pieces.push(text.slice(start, end));
+    start = end;
+  }
+  return pieces;
 }

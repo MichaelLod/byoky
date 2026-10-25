@@ -14,7 +14,7 @@
  */
 
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
-import { clearSession } from './session-store.js';
+import { createHash, timingSafeEqual } from 'node:crypto';
 
 export interface ProxyRequestOut {
   type: 'proxy_http';
@@ -25,6 +25,19 @@ export interface ProxyRequestOut {
   method: string;
   headers: Record<string, string>;
   body?: string;
+  /** The body was sent ahead in `proxy_http_body_chunk` messages. */
+  bodyChunked?: true;
+  /**
+   * This bridge answers `proxy_direct_fetch` with `proxy_direct_done`, so
+   * the extension can wait for the real status and usage before logging.
+   */
+  reportsDirectFetch: true;
+}
+
+export interface ProxyBodyChunkOut {
+  type: 'proxy_http_body_chunk';
+  requestId: string;
+  chunk: string;
 }
 
 // Streaming response messages from extension (or direct fetch)
@@ -50,6 +63,9 @@ export interface ProxyErrorIn {
   type: 'proxy_http_error';
   requestId: string;
   error: string;
+  /** HTTP status for the client (default 502) and a machine-readable code. */
+  status?: number;
+  code?: string;
 }
 
 export type ProxyResponseMessage =
@@ -62,7 +78,9 @@ interface ProxyConfig {
   port: number;
   sessionKey: string;
   providers: string[];
-  sendToExtension: (msg: ProxyRequestOut) => void;
+  /** Bridge token every client must present (see token.ts). */
+  token: string;
+  sendToExtension: (msg: ProxyRequestOut | ProxyBodyChunkOut) => void;
 }
 
 type PendingResponse = {
@@ -71,7 +89,80 @@ type PendingResponse = {
 };
 
 const MAX_PENDING_REQUESTS = 100;
+// Idle, not total: refreshed on every response chunk so a long stream that
+// is still flowing never gets cut.
+const IDLE_TIMEOUT_MS = 120_000;
 const pendingRequests = new Map<string, PendingResponse>();
+
+/**
+ * Ports the bridge may bind. Anything else is refused — notably a string,
+ * which Node's listen() would take as a Unix socket path.
+ */
+export function isValidProxyPort(port: unknown): port is number {
+  return typeof port === 'number' && Number.isInteger(port) && port >= 1024 && port <= 65535;
+}
+
+// Browsers disconnect a native host that sends a message over 1 MiB.
+const MAX_NATIVE_MESSAGE_BYTES = 1024 * 1024;
+// JSON escaping grows a UTF-16 unit to at most 6 bytes: 128K units < 1 MiB.
+const NATIVE_SLICE_UNITS = 128 * 1024;
+
+/** Split text into slices that each fit in one native message. */
+export function sliceForNativeMessaging(text: string): string[] {
+  const slices: string[] = [];
+  for (let i = 0; i < text.length;) {
+    let end = Math.min(i + NATIVE_SLICE_UNITS, text.length);
+    // Never split a surrogate pair: the browser decodes each message alone.
+    const last = text.charCodeAt(end - 1);
+    if (end < text.length && last >= 0xd800 && last <= 0xdbff) end--;
+    slices.push(text.slice(i, end));
+    i = end;
+  }
+  return slices;
+}
+
+/**
+ * The native messages for one proxied request. A body too large for a
+ * single message goes ahead in slices; the request follows with
+ * `bodyChunked` and the extension reassembles it.
+ */
+export function toNativeMessages(msg: ProxyRequestOut): Array<ProxyRequestOut | ProxyBodyChunkOut> {
+  if (!msg.body || Buffer.byteLength(JSON.stringify(msg)) <= MAX_NATIVE_MESSAGE_BYTES) {
+    return [msg];
+  }
+  const { body, ...rest } = msg;
+  const chunks: ProxyBodyChunkOut[] = sliceForNativeMessaging(body).map((chunk) => ({
+    type: 'proxy_http_body_chunk',
+    requestId: msg.requestId,
+    chunk,
+  }));
+  return [...chunks, { ...rest, bodyChunked: true }];
+}
+
+/**
+ * Where clients put the bridge token: wherever their SDK puts an API key.
+ * The bridge strips all of these before forwarding.
+ */
+const TOKEN_HEADERS = ['x-api-key', 'x-goog-api-key', 'api-key'];
+
+function presentedTokens(req: IncomingMessage): string[] {
+  const tokens: string[] = [];
+  for (const name of TOKEN_HEADERS) {
+    const value = req.headers[name];
+    if (typeof value === 'string' && value) tokens.push(value.trim());
+  }
+  const bearer = req.headers['authorization']?.match(/^Bearer\s+(.+)$/i);
+  if (bearer) tokens.push(bearer[1].trim());
+  return tokens;
+}
+
+/** Constant-time check; hashing first keeps differing lengths from leaking. */
+function hasValidToken(req: IncomingMessage, token: string): boolean {
+  const expected = createHash('sha256').update(token).digest();
+  return presentedTokens(req).some((presented) =>
+    timingSafeEqual(createHash('sha256').update(presented).digest(), expected),
+  );
+}
 
 /**
  * Reject requests a browser made on behalf of a web page.
@@ -85,19 +176,16 @@ const pendingRequests = new Map<string, PendingResponse>();
  * Two signals, both set by the browser and unforgeable from script:
  *   - `Origin`: present on every cross-origin fetch/XHR. Local CLI clients
  *     (Claude Code, OpenClaw, curl) never send it, so "absent" is the
- *     legitimate case. Extension origins are allowed — that is how the
- *     wallet's own pages talk to the bridge.
+ *     legitimate case. Extension origins are refused too: Byoky's own
+ *     extension only talks to the bridge over native messaging, and any
+ *     other installed extension has no business here.
  *   - `Sec-Fetch-Site`: a forbidden header name, so page script cannot set
  *     or clear it. Anything but `none`/`same-origin` came from a document
  *     on another site.
  */
-const EXTENSION_ORIGIN_RE = /^(chrome|moz|safari-web)-extension:\/\//i;
-
 function isBrowserCrossSiteRequest(req: IncomingMessage): boolean {
   const origin = req.headers['origin'];
-  if (typeof origin === 'string' && origin.length > 0) {
-    if (!EXTENSION_ORIGIN_RE.test(origin)) return true;
-  }
+  if (typeof origin === 'string' && origin.length > 0) return true;
   const site = req.headers['sec-fetch-site'];
   if (typeof site === 'string' && site !== 'none' && site !== 'same-origin') {
     return true;
@@ -120,40 +208,51 @@ export function handleProxyResponse(msg: ProxyResponseMessage): void {
     delete headers['set-cookie'];
     delete headers['set-cookie2'];
     pending.res.writeHead(msg.status, headers);
+    pending.timeout.refresh();
   } else if (msg.type === 'proxy_http_response_chunk') {
     pending.res.write(msg.chunk);
+    pending.timeout.refresh();
   } else if (msg.type === 'proxy_http_response_done') {
     pending.res.end();
     clearTimeout(pending.timeout);
     pendingRequests.delete(msg.requestId);
   } else if (msg.type === 'proxy_http_error') {
-    // Translate the extension's "Unauthorized session key" into a clearer 401
-    // and drop the persisted session — the cached key is dead and the user
-    // needs to reconnect via `byoky-bridge connect`.
+    // Translate the extension's "Unauthorized session key" into a clearer
+    // 401 — the key is dead and the user needs to reconnect via
+    // `byoky-bridge connect`. `code` lets clients tell it from a bad token.
     const isStaleSession =
       typeof msg.error === 'string' && /unauthorized session key/i.test(msg.error);
     if (!pending.res.headersSent) {
       if (isStaleSession) {
-        clearSession();
         pending.res.writeHead(401, { 'Content-Type': 'application/json' });
         pending.res.end(JSON.stringify({
           error: 'Byoky bridge session expired or revoked',
+          code: 'bridge_session_expired',
           hint: 'Run `byoky-bridge connect` to reconnect the wallet.',
         }));
       } else {
-        pending.res.writeHead(502, { 'Content-Type': 'application/json' });
-        pending.res.end(JSON.stringify({ error: msg.error }));
+        const status = typeof msg.status === 'number' && msg.status >= 400 && msg.status < 600
+          ? msg.status
+          : 502;
+        pending.res.writeHead(status, { 'Content-Type': 'application/json' });
+        pending.res.end(JSON.stringify(
+          typeof msg.code === 'string' ? { error: msg.error, code: msg.code } : { error: msg.error },
+        ));
       }
     } else {
-      pending.res.end();
+      // Mid-stream: drop the connection so the client sees a failed
+      // response, not a body that just ends early.
+      pending.res.destroy();
     }
     clearTimeout(pending.timeout);
     pendingRequests.delete(msg.requestId);
   }
 }
 
-export function startProxyServer(config: ProxyConfig): Server {
-  const { port, sessionKey, providers, sendToExtension } = config;
+/** Resolves once the server is listening; rejects if it can't bind. */
+export function startProxyServer(config: ProxyConfig): Promise<Server> {
+  const { port, sessionKey, providers, token, sendToExtension } = config;
+  if (!isValidProxyPort(port)) return Promise.reject(new Error('Invalid port'));
 
   // Node does not catch rejections thrown out of an async request listener,
   // and an unhandled rejection terminates the process by default. Wrapping
@@ -163,9 +262,11 @@ export function startProxyServer(config: ProxyConfig): Server {
       process.stderr.write(
         `Byoky proxy request failed: ${err instanceof Error ? err.message : 'unknown'}\n`,
       );
-      if (!res.headersSent) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
+      if (res.headersSent) {
+        res.destroy();
+        return;
       }
+      res.writeHead(500, { 'Content-Type': 'application/json' });
       try { res.end(JSON.stringify({ error: 'Internal bridge error' })); } catch { /* already closed */ }
     });
   });
@@ -197,10 +298,22 @@ export function startProxyServer(config: ProxyConfig): Server {
       return;
     }
 
-    // Health check
+    // Health check: open for liveness probes; the provider list needs the token.
     if (req.url === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'ok', providers }));
+      res.end(JSON.stringify(hasValidToken(req, token) ? { status: 'ok', providers } : { status: 'ok' }));
+      return;
+    }
+
+    // Every other route needs the bridge token, checked before anything
+    // that could tell an unauthenticated caller about the session.
+    if (!hasValidToken(req, token)) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        error: 'Missing or invalid bridge token',
+        code: 'bridge_token_invalid',
+        hint: 'Send the output of `byoky-bridge token` as the API key, e.g. export ANTHROPIC_API_KEY=$(byoky-bridge token)',
+      }));
       return;
     }
 
@@ -279,11 +392,12 @@ export function startProxyServer(config: ProxyConfig): Server {
 
     const requestId = `proxy-${crypto.randomUUID()}`;
 
-    // Forward headers, stripping hop-by-hop and auth headers (defense-in-depth;
-    // the extension's buildHeaders() does the authoritative sanitization).
+    // Forward headers, stripping hop-by-hop headers and the bridge token
+    // (defense-in-depth; the extension's buildHeaders() does the
+    // authoritative sanitization).
     const STRIP_HEADERS = new Set([
       'host', 'connection', 'cookie', 'authorization',
-      'proxy-authorization', 'proxy-connection',
+      'proxy-authorization', 'proxy-connection', ...TOKEN_HEADERS,
     ]);
     const headers: Record<string, string> = {};
     for (const [key, value] of Object.entries(req.headers)) {
@@ -301,6 +415,7 @@ export function startProxyServer(config: ProxyConfig): Server {
       method: req.method || 'GET',
       headers,
       body: body || undefined,
+      reportsDirectFetch: true,
     };
 
     if (pendingRequests.size >= MAX_PENDING_REQUESTS) {
@@ -310,24 +425,32 @@ export function startProxyServer(config: ProxyConfig): Server {
     }
 
     const timeout = setTimeout(() => {
-      if (pendingRequests.has(requestId)) {
-        pendingRequests.delete(requestId);
-        if (!res.headersSent) {
-          res.writeHead(504, { 'Content-Type': 'application/json' });
-        }
-        res.end(JSON.stringify({ error: 'Request timed out' }));
+      if (!pendingRequests.delete(requestId)) return;
+      if (res.headersSent) {
+        res.destroy();
+        return;
       }
-    }, 120_000);
+      res.writeHead(504, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Request timed out' }));
+    }, IDLE_TIMEOUT_MS);
 
     pendingRequests.set(requestId, { res, timeout });
-    sendToExtension(proxyMsg);
+    for (const msg of toNativeMessages(proxyMsg)) sendToExtension(msg);
   }
 
-  server.listen(port, '127.0.0.1', () => {
-    process.stderr.write(`Byoky proxy listening on http://127.0.0.1:${port}\n`);
+  return new Promise((resolve, reject) => {
+    // Without an 'error' listener a taken port is an uncaught exception
+    // that kills the whole native host.
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', () => {
+      server.off('error', reject);
+      server.on('error', (err) => {
+        process.stderr.write(`Byoky proxy error: ${err.message}\n`);
+      });
+      process.stderr.write(`Byoky proxy listening on http://127.0.0.1:${port}\n`);
+      resolve(server);
+    });
   });
-
-  return server;
 }
 
 const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10 MB
@@ -335,7 +458,8 @@ const MAX_URI_LENGTH = 8192;
 
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
-    let body = '';
+    // Decode once at the end: a multi-byte character can straddle chunks.
+    const chunks: Buffer[] = [];
     let size = 0;
     req.on('data', (chunk: Buffer) => {
       size += chunk.length;
@@ -344,9 +468,9 @@ function readBody(req: IncomingMessage): Promise<string> {
         reject(new Error('Request body too large'));
         return;
       }
-      body += chunk.toString();
+      chunks.push(chunk);
     });
-    req.on('end', () => resolve(body));
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
     req.on('error', reject);
   });
 }

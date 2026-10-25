@@ -122,7 +122,8 @@ function renderDashboard(): void {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          sessionId: session?.sessionKey,
+          // The server tracks relays by the ID they announce, not the session key.
+          sessionId: relay?.relayId,
           prompt,
         }),
       });

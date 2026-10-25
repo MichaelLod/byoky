@@ -15,11 +15,13 @@
 import {
   startProxyServer,
   handleProxyResponse,
-  type ProxyRequestOut,
+  isValidProxyPort,
+  sliceForNativeMessaging,
   type ProxyResponseMessage,
 } from './proxy-server.js';
-import { saveSession, loadSession } from './session-store.js';
-import { createToolNameSSERewriter, rewriteToolNamesInJSONBody } from '@byoky/core';
+import { loadOrCreateToken } from './token.js';
+import { createMessageReader } from './native-messaging.js';
+import { createToolNameSSERewriter, parseUsage, rewriteToolNamesInJSONBody } from '@byoky/core';
 
 interface BridgeRequest {
   type: 'proxy';
@@ -41,6 +43,24 @@ interface DirectFetchRequest {
   body?: string;
   /** Reverse map (alias → original) for rewriting tool_use names in SSE response chunks. */
   toolNameMap?: Record<string, string>;
+  /** Upstream provider, for reading token usage out of the response. */
+  providerId?: string;
+}
+
+/**
+ * Sent back to the extension when a direct fetch ends, however it ends. The
+ * bridge is the only one that sees this response, so the wallet's request
+ * log and allowances depend on it.
+ */
+interface DirectFetchDone {
+  type: 'proxy_direct_done';
+  requestId: string;
+  status: number;
+  /** The upstream response was read to its end. */
+  complete: boolean;
+  /** Characters of response seen, for estimating a cut-off response. */
+  responseChars: number;
+  usage?: { inputTokens: number; outputTokens: number };
 }
 
 interface BridgeResponseMeta {
@@ -86,69 +106,9 @@ interface StartProxyResponse {
 
 // --- Native messaging I/O ---
 
-function readMessage(): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    // Read 4-byte length prefix
-    const lengthBuf = Buffer.alloc(4);
-    let bytesRead = 0;
-
-    function readLength() {
-      const chunk = process.stdin.read(4 - bytesRead);
-      if (!chunk) {
-        process.stdin.once('readable', readLength);
-        return;
-      }
-      chunk.copy(lengthBuf, bytesRead);
-      bytesRead += chunk.length;
-
-      if (bytesRead < 4) {
-        process.stdin.once('readable', readLength);
-        return;
-      }
-
-      const msgLength = lengthBuf.readUInt32LE(0);
-      if (msgLength === 0) {
-        resolve(null);
-        return;
-      }
-      if (msgLength > 20_971_520) {
-        reject(new Error(`Message too large: ${msgLength} bytes (max 20MB)`));
-        return;
-      }
-
-      readBody(msgLength);
-    }
-
-    function readBody(length: number) {
-      let body = Buffer.alloc(0);
-
-      function readChunk() {
-        const chunk = process.stdin.read(length - body.length);
-        if (!chunk) {
-          process.stdin.once('readable', readChunk);
-          return;
-        }
-        body = Buffer.concat([body, chunk]);
-
-        if (body.length < length) {
-          process.stdin.once('readable', readChunk);
-          return;
-        }
-
-        try {
-          resolve(JSON.parse(body.toString('utf-8')));
-        } catch (e) {
-          reject(new Error(`Invalid JSON: ${(e as Error).message}`));
-        }
-      }
-
-      readChunk();
-    }
-
-    process.stdin.once('readable', readLength);
-    process.stdin.on('end', () => resolve(null));
-  });
-}
+// The browser allows up to 64 MiB per message; past this one is dropped
+// rather than buffered.
+const MAX_INCOMING_MESSAGE_BYTES = 20_971_520; // 20 MiB
 
 function writeMessage(msg: unknown): void {
   const json = JSON.stringify(msg);
@@ -183,16 +143,28 @@ async function handleMessage(msg: unknown): Promise<void> {
   // Direct fetch (CLI path — extension resolves creds, bridge does the fetch directly)
   if (message.type === 'proxy_direct_fetch') {
     const req = msg as DirectFetchRequest;
-    await handleStreamingFetch(
+    const outcome = await handleStreamingFetch(
       req.requestId, req.url, req.method, req.headers, req.body, 'proxy_http', req.toolNameMap,
     );
+    // Report what was seen, also when the client went away or the stream
+    // broke off. Usage is parsed the same way the extension parses it.
+    writeMessage({
+      type: 'proxy_direct_done',
+      requestId: req.requestId,
+      status: outcome.status,
+      complete: outcome.complete,
+      responseChars: outcome.responseText.length,
+      usage: req.providerId && outcome.status < 400
+        ? parseUsage(req.providerId, outcome.responseText)
+        : undefined,
+    } satisfies DirectFetchDone);
     return;
   }
 
   // Start HTTP proxy server for CLI tools (OpenClaw)
   if (message.type === 'start-proxy') {
     const req = msg as StartProxyRequest;
-    handleStartProxy(req);
+    await handleStartProxy(req);
     return;
   }
 
@@ -245,6 +217,17 @@ function stripIncompatibleBetas(url: string, headers: Record<string, string>): R
   return next;
 }
 
+const FETCH_IDLE_TIMEOUT_MS = 120_000;
+
+interface FetchOutcome {
+  /** Upstream status, or 502 when no response arrived. */
+  status: number;
+  /** The response body was read to its end. */
+  complete: boolean;
+  /** The raw upstream body, as far as it was read. */
+  responseText: string;
+}
+
 async function handleStreamingFetch(
   requestId: string,
   url: string,
@@ -253,7 +236,10 @@ async function handleStreamingFetch(
   body: string | undefined,
   mode: 'bridge' | 'proxy_http',
   toolNameMap: Record<string, string> = {},
-): Promise<void> {
+): Promise<FetchOutcome> {
+  const outcome: FetchOutcome = { status: 502, complete: false, responseText: '' };
+  const seen: string[] = [];
+
   const send = (msg: unknown) => {
     if (mode === 'bridge') {
       writeMessage(msg);
@@ -273,8 +259,17 @@ async function handleStreamingFetch(
   // JSON responses go through the JSON-body rewriter at the end.
   const rewriter = createToolNameSSERewriter(toolNameMap);
 
+  // Each slice fits in one native message; the browser drops bigger ones.
+  const sendChunk = (text: string) => {
+    for (const chunk of sliceForNativeMessaging(text)) {
+      send({ type: `${prefix}_chunk`, requestId, chunk });
+    }
+  };
+
+  // Idle timeout: refreshed whenever the upstream sends something, so only a
+  // stalled request is aborted, never a long stream that is still flowing.
   const controller = new AbortController();
-  const fetchTimeout = setTimeout(() => controller.abort(), 120_000);
+  const idleTimeout = setTimeout(() => controller.abort(), FETCH_IDLE_TIMEOUT_MS);
 
   try {
     const res = await fetch(url, {
@@ -286,6 +281,8 @@ async function handleStreamingFetch(
       // redirect, so never follow one.
       redirect: 'error',
     });
+    idleTimeout.refresh();
+    outcome.status = res.status;
 
     const resHeaders: Record<string, string> = {};
     res.headers.forEach((v, k) => { resHeaders[k] = v; });
@@ -304,32 +301,37 @@ async function handleStreamingFetch(
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
+          idleTimeout.refresh();
           const raw = decoder.decode(value, { stream: true });
+          seen.push(raw);
           const rewritten = rewriter.process(raw);
-          if (rewritten) send({ type: `${prefix}_chunk`, requestId, chunk: rewritten });
+          if (rewritten) sendChunk(rewritten);
         }
         const tail = rewriter.flush();
-        if (tail) send({ type: `${prefix}_chunk`, requestId, chunk: tail });
+        if (tail) sendChunk(tail);
       } else {
         // Non-streaming JSON: buffer the whole body, JSON-rewrite tool
-        // names, send as one chunk.
-        let buffered = '';
+        // names, then send it.
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
-          buffered += decoder.decode(value, { stream: true });
+          idleTimeout.refresh();
+          seen.push(decoder.decode(value, { stream: true }));
         }
-        const rewritten = rewriteToolNamesInJSONBody(buffered, toolNameMap);
-        send({ type: `${prefix}_chunk`, requestId, chunk: rewritten });
+        seen.push(decoder.decode());
+        sendChunk(rewriteToolNamesInJSONBody(seen.join(''), toolNameMap));
       }
     }
 
+    outcome.complete = true;
     send({ type: `${prefix}_done`, requestId });
   } catch (e) {
     send({ type: errorType, requestId, error: 'Fetch request failed' });
   } finally {
-    clearTimeout(fetchTimeout);
+    clearTimeout(idleTimeout);
   }
+  outcome.responseText = seen.join('');
+  return outcome;
 }
 
 interface RunningProxy {
@@ -340,84 +342,66 @@ interface RunningProxy {
 }
 let runningProxy: RunningProxy | null = null;
 
-function handleStartProxy(req: StartProxyRequest, opts: { silent?: boolean } = {}): void {
+async function handleStartProxy(req: StartProxyRequest): Promise<void> {
+  // Validate before touching a running proxy, so a bad request can't take
+  // down a working one.
+  if (
+    !isValidProxyPort(req.port) ||
+    typeof req.sessionKey !== 'string' || !req.sessionKey ||
+    !Array.isArray(req.providers) || req.providers.some((p) => typeof p !== 'string')
+  ) {
+    writeMessage({ type: 'proxy_error', requestId: 'start-proxy', error: 'Invalid start-proxy request' });
+    return;
+  }
+
   // Same session already running → ack and exit. This is the steady-state
   // case (browser tab refreshes, extension service worker reconnect, etc.).
   if (runningProxy && runningProxy.sessionKey === req.sessionKey && runningProxy.port === req.port) {
-    if (!opts.silent) {
-      writeMessage({ type: 'proxy-started', port: req.port } satisfies StartProxyResponse);
-    }
+    writeMessage({ type: 'proxy-started', port: req.port } satisfies StartProxyResponse);
     return;
   }
 
   // Different session/port → tear down the old listener so we don't keep
-  // forwarding requests with a stale (likely revoked) sessionKey. Without
-  // this the persistent-session feature would shadow a fresh reconnect from
-  // `byoky-bridge connect` and every request would 401.
+  // forwarding requests with a stale (likely revoked) sessionKey.
   if (runningProxy) {
     try { runningProxy.server.close(); } catch { /* best-effort */ }
     runningProxy = null;
   }
 
   try {
-    const server = startProxyServer({
+    const server = await startProxyServer({
       port: req.port,
       sessionKey: req.sessionKey,
       providers: req.providers,
-      sendToExtension: (msg: ProxyRequestOut) => writeMessage(msg),
+      token: loadOrCreateToken(),
+      sendToExtension: writeMessage,
     });
     runningProxy = { server, sessionKey: req.sessionKey, port: req.port, providers: req.providers };
-    saveSession({ sessionKey: req.sessionKey, port: req.port, providers: req.providers });
-
-    if (!opts.silent) {
-      writeMessage({
-        type: 'proxy-started',
-        port: req.port,
-      } satisfies StartProxyResponse);
-    }
+    writeMessage({ type: 'proxy-started', port: req.port } satisfies StartProxyResponse);
   } catch (e) {
-    if (!opts.silent) {
-      writeMessage({
-        type: 'proxy_error',
-        requestId: 'start-proxy',
-        error: 'Failed to start proxy server',
-      });
-    }
+    const inUse = (e as NodeJS.ErrnoException).code === 'EADDRINUSE';
+    writeMessage({
+      type: 'proxy_error',
+      requestId: 'start-proxy',
+      error: inUse ? `Port ${req.port} is already in use` : 'Failed to start proxy server',
+    });
   }
-}
-
-function tryRestoreProxy(): void {
-  const cached = loadSession();
-  if (!cached) return;
-  handleStartProxy(
-    { type: 'start-proxy', port: cached.port, sessionKey: cached.sessionKey, providers: cached.providers },
-    { silent: true },
-  );
 }
 
 // --- Main loop ---
 
-async function main() {
-  // Ensure stdin is in binary mode for native messaging
-  process.stdin.resume();
-
-  // Restore the proxy from the last persisted session before the extension
-  // sends `start-proxy`. If the cached session is still valid in the wallet,
-  // CLI tools (Claude Code, Hermes via custom_providers, OpenClaw) can hit
-  // :19280 immediately after a browser/native-host restart instead of being
-  // told to re-run `byoky-bridge connect`.
-  tryRestoreProxy();
-
-  while (true) {
-    const msg = await readMessage();
-    if (msg === null) break; // stdin closed = extension disconnected
-    await handleMessage(msg);
-  }
-
-  process.exit(0);
-}
-
-main().catch((e) => {
-  process.stderr.write(`byoky-bridge fatal: ${e.message}\n`);
-  process.exit(1);
-});
+// The extension launches a host process for every availability ping and
+// setup-token request too, so the HTTP proxy only ever starts on an
+// explicit `start-proxy`. (The extension re-sends it after a service-worker
+// restart; restoring a saved session at launch made every short-lived host
+// race the real one for the port.)
+//
+// Messages are handled concurrently: a long streaming fetch must not hold
+// up the next request or a `proxy_http_response_*` message.
+process.stdin.on('data', createMessageReader((msg) => {
+  void handleMessage(msg).catch((e: unknown) => {
+    process.stderr.write(`byoky-bridge: ${e instanceof Error ? e.message : 'message failed'}\n`);
+  });
+}, MAX_INCOMING_MESSAGE_BYTES));
+// stdin closed = extension disconnected
+process.stdin.on('end', () => process.exit(0));

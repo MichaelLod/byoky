@@ -2,10 +2,13 @@ import type {
   AuthMethod,
   RelayMessage,
   RelayHello,
+  RelayRequest,
   WebSocketLike,
 } from '@byoky/core';
 import {
   ByokyError,
+  ByokyErrorCode,
+  MAX_RELAY_MESSAGE_SIZE,
   parseRelayMessage,
   sendRelayMessage,
   WS_READY_STATE,
@@ -16,6 +19,12 @@ export interface ByokyServerOptions {
   pingInterval?: number;
   /** Timeout waiting for relay:hello after connection. Default: 10000. */
   helloTimeout?: number;
+  /**
+   * Fail a relayed request when the browser sends nothing for it for this
+   * long, in ms. Resets on every response chunk, so long streams are fine.
+   * Default: 120000. Set to 0 to disable.
+   */
+  requestTimeout?: number;
 }
 
 export interface ByokyClient {
@@ -30,10 +39,12 @@ export interface ByokyClient {
 export class ByokyServer {
   private pingInterval: number;
   private helloTimeout: number;
+  private requestTimeout: number;
 
   constructor(options: ByokyServerOptions = {}) {
     this.pingInterval = options.pingInterval ?? 30_000;
     this.helloTimeout = options.helloTimeout ?? 10_000;
+    this.requestTimeout = options.requestTimeout ?? 120_000;
   }
 
   handleConnection(ws: WebSocketLike): Promise<ByokyClient> {
@@ -161,51 +172,84 @@ export class ByokyServer {
           const body = init?.body ? await readBody(init.body) : undefined;
 
           const requestId = `relay-${++requestCounter}-${Date.now()}`;
+          const request: RelayRequest = {
+            type: 'relay:request',
+            requestId,
+            providerId,
+            url,
+            method,
+            headers,
+            body,
+          };
+
+          // The browser drops oversized relay messages without a reply, so
+          // sending one would leave this request hanging.
+          const size = JSON.stringify(request).length;
+          if (size > MAX_RELAY_MESSAGE_SIZE) {
+            throw new ByokyError(
+              ByokyErrorCode.PROXY_ERROR,
+              `Request too large for the relay: ${size} characters serialized, limit ${MAX_RELAY_MESSAGE_SIZE}`,
+              { size, limit: MAX_RELAY_MESSAGE_SIZE },
+            );
+          }
 
           return new Promise<Response>((resolveFetch, rejectFetch) => {
             let metaResolved = false;
             let controller: ReadableStreamDefaultController<Uint8Array>;
+            let idleTimer: ReturnType<typeof setTimeout> | undefined;
             const encoder = new TextEncoder();
 
             const stream = new ReadableStream<Uint8Array>({
               start(c) { controller = c; },
             });
 
-            pendingRequests.set(requestId, {
-              resolveMeta: (meta) => {
+            // Idle timeout: catches a browser that dropped the request or
+            // stalled mid-stream, without cutting off long streams.
+            const touch = () => {
+              if (self.requestTimeout <= 0) return;
+              clearTimeout(idleTimer);
+              idleTimer = setTimeout(() => {
+                pendingRequests.delete(requestId);
+                pending.error(new ByokyError(
+                  ByokyErrorCode.PROXY_ERROR,
+                  `Relay request timed out (no response from the browser for ${Math.round(self.requestTimeout / 1000)}s)`,
+                ));
+              }, self.requestTimeout);
+            };
+
+            const pending = {
+              resolveMeta: (meta: { status: number; statusText: string; headers: Record<string, string> }) => {
                 if (metaResolved) return;
                 metaResolved = true;
+                touch();
                 resolveFetch(new Response(stream, {
                   status: meta.status,
                   statusText: meta.statusText,
                   headers: new Headers(meta.headers),
                 }));
               },
-              pushChunk: (chunk) => {
+              pushChunk: (chunk: string) => {
+                touch();
                 try { controller.enqueue(encoder.encode(chunk)); } catch {}
               },
               done: () => {
+                clearTimeout(idleTimer);
                 try { controller.close(); } catch {}
               },
-              error: (err) => {
+              error: (err: Error) => {
+                clearTimeout(idleTimer);
                 try { controller.error(err); } catch {}
                 if (!metaResolved) {
                   metaResolved = true;
                   rejectFetch(err);
                 }
               },
-            });
+            };
+            pendingRequests.set(requestId, pending);
+            touch();
 
             // Send the request to the frontend
-            sendRelayMessage(ws, {
-              type: 'relay:request',
-              requestId,
-              providerId,
-              url,
-              method,
-              headers,
-              body,
-            });
+            sendRelayMessage(ws, request);
           });
         };
       }

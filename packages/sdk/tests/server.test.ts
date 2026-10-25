@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ByokyServer } from '../src/server.js';
 import type { WebSocketLike } from '@byoky/core';
-import { WS_READY_STATE } from '@byoky/core';
+import { MAX_RELAY_MESSAGE_SIZE, WS_READY_STATE } from '@byoky/core';
 
 function createMockWebSocket(): WebSocketLike & { simulateMessage(data: unknown): void; sentMessages: string[] } {
   const ws: WebSocketLike & { simulateMessage(data: unknown): void; sentMessages: string[] } = {
@@ -163,6 +163,68 @@ describe('ByokyServer', () => {
 
     expect(closeFn).toHaveBeenCalled();
     expect(client.connected).toBe(false);
+  });
+
+  it('rejects a request too large for the relay instead of sending it', async () => {
+    const clientPromise = server.handleConnection(ws);
+    ws.simulateMessage({
+      type: 'relay:hello',
+      sessionId: 'sess-1',
+      providers: { anthropic: { available: true, authMethod: 'api_key' } },
+    });
+    const client = await clientPromise;
+    const sentBefore = ws.sentMessages.length;
+
+    const fetchFn = client.createFetch('anthropic');
+    const body = JSON.stringify({ messages: [{ role: 'user', content: 'x'.repeat(MAX_RELAY_MESSAGE_SIZE) }] });
+
+    await expect(fetchFn('https://api.anthropic.com/v1/messages', { method: 'POST', body }))
+      .rejects.toThrow('too large for the relay');
+    expect(ws.sentMessages.length).toBe(sentBefore);
+  });
+
+  it('times out a request the browser never answers', async () => {
+    const server = new ByokyServer({ pingInterval: 0, requestTimeout: 50 });
+    const clientPromise = server.handleConnection(ws);
+    ws.simulateMessage({
+      type: 'relay:hello',
+      sessionId: 'sess-1',
+      providers: { anthropic: { available: true, authMethod: 'api_key' } },
+    });
+    const client = await clientPromise;
+
+    const fetchFn = client.createFetch('anthropic');
+    await expect(fetchFn('https://api.anthropic.com/v1/messages')).rejects.toThrow('timed out');
+  });
+
+  it('keeps a stream open while chunks arrive and fails it once it stalls', async () => {
+    const server = new ByokyServer({ pingInterval: 0, requestTimeout: 80 });
+    const clientPromise = server.handleConnection(ws);
+    ws.simulateMessage({
+      type: 'relay:hello',
+      sessionId: 'sess-1',
+      providers: { anthropic: { available: true, authMethod: 'api_key' } },
+    });
+    const client = await clientPromise;
+
+    const fetchFn = client.createFetch('anthropic');
+    const responsePromise = fetchFn('https://api.anthropic.com/v1/messages');
+    await new Promise((r) => setTimeout(r, 10));
+    const { requestId } = JSON.parse(ws.sentMessages[ws.sentMessages.length - 1]);
+
+    ws.simulateMessage({ type: 'relay:response:meta', requestId, status: 200, statusText: 'OK', headers: {} });
+    const response = await responsePromise;
+    const reader = response.body!.getReader();
+
+    // Five chunks 40 ms apart outlast the 80 ms timeout only because each resets it.
+    for (let i = 0; i < 5; i++) {
+      await new Promise((r) => setTimeout(r, 40));
+      ws.simulateMessage({ type: 'relay:response:chunk', requestId, chunk: `data: ${i}\n\n` });
+      const { value } = await reader.read();
+      expect(new TextDecoder().decode(value)).toBe(`data: ${i}\n\n`);
+    }
+
+    await expect(reader.read()).rejects.toThrow('timed out');
   });
 
   it('rejects pending requests when WebSocket closes', async () => {

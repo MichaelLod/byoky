@@ -2,17 +2,19 @@
  * Installs/uninstalls the native messaging host manifest for each browser.
  *
  * Usage:
- *   byoky-bridge install    — register with Chrome, Firefox, and Safari
+ *   byoky-bridge install    — register with Chrome, Chromium, Brave, and Firefox
  *   byoky-bridge uninstall  — remove registrations
  *   byoky-bridge status     — check if registered
+ *
+ * macOS and Linux only. Windows needs a registry key per browser and a
+ * non-bash wrapper, so `install` reports it as unsupported for now.
  */
 
 import { writeFileSync, mkdirSync, unlinkSync, existsSync, chmodSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { homedir, platform } from 'node:os';
 import { execFileSync } from 'node:child_process';
-
-const HOST_NAME = 'com.byoky.bridge';
+import { HOST_NAME, buildManifest, type ManifestOptions } from './native-manifest.js';
 
 function getHostPath(): string {
   try {
@@ -44,40 +46,6 @@ function createNativeWrapper(hostPath: string, manifestDir: string): string {
   writeFileSync(wrapperPath, script);
   chmodSync(wrapperPath, 0o755);
   return wrapperPath;
-}
-
-const PUBLISHED_EXTENSION_ID = 'igjohldpldlahcjmefdhlnbcpldlgmon';
-// Derived from the `key` field pinned in packages/extension/wxt.config.ts.
-// Covers WXT dev builds and any unpacked/sideloaded build produced from this
-// repo — so Chrome Web Store lag doesn't block Bridge users.
-const UNPACKED_EXTENSION_ID = 'idlmdfkobnkdakcpiihighchdbbmbpep';
-
-function buildManifest(hostPath: string, browserType: 'chrome' | 'firefox', extensionId?: string): object {
-  const base = {
-    name: HOST_NAME,
-    description: 'Byoky Bridge — routes setup token requests through Claude Code CLI',
-    path: hostPath,
-    type: 'stdio',
-  };
-
-  if (browserType === 'chrome') {
-    const origins = extensionId
-      ? [`chrome-extension://${extensionId}/`]
-      : [
-          `chrome-extension://${PUBLISHED_EXTENSION_ID}/`,
-          `chrome-extension://${UNPACKED_EXTENSION_ID}/`,
-        ];
-    return {
-      ...base,
-      allowed_origins: origins,
-    };
-  }
-
-  // Firefox uses extension IDs from the manifest
-  return {
-    ...base,
-    allowed_extensions: ['byoky@byoky.com'],
-  };
 }
 
 interface ManifestLocation {
@@ -135,22 +103,6 @@ function getManifestLocations(): ManifestLocation[] {
     ];
   }
 
-  if (os === 'win32') {
-    const appData = process.env.LOCALAPPDATA || `${home}/AppData/Local`;
-    return [
-      {
-        browser: 'Chrome',
-        path: `${appData}/Google/Chrome/User Data/NativeMessagingHosts/${HOST_NAME}.json`,
-        type: 'chrome',
-      },
-      {
-        browser: 'Firefox',
-        path: `${appData}/Mozilla/NativeMessagingHosts/${HOST_NAME}.json`,
-        type: 'firefox',
-      },
-    ];
-  }
-
   return [];
 }
 
@@ -165,7 +117,7 @@ export interface RegistrationStatus {
 }
 
 /** Programmatic install — returns registered browser names, no stdout. */
-export function registerHost(extensionId?: string): RegisterResult {
+export function registerHost(opts: ManifestOptions = {}): RegisterResult {
   const locations = getManifestLocations();
   if (locations.length === 0) return { browsers: [], unsupported: true };
 
@@ -177,7 +129,7 @@ export function registerHost(extensionId?: string): RegisterResult {
       const manifestDir = dirname(loc.path);
       mkdirSync(manifestDir, { recursive: true });
       const wrapperPath = createNativeWrapper(hostPath, manifestDir);
-      const manifest = buildManifest(wrapperPath, loc.type, extensionId);
+      const manifest = buildManifest(wrapperPath, loc.type, opts);
       writeFileSync(loc.path, JSON.stringify(manifest, null, 2));
       browsers.push(loc.browser);
     } catch {
@@ -199,11 +151,11 @@ export function getRegistrationStatus(): RegistrationStatus {
   return { registered, missing };
 }
 
-export function install(extensionId?: string): void {
-  const result = registerHost(extensionId);
+export function install(opts: ManifestOptions = {}): void {
+  const result = registerHost(opts);
 
   if (result.unsupported) {
-    console.error('Unsupported platform');
+    console.error('Byoky Bridge supports macOS and Linux only — Windows isn\'t supported yet.');
     process.exit(1);
   }
 
@@ -214,6 +166,9 @@ export function install(extensionId?: string): void {
   if (result.browsers.length > 0) {
     console.log(`\nByoky Bridge installed for ${result.browsers.length} browser(s).`);
     console.log('Restart your browser for changes to take effect.');
+    if (!opts.dev && !opts.extensionId) {
+      console.log('Only the Chrome Web Store extension is allowed. Loaded Byoky unpacked? Re-run with --dev.');
+    }
   } else {
     console.error('No supported browsers found.');
   }

@@ -10,6 +10,14 @@
       "types": "./dist/installer.d.ts",
       "import": "./dist/installer.js"
     },
+    "./token": {
+      "types": "./dist/token.d.ts",
+      "import": "./dist/token.js"
+    },
+    "./native-manifest": {
+      "types": "./dist/native-manifest.d.ts",
+      "import": "./dist/native-manifest.js"
+    },
     "./package.json": "./package.json"
   },
   "bin": {

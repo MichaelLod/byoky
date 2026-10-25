@@ -22,13 +22,13 @@ OpenClaw loads plugins from `~/.openclaw/extensions` (not the global npm prefix)
 openclaw models auth login --provider byoky-anthropic
 ```
 
-This opens your browser. Unlock your Byoky wallet and approve the connection. The bridge starts automatically.
+This opens your browser. Unlock your Byoky wallet and approve the connection. The bridge starts automatically, and the plugin configures OpenClaw with the bridge token from `~/.byoky-bridge/token`, so there's no key to paste.
 
 **3. Done.** OpenClaw now routes API calls through your wallet:
 
 ```bash
 # Verify the bridge is running
-curl http://127.0.0.1:19280/health
+curl -H "x-api-key: $(byoky-bridge token)" http://127.0.0.1:19280/health
 # → {"status":"ok","providers":["anthropic"]}
 ```
 
@@ -70,8 +70,8 @@ The plugin adds an OpenClaw command:
 ## How it works
 
 1. The plugin registers Byoky providers in OpenClaw, each pointing to `http://127.0.0.1:19280/<provider>`
-2. When OpenClaw makes an API call, the request hits the local Byoky Bridge
-3. The bridge relays the request to the Byoky extension via native messaging
+2. When OpenClaw makes an API call, the request hits the local Byoky Bridge with the bridge token as its API key
+3. The bridge checks the token and relays the request to the Byoky extension via native messaging
 4. The extension injects the real API key and calls the provider API
 5. The response streams back through the same path
 

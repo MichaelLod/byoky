@@ -7,6 +7,10 @@ export default defineConfig([
     dts: true,
     clean: true,
     external: ['openclaw'],
+    // Inline the bridge's token and manifest modules so the plugin shares
+    // their code with `byoky-bridge` without a runtime import of a package
+    // version that may lag behind.
+    noExternal: [/^@byoky\/bridge\//],
   },
   {
     entry: { 'auth-sdk': 'src/auth-sdk.ts' },

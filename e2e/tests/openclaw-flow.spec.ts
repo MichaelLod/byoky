@@ -117,6 +117,12 @@ test.describe('OpenClaw + byoky extension + bridge full flow', () => {
       stdio: 'inherit',
     });
 
+    // The bridge host runs under the real HOME (the browser spawns it), so
+    // the plugin must read the same ~/.byoky-bridge/token.
+    const bridgeDir = path.join(os.homedir(), '.byoky-bridge');
+    fs.mkdirSync(bridgeDir, { recursive: true, mode: 0o700 });
+    fs.symlinkSync(bridgeDir, path.join(openclawHome, '.byoky-bridge'));
+
     // Install @byoky/openclaw-plugin into the isolated openclaw config.
     // --force makes the step idempotent across reruns. Set
     // BYOKY_OPENCLAW_PLUGIN to a packed tarball to test an unreleased build.
@@ -255,7 +261,9 @@ test.describe('OpenClaw + byoky extension + bridge full flow', () => {
     // native messaging during the approval step. Give it a moment to bind.
     for (let i = 0; i < 20; i++) {
       try {
-        const res = await fetch('http://127.0.0.1:19280/health');
+        // /health lists providers only to a caller with the bridge token.
+        const token = fs.readFileSync(path.join(os.homedir(), '.byoky-bridge', 'token'), 'utf-8').trim();
+        const res = await fetch('http://127.0.0.1:19280/health', { headers: { 'x-api-key': token } });
         if (res.ok) {
           const body = await res.json() as { status?: string; providers?: string[] };
           expect(body.status).toBe('ok');

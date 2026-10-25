@@ -25,6 +25,10 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir, platform } from 'node:os';
 import { createRequire } from 'node:module';
+// Bundled into dist at build time (see tsup.config.ts), so the plugin and
+// `byoky-bridge install` share one allow-list and one token file.
+import { HOST_NAME, buildManifest } from '@byoky/bridge/native-manifest';
+import { loadOrCreateToken } from '@byoky/bridge/token';
 
 type ProviderApi = 'anthropic-messages' | 'openai-completions';
 
@@ -42,6 +46,9 @@ interface ByokyProvider {
   id: string;
   name: string;
   api: ProviderApi;
+  // Appended to the bridge URL so the SDK's own suffix (`/v1/messages`,
+  // `/chat/completions`) lands on the provider's real endpoint.
+  basePath: string;
   models: ModelDef[];
 }
 
@@ -211,20 +218,23 @@ const GROQ_MODELS: ModelDef[] = [
 // Providers with no pre-defined model catalog (models vary widely or require discovery)
 const EMPTY_MODELS: ModelDef[] = [];
 
+// basePath values mirror each provider's OpenAI-compatible chat endpoint
+// (see chatPath in @byoky/core's provider registry).
 const PROVIDERS: ByokyProvider[] = [
-  { id: 'anthropic', name: 'Anthropic', api: 'anthropic-messages', models: ANTHROPIC_MODELS },
-  { id: 'openai', name: 'OpenAI', api: 'openai-completions', models: OPENAI_MODELS },
-  { id: 'gemini', name: 'Google Gemini', api: 'openai-completions', models: GEMINI_MODELS },
-  { id: 'mistral', name: 'Mistral', api: 'openai-completions', models: MISTRAL_MODELS },
-  { id: 'cohere', name: 'Cohere', api: 'openai-completions', models: EMPTY_MODELS },
-  { id: 'xai', name: 'xAI (Grok)', api: 'openai-completions', models: XAI_MODELS },
-  { id: 'deepseek', name: 'DeepSeek', api: 'openai-completions', models: DEEPSEEK_MODELS },
-  { id: 'perplexity', name: 'Perplexity', api: 'openai-completions', models: EMPTY_MODELS },
-  { id: 'groq', name: 'Groq', api: 'openai-completions', models: GROQ_MODELS },
-  { id: 'together', name: 'Together AI', api: 'openai-completions', models: EMPTY_MODELS },
-  { id: 'fireworks', name: 'Fireworks AI', api: 'openai-completions', models: EMPTY_MODELS },
-  { id: 'openrouter', name: 'OpenRouter', api: 'openai-completions', models: EMPTY_MODELS },
-  { id: 'azure_openai', name: 'Azure OpenAI', api: 'openai-completions', models: EMPTY_MODELS },
+  { id: 'anthropic', name: 'Anthropic', api: 'anthropic-messages', basePath: '', models: ANTHROPIC_MODELS },
+  { id: 'openai', name: 'OpenAI', api: 'openai-completions', basePath: '/v1', models: OPENAI_MODELS },
+  { id: 'gemini', name: 'Google Gemini', api: 'openai-completions', basePath: '/v1beta/openai', models: GEMINI_MODELS },
+  { id: 'mistral', name: 'Mistral', api: 'openai-completions', basePath: '/v1', models: MISTRAL_MODELS },
+  { id: 'cohere', name: 'Cohere', api: 'openai-completions', basePath: '/compatibility/v1', models: EMPTY_MODELS },
+  { id: 'xai', name: 'xAI (Grok)', api: 'openai-completions', basePath: '/v1', models: XAI_MODELS },
+  { id: 'deepseek', name: 'DeepSeek', api: 'openai-completions', basePath: '', models: DEEPSEEK_MODELS },
+  { id: 'perplexity', name: 'Perplexity', api: 'openai-completions', basePath: '', models: EMPTY_MODELS },
+  { id: 'groq', name: 'Groq', api: 'openai-completions', basePath: '/openai/v1', models: GROQ_MODELS },
+  { id: 'together', name: 'Together AI', api: 'openai-completions', basePath: '/v1', models: EMPTY_MODELS },
+  { id: 'fireworks', name: 'Fireworks AI', api: 'openai-completions', basePath: '/inference/v1', models: EMPTY_MODELS },
+  { id: 'openrouter', name: 'OpenRouter', api: 'openai-completions', basePath: '/v1', models: EMPTY_MODELS },
+  // Azure needs the tenant's own host, which the bridge doesn't know yet.
+  { id: 'azure_openai', name: 'Azure OpenAI', api: 'openai-completions', basePath: '', models: EMPTY_MODELS },
 ];
 
 const byokyPlugin = {
@@ -311,11 +321,10 @@ export default byokyPlugin;
 // --- Native messaging host registration (inline, scanner-safe) ---
 //
 // Duplicates the minimal subset of @byoky/bridge/installer needed here.
-// We avoid importing the bridge package at runtime so OpenClaw's plugin
-// sandbox doesn't see child_process / os-specific env lookups in the same
-// module as `fetch` (its scanner flags those combinations).
-
-const HOST_NAME = 'com.byoky.bridge';
+// We avoid importing the installer so OpenClaw's plugin sandbox doesn't see
+// child_process / os-specific env lookups in the same module as `fetch`
+// (its scanner flags those combinations). The manifest itself comes from
+// @byoky/bridge/native-manifest, which has neither.
 
 interface ManifestLocation {
   browser: string;
@@ -342,15 +351,7 @@ function getManifestLocations(): ManifestLocation[] {
       { browser: 'Firefox', path: `${home}/.mozilla/native-messaging-hosts/${HOST_NAME}.json`, type: 'firefox' },
     ];
   }
-  if (os === 'win32') {
-    // Use homedir() instead of LOCALAPPDATA env var to keep the file free of
-    // `process.env` reads (scanner heuristic for credential harvesting).
-    const appData = `${home}/AppData/Local`;
-    return [
-      { browser: 'Chrome', path: `${appData}/Google/Chrome/User Data/NativeMessagingHosts/${HOST_NAME}.json`, type: 'chrome' },
-      { browser: 'Firefox', path: `${appData}/Mozilla/NativeMessagingHosts/${HOST_NAME}.json`, type: 'firefox' },
-    ];
-  }
+  // Windows isn't supported yet: it needs registry keys and a non-bash wrapper.
   return [];
 }
 
@@ -385,28 +386,6 @@ function createNativeWrapper(hostPath: string, manifestDir: string): string {
   return wrapperPath;
 }
 
-const PUBLISHED_EXTENSION_ID = 'igjohldpldlahcjmefdhlnbcpldlgmon';
-const DEV_EXTENSION_ID = 'ahhecmfcclkjdgjnmackoacldnmgmipl';
-
-function buildManifest(hostPath: string, browserType: 'chrome' | 'firefox'): object {
-  const base = {
-    name: HOST_NAME,
-    description: 'Byoky Bridge — native messaging host',
-    path: hostPath,
-    type: 'stdio',
-  };
-  if (browserType === 'chrome') {
-    return {
-      ...base,
-      allowed_origins: [
-        `chrome-extension://${PUBLISHED_EXTENSION_ID}/`,
-        `chrome-extension://${DEV_EXTENSION_ID}/`,
-      ],
-    };
-  }
-  return { ...base, allowed_extensions: ['byoky@byoky.com'] };
-}
-
 function getRegistrationStatus(): { registered: string[]; missing: string[] } {
   const registered: string[] = [];
   const missing: string[] = [];
@@ -438,11 +417,14 @@ function registerHost(): { browsers: string[]; unsupported?: boolean } {
 
 // --- Bridge health check ---
 
+// /health lists providers only to a caller with the bridge token. A bridge
+// that answers without them is running with a different token.
 async function checkBridgeHealth(): Promise<{ providers: string[] } | null> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
     const res = await fetch(`http://127.0.0.1:${DEFAULT_BRIDGE_PORT}/health`, {
+      headers: { authorization: `Bearer ${loadOrCreateToken()}` },
       signal: controller.signal,
     });
     clearTimeout(timeout);
@@ -455,31 +437,37 @@ async function checkBridgeHealth(): Promise<{ providers: string[] } | null> {
   }
 }
 
+type BridgeSessionState = 'ok' | 'stale' | 'bad-token';
+
 // Probes whether the bridge's current session key is still authorized by the
 // extension. /health is not enough — it only confirms the bridge process is up,
 // not that its sessionKey still matches the extension's authorizedBridgeSessionKey
 // (which gets rotated on extension reload, wallet unlock, or a newer auth).
-// Returns true if the bridge can actually relay to the extension, false if the
-// session is stale and the wallet must be reconnected.
-async function probeBridgeSession(port: number, providerId: string): Promise<boolean> {
+// 'stale' means the wallet must be reconnected; 'bad-token' means the running
+// bridge predates the current ~/.byoky-bridge/token and must be restarted.
+async function probeBridgeSession(port: number, providerId: string): Promise<BridgeSessionState> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
     const res = await fetch(`http://127.0.0.1:${port}/${providerId}/v1/models`, {
       method: 'GET',
-      headers: { authorization: 'Bearer byoky-proxy' },
+      headers: { authorization: `Bearer ${loadOrCreateToken()}` },
       signal: controller.signal,
     });
     clearTimeout(timeout);
+    if (res.status === 401) {
+      const data = await res.json().catch(() => ({})) as { code?: string };
+      return data.code === 'bridge_token_invalid' ? 'bad-token' : 'stale';
+    }
     if (res.status === 502) {
       const text = await res.text().catch(() => '');
       if (text.includes('Unauthorized session key') || text.includes('Session not found')) {
-        return false;
+        return 'stale';
       }
     }
-    return true;
+    return 'ok';
   } catch {
-    return true;
+    return 'ok';
   }
 }
 
@@ -551,7 +539,7 @@ async function ensureNativeHostRegistered(
   try {
     const result = registerHost();
     if (result.unsupported) {
-      progress.stop('Unsupported platform');
+      progress.stop('Unsupported platform — Byoky Bridge supports macOS and Linux only');
       return false;
     }
     if (result.browsers.length === 0) {
@@ -599,15 +587,17 @@ async function runProviderAuth(
       );
     } else {
       const probeProviderId = selected[0];
-      const sessionOk = await probeBridgeSession(DEFAULT_BRIDGE_PORT, probeProviderId);
-      if (sessionOk) {
+      const state = await probeBridgeSession(DEFAULT_BRIDGE_PORT, probeProviderId);
+      if (state === 'ok') {
         await ctx.prompter.note(
           `Reusing live Byoky Bridge on port ${DEFAULT_BRIDGE_PORT} — no browser round-trip needed.`,
         );
         return buildAuthResult(selected, DEFAULT_BRIDGE_PORT, provider, overrides);
       }
       await ctx.prompter.note(
-        'Byoky Bridge is running but its session key no longer matches the extension (the extension was reloaded or the wallet was re-locked). Opening the wallet to reconnect.',
+        state === 'bad-token'
+          ? 'Byoky Bridge is running with an older token than ~/.byoky-bridge/token. Opening the wallet to restart it.'
+          : 'Byoky Bridge is running but its session key no longer matches the extension (the extension was reloaded or the wallet was re-locked). Opening the wallet to reconnect.',
       );
     }
   }
@@ -680,6 +670,10 @@ function buildAuthResult(
     overrides,
   );
 
+  // The bridge rejects requests without its token; OpenClaw sends the
+  // provider apiKey, so that is where it goes.
+  const token = loadOrCreateToken();
+
   const profiles = providers.map((p) => {
     const openclawId = `byoky-${p.id}`;
     return {
@@ -687,7 +681,7 @@ function buildAuthResult(
       credential: {
         type: 'api_key' as const,
         provider: openclawId,
-        key: 'byoky-proxy',
+        key: token,
       },
     };
   });
@@ -701,9 +695,9 @@ function buildAuthResult(
   const agentModels: Record<string, Record<string, never>> = {};
   for (const p of providers) {
     providerConfig[`byoky-${p.id}`] = {
-      baseUrl: `http://127.0.0.1:${port}/${p.id}`,
+      baseUrl: `http://127.0.0.1:${port}/${p.id}${p.basePath}`,
       api: p.api,
-      apiKey: 'byoky-proxy',
+      apiKey: token,
       models: p.models,
     };
     for (const m of p.models) {
@@ -1160,7 +1154,10 @@ function buildAuthPage(requestProviderId: string | null): string {
 
           setStatus('Wallet connected — starting bridge proxy…', 'waiting');
           const bridgeResult = await startBridge(sessionKey);
-          const bridgePort = (bridgeResult && bridgeResult.port) || ${DEFAULT_BRIDGE_PORT};
+          if (!bridgeResult || !bridgeResult.success) {
+            throw new Error((bridgeResult && bridgeResult.error) || 'Bridge proxy failed to start');
+          }
+          const bridgePort = bridgeResult.port || ${DEFAULT_BRIDGE_PORT};
           const callbackBody = { providers: available, bridgePort };
 
           setStatus(

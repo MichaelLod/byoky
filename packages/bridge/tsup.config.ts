@@ -2,7 +2,10 @@ import { defineConfig } from 'tsup';
 
 export default defineConfig([
   {
-    entry: ['src/host.ts', 'src/installer.ts', 'src/connect-mode.ts', 'src/hermes-setup.ts', 'src/session-store.ts'],
+    entry: [
+      'src/host.ts', 'src/installer.ts', 'src/connect-mode.ts', 'src/hermes-setup.ts',
+      'src/token.ts', 'src/native-manifest.ts',
+    ],
     format: ['esm'],
     dts: true,
     clean: true,
