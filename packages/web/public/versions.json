@@ -4,9 +4,8 @@
   "platforms": [
     {
       "platform": "Chrome",
-      "version": "0.9.13",
-      "status": "live",
-      "pending": "1.1.0"
+      "version": "1.1.0",
+      "status": "live"
     },
     {
       "platform": "Firefox",
@@ -29,5 +28,5 @@
       "status": "live"
     }
   ],
-  "generatedAt": "2026-10-25T01:36:55.134Z"
+  "generatedAt": "2026-10-25T09:57:10.187Z"
 }
