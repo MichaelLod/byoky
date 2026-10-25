@@ -21,9 +21,8 @@
     },
     {
       "platform": "Android",
-      "version": "1.1.0",
-      "status": "live",
-      "pending": "1.1.1"
+      "version": "1.1.1",
+      "status": "live"
     },
     {
       "platform": "npm",
@@ -31,5 +30,5 @@
       "status": "live"
     }
   ],
-  "generatedAt": "2026-10-25T16:28:50.558Z"
+  "generatedAt": "2026-10-25T19:18:02.611Z"
 }
