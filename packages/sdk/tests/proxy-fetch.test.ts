@@ -173,6 +173,170 @@ describe('createProxyFetch', () => {
     expect(response.status).toBe(201);
   });
 
+  it('errors the body when the request fails after the headers', async () => {
+    const proxyFetch = createProxyFetch('anthropic', { current: 'byk_session' });
+
+    const fetchPromise = proxyFetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      body: '{"stream":true}',
+    });
+
+    await new Promise((r) => setTimeout(r, 10));
+
+    const requestId = postedMessages[0].data.requestId as string;
+    simulateResponse({
+      type: 'BYOKY_PROXY_RESPONSE_META',
+      requestId,
+      status: 200,
+      statusText: 'OK',
+      headers: { 'content-type': 'text/event-stream' },
+    });
+    simulateResponse({
+      type: 'BYOKY_PROXY_RESPONSE_CHUNK',
+      requestId,
+      chunk: 'data: {"type":"content"}',
+    });
+    simulateResponse({
+      type: 'BYOKY_PROXY_RESPONSE_ERROR',
+      requestId,
+      status: 500,
+      error: { code: 'PROXY_ERROR', message: 'Extension disconnected' },
+    });
+
+    const response = await fetchPromise;
+    expect(response.status).toBe(200);
+    await expect(response.text()).rejects.toMatchObject({
+      code: 'PROXY_ERROR',
+      message: 'Extension disconnected',
+    });
+  });
+
+  describe('abort signal', () => {
+    function cancelMessages() {
+      return postedMessages.filter((m) => m.data.type === 'BYOKY_PROXY_CANCEL');
+    }
+
+    it('rejects at once when the signal is already aborted', async () => {
+      const proxyFetch = createProxyFetch('anthropic', { current: 'byk_session' });
+      const controller = new AbortController();
+      controller.abort();
+
+      await expect(
+        proxyFetch('https://api.anthropic.com/v1/messages', { signal: controller.signal }),
+      ).rejects.toMatchObject({ name: 'AbortError' });
+
+      await new Promise((r) => setTimeout(r, 10));
+      expect(postedMessages).toHaveLength(0);
+    });
+
+    it('rejects and cancels when aborted before the headers', async () => {
+      const proxyFetch = createProxyFetch('anthropic', { current: 'byk_session' });
+      const controller = new AbortController();
+
+      const fetchPromise = proxyFetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        body: '{}',
+        signal: controller.signal,
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+      const requestId = postedMessages[0].data.requestId as string;
+
+      controller.abort();
+      await expect(fetchPromise).rejects.toMatchObject({ name: 'AbortError' });
+
+      await new Promise((r) => setTimeout(r, 10));
+      expect(cancelMessages().map((m) => m.data)).toEqual([
+        { type: 'BYOKY_PROXY_CANCEL', requestId },
+      ]);
+    });
+
+    it('rejects with the reason the signal was aborted with', async () => {
+      const proxyFetch = createProxyFetch('anthropic', { current: 'byk_session' });
+      const controller = new AbortController();
+
+      const fetchPromise = proxyFetch('https://api.anthropic.com/v1/messages', {
+        signal: controller.signal,
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+      const reason = new Error('user left the page');
+      controller.abort(reason);
+
+      await expect(fetchPromise).rejects.toBe(reason);
+    });
+
+    it('errors the body and cancels when aborted mid-stream', async () => {
+      const proxyFetch = createProxyFetch('anthropic', { current: 'byk_session' });
+      const controller = new AbortController();
+
+      const fetchPromise = proxyFetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        body: '{"stream":true}',
+        signal: controller.signal,
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+      const requestId = postedMessages[0].data.requestId as string;
+
+      simulateResponse({
+        type: 'BYOKY_PROXY_RESPONSE_META',
+        requestId,
+        status: 200,
+        statusText: 'OK',
+        headers: { 'content-type': 'text/event-stream' },
+      });
+      simulateResponse({
+        type: 'BYOKY_PROXY_RESPONSE_CHUNK',
+        requestId,
+        chunk: 'data: {"type":"content"}',
+      });
+
+      const response = await fetchPromise;
+      controller.abort();
+
+      await expect(response.text()).rejects.toMatchObject({ name: 'AbortError' });
+      await new Promise((r) => setTimeout(r, 10));
+      expect(cancelMessages().map((m) => m.data)).toEqual([
+        { type: 'BYOKY_PROXY_CANCEL', requestId },
+      ]);
+    });
+
+    it('does nothing once the response is complete', async () => {
+      const proxyFetch = createProxyFetch('anthropic', { current: 'byk_session' });
+      const controller = new AbortController();
+
+      const fetchPromise = proxyFetch('https://api.anthropic.com/v1/messages', {
+        signal: controller.signal,
+      });
+
+      await new Promise((r) => setTimeout(r, 10));
+      const requestId = postedMessages[0].data.requestId as string;
+
+      simulateResponse({
+        type: 'BYOKY_PROXY_RESPONSE_META',
+        requestId,
+        status: 200,
+        statusText: 'OK',
+        headers: { 'content-type': 'application/json' },
+      });
+      simulateResponse({
+        type: 'BYOKY_PROXY_RESPONSE_CHUNK',
+        requestId,
+        chunk: '{"ok":true}',
+      });
+      simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_DONE', requestId });
+
+      const response = await fetchPromise;
+      await new Promise((r) => setTimeout(r, 10));
+      controller.abort();
+
+      expect(await response.json()).toEqual({ ok: true });
+      await new Promise((r) => setTimeout(r, 10));
+      expect(cancelMessages()).toHaveLength(0);
+    });
+  });
+
   function simulateResponse(data: Record<string, unknown>) {
     const entry = postedMessages.find(
       (m) => m.data.requestId === data.requestId,

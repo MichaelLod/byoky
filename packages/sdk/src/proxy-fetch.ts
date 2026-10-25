@@ -1,4 +1,5 @@
 import type { SerializedFormDataEntry } from '@byoky/core';
+import { ByokyError, ByokyErrorCode } from '@byoky/core';
 import { resolveMessageTarget } from './detect.js';
 
 interface ReadBodyResult {
@@ -21,11 +22,15 @@ export function createProxyFetch(
           ? input.toString()
           : input.url;
 
+    const signal = init?.signal ?? undefined;
+    if (signal?.aborted) throw abortReason(signal);
+
     const method = init?.method ?? 'GET';
     const headers = init?.headers
       ? Object.fromEntries(new Headers(init.headers).entries())
       : {};
     const bodyResult = init?.body ? await readBody(init.body, headers['content-type']) : undefined;
+    if (signal?.aborted) throw abortReason(signal);
 
     const requestId = crypto.randomUUID();
 
@@ -37,6 +42,7 @@ export function createProxyFetch(
 
       const timeout = setTimeout(() => {
         cleanup();
+        cancel();
         reject(new Error('Proxy request timed out'));
       }, 120_000);
 
@@ -84,17 +90,46 @@ export function createProxyFetch(
               resolved = true;
               clearTimeout(timeout);
               resolve(errResponse);
+            } else {
+              // The status line already went out, so error the body: a
+              // closed stream would pass for a complete response.
+              writer.abort(new ByokyError(
+                (data.error?.code ?? ByokyErrorCode.PROXY_ERROR) as ByokyErrorCode,
+                data.error?.message ?? 'Proxy request failed',
+              )).catch(() => {});
             }
-            writer.close().catch(() => {});
             cleanup();
             break;
           }
         }
       };
 
+      // Like fetch: reject while waiting for headers, error the body after.
+      const onAbort = () => {
+        const reason = abortReason(signal!);
+        cleanup();
+        cancel();
+        if (resolved) {
+          writer.abort(reason).catch(() => {});
+        } else {
+          resolved = true;
+          reject(reason);
+        }
+      };
+      signal?.addEventListener('abort', onAbort);
+
       function cleanup() {
         clearTimeout(timeout);
+        signal?.removeEventListener('abort', onAbort);
         channel.port1.close();
+      }
+
+      // The content script drops the request's port, and the wallet then
+      // aborts the upstream call.
+      function cancel() {
+        void resolveMessageTarget().then(({ target, origin }) => {
+          target.postMessage({ type: 'BYOKY_PROXY_CANCEL', requestId }, origin);
+        });
       }
 
       // This message carries the session key and the full request body, so
@@ -118,6 +153,11 @@ export function createProxyFetch(
       });
     });
   };
+}
+
+/** What fetch rejects with on abort: the signal's reason, an AbortError by default. */
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
 }
 
 function isTextContentType(contentType?: string): boolean {

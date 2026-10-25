@@ -29,7 +29,13 @@ export default function App() {
             useWalletStore.getState().navigate('approval');
           }
         });
-      } else if (msg.action === 'sessionChanged' || msg.action === 'usageUpdated') {
+      } else if (msg.action === 'sessionChanged') {
+        // Also sent on auto-lock: show the unlock screen rather than a
+        // wallet that looks open but can't add keys or approve apps.
+        useWalletStore.getState().syncLockState().then((unlocked) => {
+          if (unlocked) useWalletStore.getState().refreshData();
+        });
+      } else if (msg.action === 'usageUpdated') {
         useWalletStore.getState().refreshData();
       }
     }

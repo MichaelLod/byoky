@@ -151,6 +151,10 @@ describe('Byoky', () => {
     expect(
       (disconnectMsg!.data.payload as Record<string, string>).sessionKey,
     ).toBe('byk_disconnect_test');
+    // Older extensions drop a disconnect that has neither a reply port nor
+    // an id (content-script.test.ts runs it through the real content script).
+    expect(disconnectMsg!.port).toBeDefined();
+    expect(typeof disconnectMsg!.data.id).toBe('string');
   });
 
   it('session.onDisconnect fires when wallet revokes session', async () => {

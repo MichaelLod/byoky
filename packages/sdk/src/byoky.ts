@@ -361,10 +361,18 @@ export class Byoky {
   }
 
   private sendDisconnect(sessionKey: string): void {
+    // The wallet sends no answer, so nothing listens on the reply port. It
+    // and the id are still sent: older extensions drop a BYOKY_DISCONNECT
+    // that carries neither.
+    const requestId = crypto.randomUUID();
+    const channel = new MessageChannel();
+    channel.port1.close();
+
     void resolveMessageTarget().then(({ target, origin }) => {
       target.postMessage(
-        { type: 'BYOKY_DISCONNECT', payload: { sessionKey } },
+        { type: 'BYOKY_DISCONNECT', id: requestId, requestId, payload: { sessionKey } },
         origin,
+        [channel.port2],
       );
     });
   }

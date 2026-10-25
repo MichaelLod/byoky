@@ -30,12 +30,15 @@ import {
   detectRequestCapabilities,
   injectStreamUsageOptions,
   computeAllowanceCheck,
+  shouldEstimateUsage,
   validateProxyUrl,
+  isAllowedProxyRequest,
   resolveProviderBaseUrl,
   injectClaudeCodeSystemPrompt,
   rewriteToolNamesForClaudeCode,
   familyOf,
   rewriteProxyUrl,
+  isChatCompletionsEndpoint,
   translateRequest,
   translateResponse,
   createStreamTranslator,
@@ -94,6 +97,13 @@ function reconstructBody(
 }
 
 export default defineBackground(() => {
+  // Content scripts never read extension storage, so close storage.local to
+  // them: a compromised renderer in any tab could otherwise add itself to the
+  // trusted sites or repoint a credential's base URL. Chrome only; elsewhere
+  // the call doesn't exist and storage stays as it was.
+  const localArea = browser.storage.local as { setAccessLevel?: (o: { accessLevel: string }) => Promise<void> };
+  localArea.setAccessLevel?.({ accessLevel: 'TRUSTED_CONTEXTS' })?.catch(() => {});
+
   const sessions = new Map<string, Session>();
   function updateBadge() {
     const count = _pendingMap.size;
@@ -140,6 +150,13 @@ export default defineBackground(() => {
       const exponent = Math.min(unlockFailures - 5, 5);
       unlockLockedUntil = Date.now() + 60_000 * Math.pow(2, exponent);
     }
+    persistLockout();
+  }
+
+  function clearPasswordFailures() {
+    unlockFailures = 0;
+    unlockLockedUntil = 0;
+    persistLockout();
   }
 
   // Persist masterPassword across MV3 service worker restarts using session storage.
@@ -157,17 +174,36 @@ export default defineBackground(() => {
   async function clearSessionStorage() {
     if (!hasSessionStorage) return;
     try {
-      await browser.storage.session.remove('_mp');
+      await browser.storage.session.remove(['_mp', '_lastActivity']);
+    } catch {}
+  }
+
+  // The lockout counters live in session storage too, or every service
+  // worker restart would hand out five fresh password guesses.
+  async function persistLockout() {
+    if (!hasSessionStorage) return;
+    try {
+      await browser.storage.session.set({ _unlockFailures: unlockFailures, _unlockLockedUntil: unlockLockedUntil });
     } catch {}
   }
 
   async function restoreSession() {
     if (!hasSessionStorage) return;
     try {
-      const data = await browser.storage.session.get('_mp');
+      const data = await browser.storage.session.get(['_mp', '_lastActivity', '_unlockFailures', '_unlockLockedUntil']);
+      if (typeof data._unlockFailures === 'number') unlockFailures = data._unlockFailures;
+      if (typeof data._unlockLockedUntil === 'number') unlockLockedUntil = data._unlockLockedUntil;
       if (data._mp) {
+        // A worker restart must not reset the idle clock: lock if the wallet
+        // was idle long enough, else keep counting from the last activity.
+        const last = typeof data._lastActivity === 'number' ? data._lastActivity : 0;
+        if (Date.now() - last >= IDLE_TIMEOUT_MS) {
+          await browser.storage.session.remove(['_mp', '_lastActivity', '_sessions', '_bridgeKey', '_bridgePort']);
+          return;
+        }
         masterPassword = data._mp as string;
-        resetIdleTimer();
+        lastActivityAt = last;
+        scheduleIdleLock();
       }
     } catch {}
   }
@@ -189,6 +225,29 @@ export default defineBackground(() => {
           if (session.expiresAt > now) {
             sessions.set(key, session);
           }
+        }
+      }
+    } catch {}
+  }
+
+  // Origins whose session the user revoked. Their next connect needs a
+  // manual approval even if the site is trusted, or the SDK's automatic
+  // reconnect would silently undo the revocation. Cleared when the user
+  // approves the site again.
+  const revokedOrigins = new Set<string>();
+
+  async function persistRevokedOrigins() {
+    try {
+      await browser.storage.local.set({ revokedOrigins: [...revokedOrigins] });
+    } catch {}
+  }
+
+  async function restoreRevokedOrigins() {
+    try {
+      const data = await browser.storage.local.get('revokedOrigins');
+      if (Array.isArray(data.revokedOrigins)) {
+        for (const origin of data.revokedOrigins) {
+          if (typeof origin === 'string') revokedOrigins.add(origin);
         }
       }
     } catch {}
@@ -256,17 +315,35 @@ export default defineBackground(() => {
     } catch {}
   }
 
-  // Auto-lock after 20 minutes of inactivity
+  // Auto-lock after 20 minutes of inactivity. Chrome stops an idle MV3
+  // service worker after ~30s, killing the timer, so the last activity is
+  // also kept in session storage and checked on restore and by the
+  // keepalive alarm.
   const IDLE_TIMEOUT_MS = 20 * 60 * 1000;
+  const ACTIVITY_PERSIST_INTERVAL_MS = 15_000;
   let lastActivityAt = 0;
+  let lastActivityPersistedAt = 0;
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function scheduleIdleLock() {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = null;
+    if (masterPassword) {
+      idleTimer = setTimeout(autoLock, Math.max(0, lastActivityAt + IDLE_TIMEOUT_MS - Date.now()));
+    }
+  }
 
   function resetIdleTimer() {
     lastActivityAt = Date.now();
-    if (idleTimer) clearTimeout(idleTimer);
-    if (masterPassword) {
-      idleTimer = setTimeout(autoLock, IDLE_TIMEOUT_MS);
+    scheduleIdleLock();
+    if (masterPassword && hasSessionStorage && lastActivityAt - lastActivityPersistedAt >= ACTIVITY_PERSIST_INTERVAL_MS) {
+      lastActivityPersistedAt = lastActivityAt;
+      browser.storage.session.set({ _lastActivity: lastActivityAt }).catch(() => {});
     }
+  }
+
+  function lockIfIdle() {
+    if (masterPassword && Date.now() - lastActivityAt >= IDLE_TIMEOUT_MS) autoLock();
   }
 
   function autoLock() {
@@ -311,24 +388,6 @@ export default defineBackground(() => {
     return { limited: false };
   }
 
-  // Rate limiting for OAuth flow requests
-  const oauthRateLimit = new Map<string, number[]>();
-  const OAUTH_RATE_LIMIT = 3;
-  const OAUTH_RATE_WINDOW = 60_000;
-
-  function isOAuthRateLimited(providerId: string): boolean {
-    const now = Date.now();
-    const timestamps = oauthRateLimit.get(providerId) ?? [];
-    const recent = timestamps.filter((t) => now - t < OAUTH_RATE_WINDOW);
-    if (recent.length >= OAUTH_RATE_LIMIT) {
-      oauthRateLimit.set(providerId, recent);
-      return true;
-    }
-    recent.push(now);
-    oauthRateLimit.set(providerId, recent);
-    return false;
-  }
-
   // Restore session after MV3 service worker restart. Capture the sessions
   // promise so port handlers can await it — otherwise a proxy request that
   // arrives during the SW boot window would miss the in-flight rehydrate
@@ -337,7 +396,10 @@ export default defineBackground(() => {
   // CLI tools (Hermes, Claude Code) can hit :19280 without waiting for the
   // user to re-run `byoky-bridge connect`.
   const sessionRestored = restoreSession();
-  const sessionsRestored = Promise.all([sessionRestored, restoreSessions()])
+  const sessionsRestored = Promise.all([sessionRestored, restoreSessions(), restoreRevokedOrigins()])
+    // restoreSession drops the password when the wallet idled out while the
+    // worker was stopped; the app sessions loaded alongside go with it.
+    .then(() => { if (!masterPassword) sessions.clear(); })
     .then(() => restoreAuthorizedBridgeSessionKey())
     .then(() => maybeAutoStartBridgeProxy());
 
@@ -441,7 +503,7 @@ export default defineBackground(() => {
       const extensionOrigin = new URL(browser.runtime.getURL('/popup.html')).origin;
       const isExtensionPage = senderUrl.startsWith(extensionOrigin + '/');
       if (!isExtensionPage) {
-        const ALLOWED_CONTENT_ACTIONS = ['startBridgeProxy', 'checkBridge', 'startOAuth'];
+        const ALLOWED_CONTENT_ACTIONS = ['startBridgeProxy', 'checkBridge'];
         if (!ALLOWED_CONTENT_ACTIONS.includes((message as { action: string }).action)) return;
       }
       return handleInternal(message as { action: string; payload?: unknown }, senderInfo);
@@ -495,6 +557,8 @@ export default defineBackground(() => {
               }).catch(() => {});
             }
           }
+          // Lets the content script close its port; never forwarded to the page.
+          response = { type: 'BYOKY_DISCONNECT_ACK', requestId: (message as { id?: string }).id };
         } else if (message.type === 'BYOKY_SESSION_STATUS') {
           const { sessionKey } = message.payload as { sessionKey: string };
           const session = sessions.get(sessionKey);
@@ -547,16 +611,28 @@ export default defineBackground(() => {
     // The sending frame's origin, set by the browser (can't be spoofed).
     const portOrigin = senderOrigin(port.sender);
 
+    // One port per request. When it closes (the app cancelled, or the tab
+    // went away) the upstream call is aborted instead of running on and
+    // billing; usage up to that point is still recorded.
+    const upstreamAbort = new AbortController();
+    let portOpen = true;
+    port.onDisconnect.addListener(() => {
+      portOpen = false;
+      upstreamAbort.abort();
+    });
+    const send = (message: unknown) => {
+      if (!portOpen) return;
+      try { port.postMessage(message); } catch { portOpen = false; }
+    };
+
     port.onMessage.addListener(async (raw: unknown) => {
       await sessionsRestored;
       const msg = raw as ProxyRequest;
       if (msg.sessionKey == null) return;
 
-      resetIdleTimer();
-
       const session = sessions.get(msg.sessionKey);
       if (!session) {
-        port.postMessage({
+        send({
           type: 'BYOKY_PROXY_RESPONSE_ERROR',
           requestId: msg.requestId,
           status: 401,
@@ -569,7 +645,7 @@ export default defineBackground(() => {
       if (session.expiresAt < Date.now()) {
         sessions.delete(msg.sessionKey);
         persistSessions();
-        port.postMessage({
+        send({
           type: 'BYOKY_PROXY_RESPONSE_ERROR',
           requestId: msg.requestId,
           status: 401,
@@ -580,7 +656,7 @@ export default defineBackground(() => {
 
       // Verify the requesting origin matches the session's approved origin
       if (!portOrigin || portOrigin !== session.appOrigin) {
-        port.postMessage({
+        send({
           type: 'BYOKY_PROXY_RESPONSE_ERROR',
           requestId: msg.requestId,
           status: 403,
@@ -589,24 +665,28 @@ export default defineBackground(() => {
         return;
       }
 
-      if (!masterPassword) {
-        port.postMessage({
+      // Apps get inference endpoints only: no files, batches, fine-tunes or
+      // account management, which would expose other apps' stored data.
+      if (!isAllowedProxyRequest(msg.method, msg.url)) {
+        send({
           type: 'BYOKY_PROXY_RESPONSE_ERROR',
           requestId: msg.requestId,
-          status: 423,
-          error: { code: 'WALLET_LOCKED', message: 'Wallet is locked' },
+          status: 403,
+          error: { code: 'ENDPOINT_NOT_ALLOWED', message: 'Apps can only call inference and model-listing endpoints through Byoky' },
         });
         return;
       }
 
-      // Check token allowance before proxying
-      const allowanceCheck = await checkAllowance(session.appOrigin, msg.providerId);
-      if (!allowanceCheck.allowed) {
-        port.postMessage({
+      // Only requests from the approved app count as wallet activity, or any
+      // page could keep the wallet from locking with junk requests.
+      resetIdleTimer();
+
+      if (!masterPassword) {
+        send({
           type: 'BYOKY_PROXY_RESPONSE_ERROR',
           requestId: msg.requestId,
-          status: 429,
-          error: { code: 'QUOTA_EXCEEDED', message: allowanceCheck.reason ?? 'Token allowance exceeded' },
+          status: 423,
+          error: { code: 'WALLET_LOCKED', message: 'Wallet is locked' },
         });
         return;
       }
@@ -635,7 +715,7 @@ export default defineBackground(() => {
           Array.from(new Set(allCreds.map((c) => c.providerId))).sort(),
           group,
         );
-        port.postMessage({
+        send({
           type: 'BYOKY_PROXY_RESPONSE_ERROR',
           requestId: msg.requestId,
           status: 403,
@@ -644,20 +724,24 @@ export default defineBackground(() => {
         return;
       }
 
-      // Refresh OAuth token if expired or about to expire. Key off the
-      // credential's own providerId so cross-family routing still refreshes
-      // a destination-side OAuth token correctly.
-      if (
-        credential.authMethod === 'oauth' &&
-        (credential as { expiresAt?: number }).expiresAt &&
-        (credential as { expiresAt: number }).expiresAt < Date.now() + 60_000 &&
-        PROVIDERS[credential.providerId]?.oauthConfig
-      ) {
-        const refreshed = await refreshOAuthToken(credential);
-        if (refreshed) {
-          credential = (await resolveCredential(session, msg.providerId))!;
-        }
+      // Check the token allowance and hold what this request may use in one
+      // step, so a burst of parallel requests can't all pass the check.
+      const reservation = await checkAndReserveAllowance(session.appOrigin, msg.providerId, msg);
+      if (!reservation.allowed) {
+        send({
+          type: 'BYOKY_PROXY_RESPONSE_ERROR',
+          requestId: msg.requestId,
+          status: 429,
+          error: { code: 'QUOTA_EXCEEDED', message: reservation.reason },
+        });
+        return;
       }
+      let logEntryId: string | undefined;
+      let responseStatus = 0;
+      let responseContentType = '';
+      let responseChunks: string[] | undefined;
+      let streamComplete = false;
+      let fetchSent = false;
 
       try {
         const apiKey = await decryptCredentialKey(credential);
@@ -673,11 +757,24 @@ export default defineBackground(() => {
           ? credential.baseUrl
           : undefined;
         if (!validateProxyUrl(msg.providerId, msg.url, sourceBaseUrl)) {
-          port.postMessage({
+          send({
             type: 'BYOKY_PROXY_RESPONSE_ERROR',
             requestId: msg.requestId,
             status: 403,
             error: { code: 'INVALID_URL', message: 'Request URL does not match the provider\'s registered base URL' },
+          });
+          return;
+        }
+
+        // Routing rewrites the request onto the destination's chat endpoint,
+        // so only chat requests can be swapped or translated. Model lists,
+        // embeddings or the Responses API would be mangled into chat calls.
+        if ((translation || swap) && !isRoutableChatRequest(msg.providerId, msg.url)) {
+          send({
+            type: 'BYOKY_PROXY_RESPONSE_ERROR',
+            requestId: msg.requestId,
+            status: 400,
+            error: { code: 'ROUTING_UNSUPPORTED', message: `This app is routed to ${effectiveProviderId}, and only chat requests can be routed to another provider` },
           });
           return;
         }
@@ -689,7 +786,7 @@ export default defineBackground(() => {
         if (translation) {
           if (msg.bodyEncoding) {
             // Binary bodies cannot be translated — translation requires JSON.
-            port.postMessage({
+            send({
               type: 'BYOKY_PROXY_RESPONSE_ERROR',
               requestId: msg.requestId,
               status: 400,
@@ -698,10 +795,10 @@ export default defineBackground(() => {
             return;
           }
           try {
-            translatedBody = applyRequestTranslation(translation, msg.body, msg.requestId);
+            translatedBody = applyRequestTranslation(translation, msg.body, msg.requestId, msg.url);
           } catch (err) {
             const code = err instanceof TranslationError ? err.code : 'TRANSLATION_FAILED';
-            port.postMessage({
+            send({
               type: 'BYOKY_PROXY_RESPONSE_ERROR',
               requestId: msg.requestId,
               status: 502,
@@ -709,10 +806,10 @@ export default defineBackground(() => {
             });
             return;
           }
-          const isStreaming = detectStreamingRequest(msg.body);
+          const isStreaming = detectStreamingRequest(msg.body, msg.url);
           const rewritten = rewriteProxyUrl(translation.dstProviderId, translation.dstModel, isStreaming, credential.baseUrl);
           if (!rewritten) {
-            port.postMessage({
+            send({
               type: 'BYOKY_PROXY_RESPONSE_ERROR',
               requestId: msg.requestId,
               status: 502,
@@ -725,10 +822,10 @@ export default defineBackground(() => {
           // Same-family swap: no translation layer, just URL rewrite +
           // optional body.model override. Binary bodies pass through
           // unchanged (we only touch the JSON when swap.dstModel is set).
-          const isStreaming = detectStreamingRequest(msg.body);
+          const isStreaming = detectStreamingRequest(msg.body, msg.url);
           const rewritten = rewriteProxyUrl(swap.dstProviderId, swap.dstModel ?? '', isStreaming, credential.baseUrl);
           if (!rewritten) {
-            port.postMessage({
+            send({
               type: 'BYOKY_PROXY_RESPONSE_ERROR',
               requestId: msg.requestId,
               status: 502,
@@ -761,13 +858,14 @@ export default defineBackground(() => {
             relocateExisting: isThirdParty,
           });
           const sseRewriter = translation
-            ? buildResponseStreamRewriter(translation, msg.requestId)
+            ? buildResponseStreamRewriter(translation, msg.requestId, msg.body, msg.url)
             : undefined;
           await proxyViaBridge(
             port,
             { ...msg, body, url: translatedUrl, providerId: effectiveProviderId },
             realHeaders,
             session,
+            msg,
             toolNameMap,
             translation
               ? { translation, sseRewriter, originalBody: msg.body }
@@ -783,11 +881,13 @@ export default defineBackground(() => {
 
         // redirect: 'error' — a redirect would carry the injected API key
         // headers to wherever the upstream points.
+        fetchSent = true;
         const response = await fetch(translatedUrl, {
           method: msg.method,
           headers: fetchHeaders,
           body: reconstructed.body,
           redirect: 'error',
+          signal: upstreamAbort.signal,
         });
 
         const respHeaders: Record<string, string> = {};
@@ -795,7 +895,7 @@ export default defineBackground(() => {
           respHeaders[k] = v;
         });
 
-        port.postMessage({
+        send({
           type: 'BYOKY_PROXY_RESPONSE_META',
           requestId: msg.requestId,
           status: response.status,
@@ -803,17 +903,20 @@ export default defineBackground(() => {
           headers: respHeaders,
         });
 
-        const logEntryId = await logRequest(session, msg, response.status);
+        responseStatus = response.status;
+        responseContentType = respHeaders['content-type'] ?? '';
+        logEntryId = await logRequest(session, msg, response.status);
 
         // Decide streaming vs single-shot from the response Content-Type.
         // Translation activates a per-chunk SSE rewriter for streaming
         // responses, or a one-shot JSON translator for non-streaming.
         const isStreamingResponse = (respHeaders['content-type'] ?? '').includes('text/event-stream');
         const sseRewriter = translation && isStreamingResponse
-          ? buildResponseStreamRewriter(translation, msg.requestId)
+          ? buildResponseStreamRewriter(translation, msg.requestId, msg.body, msg.url)
           : undefined;
 
         const chunks: string[] = [];
+        responseChunks = chunks;
         if (response.body) {
           const reader = response.body.getReader();
           const decoder = new TextDecoder();
@@ -826,7 +929,7 @@ export default defineBackground(() => {
             if (sseRewriter) {
               const rewritten = sseRewriter.process(text);
               if (rewritten) {
-                port.postMessage({
+                send({
                   type: 'BYOKY_PROXY_RESPONSE_CHUNK',
                   requestId: msg.requestId,
                   chunk: rewritten,
@@ -834,7 +937,7 @@ export default defineBackground(() => {
               }
             } else if (!translation) {
               // Pass-through path: forward each chunk as-is.
-              port.postMessage({
+              send({
                 type: 'BYOKY_PROXY_RESPONSE_CHUNK',
                 requestId: msg.requestId,
                 chunk: text,
@@ -845,10 +948,12 @@ export default defineBackground(() => {
           }
         }
 
+        streamComplete = true;
+
         if (sseRewriter) {
           const tail = sseRewriter.flush();
           if (tail) {
-            port.postMessage({
+            send({
               type: 'BYOKY_PROXY_RESPONSE_CHUNK',
               requestId: msg.requestId,
               chunk: tail,
@@ -858,14 +963,14 @@ export default defineBackground(() => {
           // Non-streaming translation: translate the buffered JSON body
           // and emit it as a single chunk.
           try {
-            const translatedResponse = applyResponseTranslation(translation, msg.body, msg.requestId, chunks.join(''));
-            port.postMessage({
+            const translatedResponse = applyResponseTranslation(translation, msg.body, msg.requestId, chunks.join(''), msg.url);
+            send({
               type: 'BYOKY_PROXY_RESPONSE_CHUNK',
               requestId: msg.requestId,
               chunk: translatedResponse,
             });
           } catch (err) {
-            port.postMessage({
+            send({
               type: 'BYOKY_PROXY_RESPONSE_ERROR',
               requestId: msg.requestId,
               status: 502,
@@ -875,35 +980,33 @@ export default defineBackground(() => {
           }
         }
 
-        port.postMessage({
+        send({
           type: 'BYOKY_PROXY_RESPONSE_DONE',
           requestId: msg.requestId,
         });
-
-        // Parse token usage from the buffered response. We always read from
-        // the *destination* format (effectiveProviderId), since chunks[]
-        // holds the untranslated upstream body.
-        const fullBody = chunks.join('');
-        const model = msg.bodyEncoding ? undefined : parseModel(msg.body);
-        const usage = parseUsage(effectiveProviderId, fullBody);
-        if (usage || model) {
-          await updateLogEntry(logEntryId, {
-            inputTokens: usage?.inputTokens,
-            outputTokens: usage?.outputTokens,
-            model,
-          });
-          browser.runtime.sendMessage({
-            type: 'BYOKY_INTERNAL',
-            action: 'usageUpdated',
-          }).catch(() => {});
-        }
       } catch (error) {
-        port.postMessage({
+        send({
           type: 'BYOKY_PROXY_RESPONSE_ERROR',
           requestId: msg.requestId,
           status: 502,
           error: { code: 'PROXY_ERROR', message: 'Proxy request failed' },
         });
+      } finally {
+        // Usage is read from the *destination* format (effectiveProviderId),
+        // since the chunks hold the untranslated upstream body. Recorded even
+        // when the stream was cut off or a later step failed: the provider
+        // billed it either way. The reservation is released only once the
+        // usage is counted, so the tokens are never counted nowhere.
+        try {
+          if (logEntryId && responseChunks) {
+            await recordProxyUsage(session.appOrigin, msg, effectiveProviderId, logEntryId, responseStatus, responseContentType, responseChunks.join(''), streamComplete);
+          } else if (fetchSent && upstreamAbort.signal.aborted) {
+            // Cancelled before the response headers (for a non-streaming
+            // reply that's until generation ends): the provider still bills.
+            await chargeCancelledRequest(session, msg);
+          }
+        } catch { /* usage bookkeeping must not break the response */ }
+        reservation.release();
       }
     });
   });
@@ -1033,7 +1136,7 @@ export default defineBackground(() => {
           const entry = pendingApprovals.get(approval.id);
           if (!entry) return;
           const trustedSite = trustedSites.find((s) => s.origin === origin);
-          if (trustedSite && trustedSite.allowedProviders?.length) {
+          if (trustedSite && trustedSite.allowedProviders?.length && !revokedOrigins.has(origin)) {
             // Scope to the providers the user originally approved for this trusted site
             const scopedProviders = scopeProvidersForTrust(
               message.payload.providers,
@@ -1202,8 +1305,9 @@ export default defineBackground(() => {
       // has no group binding AND no direct credential for the requested
       // provider. Picks any translatable credential the user holds so apps
       // "just work" against mismatched keys. Group intent always wins — we
-      // only fire this when `group` is absent.
-      const autoRoute = !group && !directCred
+      // only fire this when the app's group binds no provider (the default
+      // group binds none).
+      const autoRoute = !group?.providerId && !directCred
         ? resolveAutoCrossFamilyRoute(req.id, credentials)
         : undefined;
 
@@ -1247,7 +1351,12 @@ export default defineBackground(() => {
       sessionKey,
       appOrigin: origin,
       providers: sessionProviders,
-      requestedProviders: request.providers?.map(p => p.id) ?? [],
+      // What the user approved. An "all providers" request is pinned to the
+      // providers it resolved to, so keys added later aren't handed to this
+      // session without a new approval.
+      requestedProviders: request.providers?.length
+        ? request.providers.map(p => p.id)
+        : sessionProviders.map(sp => sp.providerId),
       createdAt: Date.now(),
       expiresAt: Date.now() + 24 * 60 * 60 * 1000,
     };
@@ -1270,6 +1379,9 @@ export default defineBackground(() => {
     message: { action: string; payload?: unknown },
     sender?: Runtime.MessageSender,
   ): Promise<unknown> {
+    // When this message is what woke the worker, the lockout counters and
+    // the unlocked state are still being restored from session storage.
+    await sessionRestored;
     switch (message.action) {
       case 'unlock': {
         const lockout = passwordLockoutError();
@@ -1280,8 +1392,8 @@ export default defineBackground(() => {
         const valid = await verifyPassword(password, data.passwordHash as string);
         if (valid) {
           masterPassword = password;
-          unlockFailures = 0;
-          unlockLockedUntil = 0;
+          clearPasswordFailures();
+          lastActivityPersistedAt = 0;
           persistSession();
           resetIdleTimer();
           processPendingAfterUnlock();
@@ -1300,6 +1412,11 @@ export default defineBackground(() => {
         persistAuthorizedBridgeSessionKey();
         clearSessionStorage();
         if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+        // An open side panel or another popup switches to the unlock screen.
+        browser.runtime.sendMessage({
+          type: 'BYOKY_INTERNAL',
+          action: 'sessionChanged',
+        }).catch(() => {});
         return { success: true };
 
       case 'isUnlocked':
@@ -1405,8 +1522,7 @@ export default defineBackground(() => {
         persistAuthorizedBridgeSessionKey();
         clearSessionStorage();
         if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
-        unlockFailures = 0;
-        unlockLockedUntil = 0;
+        clearPasswordFailures();
         await browser.storage.local.clear();
         return { success: true };
       }
@@ -1435,6 +1551,8 @@ export default defineBackground(() => {
               authorizedBridgePort = null;
               persistAuthorizedBridgeSessionKey();
             }
+            revokedOrigins.add(s.appOrigin);
+            persistRevokedOrigins();
             broadcastRevocation(s);
             break;
           }
@@ -1450,7 +1568,7 @@ export default defineBackground(() => {
       case 'startBridgeProxy': {
         const { sessionKey, port } = message.payload as {
           sessionKey: string;
-          port: number;
+          port?: unknown;
         };
         // Reachable from localhost pages via the content script. Only the
         // app that owns the session may bind the bridge to it.
@@ -1458,15 +1576,13 @@ export default defineBackground(() => {
         if (!bridgeSession || !sender || resolveOrigin(sender) !== bridgeSession.appOrigin) {
           return { success: false, error: 'Invalid session' };
         }
-        return startBridgeProxy(sessionKey, port ?? 19280);
-      }
-
-      case 'startOAuth': {
-        const { providerId, label } = message.payload as {
-          providerId: string;
-          label: string;
-        };
-        return handleOAuthFlow(providerId, label);
+        // The page picks the port. Only a plain unprivileged TCP port: a
+        // string would make the bridge's listen() create a Unix socket.
+        const bridgePort = port ?? 19280;
+        if (typeof bridgePort !== 'number' || !Number.isInteger(bridgePort) || bridgePort < 1024 || bridgePort > 65535) {
+          return { success: false, error: 'Invalid port' };
+        }
+        return startBridgeProxy(sessionKey, bridgePort);
       }
 
       case 'getPendingApprovals':
@@ -1483,6 +1599,7 @@ export default defineBackground(() => {
         if (!pending) return { success: false, error: 'Approval not found' };
 
         pendingApprovals.delete(approvalId);
+        if (revokedOrigins.delete(pending.approval.appOrigin)) persistRevokedOrigins();
 
         // Resolve which providers are being approved
         const approvedProviderIds = pending.approval.providers.length > 0
@@ -1552,8 +1669,7 @@ export default defineBackground(() => {
           recordPasswordFailure();
           return { error: 'Incorrect wallet password' };
         }
-        unlockFailures = 0;
-        unlockLockedUntil = 0;
+        clearPasswordFailures();
         const encryptedVault = await exportVaultFile(await getStoredCredentials(), masterPassword, exportPassword);
         return { encryptedVault };
       }
@@ -1575,26 +1691,19 @@ export default defineBackground(() => {
         return { success: true, count: result.added.length, skipped: result.skipped, rejected: result.rejected };
       }
 
-      case 'encryptValue': {
-        if (!masterPassword) return { error: 'Wallet is locked' };
-        const { value } = message.payload as { value: string };
-        const encrypted = await encrypt(value, masterPassword);
-        return { encrypted };
-      }
-
-      case 'decryptValue': {
-        if (!masterPassword) return { error: 'Wallet is locked' };
-        const { encrypted: enc } = message.payload as { encrypted: string };
-        try {
-          const decrypted = await decrypt(enc, masterPassword);
-          return { decrypted };
-        } catch {
-          return { error: 'Failed to decrypt' };
-        }
-      }
-
       case 'getAllowances':
-        return { allowances: await getAllowances() };
+        // The usage totals are what allowances are enforced against.
+        return { allowances: await getAllowances(), usage: await getUsageTotals() };
+
+      case 'resetAppUsage': {
+        const { origin } = message.payload as { origin: string };
+        await serializedStorage(async () => {
+          const totals = await getUsageTotals();
+          delete totals[origin];
+          await browser.storage.local.set({ usageTotals: totals });
+        });
+        return { success: true };
+      }
 
       case 'setAllowance': {
         const { allowance } = message.payload as { allowance: TokenAllowance };
@@ -1665,227 +1774,6 @@ export default defineBackground(() => {
     }
   }
 
-  async function handleOAuthFlow(
-    providerId: string,
-    label: string,
-  ): Promise<{ success: boolean; error?: string }> {
-    if (!masterPassword) {
-      return { success: false, error: 'Wallet is locked' };
-    }
-
-    if (isOAuthRateLimited(providerId)) {
-      return { success: false, error: 'Too many OAuth requests. Try again later.' };
-    }
-
-    const provider = PROVIDERS[providerId];
-    if (!provider?.oauthConfig) {
-      return { success: false, error: 'Provider does not support OAuth' };
-    }
-
-    const { clientId, authorizationUrl, tokenUrl, scopes } = provider.oauthConfig;
-
-    if (!clientId) {
-      return { success: false, error: 'OAuth client_id not configured for this provider' };
-    }
-
-    const redirectUrl = browser.identity.getRedirectURL();
-    const state = crypto.randomUUID();
-
-    // PKCE: generate code_verifier and code_challenge (S256)
-    const codeVerifier = generateCodeVerifier();
-    const codeChallenge = await generateCodeChallenge(codeVerifier);
-
-    const authUrl = new URL(authorizationUrl);
-    authUrl.searchParams.set('client_id', clientId);
-    authUrl.searchParams.set('response_type', 'code');
-    authUrl.searchParams.set('redirect_uri', redirectUrl);
-    authUrl.searchParams.set('state', state);
-    authUrl.searchParams.set('code_challenge', codeChallenge);
-    authUrl.searchParams.set('code_challenge_method', 'S256');
-    if (scopes.length > 0) {
-      authUrl.searchParams.set('scope', scopes.join(' '));
-    }
-    // Apply provider-specific extra params (e.g., Google's access_type=offline)
-    if (provider.oauthConfig.extraAuthParams) {
-      for (const [key, value] of Object.entries(provider.oauthConfig.extraAuthParams)) {
-        authUrl.searchParams.set(key, value);
-      }
-    }
-
-    try {
-      const responseUrl = await browser.identity.launchWebAuthFlow({
-        url: authUrl.toString(),
-        interactive: true,
-      });
-
-      const params = new URL(responseUrl).searchParams;
-
-      if (params.get('state') !== state) {
-        return { success: false, error: 'OAuth state mismatch' };
-      }
-
-      const code = params.get('code');
-      if (!code) {
-        const error = params.get('error') || 'No authorization code received';
-        return { success: false, error };
-      }
-
-      // Exchange code for tokens (with PKCE code_verifier, no client_secret needed)
-      const tokenResponse = await fetch(tokenUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          grant_type: 'authorization_code',
-          client_id: clientId,
-          code,
-          code_verifier: codeVerifier,
-          redirect_uri: redirectUrl,
-        }),
-      });
-
-      if (!tokenResponse.ok) {
-        return { success: false, error: `Token exchange failed (HTTP ${tokenResponse.status})` };
-      }
-
-      const tokens = (await tokenResponse.json()) as {
-        access_token?: string;
-        refresh_token?: string;
-        expires_in?: number;
-      };
-
-      if (!tokens.access_token || typeof tokens.access_token !== 'string') {
-        return { success: false, error: 'OAuth provider returned no access token' };
-      }
-
-      // Encrypt and store
-      const encryptedAccessToken = await encrypt(
-        tokens.access_token,
-        masterPassword,
-      );
-      const encryptedRefreshToken = tokens.refresh_token && typeof tokens.refresh_token === 'string'
-        ? await encrypt(tokens.refresh_token, masterPassword)
-        : undefined;
-
-      const expiresIn = typeof tokens.expires_in === 'number' && tokens.expires_in > 0
-        ? tokens.expires_in
-        : undefined;
-
-      const newCred: Credential = {
-        id: crypto.randomUUID(),
-        providerId,
-        label,
-        authMethod: 'oauth',
-        encryptedAccessToken,
-        encryptedRefreshToken,
-        expiresAt: expiresIn
-          ? Date.now() + expiresIn * 1000
-          : undefined,
-        createdAt: Date.now(),
-      };
-
-      const data = await browser.storage.local.get('credentials');
-      const credentials = (data.credentials as Credential[]) ?? [];
-      credentials.push(newCred);
-      await browser.storage.local.set({ credentials });
-
-      return { success: true };
-    } catch (e) {
-      const msg = (e as Error).message;
-      if (msg.includes('canceled') || msg.includes('cancelled')) {
-        return { success: false, error: 'OAuth flow was cancelled' };
-      }
-      return { success: false, error: msg };
-    }
-  }
-
-  // --- PKCE helpers (RFC 7636) ---
-
-  function generateCodeVerifier(): string {
-    const array = new Uint8Array(32);
-    crypto.getRandomValues(array);
-    return base64UrlEncode(array);
-  }
-
-  async function generateCodeChallenge(verifier: string): Promise<string> {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(verifier);
-    const digest = await crypto.subtle.digest('SHA-256', data);
-    return base64UrlEncode(new Uint8Array(digest));
-  }
-
-  function base64UrlEncode(buffer: Uint8Array): string {
-    let binary = '';
-    for (const byte of buffer) {
-      binary += String.fromCharCode(byte);
-    }
-    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  }
-
-  // --- OAuth token refresh ---
-
-  async function refreshOAuthToken(
-    credential: Credential,
-  ): Promise<boolean> {
-    if (!masterPassword) return false;
-    if (credential.authMethod !== 'oauth') return false;
-
-    const provider = PROVIDERS[credential.providerId];
-    if (!provider?.oauthConfig) return false;
-
-    const oauthCred = credential as { encryptedRefreshToken?: string; id: string; providerId: string; authMethod: string; encryptedAccessToken: string; label: string; createdAt: number };
-    if (!oauthCred.encryptedRefreshToken) return false;
-
-    try {
-      const refreshToken = await decrypt(oauthCred.encryptedRefreshToken, masterPassword);
-      const { clientId, tokenUrl } = provider.oauthConfig;
-
-      const response = await fetch(tokenUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          grant_type: 'refresh_token',
-          client_id: clientId,
-          refresh_token: refreshToken,
-        }),
-      });
-
-      if (!response.ok) return false;
-
-      const tokens = (await response.json()) as {
-        access_token?: string;
-        expires_in?: number;
-        refresh_token?: string;
-      };
-
-      if (!tokens.access_token || typeof tokens.access_token !== 'string') return false;
-
-      const encryptedAccessToken = await encrypt(tokens.access_token, masterPassword);
-      const encryptedRefreshToken = tokens.refresh_token && typeof tokens.refresh_token === 'string'
-        ? await encrypt(tokens.refresh_token, masterPassword)
-        : oauthCred.encryptedRefreshToken;
-
-      const refreshExpiresIn = typeof tokens.expires_in === 'number' && tokens.expires_in > 0
-        ? tokens.expires_in
-        : undefined;
-
-      const credentials = await getStoredCredentials();
-      const idx = credentials.findIndex((c) => c.id === credential.id);
-      if (idx === -1) return false;
-
-      credentials[idx] = {
-        ...credentials[idx],
-        encryptedAccessToken,
-        encryptedRefreshToken,
-        expiresAt: refreshExpiresIn ? Date.now() + refreshExpiresIn * 1000 : undefined,
-      } as Credential;
-
-      await browser.storage.local.set({ credentials });
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
   // --- Bridge for setup tokens (native messaging → Claude Code CLI) ---
 
   const BRIDGE_HOST = 'com.byoky.bridge';
@@ -1941,25 +1829,184 @@ export default defineBackground(() => {
     msg: ProxyRequest,
     headers: Record<string, string>,
     session: Session,
+    appRequest: ProxyRequest,
     toolNameMap: Record<string, string> = {},
     translationCtx?: BridgeTranslation,
   ): Promise<void> {
+    // The app's port may close at any time (cancel, tab closed); posting to
+    // it after that throws.
+    let appConnected = true;
+    const send = (message: unknown) => {
+      if (!appConnected) return;
+      try { responsePort.postMessage(message); } catch { appConnected = false; }
+    };
+
     const available = await checkBridgeAvailable();
     if (!available) {
-      responsePort.postMessage({
+      send({
         type: 'BYOKY_PROXY_RESPONSE_ERROR',
         requestId: msg.requestId,
         status: 503,
         error: {
           code: 'BRIDGE_UNAVAILABLE',
-          message: 'Byoky Bridge not installed. Run: npm install -g @byoky/bridge && byoky-bridge install',
+          // The bridge is a desktop Node program; Safari can't reach it.
+          message: import.meta.env.SAFARI
+            ? 'Claude setup tokens need the Byoky Bridge, which works with Chrome and Firefox on a computer. Use an Anthropic API key in Safari.'
+            : 'Byoky Bridge not installed. Run: npm install -g @byoky/bridge && byoky-bridge install',
         },
       });
       return;
     }
 
+    let nativePort: Runtime.Port;
     try {
-      const nativePort = browser.runtime.connectNative(BRIDGE_HOST);
+      nativePort = browser.runtime.connectNative(BRIDGE_HOST);
+    } catch {
+      send({
+        type: 'BYOKY_PROXY_RESPONSE_ERROR',
+        requestId: msg.requestId,
+        status: 502,
+        error: { code: 'BRIDGE_ERROR', message: 'Could not start the bridge' },
+      });
+      return;
+    }
+
+    let bridgeResponded = false;
+    let status = 0;
+    let contentType = '';
+    let appCancelled = false;
+    let logEntry: Promise<string> | undefined;
+    let complete = false;
+    const chunks: string[] = [];
+    let isStreamingResponse = false;
+
+    // Resolves once the request is over, however it ended, so the caller's
+    // allowance reservation lasts as long as the request does.
+    await new Promise<void>((resolve) => {
+      let finished = false;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        try { nativePort.disconnect(); } catch { /* already gone */ }
+        resolve();
+      };
+
+      // Closing the native port ends the bridge process and its upstream fetch.
+      responsePort.onDisconnect.addListener(() => {
+        appConnected = false;
+        if (!finished) appCancelled = true;
+        finish();
+      });
+
+      nativePort.onMessage.addListener((raw: unknown) => {
+        const response = raw as { type: string; requestId: string; status?: number; headers?: Record<string, string>; chunk?: string; error?: string };
+        if (response.requestId !== msg.requestId) return;
+
+        if (response.type === 'proxy_response_meta') {
+          bridgeResponded = true;
+          status = response.status ?? 0;
+          const respHeaders = response.headers ?? {};
+          contentType = respHeaders['content-type'] ?? '';
+          isStreamingResponse = (respHeaders['content-type'] ?? '').includes('text/event-stream');
+          send({
+            type: 'BYOKY_PROXY_RESPONSE_META',
+            requestId: msg.requestId,
+            status: response.status,
+            statusText: response.status === 200 ? 'OK' : 'Error',
+            headers: respHeaders,
+          });
+          logEntry = logRequest(session, appRequest, status);
+        } else if (response.type === 'proxy_response_chunk') {
+          chunks.push(response.chunk ?? '');
+          // Translation: route chunks through the SSE rewriter when
+          // streaming, otherwise buffer for one-shot translation at done.
+          if (translationCtx && isStreamingResponse && translationCtx.sseRewriter) {
+            const rewritten = translationCtx.sseRewriter.process(response.chunk ?? '');
+            if (rewritten) {
+              send({
+                type: 'BYOKY_PROXY_RESPONSE_CHUNK',
+                requestId: msg.requestId,
+                chunk: rewritten,
+              });
+            }
+          } else if (!translationCtx) {
+            send({
+              type: 'BYOKY_PROXY_RESPONSE_CHUNK',
+              requestId: msg.requestId,
+              chunk: response.chunk,
+            });
+          }
+          // Non-streaming + translation: hold chunks until done.
+        } else if (response.type === 'proxy_response_done') {
+          complete = true;
+          // Flush any trailing translated bytes / emit one-shot translation.
+          if (translationCtx) {
+            if (isStreamingResponse && translationCtx.sseRewriter) {
+              const tail = translationCtx.sseRewriter.flush();
+              if (tail) {
+                send({
+                  type: 'BYOKY_PROXY_RESPONSE_CHUNK',
+                  requestId: msg.requestId,
+                  chunk: tail,
+                });
+              }
+            } else {
+              try {
+                const translated = applyResponseTranslation(
+                  translationCtx.translation,
+                  translationCtx.originalBody,
+                  msg.requestId,
+                  chunks.join(''),
+                  appRequest.url,
+                );
+                send({
+                  type: 'BYOKY_PROXY_RESPONSE_CHUNK',
+                  requestId: msg.requestId,
+                  chunk: translated,
+                });
+              } catch (err) {
+                send({
+                  type: 'BYOKY_PROXY_RESPONSE_ERROR',
+                  requestId: msg.requestId,
+                  status: 502,
+                  error: { code: 'TRANSLATION_FAILED', message: err instanceof Error ? err.message : 'Response translation failed' },
+                });
+                finish();
+                return;
+              }
+            }
+          }
+          send({
+            type: 'BYOKY_PROXY_RESPONSE_DONE',
+            requestId: msg.requestId,
+          });
+          finish();
+        } else if (response.type === 'proxy_error') {
+          bridgeResponded = true;
+          send({
+            type: 'BYOKY_PROXY_RESPONSE_ERROR',
+            requestId: msg.requestId,
+            status: 502,
+            error: {
+              code: 'BRIDGE_ERROR',
+              message: 'Bridge request failed',
+            },
+          });
+          finish();
+        }
+      });
+
+      nativePort.onDisconnect.addListener(() => {
+        if (!bridgeResponded) {
+          send({
+            type: 'BYOKY_PROXY_RESPONSE_ERROR',
+            requestId: msg.requestId,
+            status: 502,
+            error: { code: 'BRIDGE_ERROR', message: 'Bridge disconnected unexpectedly' },
+          });
+        }
+        finish();
+      });
 
       nativePort.postMessage({
         type: 'proxy',
@@ -1970,143 +2017,19 @@ export default defineBackground(() => {
         body: msg.body,
         toolNameMap,
       });
+    });
 
-      let bridgeResponded = false;
-      let logEntryId: string | undefined;
-      const chunks: string[] = [];
-      let isStreamingResponse = false;
-
-      nativePort.onMessage.addListener(
-        (raw: unknown) => {
-          const response = raw as { type: string; requestId: string; status?: number; headers?: Record<string, string>; chunk?: string; error?: string };
-          if (response.requestId !== msg.requestId) return;
-
-          if (response.type === 'proxy_response_meta') {
-            bridgeResponded = true;
-            const respHeaders = response.headers ?? {};
-            isStreamingResponse = (respHeaders['content-type'] ?? '').includes('text/event-stream');
-            responsePort.postMessage({
-              type: 'BYOKY_PROXY_RESPONSE_META',
-              requestId: msg.requestId,
-              status: response.status,
-              statusText: response.status === 200 ? 'OK' : 'Error',
-              headers: respHeaders,
-            });
-            logRequest(session, msg, response.status ?? 0).then((id) => { logEntryId = id; });
-          } else if (response.type === 'proxy_response_chunk') {
-            chunks.push(response.chunk ?? '');
-            // Translation: route chunks through the SSE rewriter when
-            // streaming, otherwise buffer for one-shot translation at done.
-            if (translationCtx && isStreamingResponse && translationCtx.sseRewriter) {
-              const rewritten = translationCtx.sseRewriter.process(response.chunk ?? '');
-              if (rewritten) {
-                responsePort.postMessage({
-                  type: 'BYOKY_PROXY_RESPONSE_CHUNK',
-                  requestId: msg.requestId,
-                  chunk: rewritten,
-                });
-              }
-            } else if (!translationCtx) {
-              responsePort.postMessage({
-                type: 'BYOKY_PROXY_RESPONSE_CHUNK',
-                requestId: msg.requestId,
-                chunk: response.chunk,
-              });
-            }
-            // Non-streaming + translation: hold chunks until done.
-          } else if (response.type === 'proxy_response_done') {
-            // Flush any trailing translated bytes / emit one-shot translation.
-            if (translationCtx) {
-              if (isStreamingResponse && translationCtx.sseRewriter) {
-                const tail = translationCtx.sseRewriter.flush();
-                if (tail) {
-                  responsePort.postMessage({
-                    type: 'BYOKY_PROXY_RESPONSE_CHUNK',
-                    requestId: msg.requestId,
-                    chunk: tail,
-                  });
-                }
-              } else {
-                try {
-                  const translated = applyResponseTranslation(
-                    translationCtx.translation,
-                    translationCtx.originalBody,
-                    msg.requestId,
-                    chunks.join(''),
-                  );
-                  responsePort.postMessage({
-                    type: 'BYOKY_PROXY_RESPONSE_CHUNK',
-                    requestId: msg.requestId,
-                    chunk: translated,
-                  });
-                } catch (err) {
-                  responsePort.postMessage({
-                    type: 'BYOKY_PROXY_RESPONSE_ERROR',
-                    requestId: msg.requestId,
-                    status: 502,
-                    error: { code: 'TRANSLATION_FAILED', message: err instanceof Error ? err.message : 'Response translation failed' },
-                  });
-                  nativePort.disconnect();
-                  return;
-                }
-              }
-            }
-            responsePort.postMessage({
-              type: 'BYOKY_PROXY_RESPONSE_DONE',
-              requestId: msg.requestId,
-            });
-            nativePort.disconnect();
-            const fullBody = chunks.join('');
-            // parseModel runs against the SDK's original body, even when
-            // the bridge saw the translated body. parseUsage runs against
-            // the destination format (msg.providerId here is already the
-            // effective/destination provider).
-            const model = parseModel(translationCtx?.originalBody ?? msg.body);
-            const usage = parseUsage(msg.providerId, fullBody);
-            if (logEntryId && (usage || model)) {
-              updateLogEntry(logEntryId, {
-                inputTokens: usage?.inputTokens,
-                outputTokens: usage?.outputTokens,
-                model,
-              });
-              browser.runtime.sendMessage({
-                type: 'BYOKY_INTERNAL',
-                action: 'usageUpdated',
-              }).catch(() => {});
-            }
-          } else if (response.type === 'proxy_error') {
-            bridgeResponded = true;
-            responsePort.postMessage({
-              type: 'BYOKY_PROXY_RESPONSE_ERROR',
-              requestId: msg.requestId,
-              status: 502,
-              error: {
-                code: 'BRIDGE_ERROR',
-                message: 'Bridge request failed',
-              },
-            });
-            nativePort.disconnect();
-          }
-        },
-      );
-
-      nativePort.onDisconnect.addListener(() => {
-        if (!bridgeResponded) {
-          responsePort.postMessage({
-            type: 'BYOKY_PROXY_RESPONSE_ERROR',
-            requestId: msg.requestId,
-            status: 502,
-            error: { code: 'BRIDGE_ERROR', message: 'Bridge disconnected unexpectedly' },
-          });
-        }
-      });
-    } catch (e) {
-      responsePort.postMessage({
-        type: 'BYOKY_PROXY_RESPONSE_ERROR',
-        requestId: msg.requestId,
-        status: 502,
-        error: { code: 'BRIDGE_ERROR', message: (e as Error).message },
-      });
+    // The log entry is written when the response headers arrive; waiting for
+    // it here (not in the message handler) means a fast reply can't finish
+    // before the entry exists. Usage is parsed in the upstream format
+    // (msg.providerId is the destination) and charged to the provider the
+    // app asked for.
+    if (logEntry) {
+      const logEntryId = await logEntry;
+      await recordProxyUsage(session.appOrigin, appRequest, msg.providerId, logEntryId, status, contentType, chunks.join(''), complete)
+        .catch(() => {});
+    } else if (appCancelled) {
+      await chargeCancelledRequest(session, appRequest).catch(() => {});
     }
   }
 
@@ -2140,30 +2063,67 @@ export default defineBackground(() => {
         bridgeProxyPort = null;
       }
 
-      bridgeProxyPort = browser.runtime.connectNative(BRIDGE_HOST);
+      const nativePort = browser.runtime.connectNative(BRIDGE_HOST);
+      bridgeProxyPort = nativePort;
 
       authorizedBridgeSessionKey = sessionKey;
       authorizedBridgePort = port;
       persistAuthorizedBridgeSessionKey();
 
+      // The bridge answers start-proxy with proxy-started once it listens,
+      // or proxy_error when it can't (port taken). Wait for that, so callers
+      // never report a proxy that isn't there.
+      const startError = new Promise<string | null>((resolve) => {
+        const timer = setTimeout(() => resolve('Bridge did not respond'), 10_000);
+        const onReply = (raw: unknown) => {
+          const msg = raw as Record<string, unknown>;
+          if (msg.type === 'proxy-started') {
+            resolve(null);
+          } else if (msg.type === 'proxy_error' && msg.requestId === 'start-proxy') {
+            resolve(typeof msg.error === 'string' ? msg.error : 'Bridge failed to start');
+          } else {
+            return;
+          }
+          clearTimeout(timer);
+          nativePort.onMessage.removeListener(onReply);
+        };
+        nativePort.onMessage.addListener(onReply);
+        nativePort.onDisconnect.addListener(() => {
+          clearTimeout(timer);
+          resolve('Bridge disconnected');
+        });
+      });
+
       // Tell bridge to start the HTTP proxy server
-      bridgeProxyPort.postMessage({
+      nativePort.postMessage({
         type: 'start-proxy',
         port,
         sessionKey,
         providers: providerIds,
       });
 
-      // Listen for HTTP proxy requests from the bridge
-      bridgeProxyPort.onMessage.addListener(async (raw: unknown) => {
+      // Listen for HTTP proxy requests from the bridge. A body too big for
+      // one native message (1 MiB) arrives first in slices, then the
+      // request with `bodyChunked`.
+      const pendingBodies = new Map<string, string[]>();
+      nativePort.onMessage.addListener(async (raw: unknown) => {
         const msg = raw as Record<string, unknown>;
-        if (msg.type === 'proxy_http') {
+        if (msg.type === 'proxy_http_body_chunk') {
+          if (typeof msg.requestId !== 'string' || typeof msg.chunk !== 'string') return;
+          const parts = pendingBodies.get(msg.requestId) ?? [];
+          parts.push(msg.chunk);
+          pendingBodies.set(msg.requestId, parts);
+        } else if (msg.type === 'proxy_http') {
+          if (msg.bodyChunked === true && typeof msg.requestId === 'string') {
+            msg.body = (pendingBodies.get(msg.requestId) ?? []).join('');
+            pendingBodies.delete(msg.requestId);
+          }
           await handleBridgeProxyRequest(msg);
         }
       });
 
-      bridgeProxyPort.onDisconnect.addListener(() => {
-        bridgeProxyPort = null;
+      nativePort.onDisconnect.addListener(() => {
+        if (bridgeProxyPort === nativePort) bridgeProxyPort = null;
         // Note: do NOT clear authorizedBridgeSessionKey here. The native-host
         // port disconnects on every MV3 service-worker recycle (which is
         // frequent and unrelated to user intent). Keeping the key authorized
@@ -2173,6 +2133,15 @@ export default defineBackground(() => {
         // revocation paths below.
       });
 
+      const error = await startError;
+      if (error) {
+        // Drop the port so the keepalive's auto-start can try again later.
+        if (bridgeProxyPort === nativePort) {
+          nativePort.disconnect();
+          bridgeProxyPort = null;
+        }
+        return { success: false, error };
+      }
       return { success: true, port };
     } catch (e) {
       return { success: false, error: (e as Error).message };
@@ -2240,22 +2209,15 @@ export default defineBackground(() => {
       return;
     }
 
-    const allowanceCheck = await checkAllowance(session.appOrigin, providerId);
-    if (!allowanceCheck.allowed) {
-      bridgeProxyPort?.postMessage({
-        type: 'proxy_http_error',
-        requestId,
-        error: allowanceCheck.reason ?? 'Token allowance exceeded',
-      });
-      return;
-    }
-
     const sessionProvider = session.providers.find((sp) => sp.providerId === providerId);
 
     // For requiresCustomBaseUrl providers (Azure, Ollama, LM Studio) we can't
     // validate here yet — we need the credential's baseUrl, which isn't
     // resolved until below. Skip the pre-flight validate for those; direct-
     // path calls revalidate after resolveCredential with the override.
+    // Unlike the page path there is no isAllowedProxyRequest check: bridge
+    // callers are local tools holding the bridge token, and Claude Code uses
+    // Anthropic paths beyond inference.
     const providerCfg = PROVIDERS[providerId];
     if (!providerCfg?.requiresCustomBaseUrl && !validateProxyUrl(providerId, url)) {
       bridgeProxyPort?.postMessage({
@@ -2307,6 +2269,23 @@ export default defineBackground(() => {
       return;
     }
 
+    // Routing rewrites the request onto the destination's chat endpoint, so
+    // only chat requests can be swapped or translated (same rule as the page
+    // path). Model lists or token counting would be mangled into chat calls.
+    if ((translation || swap) && !isRoutableChatRequest(providerId, url)) {
+      bridgeProxyPort?.postMessage({
+        type: 'proxy_http_error',
+        requestId,
+        status: 400,
+        code: 'ROUTING_UNSUPPORTED',
+        error: `This app is routed to ${effectiveProviderId}, and only chat requests can be routed to another provider`,
+      });
+      return;
+    }
+
+    // The app's request as the log and allowance helpers expect it.
+    const appRequest = { providerId, url, method, body } as ProxyRequest;
+
     try {
       const apiKey = await decryptCredentialKey(credential);
 
@@ -2315,7 +2294,7 @@ export default defineBackground(() => {
       let translatedUrl = url;
       if (translation) {
         try {
-          translatedBody = applyRequestTranslation(translation, body, requestId);
+          translatedBody = applyRequestTranslation(translation, body, requestId, url);
         } catch (err) {
           bridgeProxyPort?.postMessage({
             type: 'proxy_http_error',
@@ -2324,7 +2303,7 @@ export default defineBackground(() => {
           });
           return;
         }
-        const isStreaming = detectStreamingRequest(body);
+        const isStreaming = detectStreamingRequest(body, url);
         const rewritten = rewriteProxyUrl(translation.dstProviderId, translation.dstModel, isStreaming, credential.baseUrl);
         if (!rewritten) {
           bridgeProxyPort?.postMessage({
@@ -2337,7 +2316,7 @@ export default defineBackground(() => {
         translatedUrl = rewritten;
       } else if (swap) {
         // Same-family swap: URL rewrite + optional body.model override.
-        const isStreaming = detectStreamingRequest(body);
+        const isStreaming = detectStreamingRequest(body, url);
         const rewritten = rewriteProxyUrl(swap.dstProviderId, swap.dstModel ?? '', isStreaming, credential.baseUrl);
         if (!rewritten) {
           bridgeProxyPort?.postMessage({
@@ -2391,7 +2370,66 @@ export default defineBackground(() => {
           relocateExisting: isThirdParty,
         });
 
-        bridgeProxyPort.postMessage({
+        const nativePort = bridgeProxyPort;
+        const reservation = await checkAndReserveAllowance(session.appOrigin, providerId, appRequest);
+        if (!reservation.allowed) {
+          nativePort.postMessage({ type: 'proxy_http_error', requestId, error: reservation.reason });
+          return;
+        }
+        if (msg.reportsDirectFetch === true) {
+          // Only the bridge sees this response. It reports the status and
+          // usage once the response ends, also when it was cut off; log and
+          // charge it then, the same way recordProxyUsage does for responses
+          // the extension reads itself.
+          const finish = async (status: number, report?: Record<string, unknown>) => {
+            nativePort.onMessage.removeListener(onDone);
+            nativePort.onDisconnect.removeListener(onGone);
+            try {
+              await chargeDirectFetch(status, report);
+            } finally {
+              reservation.release();
+            }
+          };
+          const chargeDirectFetch = async (status: number, report?: Record<string, unknown>) => {
+            const tokens = (v: unknown) =>
+              typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.round(v) : undefined;
+            const usage = report?.usage as Record<string, unknown> | undefined;
+            let inputTokens = tokens(usage?.inputTokens);
+            let outputTokens = tokens(usage?.outputTokens);
+            const responseChars = tokens(report?.responseChars) ?? 0;
+            // A successful call without readable usage, or one cut off before
+            // its final usage event, is charged an estimate (bytes / 4 each way).
+            // The bridge only takes this path for Anthropic setup tokens, whose
+            // replies are JSON or SSE.
+            if (status >= 200 && status < 300 && shouldEstimateUsage(effectiveProviderId, url, 'application/json') &&
+                (inputTokens == null || outputTokens == null || report?.complete !== true)) {
+              if (!inputTokens) inputTokens = Math.ceil((body?.length ?? 0) / 4);
+              if (!outputTokens) outputTokens = Math.ceil(responseChars / 4);
+            }
+            const logId = await logRequest(session, appRequest, status);
+            await updateLogEntry(logId, { inputTokens, outputTokens, model: parseModel(body) });
+            browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'usageUpdated' }).catch(() => {});
+            await addUsage(session.appOrigin, providerId, (inputTokens ?? 0) + (outputTokens ?? 0));
+          };
+          const onDone = (raw: unknown) => {
+            const report = raw as Record<string, unknown>;
+            if (report.type !== 'proxy_direct_done' || report.requestId !== requestId) return;
+            void finish(typeof report.status === 'number' ? report.status : 502, report).catch(() => {});
+          };
+          // The bridge died mid-request: the client got an error, log one.
+          const onGone = () => { void finish(502).catch(() => {}); };
+          nativePort.onMessage.addListener(onDone);
+          nativePort.onDisconnect.addListener(onGone);
+        } else {
+          // Older bridges don't report back; log what is known now.
+          reservation.release();
+          const model = parseModel(body);
+          logRequest(session, appRequest, 200).then((logId) => {
+            if (model) updateLogEntry(logId, { model });
+          });
+        }
+
+        nativePort.postMessage({
           type: 'proxy_direct_fetch',
           requestId,
           url: translatedUrl,
@@ -2399,116 +2437,123 @@ export default defineBackground(() => {
           headers: realHeaders,
           body: finalBody,
           toolNameMap,
-        });
-        const model = parseModel(body);
-        logRequest(session, { providerId, url, method } as ProxyRequest, 200).then((logId) => {
-          if (model) updateLogEntry(logId, { model });
+          providerId: effectiveProviderId,
         });
         return;
       }
 
       const bridgeBody = injectStreamUsageOptions(effectiveProviderId, translatedBody);
-      // redirect: 'error' — see the extension-port proxy path.
-      const response = await fetch(translatedUrl, {
-        method,
-        headers: realHeaders,
-        body: bridgeBody || undefined,
-        redirect: 'error',
-      });
-
-      const responseHeaders: Record<string, string> = {};
-      response.headers.forEach((value, key) => {
-        responseHeaders[key] = value;
-      });
-
-      bridgeProxyPort?.postMessage({
-        type: 'proxy_http_response_meta',
-        requestId,
-        status: response.status,
-        headers: responseHeaders,
-      });
-
-      const logEntryId = await logRequest(session, { providerId, url, method } as ProxyRequest, response.status);
-
-      // Translation: stream rewriter for SSE responses, one-shot for JSON.
-      const isStreamingResponse = (responseHeaders['content-type'] ?? '').includes('text/event-stream');
-      const sseRewriter = translation && isStreamingResponse
-        ? buildResponseStreamRewriter(translation, requestId)
-        : undefined;
-
+      // Check the allowance and hold what this request may use in one step,
+      // as on the page path.
+      const reservation = await checkAndReserveAllowance(session.appOrigin, providerId, appRequest);
+      if (!reservation.allowed) {
+        bridgeProxyPort?.postMessage({ type: 'proxy_http_error', requestId, error: reservation.reason });
+        return;
+      }
+      let logEntryId: string | undefined;
+      let responseStatus = 0;
+      let responseContentType = '';
+      let complete = false;
       const chunks: string[] = [];
-      if (response.body) {
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const text = decoder.decode(value, { stream: true });
-          chunks.push(text);
-          if (sseRewriter) {
-            const rewritten = sseRewriter.process(text);
-            if (rewritten) {
+      try {
+        // redirect: 'error' — see the extension-port proxy path.
+        const response = await fetch(translatedUrl, {
+          method,
+          headers: realHeaders,
+          body: bridgeBody || undefined,
+          redirect: 'error',
+        });
+        responseStatus = response.status;
+
+        const responseHeaders: Record<string, string> = {};
+        response.headers.forEach((value, key) => {
+          responseHeaders[key] = value;
+        });
+
+        bridgeProxyPort?.postMessage({
+          type: 'proxy_http_response_meta',
+          requestId,
+          status: response.status,
+          headers: responseHeaders,
+        });
+
+        logEntryId = await logRequest(session, appRequest, response.status);
+
+        // Translation: stream rewriter for SSE responses, one-shot for JSON.
+        const isStreamingResponse = (responseHeaders['content-type'] ?? '').includes('text/event-stream');
+        const sseRewriter = translation && isStreamingResponse
+          ? buildResponseStreamRewriter(translation, requestId, body, url)
+          : undefined;
+
+        if (response.body) {
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const text = decoder.decode(value, { stream: true });
+            chunks.push(text);
+            if (sseRewriter) {
+              const rewritten = sseRewriter.process(text);
+              if (rewritten) {
+                bridgeProxyPort?.postMessage({
+                  type: 'proxy_http_response_chunk',
+                  requestId,
+                  chunk: rewritten,
+                });
+              }
+            } else if (!translation) {
               bridgeProxyPort?.postMessage({
                 type: 'proxy_http_response_chunk',
                 requestId,
-                chunk: rewritten,
+                chunk: text,
               });
             }
-          } else if (!translation) {
+          }
+        }
+        complete = true;
+
+        if (sseRewriter) {
+          const tail = sseRewriter.flush();
+          if (tail) {
             bridgeProxyPort?.postMessage({
               type: 'proxy_http_response_chunk',
               requestId,
-              chunk: text,
+              chunk: tail,
             });
           }
+        } else if (translation && !isStreamingResponse) {
+          try {
+            const translatedResponse = applyResponseTranslation(translation, body, requestId, chunks.join(''), url);
+            bridgeProxyPort?.postMessage({
+              type: 'proxy_http_response_chunk',
+              requestId,
+              chunk: translatedResponse,
+            });
+          } catch (err) {
+            bridgeProxyPort?.postMessage({
+              type: 'proxy_http_error',
+              requestId,
+              error: err instanceof Error ? err.message : 'Response translation failed',
+            });
+            return;
+          }
         }
-      }
 
-      if (sseRewriter) {
-        const tail = sseRewriter.flush();
-        if (tail) {
-          bridgeProxyPort?.postMessage({
-            type: 'proxy_http_response_chunk',
-            requestId,
-            chunk: tail,
-          });
-        }
-      } else if (translation && !isStreamingResponse) {
-        try {
-          const translatedResponse = applyResponseTranslation(translation, body, requestId, chunks.join(''));
-          bridgeProxyPort?.postMessage({
-            type: 'proxy_http_response_chunk',
-            requestId,
-            chunk: translatedResponse,
-          });
-        } catch (err) {
-          bridgeProxyPort?.postMessage({
-            type: 'proxy_http_error',
-            requestId,
-            error: err instanceof Error ? err.message : 'Response translation failed',
-          });
-          return;
-        }
-      }
-
-      bridgeProxyPort?.postMessage({
-        type: 'proxy_http_response_done',
-        requestId,
-      });
-
-      const fullBody = chunks.join('');
-      const model = parseModel(body);
-      const usage = parseUsage(effectiveProviderId, fullBody);
-      if (usage || model) {
-        await updateLogEntry(logEntryId, {
-          inputTokens: usage?.inputTokens,
-          outputTokens: usage?.outputTokens,
-          model,
+        bridgeProxyPort?.postMessage({
+          type: 'proxy_http_response_done',
+          requestId,
         });
-        browser.runtime.sendMessage({
-          type: 'BYOKY_INTERNAL',
-          action: 'usageUpdated',
-        }).catch(() => {});
+      } finally {
+        // Usage is read from the destination format (chunks hold the
+        // untranslated upstream body) and recorded even when the stream was
+        // cut off or a later step failed: the provider billed it either way.
+        // The hold is released only once the usage is counted.
+        if (logEntryId) {
+          await recordProxyUsage(session.appOrigin, appRequest, effectiveProviderId, logEntryId, responseStatus, responseContentType, chunks.join(''), complete)
+            .catch(() => {});
+        }
+        reservation.release();
       }
     } catch {
       bridgeProxyPort?.postMessage({
@@ -2563,6 +2608,7 @@ export default defineBackground(() => {
     translation: SessionTranslation,
     requestBody: string | undefined,
     requestId: string,
+    requestUrl?: string,
   ): TranslationContext | null {
     const srcFamily = familyOf(translation.srcProviderId);
     const dstFamily = familyOf(translation.dstProviderId);
@@ -2570,14 +2616,36 @@ export default defineBackground(() => {
     return {
       srcFamily: srcFamily as ModelFamily,
       dstFamily: dstFamily as ModelFamily,
-      srcModel: requestBody ? parseModel(requestBody) : undefined,
+      srcModel: (requestBody ? parseModel(requestBody) : undefined) ?? modelFromUrl(requestUrl),
       dstModel: translation.dstModel,
-      isStreaming: detectStreamingRequest(requestBody),
+      isStreaming: detectStreamingRequest(requestBody, requestUrl),
       requestId,
     };
   }
 
-  function detectStreamingRequest(body: string | undefined): boolean {
+  /** Gemini puts the model in the path: /v1beta/models/{model}:generateContent. */
+  function modelFromUrl(url: string | undefined): string | undefined {
+    if (!url) return undefined;
+    try {
+      const match = /\/models\/([^/:]+):/.exec(new URL(url).pathname);
+      return match ? decodeURIComponent(match[1]) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  function isRoutableChatRequest(providerId: string, url: string): boolean {
+    const family = familyOf(providerId);
+    return !!family && isChatCompletionsEndpoint(family, url);
+  }
+
+  function detectStreamingRequest(body: string | undefined, url?: string): boolean {
+    // Gemini asks for a stream in the URL, not the body.
+    if (url) {
+      try {
+        if (new URL(url).pathname.endsWith(':streamGenerateContent')) return true;
+      } catch { /* fall through to the body */ }
+    }
     if (!body) return false;
     try {
       const parsed = JSON.parse(body) as { stream?: boolean };
@@ -2612,9 +2680,10 @@ export default defineBackground(() => {
     translation: SessionTranslation,
     body: string | undefined,
     requestId: string,
+    requestUrl?: string,
   ): string | undefined {
     if (!body) return body;
-    const ctx = buildTranslationContext(translation, body, requestId);
+    const ctx = buildTranslationContext(translation, body, requestId, requestUrl);
     if (!ctx) {
       throw new TranslationError('TRANSLATION_FAILED', 'Cannot resolve translation families');
     }
@@ -2630,8 +2699,9 @@ export default defineBackground(() => {
     requestBody: string | undefined,
     requestId: string,
     responseBody: string,
+    requestUrl?: string,
   ): string {
-    const ctx = buildTranslationContext(translation, requestBody, requestId);
+    const ctx = buildTranslationContext(translation, requestBody, requestId, requestUrl);
     if (!ctx) {
       throw new TranslationError('TRANSLATION_FAILED', 'Cannot resolve translation families');
     }
@@ -2645,8 +2715,12 @@ export default defineBackground(() => {
   function buildResponseStreamRewriter(
     translation: SessionTranslation,
     requestId: string,
+    requestBody?: string,
+    requestUrl?: string,
   ): { process(s: string): string; flush(): string } | undefined {
-    const ctx = buildTranslationContext(translation, undefined, requestId);
+    // The request body carries the model the app asked for, which the
+    // translated stream echoes back instead of the destination's.
+    const ctx = buildTranslationContext(translation, requestBody, requestId, requestUrl);
     if (!ctx) return undefined;
     return createStreamTranslator(ctx);
   }
@@ -2732,13 +2806,15 @@ export default defineBackground(() => {
       }
     }
 
-    const data = await browser.storage.local.get('requestLog');
-    const log = (data.requestLog as RequestLogEntry[]) ?? [];
-    log.unshift(entry);
+    await serializedStorage(async () => {
+      const data = await browser.storage.local.get('requestLog');
+      const log = (data.requestLog as RequestLogEntry[]) ?? [];
+      log.unshift(entry);
 
-    // Keep last 500 entries
-    await browser.storage.local.set({
-      requestLog: log.slice(0, 500),
+      // Keep last 500 entries
+      await browser.storage.local.set({
+        requestLog: log.slice(0, 500),
+      });
     });
 
     return id;
@@ -2748,14 +2824,164 @@ export default defineBackground(() => {
     entryId: string,
     updates: { inputTokens?: number; outputTokens?: number; model?: string },
   ) {
-    const data = await browser.storage.local.get('requestLog');
-    const log = (data.requestLog as RequestLogEntry[]) ?? [];
-    const entry = log.find((e) => e.id === entryId);
-    if (!entry) return;
-    if (updates.inputTokens != null) entry.inputTokens = updates.inputTokens;
-    if (updates.outputTokens != null) entry.outputTokens = updates.outputTokens;
-    if (updates.model) entry.model = updates.model;
-    await browser.storage.local.set({ requestLog: log });
+    await serializedStorage(async () => {
+      const data = await browser.storage.local.get('requestLog');
+      const log = (data.requestLog as RequestLogEntry[]) ?? [];
+      const entry = log.find((e) => e.id === entryId);
+      if (!entry) return;
+      if (updates.inputTokens != null) entry.inputTokens = updates.inputTokens;
+      if (updates.outputTokens != null) entry.outputTokens = updates.outputTokens;
+      if (updates.model) entry.model = updates.model;
+      await browser.storage.local.set({ requestLog: log });
+    });
+  }
+
+  // Read-modify-write of the request log and the usage totals runs one at a
+  // time, or concurrent requests drop each other's entries.
+  let storageQueue: Promise<unknown> = Promise.resolve();
+  function serializedStorage<T>(fn: () => Promise<T>): Promise<T> {
+    const run = storageQueue.then(fn, fn);
+    storageQueue = run.catch(() => {});
+    return run;
+  }
+
+  // Lifetime tokens per app and provider, which allowances are checked
+  // against. Kept apart from the request log: that holds only the last 500
+  // entries across all apps, so an app could push its own expensive entries
+  // out of the window with cheap requests.
+  type UsageTotals = Record<string, Record<string, number>>;
+
+  async function getUsageTotals(): Promise<UsageTotals> {
+    const data = await browser.storage.local.get(['usageTotals', 'requestLog']);
+    if (data.usageTotals) return data.usageTotals as UsageTotals;
+    // First run with totals: seed them from what the log still holds.
+    const totals: UsageTotals = {};
+    for (const e of (data.requestLog as RequestLogEntry[]) ?? []) {
+      const tokens = (e.inputTokens ?? 0) + (e.outputTokens ?? 0);
+      if (e.status >= 400 || tokens <= 0) continue;
+      const app = (totals[e.appOrigin] ??= {});
+      app[e.providerId] = (app[e.providerId] ?? 0) + tokens;
+    }
+    return totals;
+  }
+
+  // Seed the totals once, before any request can update the log, or the
+  // first request after the upgrade would be counted twice (once from the
+  // log, once by addUsage).
+  serializedStorage(async () => {
+    const data = await browser.storage.local.get('usageTotals');
+    if (!data.usageTotals) await browser.storage.local.set({ usageTotals: await getUsageTotals() });
+  }).catch(() => {});
+
+  function addUsage(origin: string, providerId: string, tokens: number): Promise<void> {
+    if (tokens <= 0) return Promise.resolve();
+    return serializedStorage(async () => {
+      const totals = await getUsageTotals();
+      const app = (totals[origin] ??= {});
+      app[providerId] = (app[providerId] ?? 0) + tokens;
+      await browser.storage.local.set({ usageTotals: totals });
+    });
+  }
+
+  // Tokens in-flight requests may still use, per app and provider.
+  const reservedTokens = new Map<string, Map<string, number>>();
+
+  function reserveTokens(origin: string, providerId: string, tokens: number): () => void {
+    const app = reservedTokens.get(origin) ?? new Map<string, number>();
+    reservedTokens.set(origin, app);
+    app.set(providerId, (app.get(providerId) ?? 0) + tokens);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const left = (app.get(providerId) ?? 0) - tokens;
+      if (left > 0) app.set(providerId, left);
+      else app.delete(providerId);
+      if (app.size === 0) reservedTokens.delete(origin);
+    };
+  }
+
+  /**
+   * Check the app's allowance and, if it passes, hold the tokens this
+   * request may use. Everything after the one await runs synchronously, so
+   * concurrent requests see each other's holds.
+   */
+  async function checkAndReserveAllowance(
+    origin: string,
+    providerId: string,
+    req: ProxyRequest,
+  ): Promise<{ allowed: true; release: () => void } | { allowed: false; reason: string }> {
+    const [allowances, allTotals] = await Promise.all([getAllowances(), getUsageTotals()]);
+    const allowance = allowances.find((a) => a.origin === origin);
+    if (allowance) {
+      const totals = allTotals[origin] ?? {};
+      const reserved = reservedTokens.get(origin) ?? new Map<string, number>();
+      const entries = [...Object.entries(totals), ...reserved.entries()].map(([pid, tokens]) => ({
+        providerId: pid as ProviderId,
+        inputTokens: tokens,
+        outputTokens: 0,
+      }));
+      const check = computeAllowanceCheck(allowance, entries, providerId);
+      if (!check.allowed) return { allowed: false, reason: check.reason ?? 'Token allowance exceeded' };
+    }
+    return { allowed: true, release: reserveTokens(origin, providerId, estimateRequestTokens(req)) };
+  }
+
+  /** A request the app cancelled before any response: charge its estimate. */
+  async function chargeCancelledRequest(session: Session, req: ProxyRequest) {
+    const inputTokens = req.body && !req.bodyEncoding ? Math.ceil(req.body.length / 4) : 0;
+    const outputTokens = Math.max(0, estimateRequestTokens(req) - inputTokens);
+    const logEntryId = await logRequest(session, req, 499);
+    await updateLogEntry(logEntryId, { inputTokens, outputTokens, model: req.bodyEncoding ? undefined : parseModel(req.body) });
+    await addUsage(session.appOrigin, req.providerId, inputTokens + outputTokens);
+  }
+
+  /** Rough upper bound for a request: its prompt plus the output it asks for. */
+  function estimateRequestTokens(req: ProxyRequest): number {
+    if (!req.body || req.bodyEncoding) return 0;
+    let maxOutput = 0;
+    try {
+      const body = JSON.parse(req.body) as Record<string, unknown>;
+      const config = body.generationConfig as Record<string, unknown> | undefined;
+      for (const value of [body.max_tokens, body.max_completion_tokens, body.max_output_tokens, config?.maxOutputTokens]) {
+        if (typeof value === 'number' && value > maxOutput) maxOutput = value;
+      }
+    } catch { /* not JSON: count the prompt only */ }
+    return Math.ceil(req.body.length / 4) + maxOutput;
+  }
+
+  async function recordProxyUsage(
+    origin: string,
+    req: ProxyRequest,
+    upstreamProviderId: string,
+    logEntryId: string,
+    status: number,
+    contentType: string,
+    responseText: string,
+    complete: boolean,
+  ) {
+    const model = req.bodyEncoding ? undefined : parseModel(req.body);
+    const ok = status >= 200 && status < 300;
+    const parsed = ok ? parseUsage(upstreamProviderId, responseText) : undefined;
+    let inputTokens = parsed?.inputTokens;
+    let outputTokens = parsed?.outputTokens;
+    // A successful generation whose usage we can't read, or a stream cut off
+    // before its final usage event, is charged an estimate (bytes / 4 each
+    // way), so allowances can't be dodged by cancelling early. Embeddings,
+    // images, audio, token counting and model lists aren't estimated. Same
+    // rule on iOS and Android.
+    if (ok && shouldEstimateUsage(upstreamProviderId, req.url, contentType) && (!parsed || !complete)) {
+      if (!inputTokens) inputTokens = Math.ceil((req.body?.length ?? 0) / 4);
+      if (!outputTokens) outputTokens = Math.ceil(responseText.length / 4);
+    }
+    if (inputTokens != null || outputTokens != null || model) {
+      await updateLogEntry(logEntryId, { inputTokens, outputTokens, model });
+      browser.runtime.sendMessage({
+        type: 'BYOKY_INTERNAL',
+        action: 'usageUpdated',
+      }).catch(() => {});
+    }
+    await addUsage(origin, req.providerId, (inputTokens ?? 0) + (outputTokens ?? 0));
   }
 
   async function getSessionUsage(sessionId: string) {
@@ -2793,7 +3019,7 @@ export default defineBackground(() => {
 
     for (const [id, entry] of pendingApprovals) {
       const trustedSite = trustedSites.find((s) => s.origin === entry.approval.appOrigin);
-      if (trustedSite && trustedSite.allowedProviders?.length) {
+      if (trustedSite && trustedSite.allowedProviders?.length && !revokedOrigins.has(entry.approval.appOrigin)) {
         const scopedProviders = scopeProvidersForTrust(
           entry.approval.providers,
           trustedSite.allowedProviders,
@@ -2835,10 +3061,7 @@ export default defineBackground(() => {
     const credentials = await getStoredCredentials();
 
     for (const [sessionKey, session] of sessions) {
-      const requested = session.requestedProviders;
-      const providerIds = requested.length > 0 ? requested : [
-        ...new Set(credentials.map(c => c.providerId)),
-      ];
+      const providerIds = session.requestedProviders;
 
       // Re-resolve group binding for this session's origin (may have changed)
       const group = await getGroupForOrigin(session.appOrigin);
@@ -2856,7 +3079,7 @@ export default defineBackground(() => {
           ? resolveSameFamilySwapRoute(group, providerId, credentials)
           : undefined;
         const directCred = credentials.find(c => c.providerId === providerId);
-        const autoRoute = !group && !directCred
+        const autoRoute = !group?.providerId && !directCred
           ? resolveAutoCrossFamilyRoute(providerId, credentials)
           : undefined;
         const cred = groupPinnedCred ?? crossRoute?.cred ?? swapRoute?.cred ?? directCred ?? autoRoute?.cred;
@@ -3106,21 +3329,6 @@ export default defineBackground(() => {
     return { success: true };
   }
 
-  async function checkAllowance(
-    origin: string,
-    providerId: string,
-  ): Promise<{ allowed: boolean; reason?: string }> {
-    const allowances = await getAllowances();
-    const allowance = allowances.find((a) => a.origin === origin);
-    if (!allowance) return { allowed: true };
-
-    const data = await browser.storage.local.get('requestLog');
-    const log = (data.requestLog as RequestLogEntry[]) ?? [];
-    const entries = log.filter((e) => e.appOrigin === origin && e.status < 400);
-
-    return computeAllowanceCheck(allowance, entries, providerId);
-  }
-
   // Wake the SW every minute to re-spawn the byoky-bridge native host if it
   // died with the SW (Hermes/OpenClaw need :19280 stable).
   const BRIDGE_KEEPALIVE_ALARM = 'byoky:bridge-keepalive';
@@ -3131,6 +3339,7 @@ export default defineBackground(() => {
 
   browser.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === BRIDGE_KEEPALIVE_ALARM) {
+      lockIfIdle();
       maybeAutoStartBridgeProxy().catch(() => {});
     }
   });

@@ -32,6 +32,8 @@ interface WalletState {
   pendingApprovals: PendingApproval[];
   trustedSites: TrustedSite[];
   tokenAllowances: TokenAllowance[];
+  /** Lifetime tokens per app origin and provider, which allowances are checked against. */
+  tokenUsage: Record<string, Record<string, number>>;
   groups: Group[];
   appGroups: AppGroups;
   showRetiredFeaturesNotice: boolean;
@@ -46,12 +48,12 @@ interface WalletState {
   markRetiredFeaturesNoticeSeen: () => Promise<void>;
   unlock: (password: string) => Promise<boolean>;
   lock: () => Promise<void>;
+  syncLockState: () => Promise<boolean>;
   navigate: (page: Page) => void;
   openModal: (modal: 'add-credential') => void;
   closeModal: () => void;
   addApiKey: (providerId: string, label: string, apiKey: string, baseUrl?: string) => Promise<void>;
   addSetupToken: (providerId: string, label: string, token: string) => Promise<void>;
-  startOAuth: (providerId: string, label: string) => Promise<void>;
   removeCredential: (id: string) => Promise<void>;
   renameCredential: (id: string, label: string) => Promise<boolean>;
   revokeSession: (sessionId: string) => Promise<void>;
@@ -60,6 +62,7 @@ interface WalletState {
   removeTrustedSite: (origin: string) => Promise<void>;
   setAllowance: (allowance: TokenAllowance) => Promise<void>;
   removeAllowance: (origin: string) => Promise<void>;
+  resetAppUsage: (origin: string) => Promise<void>;
   createGroup: (input: { name: string; providerId: string; credentialId?: string; model?: string }) => Promise<string | null>;
   updateGroup: (id: string, patch: { name?: string; providerId?: string; credentialId?: string | null; model?: string | null }) => Promise<boolean>;
   deleteGroup: (id: string) => Promise<boolean>;
@@ -68,6 +71,18 @@ interface WalletState {
   refreshData: () => Promise<void>;
   clearError: () => void;
 }
+
+// What the popup drops when the wallet locks.
+const LOCKED_STATE = {
+  isUnlocked: false,
+  credentials: [],
+  requestLog: [],
+  pendingApprovals: [],
+  groups: [],
+  appGroups: {},
+  currentPage: 'unlock',
+  modal: null,
+} satisfies Partial<WalletState>;
 
 async function sendInternal(action: string, payload?: unknown): Promise<Record<string, unknown>> {
   return browser.runtime.sendMessage({
@@ -86,6 +101,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   pendingApprovals: [],
   trustedSites: [],
   tokenAllowances: [],
+  tokenUsage: {},
   groups: [],
   appGroups: {},
   showRetiredFeaturesNotice: false,
@@ -154,22 +170,25 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       await get().refreshData();
       return true;
     }
-    set({ error: 'Incorrect password', loading: false });
+    // During the lockout the background refuses even the right password and
+    // says for how long; "Incorrect password" would push toward a reset.
+    set({ error: (unlockResult.error as string | undefined) ?? 'Incorrect password', loading: false });
     return false;
   },
 
   lock: async () => {
     await sendInternal('lock');
-    set({
-      isUnlocked: false,
-      credentials: [],
-      requestLog: [],
-      pendingApprovals: [],
-      groups: [],
-      appGroups: {},
-      currentPage: 'unlock',
-      modal: null,
-    });
+    set(LOCKED_STATE);
+  },
+
+  // The background also locks on its own (auto-lock after idle) and only
+  // announces it as a session change, so the popup has to ask.
+  syncLockState: async () => {
+    const { unlocked } = await sendInternal('isUnlocked');
+    if (!unlocked && get().isUnlocked) {
+      set({ ...LOCKED_STATE, error: null });
+    }
+    return unlocked === true;
   },
 
   navigate: (page: Page) => {
@@ -215,20 +234,6 @@ export const useWalletStore = create<WalletState>((set, get) => ({
         providerId, label, value: token, authMethod: 'oauth',
       });
       if (result.error) throw new Error(result.error as string);
-      await get().refreshData();
-      set({ modal: null, loading: false });
-    } catch (e) {
-      set({ error: (e as Error).message, loading: false });
-    }
-  },
-
-  startOAuth: async (providerId: string, label: string) => {
-    set({ loading: true, error: null });
-    try {
-      const oauthResult = await sendInternal('startOAuth', { providerId, label });
-      if (!oauthResult.success) {
-        throw new Error((oauthResult.error as string) || 'OAuth flow failed');
-      }
       await get().refreshData();
       set({ modal: null, loading: false });
     } catch (e) {
@@ -288,6 +293,11 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     await get().refreshData();
   },
 
+  resetAppUsage: async (origin: string) => {
+    await sendInternal('resetAppUsage', { origin });
+    await get().refreshData();
+  },
+
   createGroup: async (input) => {
     set({ error: null });
     const result = await sendInternal('createGroup', input);
@@ -343,6 +353,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       pendingApprovals: [],
       trustedSites: [],
       tokenAllowances: [],
+  tokenUsage: {},
       groups: [],
       appGroups: {},
       showRetiredFeaturesNotice: false,
@@ -382,6 +393,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       pendingApprovals: (approvalResult.approvals ?? []) as PendingApproval[],
       trustedSites: (trustedResult.sites ?? []) as TrustedSite[],
       tokenAllowances: (allowanceResult.allowances ?? []) as TokenAllowance[],
+      tokenUsage: (allowanceResult.usage ?? {}) as Record<string, Record<string, number>>,
       groups: (groupsResult.groups ?? []) as Group[],
       appGroups: (groupsResult.appGroups ?? {}) as AppGroups,
     });

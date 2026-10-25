@@ -23,7 +23,7 @@ const LOCAL_PROVIDER_DEFAULT_BASE_URL: Record<string, string> = {
 };
 
 export function AddCredential() {
-  const { addApiKey, addSetupToken, startOAuth, closeModal, error, loading, clearError } = useWalletStore();
+  const { addApiKey, addSetupToken, closeModal, error, loading, clearError } = useWalletStore();
   const [providerId, setProviderId] = useState('anthropic');
   const [authMethod, setAuthMethod] = useState<'api_key' | 'oauth'>('api_key');
   const [label, setLabel] = useState('');
@@ -33,15 +33,14 @@ export function AddCredential() {
 
   const provider = PROVIDERS[providerId];
   const supportsOAuth = provider?.authMethods.includes('oauth');
-  const hasOAuthConfig = !!provider?.oauthConfig;
   const isLocalProvider = providerId === 'ollama' || providerId === 'lm_studio';
   const requiresBaseUrl = provider?.requiresCustomBaseUrl === true;
 
   useEffect(() => {
-    if (authMethod === 'oauth' && !hasOAuthConfig) {
+    if (authMethod === 'oauth') {
       checkBridge().then(setBridgeOnline);
     }
-  }, [authMethod, hasOAuthConfig]);
+  }, [authMethod]);
 
   function handleProviderChange(id: string) {
     setProviderId(id);
@@ -50,10 +49,10 @@ export function AddCredential() {
     if (!p?.authMethods.includes('oauth')) {
       setAuthMethod('api_key');
     }
-    // Pre-fill the loopback default when switching into a local provider,
-    // but only if the user hasn't already typed something.
-    if (LOCAL_PROVIDER_DEFAULT_BASE_URL[id] && !baseUrl) {
-      setBaseUrl(LOCAL_PROVIDER_DEFAULT_BASE_URL[id]);
+    // Swap in the new provider's loopback default (or clear the field), but
+    // keep a URL the user typed themselves.
+    if (!baseUrl || Object.values(LOCAL_PROVIDER_DEFAULT_BASE_URL).includes(baseUrl)) {
+      setBaseUrl(LOCAL_PROVIDER_DEFAULT_BASE_URL[id] ?? '');
     }
   }
 
@@ -67,12 +66,8 @@ export function AddCredential() {
     if (requiresBaseUrl && !cleanBaseUrl) return;
 
     if (authMethod === 'oauth') {
-      if (hasOAuthConfig) {
-        startOAuth(providerId, label.trim());
-      } else {
-        if (!cleanKey) return;
-        addSetupToken(providerId, label.trim(), cleanKey);
-      }
+      if (!cleanKey) return;
+      addSetupToken(providerId, label.trim(), cleanKey);
     } else {
       // Local providers run unauthenticated — allow an empty key.
       if (!isLocalProvider && !cleanKey) return;
@@ -142,15 +137,13 @@ export function AddCredential() {
                 className={`auth-toggle-btn ${authMethod === 'oauth' ? 'active' : ''}`}
                 onClick={() => setAuthMethod('oauth')}
               >
-                {hasOAuthConfig ? 'OAuth' : 'Setup Token'}
+                Setup Token
               </button>
             </div>
             <p className="form-hint">
               {authMethod === 'api_key'
                 ? 'Pay-per-use. Get one from your provider console.'
-                : hasOAuthConfig
-                  ? `Sign in with your ${provider?.name} account.`
-                  : 'Uses your Claude Pro/Max subscription credits.'}
+                : 'Uses your Claude Pro/Max subscription credits.'}
             </p>
           </div>
         )}
@@ -194,9 +187,18 @@ export function AddCredential() {
             </div>
             {isLocalProvider && (
               <div className="warning-note" style={{ marginTop: '10px', marginBottom: '12px' }}>
-                <strong>Your computer must stay online.</strong> This credential
-                only works while your machine is running and the Byoky Bridge is
-                connected.
+                <strong>The server must be running.</strong> The wallet calls it
+                directly, so this credential only works while it's up.{' '}
+                {providerId === 'ollama' ? (
+                  <>
+                    Ollama also has to allow this extension's origin:
+                    <code style={{ display: 'block', marginTop: '6px', wordBreak: 'break-all' }}>
+                      OLLAMA_ORIGINS={window.location.origin} ollama serve
+                    </code>
+                  </>
+                ) : (
+                  <>Turn on CORS in LM Studio's server settings (or run <code>lms server start --cors</code>).</>
+                )}
               </div>
             )}
           </>
@@ -232,10 +234,6 @@ export function AddCredential() {
                 </a>
               </p>
             )}
-          </div>
-        ) : hasOAuthConfig ? (
-          <div className="oauth-info">
-            <p>You'll be redirected to {provider?.name} to authorize access.</p>
           </div>
         ) : (
           <div className="form-group">
@@ -301,9 +299,7 @@ export function AddCredential() {
             Cancel
           </button>
           <button type="submit" className="btn btn-primary" disabled={loading}>
-            {authMethod === 'oauth' && hasOAuthConfig
-              ? `Sign in with ${provider?.name}`
-              : 'Save'}
+            Save
           </button>
         </div>
       </form>

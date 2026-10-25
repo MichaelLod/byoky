@@ -42,7 +42,7 @@ const DRAG_MIME = 'application/x-byoky-app-origin';
 export function ConnectedApps() {
   const {
     sessions, revokeSession, trustedSites, removeTrustedSite,
-    requestLog, tokenAllowances, setAllowance, removeAllowance,
+    requestLog, tokenAllowances, tokenUsage, setAllowance, removeAllowance, resetAppUsage,
     groups, appGroups, credentials,
     createGroup, updateGroup, deleteGroup, setAppGroup,
   } = useWalletStore();
@@ -58,15 +58,11 @@ export function ConnectedApps() {
     targetModel: string;
   } | null>(null);
 
+  // Lifetime totals, the numbers allowances are enforced against (the
+  // request log only keeps the last 500 entries).
   function getOriginUsage(origin: string) {
-    const entries = requestLog.filter((e) => e.appOrigin === origin && e.status < 400);
-    let total = 0;
-    const byProvider: Record<string, number> = {};
-    for (const entry of entries) {
-      const tokens = (entry.inputTokens ?? 0) + (entry.outputTokens ?? 0);
-      total += tokens;
-      byProvider[entry.providerId] = (byProvider[entry.providerId] ?? 0) + tokens;
-    }
+    const byProvider = { ...(tokenUsage[origin] ?? {}) };
+    const total = Object.values(byProvider).reduce((sum, n) => sum + n, 0);
     return { total, byProvider };
   }
 
@@ -394,6 +390,7 @@ export function ConnectedApps() {
                         allowance={allowance}
                         onSave={(a) => { setAllowance(a); setEditingOrigin(null); }}
                         onRemove={() => { removeAllowance(session.appOrigin); setEditingOrigin(null); }}
+                        onResetUsage={usage.total > 0 ? () => { resetAppUsage(session.appOrigin); setEditingOrigin(null); } : undefined}
                         onCancel={() => setEditingOrigin(null)}
                       />
                     )}
@@ -597,6 +594,7 @@ function AllowanceForm({
   allowance,
   onSave,
   onRemove,
+  onResetUsage,
   onCancel,
 }: {
   origin: string;
@@ -604,6 +602,8 @@ function AllowanceForm({
   allowance?: TokenAllowance;
   onSave: (a: TokenAllowance) => void;
   onRemove: () => void;
+  /** Start counting from zero again; absent when nothing has been used. */
+  onResetUsage?: () => void;
   onCancel: () => void;
 }) {
   const [totalLimit, setTotalLimit] = useState(
@@ -663,6 +663,9 @@ function AllowanceForm({
         <button className="btn btn-primary btn-sm" onClick={handleSave}>Save</button>
         {allowance && (
           <button className="btn btn-danger btn-sm" onClick={onRemove}>Remove limit</button>
+        )}
+        {onResetUsage && (
+          <button className="btn btn-ghost btn-sm" onClick={onResetUsage}>Reset usage</button>
         )}
         <button className="btn btn-ghost btn-sm" onClick={onCancel}>Cancel</button>
       </div>
