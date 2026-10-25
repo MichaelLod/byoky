@@ -555,8 +555,8 @@ async function chromePromo() {
     const text = textOverlay({
       width: w,
       height: h,
-      headline: name === 'marquee' ? 'The MetaMask\nfor API keys.' : 'Byoky',
-      sub: name === 'marquee' ? 'One wallet for every AI key. Apps connect, keys never leave.' : 'The MetaMask for API keys',
+      headline: name === 'marquee' ? 'One wallet for\nyour AI keys.' : 'Byoky',
+      sub: name === 'marquee' ? 'Apps connect to it. Your keys never leave.' : 'Wallet for your AI API keys',
       align: name === 'marquee' ? 'left' : 'center',
       headlineSize: fontHeadline,
       subSize: fontSub,
@@ -587,14 +587,14 @@ function firstExisting(paths: string[]): string | undefined {
   console.log('\n📐 Composing marketing assets...\n');
 
   // Chrome / Firefox Web Store slides — same 1280×800 spec. Story beats:
-  // MetaMask for API keys → every provider → apps connect, keys never leave →
+  // one wallet for your AI keys → every provider → apps connect, keys never leave →
   // you're in control → Claude-to-GPT routing → no servers, open source.
   // Frames come from capture-extension.spec.ts (raw/popup-frames/).
   // Subs are one unwrapped line: past ~60 characters they clip at the edge.
   const chromeSlides: Slide[] = [
     {
-      headline: 'The MetaMask\nfor API keys.',
-      sub: 'Every AI key in one wallet, encrypted on your device.',
+      headline: 'One wallet for\nyour AI keys.',
+      sub: 'Encrypted on your device. Apps never see them.',
       popupFrame: '09-dashboard-multi-provider.png',
     },
     {
@@ -631,7 +631,7 @@ function firstExisting(paths: string[]): string | undefined {
   // iOS App Store slides (Safari extension lives inside this app). Frames
   // come from ByokyMarketingTests.swift via capture-ios.sh (raw/ios/).
   const iosSlides: Slide[] = [
-    { headline: 'The MetaMask\nfor API keys.', sub: 'Every AI key in one wallet, on your iPhone.', mobileFrame: '02-dashboard.png' },
+    { headline: 'One wallet for\nyour AI keys.', sub: 'Encrypted on your iPhone. Apps never see them.', mobileFrame: '02-dashboard.png' },
     { headline: 'Add any app\nby URL.', sub: 'Web apps run right inside your wallet.', mobileFrame: '05-add-app-form.png' },
     { headline: 'Apps connect.\nKeys never leave.', sub: 'The wallet makes the calls for them.', mobileFrame: '06-app-runtime.png' },
     { headline: 'All your apps,\none tap away.', sub: 'Plus a Safari extension for the web.', mobileFrame: '07-apps-grid.png' },
@@ -645,7 +645,7 @@ function firstExisting(paths: string[]): string | undefined {
   // Android (Google Play) slides. Frames come from capture-android.sh
   // (raw/android/).
   const androidSlides: Slide[] = [
-    { headline: 'The MetaMask\nfor API keys.', sub: 'Every AI key in one wallet, on Android.', mobileFrame: '05-wallet-with-keys.png' },
+    { headline: 'One wallet for\nyour AI keys.', sub: 'Encrypted on your phone. Apps never see them.', mobileFrame: '05-wallet-with-keys.png' },
     { headline: 'One wallet,\nevery provider.', sub: 'Anthropic, OpenAI, Gemini and more.', mobileFrame: '04-add-credential.png' },
     { headline: 'Add any app\nby URL.', sub: 'It opens in the in-wallet browser.', mobileFrame: '07-add-app-form.png' },
     { headline: 'Apps connect.\nKeys never leave.', sub: 'The wallet makes the calls for them.', mobileFrame: '08-app-runtime.png' },
