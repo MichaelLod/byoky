@@ -507,8 +507,13 @@ struct GroupEditorSheet: View {
                     }
                     .accessibilityIdentifier("groupEditor.provider")
                     .onChange(of: providerId) { _, newValue in
-                        // Provider change invalidates any pin.
-                        pinValue = ""
+                        // A pin to another provider's key no longer applies.
+                        // Loading an existing group also lands here (its
+                        // provider replaces the default), and its own pin
+                        // must survive that.
+                        if !wallet.credentials.contains(where: { $0.id == pinValue && $0.providerId == newValue }) {
+                            pinValue = ""
+                        }
                         loadSuggestedModels(for: newValue)
                     }
 

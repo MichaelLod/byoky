@@ -58,11 +58,17 @@ struct RoutingResolver {
         // 3. Direct credential match. When the group also pins a model for
         // this provider, surface it so the proxy rewrites the body — the
         // group is the strongest routing force, stronger than the SDK's
-        // model choice.
+        // model choice. A group bound to this provider with a pinned key
+        // uses exactly that key; a stale pin resolves to nothing rather than
+        // silently spending another key (core's resolveRoute does the same).
+        let override: String? = (group?.providerId == requestedProviderId)
+            ? group?.model?.nilIfEmpty
+            : nil
+        if let group, group.providerId == requestedProviderId, let pinnedId = group.credentialId {
+            guard let pinned = credentials.first(where: { $0.id == pinnedId }) else { return nil }
+            return RoutingDecision(credential: pinned, translation: nil, modelOverride: override)
+        }
         if let cred = credentials.first(where: { $0.providerId == requestedProviderId }) {
-            let override: String? = (group?.providerId == requestedProviderId)
-                ? group?.model?.nilIfEmpty
-                : nil
             return RoutingDecision(credential: cred, translation: nil, modelOverride: override)
         }
 
@@ -304,9 +310,34 @@ struct RoutingResolver {
         return model
     }
 
-    /// Detect whether a JSON request body asked for a streaming response.
-    /// The bridge needs this to pick request vs stream translator paths.
-    static func isStreamingRequest(body: Data?) -> Bool {
+    /// The model a request is for: the body's `model`, or for Gemini, which
+    /// names it in the path (`/v1beta/models/{model}:generateContent`), the
+    /// URL.
+    static func requestedModel(body: Data?, url: String, providerId: String) -> String? {
+        if let model = parseModel(from: body) { return model }
+        guard providerId == "gemini" else { return nil }
+        return geminiModel(fromURL: url)
+    }
+
+    /// `{model}` from a Gemini `…/models/{model}:{action}` URL.
+    static func geminiModel(fromURL url: String) -> String? {
+        guard let path = URLComponents(string: url)?.path else { return nil }
+        let segments = path.split(separator: "/")
+        guard segments.count >= 2, segments[segments.count - 2] == "models",
+              let colon = segments[segments.count - 1].lastIndex(of: ":") else { return nil }
+        let model = segments[segments.count - 1][..<colon]
+        return model.isEmpty ? nil : String(model)
+    }
+
+    /// Detect whether a request asked for a streaming response. The bridge
+    /// needs this to pick request vs stream translator paths. Gemini says so
+    /// in the URL (`:streamGenerateContent`, `?alt=sse`), the other dialects
+    /// with `"stream": true` in the body.
+    static func isStreamingRequest(body: Data?, url: String? = nil) -> Bool {
+        if let url, let path = URLComponents(string: url)?.path,
+           path.hasSuffix(":streamGenerateContent") {
+            return true
+        }
         guard let body,
               let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else {
             return false

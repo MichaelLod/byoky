@@ -72,6 +72,27 @@ final class TranslationEngineTests: XCTestCase {
         }
     }
 
+    /// A TranslationError reaches native code with its code and message,
+    /// not as "invalid result".
+    func testTranslationErrorsKeepTheirCodeAndMessage() {
+        XCTAssertThrowsError(try TranslationEngine.shared.translateRequest(
+            contextJson: anthropicToOpenaiCtx,
+            body: "{ not json"
+        )) { error in
+            guard let error = error as? TranslationEngine.EngineError else {
+                return XCTFail("unexpected error \(error)")
+            }
+            XCTAssertEqual(error.pageCode, "INVALID_JSON")
+            XCTAssertTrue(error.pageMessage.hasPrefix("Anthropic request body is not valid JSON"), error.pageMessage)
+        }
+        // A plain JS error has no code of its own.
+        XCTAssertThrowsError(try TranslationEngine.shared.translateRequest(contextJson: "{ not valid json", body: anthropicReqBody)) { error in
+            XCTAssertEqual((error as? TranslationEngine.EngineError)?.pageCode, "TRANSLATION_FAILED")
+        }
+        // Nothing is left pending for the next call.
+        XCTAssertNoThrow(try TranslationEngine.shared.translateRequest(contextJson: anthropicToOpenaiCtx, body: anthropicReqBody))
+    }
+
     func testSpecialCharactersInBodyHandled() throws {
         let body = """
         {"model":"claude-sonnet-4-5","max_tokens":1,\

@@ -24,47 +24,6 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
             let providers = getAvailableProviders()
             response.userInfo = [SFExtensionMessageKey: ["providers": providers]]
 
-        case "proxy":
-            guard let providerId = messageDict["providerId"] as? String,
-                  let url = messageDict["url"] as? String,
-                  let method = messageDict["method"] as? String else {
-                response.userInfo = [SFExtensionMessageKey: ["error": "missing proxy params"]]
-                context.completeRequest(returningItems: [response])
-                return
-            }
-
-            guard url.hasPrefix("https://") else {
-                response.userInfo = [SFExtensionMessageKey: ["error": "URL must use HTTPS"]]
-                context.completeRequest(returningItems: [response])
-                return
-            }
-
-            let headers = messageDict["headers"] as? [String: String] ?? [:]
-            let bodyString = messageDict["body"] as? String
-
-            handleProxyRequest(
-                providerId: providerId,
-                url: url,
-                method: method,
-                headers: headers,
-                body: bodyString?.data(using: .utf8)
-            ) { result in
-                switch result {
-                case .success(let data):
-                    response.userInfo = [SFExtensionMessageKey: [
-                        "status": "ok",
-                        "data": String(data: data.0, encoding: .utf8) ?? "",
-                        "statusCode": data.1,
-                    ]]
-                case .failure(let error):
-                    response.userInfo = [SFExtensionMessageKey: [
-                        "error": error.localizedDescription,
-                    ]]
-                }
-                context.completeRequest(returningItems: [response])
-            }
-            return
-
         default:
             response.userInfo = [SFExtensionMessageKey: ["error": "unknown action"]]
         }
@@ -88,60 +47,5 @@ class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
     private func getAvailableProviders() -> [String] {
         let defaults = UserDefaults(suiteName: appGroupId)
         return defaults?.stringArray(forKey: "availableProviders") ?? []
-    }
-
-    private func handleProxyRequest(
-        providerId: String,
-        url: String,
-        method: String,
-        headers: [String: String],
-        body: Data?,
-        completion: @escaping (Result<(Data, Int), Error>) -> Void
-    ) {
-        let defaults = UserDefaults(suiteName: appGroupId)
-
-        let requestId = UUID().uuidString
-        let request: [String: Any] = [
-            "id": requestId,
-            "providerId": providerId,
-            "url": url,
-            "method": method,
-            "headers": headers,
-            "body": body?.base64EncodedString() ?? "",
-            "timestamp": Date().timeIntervalSince1970,
-        ]
-
-        defaults?.set(request, forKey: "pendingRequest_\(requestId)")
-
-        let startTime = Date()
-        let timeout: TimeInterval = 30
-
-        func checkResponse() {
-            guard Date().timeIntervalSince(startTime) < timeout else {
-                completion(.failure(NSError(domain: "com.byoky", code: -1, userInfo: [NSLocalizedDescriptionKey: "Request timed out. Make sure the Byoky app is open."])))
-                return
-            }
-
-            if let response = defaults?.dictionary(forKey: "proxyResponse_\(requestId)") {
-                defaults?.removeObject(forKey: "proxyResponse_\(requestId)")
-
-                if let error = response["error"] as? String {
-                    completion(.failure(NSError(domain: "com.byoky", code: -1, userInfo: [NSLocalizedDescriptionKey: error])))
-                } else if let dataString = response["data"] as? String,
-                          let data = dataString.data(using: .utf8),
-                          let statusCode = response["statusCode"] as? Int {
-                    completion(.success((data, statusCode)))
-                } else {
-                    completion(.failure(NSError(domain: "com.byoky", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response"])))
-                }
-                return
-            }
-
-            DispatchQueue.global().asyncAfter(deadline: .now() + 0.1) {
-                checkResponse()
-            }
-        }
-
-        checkResponse()
     }
 }

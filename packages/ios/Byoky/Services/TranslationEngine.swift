@@ -30,12 +30,13 @@ final class TranslationEngine {
 
     /// Errors surfaced to native callers. JS exceptions thrown inside the
     /// bundle (e.g. TranslationError for unrepresentable features) are wrapped
-    /// in `.translationFailed`. Bundle/load failures are `.bundleLoadFailed`.
+    /// in `.translationFailed`, with the TranslationError's code when it has
+    /// one. Bundle/load failures are `.bundleLoadFailed`.
     enum EngineError: LocalizedError {
         case bundleNotFound
         case bundleLoadFailed(String)
         case bridgeNotInitialized
-        case translationFailed(String)
+        case translationFailed(code: String?, message: String)
         case invalidResult
 
         var errorDescription: String? {
@@ -46,11 +47,24 @@ final class TranslationEngine {
                 return "TranslationEngine: failed to evaluate bundle: \(msg)"
             case .bridgeNotInitialized:
                 return "TranslationEngine: BYOKY_TRANSLATE global not exposed by bundle"
-            case .translationFailed(let msg):
-                return "TranslationEngine: \(msg)"
+            case .translationFailed(_, let message):
+                return "TranslationEngine: \(message)"
             case .invalidResult:
                 return "TranslationEngine: bridge returned an invalid result"
             }
+        }
+
+        /// Error code for the page: the TranslationError's own code (e.g.
+        /// `UNSUPPORTED_FEATURE`), or `TRANSLATION_FAILED`.
+        var pageCode: String {
+            if case .translationFailed(let code?, _) = self { return code }
+            return "TRANSLATION_FAILED"
+        }
+
+        /// Error message for the page, without the engine prefix.
+        var pageMessage: String {
+            if case .translationFailed(_, let message) = self { return message }
+            return errorDescription ?? "Translation failed"
         }
     }
 
@@ -93,6 +107,12 @@ final class TranslationEngine {
         ctx.evaluateScript(source)
         if let err = captured {
             throw EngineError.bundleLoadFailed(err)
+        }
+        // From here on keep exceptions on the context, where
+        // `pendingException()` reads them. A custom handler that doesn't
+        // store them hides every JS error behind `.invalidResult`.
+        ctx.exceptionHandler = { context, exception in
+            context?.exception = exception
         }
 
         guard let global = ctx.objectForKeyedSubscript("BYOKY_TRANSLATE"),
@@ -211,11 +231,10 @@ final class TranslationEngine {
         try queue.sync {
             try ensureLoadedLocked()
             guard let bridge = self.bridge else { throw EngineError.bridgeNotInitialized }
-            guard let result = bridge.invokeMethod("createStreamTranslator", withArguments: [contextJson]),
-                  result.isNumber else {
-                throw EngineError.invalidResult
-            }
-            if let err = pendingException() { throw EngineError.translationFailed(err) }
+            context?.exception = nil
+            let result = bridge.invokeMethod("createStreamTranslator", withArguments: [contextJson])
+            if let err = pendingException() { throw err }
+            guard let result, result.isNumber else { throw EngineError.invalidResult }
             return Int(result.toInt32())
         }
     }
@@ -237,6 +256,7 @@ final class TranslationEngine {
         queue.sync {
             try? ensureLoadedLocked()
             bridge?.invokeMethod("releaseStreamTranslator", withArguments: [handle])
+            _ = pendingException()
         }
     }
 
@@ -284,6 +304,26 @@ final class TranslationEngine {
                 try ensureLoadedLocked()
                 guard let bridge = self.bridge else { return false }
                 guard let result = bridge.invokeMethod("sameFamily", withArguments: [srcProviderId, dstProviderId]) else {
+                    return false
+                }
+                if pendingException() != nil { return false }
+                return result.toBool()
+            }
+        } catch {
+            return false
+        }
+    }
+
+    /// True iff `url` is the chat endpoint of `providerId`'s family: the only
+    /// request shape a translation or same-family swap can carry, since both
+    /// rewrite the request onto the destination's chat endpoint. False on
+    /// errors and unknown providers.
+    func isChatEndpoint(providerId: String, url: String) -> Bool {
+        do {
+            return try queue.sync {
+                try ensureLoadedLocked()
+                guard let bridge = self.bridge else { return false }
+                guard let result = bridge.invokeMethod("isChatEndpoint", withArguments: [providerId, url]) else {
                     return false
                 }
                 if pendingException() != nil { return false }
@@ -398,11 +438,10 @@ final class TranslationEngine {
         return try queue.sync {
             try ensureLoadedLocked()
             guard let bridge = self.bridge else { throw EngineError.bridgeNotInitialized }
-            guard let result = bridge.invokeMethod("createClaudeCodeSSERewriter", withArguments: [mapJson]),
-                  result.isNumber else {
-                throw EngineError.invalidResult
-            }
-            if let err = pendingException() { throw EngineError.translationFailed(err) }
+            context?.exception = nil
+            let result = bridge.invokeMethod("createClaudeCodeSSERewriter", withArguments: [mapJson])
+            if let err = pendingException() { throw err }
+            guard let result, result.isNumber else { throw EngineError.invalidResult }
             return Int(result.toInt32())
         }
     }
@@ -423,6 +462,7 @@ final class TranslationEngine {
         queue.sync {
             try? ensureLoadedLocked()
             bridge?.invokeMethod("releaseClaudeCodeSSE", withArguments: [handle])
+            _ = pendingException()
         }
     }
 
@@ -464,13 +504,12 @@ final class TranslationEngine {
         try queue.sync {
             try ensureLoadedLocked()
             guard let bridge = self.bridge else { throw EngineError.bridgeNotInitialized }
-            guard let result = bridge.invokeMethod(method, withArguments: args) else {
-                throw EngineError.invalidResult
-            }
+            context?.exception = nil
+            let result = bridge.invokeMethod(method, withArguments: args)
             if let err = pendingException() {
-                throw EngineError.translationFailed(err)
+                throw err
             }
-            if !result.isString {
+            guard let result, result.isString else {
                 throw EngineError.invalidResult
             }
             return result.toString() ?? ""
@@ -479,13 +518,29 @@ final class TranslationEngine {
 
     /// Pull and clear any pending JS exception captured by the context's
     /// exception handler. Caller holds `queue`.
-    private func pendingException() -> String? {
+    private func pendingException() -> EngineError? {
         guard let ctx = context else { return nil }
-        if let exception = ctx.exception, !exception.isUndefined {
-            ctx.exception = nil
-            return exception.toString()
+        guard let exception = ctx.exception, !exception.isUndefined else { return nil }
+        ctx.exception = nil
+        return Self.engineError(from: exception)
+    }
+
+    /// A thrown JS value as an engine error: a TranslationError's `code`
+    /// (only when it looks like one, so the page gets a fixed vocabulary)
+    /// and its `message`.
+    static func engineError(from exception: JSValue) -> EngineError {
+        var code: String?
+        if let value = exception.objectForKeyedSubscript("code"), value.isString,
+           let string = value.toString(),
+           string.range(of: #"^[A-Z][A-Z0-9_]{0,63}$"#, options: .regularExpression) != nil {
+            code = string
         }
-        return nil
+        var message = exception.toString() ?? "Translation failed"
+        if let value = exception.objectForKeyedSubscript("message"), value.isString,
+           let string = value.toString(), !string.isEmpty {
+            message = string
+        }
+        return .translationFailed(code: code, message: message)
     }
 
     // MARK: - Self-test

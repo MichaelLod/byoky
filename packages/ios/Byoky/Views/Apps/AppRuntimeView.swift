@@ -146,6 +146,15 @@ struct AppWebView: UIViewRepresentable {
 
     func updateUIView(_ uiView: WKWebView, context: Context) {}
 
+    /// The app was closed: its requests stop with it, and the content
+    /// controller lets go of the handler.
+    static func dismantleUIView(_ uiView: WKWebView, coordinator: Coordinator) {
+        coordinator.bridgeHandler?.close()
+        coordinator.bridgeHandler = nil
+        uiView.configuration.userContentController.removeScriptMessageHandler(forName: "byoky")
+        uiView.stopLoading()
+    }
+
     /// JavaScript injected at document_start to bridge the Byoky SDK
     /// protocol to the native wallet via webkit.messageHandlers. Replies come
     /// back through `_deliver(requestId, json)`, called by
@@ -191,7 +200,8 @@ struct AppWebView: UIViewRepresentable {
                     url: data.url || '',
                     method: data.method || '',
                     headers: data.headers || {},
-                    body: data.body || null
+                    body: data.body || null,
+                    bodyEncoding: data.bodyEncoding || null
                 });
             } catch (e) {
                 console.error('[byoky-bridge] native forward failed:', e);

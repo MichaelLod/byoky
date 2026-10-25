@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import WebKit
 
@@ -9,16 +10,41 @@ import WebKit
 final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
     private let wallet: WalletStore
     private let appOrigin: String
+    private let upstream: ProxyURLSession
     private weak var webView: WKWebView?
     private var sessionKey: String?
+    /// Proxied requests still running, by request id. Cancelled when the
+    /// page closes or the wallet locks, so nothing keeps spending a key the
+    /// user put away.
+    private var inFlight: [String: Task<Void, Never>] = [:]
+    private var lockObserver: AnyCancellable?
 
-    init(wallet: WalletStore, appOrigin: String) {
+    init(wallet: WalletStore, appOrigin: String, upstream: ProxyURLSession = .shared) {
         self.wallet = wallet
         self.appOrigin = appOrigin
+        self.upstream = upstream
+        super.init()
+        // `status` is only ever set on the main actor.
+        lockObserver = wallet.$status.sink { [weak self] status in
+            guard status != .unlocked else { return }
+            MainActor.assumeIsolated { self?.cancelRequests() }
+        }
     }
 
     func attach(to webView: WKWebView) {
         self.webView = webView
+    }
+
+    /// The app's page is closing: stop its requests.
+    func close() {
+        cancelRequests()
+        lockObserver = nil
+        sessionKey = nil
+    }
+
+    private func cancelRequests() {
+        for task in inFlight.values { task.cancel() }
+        inFlight.removeAll()
     }
 
     // MARK: - WKScriptMessageHandler
@@ -157,6 +183,17 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             deliverProxyError(requestId: requestId, code: "SESSION_EXPIRED", message: "Invalid or expired session")
             return
         }
+        // A request id still in use gets nothing: replies to both would mix.
+        guard inFlight[requestId] == nil else { return }
+
+        // Apps get inference and model-listing endpoints only: no files,
+        // batches, fine-tunes or account management, which would expose
+        // other apps' stored data or change the account.
+        guard ProxyPolicy.isAllowedRequest(method: method, url: urlString) else {
+            deliverProxyError(requestId: requestId, code: ProxyPolicy.endpointNotAllowedCode,
+                              message: ProxyPolicy.endpointNotAllowedMessage)
+            return
+        }
 
         // For requiresCustomBaseUrl providers (Azure, Ollama, LM Studio) we
         // can't validate the URL against a fixed host — the real host lives
@@ -179,82 +216,123 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             url = validated
         }
 
-        let allowanceCheck = wallet.checkAllowance(origin: appOrigin, providerId: providerId)
-        if !allowanceCheck.allowed {
-            deliverProxyError(requestId: requestId, code: "QUOTA_EXCEEDED",
-                              message: allowanceCheck.reason ?? "Token allowance exceeded")
+        let body: ProxyBody?
+        do {
+            body = try ProxyBody.decode(body: msg["body"] as? String, encoding: msg["bodyEncoding"] as? String)
+        } catch {
+            deliverProxyError(requestId: requestId, code: "INVALID_BODY", message: "The request body couldn't be decoded")
             return
         }
 
+        // Check the allowance and hold this request's expected cost until it
+        // ends, so parallel requests can't all start on what's left.
+        let reservation: TokenReservation
+        switch wallet.reserveTokens(origin: appOrigin, providerId: providerId,
+                                    estimatedTokens: UsageParser.requestEstimate(for: body).total) {
+        case .success(let held):
+            reservation = held
+        case .failure(let exceeded):
+            deliverProxyError(requestId: requestId, code: "QUOTA_EXCEEDED", message: exceeded.reason)
+            return
+        }
+        wallet.noteActivity()
+
         let headers = msg["headers"] as? [String: String] ?? [:]
-        let bodyString = msg["body"] as? String
 
         // Capture wallet state before entering Task
         let group = wallet.groupForOrigin(appOrigin)
         let allCreds = wallet.credentials
 
-        Task {
-            let srcModel = RoutingResolver.parseModel(from: bodyString?.data(using: .utf8))
-            let routing = RoutingResolver.resolve(
-                requestedProviderId: providerId,
-                requestedModel: srcModel,
-                group: group,
-                credentials: allCreds
-            )
-
-            // 1. Cross-family translation
-            if let routing, let translation = routing.translation {
-                await proxyWithTranslation(
-                    requestId: requestId,
-                    originalProviderId: providerId,
-                    translation: translation,
-                    credential: routing.credential,
-                    method: method, headers: headers, bodyString: bodyString
-                )
-                return
-            }
-
-            // 2. Same-family swap
-            if let routing, let swapTo = routing.swapToProviderId {
-                await proxyWithSwap(
-                    requestId: requestId,
-                    originalProviderId: providerId,
-                    swapToProviderId: swapTo,
-                    swapDstModel: routing.swapDstModel,
-                    credential: routing.credential,
-                    method: method, headers: headers, bodyString: bodyString
-                )
-                return
-            }
-
-            // 3. Pass-through
-            guard let credential = routing?.credential else {
-                let uniqueCreds = Array(Set(allCreds.map(\.providerId))).sorted()
-                let message = RoutingResolver.noCredentialMessage(
-                    requestedProviderId: providerId,
-                    userCredentialProviderIds: uniqueCreds,
-                    group: group
-                )
-                self.deliverProxyError(requestId: requestId, code: "NO_CREDENTIAL", message: message)
-                return
-            }
-
-            // The group is the strongest routing force: when it pins a
-            // model for the requested provider, rewrite the body before
-            // forwarding, even though no translation/swap is needed.
-            let forwardedBody: String?
-            if let override = routing?.modelOverride, !override.isEmpty {
-                forwardedBody = rewriteModelInJsonBody(bodyString, to: override)
-            } else {
-                forwardedBody = bodyString
-            }
-
-            await proxyDirect(
+        inFlight[requestId] = Task {
+            let usedTokens = await route(
                 requestId: requestId, providerId: providerId,
                 url: url, urlString: urlString, method: method,
-                headers: headers, bodyString: forwardedBody, credential: credential
+                headers: headers, body: body,
+                group: group, credentials: allCreds
+            )
+            wallet.settleReservation(reservation, usedTokens: usedTokens)
+            wallet.noteActivity()
+            inFlight[requestId] = nil
+        }
+    }
+
+    /// Pick the route (translation, same-family swap or pass-through) and
+    /// send the request. Returns the tokens to count against the app's
+    /// allowance.
+    private func route(
+        requestId: String, providerId: String,
+        url: URL, urlString: String, method: String,
+        headers: [String: String], body: ProxyBody?,
+        group: Group?, credentials allCreds: [Credential]
+    ) async -> Int {
+        let srcModel = RoutingResolver.requestedModel(
+            body: body?.asText.map { Data($0.utf8) }, url: urlString, providerId: providerId
+        )
+        let routing = RoutingResolver.resolve(
+            requestedProviderId: providerId,
+            requestedModel: srcModel,
+            group: group,
+            credentials: allCreds
+        )
+
+        // Routing rewrites the request onto the destination's chat endpoint,
+        // so only chat requests can be translated or swapped. Model lists,
+        // token counting or embeddings would be mangled into billed chat calls.
+        if let routing, let destination = routing.translation?.dstProviderId ?? routing.swapToProviderId,
+           !TranslationEngine.shared.isChatEndpoint(providerId: providerId, url: urlString) {
+            deliverProxyError(requestId: requestId, code: "ROUTING_UNSUPPORTED",
+                              message: "This app is routed to \(destination), and only chat requests can be routed to another provider")
+            return 0
+        }
+
+        // 1. Cross-family translation
+        if let routing, let translation = routing.translation {
+            return await proxyWithTranslation(
+                requestId: requestId,
+                originalProviderId: providerId,
+                translation: translation,
+                credential: routing.credential,
+                method: method, urlString: urlString, headers: headers, body: body
             )
         }
+
+        // 2. Same-family swap
+        if let routing, let swapTo = routing.swapToProviderId {
+            return await proxyWithSwap(
+                requestId: requestId,
+                originalProviderId: providerId,
+                swapToProviderId: swapTo,
+                swapDstModel: routing.swapDstModel,
+                credential: routing.credential,
+                method: method, urlString: urlString, headers: headers, body: body
+            )
+        }
+
+        // 3. Pass-through
+        guard let credential = routing?.credential else {
+            let uniqueCreds = Array(Set(allCreds.map(\.providerId))).sorted()
+            let message = RoutingResolver.noCredentialMessage(
+                requestedProviderId: providerId,
+                userCredentialProviderIds: uniqueCreds,
+                group: group
+            )
+            deliverProxyError(requestId: requestId, code: "NO_CREDENTIAL", message: message)
+            return 0
+        }
+
+        // The group is the strongest routing force: when it pins a
+        // model for the requested provider, rewrite the body before
+        // forwarding, even though no translation/swap is needed.
+        var forwardedBody = body
+        if let override = routing?.modelOverride, !override.isEmpty, let text = body?.asText {
+            forwardedBody = rewriteModelInJsonBody(text, to: override).map(ProxyBody.text)
+        }
+
+        return await proxyDirect(
+            requestId: requestId, providerId: providerId,
+            url: url, urlString: urlString, method: method,
+            headers: headers, body: forwardedBody, credential: credential
+        )
     }
 
     // MARK: - Direct proxy
@@ -262,9 +340,10 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
     private func proxyDirect(
         requestId: String, providerId: String,
         url: URL, urlString: String, method: String,
-        headers: [String: String], bodyString: String?,
+        headers: [String: String], body: ProxyBody?,
         credential: Credential
-    ) async {
+    ) async -> Int {
+        var sent = false
         do {
             // Post-resolve validation for requiresCustomBaseUrl providers.
             // The initial parse in handleProxy was permissive; now we know
@@ -273,12 +352,12 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             if Provider.find(providerId)?.requiresCustomBaseUrl == true {
                 if let message = Provider.missingEndpointMessage(providerId: providerId, credentialBaseUrl: credential.baseUrl) {
                     deliverProxyError(requestId: requestId, code: "ENDPOINT_REQUIRED", message: message)
-                    return
+                    return 0
                 }
                 if Provider.validateUrl(urlString, for: providerId, credentialBaseUrl: credential.baseUrl) == nil {
                     deliverProxyError(requestId: requestId, code: "INVALID_URL",
                                        message: "URL doesn't match credential's registered base URL")
-                    return
+                    return 0
                 }
             }
 
@@ -288,44 +367,59 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             request.httpMethod = method
             request.timeoutInterval = 120
 
-            // Setup tokens only work for Claude-Code-shaped requests.
-            var forwardedBody = bodyString
+            // Setup tokens only work for Claude-Code-shaped requests. Binary
+            // and form bodies are forwarded as they are.
+            var outboundBody = body
             var toolNameMap: [String: String] = [:]
-            if ClaudeCodeShaping.applies(providerId: providerId, authMethod: credential.authMethod) {
-                (forwardedBody, toolNameMap) = ClaudeCodeShaping.shape(body: bodyString)
+            if let text = body?.asText {
+                var shaped: String? = text
+                if ClaudeCodeShaping.applies(providerId: providerId, authMethod: credential.authMethod) {
+                    (shaped, toolNameMap) = ClaudeCodeShaping.shape(body: text)
+                }
+                outboundBody = injectStreamUsageOptions(providerId: providerId, body: shaped).map(ProxyBody.text)
             }
+            request.httpBody = outboundBody?.data
 
-            let finalBody = injectStreamUsageOptions(providerId: providerId, body: forwardedBody)
-            if let finalBody { request.httpBody = finalBody.data(using: .utf8) }
-
-            for (key, value) in headers {
-                let lower = key.lowercased()
-                if lower == "host" || lower == "authorization" || lower == "x-api-key" { continue }
-                request.setValue(value, forHTTPHeaderField: key)
-            }
+            applyForwardedHeaders(headers, to: &request, body: outboundBody)
             Credential.applyAuth(to: &request, providerId: providerId, authMethod: credential.authMethod, apiKey: apiKey)
 
-            let (bytes, response) = try await URLSession.shared.bytes(for: request)
+            sent = true
+            let (bytes, response) = try await upstream.bytes(for: request)
             guard let httpResponse = response as? HTTPURLResponse else {
                 deliverProxyError(requestId: requestId, code: "INVALID_RESPONSE", message: "Invalid response")
-                return
+                return 0
             }
 
             // Give the app back its own tool names.
             let toolNameRewriter = (200..<300).contains(httpResponse.statusCode)
                 ? ClaudeCodeResponseRewriter(toolNameMap: toolNameMap, streaming: isEventStream(httpResponse))
                 : nil
-            await streamResponse(requestId: requestId, httpResponse: httpResponse, bytes: bytes, rewriter: toolNameRewriter)
+            var meter = UsageMeter(providerId: providerId)
+            await streamResponse(requestId: requestId, httpResponse: httpResponse, bytes: bytes,
+                                 rewriter: toolNameRewriter, meter: &meter)
 
+            meter.finish()
+            let usage = UsageParser.settledUsage(
+                statusCode: httpResponse.statusCode, meter: meter,
+                shouldEstimate: ProxyPolicy.shouldEstimateUsage(
+                    upstreamProviderId: providerId, appUrl: urlString, contentType: contentType(httpResponse)
+                ),
+                requestBytes: body?.data.count ?? 0
+            )
             wallet.logRequest(
                 appOrigin: appOrigin, providerId: providerId,
                 method: method, url: urlString,
                 statusCode: httpResponse.statusCode,
-                requestBody: bodyString?.data(using: .utf8),
-                responseBody: nil
+                requestBody: body?.asText.map { Data($0.utf8) },
+                usage: usage
             )
+            return usage?.total ?? 0
         } catch {
-            deliverProxyError(requestId: requestId, code: "PROXY_ERROR", message: error.localizedDescription)
+            if sent && Task.isCancelled {
+                return chargeCancelledRequest(providerId: providerId, method: method, url: urlString, body: body)
+            }
+            deliverFailure(requestId: requestId, error: error)
+            return 0
         }
     }
 
@@ -334,10 +428,25 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
     private func proxyWithTranslation(
         requestId: String, originalProviderId: String,
         translation: RoutingTranslation, credential: Credential,
-        method: String, headers: [String: String], bodyString: String?
-    ) async {
+        method: String, urlString sourceUrl: String, headers: [String: String], body: ProxyBody?
+    ) async -> Int {
+        // Translation works on JSON; binary and form bodies can't be translated.
+        if let body, body.asText == nil {
+            deliverProxyError(requestId: requestId, code: "TRANSLATION_NOT_SUPPORTED",
+                              message: "Cross-family routing does not support binary request bodies.")
+            return 0
+        }
+        let bodyString = body?.asText
         let engine = TranslationEngine.shared
-        let isStreaming = RoutingResolver.isStreamingRequest(body: bodyString?.data(using: .utf8))
+        // Gemini asks for a stream in the URL; the context tells the
+        // translator to request one from the destination.
+        let isStreaming = RoutingResolver.isStreamingRequest(body: bodyString?.data(using: .utf8), url: sourceUrl)
+        // Usage is read from the upstream (destination-dialect) bytes. Kept
+        // outside `do` so a response cut off midway still counts.
+        var meter = UsageMeter(providerId: translation.dstProviderId)
+        var upstreamResponse: HTTPURLResponse?
+        var destinationUrl: String?
+        var sent = false
 
         do {
             let ctxJson = try engine.buildTranslationContext(
@@ -352,7 +461,7 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
 
             if let message = Provider.missingEndpointMessage(providerId: translation.dstProviderId, credentialBaseUrl: credential.baseUrl) {
                 deliverProxyError(requestId: requestId, code: "ENDPOINT_REQUIRED", message: message)
-                return
+                return 0
             }
             guard let urlString = engine.rewriteProxyUrl(
                 dstProviderId: translation.dstProviderId,
@@ -361,13 +470,14 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
                 overrideBaseUrl: Provider.baseUrlOverride(for: translation.dstProviderId, credentialBaseUrl: credential.baseUrl)
             ) else {
                 deliverProxyError(requestId: requestId, code: "TRANSLATION_FAILED", message: "rewriteProxyUrl returned null")
-                return
+                return 0
             }
             // Check the destination before any key is attached.
             guard let url = Provider.validateUrl(urlString, for: translation.dstProviderId, credentialBaseUrl: credential.baseUrl) else {
                 deliverProxyError(requestId: requestId, code: "INVALID_URL", message: "Destination URL doesn't match the provider")
-                return
+                return 0
             }
+            destinationUrl = urlString
 
             let dstApiKey = try wallet.decryptKey(for: credential)
 
@@ -387,24 +497,26 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             let injected = injectStreamUsageOptions(providerId: translation.dstProviderId, body: outboundBody) ?? outboundBody
             request.httpBody = injected.data(using: .utf8)
 
-            for (key, value) in headers {
-                let lower = key.lowercased()
-                if ["host", "authorization", "x-api-key", "anthropic-version", "content-length"].contains(lower) { continue }
-                request.setValue(value, forHTTPHeaderField: key)
-            }
+            // The app's anthropic-version belongs to the source dialect.
+            applyForwardedHeaders(headers, to: &request, excluding: ["anthropic-version"])
             Credential.applyAuth(to: &request, providerId: translation.dstProviderId, authMethod: credential.authMethod, apiKey: dstApiKey)
 
-            let (bytes, response) = try await URLSession.shared.bytes(for: request)
+            sent = true
+            let (bytes, response) = try await upstream.bytes(for: request)
             guard let httpResponse = response as? HTTPURLResponse else {
                 deliverProxyError(requestId: requestId, code: "INVALID_RESPONSE", message: "Invalid response")
-                return
+                return 0
             }
+            upstreamResponse = httpResponse
 
             deliverResponseHeaders(requestId: requestId, httpResponse: httpResponse)
 
+            // The reply's Content-Type, not the request, decides how it's
+            // translated: a destination may answer a stream request with
+            // plain JSON, which the stream translator would swallow.
             if !(200..<300).contains(httpResponse.statusCode) {
-                await streamRawBytes(requestId: requestId, bytes: bytes)
-            } else if isStreaming {
+                await streamRawBytes(requestId: requestId, bytes: bytes, meter: &meter)
+            } else if isEventStream(httpResponse) {
                 // Undo tool renames on the Anthropic stream first, then
                 // translate it back to the app's dialect.
                 let toolNameRewriter = ClaudeCodeResponseRewriter(toolNameMap: toolNameMap, streaming: true)
@@ -424,10 +536,13 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
                 for try await byte in bytes {
                     buffer.append(byte)
                     if buffer.count >= 4096 || byte == 0x0A {
+                        meter.consume(buffer)
                         try rewriteAndTranslate(decoder.decode(buffer))
                         buffer.removeAll(keepingCapacity: true)
                     }
                 }
+                meter.consume(buffer)
+                meter.markComplete()
                 try rewriteAndTranslate(decoder.decode(buffer))
                 try rewriteAndTranslate(decoder.finish())
                 if let tail = toolNameRewriter?.finish() {
@@ -437,8 +552,21 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
                 releasedExplicitly = true
                 deliverChunk(requestId, trailing)
             } else {
+                // Metered as it downloads, so a reply cut off midway still
+                // counts what arrived.
                 var accumulated = Data()
-                for try await byte in bytes { accumulated.append(byte) }
+                var chunk = Data()
+                for try await byte in bytes {
+                    chunk.append(byte)
+                    if chunk.count >= 65_536 {
+                        meter.consume(chunk)
+                        accumulated.append(chunk)
+                        chunk.removeAll(keepingCapacity: true)
+                    }
+                }
+                meter.consume(chunk)
+                accumulated.append(chunk)
+                meter.markComplete()
                 var upstreamBody = String(decoding: accumulated, as: UTF8.self)
                 if let toolNameRewriter = ClaudeCodeResponseRewriter(toolNameMap: toolNameMap, streaming: false) {
                     _ = toolNameRewriter.process(upstreamBody)
@@ -454,19 +582,40 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             deliver(requestId: requestId, message: [
                 "type": "BYOKY_PROXY_RESPONSE_DONE", "requestId": requestId,
             ])
-
-            wallet.logRequest(
-                appOrigin: appOrigin, providerId: originalProviderId,
-                method: method, url: urlString,
-                statusCode: httpResponse.statusCode,
-                requestBody: bodyString?.data(using: .utf8), responseBody: nil,
-                actualProviderId: translation.dstProviderId,
-                actualModel: translation.dstModel,
-                groupId: wallet.groupForOrigin(appOrigin)?.id
-            )
+        } catch let error as TranslationEngine.EngineError {
+            deliverProxyError(requestId: requestId, code: error.pageCode, message: error.pageMessage)
         } catch {
-            deliverProxyError(requestId: requestId, code: "TRANSLATION_FAILED", message: error.localizedDescription)
+            deliverFailure(requestId: requestId, error: error)
         }
+
+        guard let httpResponse = upstreamResponse else {
+            // Cancelled after the request went out, before any response.
+            guard sent && Task.isCancelled else { return 0 }
+            return chargeCancelledRequest(
+                providerId: originalProviderId, method: method, url: destinationUrl ?? sourceUrl, body: body,
+                actualProviderId: translation.dstProviderId, actualModel: translation.dstModel
+            )
+        }
+        // Counted even when the stream was cut off or a later step failed:
+        // the provider billed it either way.
+        meter.finish()
+        let usage = UsageParser.settledUsage(
+            statusCode: httpResponse.statusCode, meter: meter,
+            shouldEstimate: ProxyPolicy.shouldEstimateUsage(
+                upstreamProviderId: translation.dstProviderId, appUrl: sourceUrl, contentType: contentType(httpResponse)
+            ),
+            requestBytes: body?.data.count ?? 0
+        )
+        wallet.logRequest(
+            appOrigin: appOrigin, providerId: originalProviderId,
+            method: method, url: destinationUrl ?? sourceUrl,
+            statusCode: httpResponse.statusCode,
+            requestBody: bodyString?.data(using: .utf8), usage: usage,
+            actualProviderId: translation.dstProviderId,
+            actualModel: translation.dstModel,
+            groupId: wallet.groupForOrigin(appOrigin)?.id
+        )
+        return usage?.total ?? 0
     }
 
     // MARK: - Same-family swap proxy
@@ -475,17 +624,19 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
         requestId: String, originalProviderId: String,
         swapToProviderId: String, swapDstModel: String?,
         credential: Credential,
-        method: String, headers: [String: String], bodyString: String?
-    ) async {
+        method: String, urlString sourceUrl: String, headers: [String: String], body: ProxyBody?
+    ) async -> Int {
         let engine = TranslationEngine.shared
-        let bodyData = bodyString?.data(using: .utf8)
-        let isStreaming = RoutingResolver.isStreamingRequest(body: bodyData)
-        let modelForUrl = swapDstModel ?? RoutingResolver.parseModel(from: bodyData) ?? ""
+        let bodyData = body?.asText.map { Data($0.utf8) }
+        let isStreaming = RoutingResolver.isStreamingRequest(body: bodyData, url: sourceUrl)
+        let modelForUrl = swapDstModel ?? RoutingResolver.requestedModel(body: bodyData, url: sourceUrl, providerId: originalProviderId) ?? ""
+        var sent = false
+        var destinationUrl: String?
 
         do {
             if let message = Provider.missingEndpointMessage(providerId: swapToProviderId, credentialBaseUrl: credential.baseUrl) {
                 deliverProxyError(requestId: requestId, code: "ENDPOINT_REQUIRED", message: message)
-                return
+                return 0
             }
             guard let rewrittenUrlString = engine.rewriteProxyUrl(
                 dstProviderId: swapToProviderId, model: modelForUrl, stream: isStreaming,
@@ -493,53 +644,110 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             ) else {
                 deliverProxyError(requestId: requestId, code: "SWAP_FAILED",
                                   message: "rewriteProxyUrl returned null for \(swapToProviderId)")
-                return
+                return 0
             }
             // Check the destination before any key is attached.
             guard let url = Provider.validateUrl(rewrittenUrlString, for: swapToProviderId, credentialBaseUrl: credential.baseUrl) else {
                 deliverProxyError(requestId: requestId, code: "INVALID_URL", message: "Destination URL doesn't match the provider")
-                return
+                return 0
             }
+            destinationUrl = rewrittenUrlString
 
-            var forwardedBody = bodyString
-            if let dstModel = swapDstModel, !dstModel.isEmpty {
-                forwardedBody = rewriteModelInJsonBody(forwardedBody, to: dstModel)
+            // Only JSON bodies are touched (model pin, stream usage); binary
+            // and form bodies pass through unchanged.
+            var outboundBody = body
+            if let text = body?.asText {
+                var forwarded: String? = text
+                if let dstModel = swapDstModel, !dstModel.isEmpty {
+                    forwarded = rewriteModelInJsonBody(forwarded, to: dstModel)
+                }
+                outboundBody = injectStreamUsageOptions(providerId: swapToProviderId, body: forwarded).map(ProxyBody.text)
             }
-            let injectedBody = injectStreamUsageOptions(providerId: swapToProviderId, body: forwardedBody) ?? forwardedBody
 
             let dstApiKey = try wallet.decryptKey(for: credential)
 
             var request = URLRequest(url: url)
             request.httpMethod = method
             request.timeoutInterval = 120
-            if let injectedBody { request.httpBody = injectedBody.data(using: .utf8) }
+            request.httpBody = outboundBody?.data
 
-            for (key, value) in headers {
-                let lower = key.lowercased()
-                if ["host", "authorization", "x-api-key", "anthropic-version", "content-length"].contains(lower) { continue }
-                request.setValue(value, forHTTPHeaderField: key)
-            }
+            applyForwardedHeaders(headers, to: &request, body: outboundBody, excluding: ["anthropic-version"])
             Credential.applyAuth(to: &request, providerId: swapToProviderId, authMethod: credential.authMethod, apiKey: dstApiKey)
 
-            let (bytes, response) = try await URLSession.shared.bytes(for: request)
+            sent = true
+            let (bytes, response) = try await upstream.bytes(for: request)
             guard let httpResponse = response as? HTTPURLResponse else {
                 deliverProxyError(requestId: requestId, code: "INVALID_RESPONSE", message: "Invalid response")
-                return
+                return 0
             }
 
-            await streamResponse(requestId: requestId, httpResponse: httpResponse, bytes: bytes)
+            var meter = UsageMeter(providerId: swapToProviderId)
+            await streamResponse(requestId: requestId, httpResponse: httpResponse, bytes: bytes, meter: &meter)
 
+            meter.finish()
+            let usage = UsageParser.settledUsage(
+                statusCode: httpResponse.statusCode, meter: meter,
+                shouldEstimate: ProxyPolicy.shouldEstimateUsage(
+                    upstreamProviderId: swapToProviderId, appUrl: sourceUrl, contentType: contentType(httpResponse)
+                ),
+                requestBytes: body?.data.count ?? 0
+            )
             wallet.logRequest(
                 appOrigin: appOrigin, providerId: originalProviderId,
                 method: method, url: rewrittenUrlString,
                 statusCode: httpResponse.statusCode,
-                requestBody: bodyData, responseBody: nil,
+                requestBody: bodyData, usage: usage,
                 actualProviderId: swapToProviderId,
                 actualModel: swapDstModel,
                 groupId: wallet.groupForOrigin(appOrigin)?.id
             )
+            return usage?.total ?? 0
         } catch {
-            deliverProxyError(requestId: requestId, code: "PROXY_ERROR", message: error.localizedDescription)
+            if sent && Task.isCancelled {
+                return chargeCancelledRequest(
+                    providerId: originalProviderId, method: method, url: destinationUrl ?? sourceUrl, body: body,
+                    actualProviderId: swapToProviderId, actualModel: swapDstModel
+                )
+            }
+            deliverFailure(requestId: requestId, error: error)
+            return 0
+        }
+    }
+
+    /// The page closed or the wallet locked after the request went out but
+    /// before any response arrived. The provider bills it anyway, so charge
+    /// the request's estimate (prompt and output limit) and log it as 499,
+    /// as the extension does. Returns the tokens to count.
+    private func chargeCancelledRequest(
+        providerId: String, method: String, url: String, body: ProxyBody?,
+        actualProviderId: String? = nil, actualModel: String? = nil
+    ) -> Int {
+        let usage = UsageParser.requestEstimate(for: body)
+        wallet.logRequest(
+            appOrigin: appOrigin, providerId: providerId,
+            method: method, url: url,
+            statusCode: 499,
+            requestBody: body?.asText.map { Data($0.utf8) }, usage: usage,
+            actualProviderId: actualProviderId,
+            actualModel: actualModel,
+            groupId: actualProviderId == nil ? nil : wallet.groupForOrigin(appOrigin)?.id
+        )
+        return usage.total
+    }
+
+    /// The app's allowed headers (see `ProxyPolicy.forwardedHeaders`), and a
+    /// form body's own Content-Type with its boundary.
+    private func applyForwardedHeaders(
+        _ headers: [String: String],
+        to request: inout URLRequest,
+        body: ProxyBody? = nil,
+        excluding: Set<String> = []
+    ) {
+        for (name, value) in ProxyPolicy.forwardedHeaders(headers, excluding: excluding) {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
+        if let contentType = body?.contentTypeOverride {
+            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }
     }
 
@@ -570,17 +778,22 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
         requestId: String,
         httpResponse: HTTPURLResponse,
         bytes: URLSession.AsyncBytes,
-        rewriter: ClaudeCodeResponseRewriter? = nil
+        rewriter: ClaudeCodeResponseRewriter? = nil,
+        meter: inout UsageMeter
     ) async {
         deliverResponseHeaders(requestId: requestId, httpResponse: httpResponse)
-        await streamRawBytes(requestId: requestId, bytes: bytes, rewriter: rewriter)
+        await streamRawBytes(requestId: requestId, bytes: bytes, rewriter: rewriter, meter: &meter)
         deliver(requestId: requestId, message: [
             "type": "BYOKY_PROXY_RESPONSE_DONE", "requestId": requestId,
         ])
     }
 
+    private func contentType(_ httpResponse: HTTPURLResponse) -> String {
+        httpResponse.value(forHTTPHeaderField: "Content-Type") ?? ""
+    }
+
     private func isEventStream(_ httpResponse: HTTPURLResponse) -> Bool {
-        (httpResponse.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased().contains("text/event-stream")
+        contentType(httpResponse).lowercased().contains("text/event-stream")
     }
 
     private func deliverChunk(_ requestId: String, _ chunk: String) {
@@ -606,10 +819,13 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
         ])
     }
 
+    /// Forward the body to the page as it arrives, feeding `meter` the
+    /// upstream bytes on the way.
     private func streamRawBytes(
         requestId: String,
         bytes: URLSession.AsyncBytes,
-        rewriter: ClaudeCodeResponseRewriter? = nil
+        rewriter: ClaudeCodeResponseRewriter? = nil,
+        meter: inout UsageMeter
     ) async {
         var buffer = Data()
         // Reads are cut at 4 KB or a newline; the decoder carries a split
@@ -623,11 +839,14 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             for try await byte in bytes {
                 buffer.append(byte)
                 if buffer.count >= 4096 || byte == 0x0A {
+                    meter.consume(buffer)
                     emit(decoder.decode(buffer))
                     buffer.removeAll(keepingCapacity: true)
                 }
             }
+            meter.markComplete()
         } catch {}
+        meter.consume(buffer)
         emit(decoder.decode(buffer))
         emit(decoder.finish())
         if let tail = rewriter?.finish() {
@@ -657,10 +876,18 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
         return String(data: data, encoding: .utf8)
     }
 
+    /// A request that threw. Nothing is sent once the request was cancelled
+    /// (page closed, wallet locked).
+    private func deliverFailure(requestId: String, error: Error) {
+        guard !Task.isCancelled else { return }
+        deliverProxyError(requestId: requestId, code: "PROXY_ERROR", message: error.localizedDescription)
+    }
+
     private func deliverProxyError(requestId: String, code: String, message: String) {
         let status: Int = switch code {
         case "SESSION_EXPIRED": 401
-        case "NO_CREDENTIAL", "INVALID_URL", "ENDPOINT_REQUIRED": 403
+        case "NO_CREDENTIAL", "INVALID_URL", "ENDPOINT_REQUIRED", ProxyPolicy.endpointNotAllowedCode: 403
+        case "INVALID_BODY", "TRANSLATION_NOT_SUPPORTED", "ROUTING_UNSUPPORTED": 400
         case "QUOTA_EXCEEDED": 429
         default: 500
         }
@@ -697,7 +924,7 @@ private let sensitiveResponseHeaders: Set<String> = [
 
 /// Providers that need `stream_options.include_usage` injected for streaming.
 private let streamUsageProviders: Set<String> = [
-    "openai", "azure-openai", "together", "deepseek",
+    "openai", "azure_openai", "together", "deepseek",
 ]
 
 /// Inject `stream_options.include_usage` into a streaming request body for

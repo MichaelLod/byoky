@@ -103,26 +103,63 @@ struct AllowanceCheck {
     let allowed: Bool
     let reason: String?
 
-    static func compute(allowance: TokenAllowance?, entries: [RequestLog], providerId: String) -> AllowanceCheck {
+    /// `totalUsed` and `providerUsed` include tokens held by requests still
+    /// in flight. Mirrors `computeAllowanceCheck` in core proxy-utils.ts.
+    static func compute(allowance: TokenAllowance?, totalUsed: Int, providerUsed: Int, providerId: String) -> AllowanceCheck {
         guard let allowance else { return AllowanceCheck(allowed: true, reason: nil) }
-
-        var totalUsed = 0
-        var byProvider: [String: Int] = [:]
-        for entry in entries {
-            let tokens = (entry.inputTokens ?? 0) + (entry.outputTokens ?? 0)
-            totalUsed += tokens
-            byProvider[entry.providerId, default: 0] += tokens
-        }
 
         if let totalLimit = allowance.totalLimit, totalUsed >= totalLimit {
             return AllowanceCheck(allowed: false, reason: "Token allowance exceeded for \(allowance.origin)")
         }
 
-        if let providerLimit = allowance.providerLimits?[providerId],
-           (byProvider[providerId] ?? 0) >= providerLimit {
+        if let providerLimit = allowance.providerLimits?[providerId], providerUsed >= providerLimit {
             return AllowanceCheck(allowed: false, reason: "Token allowance for \(providerId) exceeded")
         }
 
         return AllowanceCheck(allowed: true, reason: nil)
     }
+}
+
+/// Tokens each app has used, per provider, counted against its allowance.
+/// Unlike the request log, which keeps only the latest 500 entries, it never
+/// drops anything, so an app can't outrun its limit by sheer request count.
+struct TokenUsageLedger: Codable, Equatable {
+    /// origin → providerId → tokens
+    private(set) var tokens: [String: [String: Int]] = [:]
+
+    func total(origin: String) -> Int {
+        tokens[origin]?.values.reduce(0, +) ?? 0
+    }
+
+    func used(origin: String, providerId: String) -> Int {
+        tokens[origin]?[providerId] ?? 0
+    }
+
+    mutating func add(_ count: Int, origin: String, providerId: String) {
+        guard count > 0 else { return }
+        tokens[origin, default: [:]][providerId, default: 0] += count
+    }
+
+    /// Usage recorded before the ledger existed: the successful requests
+    /// still in the log.
+    static func seeded(from logs: [RequestLog]) -> TokenUsageLedger {
+        var ledger = TokenUsageLedger()
+        for entry in logs where entry.statusCode < 400 {
+            ledger.add((entry.inputTokens ?? 0) + (entry.outputTokens ?? 0), origin: entry.appOrigin, providerId: entry.providerId)
+        }
+        return ledger
+    }
+}
+
+/// Tokens held against an app's allowance while one of its requests runs.
+/// Settled with the real count when the request ends.
+struct TokenReservation: Hashable {
+    let id = UUID()
+    let origin: String
+    let providerId: String
+    let tokens: Int
+}
+
+struct AllowanceExceeded: Error {
+    let reason: String
 }

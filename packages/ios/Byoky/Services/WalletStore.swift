@@ -6,11 +6,20 @@ import Foundation
 final class WalletStore: ObservableObject {
     static let shared = WalletStore()
 
-    @Published var status: WalletStatus = .uninitialized
+    @Published var status: WalletStatus = .uninitialized {
+        // The idle timer runs exactly while the wallet is unlocked, whatever
+        // path unlocked it (and even if a later step of unlocking threw).
+        didSet {
+            guard status != oldValue else { return }
+            if status == .unlocked { startIdleTimer() } else { stopIdleTimer() }
+        }
+    }
     @Published var credentials: [Credential] = []
     @Published var sessions: [Session] = []
     @Published var requestLogs: [RequestLog] = []
     @Published var tokenAllowances: [TokenAllowance] = []
+    /// Tokens each app has used, for allowances (see `TokenUsageLedger`).
+    @Published private(set) var tokenLedger = TokenUsageLedger()
     @Published var groups: [Group] = []
     @Published var appGroups: AppGroups = [:]
     @Published var lockoutEndTime: Date?
@@ -35,21 +44,45 @@ final class WalletStore: ObservableObject {
     private let groupsKey = "groups"
     private let appGroupsKey = "appGroups"
     private let installedAppsKey = "installedApps"
+    private let tokenLedgerKey = "tokenUsage"
+    private let unlockLockoutKey = "unlockLockout"
 
     private let appConsent = AppConsentStore()
 
+    /// Idle time after which the wallet locks, in the foreground or not.
     private let autoLockTimeout: TimeInterval = 900
     private var backgroundTime: Date?
+    private var lastActivity = Date()
+    private var idleLockTask: Task<Void, Never>?
 
-    private var failedAttempts: Int {
-        get { UserDefaults.standard.integer(forKey: "byoky_failedUnlockAttempts") }
-        set { UserDefaults.standard.set(newValue, forKey: "byoky_failedUnlockAttempts") }
+    /// Requests in flight and the tokens each one holds.
+    private var reservations: [UUID: TokenReservation] = [:]
+
+    /// Failed unlock attempts and the lockout they caused. Kept in the
+    /// keychain (this device only, never synced) next to the password hash:
+    /// UserDefaults would be wiped by a reinstall while the hash survives,
+    /// handing an attacker a fresh set of attempts.
+    private struct UnlockLockout: Codable {
+        var failedAttempts = 0
+        var lockedUntil: Date?
+
+        func merged(with other: UnlockLockout) -> UnlockLockout {
+            UnlockLockout(
+                failedAttempts: max(failedAttempts, other.failedAttempts),
+                lockedUntil: [lockedUntil, other.lockedUntil].compactMap { $0 }.max()
+            )
+        }
     }
+    /// In-memory copy, so attempts still count if a keychain read fails.
+    private var unlockLockout = UnlockLockout()
+    private static let legacyFailedAttemptsKey = "byoky_failedUnlockAttempts"
+    private static let legacyLockoutEndKey = "byoky_lockoutEndTime"
 
     private init() {
         // Drop data left behind by the retired cloud vault, gift and relay
         // pairing features before anything else reads the keychain.
         LegacyDataCleanup.runIfNeeded()
+        AppGroupSync.shared.removeRetiredProxyQueue()
         showRetiredFeaturesNotice = LegacyDataCleanup.shouldShowRetiredNotice()
         checkInitialized()
         restoreLockoutState()
@@ -68,13 +101,9 @@ final class WalletStore: ObservableObject {
     }
 
     private func restoreLockoutState() {
-        let ts = UserDefaults.standard.double(forKey: "byoky_lockoutEndTime")
-        guard ts > 0 else { return }
-        let endTime = Date(timeIntervalSince1970: ts)
-        if Date() < endTime {
-            lockoutEndTime = endTime
-        } else {
-            UserDefaults.standard.set(0.0, forKey: "byoky_lockoutEndTime")
+        migrateLegacyLockout()
+        if let until = currentLockout().lockedUntil, Date() < until {
+            lockoutEndTime = until
         }
     }
 
@@ -98,13 +127,28 @@ final class WalletStore: ObservableObject {
             throw WalletError.passwordHashFailed
         }
         masterKey = key
+        resetFailedAttempts()
+
+        // A new wallet starts empty, with the default group an unlock would
+        // ensure. Without it, apps that connect right after setup don't show
+        // in Connected Apps.
+        credentials = []
+        sessions = []
+        requestLogs = []
+        tokenAllowances = []
+        tokenLedger = TokenUsageLedger()
+        saveTokenLedger()
+        groups = []
+        appGroups = [:]
         status = .unlocked
+        try? ensureDefaultGroup()
 
         AppGroupSync.shared.syncWalletState(isUnlocked: true, providers: [])
     }
 
     func unlock(password: String) throws {
-        if let endTime = lockoutEndTime, Date() < endTime {
+        if let endTime = currentLockout().lockedUntil, Date() < endTime {
+            lockoutEndTime = endTime
             throw WalletError.lockedOut(max(1, Int(endTime.timeIntervalSinceNow)))
         }
 
@@ -137,12 +181,14 @@ final class WalletStore: ObservableObject {
         try loadSessions()
         loadRequestLogs()
         loadTokenAllowances()
+        loadTokenLedger()
         loadGroups()
         loadAppGroups()
         // lock() clears the in-memory list, so reload it on every unlock —
         // otherwise the Apps tab stays empty until the next cold start.
         loadInstalledApps()
         try ensureDefaultGroup()
+        try? clearStaleCredentialPins()
         try migrateCredentials(password: password)
 
         AppGroupSync.shared.syncWalletState(
@@ -157,9 +203,12 @@ final class WalletStore: ObservableObject {
         sessions = []
         requestLogs = []
         tokenAllowances = []
+        tokenLedger = TokenUsageLedger()
+        reservations = [:]
         groups = []
         appGroups = [:]
         installedApps = []
+        // Observers (the in-wallet browser) cancel their requests here.
         status = .locked
         backgroundTime = nil
         AppGroupSync.shared.syncWalletState(isUnlocked: false, providers: [])
@@ -188,6 +237,7 @@ final class WalletStore: ObservableObject {
         try? keychain.delete(key: sessionsKey)
         try? keychain.delete(key: requestLogKey)
         try? keychain.delete(key: tokenAllowancesKey)
+        try? keychain.delete(key: tokenLedgerKey)
         try? keychain.delete(key: groupsKey)
         try? keychain.delete(key: appGroupsKey)
         // A full reset also removes anything the retired features left behind,
@@ -200,6 +250,8 @@ final class WalletStore: ObservableObject {
         sessions = []
         requestLogs = []
         tokenAllowances = []
+        tokenLedger = TokenUsageLedger()
+        reservations = [:]
         groups = []
         appGroups = [:]
         installedApps = []
@@ -207,9 +259,7 @@ final class WalletStore: ObservableObject {
         appConsent.clear()
 
         // Reset brute-force state
-        failedAttempts = 0
-        lockoutEndTime = nil
-        UserDefaults.standard.set(0.0, forKey: "byoky_lockoutEndTime")
+        resetFailedAttempts()
 
         AppGroupSync.shared.syncWalletState(isUnlocked: false, providers: [])
         status = .uninitialized
@@ -283,7 +333,8 @@ final class WalletStore: ObservableObject {
         progress: @escaping @Sendable (Double) -> Void = { _ in }
     ) async throws -> String {
         guard masterKey != nil else { throw WalletError.locked }
-        if let endTime = lockoutEndTime, Date() < endTime {
+        if let endTime = currentLockout().lockedUntil, Date() < endTime {
+            lockoutEndTime = endTime
             throw WalletError.lockedOut(max(1, Int(endTime.timeIntervalSinceNow)))
         }
         let storedHash = try keychain.loadString(key: passwordHashKey)
@@ -448,19 +499,57 @@ final class WalletStore: ObservableObject {
 
     // MARK: - Brute-Force Protection
 
-    private func handleFailedAttempt() {
-        failedAttempts += 1
-        if let duration = lockoutDuration(for: failedAttempts) {
-            let endTime = Date().addingTimeInterval(duration)
-            lockoutEndTime = endTime
-            UserDefaults.standard.set(endTime.timeIntervalSince1970, forKey: "byoky_lockoutEndTime")
+    /// The stored lockout state, merged with the in-memory copy (whichever
+    /// counts more wins, so neither a failed read nor a stale copy can lower
+    /// the count).
+    private func currentLockout() -> UnlockLockout {
+        if let stored = try? keychain.loadCodable(key: unlockLockoutKey, as: UnlockLockout.self) {
+            unlockLockout = unlockLockout.merged(with: stored)
         }
+        return unlockLockout
+    }
+
+    private func saveLockout(_ lockout: UnlockLockout) {
+        unlockLockout = lockout
+        try? keychain.saveCodable(key: unlockLockoutKey, value: lockout)
+    }
+
+    private func handleFailedAttempt() {
+        var lockout = currentLockout()
+        lockout.failedAttempts += 1
+        if let duration = lockoutDuration(for: lockout.failedAttempts) {
+            lockout.lockedUntil = Date().addingTimeInterval(duration)
+            lockoutEndTime = lockout.lockedUntil
+        }
+        saveLockout(lockout)
     }
 
     private func resetFailedAttempts() {
-        failedAttempts = 0
+        unlockLockout = UnlockLockout()
         lockoutEndTime = nil
-        UserDefaults.standard.set(0.0, forKey: "byoky_lockoutEndTime")
+        try? keychain.delete(key: unlockLockoutKey)
+        // A copy the migration couldn't move yet would otherwise come back.
+        UserDefaults.standard.removeObject(forKey: Self.legacyFailedAttemptsKey)
+        UserDefaults.standard.removeObject(forKey: Self.legacyLockoutEndKey)
+    }
+
+    /// Earlier builds kept the counter in UserDefaults. Carry it over once,
+    /// then drop it there.
+    private func migrateLegacyLockout() {
+        let defaults = UserDefaults.standard
+        let attempts = defaults.integer(forKey: Self.legacyFailedAttemptsKey)
+        let endTime = defaults.double(forKey: Self.legacyLockoutEndKey)
+        guard attempts > 0 || endTime > 0 else { return }
+        let legacy = UnlockLockout(
+            failedAttempts: attempts,
+            lockedUntil: endTime > 0 ? Date(timeIntervalSince1970: endTime) : nil
+        )
+        let merged = currentLockout().merged(with: legacy)
+        unlockLockout = merged
+        if (try? keychain.saveCodable(key: unlockLockoutKey, value: merged)) != nil {
+            defaults.removeObject(forKey: Self.legacyFailedAttemptsKey)
+            defaults.removeObject(forKey: Self.legacyLockoutEndKey)
+        }
     }
 
     private func lockoutDuration(for attempts: Int) -> TimeInterval? {
@@ -471,6 +560,16 @@ final class WalletStore: ObservableObject {
     }
 
     // MARK: - Auto-Lock
+    //
+    // The wallet locks after `autoLockTimeout` without activity: a touch
+    // anywhere in the app (RootView) or a request from an app in the
+    // in-wallet browser. Time in the background counts as idle.
+
+    /// Restart the idle clock.
+    func noteActivity() {
+        guard status == .unlocked else { return }
+        lastActivity = Date()
+    }
 
     func recordBackgroundTime() {
         if status == .unlocked {
@@ -478,12 +577,39 @@ final class WalletStore: ObservableObject {
         }
     }
 
+    /// Back in the foreground: lock if the wallet sat idle (or in the
+    /// background) longer than the timeout. The idle timer can't fire while
+    /// the app is suspended.
     func checkAutoLock() {
         defer { backgroundTime = nil }
-        guard status == .unlocked,
-              let bg = backgroundTime,
-              Date().timeIntervalSince(bg) > autoLockTimeout else { return }
-        lock()
+        guard status == .unlocked else { return }
+        let now = Date()
+        let idle = now.timeIntervalSince(lastActivity)
+        let away = backgroundTime.map { now.timeIntervalSince($0) } ?? 0
+        if idle > autoLockTimeout || away > autoLockTimeout {
+            lock()
+        }
+    }
+
+    private func startIdleTimer() {
+        lastActivity = Date()
+        idleLockTask?.cancel()
+        idleLockTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self, self.status == .unlocked else { return }
+                let remaining = self.autoLockTimeout - Date().timeIntervalSince(self.lastActivity)
+                if remaining <= 0 {
+                    self.lock()
+                    return
+                }
+                try? await Task.sleep(for: .seconds(remaining))
+            }
+        }
+    }
+
+    private func stopIdleTimer() {
+        idleLockTask?.cancel()
+        idleLockTask = nil
     }
 
     // MARK: - Credentials
@@ -532,6 +658,9 @@ final class WalletStore: ObservableObject {
         try keychain.delete(key: "key_\(credential.id)")
         credentials.removeAll { $0.id == credential.id }
         try saveCredentials()
+        // A group pinned to this key falls back to any key of its provider,
+        // like the extension does; a stale pin would fail every request.
+        try clearStaleCredentialPins()
 
         AppGroupSync.shared.syncWalletState(
             isUnlocked: true,
@@ -681,6 +810,10 @@ final class WalletStore: ObservableObject {
     }
 
     // MARK: - Token Allowances
+    //
+    // Usage is counted in `tokenLedger` (per app and provider). Each request
+    // holds a reservation while it runs, so parallel requests can't all start
+    // on the same remaining allowance.
 
     func setAllowance(_ allowance: TokenAllowance) {
         if let idx = tokenAllowances.firstIndex(where: { $0.origin == allowance.origin }) {
@@ -696,16 +829,48 @@ final class WalletStore: ObservableObject {
         saveTokenAllowances()
     }
 
+    /// Whether `origin` may start another `providerId` request: tokens
+    /// counted so far plus those held by its requests still in flight.
     func checkAllowance(origin: String, providerId: String) -> AllowanceCheck {
-        let allowance = tokenAllowances.first { $0.origin == origin }
-        let entries = requestLogs.filter { $0.appOrigin == origin && $0.statusCode < 400 }
-        return AllowanceCheck.compute(allowance: allowance, entries: entries, providerId: providerId)
+        let held = reservations.values.filter { $0.origin == origin }
+        return AllowanceCheck.compute(
+            allowance: tokenAllowances.first { $0.origin == origin },
+            totalUsed: tokenLedger.total(origin: origin) + held.reduce(0) { $0 + $1.tokens },
+            providerUsed: tokenLedger.used(origin: origin, providerId: providerId)
+                + held.filter { $0.providerId == providerId }.reduce(0) { $0 + $1.tokens },
+            providerId: providerId
+        )
+    }
+
+    /// Check the allowance and, if the request may go ahead, hold
+    /// `estimatedTokens` for it until `settleReservation`.
+    func reserveTokens(origin: String, providerId: String, estimatedTokens: Int) -> Result<TokenReservation, AllowanceExceeded> {
+        let check = checkAllowance(origin: origin, providerId: providerId)
+        guard check.allowed else {
+            return .failure(AllowanceExceeded(reason: check.reason ?? "Token allowance exceeded"))
+        }
+        let reservation = TokenReservation(origin: origin, providerId: providerId, tokens: max(0, estimatedTokens))
+        reservations[reservation.id] = reservation
+        return .success(reservation)
+    }
+
+    /// The request is over: release its hold and count what it used.
+    func settleReservation(_ reservation: TokenReservation, usedTokens: Int) {
+        reservations[reservation.id] = nil
+        guard usedTokens > 0 else { return }
+        if masterKey != nil {
+            tokenLedger.add(usedTokens, origin: reservation.origin, providerId: reservation.providerId)
+            saveTokenLedger()
+        } else if var stored = try? keychain.loadCodable(key: tokenLedgerKey, as: TokenUsageLedger.self) {
+            // Locked while the request ran: count it in the stored ledger
+            // without bringing any state back into memory.
+            stored.add(usedTokens, origin: reservation.origin, providerId: reservation.providerId)
+            try? keychain.saveCodable(key: tokenLedgerKey, value: stored)
+        }
     }
 
     func tokenUsage(for origin: String) -> Int {
-        requestLogs
-            .filter { $0.appOrigin == origin && $0.statusCode < 400 }
-            .reduce(0) { $0 + ($1.inputTokens ?? 0) + ($1.outputTokens ?? 0) }
+        tokenLedger.total(origin: origin)
     }
 
     // MARK: - Persistence
@@ -737,6 +902,8 @@ final class WalletStore: ObservableObject {
 
     // MARK: - Request Logging
 
+    /// Record a finished request. Does nothing once the wallet is locked: the
+    /// in-memory log is empty then, and saving it would wipe the stored one.
     func logRequest(
         appOrigin: String,
         providerId: String,
@@ -744,11 +911,12 @@ final class WalletStore: ObservableObject {
         url: String,
         statusCode: Int,
         requestBody: Data?,
-        responseBody: String?,
+        usage: UsageParser.TokenUsage?,
         actualProviderId: String? = nil,
         actualModel: String? = nil,
         groupId: String? = nil
     ) {
+        guard masterKey != nil else { return }
         var sanitizedUrl = url
         if let comps = URLComponents(string: url) {
             var clean = comps
@@ -767,16 +935,8 @@ final class WalletStore: ObservableObject {
         )
 
         entry.model = UsageParser.parseModel(from: requestBody)
-
-        if let responseBody {
-            // Use the upstream provider for usage parsing if we routed
-            // cross-family — the response body shape matches the destination
-            // provider, not the source.
-            let parseProviderId = actualProviderId ?? providerId
-            let usage = UsageParser.parseUsage(providerId: parseProviderId, body: responseBody)
-            entry.inputTokens = usage?.inputTokens
-            entry.outputTokens = usage?.outputTokens
-        }
+        entry.inputTokens = usage?.inputTokens
+        entry.outputTokens = usage?.outputTokens
 
         entry.actualProviderId = actualProviderId
         entry.actualModel = actualModel
@@ -819,6 +979,22 @@ final class WalletStore: ObservableObject {
         try? keychain.saveCodable(key: tokenAllowancesKey, value: tokenAllowances)
     }
 
+    /// Load the usage ledger. The first time (no ledger stored yet) it starts
+    /// from the usage still in the request log and is saved right away, so a
+    /// request that ends after a lock always finds one to add to.
+    private func loadTokenLedger() {
+        if let stored = try? keychain.loadCodable(key: tokenLedgerKey, as: TokenUsageLedger.self) {
+            tokenLedger = stored
+        } else {
+            tokenLedger = TokenUsageLedger.seeded(from: requestLogs)
+            saveTokenLedger()
+        }
+    }
+
+    private func saveTokenLedger() {
+        try? keychain.saveCodable(key: tokenLedgerKey, value: tokenLedger)
+    }
+
     // MARK: - Groups
     //
     // Groups are routing rules. Each app origin is bound to a group via
@@ -849,6 +1025,20 @@ final class WalletStore: ObservableObject {
 
     private func saveAppGroups() throws {
         try keychain.saveCodable(key: appGroupsKey, value: appGroups)
+    }
+
+    /// Drop group pins to keys that no longer exist (removed here, or left
+    /// behind by older builds). The group then uses any key of its provider.
+    private func clearStaleCredentialPins() throws {
+        let ids = Set(credentials.map(\.id))
+        var changed = false
+        for idx in groups.indices {
+            if let pinned = groups[idx].credentialId, !ids.contains(pinned) {
+                groups[idx].credentialId = nil
+                changed = true
+            }
+        }
+        if changed { try saveGroups() }
     }
 
     /// Make sure the default group exists as a routing-neutral sentinel.
