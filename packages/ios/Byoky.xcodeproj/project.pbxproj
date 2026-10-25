@@ -915,7 +915,7 @@
 				CODE_SIGN_ENTITLEMENTS = "macOS/Byoky-macOS.entitlements";
 				COMBINE_HIDPI_IMAGES = YES;
 				INFOPLIST_FILE = macOS/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = byoky;
+				INFOPLIST_KEY_CFBundleDisplayName = Byoky;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSMainStoryboardFile = Main;
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
@@ -1180,7 +1180,7 @@
 				CODE_SIGN_ENTITLEMENTS = "macOS/Byoky-macOS.entitlements";
 				COMBINE_HIDPI_IMAGES = YES;
 				INFOPLIST_FILE = macOS/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = byoky;
+				INFOPLIST_KEY_CFBundleDisplayName = Byoky;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSMainStoryboardFile = Main;
 				INFOPLIST_KEY_NSPrincipalClass = NSApplication;

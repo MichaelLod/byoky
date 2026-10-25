@@ -106,7 +106,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.byoky.app
         CODE_SIGN_ENTITLEMENTS: macOS/Byoky-macOS.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        INFOPLIST_KEY_CFBundleDisplayName: byoky
+        INFOPLIST_KEY_CFBundleDisplayName: Byoky
         INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.developer-tools"
         INFOPLIST_KEY_NSMainStoryboardFile: Main
         INFOPLIST_KEY_NSPrincipalClass: NSApplication
