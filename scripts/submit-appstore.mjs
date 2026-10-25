@@ -10,8 +10,9 @@
 //   version:  e.g. "1.0.13"
 //   platform: "IOS" or "MAC_OS"
 
-import { createSign } from 'node:crypto'
-import { readFileSync, existsSync } from 'node:fs'
+import { createSign, createHash } from 'node:crypto'
+import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 
 const [version, platform, notesFile] = process.argv.slice(2)
 
@@ -63,6 +64,91 @@ async function api(path, opts = {}) {
     throw new Error(`${res.status}: ${errs}`)
   }
   return data
+}
+
+// With STORE_IMAGES_DIR set (e.g. marketing/composites/1.1.1), the version's
+// en-US screenshots are replaced by the set's ios/ or mac/ PNGs. File name
+// prefixes pick the display type. Sets for display types the new images
+// don't cover but that would still be shown (the old 6.5" iPhone set) are
+// removed, so no device keeps showing old screenshots.
+const SCREENSHOT_TYPES = {
+  IOS: [
+    { prefix: 'iphone-', type: 'APP_IPHONE_67', replaces: ['APP_IPHONE_65', 'APP_IPHONE_61', 'APP_IPHONE_58', 'APP_IPHONE_55'] },
+    { prefix: 'ipad-', type: 'APP_IPAD_PRO_3GEN_129', replaces: [] },
+  ],
+  MAC_OS: [{ prefix: '', type: 'APP_DESKTOP', replaces: [] }],
+}
+
+async function uploadScreenshots(versionId) {
+  const dir = process.env.STORE_IMAGES_DIR && join(process.env.STORE_IMAGES_DIR, platform === 'IOS' ? 'ios' : 'mac')
+  if (!dir || !existsSync(dir)) return
+  const files = readdirSync(dir).filter((f) => f.endsWith('.png')).sort()
+  const locs = await api(`/appStoreVersions/${versionId}/appStoreVersionLocalizations`)
+  const loc = locs.data?.find((l) => l.attributes.locale.startsWith('en'))
+  if (!loc) throw new Error('No en localization for screenshots')
+  const sets = (await api(`/appStoreVersionLocalizations/${loc.id}/appScreenshotSets?limit=50`)).data ?? []
+
+  for (const { prefix, type, replaces } of SCREENSHOT_TYPES[platform]) {
+    const names = files.filter((f) => f.startsWith(prefix))
+    if (names.length === 0) continue
+    for (const set of sets.filter((x) => x.attributes.screenshotDisplayType === type || replaces.includes(x.attributes.screenshotDisplayType))) {
+      await api(`/appScreenshotSets/${set.id}`, { method: 'DELETE' })
+    }
+    const set = (await api('/appScreenshotSets', {
+      method: 'POST',
+      body: JSON.stringify({
+        data: {
+          type: 'appScreenshotSets',
+          attributes: { screenshotDisplayType: type },
+          relationships: { appStoreVersionLocalization: { data: { type: 'appStoreVersionLocalizations', id: loc.id } } },
+        },
+      }),
+    })).data
+    for (const name of names) {
+      const path = join(dir, name)
+      const bytes = readFileSync(path)
+      const shot = (await api('/appScreenshots', {
+        method: 'POST',
+        body: JSON.stringify({
+          data: {
+            type: 'appScreenshots',
+            attributes: { fileName: name, fileSize: statSync(path).size },
+            relationships: { appScreenshotSet: { data: { type: 'appScreenshotSets', id: set.id } } },
+          },
+        }),
+      })).data
+      for (const op of shot.attributes.uploadOperations) {
+        const res = await fetch(op.url, {
+          method: op.method,
+          headers: Object.fromEntries(op.requestHeaders.map((h) => [h.name, h.value])),
+          body: bytes.subarray(op.offset, op.offset + op.length),
+        })
+        if (!res.ok) throw new Error(`Screenshot upload ${name} failed: ${res.status}`)
+      }
+      await api(`/appScreenshots/${shot.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          data: {
+            type: 'appScreenshots',
+            id: shot.id,
+            attributes: { uploaded: true, sourceFileChecksum: createHash('md5').update(bytes).digest('hex') },
+          },
+        }),
+      })
+    }
+    console.log(`  Screenshots ${type}: ${names.length}`)
+  }
+
+  // Apple processes uploads asynchronously; a submission with screenshots
+  // still processing is refused, so wait for them.
+  for (let i = 0; i < 40; i++) {
+    const current = (await api(`/appStoreVersionLocalizations/${loc.id}/appScreenshotSets?include=appScreenshots&limit=50`)).included ?? []
+    const states = current.map((x) => x.attributes.assetDeliveryState?.state)
+    if (states.includes('FAILED')) throw new Error('A screenshot failed processing')
+    if (states.every((st) => st === 'COMPLETE')) return
+    await new Promise((r) => setTimeout(r, 3000))
+  }
+  console.log('  Screenshots still processing; the submission may need a retry')
 }
 
 async function main() {
@@ -124,7 +210,10 @@ async function main() {
     }
   }
 
-  // 4. Set release notes if provided
+  // 4. Screenshots, when a store image set is given
+  await uploadScreenshots(ver.id)
+
+  // 5. Set release notes if provided
   if (notesFile && existsSync(notesFile)) {
     const notes = readFileSync(notesFile, 'utf8').slice(0, 4000)
     const locData = await api(`/appStoreVersions/${ver.id}/appStoreVersionLocalizations`)
@@ -160,7 +249,7 @@ async function main() {
     if (notesSet) console.log(`  Release notes set (${notes.length} chars)`)
   }
 
-  // 5. Find the latest processed build of this version for this platform.
+  // 6. Find the latest processed build of this version for this platform.
   // Without the version filter a build still processing would lose to the
   // previous version's build, which App Store Connect refuses to attach.
   console.log(`  Looking for ${label} build...`)
@@ -179,14 +268,14 @@ async function main() {
   }
   console.log(`  Build: ${build.id} (v${build.attributes.version})`)
 
-  // 6. Select build for this version
+  // 7. Select build for this version
   await api(`/appStoreVersions/${ver.id}/relationships/build`, {
     method: 'PATCH',
     body: JSON.stringify({ data: { type: 'builds', id: build.id } }),
   })
   console.log(`  Build selected`)
 
-  // 7. Submit for review
+  // 8. Submit for review
   try {
     await api('/appStoreVersionSubmissions', {
       method: 'POST',

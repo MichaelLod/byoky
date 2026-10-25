@@ -11,8 +11,13 @@
 //
 //   track: "internal" (default), "alpha", "beta", or "production"
 //   release-notes-file: optional path to a text file with release notes
+//
+// With STORE_IMAGES_DIR set (e.g. marketing/composites/1.1.1), the same edit
+// also replaces the en-US listing images from its play/ folder: phone-*.png
+// screenshots, feature-graphic-*.png and icon-*.png.
 
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { createSign } from 'node:crypto'
 
 const PACKAGE_NAME = 'com.byoky.app'
@@ -107,7 +112,32 @@ async function main() {
   if (!trackRes.ok) throw new Error(`Track assign failed: ${trackRes.status} ${await trackRes.text()}`)
   console.log(`  Assigned to ${track} track`)
 
-  // 4. Commit edit
+  // 4. Listing images, when a store image set is given
+  const imagesDir = process.env.STORE_IMAGES_DIR && join(process.env.STORE_IMAGES_DIR, 'play')
+  if (imagesDir && existsSync(imagesDir)) {
+    const files = readdirSync(imagesDir).filter((f) => f.endsWith('.png')).sort()
+    const groups = {
+      phoneScreenshots: files.filter((f) => f.startsWith('phone-')),
+      featureGraphic: files.filter((f) => f.startsWith('feature-graphic')),
+      icon: files.filter((f) => f.startsWith('icon-')),
+    }
+    for (const [imageType, names] of Object.entries(groups)) {
+      if (names.length === 0) continue
+      const listing = `${API}/edits/${editId}/listings/en-US/${imageType}`
+      const del = await fetch(listing, { method: 'DELETE', headers })
+      if (!del.ok) throw new Error(`Clearing ${imageType} failed: ${del.status} ${await del.text()}`)
+      for (const name of names) {
+        const up = await fetch(
+          `https://androidpublisher.googleapis.com/upload/androidpublisher/v3/applications/${PACKAGE_NAME}/edits/${editId}/listings/en-US/${imageType}?uploadType=media`,
+          { method: 'POST', headers: { ...headers, 'Content-Type': 'image/png' }, body: readFileSync(join(imagesDir, name)) },
+        )
+        if (!up.ok) throw new Error(`Uploading ${name} failed: ${up.status} ${await up.text()}`)
+      }
+      console.log(`  Listing ${imageType}: ${names.length} image(s)`)
+    }
+  }
+
+  // 5. Commit edit
   const commitRes = await fetch(`${API}/edits/${editId}:commit`, { method: 'POST', headers })
   if (!commitRes.ok) throw new Error(`Commit failed: ${commitRes.status} ${await commitRes.text()}`)
   console.log(`  Edit committed — upload complete`)
