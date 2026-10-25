@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" role="img" aria-label="Muninn, the Byoky raven, perched on a key">
+  <!--
+    Canonical raven. Facing right, perched on a violet key.
+    Animated parts (see docs/brand/README.md, "The raven"):
+      #raven      mirror with scale(-1 1) about x=120 to face left
+      #head       rotate about (140 96) to tilt; ±16° while watching
+      #crest      raised feathers, shown only in the ALERT state
+      #eye-glow   shown only in the ALERT state
+      #eye        the open eye; ry→0.8 for a blink
+      #pupil      moves within ±2.6 px (x) / ±2.4 px (y) of (161 62)
+      #eye-closed the shut eye of the ASLEEP state
+  -->
+  <g id="raven">
+    <g id="perch" fill="#7C3AED">
+      <circle cx="52" cy="200" r="14" fill="none" stroke="#7C3AED" stroke-width="7"/>
+      <rect x="65" y="196.5" width="135" height="7"/>
+      <rect x="172" y="203" width="7" height="13"/>
+      <rect x="186" y="203" width="7" height="8"/>
+    </g>
+    <g id="body">
+      <polygon points="84,170 112,178 80,214 44,222 58,194" fill="#0E0B14"/>
+      <polygon points="84,170 96,176 58,214 44,222" fill="#1D1629"/>
+      <rect x="117" y="176" width="4" height="21" fill="#3B2D55"/>
+      <rect x="133" y="174" width="4" height="23" fill="#3B2D55"/>
+      <polygon points="108,96 130,90 152,98 166,122 162,152 142,174 112,182 84,172 70,150 84,118" fill="#0B0910"/>
+      <polygon points="152,98 166,122 162,152 146,128" fill="#17121F"/>
+      <polygon points="104,106 146,120 144,150 118,176 86,170 78,142" fill="#1A1424"/>
+      <polygon points="104,106 146,120 120,132 84,128" fill="#271D38"/>
+      <polygon points="86,150 132,138 134,142 90,156" fill="#2F2444"/>
+      <polygon points="92,164 128,154 129,158 96,169" fill="#2F2444"/>
+      <polygon points="84,118 108,96 113,100 89,123" fill="#8B5CF6" opacity="0.6"/>
+    </g>
+    <g id="head">
+      <g id="crest" display="none">
+        <polygon points="128,48 120,26 138,42" fill="#3B2D55"/>
+        <polygon points="138,42 136,20 150,38" fill="#4C3A6E"/>
+      </g>
+      <polygon points="126,50 148,38 170,44 180,62 176,86 152,98 130,90 120,70" fill="#0B0910"/>
+      <polygon points="148,38 170,44 160,58" fill="#231A33"/>
+      <polygon points="120,70 126,50 138,62" fill="#17121F"/>
+      <polygon points="174,56 222,74 176,84" fill="#1F1830"/>
+      <polygon points="174,56 222,74 178,70" fill="#3B2D55"/>
+      <polygon points="126,50 148,38 149,42 129,54" fill="#A78BFA" opacity="0.75"/>
+      <circle id="eye-glow" cx="160" cy="62" r="11" fill="#7C3AED" opacity="0.35" display="none"/>
+      <ellipse id="eye" cx="160" cy="62" rx="7" ry="7" fill="#C4B5FD"/>
+      <circle id="pupil" cx="161" cy="62" r="3.4" fill="#07060A"/>
+      <rect id="eye-closed" x="153" y="61" width="14" height="2.4" fill="#A78BFA" display="none"/>
+    </g>
+  </g>
+</svg>
