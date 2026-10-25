@@ -25,5 +25,5 @@ npm run dev
 
 ## Learn more
 
-- [Byoky Documentation](https://byoky.com/dev)
+- [Byoky Documentation](https://byoky.com/docs)
 - [Vite Documentation](https://vite.dev)

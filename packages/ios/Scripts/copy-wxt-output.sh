@@ -25,8 +25,5 @@ find "$DEST" -mindepth 1 -not -name '.gitkeep' -delete 2>/dev/null || true
 # Copy all WXT output
 cp -R "$WXT_OUTPUT/"* "$DEST/"
 
-# Copy mascot and icons from extension public
-cp "$REPO_ROOT/packages/extension/public/mascot.svg" "$DEST/" 2>/dev/null || true
-
 echo "Done. Files copied:"
 find "$DEST" -type f | wc -l | xargs echo "  Total files:"

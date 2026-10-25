@@ -33,5 +33,5 @@ This starts:
 
 ## Learn more
 
-- [Byoky Documentation](https://byoky.com/dev)
+- [Byoky Documentation](https://byoky.com/docs)
 - [Express Documentation](https://expressjs.com)

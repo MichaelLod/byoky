@@ -486,12 +486,12 @@ test.describe('Byoky live end-to-end flow', () => {
     expect(result.error ?? null).toBeNull();
   });
 
-  // ── Vault file export (disaster recovery) ─────────────
+  // ── Backup file export (disaster recovery) ────────────
 
-  test('wallet A — export vault downloads a .byoky file', async ({ walletA }) => {
+  test('wallet A — export backup downloads a .byoky file', async ({ walletA }) => {
     await walletA.popup.bringToFront();
     await walletA.popup.click('button[title="Settings"]');
-    await walletA.popup.click('button:has-text("Export Vault")');
+    await walletA.popup.click('button:has-text("Export backup")');
     await walletA.popup.waitForSelector('#export-pw', { timeout: 5_000 });
     // Export re-checks the wallet password before handing out every key.
     await walletA.popup.fill('#export-current-pw', PASSWORD);
@@ -503,7 +503,7 @@ test.describe('Byoky live end-to-end flow', () => {
       walletA.popup.waitForEvent('download', { timeout: 15_000 }),
       walletA.popup.click('button[type="submit"]:has-text("Export")'),
     ]);
-    expect(download.suggestedFilename()).toMatch(/^byoky-vault-.*\.byoky$/);
+    expect(download.suggestedFilename()).toMatch(/^byoky-backup-.*\.byoky$/);
     const filePath = await download.path();
     expect(filePath).toBeTruthy();
     // Sanity: the file is non-empty (encrypted payload should be several KB).

@@ -324,7 +324,7 @@ function CursorMock() {
 }
 
 
-/* ─── App registry ─────────────────────────────── */
+/* ─── Showcase apps ────────────────────────────── */
 
 const APPS: App[] = [
   { id: 'lovable', name: 'Lovable', domain: 'lovable.dev', accent: '#ff5edf', bg: '#fff', surface: '#fff', text: '#1b1230', subtle: 'rgba(0,0,0,0.06)', render: () => <LovableMock /> },

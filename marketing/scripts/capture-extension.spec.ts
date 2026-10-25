@@ -355,7 +355,7 @@ test('capture extension popup screens for marketing', async () => {
     await popup.waitForTimeout(600);
     await snap(popup, '16-settings');
 
-    const exportBtn = popup.locator('button:has-text("Export Vault")');
+    const exportBtn = popup.locator('button:has-text("Export backup")');
     if (await exportBtn.isEnabled()) {
       await exportBtn.click();
       await popup.waitForSelector('#export-pw', { timeout: 5_000 });

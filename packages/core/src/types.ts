@@ -163,6 +163,7 @@ export interface ProviderRequirement {
 
 export interface ConnectResponse {
   sessionKey: string;
+  /** @deprecated Internal transport marker since the vault was removed; don't rely on its value. */
   proxyUrl: string;
   providers: Record<
     string,

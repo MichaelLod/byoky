@@ -53,7 +53,7 @@ const msg = await client.messages.create({
 - \`session.createRelay(wsUrl)\` — open a WebSocket so a backend server can make LLM calls through this session.
 - \`session.getUsage()\` — returns { requests, inputTokens, outputTokens, byProvider }.
 - \`session.onDisconnect(cb)\` / \`session.onProvidersUpdated(cb)\` — lifecycle callbacks.
-- \`session.sessionKey\`, \`session.proxyUrl\`, \`session.providers\` — session properties.
+- \`session.sessionKey\`, \`session.providers\` — session properties. (\`session.proxyUrl\` is deprecated: an internal transport marker, don't rely on its value.)
 - \`byoky.tryReconnect()\` — silently restore a previous session (returns null if nothing to restore).
 - \`byoky.reconnect(savedResponse)\` — restore a session from a ConnectResponse you stored yourself (returns null if it is no longer valid).
 - \`byoky.connectMock({ keys })\` — DEV ONLY: returns a fake session that calls providers directly with the supplied keys. Reads \`BYOKY_DEV_KEYS=anthropic:sk-...,openai:sk-...\` from env when no \`keys\` are passed. Refuses to run when \`NODE_ENV=production\`.
@@ -541,9 +541,9 @@ if (session) {
 
       <h3>byoky.reconnect(savedResponse)</h3>
       <p>
-        Restore a session from a <code>ConnectResponse</code> you stored yourself (for example the
-        session object&apos;s <code>sessionKey</code>, <code>proxyUrl</code> and{' '}
-        <code>providers</code>). Returns <code>null</code> if the wallet no longer recognises it.
+        Restore a session from a <code>ConnectResponse</code> you stored yourself. Store the whole
+        object (<code>sessionKey</code>, <code>proxyUrl</code> and <code>providers</code>), not just
+        the key. Returns <code>null</code> if the wallet no longer recognises it.
       </p>
       <Code lang="typescript">{`const saved = JSON.parse(localStorage.getItem('byoky-session') ?? 'null');
 const session = saved ? await byoky.reconnect(saved) : null;`}</Code>
@@ -649,7 +649,7 @@ const usage = await session.getUsage();
 
       <h3>Session properties</h3>
       <Code lang="typescript">{`session.sessionKey  // string — use as apiKey in provider SDKs
-session.proxyUrl    // string — the proxy endpoint URL
+session.proxyUrl    // deprecated — internal transport marker, don't rely on it
 session.providers   // Record<ProviderId, ProviderStatus>
 
 interface ProviderStatus {

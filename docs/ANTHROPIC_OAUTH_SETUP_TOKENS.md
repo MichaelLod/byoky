@@ -105,7 +105,7 @@ Without this, requests return `400 Error`.
 │ • refreshToken (sk-ant-ort01-...)           │
 │ • expiresAt (hours from now)                │
 │ • scopes, subscriptionType, rateLimitTier   │
-│ → Encrypted and stored in vault             │
+│ → Encrypted and stored in the wallet        │
 └─────────────┬───────────────────────────────┘
               │
               ▼

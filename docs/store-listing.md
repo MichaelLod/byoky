@@ -119,10 +119,10 @@ OPEN SOURCE
 MIT-licensed on GitHub: github.com/MichaelLod/byoky
 ```
 
-**Keywords** (≤100 chars; check how they fit with Apple's guideline on third-party trademarks):
+**Keywords** (≤100 chars; no provider names, since Apple's guideline 2.3.7 bars other companies' trademarks in keywords):
 
 ```
-api key,ai,llm,wallet,byok,openai,anthropic,gemini,developer,safari extension,proxy
+api key,ai,llm,wallet,byok,developer,safari extension,proxy,encryption,privacy,local,keys
 ```
 
 **App Privacy (nutrition label):** "Data Not Collected." Before submitting, remove any data types declared for cloud vault accounts (e.g. user ID or username), gifts or pairing.

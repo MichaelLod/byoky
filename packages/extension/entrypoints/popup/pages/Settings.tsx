@@ -32,20 +32,20 @@ export function Settings() {
       <h2 className="page-title">Settings</h2>
 
       <div className="settings-section">
-        <h3>Vault</h3>
+        <h3>Backup</h3>
         <div className="settings-actions">
           <button
             className="btn btn-secondary"
             onClick={() => setModal('export')}
             disabled={credentials.length === 0}
           >
-            Export Vault
+            Export backup
           </button>
           <button
             className="btn btn-secondary"
             onClick={() => setModal('import')}
           >
-            Import Vault
+            Import backup
           </button>
         </div>
         <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
@@ -213,7 +213,7 @@ function ExportModal({ onClose }: { onClose: () => void }) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `byoky-vault-${new Date().toISOString().slice(0, 10)}.byoky`;
+      a.download = `byoky-backup-${new Date().toISOString().slice(0, 10)}.byoky`;
       a.click();
       URL.revokeObjectURL(url);
 
@@ -228,7 +228,7 @@ function ExportModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div>
-      <h2 className="page-title">Export Vault</h2>
+      <h2 className="page-title">Export backup</h2>
       <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
         Confirm your wallet password, then choose a password to encrypt the
         backup file. You&apos;ll need the export password to import it later,
@@ -362,7 +362,7 @@ function ImportModal({ onClose }: { onClose: () => void }) {
   if (summary) {
     return (
       <div>
-        <h2 className="page-title">Import Vault</h2>
+        <h2 className="page-title">Import backup</h2>
         <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
           {summary.added === 0
             ? 'No new credentials found in the file.'
@@ -379,7 +379,7 @@ function ImportModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div>
-      <h2 className="page-title">Import Vault</h2>
+      <h2 className="page-title">Import backup</h2>
       <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' }}>
         Import a .byoky backup file. Its credentials are added to your wallet;
         keys you already have stay as they are, and duplicates are skipped.
@@ -389,7 +389,7 @@ function ImportModal({ onClose }: { onClose: () => void }) {
 
       <form onSubmit={handleImport}>
         <div className="form-group">
-          <label>Vault file</label>
+          <label>Backup file</label>
           <input
             ref={fileRef}
             type="file"
