@@ -13,7 +13,7 @@ export default function Support() {
   return (
     <div className="container" style={{ paddingTop: '120px', paddingBottom: '80px', maxWidth: '680px' }}>
       <h1 style={{ fontSize: '32px', marginBottom: '8px' }}>Support</h1>
-      <p style={{ color: 'var(--text-muted)', marginBottom: '40px', fontSize: '14px' }}>
+      <p style={{ color: 'var(--dim)', marginBottom: '40px', fontSize: '13px', fontFamily: 'var(--font-code)' }}>
         We&apos;re here to help you get the most out of Byoky.
       </p>
 
@@ -76,7 +76,7 @@ export default function Support() {
           Found a bug or have a feature request? Open an issue on our GitHub repository:
         </p>
         <p>
-          <a href="https://github.com/MichaelLod/byoky/issues" style={{ color: 'var(--teal-light)' }}>
+          <a href="https://github.com/MichaelLod/byoky/issues" style={{ color: 'var(--phosphor)' }}>
             github.com/MichaelLod/byoky/issues
           </a>
         </p>
@@ -87,7 +87,7 @@ export default function Support() {
           For general questions or support, reach out via email:
         </p>
         <p>
-          <a href="mailto:support@byoky.com" style={{ color: 'var(--teal-light)' }}>
+          <a href="mailto:support@byoky.com" style={{ color: 'var(--phosphor)' }}>
             support@byoky.com
           </a>
         </p>
@@ -99,7 +99,7 @@ export default function Support() {
           and contribute on GitHub:
         </p>
         <p>
-          <a href="https://github.com/MichaelLod/byoky" style={{ color: 'var(--teal-light)' }}>
+          <a href="https://github.com/MichaelLod/byoky" style={{ color: 'var(--phosphor)' }}>
             github.com/MichaelLod/byoky
           </a>
         </p>
@@ -110,9 +110,9 @@ export default function Support() {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section style={{ marginBottom: '32px' }}>
+    <section style={{ padding: 0, marginBottom: '32px' }}>
       <h2 style={{ fontSize: '20px', marginBottom: '12px' }}>{title}</h2>
-      <div style={{ color: 'var(--text-secondary)', lineHeight: '1.7', fontSize: '15px' }}>
+      <div style={{ color: 'var(--fog)', lineHeight: '1.7', fontSize: '15px' }}>
         {children}
       </div>
       <style>{`

@@ -60,9 +60,9 @@ export function InstallWithAI() {
   return (
     <button
       type="button"
-      className="btn"
+      className="btn btn-secondary"
       onClick={copy}
-      style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', background: '#1c1917', color: '#fff', border: 'none', minWidth: '220px', justifyContent: 'center' }}
+      style={{ minWidth: '220px' }}
     >
       <span style={{ fontSize: '14px' }}>✦</span>
       {copied ? 'Copied!' : 'Copy AI install prompt'}

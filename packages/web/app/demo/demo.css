@@ -1,29 +1,11 @@
 /* =============================================
-   Demo App — Custom Properties (scoped)
+   Demo App — palette and fonts come from :root
    ============================================= */
 
 .demo-app {
-  --bg: #fafaf9;
-  --bg-surface: #ffffff;
-  --bg-card: #ffffff;
-  --bg-elevated: #f5f5f4;
-  --border: rgba(28, 25, 23, 0.08);
-  --border-hover: rgba(28, 25, 23, 0.16);
-  --text: #1c1917;
-  --text-secondary: #57534e;
-  --text-muted: #a8a29e;
-  --teal: #FF4F00;
-  --teal-light: #ff6a2a;
-  --teal-dark: #e64500;
-  --green: #16a34a;
-  --red: #dc2626;
-  --font-sans: var(--font-outfit), system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
-  --glow: 0 10px 40px rgba(28, 25, 23, 0.06);
-
   font-family: var(--font-sans);
-  background: var(--bg);
-  color: var(--text);
+  background: var(--void);
+  color: var(--bone);
   font-size: 14px;
   line-height: 1.6;
   min-height: 100vh;
@@ -39,12 +21,12 @@
   align-items: center;
   justify-content: flex-end;
   padding: 8px 28px;
-  border-bottom: 1px solid var(--border);
-  background: rgba(250, 250, 249, 0.85);
+  border-bottom: 1px solid var(--seam);
+  background: rgba(7, 6, 10, 0.86);
   backdrop-filter: blur(20px) saturate(1.2);
   -webkit-backdrop-filter: blur(20px) saturate(1.2);
   position: sticky;
-  top: 60px;
+  top: 68px;
   z-index: 10;
 }
 
@@ -57,15 +39,15 @@
 .demo-app .connected-dot {
   width: 7px;
   height: 7px;
-  border-radius: 50%;
-  background: var(--green);
-  box-shadow: 0 0 10px rgba(34, 197, 94, 0.5);
+  background: var(--signal);
 }
 
 .demo-app .connected-text {
-  font-size: 13px;
-  color: var(--green);
-  font-weight: 500;
+  font-family: var(--font-code);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--signal);
 }
 
 /* ── Buttons ── */
@@ -75,30 +57,25 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 9px 20px;
-  border: none;
-  border-radius: 10px;
-  font-family: var(--font-sans);
-  font-size: 14px;
-  font-weight: 500;
+  height: 40px;
+  padding: 0 18px;
+  border: 1px solid transparent;
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 .demo-app .btn-primary {
-  background: var(--teal);
-  color: white;
-  box-shadow: 0 1px 2px rgba(28, 25, 23, 0.06), 0 4px 12px rgba(2, 132, 199, 0.2);
+  background: var(--violet);
+  color: #FFFFFF;
 }
 
 .demo-app .btn-primary:hover:not(:disabled) {
-  background: var(--teal-light);
-  box-shadow: 0 2px 6px rgba(28, 25, 23, 0.08), 0 6px 16px rgba(2, 132, 199, 0.25);
-  transform: translateY(-1px);
-}
-
-.demo-app .btn-primary:active:not(:disabled) {
-  transform: translateY(0);
+  background: var(--violet-hover);
 }
 
 .demo-app .btn-primary:disabled {
@@ -108,21 +85,20 @@
 
 .demo-app .btn-ghost {
   background: transparent;
-  color: var(--text-secondary);
-  border: 1px solid var(--border);
+  color: var(--bone);
+  border: 1px solid var(--seam-strong);
 }
 
 .demo-app .btn-ghost:hover {
-  border-color: var(--border-hover);
-  color: var(--text);
-  background: rgba(28, 25, 23, 0.03);
+  border-color: var(--seam-strong);
+  color: var(--bone);
+  background: var(--ash);
 }
 
 .demo-app .btn-lg {
-  padding: 14px 36px;
+  height: 52px;
+  padding: 0 32px;
   font-size: 16px;
-  font-weight: 600;
-  border-radius: 12px;
 }
 
 /* ── Error ── */
@@ -132,16 +108,16 @@
   align-items: center;
   justify-content: space-between;
   padding: 12px 28px;
-  background: rgba(239, 68, 68, 0.08);
-  border-bottom: 1px solid rgba(239, 68, 68, 0.15);
-  color: var(--red);
+  background: rgba(248, 113, 113, 0.08);
+  border-bottom: 1px solid rgba(248, 113, 113, 0.15);
+  color: var(--alarm);
   font-size: 13px;
 }
 
 .demo-app .error-banner button {
   background: none;
   border: none;
-  color: var(--red);
+  color: var(--alarm);
   cursor: pointer;
   font-size: 18px;
 }
@@ -152,15 +128,15 @@
   align-items: center;
   gap: 8px;
   padding: 12px 28px;
-  background: rgba(255, 138, 0, 0.08);
-  border-bottom: 1px solid rgba(255, 138, 0, 0.2);
-  color: #b45c00;
+  background: rgba(251, 191, 36, 0.08);
+  border-bottom: 1px solid rgba(251, 191, 36, 0.25);
+  color: var(--amber);
   font-size: 13px;
   line-height: 1.5;
 }
 
 .demo-app .empty-wallet-banner strong {
-  color: #8a4400;
+  color: var(--bone);
 }
 
 /* ── Layout ── */
@@ -191,9 +167,9 @@
   top: 10%;
   left: 50%;
   transform: translateX(-50%);
-  width: 500px;
+  width: min(500px, 100%);
   height: 500px;
-  background: radial-gradient(circle, rgba(14, 165, 233, 0.06) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(124, 58, 237, 0.08) 0%, transparent 70%);
   pointer-events: none;
 }
 
@@ -227,54 +203,53 @@
 }
 
 .demo-app .connect-flow-node span {
+  font-family: var(--font-code);
   font-size: 11px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  letter-spacing: -0.01em;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fog);
 }
 
 .demo-app .connect-flow-node small {
+  font-family: var(--font-code);
   font-size: 9px;
-  color: var(--text-muted);
+  color: var(--dim);
   margin-top: -2px;
 }
 
 .demo-app .connect-flow-icon {
   width: 44px;
   height: 44px;
-  border-radius: 12px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
+  background: var(--crypt);
+  border: 1px solid var(--seam-strong);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-secondary);
+  color: var(--fog);
   transition: all 0.3s;
 }
 
 .demo-app .connect-flow-node-highlight .connect-flow-icon {
-  background: rgba(14, 165, 233, 0.1);
-  border-color: rgba(14, 165, 233, 0.3);
-  color: var(--teal);
-  box-shadow: 0 0 20px rgba(14, 165, 233, 0.12);
+  background: var(--violet-soft);
+  border-color: var(--violet);
+  color: var(--lilac);
 }
 
 .demo-app .connect-flow-node-highlight span {
-  color: var(--teal-light);
+  color: var(--phosphor);
 }
 
 .demo-app .connect-flow-node-highlight small {
-  color: var(--teal);
+  color: var(--phosphor);
 }
 
 .demo-app .connect-flow-line {
   position: relative;
   width: 48px;
   height: 2px;
-  background: var(--border);
+  background: var(--seam);
   margin-top: 21px;
   overflow: hidden;
-  border-radius: 1px;
 }
 
 .demo-app .connect-flow-pulse {
@@ -283,7 +258,7 @@
   left: 0;
   width: 16px;
   height: 100%;
-  background: linear-gradient(90deg, transparent, var(--teal), transparent);
+  background: linear-gradient(90deg, transparent, var(--violet), transparent);
   animation: flow-move 2s ease-in-out infinite;
 }
 
@@ -304,12 +279,13 @@
 }
 
 .demo-app .connect-capabilities h3 {
+  font-family: var(--font-code);
   font-size: 12px;
+  font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
+  letter-spacing: 0.14em;
+  color: var(--dim);
   margin-bottom: 12px;
-  font-weight: 600;
 }
 
 .demo-app .connect-caps-grid {
@@ -324,20 +300,22 @@
   flex-direction: column;
   gap: 3px;
   padding: 12px 14px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  background: var(--crypt);
+  border: 1px solid var(--seam);
 }
 
 .demo-app .connect-cap strong {
+  font-family: var(--font-code);
   font-size: 12px;
-  font-weight: 600;
-  color: var(--text);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--lilac);
 }
 
 .demo-app .connect-cap span {
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--dim);
   line-height: 1.4;
 }
 
@@ -352,15 +330,13 @@
 }
 
 .demo-app .connect-card h2 {
-  font-size: 26px;
-  font-weight: 700;
+  font-size: 30px;
   margin-bottom: 14px;
-  letter-spacing: -0.03em;
-  color: var(--text);
+  color: var(--bone);
 }
 
 .demo-app .connect-card p {
-  color: var(--text-secondary);
+  color: var(--fog);
   margin-bottom: 36px;
   line-height: 1.75;
   font-size: 15px;
@@ -379,11 +355,11 @@
   align-items: center;
   gap: 12px;
   font-size: 14px;
-  color: var(--text-secondary);
+  color: var(--fog);
 }
 
 .demo-app .feature-check {
-  color: var(--green);
+  color: var(--signal);
   font-weight: 600;
   font-size: 15px;
 }
@@ -391,11 +367,11 @@
 .demo-app .connect-install {
   margin-top: 40px;
   font-size: 13px;
-  color: var(--text-muted);
+  color: var(--dim);
 }
 
 .demo-app .connect-install a {
-  color: var(--teal);
+  color: var(--phosphor);
   text-decoration: none;
   font-weight: 500;
 }
@@ -423,13 +399,13 @@
 }
 
 .demo-app .btn-secondary {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  color: var(--text);
+  background: var(--crypt);
+  border: 1px solid var(--seam);
+  color: var(--bone);
 }
 
 .demo-app .btn-secondary:hover {
-  background: var(--bg-hover);
+  background: var(--ash);
 }
 
 .demo-app .btn-sm {
@@ -454,7 +430,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 16px 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--seam);
 }
 
 .demo-app .provider-select {
@@ -462,14 +438,13 @@
   align-items: center;
   gap: 8px;
   font-size: 13px;
-  color: var(--text-secondary);
+  color: var(--fog);
 }
 
 .demo-app .provider-select select {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text);
+  background: var(--void);
+  border: 1px solid var(--seam-strong);
+  color: var(--bone);
   padding: 6px 10px;
   font-family: var(--font-sans);
   font-size: 13px;
@@ -477,14 +452,13 @@
 
 .demo-app .session-info {
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--dim);
 }
 
 .demo-app .session-info code {
   font-family: var(--font-mono);
-  background: var(--bg-card);
+  background: var(--ash);
   padding: 2px 6px;
-  border-radius: 4px;
 }
 
 /* ── Messages ── */
@@ -503,12 +477,12 @@
   min-height: 100%;
   padding-top: 32px;
   text-align: center;
-  color: var(--text-secondary);
+  color: var(--fog);
 }
 
 .demo-app .chat-empty-sub {
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--dim);
   margin-top: 8px;
 }
 
@@ -521,24 +495,24 @@
 .demo-app .message-avatar {
   width: 34px;
   height: 34px;
-  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
+  font-family: var(--font-code);
   font-size: 11px;
-  font-weight: 600;
   flex-shrink: 0;
 }
 
 .demo-app .message-user .message-avatar {
-  background: linear-gradient(135deg, var(--teal-dark), var(--teal));
-  color: white;
+  background: var(--violet-soft);
+  border: 1px solid var(--violet);
+  color: var(--lilac);
 }
 
 .demo-app .message-assistant .message-avatar {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
+  background: var(--ash);
+  border: 1px solid var(--seam);
+  color: var(--fog);
 }
 
 .demo-app .message-content {
@@ -554,11 +528,11 @@
 }
 
 .demo-app .message-user .message-content p {
-  color: var(--text);
+  color: var(--bone);
 }
 
 .demo-app .message-assistant .message-content p {
-  color: var(--text-secondary);
+  color: var(--fog);
 }
 
 /* ── Typing ── */
@@ -572,8 +546,7 @@
 .demo-app .typing-indicator span {
   width: 6px;
   height: 6px;
-  border-radius: 50%;
-  background: var(--teal);
+  background: var(--violet);
   opacity: 0.4;
   animation: demo-typing 1.4s ease-in-out infinite;
 }
@@ -589,12 +562,12 @@
 /* ── Streaming Cursor ── */
 
 .demo-app .message-streaming .message-content::after {
-  content: '\25CB';
+  content: '_';
   display: inline;
   animation: cursor-blink 0.6s steps(2) infinite;
-  color: var(--teal);
+  color: var(--phosphor);
   margin-left: 2px;
-  font-size: 12px;
+  font-family: var(--font-code);
 }
 
 @keyframes cursor-blink {
@@ -606,16 +579,15 @@
 
 .demo-app .message-content .md-code-block {
   position: relative;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  background: var(--ink);
+  border: 1px solid var(--seam);
   padding: 14px 16px;
   overflow-x: auto;
   margin: 8px 0;
   font-family: var(--font-mono);
   font-size: 12.5px;
   line-height: 1.65;
-  color: var(--text);
+  color: var(--bone);
   white-space: pre;
 }
 
@@ -624,25 +596,23 @@
   top: 6px;
   right: 10px;
   font-size: 10px;
-  color: var(--text-muted);
+  color: var(--dim);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 
 .demo-app .message-content .md-inline-code {
-  background: rgba(14, 165, 233, 0.1);
-  border: 1px solid rgba(14, 165, 233, 0.12);
-  border-radius: 4px;
+  background: var(--violet-soft);
   padding: 1px 5px;
   font-family: var(--font-mono);
   font-size: 0.88em;
-  color: var(--teal-light);
+  color: var(--phosphor);
 }
 
 .demo-app .message-content .md-list {
   padding-left: 20px;
   margin: 6px 0;
-  color: var(--text-secondary);
+  color: var(--fog);
 }
 
 .demo-app .message-content .md-list li {
@@ -652,10 +622,12 @@
 }
 
 .demo-app .message-content .md-heading {
+  font-family: var(--font-sans);
   font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
   margin: 10px 0 4px;
-  letter-spacing: -0.01em;
-  color: var(--text);
+  color: var(--bone);
 }
 
 .demo-app .message-content h2.md-heading { font-size: 1.15em; }
@@ -673,7 +645,7 @@
 /* ── Chat Suggestions ── */
 
 .demo-app .chat-empty-icon {
-  color: var(--teal);
+  color: var(--phosphor);
   opacity: 0.4;
   margin-bottom: 16px;
 }
@@ -687,11 +659,10 @@
 }
 
 .demo-app .chat-suggestion {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  background: var(--crypt);
+  border: 1px solid var(--seam);
   padding: 10px 14px;
-  color: var(--text-secondary);
+  color: var(--fog);
   font-family: var(--font-sans);
   font-size: 12.5px;
   line-height: 1.4;
@@ -701,9 +672,9 @@
 }
 
 .demo-app .chat-suggestion:hover {
-  border-color: var(--teal-dark);
-  color: var(--text);
-  background: var(--bg-elevated);
+  border-color: var(--phosphor);
+  color: var(--bone);
+  background: var(--ash);
 }
 
 .demo-app .chat-header-actions {
@@ -715,7 +686,7 @@
 /* ── Code Panel ── */
 
 .demo-app .chat-code-panel {
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--seam);
   padding: 8px 0;
 }
 
@@ -725,40 +696,41 @@
   gap: 6px;
   background: none;
   border: none;
-  color: var(--text-muted);
-  font-family: var(--font-sans);
-  font-size: 12px;
+  color: var(--dim);
+  font-family: var(--font-code);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
   cursor: pointer;
   padding: 4px 0;
   transition: color 0.15s;
 }
 
 .demo-app .chat-code-toggle:hover {
-  color: var(--text-secondary);
+  color: var(--fog);
 }
 
 .demo-app .chat-code-snippet {
   margin: 8px 0 4px;
   padding: 14px 16px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  background: var(--ink);
+  border: 1px solid var(--seam);
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.6;
-  color: var(--text-secondary);
+  color: var(--fog);
   overflow-x: auto;
   white-space: pre;
 }
 
-.demo-app .tk-keyword { color: #7c3aed; }
-.demo-app .tk-string { color: #16a34a; }
-.demo-app .tk-number { color: #b45309; }
-.demo-app .tk-bool { color: #b45309; }
-.demo-app .tk-comment { color: #94a3b8; font-style: italic; }
-.demo-app .tk-builtin { color: #0891b2; }
-.demo-app .tk-punct { color: #64748b; }
-.demo-app .tk-ident { color: #1c1917; }
+.demo-app .tk-keyword { color: var(--phosphor); }
+.demo-app .tk-string { color: var(--signal); }
+.demo-app .tk-number { color: var(--amber); }
+.demo-app .tk-bool { color: var(--amber); }
+.demo-app .tk-comment { color: var(--dim); font-style: italic; }
+.demo-app .tk-builtin { color: var(--lilac); }
+.demo-app .tk-punct { color: var(--fog); }
+.demo-app .tk-ident { color: var(--bone); }
 
 /* ── Chat Input ── */
 
@@ -766,16 +738,15 @@
   display: flex;
   gap: 10px;
   padding: 16px 0 24px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--seam);
 }
 
 .demo-app .chat-input input {
   flex: 1;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  background: var(--void);
+  border: 1px solid var(--seam-strong);
   padding: 12px 16px;
-  color: var(--text);
+  color: var(--bone);
   font-family: var(--font-sans);
   font-size: 14px;
   outline: none;
@@ -783,12 +754,12 @@
 }
 
 .demo-app .chat-input input:focus {
-  border-color: rgba(14, 165, 233, 0.4);
-  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.08);
+  border-color: var(--violet);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .demo-app .chat-input input::placeholder {
-  color: var(--text-muted);
+  color: var(--dim);
 }
 
 /* ── Image Attachment ── */
@@ -796,9 +767,8 @@
 .demo-app .message-image {
   max-width: 280px;
   max-height: 200px;
-  border-radius: 8px;
   margin-bottom: 8px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--seam);
 }
 
 .demo-app .chat-attachment {
@@ -806,27 +776,25 @@
   align-items: center;
   gap: 10px;
   padding: 8px 12px;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  background: var(--crypt);
+  border: 1px solid var(--seam);
   margin-bottom: 8px;
 }
 
 .demo-app .chat-attachment-preview {
   width: 48px;
   height: 48px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--seam);
   flex-shrink: 0;
   background-size: cover;
   background-position: center;
-  background-color: var(--bg-elevated);
+  background-color: var(--ash);
 }
 
 .demo-app .chat-attachment-name {
   flex: 1;
   font-size: 13px;
-  color: var(--text-secondary);
+  color: var(--fog);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -835,16 +803,15 @@
 .demo-app .chat-attachment-remove {
   background: none;
   border: none;
-  color: var(--text-muted);
+  color: var(--dim);
   font-size: 18px;
   cursor: pointer;
   padding: 2px 6px;
-  border-radius: 4px;
 }
 
 .demo-app .chat-attachment-remove:hover {
-  color: var(--text);
-  background: rgba(28, 25, 23, 0.06);
+  color: var(--bone);
+  background: var(--ash);
 }
 
 .demo-app .chat-attach-btn {
@@ -870,36 +837,36 @@
 }
 
 .demo-app .playground-tab {
-  padding: 9px 18px;
-  border: 1px solid var(--border);
+  padding: 10px 18px;
+  border: 1px solid var(--seam);
   border-bottom: none;
-  border-radius: 10px 10px 0 0;
   background: transparent;
-  color: var(--text-muted);
-  font-family: var(--font-sans);
-  font-size: 13px;
-  font-weight: 500;
+  color: var(--dim);
+  font-family: var(--font-code);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   cursor: pointer;
   white-space: nowrap;
   transition: all 0.2s;
 }
 
 .demo-app .playground-tab:hover {
-  color: var(--text-secondary);
-  background: rgba(28, 25, 23, 0.03);
+  color: var(--fog);
+  background: var(--ash);
 }
 
 .demo-app .playground-tab-active {
-  background: var(--bg-card);
-  border-color: var(--border);
-  color: var(--text);
+  background: var(--crypt);
+  border-color: var(--seam);
+  color: var(--bone);
+  box-shadow: inset 0 2px 0 var(--violet);
 }
 
 .demo-app .playground-content {
   flex: 1;
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 0 10px 10px 10px;
+  background: var(--crypt);
+  border: 1px solid var(--seam);
   min-height: 400px;
 }
 
@@ -929,23 +896,21 @@
 
 .demo-app .demo-header h3 {
   font-size: 16px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
 }
 
 .demo-app .demo-provider {
-  font-size: 12px;
-  color: var(--text-muted);
-  background: var(--bg-elevated);
+  font-family: var(--font-code);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--lilac);
+  background: var(--violet-soft);
   padding: 3px 10px;
-  border-radius: 12px;
 }
 
 .demo-app .demo-provider-select {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text);
+  background: var(--void);
+  border: 1px solid var(--seam-strong);
+  color: var(--bone);
   padding: 4px 8px;
   font-family: var(--font-sans);
   font-size: 12px;
@@ -953,17 +918,16 @@
 
 .demo-app .demo-desc {
   font-size: 13px;
-  color: var(--text-secondary);
+  color: var(--fog);
   line-height: 1.65;
 }
 
 .demo-app .demo-desc code {
   font-family: var(--font-mono);
   font-size: 12px;
-  background: var(--bg-elevated);
+  background: var(--ash);
   padding: 1px 6px;
-  border-radius: 4px;
-  color: var(--teal-light);
+  color: var(--phosphor);
 }
 
 .demo-app .demo-samples {
@@ -973,35 +937,35 @@
 }
 
 .demo-app .demo-sample-btn {
-  padding: 5px 13px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  padding: 5px 12px;
+  border: 1px solid var(--seam);
   background: transparent;
-  color: var(--text-muted);
-  font-size: 12px;
-  font-family: var(--font-sans);
+  color: var(--fog);
+  font-size: 11px;
+  font-family: var(--font-code);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .demo-app .demo-sample-btn:hover {
-  border-color: var(--border-hover);
-  color: var(--text-secondary);
+  border-color: var(--seam-strong);
+  color: var(--fog);
 }
 
 .demo-app .demo-sample-btn.active {
-  border-color: rgba(14, 165, 233, 0.3);
-  color: var(--teal);
-  background: rgba(14, 165, 233, 0.06);
+  border-color: var(--violet);
+  color: var(--lilac);
+  background: var(--violet-soft);
 }
 
 .demo-app .demo-textarea {
   width: 100%;
   padding: 12px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  color: var(--text);
+  background: var(--void);
+  border: 1px solid var(--seam-strong);
+  color: var(--bone);
   font-family: var(--font-sans);
   font-size: 13px;
   line-height: 1.6;
@@ -1011,21 +975,20 @@
 }
 
 .demo-app .demo-textarea:focus {
-  border-color: rgba(14, 165, 233, 0.4);
+  border-color: var(--violet);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .demo-app .demo-error {
   font-size: 13px;
-  color: var(--red);
-  background: rgba(239, 68, 68, 0.06);
+  color: var(--alarm);
+  background: rgba(248, 113, 113, 0.06);
   padding: 10px 14px;
-  border-radius: 8px;
 }
 
 .demo-app .demo-result {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  background: var(--ink);
+  border: 1px solid var(--seam);
   overflow: auto;
   max-height: 400px;
 }
@@ -1035,7 +998,7 @@
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.7;
-  color: var(--text-secondary);
+  color: var(--fog);
   margin: 0;
 }
 
@@ -1051,27 +1014,29 @@
   display: flex;
   gap: 10px;
   padding: 10px 14px;
-  border-radius: 8px;
-  background: var(--bg-surface);
+  background: var(--void);
+  border: 1px solid var(--seam);
 }
 
 .demo-app .tool-step-label {
+  font-family: var(--font-code);
   font-size: 11px;
-  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   min-width: 60px;
   flex-shrink: 0;
   padding-top: 2px;
 }
 
-.demo-app .tool-step-user .tool-step-label { color: var(--teal-light); }
-.demo-app .tool-step-tool_call .tool-step-label { color: var(--teal); }
-.demo-app .tool-step-tool_result .tool-step-label { color: var(--green); }
-.demo-app .tool-step-assistant .tool-step-label { color: var(--text-secondary); }
+.demo-app .tool-step-user .tool-step-label { color: var(--phosphor); }
+.demo-app .tool-step-tool_call .tool-step-label { color: var(--lilac); }
+.demo-app .tool-step-tool_result .tool-step-label { color: var(--signal); }
+.demo-app .tool-step-assistant .tool-step-label { color: var(--fog); }
 
 .demo-app .tool-step-content {
   font-size: 13px;
   line-height: 1.6;
-  color: var(--text-secondary);
+  color: var(--fog);
   min-width: 0;
   overflow-wrap: break-word;
 }
@@ -1091,19 +1056,18 @@
 }
 
 .demo-app .session-card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  background: var(--void);
+  border: 1px solid var(--seam);
   padding: 14px;
 }
 
 .demo-app .session-card-label {
+  font-family: var(--font-code);
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--dim);
   margin-bottom: 4px;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-weight: 500;
+  letter-spacing: 0.12em;
 }
 
 .demo-app .session-card-value {
@@ -1118,30 +1082,29 @@
   font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 400;
-  color: var(--text-secondary);
+  color: var(--fog);
 }
 
 .demo-app .session-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
+  width: 7px;
+  height: 7px;
 }
 
 .demo-app .session-dot.connected {
-  background: var(--green);
-  box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+  background: var(--signal);
 }
 
 .demo-app .session-dot.disconnected {
-  background: var(--red);
+  background: var(--alarm);
 }
 
 .demo-app .session-section-title {
+  font-family: var(--font-code);
   font-size: 12px;
-  font-weight: 600;
-  color: var(--text-muted);
+  font-weight: 500;
+  color: var(--dim);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.14em;
   margin-top: 8px;
 }
 
@@ -1156,8 +1119,8 @@
   justify-content: space-between;
   align-items: center;
   padding: 8px 12px;
-  background: var(--bg-surface);
-  border-radius: 8px;
+  background: var(--void);
+  border: 1px solid var(--seam);
   font-size: 13px;
 }
 
@@ -1167,15 +1130,15 @@
 
 .demo-app .session-provider-stats {
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--dim);
   font-family: var(--font-mono);
 }
 
 /* ── Code Example Section ── */
 
 .demo-app .code-section {
-  border-top: 1px solid var(--border);
-  background: var(--bg-surface);
+  border-top: 1px solid var(--seam);
+  background: transparent;
   padding: 100px 28px;
   position: relative;
 }
@@ -1187,7 +1150,7 @@
   left: 0;
   right: 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(14, 165, 233, 0.2), transparent);
+  background: var(--seam);
 }
 
 .demo-app .code-example {
@@ -1196,15 +1159,13 @@
 }
 
 .demo-app .code-example h2 {
-  font-size: 32px;
-  font-weight: 700;
+  font-size: 34px;
   margin-bottom: 14px;
-  letter-spacing: -0.03em;
-  color: var(--text);
+  color: var(--bone);
 }
 
 .demo-app .code-desc {
-  color: var(--text-secondary);
+  color: var(--fog);
   margin-bottom: 40px;
   max-width: 520px;
   line-height: 1.75;
@@ -1212,38 +1173,32 @@
 }
 
 .demo-app .code-window {
-  border-radius: 14px;
-  border: 1px solid var(--border);
-  background: #ffffff;
+  border: 1px solid var(--seam-strong);
+  background: var(--ink);
   overflow: hidden;
   margin-bottom: 28px;
-  box-shadow: var(--glow), 0 20px 40px rgba(28, 25, 23, 0.06);
 }
 
 .demo-app .code-titlebar {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 13px 18px;
-  background: var(--bg-elevated);
-  border-bottom: 1px solid var(--border);
+  padding: 10px 14px;
+  background: var(--crypt);
+  border-bottom: 1px solid var(--seam);
 }
 
 .demo-app .code-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
+  width: 8px;
+  height: 8px;
+  background: var(--seam-strong);
 }
-
-.demo-app .code-dot.red { background: #ff5f57; }
-.demo-app .code-dot.yellow { background: #febc2e; }
-.demo-app .code-dot.green { background: #28c840; }
 
 .demo-app .code-filename {
   margin-left: 8px;
   font-family: var(--font-mono);
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--dim);
 }
 
 .demo-app .code-body {
@@ -1255,7 +1210,7 @@
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.75;
-  color: var(--text-secondary);
+  color: var(--fog);
 }
 
 .demo-app .code-tabs {
@@ -1272,39 +1227,37 @@
 }
 
 .demo-app .code-tab {
-  padding: 8px 16px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  padding: 8px 14px;
+  border: 1px solid var(--seam);
   background: transparent;
-  color: var(--text-muted);
-  font-family: var(--font-sans);
-  font-size: 13px;
-  font-weight: 500;
+  color: var(--fog);
+  font-family: var(--font-code);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   cursor: pointer;
   white-space: nowrap;
   transition: all 0.2s;
 }
 
 .demo-app .code-tab:hover {
-  border-color: var(--border-hover);
-  color: var(--text-secondary);
+  border-color: var(--seam-strong);
+  color: var(--fog);
 }
 
 .demo-app .code-tab-active {
-  background: var(--teal);
-  border-color: var(--teal);
-  color: white;
-  box-shadow: 0 4px 12px rgba(2, 132, 199, 0.2);
+  background: var(--violet-soft);
+  border-color: var(--violet);
+  color: var(--lilac);
 }
 
 .demo-app .code-tab-active:hover {
-  background: var(--teal-light);
-  border-color: var(--teal-light);
-  color: white;
+  border-color: var(--violet);
+  color: var(--lilac);
 }
 
 .demo-app .code-tab-desc {
-  color: var(--text-secondary);
+  color: var(--fog);
   font-size: 14px;
   line-height: 1.75;
   margin-bottom: 24px;
@@ -1319,21 +1272,21 @@
 /* ── Backend Relay ── */
 
 .demo-app .relay-log {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--bg-surface);
+  border: 1px solid var(--seam);
+  background: var(--ink);
   overflow: hidden;
 }
 
 .demo-app .relay-log-header {
+  font-family: var(--font-code);
   font-size: 11px;
-  font-weight: 600;
-  color: var(--text-muted);
+  font-weight: 500;
+  color: var(--dim);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.14em;
   padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--seam);
+  background: var(--ash);
 }
 
 .demo-app .relay-step {
@@ -1342,7 +1295,7 @@
   gap: 8px;
   padding: 7px 14px;
   font-size: 12px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--seam);
   font-family: var(--font-mono);
 }
 
@@ -1357,38 +1310,37 @@
   flex-shrink: 0;
 }
 
-.demo-app .relay-step-client .relay-arrow { color: var(--teal); }
-.demo-app .relay-step-server .relay-arrow { color: #a78bfa; }
+.demo-app .relay-step-client .relay-arrow { color: var(--phosphor); }
+.demo-app .relay-step-server .relay-arrow { color: var(--lilac); }
 
 .demo-app .relay-from {
   font-size: 11px;
   font-weight: 500;
   width: 60px;
   flex-shrink: 0;
-  font-family: var(--font-sans);
+  font-family: var(--font-code);
 }
 
-.demo-app .relay-step-client .relay-from { color: var(--teal); }
-.demo-app .relay-step-server .relay-from { color: #a78bfa; }
+.demo-app .relay-step-client .relay-from { color: var(--phosphor); }
+.demo-app .relay-step-server .relay-from { color: var(--lilac); }
 
 .demo-app .relay-type {
   font-size: 11px;
   padding: 1px 6px;
-  border-radius: 4px;
   flex-shrink: 0;
-  background: rgba(28, 25, 23, 0.05);
-  color: var(--text-muted);
+  background: var(--ash);
+  color: var(--dim);
 }
 
-.demo-app .relay-type-hello { color: var(--green); background: rgba(34, 197, 94, 0.08); }
-.demo-app .relay-type-request { color: var(--teal); background: rgba(14, 165, 233, 0.08); }
-.demo-app .relay-type-meta { color: #fbbf24; background: rgba(251, 191, 36, 0.08); }
-.demo-app .relay-type-chunk { color: var(--text-muted); }
-.demo-app .relay-type-done { color: var(--green); background: rgba(34, 197, 94, 0.08); }
-.demo-app .relay-type-error { color: var(--red); background: rgba(239, 68, 68, 0.08); }
+.demo-app .relay-type-hello { color: var(--signal); background: rgba(74, 222, 128, 0.08); }
+.demo-app .relay-type-request { color: var(--phosphor); background: rgba(124, 58, 237, 0.08); }
+.demo-app .relay-type-meta { color: var(--amber); background: rgba(251, 191, 36, 0.08); }
+.demo-app .relay-type-chunk { color: var(--dim); }
+.demo-app .relay-type-done { color: var(--signal); background: rgba(74, 222, 128, 0.08); }
+.demo-app .relay-type-error { color: var(--alarm); background: rgba(248, 113, 113, 0.08); }
 
 .demo-app .relay-preview {
-  color: var(--text-muted);
+  color: var(--dim);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1402,19 +1354,21 @@
   align-items: center;
   justify-content: space-between;
   padding: 22px 28px;
-  border-top: 1px solid var(--border);
-  font-size: 13px;
-  color: var(--text-muted);
+  border-top: 1px solid var(--seam);
+  font-family: var(--font-code);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--dim);
 }
 
 .demo-app .footer a {
-  color: var(--teal);
+  color: var(--phosphor);
   text-decoration: none;
   font-weight: 500;
 }
 
 .demo-app .footer a:hover {
-  color: var(--teal-light);
+  color: var(--lilac);
 }
 
 /* ── Responsive ── */

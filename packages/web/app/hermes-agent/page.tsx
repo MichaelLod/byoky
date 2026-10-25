@@ -54,7 +54,7 @@ export default function HermesAgentTutorial() {
               target="_blank"
               rel="noopener noreferrer"
             >
-              <svg width="20" height="20" viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="#fff" stroke="#ddd" strokeWidth="1"/><path d="M38 18c-1-4-4-7-8-9 2 2 3 5 3 7 0 3-2 6-5 7-4 1-7-1-7-1s1 5 6 6c4 1 8-1 10-4 1-1 1-3 1-6z" fill="#FF4F00"/><path d="M14 30c-1-3 0-6 2-9 1-2 3-3 5-4-2 2-3 4-2 7 0 2 2 4 4 5 3 1 6 0 7-2-1 3-4 6-8 6-3 1-6-1-8-3z" fill="#FF9500"/></svg>
+              <svg width="20" height="20" viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="#fff" stroke="#ddd" strokeWidth="1"/><path d="M38 18c-1-4-4-7-8-9 2 2 3 5 3 7 0 3-2 6-5 7-4 1-7-1-7-1s1 5 6 6c4 1 8-1 10-4 1-1 1-3 1-6z" fill="#FF7139"/><path d="M14 30c-1-3 0-6 2-9 1-2 3-3 5-4-2 2-3 4-2 7 0 2 2 4 4 5 3 1 6 0 7-2-1 3-4 6-8 6-3 1-6-1-8-3z" fill="#FF9500"/></svg>
               <span>Firefox</span>
             </a>
           </div>
@@ -163,7 +163,7 @@ byoky-bridge install`}</Code>
           <Code>{`hermes chat -q "ping" -Q       # one-shot smoke test
 hermes                          # interactive`}</Code>
           <details>
-            <summary style={{ cursor: 'pointer', fontSize: 14, color: 'var(--text-secondary)', margin: '8px 0' }}>
+            <summary style={{ cursor: 'pointer', fontSize: 14, color: 'var(--fog)', margin: '8px 0' }}>
               Prefer to edit by hand? Show the manual diff.
             </summary>
             <Code>{`# At the top of ~/.hermes/config.yaml:
@@ -235,7 +235,7 @@ function Hero() {
       }}>
         <div style={{
           display: 'flex', alignItems: 'center', gap: '8px',
-          fontSize: '15px', fontWeight: 600, color: 'var(--text)',
+          fontSize: '15px', fontWeight: 600, color: 'var(--bone)',
         }}>
           <span aria-hidden style={{ fontSize: 22, lineHeight: 1 }}>☤</span>
           Hermes Agent
@@ -249,7 +249,7 @@ function Hero() {
         <a className="btn btn-primary" href="#step-1" style={{ minWidth: '220px', textAlign: 'center', justifyContent: 'center' }}>
           Start Setup
         </a>
-        <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>or</span>
+        <span style={{ color: 'var(--dim)', fontSize: '13px' }}>or</span>
         <InstallWithAI />
       </div>
     </header>
@@ -587,16 +587,12 @@ function Code({ children }: { children: string }) {
 
 const styles = `
 .oc-page {
-  --oc-bg-card: #ffffff;
-  --oc-bg-elevated: #f5f5f4;
-  --oc-border: #e7e5e4;
-  --oc-border-strong: #d6d3d1;
-  color: var(--text);
+  color: var(--bone);
 }
 
 .oc-container {
   max-width: 820px;
-  padding-top: 120px;
+  padding-top: 132px;
   padding-bottom: 96px;
 }
 
@@ -604,28 +600,25 @@ const styles = `
 .oc-hero { margin-bottom: 56px; text-align: center; }
 .oc-eyebrow {
   display: inline-block;
+  font-family: var(--font-code);
   font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--teal);
-  background: rgba(255, 79, 0, 0.08);
-  border: 1px solid rgba(255, 79, 0, 0.25);
+  color: var(--fog);
+  background: var(--crypt);
+  border: 1px solid var(--seam);
   padding: 6px 12px;
-  border-radius: 999px;
   margin-bottom: 22px;
 }
 .oc-hero h1 {
-  font-size: 44px;
-  line-height: 1.1;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  font-size: 48px;
+  line-height: 1.02;
   margin: 0 0 18px;
 }
 .oc-lede {
   font-size: 17px;
   line-height: 1.65;
-  color: var(--text-secondary);
+  color: var(--fog);
   max-width: 680px;
   margin: 0 0 28px;
 }
@@ -639,35 +632,34 @@ const styles = `
   margin: -32px auto 40px;
   max-width: 680px;
   padding: 12px 16px;
-  border-radius: 10px;
-  background: rgba(234, 179, 8, 0.08);
-  border: 1px solid rgba(234, 179, 8, 0.3);
+  background: rgba(251, 191, 36, 0.08);
+  border: 1px solid rgba(251, 191, 36, 0.3);
   font-size: 13.5px;
   line-height: 1.55;
-  color: var(--text-secondary);
+  color: var(--fog);
 }
 .oc-version-hint svg {
   flex-shrink: 0;
   margin-top: 2px;
-  color: #b45309;
+  color: var(--amber);
 }
-.oc-version-hint strong { color: var(--text); }
+.oc-version-hint strong { color: var(--bone); }
 .oc-version-hint code {
   font-family: var(--font-mono), monospace;
   font-size: 12.5px;
-  background: rgba(234, 179, 8, 0.14);
+  background: rgba(251, 191, 36, 0.14);
   padding: 1px 5px;
-  border-radius: 3px;
 }
 
 /* Two credential paths */
 .oc-paths { margin-bottom: 64px; }
 .oc-paths-heading {
+  font-family: var(--font-code);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--text-muted);
+  letter-spacing: 0.14em;
+  color: var(--dim);
   margin-bottom: 12px;
   padding-left: 2px;
 }
@@ -678,66 +670,60 @@ const styles = `
 }
 .oc-path-card {
   padding: 22px 22px 18px;
-  border-radius: 14px;
-  background: linear-gradient(180deg, rgba(14,165,233,0.08), rgba(14,165,233,0.02));
-  border: 1px solid rgba(14, 165, 233, 0.28);
+  background: var(--crypt);
+  border: 1px solid var(--seam-strong);
   display: flex;
   flex-direction: column;
 }
 .oc-path-card h3 {
   font-size: 16px;
-  font-weight: 600;
   margin: 0 0 8px;
-  color: var(--text);
+  color: var(--bone);
 }
 .oc-path-card p {
   font-size: 14px;
   line-height: 1.6;
-  color: var(--text-secondary);
+  color: var(--fog);
   margin: 0 0 10px;
 }
-.oc-path-card strong { color: var(--text); }
+.oc-path-card strong { color: var(--bone); }
 .oc-path-card code {
   font-family: var(--font-mono), monospace;
   font-size: 12px;
-  background: var(--oc-bg-elevated);
+  background: var(--ash);
   padding: 2px 6px;
-  border-radius: 4px;
-  color: var(--teal-light);
+  color: var(--phosphor);
 }
 .oc-path-icon {
   width: 34px;
   height: 34px;
-  border-radius: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(14, 165, 233, 0.18);
-  color: var(--teal-light);
+  border: 1px solid var(--seam-strong);
+  color: var(--phosphor);
   margin-bottom: 14px;
 }
 .oc-path-tag {
   margin-top: auto !important;
   padding-top: 6px;
   font-size: 12px !important;
-  color: var(--text-muted) !important;
+  color: var(--dim) !important;
 }
 
 /* Sub-card (alternative inside a step) */
 .oc-option-card {
   padding: 12px 16px;
-  border-radius: 8px;
-  background: var(--bg-card, #fff);
-  border: 1px solid var(--border, #e5e5e5);
+  background: var(--crypt);
+  border: 1px solid var(--seam);
   font-size: 14px;
   line-height: 1.5;
-  color: var(--text-secondary);
+  color: var(--fog);
 }
-.oc-option-card strong { color: var(--text); }
+.oc-option-card strong { color: var(--bone); }
 .oc-option-card code {
-  background: var(--bg-elevated, #f5f5f4);
+  background: var(--ash);
   padding: 2px 6px;
-  border-radius: 4px;
   font-size: 13px;
 }
 
@@ -745,9 +731,8 @@ const styles = `
 .oc-step {
   margin-bottom: 12px;
   padding: 28px 28px 24px;
-  border: 1px solid var(--oc-border);
-  border-radius: 16px;
-  background: var(--oc-bg-card);
+  border: 1px solid var(--seam);
+  background: var(--crypt);
   scroll-margin-top: 100px;
 }
 .oc-step-head {
@@ -760,14 +745,13 @@ const styles = `
   flex-shrink: 0;
   width: 38px;
   height: 38px;
-  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--oc-bg-elevated);
-  border: 1px solid var(--oc-border-strong);
-  color: var(--teal-dark);
-  font-weight: 700;
+  background: var(--void);
+  border: 1px solid var(--seam-strong);
+  color: var(--phosphor);
+  font-weight: 500;
   font-size: 15px;
   font-family: var(--font-mono), monospace;
 }
@@ -775,24 +759,23 @@ const styles = `
   font-size: 21px;
   margin: 0 0 6px;
   line-height: 1.25;
-  color: var(--text);
+  color: var(--bone);
 }
 .oc-step-sub {
   margin: 0;
   font-size: 14px;
-  color: var(--text-secondary);
+  color: var(--fog);
   line-height: 1.55;
 }
-.oc-step-body { font-size: 15px; line-height: 1.65; color: var(--text-secondary); }
+.oc-step-body { font-size: 15px; line-height: 1.65; color: var(--fog); }
 .oc-step-body p { margin: 12px 0; }
-.oc-step-body strong { color: var(--text); }
+.oc-step-body strong { color: var(--bone); }
 .oc-step-body code {
   font-family: var(--font-mono), monospace;
   font-size: 13px;
-  background: var(--oc-bg-elevated);
+  background: var(--ash);
   padding: 2px 6px;
-  border-radius: 4px;
-  color: var(--teal-dark);
+  color: var(--phosphor);
 }
 
 /* Install card grid (step 1) */
@@ -807,53 +790,52 @@ const styles = `
   align-items: center;
   gap: 6px;
   padding: 8px 14px;
-  border: 1px solid var(--oc-border);
-  background: var(--oc-bg-elevated);
-  border-radius: 8px;
+  border: 1px solid var(--seam);
+  background: var(--ash);
   text-decoration: none;
-  color: var(--text);
+  color: var(--bone);
   transition: border-color 0.15s;
 }
 .oc-install-card:hover {
-  border-color: var(--teal);
-  transform: translateY(-1px);
+  border-color: var(--violet);
 }
 .oc-install-card span {
-  font-weight: 600;
-  font-size: 13px;
+  font-family: var(--font-code);
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 /* Lists */
 .oc-list { margin: 12px 0; padding-left: 22px; }
 .oc-list li { margin-bottom: 8px; line-height: 1.6; }
 .oc-link {
-  color: var(--teal);
+  color: var(--phosphor);
   text-decoration: underline;
-  text-decoration-color: var(--oc-border-strong);
+  text-decoration-color: var(--seam-strong);
   text-underline-offset: 3px;
 }
-.oc-link:hover { text-decoration-color: var(--teal); }
+.oc-link:hover { text-decoration-color: var(--violet); }
 .oc-note {
   font-size: 14px;
-  color: var(--text-secondary);
+  color: var(--fog);
   margin: 14px 0 0;
   line-height: 1.6;
 }
-.oc-note-muted { color: var(--text-muted); font-size: 13px; }
+.oc-note-muted { color: var(--dim); font-size: 13px; }
 
 /* Code blocks */
 .oc-code {
-  background: #1e1e2e !important;
-  border: 1px solid #2a2a3e !important;
-  border-radius: 10px;
+  background: var(--ink) !important;
+  border: 1px solid var(--seam) !important;
   padding: 16px 18px;
   font-family: var(--font-mono), monospace;
   font-size: 13px;
   line-height: 1.7;
-  color: #e0e0e0 !important;
+  color: var(--bone) !important;
   overflow-x: auto;
   margin: 14px 0;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 .oc-code code { background: none !important; padding: 0; color: inherit !important; font-size: inherit; }
 
@@ -861,42 +843,39 @@ const styles = `
 .oc-section { margin-top: 16px; margin-bottom: 8px; }
 .oc-section h2 {
   font-size: 24px;
-  font-weight: 700;
   margin: 0 0 12px;
-  color: var(--text);
+  color: var(--bone);
 }
 .oc-section p {
   font-size: 15px;
   line-height: 1.65;
-  color: var(--text-secondary);
+  color: var(--fog);
   margin: 12px 0;
 }
 .oc-section code {
   font-family: var(--font-mono), monospace;
   font-size: 13px;
-  background: var(--oc-bg-elevated);
+  background: var(--ash);
   padding: 2px 6px;
-  border-radius: 4px;
-  color: var(--teal-light);
+  color: var(--phosphor);
 }
-.oc-section .oc-list { color: var(--text-secondary); }
+.oc-section .oc-list { color: var(--fog); }
 
 /* Closing */
 .oc-closing {
   margin-top: 12px;
   padding: 36px 32px;
-  border: 1px solid var(--oc-border);
-  border-radius: 16px;
-  background: radial-gradient(circle at top right, rgba(2, 132, 199, 0.06), transparent 60%), var(--oc-bg-card);
+  border: 1px solid var(--seam);
+  background: var(--crypt);
   text-align: center;
 }
 .oc-closing h2 {
   font-size: 26px;
   margin: 0 0 10px;
-  color: var(--text);
+  color: var(--bone);
 }
 .oc-closing p {
-  color: var(--text-secondary);
+  color: var(--fog);
   font-size: 15px;
   margin: 0 auto 22px;
   max-width: 460px;
@@ -907,7 +886,7 @@ const styles = `
 /* Responsive */
 @media (max-width: 720px) {
   .oc-container { padding-top: 100px; padding-bottom: 64px; }
-  .oc-hero h1 { font-size: 32px; }
+  .oc-hero h1 { font-size: 34px; }
   .oc-lede { font-size: 16px; }
   .oc-install-grid { flex-direction: column; }
   .oc-paths-grid { grid-template-columns: 1fr; }

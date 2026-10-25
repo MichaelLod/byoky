@@ -1,26 +1,34 @@
-import type { Metadata } from 'next';
-import { Sora, JetBrains_Mono, Outfit } from 'next/font/google';
+import type { Metadata, Viewport } from 'next';
+import { Chakra_Petch, IBM_Plex_Mono, IBM_Plex_Sans } from 'next/font/google';
 import { Navbar } from './components/Navbar';
 import { ProductHuntBanner } from './components/ProductHuntBanner';
 import './globals.css';
 
-const sora = Sora({
+const chakraPetch = Chakra_Petch({
   subsets: ['latin'],
-  variable: '--font-sora',
+  weight: ['600', '700'],
+  variable: '--font-chakra',
   display: 'swap',
 });
 
-const outfit = Outfit({
+const plexSans = IBM_Plex_Sans({
   subsets: ['latin'],
-  variable: '--font-outfit',
+  weight: ['400', '500', '600'],
+  variable: '--font-plex',
   display: 'swap',
 });
 
-const jetbrainsMono = JetBrains_Mono({
+const plexMono = IBM_Plex_Mono({
   subsets: ['latin'],
+  weight: ['400', '500'],
   variable: '--font-mono',
   display: 'swap',
 });
+
+export const viewport: Viewport = {
+  themeColor: '#07060A',
+  colorScheme: 'dark',
+};
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://byoky.com'),
@@ -86,7 +94,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${sora.variable} ${jetbrainsMono.variable} ${outfit.variable}`}>
+    <html lang="en" className={`${chakraPetch.variable} ${plexSans.variable} ${plexMono.variable}`}>
       <body>
         <script
           type="application/ld+json"

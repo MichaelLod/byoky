@@ -13,7 +13,7 @@ export default function Terms() {
   return (
     <div className="container" style={{ paddingTop: '120px', paddingBottom: '80px', maxWidth: '680px' }}>
       <h1 style={{ fontSize: '32px', marginBottom: '8px' }}>Terms of Use</h1>
-      <p style={{ color: 'var(--text-muted)', marginBottom: '40px', fontSize: '14px' }}>
+      <p style={{ color: 'var(--dim)', marginBottom: '40px', fontSize: '13px', fontFamily: 'var(--font-code)' }}>
         Last updated: October 23, 2026
       </p>
 
@@ -247,7 +247,7 @@ export default function Terms() {
       <Section title="Contact">
         <p>
           Questions or notices regarding these Terms can be filed as an issue on{' '}
-          <a href="https://github.com/MichaelLod/byoky/issues" style={{ color: 'var(--teal-light)' }}>
+          <a href="https://github.com/MichaelLod/byoky/issues" style={{ color: 'var(--phosphor)' }}>
             GitHub
           </a>
           .
@@ -259,9 +259,9 @@ export default function Terms() {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section style={{ marginBottom: '32px' }}>
+    <section style={{ padding: 0, marginBottom: '32px' }}>
       <h2 style={{ fontSize: '20px', marginBottom: '12px' }}>{title}</h2>
-      <div style={{ color: 'var(--text-secondary)', lineHeight: '1.7', fontSize: '15px' }}>
+      <div style={{ color: 'var(--fog)', lineHeight: '1.7', fontSize: '15px' }}>
         {children}
       </div>
       <style>{`

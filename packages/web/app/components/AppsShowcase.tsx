@@ -8,36 +8,35 @@ type App = {
   domain: string;
   accent: string;
   bg: string;
-  surface: string;
   text: string;
-  subtle: string;
   render: () => ReactNode;
 };
 
 function ByokyPill() {
   return (
     <button className="byoky-pill" type="button">
-      <img src="/byoky_logo.svg" alt="" width={16} height={16} style={{ borderRadius: '3px' }} />
+      <span className="brand-tile" aria-hidden>b</span>
       Connect Byoky wallet
       <style jsx>{`
         .byoky-pill {
           display: inline-flex;
           align-items: center;
-          gap: 8px;
-          padding: 8px 14px;
-          border-radius: 10px;
-          background: #FF4F00;
-          color: #fff;
-          font-size: 12.5px;
+          gap: 7px;
+          height: 32px;
+          padding: 0 10px 0 6px;
+          border: 0;
+          background: var(--violet);
+          color: #FFFFFF;
+          font-family: var(--font-display);
+          font-size: 11px;
           font-weight: 600;
-          letter-spacing: -0.01em;
-          border: 1px solid rgba(255, 79, 0, 0.3);
-          box-shadow: 0 4px 14px rgba(255, 79, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+          letter-spacing: 0.06em;
+          text-transform: uppercase;
           cursor: pointer;
-          font-family: inherit;
           white-space: nowrap;
         }
-        .byoky-pill:hover { filter: brightness(1.05); }
+        .byoky-pill:hover { background: var(--violet-hover); }
+        .byoky-pill .brand-tile { --tile: 20px; }
       `}</style>
     </button>
   );
@@ -46,29 +45,25 @@ function ByokyPill() {
 function BrowserFrame({
   domain,
   bg,
-  surface,
   text,
-  subtle,
   children,
 }: {
   domain: string;
   bg: string;
-  surface: string;
   text: string;
-  subtle: string;
   children: ReactNode;
 }) {
   return (
     <div className="frame" style={{ background: bg, color: text }}>
-      <div className="frame-chrome" style={{ background: surface, borderBottom: `1px solid ${subtle}` }}>
+      <div className="frame-chrome">
         <div className="dots">
-          <span style={{ background: '#ff5f57' }} />
-          <span style={{ background: '#febc2e' }} />
-          <span style={{ background: '#28c840' }} />
+          <span />
+          <span />
+          <span />
         </div>
-        <div className="url" style={{ background: bg, color: text, border: `1px solid ${subtle}` }}>
+        <div className="url">
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" aria-hidden>
-            <path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v10H6z" stroke={text} strokeWidth="2" strokeLinecap="round" />
+            <path d="M7 11V8a5 5 0 0 1 10 0v3M6 11h12v10H6z" stroke="currentColor" strokeWidth="2" strokeLinecap="square" />
           </svg>
           <span>{domain}</span>
         </div>
@@ -77,19 +72,20 @@ function BrowserFrame({
       <div className="frame-body">{children}</div>
       <style jsx>{`
         .frame {
-          border-radius: 12px;
           overflow: hidden;
           height: 100%;
           display: flex;
           flex-direction: column;
-          box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+          border: 1px solid var(--seam-strong);
         }
         .frame-chrome {
           display: flex;
           align-items: center;
           gap: 12px;
-          padding: 10px 14px;
+          padding: 9px 12px;
           flex-shrink: 0;
+          background: var(--crypt);
+          border-bottom: 1px solid var(--seam);
         }
         .dots {
           display: flex;
@@ -97,20 +93,29 @@ function BrowserFrame({
           width: 46px;
         }
         .dots span {
-          width: 10px;
-          height: 10px;
-          border-radius: 999px;
+          width: 8px;
+          height: 8px;
           display: block;
+          background: var(--seam-strong);
         }
         .url {
           flex: 1;
+          max-width: 420px;
+          margin: 0 auto;
           display: inline-flex;
           align-items: center;
           gap: 6px;
-          padding: 5px 12px;
-          border-radius: 999px;
+          padding: 4px 10px;
+          background: var(--void);
+          border: 1px solid var(--seam);
+          color: var(--fog);
+          font-family: var(--font-code);
           font-size: 11.5px;
-          font-family: var(--font-sans);
+          letter-spacing: 0.02em;
+        }
+        .url svg {
+          color: var(--signal);
+          flex-shrink: 0;
         }
         .frame-body {
           flex: 1;
@@ -169,7 +174,7 @@ function LovableMock() {
         .m-top { display: flex; justify-content: space-between; align-items: center; padding: 12px 18px; border-bottom: 1px solid rgba(0,0,0,0.06); }
         .m-brand { display: inline-flex; gap: 8px; align-items: center; font-weight: 600; font-size: 14px; color: #1b1230; letter-spacing: -0.01em; }
         .m-center { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; gap: 14px; text-align: center; }
-        h3 { font-size: 30px; font-weight: 600; letter-spacing: -0.03em; line-height: 1.1; }
+        h3 { font-family: var(--font-sans); text-transform: none; font-size: 30px; font-weight: 600; letter-spacing: -0.03em; line-height: 1.1; }
         .grad { background: linear-gradient(90deg, #ff5edf, #7c5cff); -webkit-background-clip: text; background-clip: text; color: transparent; font-style: italic; }
         .m-sub { color: #5a4e75; font-size: 13.5px; margin-top: -6px; }
         .m-input { width: 100%; max-width: 460px; padding: 14px 16px; background: #fff; border: 1px solid #e6deff; border-radius: 16px; display: flex; align-items: center; justify-content: space-between; color: #8c82a8; font-size: 13px; box-shadow: 0 8px 24px rgba(124, 92, 255, 0.08); }
@@ -237,7 +242,7 @@ function NotionMock() {
         .m-top { display: flex; justify-content: space-between; align-items: center; padding: 10px 18px; border-bottom: 1px solid #eceae5; }
         .crumb { font-size: 12px; color: #7f7a72; }
         .m-doc { padding: 24px 40px; flex: 1; display: flex; flex-direction: column; gap: 14px; }
-        h3 { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; }
+        h3 { font-family: var(--font-sans); text-transform: none; font-size: 28px; font-weight: 700; letter-spacing: -0.02em; }
         .m-line { color: #37352f; font-size: 14px; line-height: 1.55; }
         .m-ai { margin-top: 4px; border: 1px solid #eceae5; border-radius: 10px; overflow: hidden; box-shadow: 0 8px 24px rgba(15,15,15,0.06); }
         .ai-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; font-size: 13px; color: #7f7a72; background: #fff; border-bottom: 1px solid #eceae5; }
@@ -327,9 +332,9 @@ function CursorMock() {
 /* ─── Showcase apps ────────────────────────────── */
 
 const APPS: App[] = [
-  { id: 'lovable', name: 'Lovable', domain: 'lovable.dev', accent: '#ff5edf', bg: '#fff', surface: '#fff', text: '#1b1230', subtle: 'rgba(0,0,0,0.06)', render: () => <LovableMock /> },
-  { id: 'notion', name: 'Notion AI', domain: 'notion.so', accent: '#448ef7', bg: '#fff', surface: '#f7f6f3', text: '#37352f', subtle: '#eceae5', render: () => <NotionMock /> },
-  { id: 'cursor', name: 'Cursor', domain: 'cursor.com', accent: '#7c5cff', bg: '#1e1e20', surface: '#181819', text: '#e4e4e7', subtle: '#2a2a2e', render: () => <CursorMock /> },
+  { id: 'lovable', name: 'Lovable', domain: 'lovable.dev', accent: '#ff5edf', bg: '#fff', text: '#1b1230', render: () => <LovableMock /> },
+  { id: 'notion', name: 'Notion AI', domain: 'notion.so', accent: '#448ef7', bg: '#fff', text: '#37352f', render: () => <NotionMock /> },
+  { id: 'cursor', name: 'Cursor', domain: 'cursor.com', accent: '#7c5cff', bg: '#1e1e20', text: '#e4e4e7', render: () => <CursorMock /> },
 ];
 
 export function AppsShowcase() {
@@ -339,9 +344,9 @@ export function AppsShowcase() {
   return (
     <section className="apps-showcase">
       <div className="container">
-        <div className="apps-showcase-head">
+        <div className="section-head">
           <h2>One wallet. Every AI app.</h2>
-          <p className="subtitle">
+          <p>
             Apps connect to your wallet instead of asking for your keys. One click to approve,
             one click to revoke. Pick an app below to see what it could look like.
           </p>
@@ -370,9 +375,7 @@ export function AppsShowcase() {
             <BrowserFrame
               domain={app.domain}
               bg={app.bg}
-              surface={app.surface}
               text={app.text}
-              subtle={app.subtle}
             >
               {app.render()}
             </BrowserFrame>
@@ -391,28 +394,10 @@ export function AppsShowcase() {
           position: relative;
           z-index: 1;
         }
-        .apps-showcase-head {
-          text-align: center;
-          max-width: 640px;
-          margin: 0 auto 48px;
-        }
-        .apps-showcase-head h2 {
-          font-size: 44px;
-          font-weight: 700;
-          letter-spacing: -0.03em;
-          margin-bottom: 14px;
-        }
-        .apps-showcase-head .subtitle {
-          font-size: 17px;
-          color: var(--text-secondary);
-          line-height: 1.55;
-        }
         .apps-showcase-box {
-          background: var(--bg-card);
-          border: 1px solid var(--border);
-          border-radius: 20px;
+          background: var(--crypt);
+          border: 1px solid var(--seam);
           padding: 16px;
-          box-shadow: 0 12px 40px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.04);
         }
         .apps-tabs {
           display: flex;
@@ -420,8 +405,8 @@ export function AppsShowcase() {
           overflow-x: auto;
           overflow-y: hidden;
           scrollbar-width: none;
-          padding: 4px 4px 12px;
-          border-bottom: 1px solid var(--border);
+          padding: 0 0 14px;
+          border-bottom: 1px solid var(--seam);
           margin-bottom: 16px;
         }
         .apps-tabs::-webkit-scrollbar { display: none; }
@@ -429,33 +414,32 @@ export function AppsShowcase() {
           display: inline-flex;
           align-items: center;
           gap: 8px;
-          padding: 8px 14px;
-          border-radius: 999px;
+          height: 36px;
+          padding: 0 14px;
           background: transparent;
           border: 1px solid transparent;
-          color: var(--text-secondary);
-          font-size: 13px;
-          font-weight: 500;
-          font-family: inherit;
+          color: var(--fog);
+          font-family: var(--font-code);
+          font-size: 12px;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
           cursor: pointer;
           white-space: nowrap;
           transition: background 0.15s, color 0.15s, border-color 0.15s;
         }
         .apps-tab:hover {
-          background: var(--bg-elevated);
-          color: var(--text);
+          background: var(--ash);
+          color: var(--bone);
         }
         .apps-tab.is-active {
-          background: var(--bg-elevated);
-          color: var(--text);
-          border-color: var(--border);
+          background: rgba(124, 58, 237, 0.16);
+          color: var(--lilac);
+          border-color: var(--violet);
         }
         .apps-tab-dot {
-          width: 8px;
-          height: 8px;
-          border-radius: 999px;
+          width: 7px;
+          height: 7px;
           display: inline-block;
-          box-shadow: 0 0 0 2px rgba(0,0,0,0.05);
         }
         .apps-panel {
           height: 480px;
@@ -463,16 +447,14 @@ export function AppsShowcase() {
         .apps-showcase-foot {
           margin-top: 20px;
           text-align: center;
-          font-size: 12.5px;
-          color: var(--text-muted);
+          font-size: 13px;
+          color: var(--dim);
         }
         .apps-showcase-foot strong {
-          color: var(--text-secondary);
+          color: var(--fog);
           font-weight: 600;
         }
         @media (max-width: 720px) {
-          .apps-showcase-head h2 { font-size: 32px; }
-          .apps-showcase-head .subtitle { font-size: 15px; }
           .apps-panel { height: 560px; }
         }
       `}</style>

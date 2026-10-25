@@ -13,7 +13,7 @@ export default function Privacy() {
   return (
     <div className="container" style={{ paddingTop: '120px', paddingBottom: '80px', maxWidth: '680px' }}>
       <h1 style={{ fontSize: '32px', marginBottom: '8px' }}>Privacy Policy</h1>
-      <p style={{ color: 'var(--text-muted)', marginBottom: '40px', fontSize: '14px' }}>
+      <p style={{ color: 'var(--dim)', marginBottom: '40px', fontSize: '13px', fontFamily: 'var(--font-code)' }}>
         Last updated: October 23, 2026
       </p>
 
@@ -39,7 +39,7 @@ export default function Privacy() {
           <li>Vienna, Austria</li>
           <li>
             Email:{' '}
-            <a href="mailto:privacy@byoky.com" style={{ color: 'var(--teal-light)' }}>
+            <a href="mailto:privacy@byoky.com" style={{ color: 'var(--phosphor)' }}>
               privacy@byoky.com
             </a>
           </li>
@@ -192,7 +192,7 @@ export default function Privacy() {
           the{' '}
           <a
             href="https://developers.google.com/terms/api-services-user-data-policy"
-            style={{ color: 'var(--teal-light)' }}
+            style={{ color: 'var(--phosphor)' }}
           >
             Google API Services User Data Policy
           </a>
@@ -278,7 +278,7 @@ export default function Privacy() {
           <li>
             Right to lodge a complaint with the Austrian Data Protection Authority
             (Datenschutzbehörde,{' '}
-            <a href="https://www.dsb.gv.at" style={{ color: 'var(--teal-light)' }}>
+            <a href="https://www.dsb.gv.at" style={{ color: 'var(--phosphor)' }}>
               dsb.gv.at
             </a>
             ) or with the supervisory authority of your country of residence.
@@ -288,7 +288,7 @@ export default function Privacy() {
           Data held by the Byoky software lives only on your device: you can export it or delete
           it in the wallet&apos;s Settings, or remove it by uninstalling. For anything else,
           email{' '}
-          <a href="mailto:privacy@byoky.com" style={{ color: 'var(--teal-light)' }}>
+          <a href="mailto:privacy@byoky.com" style={{ color: 'var(--phosphor)' }}>
             privacy@byoky.com
           </a>
           . We respond within 30 days.
@@ -317,7 +317,7 @@ export default function Privacy() {
           under 14 (the digital-consent age in Austria) or under the age of digital consent in
           your country, whichever is higher. If you believe a child has provided us with data,
           contact{' '}
-          <a href="mailto:privacy@byoky.com" style={{ color: 'var(--teal-light)' }}>
+          <a href="mailto:privacy@byoky.com" style={{ color: 'var(--phosphor)' }}>
             privacy@byoky.com
           </a>{' '}
           and we will delete it.
@@ -328,7 +328,7 @@ export default function Privacy() {
         <p>
           Byoky is fully open source under the MIT license, including the extension, the mobile
           apps, the bridge, the SDK, and this website. You can audit every line at{' '}
-          <a href="https://github.com/MichaelLod/byoky" style={{ color: 'var(--teal-light)' }}>
+          <a href="https://github.com/MichaelLod/byoky" style={{ color: 'var(--phosphor)' }}>
             github.com/MichaelLod/byoky
           </a>
           .
@@ -345,11 +345,11 @@ export default function Privacy() {
       <Section title="Contact">
         <p>
           Privacy questions, GDPR requests, or data-deletion requests:{' '}
-          <a href="mailto:privacy@byoky.com" style={{ color: 'var(--teal-light)' }}>
+          <a href="mailto:privacy@byoky.com" style={{ color: 'var(--phosphor)' }}>
             privacy@byoky.com
           </a>
           . General support:{' '}
-          <a href="mailto:support@byoky.com" style={{ color: 'var(--teal-light)' }}>
+          <a href="mailto:support@byoky.com" style={{ color: 'var(--phosphor)' }}>
             support@byoky.com
           </a>
           .
@@ -361,15 +361,15 @@ export default function Privacy() {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section style={{ marginBottom: '32px' }}>
+    <section style={{ padding: 0, marginBottom: '32px' }}>
       <h2 style={{ fontSize: '20px', marginBottom: '12px' }}>{title}</h2>
-      <div style={{ color: 'var(--text-secondary)', lineHeight: '1.7', fontSize: '15px' }}>
+      <div style={{ color: 'var(--fog)', lineHeight: '1.7', fontSize: '15px' }}>
         {children}
       </div>
       <style>{`
         section ul { padding-left: 20px; margin: 8px 0; }
         section li { margin-bottom: 6px; }
-        section code { background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px; font-size: 13px; }
+        section code { background: var(--ash); padding: 1px 5px; font-size: 13px; color: var(--lilac); }
       `}</style>
     </section>
   );

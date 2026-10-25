@@ -51,13 +51,12 @@ export function ProviderMarquee() {
         }
         .pm-label {
           text-align: center;
-          font-size: 14px;
-          color: var(--text-muted);
+          font-size: 12px;
+          color: var(--dim);
           margin-bottom: 24px;
           text-transform: uppercase;
-          letter-spacing: 0.1em;
-          font-weight: 500;
-          font-family: var(--font-sans);
+          letter-spacing: 0.14em;
+          font-family: var(--font-code);
           padding: 0 16px;
         }
         .pm-wrapper {
@@ -74,11 +73,11 @@ export function ProviderMarquee() {
         }
         .pm-wrapper::before {
           left: 0;
-          background: linear-gradient(to right, var(--bg), transparent);
+          background: linear-gradient(to right, var(--void), transparent);
         }
         .pm-wrapper::after {
           right: 0;
-          background: linear-gradient(to left, var(--bg), transparent);
+          background: linear-gradient(to left, var(--void), transparent);
         }
         @keyframes pm-scroll {
           0% { transform: translateX(0); }
@@ -98,27 +97,28 @@ export function ProviderMarquee() {
           align-items: center;
           gap: 8px;
           padding: 8px 4px;
-          font-size: 14px;
-          font-weight: 500;
-          font-family: var(--font-sans);
-          color: var(--text-muted);
+          font-size: 13px;
+          letter-spacing: 0.06em;
+          text-transform: uppercase;
+          font-family: var(--font-code);
+          color: var(--fog);
           white-space: nowrap;
           flex-shrink: 0;
           cursor: default;
           transition: color 0.2s;
         }
         .pm-item:hover {
-          color: var(--text);
+          color: var(--bone);
         }
         .pm-icon {
           width: 20px;
           height: 20px;
           flex-shrink: 0;
-          filter: brightness(0) invert(0.7);
+          filter: brightness(0) invert(0.68);
           transition: filter 0.2s;
         }
         .pm-item:hover .pm-icon {
-          filter: brightness(0) invert(0.3);
+          filter: brightness(0) invert(0.93);
         }
         @media (prefers-reduced-motion: reduce) {
           .pm-track {

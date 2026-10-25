@@ -320,17 +320,17 @@ In-wallet apps → SDK (createFetch) → Native bridge → iOS / Android app →
       <p>
         Tools that run outside a browser talk HTTP to <code>@byoky/bridge</code> on localhost, which
         hands each request to the extension over native messaging. See{' '}
-        <a href="#bridge" style={{ color: 'var(--teal-dark)' }}>Bridge</a>, and the{' '}
-        <a href="/openclaw" style={{ color: 'var(--teal-dark)' }}>OpenClaw</a>,{' '}
-        <a href="/claude-code" style={{ color: 'var(--teal-dark)' }}>Claude Code</a> and{' '}
-        <a href="/hermes-agent" style={{ color: 'var(--teal-dark)' }}>Hermes</a> guides.
+        <a href="#bridge" style={{ color: 'var(--phosphor)' }}>Bridge</a>, and the{' '}
+        <a href="/openclaw" style={{ color: 'var(--phosphor)' }}>OpenClaw</a>,{' '}
+        <a href="/claude-code" style={{ color: 'var(--phosphor)' }}>Claude Code</a> and{' '}
+        <a href="/hermes-agent" style={{ color: 'var(--phosphor)' }}>Hermes</a> guides.
       </p>
 
       <h3>Your backend</h3>
       <p>
         When your server needs to make the LLM call, the user&apos;s browser relays it through the
         wallet over a WebSocket server <em>you</em> run. See{' '}
-        <a href="#backend-relay" style={{ color: 'var(--teal-dark)' }}>Backend Relay</a>.
+        <a href="#backend-relay" style={{ color: 'var(--phosphor)' }}>Backend Relay</a>.
       </p>
     </Section>
   );
@@ -353,14 +353,14 @@ function Installation() {
       <h3>User wallets</h3>
       <p>Your users need one of these installed:</p>
       <ul>
-        <li><a href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon" style={{ color: 'var(--teal-dark)' }}>Chrome Extension</a></li>
-        <li><a href="https://addons.mozilla.org/en-US/firefox/addon/byoky/" style={{ color: 'var(--teal-dark)' }}>Firefox Extension</a></li>
-        <li><a href="https://apps.apple.com/app/byoky/id6760779919" style={{ color: 'var(--teal-dark)' }}>iOS App</a> (wallet + in-wallet browser, plus the Byoky Safari extension)</li>
-        <li><a href="https://play.google.com/store/apps/details?id=com.byoky.app" style={{ color: 'var(--teal-dark)' }}>Android App</a> (wallet + in-wallet browser)</li>
+        <li><a href="https://chromewebstore.google.com/detail/byoky/igjohldpldlahcjmefdhlnbcpldlgmon" style={{ color: 'var(--phosphor)' }}>Chrome Extension</a></li>
+        <li><a href="https://addons.mozilla.org/en-US/firefox/addon/byoky/" style={{ color: 'var(--phosphor)' }}>Firefox Extension</a></li>
+        <li><a href="https://apps.apple.com/app/byoky/id6760779919" style={{ color: 'var(--phosphor)' }}>iOS App</a> (wallet + in-wallet browser, plus the Byoky Safari extension)</li>
+        <li><a href="https://play.google.com/store/apps/details?id=com.byoky.app" style={{ color: 'var(--phosphor)' }}>Android App</a> (wallet + in-wallet browser)</li>
       </ul>
       <p>
         Each wallet serves the apps on its own device. See{' '}
-        <a href="#where-apps-connect" style={{ color: 'var(--teal-dark)' }}>Where Apps Connect</a>.
+        <a href="#where-apps-connect" style={{ color: 'var(--phosphor)' }}>Where Apps Connect</a>.
       </p>
     </Section>
   );
@@ -551,7 +551,7 @@ const session = saved ? await byoky.reconnect(saved) : null;`}</Code>
       <h3>byoky.connectMock(options)</h3>
       <p>
         Development only: returns a session that calls providers directly with keys you supply. See{' '}
-        <a href="#dev-sandbox" style={{ color: 'var(--teal-dark)' }}>Dev Sandbox</a>.
+        <a href="#dev-sandbox" style={{ color: 'var(--phosphor)' }}>Dev Sandbox</a>.
       </p>
 
       <h3>Utilities</h3>
@@ -604,14 +604,14 @@ const res = await fetch('https://api.anthropic.com/v1/messages', {
       <h3>session.listModels(providerId)</h3>
       <p>
         List the models the user&apos;s credential can access for a provider. See{' '}
-        <a href="#list-models" style={{ color: 'var(--teal-dark)' }}>Model Discovery</a>.
+        <a href="#list-models" style={{ color: 'var(--phosphor)' }}>Model Discovery</a>.
       </p>
 
       <h3>session.createRelay(wsUrl)</h3>
       <p>
         Open a WebSocket relay channel to <em>your own</em> server so your backend can make LLM calls
         through this session. Requires <code>wss://</code> (or <code>ws://</code> on localhost). See{' '}
-        <a href="#backend-relay" style={{ color: 'var(--teal-dark)' }}>Backend Relay</a>.
+        <a href="#backend-relay" style={{ color: 'var(--phosphor)' }}>Backend Relay</a>.
       </p>
 
       <h3>session.disconnect()</h3>
@@ -665,7 +665,7 @@ interface ProviderStatus {
       <p>
         Check <code>providers[id].available</code> before assuming direct access. A provider marked{' '}
         <code>available: false</code> may still work if the user has set up cross-provider routing.
-        See <a href="#cross-provider" style={{ color: 'var(--teal-dark)' }}>Cross-Provider Routing</a>.
+        See <a href="#cross-provider" style={{ color: 'var(--phosphor)' }}>Cross-Provider Routing</a>.
       </p>
     </Section>
   );
@@ -705,7 +705,7 @@ function ProvidersSection() {
         Providers fall into one of four wire-format families. Two providers in the same family speak
         the same API surface and are byte-for-byte interchangeable; crossing families requires the
         wallet&apos;s translation layer (see{' '}
-        <a href="#cross-provider" style={{ color: 'var(--teal-dark)' }}>Cross-Provider Routing</a>).
+        <a href="#cross-provider" style={{ color: 'var(--phosphor)' }}>Cross-Provider Routing</a>).
       </p>
       <div className="docs-providers-grid">
         {[
@@ -1046,7 +1046,7 @@ function Vision() {
       <p>
         Image inputs work through the proxy just like text. Anthropic, OpenAI, and Gemini each take
         a different wire format &mdash; the payload pattern below matches what ships in the{' '}
-        <a href="/demo" style={{ color: 'var(--teal-dark)' }}>demo</a>.
+        <a href="/demo" style={{ color: 'var(--phosphor)' }}>demo</a>.
       </p>
 
       <h3>Convert a File to base64</h3>
@@ -1163,7 +1163,7 @@ const options = models.map(m => ({
         <li><code>PROXY_ERROR</code> — anything else (transport failure, malformed response).</li>
       </ul>
       <p>
-        Defensive callers should fall back to a hardcoded list. The <a href="/demo" style={{ color: 'var(--teal-dark)' }}>demo</a> shows the pattern.
+        Defensive callers should fall back to a hardcoded list. The <a href="/demo" style={{ color: 'var(--phosphor)' }}>demo</a> shows the pattern.
       </p>
     </Section>
   );
@@ -1600,18 +1600,11 @@ function Prop({ name, type, children }: { name: string; type: string; children: 
 
 const docsStyles = `
 .docs-layout {
-  --docs-bg: #fafaf9;
-  --docs-bg-card: #ffffff;
-  --docs-bg-elevated: #f5f5f4;
-  --docs-border: #e7e5e4;
-  --docs-text: #1c1917;
-  --docs-text-secondary: #44403c;
-  --docs-text-muted: #78716c;
 
   display: flex;
   max-width: 1100px;
   margin: 0 auto;
-  padding: 120px 20px 80px;
+  padding: 116px 20px 80px;
   gap: 48px;
 }
 
@@ -1619,7 +1612,7 @@ const docsStyles = `
 
 .docs-nav {
   position: sticky;
-  top: 80px;
+  top: 92px;
   width: 200px;
   flex-shrink: 0;
   align-self: flex-start;
@@ -1632,11 +1625,11 @@ const docsStyles = `
 }
 
 .docs-nav-category {
+  font-family: var(--font-code);
   font-size: 11px;
-  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--docs-text-muted);
+  letter-spacing: 0.14em;
+  color: var(--dim);
   margin-bottom: 8px;
   padding-left: 2px;
 }
@@ -1645,7 +1638,7 @@ const docsStyles = `
   display: block;
   padding: 5px 0 5px 2px;
   font-size: 14px;
-  color: var(--docs-text-secondary);
+  color: var(--fog);
   text-decoration: none;
   transition: color 0.15s;
   border-left: 2px solid transparent;
@@ -1654,12 +1647,12 @@ const docsStyles = `
 }
 
 .docs-nav-link:hover {
-  color: var(--docs-text);
+  color: var(--bone);
 }
 
 .docs-nav-link.active {
-  color: var(--teal-dark);
-  border-left-color: var(--teal);
+  color: var(--phosphor);
+  border-left-color: var(--violet);
 }
 
 /* ── Content ── */
@@ -1674,29 +1667,31 @@ const docsStyles = `
 .docs-hero {
   margin-bottom: 48px;
   padding-bottom: 40px;
-  border-bottom: 1px solid var(--docs-border);
+  border-bottom: 1px solid var(--seam);
 }
 
 .docs-hero-label {
   display: inline-block;
-  font-size: 13px;
-  font-weight: 600;
+  font-family: var(--font-code);
+  font-size: 12px;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--teal);
+  letter-spacing: 0.16em;
+  color: var(--phosphor);
   margin-bottom: 12px;
 }
 
+.docs-hero-label::before {
+  content: '> ';
+}
+
 .docs-hero h1 {
-  font-size: 40px;
-  font-weight: 700;
-  margin-bottom: 12px;
-  letter-spacing: -0.02em;
+  font-size: 44px;
+  margin-bottom: 14px;
 }
 
 .docs-hero p {
   font-size: 17px;
-  color: var(--docs-text-secondary);
+  color: var(--fog);
   line-height: 1.6;
   max-width: 560px;
 }
@@ -1710,10 +1705,8 @@ const docsStyles = `
   justify-content: space-between;
   gap: 24px;
   padding: 18px 22px;
-  background: var(--docs-bg-card);
-  border: 1px solid var(--docs-border);
-  border-radius: 12px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+  background: var(--crypt);
+  border: 1px solid var(--seam);
 }
 
 .docs-ai-cta-text {
@@ -1724,20 +1717,23 @@ const docsStyles = `
   display: flex;
   align-items: center;
   gap: 8px;
+  font-family: var(--font-display);
   font-size: 15px;
   font-weight: 600;
-  color: var(--docs-text);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--bone);
   margin-bottom: 4px;
 }
 
 .docs-ai-cta-spark {
-  color: var(--teal);
+  color: var(--phosphor);
   font-size: 14px;
 }
 
 .docs-ai-cta-subtitle {
   font-size: 13.5px;
-  color: var(--docs-text-muted);
+  color: var(--fog);
   line-height: 1.5;
 }
 
@@ -1746,20 +1742,22 @@ const docsStyles = `
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 16px;
-  background: var(--docs-text);
-  color: var(--docs-bg-card);
-  border: none;
-  border-radius: 8px;
-  font-size: 13.5px;
+  height: 40px;
+  padding: 0 16px;
+  background: var(--violet);
+  color: #FFFFFF;
+  border: 1px solid transparent;
+  font-family: var(--font-display);
+  font-size: 13px;
   font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
   cursor: pointer;
   transition: background 0.15s, transform 0.1s;
-  font-family: inherit;
 }
 
 .docs-ai-cta-btn:hover {
-  background: #000;
+  background: var(--violet-hover);
 }
 
 .docs-ai-cta-btn:active {
@@ -1767,8 +1765,9 @@ const docsStyles = `
 }
 
 .docs-ai-cta-btn.copied {
-  background: var(--teal);
-  color: #fff;
+  background: transparent;
+  border-color: var(--signal);
+  color: var(--signal);
 }
 
 @media (max-width: 640px) {
@@ -1787,7 +1786,7 @@ const docsStyles = `
 .docs-cards-area {
   margin-bottom: 56px;
   padding-bottom: 48px;
-  border-bottom: 1px solid var(--docs-border);
+  border-bottom: 1px solid var(--seam);
 }
 
 .docs-cards-area > div + div {
@@ -1795,10 +1794,9 @@ const docsStyles = `
 }
 
 .docs-cards-heading {
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 14px;
   margin-bottom: 12px;
-  color: var(--docs-text);
+  color: var(--bone);
 }
 
 .docs-cards-grid {
@@ -1810,20 +1808,18 @@ const docsStyles = `
 .docs-card {
   display: block;
   padding: 16px 20px;
-  border-radius: 10px;
-  border: 1px solid var(--docs-border);
-  background: var(--docs-bg-card);
-  color: var(--docs-text);
+  border: 1px solid var(--seam);
+  background: var(--crypt);
+  color: var(--bone);
   font-size: 14px;
   font-weight: 500;
   text-decoration: none;
-  transition: border-color 0.2s, background 0.2s, transform 0.2s;
+  transition: border-color 0.2s, background 0.2s;
 }
 
 .docs-card:hover {
-  border-color: var(--teal);
-  background: var(--docs-bg-elevated);
-  transform: translateY(-1px);
+  border-color: var(--violet);
+  background: var(--ash);
 }
 
 /* ── Sections ── */
@@ -1835,21 +1831,19 @@ const docsStyles = `
 
 .docs-section h2 {
   font-size: 26px;
-  font-weight: 700;
   margin-bottom: 16px;
-  color: var(--docs-text);
+  color: var(--bone);
 }
 
 .docs-section h3 {
-  font-size: 17px;
-  font-weight: 600;
+  font-size: 16px;
   margin-top: 28px;
   margin-bottom: 10px;
-  color: var(--docs-text);
+  color: var(--bone);
 }
 
 .docs-section-body {
-  color: var(--docs-text-secondary);
+  color: var(--fog);
   font-size: 15px;
   line-height: 1.7;
 }
@@ -1859,11 +1853,10 @@ const docsStyles = `
 }
 
 .docs-section-body code {
-  background: var(--docs-bg-elevated);
+  background: var(--ash);
   padding: 2px 6px;
-  border-radius: 4px;
   font-size: 13px;
-  color: var(--teal-dark);
+  color: var(--phosphor);
 }
 
 .docs-section-body ul,
@@ -1880,9 +1873,8 @@ const docsStyles = `
 
 .docs-code {
   position: relative;
-  background: var(--docs-bg-card);
-  border: 1px solid var(--docs-border);
-  border-radius: 10px;
+  background: var(--ink);
+  border: 1px solid var(--seam);
   margin: 14px 0 20px;
   overflow-x: auto;
 }
@@ -1891,10 +1883,11 @@ const docsStyles = `
   position: absolute;
   top: 8px;
   right: 12px;
+  font-family: var(--font-code);
   font-size: 11px;
-  color: var(--docs-text-muted);
+  color: var(--dim);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.12em;
 }
 
 .docs-code-try {
@@ -1906,21 +1899,20 @@ const docsStyles = `
   align-items: center;
   gap: 5px;
   padding: 4px 10px 4px 11px;
-  background: var(--teal);
-  color: #fff;
+  background: var(--violet);
+  color: #FFFFFF;
   border: none;
-  border-radius: 6px;
-  font-family: inherit;
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
+  font-family: var(--font-code);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
   text-decoration: none;
   cursor: pointer;
   transition: background 0.15s, transform 0.1s;
 }
 
 .docs-code-try:hover {
-  background: var(--teal-dark);
+  background: var(--violet-hover);
 }
 
 .docs-code-try:active {
@@ -1938,10 +1930,10 @@ const docsStyles = `
 .docs-code pre {
   margin: 0;
   padding: 18px 20px;
-  font-family: 'Fira Code', 'Consolas', 'SF Mono', monospace;
+  font-family: var(--font-code);
   font-size: 13px;
   line-height: 1.7;
-  color: var(--docs-text);
+  color: var(--bone);
 }
 
 .docs-code code {
@@ -1953,16 +1945,16 @@ const docsStyles = `
 
 /* ── Syntax highlighting ── */
 
-[data-tk="keyword"] { color: #7c3aed; }
-[data-tk="string"] { color: #16a34a; }
-[data-tk="type"] { color: #0891b2; }
-[data-tk="comment"] { color: #a8a29e; font-style: italic; }
-[data-tk="value"] { color: #2563eb; }
+[data-tk="keyword"] { color: var(--phosphor); }
+[data-tk="string"] { color: var(--signal); }
+[data-tk="type"] { color: var(--lilac); }
+[data-tk="comment"] { color: var(--dim); font-style: italic; }
+[data-tk="value"] { color: var(--amber); }
 
 /* ── Props ── */
 
 .docs-prop {
-  border-left: 2px solid var(--docs-border);
+  border-left: 2px solid var(--seam-strong);
   padding: 8px 0 8px 14px;
   margin: 8px 0;
 }
@@ -1981,13 +1973,13 @@ const docsStyles = `
 
 .docs-prop-type {
   font-size: 12px;
-  color: var(--docs-text-muted);
-  font-family: 'Fira Code', monospace;
+  color: var(--dim);
+  font-family: var(--font-code);
 }
 
 .docs-prop-desc {
   font-size: 14px;
-  color: var(--docs-text-secondary);
+  color: var(--fog);
   line-height: 1.5;
 }
 
@@ -2005,21 +1997,20 @@ const docsStyles = `
   align-items: center;
   gap: 10px;
   padding: 8px 12px;
-  background: var(--docs-bg-card);
-  border-radius: 8px;
+  background: var(--crypt);
+  border: 1px solid var(--seam);
   font-size: 14px;
 }
 
 .docs-provider-row code {
   font-size: 12px;
-  color: var(--teal-dark);
-  background: var(--docs-bg-elevated);
+  color: var(--phosphor);
+  background: var(--ash);
   padding: 2px 6px;
-  border-radius: 4px;
 }
 
 .docs-provider-row span {
-  color: var(--docs-text-secondary);
+  color: var(--fog);
 }
 
 .docs-table {
@@ -2033,15 +2024,18 @@ const docsStyles = `
 .docs-table td {
   text-align: left;
   padding: 10px 12px;
-  border-bottom: 1px solid var(--docs-border);
+  border-bottom: 1px solid var(--seam);
   vertical-align: top;
 }
 
 .docs-table th {
-  font-weight: 600;
-  color: var(--docs-text);
-  background: var(--docs-bg-elevated);
-  font-size: 13px;
+  font-family: var(--font-code);
+  font-weight: 500;
+  color: var(--fog);
+  background: var(--ash);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
 .docs-table tbody tr:last-child td {
@@ -2050,15 +2044,14 @@ const docsStyles = `
 
 .docs-table td code {
   font-size: 12px;
-  color: var(--teal-dark);
-  background: var(--docs-bg-elevated);
+  color: var(--phosphor);
+  background: var(--ash);
   padding: 2px 6px;
-  border-radius: 4px;
   white-space: nowrap;
 }
 
 .docs-table-note {
-  color: var(--docs-text-secondary);
+  color: var(--fog);
   font-size: 12px;
 }
 
@@ -2087,10 +2080,14 @@ const docsStyles = `
     margin-left: 0;
   }
   .docs-hero h1 {
-    font-size: 30px;
+    font-size: 32px;
   }
   .docs-cards-grid {
     grid-template-columns: 1fr;
+  }
+  .docs-table {
+    display: block;
+    overflow-x: auto;
   }
 }
 
@@ -2099,7 +2096,7 @@ const docsStyles = `
 .docs-drawer-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(15, 15, 15, 0.38);
+  background: rgba(7, 6, 10, 0.72);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.25s ease;
@@ -2117,9 +2114,8 @@ const docsStyles = `
   right: 0;
   bottom: 0;
   width: min(560px, 100vw);
-  background: #fff;
-  border-left: 1px solid var(--docs-border);
-  box-shadow: -12px 0 40px -20px rgba(0, 0, 0, 0.25);
+  background: var(--void);
+  border-left: 1px solid var(--seam-strong);
   transform: translateX(100%);
   transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
   z-index: 100;
@@ -2137,7 +2133,7 @@ const docsStyles = `
   align-items: center;
   justify-content: space-between;
   padding: 14px 18px;
-  border-bottom: 1px solid var(--docs-border);
+  border-bottom: 1px solid var(--seam);
   flex-shrink: 0;
 }
 
@@ -2145,40 +2141,40 @@ const docsStyles = `
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--docs-text);
+  font-family: var(--font-code);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--bone);
 }
 
 .docs-drawer-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #d4d4d1;
-  box-shadow: 0 0 0 3px rgba(120, 120, 120, 0.08);
+  width: 7px;
+  height: 7px;
+  background: var(--dim);
 }
 
 .docs-drawer-dot[data-connected='true'] {
-  background: #10b981;
-  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18);
+  background: var(--signal);
 }
 
 .docs-drawer-disconnect {
   margin-left: 10px;
   padding: 3px 10px;
   background: transparent;
-  border: 1px solid var(--docs-border);
-  border-radius: 5px;
-  font: inherit;
-  font-size: 11.5px;
-  color: var(--docs-text-secondary);
+  border: 1px solid var(--seam-strong);
+  font-family: var(--font-code);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--fog);
   cursor: pointer;
   transition: border-color 0.15s, color 0.15s;
 }
 
 .docs-drawer-disconnect:hover {
-  border-color: var(--docs-text-muted);
-  color: var(--docs-text);
+  border-color: var(--dim);
+  color: var(--bone);
 }
 
 .docs-drawer-close {
@@ -2189,15 +2185,14 @@ const docsStyles = `
   height: 30px;
   background: transparent;
   border: none;
-  border-radius: 6px;
-  color: var(--docs-text-secondary);
+  color: var(--fog);
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
 
 .docs-drawer-close:hover {
-  background: var(--docs-bg-elevated);
-  color: var(--docs-text);
+  background: var(--ash);
+  color: var(--bone);
 }
 
 .docs-drawer-body {
@@ -2228,15 +2223,14 @@ const docsStyles = `
 
 .docs-drawer-connect h3 {
   font-size: 20px;
-  font-weight: 700;
   margin: 0 0 10px;
-  color: var(--docs-text);
+  color: var(--bone);
 }
 
 .docs-drawer-connect p {
   font-size: 14px;
   line-height: 1.6;
-  color: var(--docs-text-secondary);
+  color: var(--fog);
   margin: 0 0 18px;
 }
 
@@ -2245,20 +2239,22 @@ const docsStyles = `
   align-items: center;
   justify-content: center;
   width: 100%;
-  padding: 12px 18px;
-  background: var(--teal);
-  color: #fff;
+  height: 48px;
+  padding: 0 18px;
+  background: var(--violet);
+  color: #FFFFFF;
   border: none;
-  border-radius: 8px;
-  font: inherit;
-  font-size: 14.5px;
+  font-family: var(--font-display);
+  font-size: 15px;
   font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
   cursor: pointer;
   transition: background 0.15s, transform 0.1s;
 }
 
 .docs-drawer-connect-btn:hover:not(:disabled) {
-  background: var(--teal-dark);
+  background: var(--violet-hover);
 }
 
 .docs-drawer-connect-btn:active:not(:disabled) {
@@ -2277,10 +2273,9 @@ const docsStyles = `
   gap: 10px;
   margin: 0 0 14px;
   padding: 10px 12px;
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  border-radius: 8px;
-  color: #991b1b;
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  color: var(--alarm);
   font-size: 13px;
   line-height: 1.5;
 }
@@ -2305,22 +2300,22 @@ const docsStyles = `
   position: relative;
   padding: 5px 0 5px 22px;
   font-size: 13.5px;
-  color: var(--docs-text-secondary);
+  color: var(--fog);
 }
 
 .docs-drawer-features li::before {
   content: '✓';
   position: absolute;
   left: 0;
-  color: var(--teal);
+  color: var(--phosphor);
   font-weight: 700;
 }
 
 .docs-drawer-install {
   padding-top: 16px;
-  border-top: 1px solid var(--docs-border);
+  border-top: 1px solid var(--seam);
   font-size: 13px;
-  color: var(--docs-text-muted);
+  color: var(--dim);
 }
 
 .docs-drawer-install-links {
@@ -2333,16 +2328,17 @@ const docsStyles = `
 .docs-drawer-install-links a {
   display: inline-block;
   padding: 5px 10px;
-  background: var(--docs-bg-elevated);
-  border-radius: 6px;
-  color: var(--docs-text-secondary);
-  font-size: 12.5px;
+  background: var(--ash);
+  border: 1px solid var(--seam);
+  color: var(--fog);
+  font-family: var(--font-code);
+  font-size: 12px;
   text-decoration: none;
   transition: background 0.15s, color 0.15s;
 }
 
 .docs-drawer-install-links a:hover {
-  background: var(--docs-border);
-  color: var(--docs-text);
+  background: var(--seam);
+  color: var(--bone);
 }
 `;

@@ -45,11 +45,10 @@ export default function BuiltWith() {
   return (
     <>
       <section className="built-with-hero">
-        <div className="built-with-glow" aria-hidden />
         <div className="container">
           <FadeIn>
             <h1>
-              Built with <span className="hero-gradient">Byoky</span>
+              Built with <span className="accent">Byoky</span>
             </h1>
             <p className="built-with-subtitle">
               Apps that let users bring their own AI keys.
@@ -75,7 +74,7 @@ export default function BuiltWith() {
                   <div className="built-with-card-header">
                     <div
                       className="built-with-card-logo"
-                      style={{ background: `${project.color}18`, color: project.color }}
+                      style={{ color: project.color }}
                     >
                       {project.name[0]}
                     </div>
@@ -129,7 +128,7 @@ function Footer() {
     <footer className="footer">
       <div className="container">
         <div className="footer-inner">
-          <a href="/" className="footer-brand">Byoky</a>
+          <a href="/" className="footer-brand"><span className="brand-tile">b</span>Byoky</a>
           <div className="footer-links">
             <a
               href="https://github.com/MichaelLod/byoky"

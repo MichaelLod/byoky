@@ -1,35 +1,30 @@
 export const postStyles = `
 .blog-post-layout {
-  --blog-bg: #fafaf9;
-  --blog-bg-card: #ffffff;
-  --blog-bg-elevated: #f5f5f4;
-  --blog-border: #e7e5e4;
-  --blog-text: #1c1917;
-  --blog-text-secondary: #44403c;
-  --blog-text-muted: #78716c;
-
   max-width: 760px;
   margin: 0 auto;
-  padding: 120px 20px 80px;
+  padding: 132px 20px 80px;
 }
 
 .blog-post-back {
   display: inline-block;
-  font-size: 13px;
-  color: var(--blog-text-muted);
+  font-family: var(--font-code);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
   text-decoration: none;
   margin-bottom: 32px;
   transition: color 0.15s;
 }
 
 .blog-post-back:hover {
-  color: var(--teal);
+  color: var(--phosphor);
 }
 
 .blog-post-header {
   margin-bottom: 48px;
   padding-bottom: 32px;
-  border-bottom: 1px solid var(--blog-border);
+  border-bottom: 1px solid var(--seam);
 }
 
 .blog-post-tags {
@@ -43,18 +38,15 @@ export const postStyles = `
   font-size: 11px;
   font-family: var(--font-code);
   padding: 3px 8px;
-  border-radius: 999px;
-  background: rgba(2, 132, 199, 0.1);
-  color: var(--teal-dark);
-  letter-spacing: 0.02em;
+  background: var(--violet-soft);
+  color: var(--lilac);
+  letter-spacing: 0.04em;
 }
 
 .blog-post-header h1 {
   font-size: 38px;
-  font-weight: 700;
-  line-height: 1.15;
-  letter-spacing: -0.02em;
-  color: var(--blog-text);
+  line-height: 1.1;
+  color: var(--bone);
   margin-bottom: 16px;
 }
 
@@ -64,7 +56,7 @@ export const postStyles = `
   flex-wrap: wrap;
   gap: 8px;
   font-size: 13px;
-  color: var(--blog-text-muted);
+  color: var(--dim);
   font-family: var(--font-code);
 }
 
@@ -74,11 +66,9 @@ export const postStyles = `
 
 .blog-post-hero {
   margin: 0 0 40px;
-  border-radius: 14px;
   overflow: hidden;
-  border: 1px solid var(--blog-border);
-  background: var(--blog-bg-elevated);
-  box-shadow: 0 20px 60px -30px rgba(28, 25, 23, 0.2);
+  border: 1px solid var(--seam);
+  background: var(--ash);
 }
 
 .blog-post-hero img {
@@ -90,7 +80,7 @@ export const postStyles = `
 .blog-post-body {
   font-size: 16px;
   line-height: 1.75;
-  color: var(--blog-text-secondary);
+  color: var(--fog);
 }
 
 .blog-post-body p {
@@ -99,46 +89,41 @@ export const postStyles = `
 
 .blog-post-body h2 {
   font-size: 24px;
-  font-weight: 700;
   margin-top: 44px;
   margin-bottom: 16px;
-  color: var(--blog-text);
-  letter-spacing: -0.01em;
+  color: var(--bone);
 }
 
 .blog-post-body h3 {
   font-size: 18px;
-  font-weight: 600;
   margin-top: 32px;
   margin-bottom: 12px;
-  color: var(--blog-text);
+  color: var(--bone);
 }
 
 .blog-post-body a {
-  color: var(--teal);
+  color: var(--phosphor);
   text-decoration: underline;
   text-underline-offset: 3px;
-  text-decoration-color: rgba(2, 132, 199, 0.4);
+  text-decoration-color: var(--seam-strong);
   transition: text-decoration-color 0.15s;
 }
 
 .blog-post-body a:hover {
-  text-decoration-color: var(--teal);
+  text-decoration-color: var(--violet);
 }
 
 .blog-post-body code {
-  background: var(--blog-bg-elevated);
+  background: var(--ash);
   padding: 2px 6px;
-  border-radius: 4px;
   font-size: 13px;
-  color: var(--teal-dark);
+  color: var(--phosphor);
   font-family: var(--font-code);
 }
 
 .blog-post-body pre {
-  background: var(--blog-bg-card);
-  border: 1px solid var(--blog-border);
-  border-radius: 10px;
+  background: var(--ink);
+  border: 1px solid var(--seam);
   padding: 18px 22px;
   margin: 20px 0;
   overflow-x: auto;
@@ -149,7 +134,7 @@ export const postStyles = `
 .blog-post-body pre code {
   background: none;
   padding: 0;
-  color: var(--blog-text);
+  color: var(--bone);
   font-size: inherit;
 }
 
@@ -164,24 +149,23 @@ export const postStyles = `
 }
 
 .blog-post-body li::marker {
-  color: var(--blog-text-muted);
+  color: var(--dim);
 }
 
 .blog-post-body em {
-  color: var(--blog-text);
+  color: var(--bone);
   font-style: italic;
 }
 
 .blog-post-body strong {
-  color: var(--blog-text);
+  color: var(--bone);
   font-weight: 600;
 }
 
 .blog-post-table-wrap {
   margin: 20px 0 24px;
   overflow-x: auto;
-  border: 1px solid var(--blog-border);
-  border-radius: 10px;
+  border: 1px solid var(--seam);
 }
 
 .blog-post-body table {
@@ -194,16 +178,17 @@ export const postStyles = `
 .blog-post-body td {
   text-align: left;
   padding: 10px 16px;
-  border-bottom: 1px solid var(--blog-border);
+  border-bottom: 1px solid var(--seam);
 }
 
 .blog-post-body th {
-  background: var(--blog-bg-elevated);
-  font-weight: 600;
-  color: var(--blog-text);
-  font-size: 12px;
+  background: var(--ash);
+  font-family: var(--font-code);
+  font-weight: 500;
+  color: var(--fog);
+  font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.1em;
 }
 
 .blog-post-body tr:last-child td {
@@ -213,49 +198,29 @@ export const postStyles = `
 .blog-cta {
   margin: 32px 0;
   padding: 28px 30px;
-  border-radius: 14px;
-  border: 1px solid var(--blog-border);
-  background:
-    linear-gradient(140deg, rgba(2, 132, 199, 0.06), rgba(2, 132, 199, 0.01) 60%),
-    var(--blog-bg-card);
-  position: relative;
-  overflow: hidden;
-}
-
-.blog-cta::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(circle at 0% 0%, rgba(2, 132, 199, 0.08), transparent 55%);
-  pointer-events: none;
-}
-
-.blog-cta > * {
-  position: relative;
+  border: 1px solid var(--seam-strong);
+  background: var(--crypt);
 }
 
 .blog-cta-label {
   display: inline-block;
   font-size: 11px;
-  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--teal-dark);
+  letter-spacing: 0.14em;
+  color: var(--phosphor);
   margin-bottom: 10px;
   font-family: var(--font-code);
 }
 
 .blog-cta h3 {
   font-size: 22px;
-  font-weight: 700;
   margin: 0 0 10px;
-  color: var(--blog-text);
-  letter-spacing: -0.01em;
+  color: var(--bone);
 }
 
 .blog-cta p {
   font-size: 15px;
-  color: var(--blog-text-secondary);
+  color: var(--fog);
   line-height: 1.6;
   margin: 0 0 18px;
 }
@@ -264,19 +229,21 @@ export const postStyles = `
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 11px 20px;
-  border-radius: 8px;
-  background: var(--teal);
-  color: #ffffff !important;
+  height: 44px;
+  padding: 0 20px;
+  background: var(--violet);
+  color: #FFFFFF !important;
+  font-family: var(--font-display);
   font-size: 14px;
   font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
   text-decoration: none !important;
-  transition: background 0.15s, transform 0.15s;
+  transition: background 0.15s;
 }
 
 .blog-cta-button:hover {
-  background: var(--teal-dark);
-  transform: translateY(-1px);
+  background: var(--violet-hover);
 }
 
 @media (max-width: 768px) {

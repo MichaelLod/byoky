@@ -6,6 +6,7 @@ import { ExtensionMock } from './components/ExtensionMock';
 import { AppsShowcase } from './components/AppsShowcase';
 import { InstallWalletButton } from './components/InstallWalletButton';
 import { HeroRollout } from './components/HeroRollout';
+import { Muninn, MuninnHead } from './components/Muninn';
 
 export default function Home() {
   return (
@@ -40,70 +41,97 @@ export default function Home() {
 function Hero() {
   return (
     <section className="hero">
-      <div className="hero-glow" aria-hidden />
-      <div className="hero-glow-secondary" aria-hidden />
-      <div className="hero-glow-tertiary" aria-hidden />
       <div className="container">
-        <FadeIn>
-          <div className="hero-badge">
-            <span className="hero-badge-dot" />
-            Open source · No servers · No accounts
+        <div className="hero-grid">
+          <div>
+            <FadeIn>
+              <div className="hero-badge">
+                <span className="hero-badge-dot" />
+                Open source · No servers · No accounts
+              </div>
+            </FadeIn>
+            <FadeIn delay={0.1}>
+              <h1>
+                The MetaMask{' '}
+                <span className="accent">
+                  for API keys<span className="sr-only">.</span>
+                  <span className="cursor" aria-hidden>_</span>
+                </span>
+              </h1>
+            </FadeIn>
+            <FadeIn delay={0.2}>
+              <p className="hero-lede">
+                Keep every AI API key in one wallet. Apps connect to the wallet,
+                the wallet makes their calls, and your keys never leave Byoky.
+              </p>
+            </FadeIn>
+            <FadeIn delay={0.3}>
+              <div className="hero-actions">
+                <InstallWalletButton className="btn btn-primary">
+                  <DownloadIcon />
+                  Install Wallet
+                </InstallWalletButton>
+                <a
+                  href="/docs"
+                  className="btn btn-secondary"
+                >
+                  Start Building
+                </a>
+              </div>
+              <div className="hero-also">
+                Also on{' '}
+                <a href="https://addons.mozilla.org/en-US/firefox/addon/byoky/" target="_blank" rel="noopener noreferrer">Firefox</a>
+                {' · '}
+                <a href="https://apps.apple.com/app/byoky/id6760779919" target="_blank" rel="noopener noreferrer">iOS</a>
+                {' · '}
+                <a href="https://play.google.com/store/apps/details?id=com.byoky.app" target="_blank" rel="noopener noreferrer">Android</a>
+                {' · '}
+                <a href="https://github.com/MichaelLod/byoky" target="_blank" rel="noopener noreferrer">GitHub</a>
+              </div>
+              <HeroRollout />
+            </FadeIn>
           </div>
-        </FadeIn>
-        <FadeIn delay={0.1}>
-          <h1>
-            <span className="hero-eyebrow">The MetaMask</span>
-            <span className="hero-gradient">for API keys.</span>
-          </h1>
-        </FadeIn>
-        <FadeIn delay={0.2}>
-          <p>
-            Keep every AI API key in one wallet. Apps connect to the wallet,
-            the wallet makes their calls, and your keys never leave Byoky.
-          </p>
-        </FadeIn>
-        <FadeIn delay={0.3}>
-          <div className="hero-actions">
-            <InstallWalletButton className="btn btn-primary">
-              <DownloadIcon />
-              Install Wallet
-            </InstallWalletButton>
-            <a
-              href="/docs"
-              className="btn btn-secondary"
-            >
-              Start Building
-            </a>
-          </div>
-          <div className="hero-also">
-            Also on{' '}
-            <a href="https://addons.mozilla.org/en-US/firefox/addon/byoky/" target="_blank" rel="noopener noreferrer">Firefox</a>
-            {' · '}
-            <a href="https://apps.apple.com/app/byoky/id6760779919" target="_blank" rel="noopener noreferrer">iOS</a>
-            {' · '}
-            <a href="https://play.google.com/store/apps/details?id=com.byoky.app" target="_blank" rel="noopener noreferrer">Android</a>
-            {' · '}
-            <a href="https://github.com/MichaelLod/byoky" target="_blank" rel="noopener noreferrer">GitHub</a>
-          </div>
-          <HeroRollout />
-        </FadeIn>
+          <FadeIn delay={0.2}>
+            <div className="hero-visual">
+              <div className="hero-terminal">
+                <Muninn
+                  size={150}
+                  perch="ledge"
+                  className="hero-raven"
+                  label="Muninn the raven, perched on the terminal, watching your cursor"
+                />
+                <div className="hero-terminal-bar">
+                  <span>~/my-app</span>
+                  <span>BYOKY WALLET · LOCAL</span>
+                </div>
+                <div className="hero-terminal-body">
+                  <div><span className="t-prompt">$</span> npx create-byoky-app my-app</div>
+                  <div><span className="t-prompt">&gt;</span> connect({'{'} providers: [&apos;anthropic&apos;] {'}'})</div>
+                  <div className="t-hi"><span className="t-prompt">◆</span> wallet: localhost:3000 wants to connect</div>
+                  <div><span className="t-ok">✓</span> approved · key stays in the wallet</div>
+                  <div><span className="t-prompt">&gt;</span> POST /v1/messages <span className="t-ok">200</span> streaming<span className="cursor">_</span></div>
+                </div>
+              </div>
+            </div>
+          </FadeIn>
+        </div>
         <FadeIn delay={0.35}>
-          <div className="hero-trust-bar">
-            <div className="hero-trust-item">
-              <LinkIcon />
-              <span>13 Providers</span>
+          <div className="hero-facts" aria-label="Facts">
+            <div className="hero-fact">
+              <div className="hero-fact-label">Providers</div>
+              <div className="hero-fact-value">13 supported</div>
             </div>
-            <div className="hero-trust-item">
-              <CloudOffIcon />
-              <span>No Servers, No Accounts</span>
+            <div className="hero-fact">
+              <div className="hero-fact-label">Servers</div>
+              <div className="hero-fact-value">None. No accounts.</div>
             </div>
-            <div className="hero-trust-item">
-              <LockIcon />
-              <span>AES-256-GCM Encrypted</span>
+            <div className="hero-fact">
+              <div className="hero-fact-label">Encryption</div>
+              <div className="hero-fact-value">AES-256-GCM</div>
             </div>
-            <div className="hero-trust-item">
-              <ShieldIcon />
-              <span>MIT Licensed</span>
+            <div className="hero-fact">
+              <div className="hero-fact-label">License</div>
+              <div className="hero-fact-value">MIT</div>
             </div>
           </div>
         </FadeIn>
@@ -123,27 +151,27 @@ function HowItWorks() {
       <div className="container">
         <FadeIn>
           <h2>Add your keys once. Every app connects.</h2>
-          <div style={{ display: 'flex', gap: '20px', justifyContent: 'center', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 500 }}>
+          <div className="platform-row">
+            <span>
               <svg width="18" height="18" viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="#fff" stroke="#ddd" strokeWidth="1"/><path d="M24 8a16 16 0 0 1 13.86 8H24v0z" fill="#EA4335"/><path d="M37.86 16A16 16 0 0 1 24 40l6.93-12z" fill="#FBBC05"/><path d="M24 40A16 16 0 0 1 10.14 16l6.93 12z" fill="#34A853"/><path d="M10.14 16A16 16 0 0 1 24 8v8z" fill="#4285F4"/><circle cx="24" cy="24" r="6" fill="#fff"/><circle cx="24" cy="24" r="4" fill="#4285F4"/></svg>
               Chrome
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 500 }}>
-              <svg width="18" height="18" viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="#fff" stroke="#ddd" strokeWidth="1"/><path d="M38 18c-1-4-4-7-8-9 2 2 3 5 3 7 0 3-2 6-5 7-4 1-7-1-7-1s1 5 6 6c4 1 8-1 10-4 1-1 1-3 1-6z" fill="#FF4F00"/><path d="M14 30c-1-3 0-6 2-9 1-2 3-3 5-4-2 2-3 4-2 7 0 2 2 4 4 5 3 1 6 0 7-2-1 3-4 6-8 6-3 1-6-1-8-3z" fill="#FF9500"/></svg>
+            </span>
+            <span>
+              <svg width="18" height="18" viewBox="0 0 48 48"><circle cx="24" cy="24" r="22" fill="#fff" stroke="#ddd" strokeWidth="1"/><path d="M38 18c-1-4-4-7-8-9 2 2 3 5 3 7 0 3-2 6-5 7-4 1-7-1-7-1s1 5 6 6c4 1 8-1 10-4 1-1 1-3 1-6z" fill="#FF7139"/><path d="M14 30c-1-3 0-6 2-9 1-2 3-3 5-4-2 2-3 4-2 7 0 2 2 4 4 5 3 1 6 0 7-2-1 3-4 6-8 6-3 1-6-1-8-3z" fill="#FF9500"/></svg>
               Firefox
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 500 }}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="#999"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+            </span>
+            <span>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
               iOS &amp; Safari
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 500 }}>
+            </span>
+            <span>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="#3DDC84"><path d="M17.523 15.341a.91.91 0 0 0 .916-.907V9.478a.91.91 0 0 0-.916-.907.91.91 0 0 0-.917.907v4.956a.91.91 0 0 0 .917.907zm-11.046 0a.91.91 0 0 0 .917-.907V9.478a.91.91 0 0 0-.917-.907.91.91 0 0 0-.916.907v4.956a.91.91 0 0 0 .916.907zm1.48 5.178c0 .504.41.912.916.912h.95v2.66a.91.91 0 0 0 .916.909.91.91 0 0 0 .917-.908v-2.66h1.688v2.66a.91.91 0 0 0 .916.909.91.91 0 0 0 .917-.908v-2.66h.95a.914.914 0 0 0 .916-.913V8.879H7.957v11.64zM15.4 3.11l1.124-1.727a.235.235 0 0 0-.073-.324.237.237 0 0 0-.326.072l-1.14 1.75A6.813 6.813 0 0 0 12 2.321c-1.07 0-2.08.195-3.003.56L7.857 1.13a.236.236 0 0 0-.325-.072.235.235 0 0 0-.073.324L8.583 3.11C6.572 4.12 5.204 6.071 5.204 8.338h13.592c0-2.267-1.368-4.219-3.396-5.228z"/></svg>
               Android
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 500 }}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#999" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+            </span>
+            <span>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
               CLI
-            </div>
+            </span>
           </div>
         </FadeIn>
         <div className="steps-grid">
@@ -211,7 +239,7 @@ function WhyAWallet() {
     <section className="wallet-section">
       <div className="container">
         <FadeIn>
-          <div className="wallet-section-head">
+          <div className="section-head">
             <h2>Stop pasting keys into apps.</h2>
             <p>
               A key pasted into a settings page is a key you no longer control.
@@ -242,7 +270,7 @@ function WhyAWallet() {
               <h3 className="sbs-title">Apps connect instead of copying keys.</h3>
               <p className="sbs-desc">
                 Approve an app, see every request it makes, set spending caps,
-                and revoke it with one click. No more <code style={{ fontFamily: 'var(--font-code)', color: 'var(--teal-light)', fontSize: 13 }}>sk-...</code> in a settings page.
+                and revoke it with one click. No more <code style={{ fontFamily: 'var(--font-code)', color: 'var(--phosphor)', fontSize: 13 }}>sk-...</code> in a settings page.
               </p>
             </div>
           </FadeIn>
@@ -308,28 +336,6 @@ function WhyAWallet() {
           </FadeIn>
         </div>
       </div>
-      <style>{`
-        .wallet-section-head {
-          text-align: center;
-          max-width: 640px;
-          margin: 0 auto 48px;
-        }
-        .wallet-section-head h2 {
-          font-size: 44px;
-          font-weight: 700;
-          letter-spacing: -0.03em;
-          margin-bottom: 14px;
-        }
-        .wallet-section-head p {
-          font-size: 17px;
-          color: var(--text-secondary);
-          line-height: 1.6;
-        }
-        @media (max-width: 720px) {
-          .wallet-section-head h2 { font-size: 32px; }
-          .wallet-section-head p { font-size: 15px; }
-        }
-      `}</style>
     </section>
   );
 }
@@ -344,7 +350,7 @@ function NoServers() {
         <FadeIn>
           <h2 className="zero-cost-heading">
             No servers.<br />
-            <span className="hero-gradient">No accounts. No cloud.</span>
+            <span className="accent">No accounts. No cloud.</span>
           </h2>
           <p className="zero-cost-body">
             Byoky doesn&apos;t run anything that sits between you and your provider.
@@ -458,7 +464,7 @@ function WhereAppsConnect() {
     <section className="wallet-section">
       <div className="container">
         <FadeIn>
-          <div className="wallet-section-head">
+          <div className="section-head">
             <h2>Works where your apps run.</h2>
             <p>
               Each wallet serves the apps on its own device. Every path ends at a
@@ -506,7 +512,7 @@ function OpenClawCTA() {
     <section className="openclaw-cta-section">
       <div className="container">
         <FadeIn>
-          <div className="openclaw-cta-card">
+          <div className="openclaw-cta-card brackets">
             <div className="openclaw-cta-copy">
               <div className="openclaw-cta-eyebrow">
                 <span className="openclaw-cta-dot" />
@@ -515,16 +521,16 @@ function OpenClawCTA() {
               <h2 style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }}>
                 Run{' '}
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                  <img src="https://unpkg.com/@lobehub/icons-static-svg@latest/icons/claude.svg" alt="" width={24} height={24} />
+                  <img className="provider-mark" src="https://unpkg.com/@lobehub/icons-static-svg@latest/icons/claude.svg" alt="" width={24} height={24} />
                   Claude Code,
                 </span>{' '}
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                  <img src="https://unpkg.com/@lobehub/icons-static-svg@latest/icons/openai.svg" alt="" width={24} height={24} />
+                  <img className="provider-mark" src="https://unpkg.com/@lobehub/icons-static-svg@latest/icons/openai.svg" alt="" width={24} height={24} />
                   Codex,
                 </span>{' '}
                 and{' '}
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                  <img src="https://unpkg.com/@lobehub/icons-static-svg@latest/icons/gemini.svg" alt="" width={24} height={24} />
+                  <img className="provider-mark" src="https://unpkg.com/@lobehub/icons-static-svg@latest/icons/gemini.svg" alt="" width={24} height={24} />
                   Gemini
                 </span>{' '}
                 in OpenClaw.
@@ -568,45 +574,37 @@ function OpenClawCTA() {
           gap: 48px;
           align-items: center;
           padding: 48px;
-          border-radius: 20px;
-          background:
-            radial-gradient(circle at 0% 0%, rgba(255,79,0,0.08), transparent 50%),
-            radial-gradient(circle at 100% 100%, rgba(255,79,0,0.05), transparent 50%),
-            var(--bg-card);
-          border: 1px solid rgba(255, 79, 0, 0.2);
+          background: var(--crypt);
+          border: 1px solid var(--seam-strong);
         }
         .openclaw-cta-eyebrow {
           display: inline-flex;
           align-items: center;
           gap: 8px;
+          font-family: var(--font-code);
           font-size: 12px;
-          font-weight: 600;
-          letter-spacing: 0.1em;
+          letter-spacing: 0.14em;
           text-transform: uppercase;
-          color: var(--teal-light);
+          color: var(--phosphor);
           margin-bottom: 14px;
         }
         .openclaw-cta-dot {
           width: 7px; height: 7px;
-          border-radius: 50%;
-          background: var(--teal);
-          box-shadow: 0 0 10px var(--teal-glow);
+          background: var(--violet);
         }
         .openclaw-cta-copy h2 {
           font-size: 32px;
           line-height: 1.15;
-          font-weight: 700;
-          letter-spacing: -0.02em;
           margin: 0 0 16px;
         }
         .openclaw-cta-copy p {
           font-size: 16px;
           line-height: 1.65;
-          color: var(--text-secondary);
+          color: var(--fog);
           margin: 0 0 24px;
           max-width: 520px;
         }
-        .openclaw-cta-copy strong { color: var(--text); }
+        .openclaw-cta-copy strong { color: var(--bone); font-weight: 600; }
         .openclaw-cta-actions {
           display: flex;
           gap: 12px;
@@ -618,16 +616,14 @@ function OpenClawCTA() {
         .openclaw-cta-code {
           margin: 0;
           padding: 22px 24px;
-          background: #ffffff;
-          border: 1px solid var(--border);
-          border-radius: 12px;
-          font-family: var(--font-mono), monospace;
+          background: var(--ink);
+          border: 1px solid var(--seam);
+          font-family: var(--font-code);
           font-size: 13px;
           line-height: 1.75;
-          color: var(--text);
+          color: var(--bone);
           overflow-x: auto;
           white-space: pre;
-          box-shadow: 0 20px 40px rgba(28, 25, 23, 0.06);
         }
         @media (max-width: 860px) {
           .openclaw-cta-section { padding: 56px 0; }
@@ -658,8 +654,8 @@ function ForDevelopers() {
             your users pay their provider directly.
           </p>
           <p className="subtitle" style={{ fontSize: 14, marginBottom: 0, marginTop: 0 }}>
-            <code style={{ fontFamily: 'var(--font-code)', color: 'var(--teal-light)', fontSize: 13 }}>npm install @byoky/sdk</code> to add to an existing project
-            {' · '}<code style={{ fontFamily: 'var(--font-code)', color: 'var(--teal-light)', fontSize: 13 }}>npx create-byoky-app</code> to scaffold a new one
+            <code style={{ fontFamily: 'var(--font-code)', color: 'var(--phosphor)', fontSize: 13 }}>npm install @byoky/sdk</code> to add to an existing project
+            {' · '}<code style={{ fontFamily: 'var(--font-code)', color: 'var(--phosphor)', fontSize: 13 }}>npx create-byoky-app</code> to scaffold a new one
           </p>
         </FadeIn>
         <div className="dev-layout">
@@ -697,7 +693,7 @@ function ForDevelopers() {
                   <div>
                     <h4>Built-in connect modal</h4>
                     <p>
-                      <code style={{ fontFamily: 'var(--font-code)', color: 'var(--teal-light)', fontSize: 13 }}>modal: true</code> handles the connect flow. No wallet
+                      <code style={{ fontFamily: 'var(--font-code)', color: 'var(--phosphor)', fontSize: 13 }}>modal: true</code> handles the connect flow. No wallet
                       yet? It shows install links, and on phones it points users to
                       the Byoky app&apos;s built-in browser.
                     </p>
@@ -839,8 +835,9 @@ function Footer() {
       <div className="container">
         <div className="footer-grid">
           <div className="footer-col">
-            <span className="footer-brand">Byoky</span>
+            <span className="footer-brand"><span className="brand-tile">b</span>Byoky</span>
             <span className="footer-note">The MetaMask for API keys.</span>
+            <span className="footer-watch"><MuninnHead width={36} />Muninn keeps watch</span>
           </div>
           <div className="footer-col">
             <span className="footer-col-title">Product</span>
