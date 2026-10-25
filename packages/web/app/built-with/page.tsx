@@ -128,7 +128,7 @@ function Footer() {
     <footer className="footer">
       <div className="container">
         <div className="footer-inner">
-          <a href="/" className="footer-brand"><span className="brand-tile">b</span>Byoky</a>
+          <a href="/" className="footer-brand"><span className="brand-tile" aria-hidden />Byoky</a>
           <div className="footer-links">
             <a
               href="https://github.com/MichaelLod/byoky"

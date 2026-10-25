@@ -96,7 +96,7 @@ export function Navbar() {
     <nav className="navbar">
       <div className="container navbar-inner">
         <a href="/" className="navbar-brand" aria-label="Byoky home">
-          <span className="brand-tile" aria-hidden>b</span>
+          <span className="brand-tile" aria-hidden />
           <span className="brand-word">Byoky</span>
         </a>
         <div className="navbar-links">

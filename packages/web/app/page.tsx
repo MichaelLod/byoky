@@ -835,7 +835,7 @@ function Footer() {
       <div className="container">
         <div className="footer-grid">
           <div className="footer-col">
-            <span className="footer-brand"><span className="brand-tile">b</span>Byoky</span>
+            <span className="footer-brand"><span className="brand-tile" aria-hidden />Byoky</span>
             <span className="footer-note">The MetaMask for API keys.</span>
             <span className="footer-watch"><MuninnHead width={36} />Muninn keeps watch</span>
           </div>

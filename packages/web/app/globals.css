@@ -198,23 +198,17 @@ section {
    Logo tile — ink square, violet inner stroke, phosphor "b"
    ============================================= */
 
+/* Muninn's head, the app icon (docs/brand/app-icon-small.svg). */
 .brand-tile {
   --tile: 28px;
+  display: inline-block;
   width: var(--tile);
   height: var(--tile);
-  border-radius: max(4px, calc(var(--tile) / 4));
-  background: var(--ink);
-  box-shadow: inset 0 0 0 1.5px var(--violet);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   flex-shrink: 0;
-  font-family: var(--font-display);
-  font-weight: 700;
-  font-size: calc(var(--tile) * 0.68);
-  line-height: 1;
-  color: var(--phosphor);
-  text-transform: none;
+  border-radius: max(4px, calc(var(--tile) / 4));
+  background: url('/logo.svg') center / cover no-repeat;
+  /* Lifts the black tile off a black header. */
+  box-shadow: inset 0 0 0 1px var(--seam-strong);
 }
 
 .brand-word {

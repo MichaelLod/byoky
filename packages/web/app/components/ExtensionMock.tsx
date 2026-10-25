@@ -102,7 +102,7 @@ function MockShell({
     <div className="mock-popup">
       <div className={`mock-header${ruled ? ' mock-header-ruled' : ''}`}>
         <div className="mock-logo">
-          <span className="brand-tile">b</span>
+          <span className="brand-tile" aria-hidden />
           <span>Byoky</span>
         </div>
         {header}

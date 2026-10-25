@@ -15,7 +15,7 @@ type App = {
 function ByokyPill() {
   return (
     <button className="byoky-pill" type="button">
-      <span className="brand-tile" aria-hidden>b</span>
+      <span className="brand-tile" aria-hidden />
       Connect Byoky wallet
       <style jsx>{`
         .byoky-pill {

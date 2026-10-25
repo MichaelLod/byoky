@@ -70,7 +70,7 @@ export default function App() {
     <div className={`app ${locked ? 'app-locked' : ''}`}>
       <header className={`header ${showNav ? 'header-bordered' : ''}`}>
         <h1 className="logo">
-          <span className="logo-tile" aria-hidden="true">b</span>
+          <img className="logo-tile" src="/logo.svg" alt="" />
           Byoky
         </h1>
         {locked && (
