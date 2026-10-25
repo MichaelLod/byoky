@@ -64,6 +64,8 @@ async function getFirefoxVersion() {
   if (pubData.is_disabled_by_mozilla || pubData.is_disabled_by_developer) {
     return { platform: 'Firefox', version: null, status: 'unavailable' }
   }
+  // No flags means the lookup itself failed, so we can't tell whether it's installable.
+  if (!('is_disabled_by_mozilla' in pubData)) return { platform: 'Firefox', version: null, status: 'unknown' }
 
   const { AMO_API_KEY, AMO_API_SECRET } = process.env
   if (!AMO_API_KEY || !AMO_API_SECRET) return { platform: 'Firefox', version: null, status: 'unknown' }
@@ -76,9 +78,10 @@ async function getFirefoxVersion() {
     { headers: { Authorization: `JWT ${h}.${p}.${s}` } }
   )
   if (!res) return { platform: 'Firefox', version: null, status: 'unknown' }
-  const data = await res.json()
+  const data = await res.json().catch(() => ({}))
   const v = data.results?.[0]
-  return { platform: 'Firefox', version: v?.version || null, status: v?.file?.status === 'public' ? 'live' : 'pending' }
+  if (!v) return { platform: 'Firefox', version: null, status: 'unknown' }
+  return { platform: 'Firefox', version: v.version, status: v.file?.status === 'public' ? 'live' : 'pending' }
 }
 
 async function getIOSVersion() {
