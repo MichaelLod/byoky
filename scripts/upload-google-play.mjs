@@ -12,8 +12,8 @@
 //   track: "internal" (default), "alpha", "beta", or "production"
 //   release-notes-file: optional path to a text file with release notes
 //
-// With STORE_IMAGES_DIR set (e.g. marketing/composites/1.1.1), the same edit
-// also replaces the en-US listing images from its play/ folder: phone-*.png
+// With STORE_IMAGES_DIR set (e.g. marketing/composites/1.1.1), a second edit
+// replaces the en-US listing images from its play/ folder: phone-*.png
 // screenshots, feature-graphic-*.png and icon-*.png.
 
 import { readFileSync, existsSync, readdirSync } from 'node:fs'
@@ -112,9 +112,28 @@ async function main() {
   if (!trackRes.ok) throw new Error(`Track assign failed: ${trackRes.status} ${await trackRes.text()}`)
   console.log(`  Assigned to ${track} track`)
 
-  // 4. Listing images, when a store image set is given
+  // 4. Commit edit
+  const commitRes = await fetch(`${API}/edits/${editId}:commit`, { method: 'POST', headers })
+  if (!commitRes.ok) throw new Error(`Commit failed: ${commitRes.status} ${await commitRes.text()}`)
+  console.log(`  Edit committed — upload complete`)
+
+  // 5. Listing images, in an edit of their own: a rejected image must not
+  // hold back the release, and a half-replaced set is never committed.
   const imagesDir = process.env.STORE_IMAGES_DIR && join(process.env.STORE_IMAGES_DIR, 'play')
   if (imagesDir && existsSync(imagesDir)) {
+    try {
+      await uploadListingImages(headers, imagesDir)
+    } catch (err) {
+      console.error(`  WARN: listing images not updated: ${err.message}`)
+    }
+  }
+}
+
+async function uploadListingImages(headers, imagesDir) {
+  const editRes = await fetch(`${API}/edits`, { method: 'POST', headers })
+  if (!editRes.ok) throw new Error(`Create edit failed: ${editRes.status} ${await editRes.text()}`)
+  const editId = (await editRes.json()).id
+  try {
     const files = readdirSync(imagesDir).filter((f) => f.endsWith('.png')).sort()
     const groups = {
       phoneScreenshots: files.filter((f) => f.startsWith('phone-')),
@@ -135,12 +154,13 @@ async function main() {
       }
       console.log(`  Listing ${imageType}: ${names.length} image(s)`)
     }
+    const commitRes = await fetch(`${API}/edits/${editId}:commit`, { method: 'POST', headers })
+    if (!commitRes.ok) throw new Error(`Commit failed: ${commitRes.status} ${await commitRes.text()}`)
+    console.log('  Listing images committed')
+  } catch (err) {
+    await fetch(`${API}/edits/${editId}`, { method: 'DELETE', headers }).catch(() => {})
+    throw err
   }
-
-  // 5. Commit edit
-  const commitRes = await fetch(`${API}/edits/${editId}:commit`, { method: 'POST', headers })
-  if (!commitRes.ok) throw new Error(`Commit failed: ${commitRes.status} ${await commitRes.text()}`)
-  console.log(`  Edit committed — upload complete`)
 }
 
 main().catch(err => {

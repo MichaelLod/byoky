@@ -638,7 +638,8 @@ elif [ -n "${AMO_API_KEY:-}" ] && [ -n "${AMO_API_SECRET:-}" ]; then
     --api-key "$AMO_API_KEY" \
     --api-secret "$AMO_API_SECRET" \
     --channel listed \
-    --upload-source-code "dist/byoky-source-v${NEW_VERSION}.zip"
+    --upload-source-code "dist/byoky-source-v${NEW_VERSION}.zip" \
+    || echo "  WARN: Firefox upload failed; the other stores still go out (retry with ./scripts/release.sh retry)"
 else
   echo "  Skipping Firefox Add-ons (credentials not configured)"
 fi
