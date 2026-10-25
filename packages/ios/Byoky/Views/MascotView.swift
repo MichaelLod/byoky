@@ -366,19 +366,27 @@ private final class TouchFollowingRecognizer: UIGestureRecognizer, UIGestureReco
 
 // MARK: - Provider marks
 
-/// Renders a provider's brand mark from the asset catalog. Falls back to a
-/// generic key glyph when the provider id isn't recognized.
+/// Renders a provider's brand mark from the asset catalog. Providers without
+/// one (Ollama, LM Studio) get a mono monogram, "OL" / "LM"; an unknown
+/// provider id gets a generic key glyph.
 struct ProviderIcon: View {
     let providerId: String
     var size: CGFloat = 20
 
     var body: some View {
-        if let provider = Provider.find(providerId) {
+        if let provider = Provider.find(providerId), UIImage(named: provider.icon) != nil {
             Image(provider.icon)
                 .resizable()
                 .renderingMode(.template)
                 .aspectRatio(contentMode: .fit)
                 .frame(width: size, height: size)
+        } else if let provider = Provider.find(providerId) {
+            Text(String(provider.name.prefix(2)).uppercased())
+                .font(.mono(size * 0.72, weight: .medium))
+                .lineLimit(1)
+                .fixedSize()
+                .frame(width: size, height: size)
+                .accessibilityHidden(true)
         } else {
             Image(systemName: "key")
                 .font(.system(size: size))

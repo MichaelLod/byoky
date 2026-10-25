@@ -804,6 +804,12 @@ final class WalletStore: ObservableObject {
         sessions.contains { $0.appOrigin == appOrigin && !$0.isExpired }
     }
 
+    /// Usage of the app's live session, from the request log; nil without one.
+    func sessionUsage(appOrigin: String) -> SessionUsage? {
+        guard let session = sessions.first(where: { $0.appOrigin == appOrigin && !$0.isExpired }) else { return nil }
+        return SessionUsage(sessionId: session.id, logs: requestLogs)
+    }
+
     func cleanExpiredSessions() throws {
         sessions.removeAll { $0.isExpired }
         try saveSessions()
@@ -941,6 +947,7 @@ final class WalletStore: ObservableObject {
         entry.actualProviderId = actualProviderId
         entry.actualModel = actualModel
         entry.groupId = groupId
+        entry.sessionId = sessions.first { $0.appOrigin == appOrigin }?.id
 
         // Tag the entry with the capability fingerprint of the source request
         // body (tools / vision / structured output / extended reasoning). The

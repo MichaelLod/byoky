@@ -112,7 +112,7 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
         case "BYOKY_SESSION_STATUS":
             handleSessionStatus(requestId: requestId, payload: payload)
         case "BYOKY_SESSION_USAGE":
-            handleSessionUsage(requestId: requestId)
+            handleSessionUsage(requestId: requestId, payload: payload)
         default:
             break
         }
@@ -765,14 +765,17 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
         ])
     }
 
-    private func handleSessionUsage(requestId: String) {
+    /// The session's own usage, as the extension reports it. Without the
+    /// live session key the payload is null, which the SDK reports as
+    /// "Session not found".
+    private func handleSessionUsage(requestId: String, payload: [String: Any]?) {
+        let usage = isSessionValid(payload?["sessionKey"] as? String)
+            ? wallet.sessionUsage(appOrigin: appOrigin)
+            : nil
         deliver(requestId: requestId, message: [
             "type": "BYOKY_SESSION_USAGE_RESPONSE",
             "requestId": requestId,
-            "payload": [
-                "requests": 0, "inputTokens": 0, "outputTokens": 0,
-                "byProvider": [String: Any](),
-            ] as [String: Any],
+            "payload": usage?.payload ?? NSNull(),
         ])
     }
 

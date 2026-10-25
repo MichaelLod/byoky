@@ -272,4 +272,59 @@ final class UsageMeteringTests: XCTestCase {
         }
         XCTAssertTrue(wallet.checkAllowance(origin: origin, providerId: "openai").allowed)
     }
+
+    // MARK: - Session usage (session.getUsage)
+
+    private func logEntry(session: String?, provider: String, status: Int, input: Int?, output: Int?) -> RequestLog {
+        var entry = RequestLog(
+            id: UUID().uuidString, appOrigin: "https://app.example", providerId: provider,
+            method: "POST", url: "https://api.example/v1/messages", statusCode: status, timestamp: Date()
+        )
+        entry.inputTokens = input
+        entry.outputTokens = output
+        entry.sessionId = session
+        return entry
+    }
+
+    /// Like the extension's getSessionUsage: only that session's requests
+    /// below 400 count, split by the provider the app called.
+    func testSessionUsageCountsOnlyThatSessionsSuccessfulRequests() {
+        let logs = [
+            logEntry(session: "s1", provider: "anthropic", status: 200, input: 10, output: 20),
+            logEntry(session: "s1", provider: "anthropic", status: 200, input: 5, output: nil),
+            logEntry(session: "s1", provider: "openai", status: 201, input: 1, output: 2),
+            logEntry(session: "s1", provider: "openai", status: 429, input: 100, output: 100),
+            logEntry(session: "s2", provider: "anthropic", status: 200, input: 7, output: 7),
+            logEntry(session: nil, provider: "anthropic", status: 200, input: 9, output: 9),
+        ]
+        let usage = SessionUsage(sessionId: "s1", logs: logs)
+        XCTAssertEqual(usage.total, .init(requests: 3, inputTokens: 16, outputTokens: 22))
+        XCTAssertEqual(usage.byProvider, [
+            "anthropic": .init(requests: 2, inputTokens: 15, outputTokens: 20),
+            "openai": .init(requests: 1, inputTokens: 1, outputTokens: 2),
+        ])
+
+        let payload = usage.payload
+        XCTAssertEqual(payload["requests"] as? Int, 3)
+        XCTAssertEqual(payload["inputTokens"] as? Int, 16)
+        XCTAssertEqual(payload["outputTokens"] as? Int, 22)
+        let byProvider = payload["byProvider"] as? [String: [String: Int]]
+        XCTAssertEqual(byProvider?["anthropic"], ["requests": 2, "inputTokens": 15, "outputTokens": 20])
+        XCTAssertNotNil(NativeBridgeHandler.encodeMessage(["payload": payload]))
+    }
+
+    func testSessionUsageWithNoRequestsIsZero() {
+        let usage = SessionUsage(sessionId: "s1", logs: [])
+        XCTAssertEqual(usage.total, .init())
+        let payload = usage.payload
+        XCTAssertEqual(payload["requests"] as? Int, 0)
+        XCTAssertEqual((payload["byProvider"] as? [String: [String: Int]])?.isEmpty, true)
+    }
+
+    /// Logs stored before sessions were recorded still decode.
+    func testRequestLogWithoutSessionIdDecodes() throws {
+        let json = #"{"id":"a","appOrigin":"https://app.example","providerId":"openai","method":"POST","url":"https://api.openai.com/v1/chat/completions","statusCode":200,"timestamp":0}"#
+        let entry = try JSONDecoder().decode(RequestLog.self, from: Data(json.utf8))
+        XCTAssertNil(entry.sessionId)
+    }
 }

@@ -37,6 +37,49 @@ struct RequestLog: Identifiable, Codable {
     /// Populated by `detectRequestCapabilities` at log time so the Apps screen
     /// can warn before moving an app to a group whose model lacks one of them.
     var usedCapabilities: CapabilitySet?
+    /// The session the request ran in, for `session.getUsage()`. Nil for
+    /// entries logged before it was recorded.
+    var sessionId: String?
+}
+
+/// What `session.getUsage()` reports: a session's successful requests and
+/// their tokens, in total and per provider. Mirrors `getSessionUsage` in the
+/// extension's background script and `SessionUsage` in core.
+struct SessionUsage: Equatable {
+    struct Totals: Equatable {
+        var requests = 0
+        var inputTokens = 0
+        var outputTokens = 0
+
+        mutating func add(inputTokens input: Int, outputTokens output: Int) {
+            requests += 1
+            inputTokens += input
+            outputTokens += output
+        }
+
+        var payload: [String: Int] {
+            ["requests": requests, "inputTokens": inputTokens, "outputTokens": outputTokens]
+        }
+    }
+
+    private(set) var total = Totals()
+    private(set) var byProvider: [String: Totals] = [:]
+
+    init(sessionId: String, logs: [RequestLog]) {
+        for entry in logs where entry.sessionId == sessionId && entry.statusCode < 400 {
+            let input = entry.inputTokens ?? 0
+            let output = entry.outputTokens ?? 0
+            total.add(inputTokens: input, outputTokens: output)
+            byProvider[entry.providerId, default: Totals()].add(inputTokens: input, outputTokens: output)
+        }
+    }
+
+    /// The SDK's shape: `{ requests, inputTokens, outputTokens, byProvider }`.
+    var payload: [String: Any] {
+        var payload: [String: Any] = total.payload
+        payload["byProvider"] = byProvider.mapValues(\.payload)
+        return payload
+    }
 }
 
 /// Capability flags a single request used. Mirrors `CapabilitySet` in
