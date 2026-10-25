@@ -14,17 +14,37 @@ struct AppRuntimeView: View {
                         .ignoresSafeArea(edges: .bottom)
                 } else {
                     VStack(spacing: 8) {
-                        Text("Invalid app URL")
-                            .foregroundStyle(.secondary)
+                        PromptLine("Invalid app URL", color: Theme.alarm)
                         Text("Only HTTPS URLs are allowed.")
                             .font(.caption)
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(Theme.fog)
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(ScreenBackground())
                 }
             }
             .navigationTitle(app.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                // The app's name over its address, like a terminal title bar.
+                ToolbarItem(placement: .principal) {
+                    VStack(spacing: 1) {
+                        Text(app.name)
+                            .uppercaseDisplay()
+                            .font(.display(15, weight: .semibold, relativeTo: .headline))
+                            .tracking(1.2)
+                            .foregroundStyle(Theme.bone)
+                        if let host = URL(string: app.url)?.host {
+                            Text(host)
+                                .font(.mono(11, relativeTo: .caption2))
+                                .foregroundStyle(Theme.dim)
+                        }
+                    }
+                    .lineLimit(1)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityAddTraits(.isHeader)
+                }
+
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
                         dismiss()
@@ -55,7 +75,8 @@ private struct InstalledAppLauncher: ViewModifier {
     @EnvironmentObject var wallet: WalletStore
     @Binding var request: InstalledApp?
     @State private var reconnecting: InstalledApp?
-    @State private var reconnectTitle = ""
+    /// Reconnect was confirmed; the app opens once the request sheet is gone.
+    @State private var reconnected: InstalledApp?
     @State private var open: InstalledApp?
 
     func body(content: Content) -> some View {
@@ -64,29 +85,30 @@ private struct InstalledAppLauncher: ViewModifier {
                 guard let app else { return }
                 request = nil
                 if wallet.needsReapproval(app) {
-                    reconnectTitle = "Reconnect \(app.name)?"
                     reconnecting = app
                 } else {
                     open = app
                 }
             }
-            .alert(
-                reconnectTitle,
-                isPresented: Binding(
-                    get: { reconnecting != nil },
-                    set: { if !$0 { reconnecting = nil } }
-                ),
-                presenting: reconnecting
-            ) { app in
-                Button("Cancel", role: .cancel) {}
-                Button("Reconnect") {
-                    if let url = URL(string: app.url), url.host != nil {
-                        wallet.grantAppAccess(origin: InstalledApp.origin(of: url))
+            // Cancel (or swiping the sheet away) leaves the app closed and
+            // disconnected.
+            .sheet(item: $reconnecting, onDismiss: {
+                // Presenting the browser while the sheet animates out is dropped.
+                open = reconnected
+                reconnected = nil
+            }) { app in
+                ReconnectRequestView(
+                    app: app,
+                    host: Self.displayHost(app),
+                    onCancel: { reconnecting = nil },
+                    onReconnect: {
+                        if let url = URL(string: app.url), url.host != nil {
+                            wallet.grantAppAccess(origin: InstalledApp.origin(of: url))
+                        }
+                        reconnected = app
+                        reconnecting = nil
                     }
-                    open = app
-                }
-            } message: { app in
-                Text("You disconnected \(Self.displayHost(app)). Reconnecting lets it send AI requests through your keys again. It never sees the keys.")
+                )
             }
             .fullScreenCover(item: $open) { app in
                 AppRuntimeView(app: app)
@@ -99,6 +121,75 @@ private struct InstalledAppLauncher: ViewModifier {
         guard let url = URL(string: app.url), let host = url.host else { return app.name }
         if let port = url.port, port != 443 { return "\(host):\(port)" }
         return host
+    }
+}
+
+/// "Reconnect?" for an app the user disconnected in Connected Apps — the
+/// one connection request on iPhone. Muninn is on alert until you decide.
+private struct ReconnectRequestView: View {
+    let app: InstalledApp
+    let host: String
+    let onCancel: () -> Void
+    let onReconnect: () -> Void
+
+    @State private var nods = 0
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
+                Muninn(mood: .alert, size: 100, compact: true, nod: nods)
+                VStack(alignment: .leading, spacing: 6) {
+                    PromptLine("Connection request", size: 11)
+                    Text("Reconnect \(app.name)?")
+                        .uppercaseDisplay()
+                        .font(.display(22, relativeTo: .title2))
+                        .tracking(0.7)
+                        .foregroundStyle(Theme.bone)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isHeader)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(host)
+                    .font(.mono(15, relativeTo: .body))
+                    .foregroundStyle(Theme.bone)
+                Text("Disconnected in Connected Apps")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.fog)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.void)
+            .overlay(Rectangle().strokeBorder(Theme.seamStrong, lineWidth: 1))
+            .padding(.top, 16)
+
+            Text("You disconnected \(host). Reconnecting lets it send AI requests through your keys again. It never sees the keys.")
+                .font(.callout)
+                .foregroundStyle(Theme.fog)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 14)
+
+            Spacer(minLength: 20)
+
+            HStack(spacing: 10) {
+                Button("Cancel", action: onCancel)
+                    .buttonStyle(RetroButtonStyle(kind: .ghost, height: 48))
+                Button("Reconnect") {
+                    nods += 1
+                    onReconnect()
+                }
+                .buttonStyle(RetroButtonStyle(kind: .primary, height: 48))
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 24)
+        .padding(.bottom, 12)
+        .overlay(Scanlines().ignoresSafeArea())
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+        .presentationBackground(Theme.crypt)
     }
 }
 
@@ -133,7 +224,10 @@ struct AppWebView: UIViewRepresentable {
 
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.isOpaque = false
-        webView.backgroundColor = .systemBackground
+        webView.backgroundColor = UIColor(Theme.void)
+        // The wallet is dark only; the apps it opens keep seeing the light
+        // appearance they always got here.
+        webView.overrideUserInterfaceStyle = .light
         webView.allowsBackForwardNavigationGestures = false
         webView.navigationDelegate = context.coordinator
         handler.attach(to: webView)

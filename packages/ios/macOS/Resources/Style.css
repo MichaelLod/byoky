@@ -1,3 +1,17 @@
+/* Byoky's retro-security design (docs/brand/README.md): dark only. */
+
+@font-face {
+    font-family: "Chakra Petch";
+    font-weight: 600;
+    src: url("ChakraPetch-SemiBold.ttf") format("truetype");
+}
+
+@font-face {
+    font-family: "IBM Plex Mono";
+    font-weight: 400;
+    src: url("IBMPlexMono-Regular.ttf") format("truetype");
+}
+
 * {
     -webkit-user-select: none;
     -webkit-user-drag: none;
@@ -5,13 +19,26 @@
 }
 
 :root {
-    color-scheme: light dark;
+    color-scheme: dark;
 
-    --spacing: 20px;
+    --void: #07060A;
+    --seam-strong: #3B2D55;
+    --bone: #ECE8F4;
+    --fog: #A79FB8;
+    --dim: #857C95;
+    --violet: #7C3AED;
+    --violet-hover: #8B5CF6;
+    --signal: #4ADE80;
+
+    --spacing: 14px;
 }
 
 html {
     height: 100%;
+    background-color: var(--void);
+    /* The faint dot grid. */
+    background-image: radial-gradient(circle at 1px 1px, rgba(167, 139, 250, 0.08) 1px, transparent 0);
+    background-size: 24px 24px;
 }
 
 body {
@@ -24,8 +51,87 @@ body {
     margin: 0 calc(var(--spacing) * 2);
     height: 100%;
 
+    color: var(--bone);
     font: -apple-system-short-body;
     text-align: center;
+}
+
+p {
+    margin: 0;
+    max-width: 340px;
+    color: var(--fog);
+    line-height: 1.45;
+}
+
+#muninn {
+    flex-shrink: 0;
+    overflow: visible;
+}
+
+/* Script.js turns these with CSS transforms in drawing units. */
+#raven, #head, #pupil {
+    transform-box: view-box;
+    transition: transform 0.18s ease-out;
+}
+
+#raven {
+    transform-origin: 120px 0;
+}
+
+#head {
+    transform-origin: 140px 96px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #raven, #head, #pupil {
+        transition: none;
+    }
+}
+
+.status {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--dim);
+}
+
+.status .dot {
+    width: 6px;
+    height: 6px;
+    background: currentColor;
+}
+
+body.state-on .status {
+    color: var(--signal);
+}
+
+button {
+    height: 40px;
+    padding: 0 18px;
+    border: 0;
+    border-radius: 0;
+    background: var(--violet);
+    color: #FFFFFF;
+    font-family: "Chakra Petch", -apple-system, sans-serif;
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
+button:hover {
+    background: var(--violet-hover);
+}
+
+.scanlines {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background-image: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.2) 0px, rgba(0, 0, 0, 0.2) 1px, transparent 1px, transparent 3px);
 }
 
 body:not(.platform-mac, .platform-ios) :is(.platform-mac, .platform-ios) {
@@ -40,10 +146,6 @@ body.platform-mac .platform-ios {
     display: none;
 }
 
-body.platform-ios .platform-mac {
-    display: none;
-}
-
 body:not(.state-on, .state-off) :is(.state-on, .state-off) {
     display: none;
 }
@@ -54,8 +156,4 @@ body.state-on :is(.state-off, .state-unknown) {
 
 body.state-off :is(.state-on, .state-unknown) {
     display: none;
-}
-
-button {
-    font-size: 1em;
 }

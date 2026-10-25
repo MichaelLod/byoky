@@ -9,7 +9,6 @@
 /* Begin PBXBuildFile section */
 		01C40859F08D643E4BBB41AE /* RoutingResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDD23C93C263DCD747B4A451 /* RoutingResolver.swift */; };
 		07B7F34AF8C5A4FEB7033A0F /* BackupFileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9299172D894F0140FE036CB1 /* BackupFileTests.swift */; };
-		08B1CDC1B03E81A3BBE759FD /* mascot.svg in Resources */ = {isa = PBXBuildFile; fileRef = DC0DEA62654413544A1EA7E8 /* mascot.svg */; };
 		0A0B8723BEEA1F628898918C /* ByokySmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FE2FCEEC7F2B498F6F78EDB /* ByokySmokeTests.swift */; };
 		138FA942DA6C2140C8979814 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00A9C75D712BA0B46E7F2642 /* Session.swift */; };
 		14C99EB6E6465555E69339FB /* icon-128.png in Resources */ = {isa = PBXBuildFile; fileRef = 0AC0E9A4C958920C1E2F3B51 /* icon-128.png */; };
@@ -27,12 +26,14 @@
 		37A41EB94C5EDE0EEE6DE20F /* ByokyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6A030A836CCE41CC0B1AE96 /* ByokyApp.swift */; };
 		37C037BF17D918925D0B882D /* Credential.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89DFBFD38410B1E929388841 /* Credential.swift */; };
 		3A476D9C9A3C93291F1ED58E /* ByokySafariExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 6EC7AC249597267812997B80 /* ByokySafariExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		3BA6888B6C753AF2DD143FE1 /* IBMPlexMono-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 8683E637FCAB1334890BACB7 /* IBMPlexMono-Medium.ttf */; };
 		3CF13FA8D76055FF9FCED7CA /* UnlockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B641D6799174E3DFA18348D0 /* UnlockView.swift */; };
 		3D8FE6C2B54C52362DC13D27 /* ProxyBody.swift in Sources */ = {isa = PBXBuildFile; fileRef = 534B0DE68429E0F532140580 /* ProxyBody.swift */; };
 		3F4812204ED4AEA4DFB1ACE2 /* AppRuntimeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A212D32C38490153E2379245 /* AppRuntimeView.swift */; };
 		426FDFDC86B1A14E24BE30EC /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = C1A34C8CE13B080396735755 /* Main.storyboard */; };
 		439BE283B91BBA02F22ABD3C /* WalletStatsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = F01EAB6145CA4C07024CC3BA /* WalletStatsSheet.swift */; };
 		491996E094E51064FAFA4268 /* WalletView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 873BB1CDCFBE3C232CBB3AEA /* WalletView.swift */; };
+		4942C444E498802690C6DD30 /* ChakraPetch-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 35B79825C9B26EE4F8A75462 /* ChakraPetch-Bold.ttf */; };
 		5CFF0270ACC087AF340AF4C5 /* InstalledApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0558CF4019B73E39B5E6F2BF /* InstalledApp.swift */; };
 		5E08AFA22321BE94E55C6A71 /* SafariWebExtensionHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7068BDC28BA0A572F25D021 /* SafariWebExtensionHandler.swift */; };
 		6D87CA4CD76DF7AC19DD8393 /* RoutingResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E2D5F9CF6302B9D1D820573 /* RoutingResolverTests.swift */; };
@@ -41,28 +42,38 @@
 		7641980494574E8D7535D2C2 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 025A3D6E0A32412866DB3A82 /* SettingsView.swift */; };
 		76FA2C13DF843F2F2E7E0CF5 /* ViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E67372BB638FC0E494FB9AD4 /* ViewController.swift */; };
 		779FD2C6ABEBE0183B7164A7 /* Script.js in Resources */ = {isa = PBXBuildFile; fileRef = C3B5118B3A195AF66ECCB79E /* Script.js */; };
+		79F5CA9831E40D9245FA225F /* IBMPlexMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 9434DE52C83564557C8A3C68 /* IBMPlexMono-Regular.ttf */; };
 		7DA5A5B14CF0B75A65306E63 /* InstalledAppTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A612886E07EF9C6FDB6FED6E /* InstalledAppTests.swift */; };
 		805456E2631BACCBF72331BB /* BackupFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4F3B0F07E12A02FFF8E8AD1 /* BackupFile.swift */; };
+		811518768364B123F39BA13C /* IBMPlexMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 9434DE52C83564557C8A3C68 /* IBMPlexMono-Regular.ttf */; };
 		8186FC08E1E2F9596AD43D6F /* LegacyDataCleanup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 387D940FE8EC88F1930C90E5 /* LegacyDataCleanup.swift */; };
 		8252A2318B69D1CDBCEAA481 /* KeychainService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64FBAC3C6BEC76F7FEB974CA /* KeychainService.swift */; };
 		8577BD07B91A14E78C03FEFA /* UsageParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D41E4979F0A4A1026B140EF /* UsageParser.swift */; };
 		86A59E1AD791FE7E77485BE6 /* UTF8ChunkDecoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B6FC24CE3B7E5009CD0FB76 /* UTF8ChunkDecoderTests.swift */; };
+		8747B5E010715898431D42FA /* ChakraPetch-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 54DFDAB7535EA21E233A0F5D /* ChakraPetch-SemiBold.ttf */; };
 		897EA96771A94EBFC69CB648 /* ByokySafariExtension (macOS).appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = AD49BDEC54C25469FDC97E99 /* ByokySafariExtension (macOS).appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		8BA04DCB5C53ABAAB4CC98DD /* Icon.png in Resources */ = {isa = PBXBuildFile; fileRef = 9A81D448FC1082620143946F /* Icon.png */; };
+		8CC52E00CCBC5C57B2E67097 /* IBMPlexMono-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = 3866E2F79C7887DB4532A475 /* IBMPlexMono-OFL.txt */; };
+		93248CAD3B98495CFAD897EF /* IBMPlexMono-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = 3866E2F79C7887DB4532A475 /* IBMPlexMono-OFL.txt */; };
+		93DE733DB3517BF7791580EF /* IBMPlexMono-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 8683E637FCAB1334890BACB7 /* IBMPlexMono-Medium.ttf */; };
 		9E9512AC28EA06739A48CA1F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F78BFB7A6675DC135793CDF6 /* Assets.xcassets */; };
 		A0516EF4B0EF4339DBFE89DE /* InstalledAppsGrid.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE56FB091E84E9FA60F85B10 /* InstalledAppsGrid.swift */; };
+		A289F885695AEDECA67491DF /* ChakraPetch-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = 9FDF8AB95B400D60D974CF7D /* ChakraPetch-OFL.txt */; };
 		A4FAD39E6ADFF2A9EFC37F36 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 947CA8C33A7D9713FBD7AE26 /* MainTabView.swift */; };
 		A61154DF03CD67BF9A9BA941 /* ByokyMarketingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C9022E23EB29FE0138F8AAE /* ByokyMarketingTests.swift */; };
+		A6394FF201FE5CA006B037F7 /* ChakraPetch-OFL.txt in Resources */ = {isa = PBXBuildFile; fileRef = 9FDF8AB95B400D60D974CF7D /* ChakraPetch-OFL.txt */; };
 		A6B4E8A342A7F6E0597A5730 /* Style.css in Resources */ = {isa = PBXBuildFile; fileRef = 6D4E0769A3926F6F3F9D9A36 /* Style.css */; };
+		A74AE33D21024B03629FF492 /* RetroComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA8C19C5102A94BB530556EB /* RetroComponents.swift */; };
 		AEBA7F454469FC1935478195 /* SafariWebExtensionHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7068BDC28BA0A572F25D021 /* SafariWebExtensionHandler.swift */; };
 		B8892D299EB4DEFD5FFD80B5 /* ProxyPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 002AFF3060E3E2A27AD1CDFC /* ProxyPolicy.swift */; };
 		B95BE98248900520B468E737 /* ProxyPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70A9C8261C05288AFEC0AF15 /* ProxyPolicyTests.swift */; };
 		BAAB7074EE3DAA0657C9DF80 /* MascotView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B43E014DCAB9AF22FB314A7F /* MascotView.swift */; };
+		BFB4EBC4620EEF70FA2C7372 /* ChakraPetch-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 35B79825C9B26EE4F8A75462 /* ChakraPetch-Bold.ttf */; };
 		C0BC00B34D79489866BED5AB /* AddCredentialView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3737A9440D94C08CC5C24E56 /* AddCredentialView.swift */; };
 		C90992A0290F62A29ABAE125 /* WalletStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3460CC27A2B3D9F360016904 /* WalletStore.swift */; };
 		D6BE09E5B629C97D232DD633 /* NativeBridgeHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05C2E108EC58F3E09AC85704 /* NativeBridgeHandler.swift */; };
 		D83D90C01974F49A95E9727E /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFCA603A5E92A878E419B12F /* OnboardingView.swift */; };
 		E1F3C63E291CAFA4AD8DDEA8 /* ClaudeCodeShapingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E75B2D889D92C4DBC7615C8 /* ClaudeCodeShapingTests.swift */; };
+		E2599CE35400B3A427EDE583 /* ChakraPetch-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 54DFDAB7535EA21E233A0F5D /* ChakraPetch-SemiBold.ttf */; };
 		EB7D40E8DA178797F537056E /* mobile.js in Resources */ = {isa = PBXBuildFile; fileRef = 54F9FD4B4E6C8A71978FDB71 /* mobile.js */; };
 		EC32070FC63F2D3078E675A2 /* ProviderURLTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBC3049BC4F0C1B1FA036957 /* ProviderURLTests.swift */; };
 		EE42BC6A7AC2993DC364DEA1 /* TranslationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F92F1285F0CC62D52543E84 /* TranslationEngine.swift */; };
@@ -151,12 +162,15 @@
 		24B5DAFE46C86A064FD71542 /* ByokyTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ByokyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		2C9022E23EB29FE0138F8AAE /* ByokyMarketingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ByokyMarketingTests.swift; sourceTree = "<group>"; };
 		3460CC27A2B3D9F360016904 /* WalletStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalletStore.swift; sourceTree = "<group>"; };
+		35B79825C9B26EE4F8A75462 /* ChakraPetch-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "ChakraPetch-Bold.ttf"; sourceTree = "<group>"; };
 		3737A9440D94C08CC5C24E56 /* AddCredentialView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddCredentialView.swift; sourceTree = "<group>"; };
+		3866E2F79C7887DB4532A475 /* IBMPlexMono-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "IBMPlexMono-OFL.txt"; sourceTree = "<group>"; };
 		387D940FE8EC88F1930C90E5 /* LegacyDataCleanup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LegacyDataCleanup.swift; sourceTree = "<group>"; };
 		3A81990611712DAE8AE2AA2A /* WalletState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalletState.swift; sourceTree = "<group>"; };
 		3F92F1285F0CC62D52543E84 /* TranslationEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslationEngine.swift; sourceTree = "<group>"; };
 		44B0F25CD3576AA6EE926141 /* ClaudeCodeShaping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeCodeShaping.swift; sourceTree = "<group>"; };
 		534B0DE68429E0F532140580 /* ProxyBody.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyBody.swift; sourceTree = "<group>"; };
+		54DFDAB7535EA21E233A0F5D /* ChakraPetch-SemiBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "ChakraPetch-SemiBold.ttf"; sourceTree = "<group>"; };
 		54F9FD4B4E6C8A71978FDB71 /* mobile.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = mobile.js; sourceTree = "<group>"; };
 		5619226B06840C897C0B2516 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		57F7BF90B53E6F481C189526 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
@@ -169,13 +183,15 @@
 		735CB11BAAECF0D90B452E41 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		7D6A7A4061250895749E7ADD /* BridgeSecurityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeSecurityTests.swift; sourceTree = "<group>"; };
 		7E75B2D889D92C4DBC7615C8 /* ClaudeCodeShapingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeCodeShapingTests.swift; sourceTree = "<group>"; };
+		8683E637FCAB1334890BACB7 /* IBMPlexMono-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexMono-Medium.ttf"; sourceTree = "<group>"; };
 		873BB1CDCFBE3C232CBB3AEA /* WalletView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalletView.swift; sourceTree = "<group>"; };
 		89DFBFD38410B1E929388841 /* Credential.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Credential.swift; sourceTree = "<group>"; };
 		8BD435CEEF867E4F4393E64D /* SafariExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = SafariExtension.entitlements; sourceTree = "<group>"; };
 		8D41E4979F0A4A1026B140EF /* UsageParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageParser.swift; sourceTree = "<group>"; };
 		9299172D894F0140FE036CB1 /* BackupFileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupFileTests.swift; sourceTree = "<group>"; };
+		9434DE52C83564557C8A3C68 /* IBMPlexMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexMono-Regular.ttf"; sourceTree = "<group>"; };
 		947CA8C33A7D9713FBD7AE26 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
-		9A81D448FC1082620143946F /* Icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = Icon.png; sourceTree = "<group>"; };
+		9FDF8AB95B400D60D974CF7D /* ChakraPetch-OFL.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "ChakraPetch-OFL.txt"; sourceTree = "<group>"; };
 		A1698021D7C218591A207AEA /* BackupViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupViews.swift; sourceTree = "<group>"; };
 		A212D32C38490153E2379245 /* AppRuntimeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRuntimeView.swift; sourceTree = "<group>"; };
 		A4178DD3382DFFAC2C8D3B12 /* TranslationEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslationEngineTests.swift; sourceTree = "<group>"; };
@@ -193,7 +209,7 @@
 		C4B71216FA68A3818CC6A692 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		D7068BDC28BA0A572F25D021 /* SafariWebExtensionHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafariWebExtensionHandler.swift; sourceTree = "<group>"; };
 		D7D35FC06C7114F0F66FC2E8 /* Byoky-macOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "Byoky-macOS.entitlements"; sourceTree = "<group>"; };
-		DC0DEA62654413544A1EA7E8 /* mascot.svg */ = {isa = PBXFileReference; path = mascot.svg; sourceTree = "<group>"; };
+		DA8C19C5102A94BB530556EB /* RetroComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RetroComponents.swift; sourceTree = "<group>"; };
 		DDD23C93C263DCD747B4A451 /* RoutingResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutingResolver.swift; sourceTree = "<group>"; };
 		DFE5899F84197B2F2511CE0A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		E009A276D1E58F135C9704F6 /* Base */ = {isa = PBXFileReference; lastKnownFileType = text.html; name = Base; path = Base.lproj/Main.html; sourceTree = "<group>"; };
@@ -272,12 +288,26 @@
 			path = Extensions;
 			sourceTree = "<group>";
 		};
+		4C7F628E90DF536BD60557BF /* Fonts */ = {
+			isa = PBXGroup;
+			children = (
+				35B79825C9B26EE4F8A75462 /* ChakraPetch-Bold.ttf */,
+				9FDF8AB95B400D60D974CF7D /* ChakraPetch-OFL.txt */,
+				54DFDAB7535EA21E233A0F5D /* ChakraPetch-SemiBold.ttf */,
+				8683E637FCAB1334890BACB7 /* IBMPlexMono-Medium.ttf */,
+				3866E2F79C7887DB4532A475 /* IBMPlexMono-OFL.txt */,
+				9434DE52C83564557C8A3C68 /* IBMPlexMono-Regular.ttf */,
+			);
+			path = Fonts;
+			sourceTree = "<group>";
+		};
 		7299B5AFD030DC25AB5C7832 = {
 			isa = PBXGroup;
 			children = (
 				F08A2AAC8794A4C5F578D0A2 /* Byoky */,
 				90A5DD2F914D37136BEC510D /* ByokyTests */,
 				C704E0EF78DDD091165A7F49 /* ByokyUITests */,
+				4C7F628E90DF536BD60557BF /* Fonts */,
 				2BBD16FA1A7754B576C7E933 /* macOS */,
 				BD9A984C5C342F39A5589379 /* SafariExtension */,
 				EE008FE1BF7F129881291BEE /* Products */,
@@ -289,6 +319,7 @@
 			children = (
 				947CA8C33A7D9713FBD7AE26 /* MainTabView.swift */,
 				B43E014DCAB9AF22FB314A7F /* MascotView.swift */,
+				DA8C19C5102A94BB530556EB /* RetroComponents.swift */,
 				5619226B06840C897C0B2516 /* RootView.swift */,
 				AEFC5C4007252B5BF22D1CF4 /* Apps */,
 				3ACEB5821A5BACC00C2CD5DE /* Onboarding */,
@@ -363,7 +394,6 @@
 		BD9B04BA8B81C1389EA88BD5 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
-				9A81D448FC1082620143946F /* Icon.png */,
 				C3B5118B3A195AF66ECCB79E /* Script.js */,
 				6D4E0769A3926F6F3F9D9A36 /* Style.css */,
 				82D67F97E09C62E232ED4E07 /* Main.html */,
@@ -422,7 +452,6 @@
 				F6A030A836CCE41CC0B1AE96 /* ByokyApp.swift */,
 				0AC0E9A4C958920C1E2F3B51 /* icon-128.png */,
 				C4B71216FA68A3818CC6A692 /* Info.plist */,
-				DC0DEA62654413544A1EA7E8 /* mascot.svg */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -602,7 +631,12 @@
 			buildActionMask = 2147483647;
 			files = (
 				9E9512AC28EA06739A48CA1F /* Assets.xcassets in Resources */,
-				8BA04DCB5C53ABAAB4CC98DD /* Icon.png in Resources */,
+				4942C444E498802690C6DD30 /* ChakraPetch-Bold.ttf in Resources */,
+				A289F885695AEDECA67491DF /* ChakraPetch-OFL.txt in Resources */,
+				E2599CE35400B3A427EDE583 /* ChakraPetch-SemiBold.ttf in Resources */,
+				3BA6888B6C753AF2DD143FE1 /* IBMPlexMono-Medium.ttf in Resources */,
+				8CC52E00CCBC5C57B2E67097 /* IBMPlexMono-OFL.txt in Resources */,
+				79F5CA9831E40D9245FA225F /* IBMPlexMono-Regular.ttf in Resources */,
 				F412C79FAC8A6801D094FE8E /* Main.html in Resources */,
 				426FDFDC86B1A14E24BE30EC /* Main.storyboard in Resources */,
 				779FD2C6ABEBE0183B7164A7 /* Script.js in Resources */,
@@ -615,8 +649,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				1FB75D9F7943391093D57044 /* Assets.xcassets in Resources */,
+				BFB4EBC4620EEF70FA2C7372 /* ChakraPetch-Bold.ttf in Resources */,
+				A6394FF201FE5CA006B037F7 /* ChakraPetch-OFL.txt in Resources */,
+				8747B5E010715898431D42FA /* ChakraPetch-SemiBold.ttf in Resources */,
+				93DE733DB3517BF7791580EF /* IBMPlexMono-Medium.ttf in Resources */,
+				93248CAD3B98495CFAD897EF /* IBMPlexMono-OFL.txt in Resources */,
+				811518768364B123F39BA13C /* IBMPlexMono-Regular.ttf in Resources */,
 				14C99EB6E6465555E69339FB /* icon-128.png in Resources */,
-				08B1CDC1B03E81A3BBE759FD /* mascot.svg in Resources */,
 				EB7D40E8DA178797F537056E /* mobile.js in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -728,6 +767,7 @@
 				D83D90C01974F49A95E9727E /* OnboardingView.swift in Sources */,
 				3D8FE6C2B54C52362DC13D27 /* ProxyBody.swift in Sources */,
 				B8892D299EB4DEFD5FFD80B5 /* ProxyPolicy.swift in Sources */,
+				A74AE33D21024B03629FF492 /* RetroComponents.swift in Sources */,
 				2714E5DDAE8A60036E198BEC /* RootView.swift in Sources */,
 				01C40859F08D643E4BBB41AE /* RoutingResolver.swift in Sources */,
 				138FA942DA6C2140C8979814 /* Session.swift in Sources */,

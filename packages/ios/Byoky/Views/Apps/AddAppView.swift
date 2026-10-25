@@ -24,9 +24,10 @@ struct AddAppView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 Section {
                     TextField("https://example.com", text: $urlText)
+                        .font(.mono(15))
                         .keyboardType(.URL)
                         .textContentType(.URL)
                         .textInputAutocapitalization(.never)
@@ -37,10 +38,11 @@ struct AddAppView: View {
                         .onChange(of: urlText) { _, _ in error = nil }
                         .accessibilityIdentifier("addApp.url")
                 } header: {
-                    Text("App address")
+                    ListHeader("App address")
                 } footer: {
-                    Text("Only https:// addresses are supported. Opening the app in Byoky's built-in browser connects it to this wallet: it can make AI requests with your keys without ever seeing them. You can disconnect it in Connected Apps.")
+                    ListFooter("Only https:// addresses are supported. Opening the app in Byoky's built-in browser connects it to this wallet: it can make AI requests with your keys without ever seeing them. You can disconnect it in Connected Apps.")
                 }
+                .retroRow()
 
                 if let url = normalizedURL, InstalledApp.isSharedHosting(url) {
                     Section {
@@ -48,11 +50,13 @@ struct AddAppView: View {
                             Text("\(InstalledApp.origin(of: url)) is shared hosting. Wallet access is per site address, so every page served from it — not just this app — gets the same access.")
                         } icon: {
                             Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.orange)
+                                .foregroundStyle(Theme.amber)
                         }
                         .font(.callout)
+                        .foregroundStyle(Theme.bone)
                         .accessibilityIdentifier("addApp.sharedHostingWarning")
                     }
+                    .retroRow(border: Theme.amber)
                 }
 
                 Section {
@@ -60,20 +64,22 @@ struct AddAppView: View {
                         .textInputAutocapitalization(.words)
                         .accessibilityIdentifier("addApp.name")
                 } header: {
-                    Text("Name (optional)")
+                    ListHeader("Name (optional)")
                 }
+                .retroRow()
 
                 if let error {
                     Section {
                         Label(error, systemImage: "exclamationmark.triangle")
                             .font(.callout)
-                            .foregroundStyle(Theme.danger)
+                            .foregroundStyle(Theme.alarm)
                             .accessibilityIdentifier("addApp.error")
                     }
+                    .retroRow(border: Theme.alarm)
                 }
             }
-            .navigationTitle("Add App")
-            .navigationBarTitleDisplayMode(.inline)
+            .retroList()
+            .retroNavigationTitle("Add App")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }

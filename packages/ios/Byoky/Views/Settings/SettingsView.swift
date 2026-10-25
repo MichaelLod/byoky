@@ -22,7 +22,8 @@ struct SettingsView: View {
                 aboutSection
                 dangerZoneSection
             }
-            .navigationTitle("Settings")
+            .retroList()
+            .retroNavigationTitle("Settings")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
@@ -53,12 +54,13 @@ struct SettingsView: View {
                 NavigationStack {
                     ScrollView {
                         Text(debugSelfTestReport ?? "")
-                            .font(.system(.caption, design: .monospaced))
+                            .font(.mono(12, relativeTo: .caption))
+                            .foregroundStyle(Theme.fog)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding()
                     }
-                    .navigationTitle("Self-test")
-                    .navigationBarTitleDisplayMode(.inline)
+                    .background(Theme.ink)
+                    .retroNavigationTitle("Self-test")
                     .toolbar {
                         ToolbarItem(placement: .confirmationAction) {
                             Button("Done") { debugSelfTestReport = nil }
@@ -95,12 +97,13 @@ struct SettingsView: View {
             }
             .accessibilityIdentifier("settings.importBackup")
         } header: {
-            Text("Backup")
+            ListHeader("Backup")
         } footer: {
-            Text(wallet.credentials.isEmpty
+            ListFooter(wallet.credentials.isEmpty
                 ? "Add a key before exporting. You can import a .byoky backup from the Byoky extension or another device."
                 : "Keys live only on this device. Export an encrypted .byoky file to back them up or move them to another device — the Byoky extension and Android app can import it too.")
         }
+        .retroRow()
     }
 
     private var dangerZoneSection: some View {
@@ -112,13 +115,15 @@ struct SettingsView: View {
                     Label("Reset Wallet", systemImage: "arrow.counterclockwise")
                     Spacer()
                 }
+                .foregroundStyle(Theme.alarm)
                 .contentShape(Rectangle())
             }
         } header: {
-            Text("Danger Zone")
+            ListHeader("Danger Zone")
         } footer: {
-            Text("Reset wallet clears all keys on this device.")
+            ListFooter("Reset wallet clears all keys on this device.")
         }
+        .retroRow(border: Theme.alarm)
     }
 
     #if DEBUG
@@ -137,29 +142,30 @@ struct SettingsView: View {
                 HStack(spacing: 12) {
                     Image(systemName: "ant.circle")
                         .font(.system(size: 20))
-                        .foregroundStyle(Theme.accent)
+                        .foregroundStyle(Theme.phosphor)
                         .frame(width: 32)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Run TranslationEngine self-test")
                             .font(.body.weight(.medium))
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(Theme.bone)
                         Text("Verify the @byoky/core JS bundle round-trips a translation")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.fog)
                     }
 
                     Spacer()
                 }
             }
         } header: {
-            Text("Translation Engine (debug)")
+            ListHeader("Translation Engine (debug)")
         }
+        .retroRow()
     }
     #endif
 
     private var securitySection: some View {
-        Section("Security") {
+        Section {
             Button {
                 wallet.lock()
             } label: {
@@ -169,18 +175,21 @@ struct SettingsView: View {
                 }
                 .contentShape(Rectangle())
             }
-            .foregroundStyle(.primary)
+            .foregroundStyle(Theme.bone)
             .accessibilityIdentifier("settings.lock")
 
-            LabeledContent("Encryption", value: "AES-256-GCM")
-            LabeledContent("Key Derivation", value: "PBKDF2 (600K)")
-            LabeledContent("Storage", value: "iOS Keychain")
+            infoRow("Encryption", value: "AES-256-GCM")
+            infoRow("Key Derivation", value: "PBKDF2 (600K)")
+            infoRow("Storage", value: "iOS Keychain")
+        } header: {
+            ListHeader("Security")
         }
+        .retroRow()
     }
 
     private var aboutSection: some View {
-        Section("About") {
-            LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")
+        Section {
+            infoRow("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")
 
             Link(destination: URL(string: "https://github.com/MichaelLod/byoky")!) {
                 Label("GitHub", systemImage: "link")
@@ -189,6 +198,21 @@ struct SettingsView: View {
             Link(destination: URL(string: "https://byoky.com")!) {
                 Label("Website", systemImage: "globe")
             }
+        } header: {
+            ListHeader("About")
+        }
+        .retroRow()
+    }
+
+    /// A fact about the wallet, its value in mono.
+    private func infoRow(_ label: String, value: String) -> some View {
+        LabeledContent {
+            Text(value)
+                .font(.mono(13, relativeTo: .callout))
+                .foregroundStyle(Theme.fog)
+        } label: {
+            Text(label)
+                .foregroundStyle(Theme.bone)
         }
     }
 }

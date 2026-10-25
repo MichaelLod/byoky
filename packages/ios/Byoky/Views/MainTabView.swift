@@ -35,7 +35,7 @@ struct MainTabView: View {
                     .accessibilityIdentifier("tab.connected")
                     .tag(MainTabView.connectedTabIndex)
             }
-            .tint(Theme.accent)
+            .tint(Theme.lilac)
 
             FloatingActionMenu(
                 onAddCredential: { showAddCredential = true },
@@ -87,19 +87,14 @@ struct FloatingActionMenu: View {
             }
             .accessibilityIdentifier("fab.menu.addApp")
         } label: {
+            // Square violet key with a soft violet halo, as in the design.
             Image(systemName: "plus")
                 .font(.system(size: 22, weight: .semibold))
-                .foregroundColor(.white)
+                .foregroundStyle(.white)
                 .frame(width: 56, height: 56)
-                .background(
-                    LinearGradient(
-                        colors: [Theme.accentHover, Theme.accent],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .clipShape(Circle())
-                .shadow(color: Theme.accent.opacity(0.4), radius: 12, x: 0, y: 6)
+                .background(Theme.violet)
+                .padding(4)
+                .background(Theme.violet.opacity(0.2))
         }
         .accessibilityIdentifier("fab.button")
     }

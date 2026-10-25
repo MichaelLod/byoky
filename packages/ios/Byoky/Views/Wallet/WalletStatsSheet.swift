@@ -32,8 +32,7 @@ struct WalletStatsSheet: View {
                 }
             }
         }
-        .background(Theme.bgMain)
-        .toolbarBackground(Theme.bgMain, for: .navigationBar)
+        .background(ScreenBackground())
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Close") { dismiss() }
@@ -43,7 +42,7 @@ struct WalletStatsSheet: View {
 
     private var missing: some View {
         VStack {
-            Text("No data").font(.headline)
+            PromptLine("No data")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -119,7 +118,8 @@ private struct CredentialStatsView: View {
                             StatRow(
                                 title: hostname(row.origin),
                                 subtitle: "\(row.requests) request\(row.requests == 1 ? "" : "s")",
-                                trailing: formatWalletTokens(row.total) + " tokens"
+                                trailing: formatWalletTokens(row.total) + " tokens",
+                                monospace: true
                             )
                         }
                     }
@@ -127,17 +127,20 @@ private struct CredentialStatsView: View {
             }
             .padding()
         }
-        .navigationTitle(credential.label)
-        .navigationBarTitleDisplayMode(.inline)
+        .retroNavigationTitle(credential.label)
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(provider?.name ?? credential.providerId)
-                .font(.subheadline.weight(.semibold))
-            Text("Shared across all credentials of this provider")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        HStack(spacing: 12) {
+            ProviderTile(providerId: credential.providerId, size: 36)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(provider?.name ?? credential.providerId)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.bone)
+                Text("Shared across all credentials of this provider")
+                    .font(.caption)
+                    .foregroundStyle(Theme.fog)
+            }
         }
     }
 
@@ -148,18 +151,17 @@ private struct CredentialStatsView: View {
                     withAnimation(.easeInOut(duration: 0.2)) { range = r }
                 } label: {
                     Text(r.rawValue)
-                        .font(.subheadline.weight(.medium))
+                        .uppercaseDisplay()
+                        .font(.mono(13, weight: .medium, relativeTo: .subheadline))
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(range == r ? Theme.accent : Color.clear)
-                        .foregroundStyle(range == r ? .white : .secondary)
+                        .padding(.vertical, 9)
+                        .background(range == r ? Theme.violet : Color.clear)
+                        .foregroundStyle(range == r ? .white : Theme.fog)
                 }
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .background(Theme.bgRaised)
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border, lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .background(Theme.void)
+        .overlay(Rectangle().strokeBorder(Theme.seamStrong, lineWidth: 1))
     }
 
     private var totalsRow: some View {
@@ -173,21 +175,19 @@ private struct CredentialStatsView: View {
     private var emptySection: some View {
         Text("No usage in this period.")
             .font(.callout)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(Theme.fog)
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(.vertical, 8)
     }
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.headline)
+            SectionLabel(title)
             content()
         }
         .padding(14)
-        .background(Theme.bgCard)
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .retroCard()
     }
 
     private func hostname(_ origin: String) -> String {
@@ -202,16 +202,17 @@ private struct StatCard: View {
     var body: some View {
         VStack(spacing: 4) {
             Text(value)
-                .font(.title3.weight(.bold).monospacedDigit())
+                .font(.mono(20, weight: .medium, relativeTo: .title3))
+                .foregroundStyle(Theme.bone)
             Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .uppercaseDisplay()
+                .font(.mono(10, relativeTo: .caption2))
+                .tracking(1)
+                .foregroundStyle(Theme.dim)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 14)
-        .background(Theme.bgCard)
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .retroCard()
     }
 }
 
@@ -225,19 +226,20 @@ private struct StatRow: View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(monospace ? .caption.monospaced() : .callout)
+                    .font(monospace ? .mono(12, relativeTo: .caption) : .callout)
+                    .foregroundStyle(Theme.bone)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 if let subtitle {
                     Text(subtitle)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .font(.mono(11, relativeTo: .caption2))
+                        .foregroundStyle(Theme.dim)
                 }
             }
             Spacer()
             Text(trailing)
-                .font(.callout.monospacedDigit())
-                .foregroundStyle(.primary)
+                .font(.mono(13, relativeTo: .callout))
+                .foregroundStyle(Theme.bone)
         }
         .padding(.vertical, 6)
     }

@@ -11,10 +11,9 @@ struct AppsTabView: View {
     var body: some View {
         NavigationStack {
             InstalledAppsGrid(onAddApp: { showAddApp = true })
-                .background(Theme.bgMain)
-                .toolbarBackground(Theme.bgMain, for: .navigationBar)
-                .navigationTitle("Apps")
+                .background(ScreenBackground())
                 .navigationBarTitleDisplayMode(.inline)
+                .toolbarBackground(.hidden, for: .navigationBar)
                 .toolbar {
                     ToolbarItem(placement: .primaryAction) {
                         Button {

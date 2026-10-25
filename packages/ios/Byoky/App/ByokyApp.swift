@@ -27,6 +27,7 @@ struct ByokyApp: App {
         #endif
 
         _wallet = StateObject(wrappedValue: WalletStore.shared)
+        Theme.applyAppearance()
     }
 
     #if DEBUG
@@ -59,7 +60,9 @@ struct ByokyApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(wallet)
-                .preferredColorScheme(.light)
+                // The design is dark only.
+                .preferredColorScheme(.dark)
+                .tint(Theme.phosphor)
                 // Tapping a .byoky backup in Files, AirDrop or Mail opens it
                 // here; the import sheet appears once the wallet is unlocked.
                 .onOpenURL { url in

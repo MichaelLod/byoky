@@ -10,47 +10,49 @@ struct InstalledAppsGrid: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                ScreenHeader(
+                    title: "Apps",
+                    status: "\(wallet.installedApps.count) app\(wallet.installedApps.count == 1 ? "" : "s") · built-in browser",
+                    statusColor: Theme.phosphor
+                )
+                .padding(.horizontal, 20)
+
                 if wallet.installedApps.isEmpty {
                     emptyState
                 } else {
                     appGrid(apps: enabledApps)
 
                     if !disabledApps.isEmpty {
-                        Text("DISABLED")
-                            .font(.caption2)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(Theme.textMuted)
-                            .padding(.horizontal)
+                        SectionLabel("Disabled")
+                            .padding(.horizontal, 20)
 
                         appGrid(apps: disabledApps)
                             .opacity(0.4)
                     }
                 }
             }
-            .padding(.top, 16)
+            .padding(.top, 4)
+            .padding(.bottom, 24)
         }
     }
 
     private var emptyState: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "square.grid.2x2")
-                .font(.system(size: 40))
-                .foregroundStyle(Theme.textMuted)
-            Text("No apps yet")
-                .foregroundStyle(Theme.textSecondary)
+        VStack(spacing: 14) {
+            PromptLine("No apps yet")
             Text("Add a web app that supports Byoky by its address. It opens in the built-in browser and uses the keys in this wallet without ever seeing them.")
-                .font(.caption)
-                .foregroundStyle(Theme.textMuted)
+                .font(.callout)
+                .foregroundStyle(Theme.fog)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
+                .fixedSize(horizontal: false, vertical: true)
             Button("Add App by URL", action: onAddApp)
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.accent)
-                .padding(.top, 4)
+                .buttonStyle(.retroPrimary)
+                .padding(.top, 6)
                 .accessibilityIdentifier("apps.addAppEmpty")
         }
+        .padding(20)
         .frame(maxWidth: .infinity)
-        .padding(.top, 40)
+        .retroCard()
+        .padding(.horizontal, 16)
     }
 
     private func appGrid(apps: [InstalledApp]) -> some View {
@@ -76,24 +78,26 @@ struct AppIconView: View {
                 AsyncImage(url: URL(string: app.icon)) { image in
                     image.resizable().aspectRatio(contentMode: .fill)
                 } placeholder: {
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(Theme.accentSoft)
+                    Rectangle()
+                        .fill(Theme.violetSoft)
                         .overlay {
                             Text(String(app.name.prefix(1)))
-                                .font(.title2)
-                                .fontWeight(.bold)
-                                .foregroundStyle(Theme.accent)
+                                .uppercaseDisplay()
+                                .font(.display(24, relativeTo: .title2))
+                                .foregroundStyle(Theme.lilac)
                         }
                 }
                 .frame(width: 56, height: 56)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .background(Theme.ink)
+                .clipped()
+                .overlay(Rectangle().strokeBorder(Theme.seamStrong, lineWidth: 1))
             }
             .buttonStyle(.plain)
             .accessibilityLabel(app.name)
 
             Text(app.name)
-                .font(.system(size: 11))
-                .foregroundStyle(Theme.textSecondary)
+                .font(.mono(10.5, relativeTo: .caption2))
+                .foregroundStyle(Theme.fog)
                 .lineLimit(1)
                 .frame(maxWidth: 70)
         }

@@ -12,6 +12,8 @@ class ViewController: NSViewController, WKNavigationDelegate, WKScriptMessageHan
         super.viewDidLoad()
 
         self.webView.navigationDelegate = self
+        // The page's void background, also before it has loaded.
+        self.webView.underPageBackgroundColor = NSColor(red: 0x07 / 255, green: 0x06 / 255, blue: 0x0A / 255, alpha: 1)
         self.webView.configuration.userContentController.add(self, name: "controller")
         self.webView.loadFileURL(Bundle.main.url(forResource: "Main", withExtension: "html")!, allowingReadAccessTo: Bundle.main.resourceURL!)
     }

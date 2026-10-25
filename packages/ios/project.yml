@@ -16,6 +16,10 @@ targets:
     deploymentTarget: "17.0"
     sources:
       - path: Byoky
+      # Chakra Petch and IBM Plex Mono (SIL OFL 1.1), shared with the Mac
+      # app's page. Registered in Info.plist under UIAppFonts.
+      - path: Fonts
+        buildPhase: resources
     settings:
       base:
         INFOPLIST_FILE: Byoky/App/Info.plist
@@ -94,6 +98,8 @@ targets:
         excludes:
           - "SafariExtension-macOS-Info.plist"
           - "SafariExtension-macOS.entitlements"
+      - path: Fonts
+        buildPhase: resources
     settings:
       base:
         INFOPLIST_FILE: macOS/Info.plist

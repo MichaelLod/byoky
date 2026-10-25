@@ -10,11 +10,48 @@
     <script src="../Script.js" defer></script>
 </head>
 <body>
-    <img src="../Icon.png" width="128" height="128" alt="byoky Icon">
-    <p class="platform-ios">You can turn on byoky’s Safari extension in Settings.</p>
-    <p class="platform-mac state-unknown">You can turn on byoky’s extension in Safari Extensions preferences.</p>
-    <p class="platform-mac state-on">byoky’s extension is currently on. You can turn it off in Safari Extensions preferences.</p>
-    <p class="platform-mac state-off">byoky’s extension is currently off. You can turn it on in Safari Extensions preferences.</p>
+    <!-- Muninn, from docs/brand/raven.svg. Script.js makes it watch the pointer. -->
+    <svg id="muninn" viewBox="0 0 240 240" width="132" height="132" role="img" aria-label="Muninn, the Byoky raven, perched on a key">
+        <g id="raven">
+            <g id="perch" fill="#7C3AED">
+                <circle cx="52" cy="200" r="14" fill="none" stroke="#7C3AED" stroke-width="7"/>
+                <rect x="65" y="196.5" width="135" height="7"/>
+                <rect x="172" y="203" width="7" height="13"/>
+                <rect x="186" y="203" width="7" height="8"/>
+            </g>
+            <g id="body">
+                <polygon points="84,170 112,178 80,214 44,222 58,194" fill="#0E0B14"/>
+                <polygon points="84,170 96,176 58,214 44,222" fill="#1D1629"/>
+                <rect x="117" y="176" width="4" height="21" fill="#3B2D55"/>
+                <rect x="133" y="174" width="4" height="23" fill="#3B2D55"/>
+                <polygon points="108,96 130,90 152,98 166,122 162,152 142,174 112,182 84,172 70,150 84,118" fill="#0B0910"/>
+                <polygon points="152,98 166,122 162,152 146,128" fill="#17121F"/>
+                <polygon points="104,106 146,120 144,150 118,176 86,170 78,142" fill="#1A1424"/>
+                <polygon points="104,106 146,120 120,132 84,128" fill="#271D38"/>
+                <polygon points="86,150 132,138 134,142 90,156" fill="#2F2444"/>
+                <polygon points="92,164 128,154 129,158 96,169" fill="#2F2444"/>
+                <polygon points="84,118 108,96 113,100 89,123" fill="#8B5CF6" opacity="0.6"/>
+            </g>
+            <g id="head">
+                <polygon points="126,50 148,38 170,44 180,62 176,86 152,98 130,90 120,70" fill="#0B0910"/>
+                <polygon points="148,38 170,44 160,58" fill="#231A33"/>
+                <polygon points="120,70 126,50 138,62" fill="#17121F"/>
+                <polygon points="174,56 222,74 176,84" fill="#1F1830"/>
+                <polygon points="174,56 222,74 178,70" fill="#3B2D55"/>
+                <polygon points="126,50 148,38 149,42 129,54" fill="#A78BFA" opacity="0.75"/>
+                <ellipse id="eye" cx="160" cy="62" rx="7" ry="7" fill="#C4B5FD"/>
+                <circle id="pupil" cx="161" cy="62" r="3.4" fill="#07060A"/>
+            </g>
+        </g>
+    </svg>
+
+    <p class="status platform-mac"><span class="dot"></span><span class="state-on">Extension on</span><span class="state-off">Extension off</span><span class="state-unknown">Safari extension</span></p>
+    <p class="platform-ios">You can turn on Byoky’s Safari extension in Settings.</p>
+    <p class="platform-mac state-unknown">You can turn on Byoky’s extension in Safari Extensions preferences.</p>
+    <p class="platform-mac state-on">Byoky’s extension is currently on. You can turn it off in Safari Extensions preferences.</p>
+    <p class="platform-mac state-off">Byoky’s extension is currently off. You can turn it on in Safari Extensions preferences.</p>
     <button class="platform-mac open-preferences">Quit and Open Safari Extensions Preferences…</button>
+
+    <div class="scanlines" aria-hidden="true"></div>
 </body>
 </html>

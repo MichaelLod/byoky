@@ -9,6 +9,9 @@ struct UnlockView: View {
     @State private var lockoutRemaining: Int = 0
     @State private var showResetConfirmation = false
     @State private var showPassword = false
+    /// Set once the password is accepted, for the moment before the
+    /// wallet screen replaces this one.
+    @State private var awake = false
     @FocusState private var isPasswordFocused: Bool
 
     private let lockoutTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -19,108 +22,20 @@ struct UnlockView: View {
 
     var body: some View {
         ZStack {
-            Theme.bgMain.ignoresSafeArea()
+            ScreenBackground()
 
-            VStack(spacing: 32) {
-                Spacer()
-
-                BrandMark(size: 120)
-
-                Text("Byoky Wallet")
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundStyle(Theme.textPrimary)
-
-                Text("Enter your master password to unlock")
-                    .font(.callout)
-                    .foregroundStyle(Theme.textSecondary)
-
-                VStack(spacing: 16) {
-                    HStack(spacing: 10) {
-                        Image(systemName: "lock.fill")
-                            .font(.system(size: 15))
-                            .foregroundStyle(Theme.textMuted)
-                            .frame(width: 18)
-                        SwiftUI.Group {
-                            if showPassword {
-                                TextField("Master password", text: $password)
-                            } else {
-                                SecureField("Master password", text: $password)
-                            }
-                        }
-                        .textContentType(.password)
-                        .autocapitalization(.none)
-                        .disableAutocorrection(true)
-                        .focused($isPasswordFocused)
-                        .submitLabel(.go)
-                        .onSubmit { unlock() }
-                        .accessibilityIdentifier("unlock.password")
-                        Button {
-                            showPassword.toggle()
-                        } label: {
-                            Image(systemName: showPassword ? "eye.slash.fill" : "eye.fill")
-                                .font(.system(size: 15))
-                                .foregroundStyle(Theme.textMuted)
-                                .frame(width: 18)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(isLockedOut)
-                    }
-                    .padding(14)
-                    .background(Theme.bgRaised)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(isPasswordFocused ? Theme.accent : Theme.border,
-                                    lineWidth: isPasswordFocused ? 1.5 : 1)
-                    )
-                    .animation(.easeInOut(duration: 0.15), value: isPasswordFocused)
-                    .offset(x: isShaking ? -8 : 0)
-                    .disabled(isLockedOut)
-
-                    if isLockedOut {
-                        HStack(spacing: 6) {
-                            Image(systemName: "lock.fill")
-                            Text("Too many attempts. Try again in \(lockoutRemaining)s")
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                    } else if let error {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundStyle(Theme.danger)
-                    }
-
-                    Button {
-                        unlock()
-                    } label: {
-                        Text("Unlock")
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .background(password.isEmpty || isLockedOut ? Theme.accent.opacity(0.3) : Theme.accent)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                    }
-                    .disabled(password.isEmpty || isLockedOut)
-                    .accessibilityIdentifier("unlock.submit")
+            // Scrolls only when the keyboard leaves too little room.
+            GeometryReader { geometry in
+                ScrollView {
+                    content
+                        .frame(minHeight: geometry.size.height)
                 }
-                .padding(.horizontal, 24)
-
-                Spacer()
-
-                Button {
-                    showResetConfirmation = true
-                } label: {
-                    Text("Forgot password?")
-                        .font(.callout)
-                        .foregroundStyle(Theme.textMuted)
-                }
-
-                Spacer()
+                .scrollBounceBehavior(.basedOnSize)
+                .scrollDismissesKeyboard(.interactively)
             }
-            .padding(24)
+
+            Scanlines().ignoresSafeArea()
         }
-        .preferredColorScheme(.light)
         .alert("Reset Wallet?", isPresented: $showResetConfirmation) {
             Button("Cancel", role: .cancel) {}
             Button("Reset", role: .destructive) {
@@ -135,6 +50,115 @@ struct UnlockView: View {
         .onAppear {
             updateLockoutState()
         }
+    }
+
+    private var content: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 24)
+
+            // Asleep while locked. It wakes as the wallet opens and
+            // greets you with a nod from the wallet header.
+            Muninn(mood: awake ? .watching : .asleep, size: isPasswordFocused ? 140 : 220, nod: awake ? 1 : 0)
+                .animation(.easeInOut(duration: 0.25), value: isPasswordFocused)
+
+            PromptLine("Wallet locked")
+                .padding(.top, 8)
+
+            Text("Muninn is asleep")
+                .uppercaseDisplay()
+                .font(.display(30, relativeTo: .largeTitle))
+                .tracking(0.9)
+                .foregroundStyle(Theme.bone)
+                .multilineTextAlignment(.center)
+                .padding(.top, 8)
+                .accessibilityAddTraits(.isHeader)
+
+            Text("Your keys are encrypted on this device. Enter your master password to wake Muninn.")
+                .font(.callout)
+                .foregroundStyle(Theme.fog)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 8)
+
+            VStack(alignment: .leading, spacing: 12) {
+                SectionLabel("Master password", color: Theme.fog)
+
+                HStack(spacing: 10) {
+                    SwiftUI.Group {
+                        if showPassword {
+                            TextField("Master password", text: $password)
+                        } else {
+                            SecureField("Master password", text: $password)
+                        }
+                    }
+                    .font(.mono(16))
+                    .foregroundStyle(Theme.bone)
+                    // Shown or hidden, the password stays out of QuickType
+                    // and autocorrect.
+                    .textContentType(.password)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled(true)
+                    .focused($isPasswordFocused)
+                    .submitLabel(.go)
+                    .onSubmit { unlock() }
+                    .accessibilityIdentifier("unlock.password")
+                    Button {
+                        showPassword.toggle()
+                    } label: {
+                        Image(systemName: showPassword ? "eye.slash" : "eye")
+                            .font(.system(size: 15))
+                            .foregroundStyle(Theme.dim)
+                            .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(showPassword ? "Hide password" : "Show password")
+                    .disabled(isLockedOut)
+                }
+                .retroField(focused: isPasswordFocused)
+                .animation(.easeInOut(duration: 0.15), value: isPasswordFocused)
+                .offset(x: isShaking ? -8 : 0)
+                .disabled(isLockedOut)
+
+                if isLockedOut {
+                    HStack(spacing: 6) {
+                        Image(systemName: "lock.fill")
+                        Text("Too many attempts. Try again in \(lockoutRemaining)s")
+                    }
+                    .font(.mono(12, relativeTo: .caption))
+                    .foregroundStyle(Theme.amber)
+                } else if let error {
+                    Text(error)
+                        .font(.mono(12, relativeTo: .caption))
+                        .foregroundStyle(Theme.alarm)
+                }
+
+                Button("Unlock") {
+                    unlock()
+                }
+                .buttonStyle(.retroPrimary)
+                .disabled(password.isEmpty || isLockedOut)
+                .accessibilityIdentifier("unlock.submit")
+            }
+            .padding(.top, 24)
+
+            Spacer(minLength: 16)
+
+            Button("Forgot password?") {
+                showResetConfirmation = true
+            }
+            .buttonStyle(.bracket(Theme.dim))
+
+            HStack {
+                Text("Keys stay on this device")
+                Spacer()
+                Text("AES-256-GCM")
+            }
+            .font(.mono(11, relativeTo: .caption2))
+            .foregroundStyle(Theme.dim)
+            .padding(.top, 4)
+        }
+        .padding(.horizontal, 24)
+        .padding(.bottom, 12)
     }
 
     private func updateLockoutState() {
@@ -153,6 +177,7 @@ struct UnlockView: View {
         guard !isLockedOut else { return }
         do {
             try wallet.unlock(password: password)
+            awake = true
         } catch WalletError.lockedOut(let seconds) {
             lockoutRemaining = seconds
             error = nil

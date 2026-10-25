@@ -20,29 +20,38 @@ struct WalletView: View {
     @State private var renameDraft: String = ""
     @State private var removingCredential: Credential?
     @State private var removeTitle = ""
+    @State private var greetings = 0
+    @State private var greeted = false
 
     var body: some View {
         NavigationStack {
             SwiftUI.Group {
                 if wallet.credentials.isEmpty {
-                    VStack {
-                        retiredFeaturesBanner
-                        emptyState
+                    ScrollView {
+                        VStack(spacing: 16) {
+                            header
+                            retiredFeaturesBanner
+                            emptyState
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 24)
                     }
                 } else {
-                    VStack(spacing: 0) {
+                    List {
+                        header
+                            .walletListRow(top: 4, bottom: 8)
                         retiredFeaturesBanner
-                        List {
-                            credentialsSection
-                        }
-                        .scrollContentBackground(.hidden)
-                        .background(Theme.bgMain)
+                            .walletListRow()
+                        credentialsSection
                     }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
                 }
             }
-            .background(Theme.bgMain)
-            .toolbarBackground(Theme.bgMain, for: .navigationBar)
-            .navigationTitle("Wallet")
+            .background(ScreenBackground())
+            .navigationBarTitleDisplayMode(.inline)
+            // The screen header below is the title; the bar only holds the gear.
+            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button {
@@ -103,66 +112,82 @@ struct WalletView: View {
         }
     }
 
+    /// Status, the screen title and Muninn keeping watch.
+    private var header: some View {
+        let count = wallet.credentials.count
+        return ScreenHeader(
+            title: "Wallet",
+            status: "Unlocked · \(count) key\(count == 1 ? "" : "s")"
+        ) {
+            Muninn(mood: .watching, size: 96, compact: true, nod: greetings)
+                .task {
+                    // One nod as the wallet opens, once the unlock cross-fade is done.
+                    guard !greeted else { return }
+                    greeted = true
+                    try? await Task.sleep(for: .milliseconds(400))
+                    greetings += 1
+                }
+        }
+        .padding(.leading, 4)
+    }
+
     @ViewBuilder
     private var retiredFeaturesBanner: some View {
         if wallet.showRetiredFeaturesNotice {
             RetiredFeaturesBanner(onDismiss: { wallet.dismissRetiredFeaturesNotice() })
-                .padding(.horizontal)
                 // Shown once: seen now means gone on the next launch.
                 .onAppear { wallet.markRetiredFeaturesNoticeShown() }
         }
     }
 
     private var emptyState: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "key.fill")
-                .font(.system(size: 40))
-                .foregroundStyle(Color(.systemGray3))
-
-            Text("No keys yet")
-                .font(.headline)
+        VStack(spacing: 14) {
+            PromptLine("No keys yet")
 
             Text("Add your first API key to get started. Keys are encrypted with your master password and stored in the iOS Keychain on this device.")
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.fog)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
+                .fixedSize(horizontal: false, vertical: true)
 
             Button {
                 showAddCredential = true
             } label: {
                 Label("Add API Key", systemImage: "plus")
             }
-            .buttonStyle(.borderedProminent)
-            .tint(Theme.accent)
+            .buttonStyle(.retroPrimary)
+            .padding(.top, 6)
             .accessibilityIdentifier("wallet.addCredentialEmpty")
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(20)
+        .frame(maxWidth: .infinity)
+        .retroCard()
     }
 
+    @ViewBuilder
     private var credentialsSection: some View {
-        Section {
-            ForEach(wallet.credentials) { credential in
-                CredentialRow(
-                    credential: credential,
-                    usage: providerUsage(for: credential.providerId),
-                    onOpenStats: { statsTarget = .credential(credential.id) },
-                    onEditEndpoint: { editingEndpointFor = credential },
-                    onRename: {
-                        renameDraft = credential.label
-                        renamingCredential = credential
-                    }
-                )
-            }
-            // Swipe-to-delete asks first; a full swipe used to remove the key
-            // straight away.
-            .onDelete { offsets in
-                guard let credential = offsets.first.map({ wallet.credentials[$0] }) else { return }
-                removeTitle = "Remove \(credential.label)?"
-                removingCredential = credential
-            }
-        } header: {
-            Text("\(wallet.credentials.count) credential\(wallet.credentials.count == 1 ? "" : "s")")
+        SectionLabel("\(wallet.credentials.count) credential\(wallet.credentials.count == 1 ? "" : "s")")
+            .walletListRow(top: 10, bottom: 2)
+
+        ForEach(wallet.credentials) { credential in
+            CredentialRow(
+                credential: credential,
+                usage: providerUsage(for: credential.providerId),
+                onOpenStats: { statsTarget = .credential(credential.id) },
+                onEditEndpoint: { editingEndpointFor = credential },
+                onRename: {
+                    renameDraft = credential.label
+                    renamingCredential = credential
+                }
+            )
+            .walletListRow(top: 5, bottom: 5)
+        }
+        // Swipe-to-delete asks first; a full swipe used to remove the key
+        // straight away.
+        .onDelete { offsets in
+            guard let credential = offsets.first.map({ wallet.credentials[$0] }) else { return }
+            removeTitle = "Remove \(credential.label)?"
+            removingCredential = credential
         }
     }
 
@@ -192,36 +217,41 @@ private struct RetiredFeaturesBanner: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
+                SectionLabel("Notice", color: Theme.phosphor)
                 Text("Byoky is now fully local")
                     .font(.subheadline.bold())
-                    .foregroundStyle(Theme.textPrimary)
+                    .foregroundStyle(Theme.bone)
                 Text("Cloud sync, gifts and phone pairing have been retired. Your keys on this device are untouched. To move keys to another device, use Export in Settings.")
                     .font(.caption)
-                    .foregroundStyle(Theme.textSecondary)
+                    .foregroundStyle(Theme.fog)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
             Button(action: onDismiss) {
                 Image(systemName: "xmark")
                     .font(.caption)
-                    .foregroundStyle(Theme.textMuted)
+                    .foregroundStyle(Theme.dim)
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Dismiss")
             .accessibilityIdentifier("wallet.retiredNotice.dismiss")
         }
-        .padding(12)
-        .background(Theme.accent.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(Theme.accent, lineWidth: 1)
-        )
-        .padding(.bottom, 12)
+        .padding(14)
+        .retroCard(border: Theme.seamStrong)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("wallet.retiredNotice")
+    }
+}
+
+private extension View {
+    /// A wallet list row that draws its own card: no system background,
+    /// separator or inset beyond the screen gutter.
+    func walletListRow(top: CGFloat = 0, bottom: CGFloat = 0) -> some View {
+        listRowInsets(EdgeInsets(top: top, leading: 16, bottom: bottom, trailing: 16))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
     }
 }
 
@@ -240,38 +270,40 @@ struct EndpointEditorView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 Section {
                     TextField(isAzure ? "https://<resource>.openai.azure.com" : "http://localhost:11434", text: $endpoint)
                         .keyboardType(.URL)
                         .textContentType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                        .fontDesign(.monospaced)
+                        .font(.mono(15))
                         .accessibilityIdentifier("endpointEditor.field")
                     if !endpoint.trimmingCharacters(in: .whitespaces).isEmpty && !isValid {
                         Text(isAzure
                              ? "Use your resource endpoint, like https://contoso.openai.azure.com"
                              : "Use http://localhost:<port>, http://127.0.0.1:<port>, or an https:// address")
                             .font(.caption)
-                            .foregroundStyle(Theme.danger)
+                            .foregroundStyle(Theme.alarm)
                     }
                 } header: {
-                    Text(credential.label)
+                    ListHeader(credential.label)
                 } footer: {
-                    Text(isAzure
+                    ListFooter(isAzure
                          ? "Your Azure OpenAI resource endpoint, from Keys and Endpoint in the Azure portal. This key is only ever sent to this endpoint."
                          : "Where this server is running. This key is only ever sent there.")
                 }
+                .retroRow()
 
                 if let error {
                     Section {
-                        Text(error).foregroundStyle(Theme.danger)
+                        Text(error).foregroundStyle(Theme.alarm)
                     }
+                    .retroRow(border: Theme.alarm)
                 }
             }
-            .navigationTitle(isAzure ? "Azure Endpoint" : "Server URL")
-            .navigationBarTitleDisplayMode(.inline)
+            .retroList()
+            .retroNavigationTitle(isAzure ? "Azure Endpoint" : "Server URL")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -316,20 +348,17 @@ struct CredentialRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 14) {
-                ProviderIcon(providerId: credential.providerId, size: 18)
-                    .foregroundStyle(Color.white)
-                    .frame(width: 36, height: 36)
-                    .background(Color.black)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                ProviderTile(providerId: credential.providerId, size: 40)
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(credential.label)
-                        .font(.body.weight(.medium))
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(Theme.bone)
                     Text(Provider.find(credential.providerId)?.name ?? credential.providerId)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.mono(12, relativeTo: .caption))
+                        .foregroundStyle(Theme.dim)
                 }
 
                 Spacer()
@@ -339,7 +368,7 @@ struct CredentialRow: View {
                 } label: {
                     Image(systemName: "pencil")
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.dim)
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.borderless)
@@ -347,11 +376,10 @@ struct CredentialRow: View {
                 .accessibilityIdentifier("wallet.credential.rename")
 
                 Text(credential.authMethod == .apiKey ? "API Key" : "OAuth")
-                    .font(.caption2.weight(.medium))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color(.systemGray5))
-                    .clipShape(Capsule())
+                    .uppercaseDisplay()
+                    .font(.mono(11, relativeTo: .caption2))
+                    .tracking(0.8)
+                    .foregroundStyle(credential.authMethod == .apiKey ? Theme.fog : Theme.phosphor)
             }
 
             if needsEndpoint {
@@ -361,15 +389,15 @@ struct CredentialRow: View {
                         Label(credential.providerId == "azure_openai" ? "Add endpoint" : "Add server URL",
                               systemImage: "exclamationmark.triangle.fill")
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(Theme.amber)
                     }
                     .buttonStyle(.borderless)
                     .accessibilityIdentifier("wallet.credential.addEndpoint")
                 } else if let endpoint = credential.baseUrl {
                     Button(action: onEditEndpoint) {
                         Text(endpoint)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
+                            .font(.mono(12, relativeTo: .caption))
+                            .foregroundStyle(Theme.fog)
                             .lineLimit(1)
                             .truncationMode(.middle)
                     }
@@ -378,12 +406,12 @@ struct CredentialRow: View {
                 }
             }
 
-            Divider()
+            Rectangle()
+                .fill(Theme.seam)
+                .frame(height: 1)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("LAST 7 DAYS")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                SectionLabel("Last 7 days")
 
                 HStack(spacing: 16) {
                     statColumn(value: "\(usage.requests)", label: "requests")
@@ -392,15 +420,22 @@ struct CredentialRow: View {
                 }
             }
         }
-        .padding(.vertical, 4)
+        .padding(14)
+        .retroCard()
         .contentShape(Rectangle())
         .onTapGesture { onOpenStats() }
     }
 
     private func statColumn(value: String, label: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(value).font(.headline)
-            Text(label).font(.caption2).foregroundStyle(.secondary)
+            Text(value)
+                .font(.mono(17, weight: .medium, relativeTo: .headline))
+                .foregroundStyle(Theme.bone)
+            Text(label)
+                .uppercaseDisplay()
+                .font(.mono(10, relativeTo: .caption2))
+                .tracking(1)
+                .foregroundStyle(Theme.dim)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

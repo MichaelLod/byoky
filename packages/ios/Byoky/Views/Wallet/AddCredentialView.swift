@@ -8,31 +8,28 @@ struct AddCredentialView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 Section {
                     ForEach(Provider.all) { provider in
                         NavigationLink(value: provider) {
                             HStack(spacing: 12) {
-                                ProviderIcon(providerId: provider.id, size: 18)
-                                    .foregroundStyle(Color.white)
-                                    .frame(width: 32, height: 32)
-                                    .background(Color.black)
-                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                                ProviderTile(providerId: provider.id, size: 32)
 
                                 Text(provider.name)
-                                    .foregroundStyle(.primary)
+                                    .foregroundStyle(Theme.bone)
                             }
                         }
                         .accessibilityIdentifier("addCredential.provider.\(provider.id)")
                     }
                 } header: {
-                    Text("Provider")
+                    ListHeader("Provider")
                 } footer: {
-                    Text("Select the AI provider for this credential.")
+                    ListFooter("Select the AI provider for this credential.")
                 }
+                .retroRow()
             }
-            .navigationTitle("Add API Key")
-            .navigationBarTitleDisplayMode(.inline)
+            .retroList()
+            .retroNavigationTitle("Add API Key")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -95,20 +92,22 @@ struct CredentialEntryView: View {
     }
 
     var body: some View {
-        Form {
+        List {
             if supportsSetupToken {
                 Section {
-                    Picker("Type", selection: $authMethod) {
-                        Text("API Key").tag(AuthMethod.apiKey)
-                            .accessibilityIdentifier("credentialEntry.authMethod.apiKey")
-                        Text("Setup Token").tag(AuthMethod.oauth)
-                            .accessibilityIdentifier("credentialEntry.authMethod.setupToken")
-                    }
-                    .pickerStyle(.segmented)
+                    RetroSegmentedPicker(
+                        options: [
+                            .init(value: .apiKey, title: "API Key", accessibilityIdentifier: "credentialEntry.authMethod.apiKey"),
+                            .init(value: .oauth, title: "Setup Token", accessibilityIdentifier: "credentialEntry.authMethod.setupToken"),
+                        ],
+                        selection: $authMethod
+                    )
+                    .accessibilityLabel("Type")
                     .accessibilityIdentifier("credentialEntry.authMethod")
                 } header: {
-                    Text("Credential Type")
+                    ListHeader("Credential Type")
                 }
+                .retroRow()
             }
 
             if isAzure {
@@ -118,18 +117,19 @@ struct CredentialEntryView: View {
                         .textContentType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                        .fontDesign(.monospaced)
+                        .font(.mono(15))
                         .accessibilityIdentifier("credentialEntry.endpoint")
                     if showsEndpointError {
                         Text("Use your resource endpoint, like https://contoso.openai.azure.com")
                             .font(.caption)
-                            .foregroundStyle(Theme.danger)
+                            .foregroundStyle(Theme.alarm)
                     }
                 } header: {
-                    Text("Endpoint")
+                    ListHeader("Endpoint")
                 } footer: {
-                    Text("Your Azure OpenAI resource endpoint, from Keys and Endpoint in the Azure portal. This key is only ever sent to this endpoint.")
+                    ListFooter("Your Azure OpenAI resource endpoint, from Keys and Endpoint in the Azure portal. This key is only ever sent to this endpoint.")
                 }
+                .retroRow()
             }
 
             if isLocalProvider {
@@ -138,29 +138,32 @@ struct CredentialEntryView: View {
                         .textContentType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                        .fontDesign(.monospaced)
+                        .font(.mono(15))
                         .accessibilityIdentifier("credentialEntry.baseUrl")
                     if showsEndpointError {
                         Text("Use http://localhost:<port>, http://127.0.0.1:<port>, or an https:// address")
                             .font(.caption)
-                            .foregroundStyle(Theme.danger)
+                            .foregroundStyle(Theme.alarm)
                     }
                 } header: {
-                    Text("Server URL")
+                    ListHeader("Server URL")
                 } footer: {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(provider.id == "ollama"
-                             ? "Where your Ollama server is running. Make sure `ollama serve` is active."
-                             : "Where your LM Studio server is running. Start the \"Local Server\" in LM Studio.")
-                        Label {
-                            Text("The server must be reachable from this device. Apps using this credential fail whenever the server is offline.")
-                        } icon: {
-                            Image(systemName: "exclamationmark.triangle.fill")
+                    ListFooter {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(provider.id == "ollama"
+                                 ? "Where your Ollama server is running. Make sure `ollama serve` is active."
+                                 : "Where your LM Studio server is running. Start the \"Local Server\" in LM Studio.")
+                            Label {
+                                Text("The server must be reachable from this device. Apps using this credential fail whenever the server is offline.")
+                            } icon: {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                            }
+                            .foregroundStyle(Theme.amber)
+                            .padding(.top, 4)
                         }
-                        .foregroundStyle(.orange)
-                        .padding(.top, 4)
                     }
                 }
+                .retroRow()
             }
 
             Section {
@@ -168,37 +171,46 @@ struct CredentialEntryView: View {
                     .textContentType(.name)
                     .accessibilityIdentifier("credentialEntry.label")
 
+                // A key is not a password: no content type, so iOS neither
+                // suggests it in QuickType nor offers to save it to Passwords.
                 SecureField(
                     authMethod == .oauth ? "Setup Token" : (isLocalProvider ? "API Key (optional)" : "API Key"),
                     text: $apiKey
                 )
-                .textContentType(.password)
-                .fontDesign(.monospaced)
+                .textContentType(nil)
+                .keyboardType(.asciiCapable)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled(true)
+                .font(.mono(15))
                 .accessibilityIdentifier("credentialEntry.apiKey")
             } header: {
-                Text("Credential")
+                ListHeader("Credential")
             } footer: {
-                if authMethod == .oauth {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Run `claude setup-token` in your terminal to get a token.")
-                        Text("Setup tokens use your Claude Pro/Max subscription. Requests are sent directly from this device with native networking.")
+                ListFooter {
+                    if authMethod == .oauth {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Run `claude setup-token` in your terminal to get a token.")
+                            Text("Setup tokens use your Claude Pro/Max subscription. Requests are sent directly from this device with native networking.")
+                        }
+                    } else if isLocalProvider {
+                        Text("Leave blank if your local server has no auth. Any key you enter is stored encrypted in the iOS Keychain and forwarded as a Bearer token.")
+                    } else {
+                        Text("Your key will be encrypted with AES-256-GCM and stored in the iOS Keychain. It never leaves this device.")
                     }
-                } else if isLocalProvider {
-                    Text("Leave blank if your local server has no auth. Any key you enter is stored encrypted in the iOS Keychain and forwarded as a Bearer token.")
-                } else {
-                    Text("Your key will be encrypted with AES-256-GCM and stored in the iOS Keychain. It never leaves this device.")
                 }
             }
+            .retroRow()
 
             if let error {
                 Section {
                     Label(error, systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.red)
+                        .foregroundStyle(Theme.alarm)
                 }
+                .retroRow(border: Theme.alarm)
             }
         }
-        .navigationTitle(provider.name)
-        .navigationBarTitleDisplayMode(.inline)
+        .retroList()
+        .retroNavigationTitle(provider.name)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save") { save() }
@@ -230,6 +242,9 @@ struct CredentialEntryView: View {
                 authMethod: authMethod,
                 baseUrl: requiresEndpoint ? endpoint : nil
             )
+            // Stored: empty the field before the sheet goes, so iOS has no
+            // typed key to offer saving to Passwords.
+            apiKey = ""
             onSaved()
         } catch {
             self.error = error.localizedDescription

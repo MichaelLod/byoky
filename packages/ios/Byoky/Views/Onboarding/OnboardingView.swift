@@ -11,93 +11,124 @@ struct OnboardingView: View {
     @State private var confirmPassword = ""
     @State private var error: String?
     @State private var step: OnboardingStep = .welcome
+    @FocusState private var focusedField: Field?
+
+    private enum Field {
+        case password, confirm
+    }
 
     var body: some View {
         ZStack {
-            Theme.bgMain.ignoresSafeArea()
+            ScreenBackground()
 
-            VStack(spacing: 0) {
-                Spacer()
+            GeometryReader { geometry in
+                ScrollView {
+                    VStack(spacing: 0) {
+                        HStack {
+                            Wordmark()
+                            Spacer()
+                            StatusLabel("Local only", color: Theme.dim)
+                        }
 
-                switch step {
-                case .welcome:
-                    welcomeStep
-                case .createPassword:
-                    passwordStep
+                        Spacer(minLength: 24)
+
+                        switch step {
+                        case .welcome:
+                            welcomeStep
+                        case .createPassword:
+                            passwordStep
+                        }
+
+                        Spacer(minLength: 24)
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 12)
+                    .frame(minHeight: geometry.size.height)
                 }
-
-                Spacer()
+                .scrollBounceBehavior(.basedOnSize)
+                .scrollDismissesKeyboard(.interactively)
             }
-            .padding(24)
+
+            Scanlines().ignoresSafeArea()
         }
-        .preferredColorScheme(.light)
     }
 
     private var welcomeStep: some View {
-        VStack(spacing: 24) {
-            BrandMark(size: 140)
+        VStack(spacing: 0) {
+            Muninn(mood: .watching, size: 220)
+                .padding(18)
+                .overlay(CornerBrackets())
+
+            PromptLine("New wallet")
+                .padding(.top, 22)
 
             Text("Byoky Wallet")
-                .font(.system(size: 32, weight: .bold))
-                .foregroundStyle(Theme.textPrimary)
+                .uppercaseDisplay()
+                .font(.display(32, relativeTo: .largeTitle))
+                .tracking(1)
+                .foregroundStyle(Theme.bone)
+                .padding(.top, 8)
+                .accessibilityAddTraits(.isHeader)
 
             Text("Your encrypted wallet for AI API keys. Keys stay on this device — apps use them without ever seeing them.")
                 .font(.body)
-                .foregroundStyle(Theme.textSecondary)
+                .foregroundStyle(Theme.fog)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 16)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 10)
+                .padding(.horizontal, 8)
 
-            Button {
+            Button("Get Started") {
                 withAnimation { step = .createPassword }
-            } label: {
-                Text("Get Started")
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(Theme.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
             }
-            .padding(.top, 8)
+            .buttonStyle(.retroPrimary)
+            .padding(.top, 28)
             .accessibilityIdentifier("onboarding.getStarted")
         }
     }
 
     private var passwordStep: some View {
-        VStack(spacing: 24) {
-            BrandMark(size: 100)
+        VStack(spacing: 0) {
+            Muninn(mood: .watching, size: 120)
+
+            PromptLine("Encrypt your keys")
+                .padding(.top, 12)
 
             Text("Set Master Password")
-                .font(.system(size: 28, weight: .bold))
-                .foregroundStyle(Theme.textPrimary)
+                .uppercaseDisplay()
+                .font(.display(28, relativeTo: .largeTitle))
+                .tracking(0.8)
+                .foregroundStyle(Theme.bone)
+                .multilineTextAlignment(.center)
+                .padding(.top, 8)
+                .accessibilityAddTraits(.isHeader)
 
             Text("This password encrypts all your API keys. It's never stored — only a hash is kept to verify unlock.")
                 .font(.callout)
-                .foregroundStyle(Theme.textSecondary)
+                .foregroundStyle(Theme.fog)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 16)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 10)
+                .padding(.horizontal, 8)
 
-            VStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
+                SectionLabel("Master password", color: Theme.fog)
                 SecureField("Master password", text: $password)
+                    .font(.mono(16))
+                    .foregroundStyle(Theme.bone)
                     .textContentType(.newPassword)
-                    .padding(14)
-                    .background(Theme.bgRaised)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Theme.border, lineWidth: 1)
-                    )
+                    .focused($focusedField, equals: .password)
+                    .retroField(focused: focusedField == .password)
                     .accessibilityIdentifier("onboarding.password")
 
+                SectionLabel("Confirm password", color: Theme.fog)
+                    .padding(.top, 8)
                 SecureField("Confirm password", text: $confirmPassword)
+                    .font(.mono(16))
+                    .foregroundStyle(Theme.bone)
                     .textContentType(.newPassword)
-                    .padding(14)
-                    .background(Theme.bgRaised)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Theme.border, lineWidth: 1)
-                    )
+                    .focused($focusedField, equals: .confirm)
+                    .retroField(focused: focusedField == .confirm)
                     .accessibilityIdentifier("onboarding.confirmPassword")
 
                 if !password.isEmpty {
@@ -106,37 +137,32 @@ struct OnboardingView: View {
                         Image(systemName: quality.icon)
                         Text(quality.message)
                     }
-                    .font(.caption)
+                    .font(.mono(12, relativeTo: .caption))
                     .foregroundStyle(quality.color)
+                    .padding(.top, 4)
                 }
 
                 if let error {
                     Text(error)
-                        .font(.caption)
-                        .foregroundStyle(Theme.danger)
+                        .font(.mono(12, relativeTo: .caption))
+                        .foregroundStyle(Theme.alarm)
                 }
             }
+            .padding(.top, 24)
 
-            Button {
+            Button("Create Wallet") {
                 createWallet()
-            } label: {
-                Text("Create Wallet")
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(isValid ? Theme.accent : Theme.accent.opacity(0.3))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
             }
+            .buttonStyle(.retroPrimary)
             .disabled(!isValid)
+            .padding(.top, 24)
             .accessibilityIdentifier("onboarding.createWallet")
 
-            Button {
+            Button("Back") {
                 withAnimation { step = .welcome }
-            } label: {
-                Text("Back")
-                    .foregroundStyle(Theme.textSecondary)
             }
+            .buttonStyle(.bracket(Theme.fog))
+            .padding(.top, 8)
         }
     }
 
@@ -178,9 +204,10 @@ enum PasswordQuality {
 
     var color: Color {
         switch self {
-        case .tooShort, .weak: return .orange
-        case .fair: return .yellow
-        case .strong: return .green
+        case .tooShort: return Theme.dim
+        case .weak: return Theme.amber
+        case .fair: return Theme.phosphor
+        case .strong: return Theme.signal
         }
     }
 

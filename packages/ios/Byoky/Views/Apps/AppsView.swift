@@ -30,15 +30,27 @@ struct AppsView: View {
         NavigationStack {
             List {
                 Section {
+                    ScreenHeader(
+                        title: "Connected",
+                        status: "\(wallet.sessions.count) app\(wallet.sessions.count == 1 ? "" : "s") connected",
+                        statusColor: wallet.sessions.isEmpty ? Theme.dim : Theme.signal
+                    )
+                    .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 16))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                }
+
+                Section {
                     Button {
                         showCreateGroup = true
                     } label: {
                         Label("New group", systemImage: "plus")
                             .font(.callout.weight(.medium))
-                            .foregroundStyle(Theme.accent)
+                            .foregroundStyle(Theme.phosphor)
                     }
                     .accessibilityIdentifier("groups.create")
                 }
+                .retroRow()
 
                 ForEach(orderedGroups) { group in
                     groupSection(group)
@@ -48,10 +60,9 @@ struct AppsView: View {
                     emptyState
                 }
             }
-            .scrollContentBackground(.hidden)
-            .background(Theme.bgMain)
-            .toolbarBackground(Theme.bgMain, for: .navigationBar)
-            .navigationTitle("Connected Apps")
+            .retroList()
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
                 if wallet.sessions.count > 1 {
                     ToolbarItem(placement: .topBarLeading) {
@@ -107,7 +118,7 @@ struct AppsView: View {
                      ? "Apps without an assigned group land here."
                      : "Long-press an app and pick this group to move it here.")
                     .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Theme.dim)
                     .italic()
                     .padding(.vertical, 4)
             } else {
@@ -145,30 +156,34 @@ struct AppsView: View {
                             } label: {
                                 Label("Move", systemImage: "arrow.right.square")
                             }
-                            .tint(Theme.accent)
+                            .tint(Theme.violet)
                         }
                 }
             }
         } header: {
             HStack(spacing: 6) {
                 Text(group.name)
-                    .font(.callout.weight(.semibold))
+                    .uppercaseDisplay()
+                    .font(.mono(12, weight: .medium, relativeTo: .callout))
+                    .tracking(1.4)
+                    .foregroundStyle(Theme.bone)
                 if !group.providerId.isEmpty {
                     Text(provider?.name ?? group.providerId)
-                        .font(.caption2.weight(.medium))
+                        .uppercaseDisplay()
+                        .font(.mono(10, relativeTo: .caption2))
+                        .tracking(0.8)
                         .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Theme.accent.opacity(0.15))
-                        .foregroundStyle(Theme.accent)
-                        .clipShape(Capsule())
+                        .padding(.vertical, 3)
+                        .background(Theme.violetSoft)
+                        .foregroundStyle(Theme.lilac)
                 }
                 if let model = group.model, !model.isEmpty {
                     Text(model)
-                        .font(.caption2.monospaced())
+                        .font(.mono(10, relativeTo: .caption2))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(Color(.systemGray5))
-                        .clipShape(Capsule())
+                        .foregroundStyle(Theme.fog)
+                        .overlay(Rectangle().strokeBorder(Theme.seamStrong, lineWidth: 1))
                 }
                 Spacer()
                 // The default group stays routing-neutral (ensureDefaultGroup
@@ -188,39 +203,39 @@ struct AppsView: View {
                     } label: {
                         Image(systemName: "ellipsis.circle")
                             .font(.callout)
-                            .foregroundStyle(Theme.accent)
+                            .foregroundStyle(Theme.phosphor)
                     }
                 }
             }
+            .listRowInsets(EdgeInsets(top: 18, leading: RetroRowBackground.inset, bottom: 6, trailing: RetroRowBackground.inset))
         } footer: {
-            if group.providerId.isEmpty {
-                Text("No routing — apps use the provider they request")
-            } else if let pinnedCred {
-                Text("Using \(pinnedCred.label)")
-            } else {
-                Text("Any \(provider?.name ?? group.providerId) credential")
+            ListFooter {
+                if group.providerId.isEmpty {
+                    Text("No routing — apps use the provider they request")
+                } else if let pinnedCred {
+                    Text("Using \(pinnedCred.label)")
+                } else {
+                    Text("Any \(provider?.name ?? group.providerId) credential")
+                }
             }
         }
+        .retroRow()
     }
 
     private var emptyState: some View {
         Section {
-            VStack(spacing: 16) {
-                Image(systemName: "link")
-                    .font(.system(size: 40))
-                    .foregroundStyle(Color(.systemGray3))
-
-                Text("No Apps Connected")
-                    .font(.headline)
+            VStack(spacing: 14) {
+                PromptLine("No apps connected")
 
                 Text("Apps you open from the Apps tab appear here once they connect. Group them, set token limits, and reroute their requests across providers.")
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.fog)
                     .multilineTextAlignment(.center)
             }
-            .padding(.vertical, 32)
+            .padding(.vertical, 20)
             .frame(maxWidth: .infinity)
         }
+        .retroRow()
     }
 }
 
@@ -249,25 +264,26 @@ private struct AppSessionRow: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(displayHost)
-                    .font(.body.weight(.medium))
+                    .font(.mono(15, relativeTo: .body))
+                    .foregroundStyle(Theme.bone)
                     .lineLimit(1)
 
                 Text("Connected \(session.createdAt, format: .relative(presentation: .named))")
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.fog)
 
                 if let allowance, let limit = allowance.totalLimit {
                     HStack(spacing: 8) {
                         ProgressView(value: min(Double(tokensUsed) / Double(limit), 1.0))
-                            .tint(Double(tokensUsed) / Double(limit) >= 0.8 ? .orange : Theme.accent)
+                            .tint(Double(tokensUsed) / Double(limit) >= 0.8 ? Theme.amber : Theme.violet)
                         Text("\(formatTokens(tokensUsed)) / \(formatTokens(limit))")
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.secondary)
+                            .font(.mono(11, relativeTo: .caption2))
+                            .foregroundStyle(Theme.fog)
                     }
                 } else {
                     Text("\(formatTokens(tokensUsed)) tokens used")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .font(.mono(11, relativeTo: .caption2))
+                        .foregroundStyle(Theme.dim)
                 }
             }
         }
@@ -276,11 +292,11 @@ private struct AppSessionRow: View {
 
     private var faviconBadge: some View {
         Text(displayHost.first.map { String($0).uppercased() } ?? "?")
-            .font(.headline)
-            .foregroundStyle(Theme.accent)
-            .frame(width: 32, height: 32)
-            .background(Theme.accent.opacity(0.15))
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .font(.display(17, relativeTo: .headline))
+            .foregroundStyle(Theme.lilac)
+            .frame(width: 34, height: 34)
+            .background(Theme.violetSoft)
+            .overlay(Rectangle().strokeBorder(Theme.seamStrong, lineWidth: 1))
     }
 }
 
@@ -357,10 +373,12 @@ private struct MoveToGroupSheet: View {
             List {
                 Section {
                     Text(displayHost)
-                        .font(.callout.weight(.medium))
+                        .font(.mono(14, weight: .medium, relativeTo: .callout))
+                        .foregroundStyle(Theme.bone)
                 } header: {
-                    Text("App")
+                    ListHeader("App")
                 }
+                .retroRow()
 
                 Section {
                     ForEach(orderedGroups) { group in
@@ -379,40 +397,41 @@ private struct MoveToGroupSheet: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(group.name)
                                         .font(.body.weight(.medium))
-                                        .foregroundStyle(.primary)
+                                        .foregroundStyle(Theme.bone)
                                         .accessibilityIdentifier("moveApp.group.\(group.id)")
                                     HStack(spacing: 6) {
                                         Text(group.providerId.isEmpty
                                              ? "No routing"
                                              : (Provider.find(group.providerId)?.name ?? group.providerId))
                                             .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                            .foregroundStyle(Theme.fog)
                                         if let model = group.model, !model.isEmpty {
                                             Text("·")
                                                 .font(.caption)
-                                                .foregroundStyle(.secondary)
+                                                .foregroundStyle(Theme.fog)
                                             Text(model)
-                                                .font(.caption.monospaced())
-                                                .foregroundStyle(.secondary)
+                                                .font(.mono(11, relativeTo: .caption))
+                                                .foregroundStyle(Theme.fog)
                                         }
                                     }
                                 }
                                 Spacer()
                                 if group.id == currentGroupId {
                                     Image(systemName: "checkmark")
-                                        .foregroundStyle(Theme.accent)
+                                        .foregroundStyle(Theme.phosphor)
                                 }
                             }
                         }
                     }
                 } header: {
-                    Text("Move to group")
+                    ListHeader("Move to group")
                 } footer: {
-                    Text("The next request from this app will use the group's credential. Cross-family requests are translated on the fly.")
+                    ListFooter("The next request from this app will use the group's credential. Cross-family requests are translated on the fly.")
                 }
+                .retroRow()
             }
-            .navigationTitle("Move app")
-            .navigationBarTitleDisplayMode(.inline)
+            .retroList()
+            .retroNavigationTitle("Move app")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -486,17 +505,18 @@ struct GroupEditorSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 if !mode.isDefault {
                     Section {
                         TextField("Group name", text: $name)
                             .autocapitalization(.words)
                             .accessibilityIdentifier("groupEditor.name")
                     } header: {
-                        Text("Name")
+                        ListHeader("Name")
                     } footer: {
-                        Text("Pick something meaningful — \"Coding\", \"Vision tasks\", \"Cheap models\".")
+                        ListFooter("Pick something meaningful — \"Coding\", \"Vision tasks\", \"Cheap models\".")
                     }
+                    .retroRow()
                 }
 
                 Section {
@@ -532,27 +552,30 @@ struct GroupEditorSheet: View {
                         // credential is added.
                         HStack(alignment: .top, spacing: 8) {
                             Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.orange)
+                                .foregroundStyle(Theme.amber)
                                 .imageScale(.medium)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("No \(Provider.find(providerId)?.name ?? providerId) credential")
                                     .font(.subheadline)
                                     .fontWeight(.medium)
+                                    .foregroundStyle(Theme.bone)
                                 Text("This group can be saved, but apps using it will fail until you add a \(Provider.find(providerId)?.name ?? providerId) key.")
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(Theme.fog)
                             }
                         }
                         .padding(.vertical, 4)
                     }
                 } header: {
-                    Text("Destination")
+                    ListHeader("Destination")
                 } footer: {
-                    Text("Apps assigned to this group will route their requests through this provider. Pin a credential to lock the choice; leave it as \"Any\" to use any credential of that provider.")
+                    ListFooter("Apps assigned to this group will route their requests through this provider. Pin a credential to lock the choice; leave it as \"Any\" to use any credential of that provider.")
                 }
+                .retroRow()
 
                 Section {
                     TextField("e.g. claude-sonnet-4-5", text: $model)
+                        .font(.mono(15))
                         .autocapitalization(.none)
                         .disableAutocorrection(true)
                         .onChange(of: model) { _, new in
@@ -569,35 +592,39 @@ struct GroupEditorSheet: View {
                                 HStack {
                                     Text(entry.displayName)
                                         .font(.callout)
-                                        .foregroundStyle(.primary)
+                                        .foregroundStyle(Theme.bone)
                                     Spacer()
                                     Text(entry.id)
-                                        .font(.caption.monospaced())
-                                        .foregroundStyle(.tertiary)
+                                        .font(.mono(11, relativeTo: .caption))
+                                        .foregroundStyle(Theme.dim)
                                 }
                             }
                         }
                     }
                 } header: {
-                    Text("Model (optional)")
+                    ListHeader("Model (optional)")
                 } footer: {
-                    if let info = selectedModelInfo {
-                        Text(info).font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        Text("Leave empty to pass through whatever model the app requested. Set when you want to override — required for cross-family routing (e.g. apps calling Claude routed to gpt-4o).")
+                    ListFooter {
+                        if let info = selectedModelInfo {
+                            Text(info).font(.mono(11, relativeTo: .caption))
+                        } else {
+                            Text("Leave empty to pass through whatever model the app requested. Set when you want to override — required for cross-family routing (e.g. apps calling Claude routed to gpt-4o).")
+                        }
                     }
                 }
+                .retroRow()
 
                 if let error {
                     Section {
                         Text(error)
                             .font(.caption)
-                            .foregroundStyle(.red)
+                            .foregroundStyle(Theme.alarm)
                     }
+                    .retroRow(border: Theme.alarm)
                 }
             }
-            .navigationTitle(navTitle)
-            .navigationBarTitleDisplayMode(.inline)
+            .retroList()
+            .retroNavigationTitle(navTitle)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -703,22 +730,26 @@ struct AllowanceFormView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            List {
                 Section {
                     Text(origin)
-                        .font(.callout.weight(.medium))
+                        .font(.mono(14, weight: .medium, relativeTo: .callout))
+                        .foregroundStyle(Theme.bone)
                 } header: {
-                    Text("App")
+                    ListHeader("App")
                 }
+                .retroRow()
 
                 Section {
                     TextField("Unlimited", text: $totalLimit)
+                        .font(.mono(15))
                         .keyboardType(.numberPad)
                 } header: {
-                    Text("Total token limit")
+                    ListHeader("Total token limit")
                 } footer: {
-                    Text("Leave empty for unlimited.")
+                    ListFooter("Leave empty for unlimited.")
                 }
+                .retroRow()
 
                 if !providers.isEmpty {
                     Section {
@@ -726,20 +757,23 @@ struct AllowanceFormView: View {
                             HStack {
                                 Text(Provider.find(providerId)?.name ?? providerId)
                                     .font(.callout)
+                                    .foregroundStyle(Theme.bone)
                                 Spacer()
                                 TextField("Unlimited", text: binding(for: providerId))
+                                    .font(.mono(15))
                                     .keyboardType(.numberPad)
                                     .multilineTextAlignment(.trailing)
                                     .frame(width: 120)
                             }
                         }
                     } header: {
-                        Text("Per provider")
+                        ListHeader("Per provider")
                     }
+                    .retroRow()
                 }
             }
-            .navigationTitle("Token Limit")
-            .navigationBarTitleDisplayMode(.inline)
+            .retroList()
+            .retroNavigationTitle("Token Limit")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -755,7 +789,7 @@ struct AllowanceFormView: View {
                             wallet.removeAllowance(origin: origin)
                             dismiss()
                         }
-                        .foregroundStyle(.red)
+                        .foregroundStyle(Theme.alarm)
                     }
                     Spacer()
                 }
