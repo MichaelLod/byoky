@@ -317,7 +317,7 @@ function WalkthroughScene() {
   return (
     <div ref={ref} className="mock-stage mock-stage-split">
       <div className="mock-browser-side">
-        <BrowserFrame url="demo.byoky.com">
+        <BrowserFrame url="byoky.com/demo">
           {inChat ? <ChatPanel step={chatStep} /> : <ConnectPanel pressed={buttonPressed} />}
         </BrowserFrame>
         {(showSdkModal || showSuccess) && <SdkModal state={showSuccess ? 'success' : 'connecting'} />}
@@ -328,7 +328,7 @@ function WalkthroughScene() {
             <h2 className="mock-page-title">Connection Request</h2>
             <div className="mock-approval-card">
               <div className="mock-approval-icon">D</div>
-              <div className="mock-approval-origin">demo.byoky.com</div>
+              <div className="mock-approval-origin">byoky.com</div>
               <div className="mock-approval-subtitle">wants to connect to your wallet</div>
             </div>
             <div className="mock-approval-section">
@@ -348,7 +348,7 @@ function WalkthroughScene() {
               <button className="mock-btn mock-btn-secondary" type="button" tabIndex={-1}>Reject</button>
               <button className={`mock-btn mock-btn-primary ${step === 2 ? 'pressed' : ''}`} type="button" tabIndex={-1}>Approve</button>
             </div>
-            <div className="mock-approval-full">https://demo.byoky.com</div>
+            <div className="mock-approval-full">https://byoky.com</div>
           </MockShell>
         ) : (
           <MockShell active="wallet">
@@ -459,7 +459,7 @@ function ConnectChatScene() {
           <div className="mock-card-row">
             <div className="mock-app-fav">D</div>
             <div className="mock-card-text">
-              <div className="mock-card-title">demo.byoky.com</div>
+              <div className="mock-card-title">byoky.com</div>
               <div className="mock-card-sub-tight">via Claude</div>
             </div>
             <span className="mock-status-dot mock-status-ok" />
@@ -628,7 +628,7 @@ function ApprovalScene() {
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
       </div>
       <div style={{ fontSize: '14px', fontWeight: 700, color: '#1c1917' }}>Connected!</div>
-      <div style={{ fontSize: '10px', color: '#57534e' }}>demo.byoky.com</div>
+      <div style={{ fontSize: '10px', color: '#57534e' }}>byoky.com</div>
       <div style={{ display: 'flex', gap: '6px', marginTop: '2px' }}>
         <img src={ICON.anthropic} alt="" style={{ width: '16px', height: '16px' }} />
         <img src={ICON.openai} alt="" style={{ width: '16px', height: '16px' }} />
@@ -645,13 +645,13 @@ function ApprovalScene() {
             <button className="mock-btn mock-btn-secondary" type="button" tabIndex={-1} style={{ flex: 1, padding: '8px', fontSize: '11px' }}>Reject</button>
             <button className={`mock-btn mock-btn-primary ${step >= 1 ? 'pressed' : ''}`} type="button" tabIndex={-1} style={{ flex: 1, padding: '8px', fontSize: '11px' }}>Approve</button>
           </div>
-          <div className="mock-approval-full" style={{ marginTop: '6px', textAlign: 'center' }}>https://demo.byoky.com</div>
+          <div className="mock-approval-full" style={{ marginTop: '6px', textAlign: 'center' }}>https://byoky.com</div>
         </div>
       }>
         <h2 className="mock-page-title">Connection Request</h2>
         <div className="mock-approval-card">
           <div className="mock-approval-icon">D</div>
-          <div className="mock-approval-origin">demo.byoky.com</div>
+          <div className="mock-approval-origin">byoky.com</div>
           <div className="mock-approval-subtitle">wants to connect to your wallet</div>
         </div>
         <div className="mock-approval-section">
