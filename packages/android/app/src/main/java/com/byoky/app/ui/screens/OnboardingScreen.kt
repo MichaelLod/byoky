@@ -142,6 +142,7 @@ fun OnboardingScreen(wallet: WalletStore) {
                 onValueChange = { password = it },
                 label = "Master password",
                 mono = true,
+                secret = true,
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -153,6 +154,7 @@ fun OnboardingScreen(wallet: WalletStore) {
                 onValueChange = { confirmPassword = it },
                 label = "Confirm password",
                 mono = true,
+                secret = true,
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth(),
             )

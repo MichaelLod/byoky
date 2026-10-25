@@ -74,6 +74,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -401,6 +402,7 @@ fun RetroTextField(
     isError: Boolean = false,
     singleLine: Boolean = true,
     supportingText: String? = null,
+    secret: Boolean = false,
     visualTransformation: VisualTransformation = VisualTransformation.None,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     keyboardActions: KeyboardActions = KeyboardActions.Default,
@@ -472,7 +474,14 @@ fun RetroTextField(
             enabled = enabled,
             readOnly = readOnly,
             textStyle = textStyle.copy(color = if (enabled) Bone else Dim),
-            keyboardOptions = keyboardOptions,
+            // Secrets ask the keyboard for a password field: no suggestions,
+            // no autocorrect, nothing learned. Otherwise the keyboard showed a
+            // typed key in its suggestion strip and could keep it.
+            keyboardOptions = if (secret) {
+                keyboardOptions.copy(keyboardType = KeyboardType.Password, autoCorrectEnabled = false)
+            } else {
+                keyboardOptions
+            },
             keyboardActions = keyboardActions,
             singleLine = singleLine,
             maxLines = if (singleLine) 1 else Int.MAX_VALUE,

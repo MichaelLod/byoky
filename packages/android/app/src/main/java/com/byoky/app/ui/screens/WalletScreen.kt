@@ -598,6 +598,7 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
                         else -> "API Key"
                     },
                     mono = true,
+                    secret = true,
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth(),
                 )

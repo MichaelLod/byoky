@@ -235,6 +235,7 @@ private fun PasswordField(
         label = label,
         mono = true,
         isError = isError,
+        secret = true,
         visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
         trailingIcon = {
             IconButton(onClick = { visible = !visible }) {

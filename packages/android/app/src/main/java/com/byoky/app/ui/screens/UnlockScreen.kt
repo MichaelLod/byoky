@@ -145,6 +145,7 @@ fun UnlockScreen(wallet: WalletStore) {
             onValueChange = { password = it; error = null },
             label = "Master password",
             mono = true,
+            secret = true,
             leadingIcon = {
                 Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(18.dp))
             },
