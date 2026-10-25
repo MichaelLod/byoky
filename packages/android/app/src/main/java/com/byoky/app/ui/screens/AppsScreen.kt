@@ -3,23 +3,25 @@ package com.byoky.app.ui.screens
 import android.text.format.DateUtils
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -36,6 +38,18 @@ import com.byoky.app.data.capabilityLabel
 import com.byoky.app.data.detectAppCapabilities
 import com.byoky.app.data.formatTokens
 import com.byoky.app.proxy.TranslationEngine
+import com.byoky.app.ui.components.CapsText
+import com.byoky.app.ui.components.DialogButton
+import com.byoky.app.ui.components.GhostButton
+import com.byoky.app.ui.components.RetroBottomSheet
+import com.byoky.app.ui.components.RetroDialog
+import com.byoky.app.ui.components.RetroDropdownMenu
+import com.byoky.app.ui.components.RetroTextField
+import com.byoky.app.ui.components.RetroTopBar
+import com.byoky.app.ui.components.SectionLabel
+import com.byoky.app.ui.components.Tag
+import com.byoky.app.ui.components.dotGrid
+import com.byoky.app.ui.components.panel
 import com.byoky.app.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -90,43 +104,37 @@ fun AppsScreen(wallet: WalletStore) {
     }
 
     Scaffold(
+        modifier = Modifier
+            .background(Void)
+            .dotGrid(),
         topBar = {
-            TopAppBar(
-                title = { Text("Connected") },
+            RetroTopBar(
+                title = "Connected",
                 actions = {
                     if (sessions.size > 1) {
                         IconButton(onClick = {
                             sessions.forEach { wallet.revokeSession(it) }
                         }) {
-                            Icon(Icons.Default.Close, "Disconnect all", tint = Danger)
+                            Icon(Icons.Default.Close, "Disconnect all", tint = Alarm)
                         }
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = BgMain,
-                    titleContentColor = TextPrimary,
-                ),
             )
         },
-        containerColor = BgMain,
+        containerColor = Color.Transparent,
     ) { padding ->
         LazyColumn(
             modifier = Modifier.padding(padding),
-            contentPadding = PaddingValues(16.dp),
+            contentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
-                OutlinedButton(
+                GhostButton(
+                    "New group",
                     onClick = { creatingGroup = true },
+                    icon = Icons.Default.Add,
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
-                    border = BorderStroke(1.dp, Accent.copy(alpha = 0.4f)),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Accent),
-                ) {
-                    Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("New group", fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                }
+                )
             }
 
             items(orderedGroups, key = { it.id }) { group ->
@@ -153,21 +161,24 @@ fun AppsScreen(wallet: WalletStore) {
                             .padding(top = 32.dp, bottom = 32.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        Icon(
-                            Icons.Default.Link,
-                            null,
-                            tint = TextMuted,
-                            modifier = Modifier.size(48.dp),
-                        )
-                        Spacer(Modifier.height(16.dp))
-                        Text("No Apps Connected", fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                        Box(
+                            modifier = Modifier
+                                .size(64.dp)
+                                .border(1.dp, SeamStrong),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.Default.Link, null, tint = Phosphor, modifier = Modifier.size(28.dp))
+                        }
+                        Spacer(Modifier.height(18.dp))
+                        CapsText("No Apps Connected", style = HeadingStyle, color = Bone)
                         Spacer(Modifier.height(8.dp))
                         Text(
                             "Apps you open from the Apps tab appear here once they connect. Group them, set token limits, and reroute their requests across providers.",
-                            color = TextSecondary,
+                            color = Fog,
                             textAlign = TextAlign.Center,
-                            fontSize = 13.sp,
-                            modifier = Modifier.padding(horizontal = 24.dp),
+                            fontSize = 14.sp,
+                            lineHeight = 20.sp,
+                            modifier = Modifier.padding(horizontal = 16.dp),
                         )
                     }
                 }
@@ -202,10 +213,9 @@ fun AppsScreen(wallet: WalletStore) {
     }
 
     pendingMove?.let { pending ->
-        AlertDialog(
+        RetroDialog(
             onDismissRequest = { pendingMove = null },
-            containerColor = BgCard,
-            title = { Text("Capability mismatch", color = TextPrimary) },
+            title = "Capability mismatch",
             text = {
                 val singular = pending.gapLabels.size == 1
                 Text(
@@ -215,21 +225,20 @@ fun AppsScreen(wallet: WalletStore) {
                         ". Requests using " +
                         (if (singular) "that feature" else "those features") +
                         " will fail until you switch back.",
-                    color = TextSecondary,
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    try { wallet.setAppGroup(pending.origin, pending.groupId) } catch (_: Throwable) {}
-                    pendingMove = null
-                }) {
-                    Text("Move anyway", color = Danger)
-                }
+                DialogButton(
+                    "Move anyway",
+                    onClick = {
+                        try { wallet.setAppGroup(pending.origin, pending.groupId) } catch (_: Throwable) {}
+                        pendingMove = null
+                    },
+                    color = Alarm,
+                )
             },
             dismissButton = {
-                TextButton(onClick = { pendingMove = null }) {
-                    Text("Cancel", color = TextSecondary)
-                }
+                DialogButton("Cancel", onClick = { pendingMove = null }, color = Fog)
             },
         )
     }
@@ -286,119 +295,116 @@ private fun GroupBucket(
     }
     var menuOpen by remember { mutableStateOf(false) }
 
-    Card(
-        colors = CardDefaults.cardColors(containerColor = BgCard),
-        shape = RoundedCornerShape(16.dp),
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .panel()
+            .padding(start = 16.dp, top = 12.dp, end = 4.dp, bottom = 16.dp),
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            // Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            group.name,
-                            fontWeight = FontWeight.SemiBold,
-                            color = TextPrimary,
-                        )
-                        if (group.providerId.isNotEmpty()) {
-                            Spacer(Modifier.width(8.dp))
-                            Box(
-                                modifier = Modifier
-                                    .background(Accent.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                            ) {
-                                Text(
-                                    provider?.name ?: group.providerId,
-                                    color = Accent,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Medium,
-                                )
-                            }
-                        }
-                        if (!group.model.isNullOrEmpty()) {
-                            Spacer(Modifier.width(6.dp))
-                            Box(
-                                modifier = Modifier
-                                    .background(BgMain, RoundedCornerShape(8.dp))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                            ) {
-                                Text(
-                                    group.model!!,
-                                    color = TextSecondary,
-                                    fontSize = 10.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                )
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        when {
-                            group.providerId.isEmpty() -> "No routing — apps use the provider they request"
-                            pinnedCred != null -> "Using ${pinnedCred.label}"
-                            else -> "Any ${provider?.name ?: group.providerId} credential"
-                        },
-                        color = TextMuted,
-                        fontSize = 11.sp,
+        // Header
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CapsText(
+                        group.name,
+                        style = HeadingStyle.copy(fontSize = 16.sp),
+                        color = Bone,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f, fill = false),
                     )
-                }
-                // The default group stays routing-neutral (ensureDefaultGroup
-                // resets it), so it has nothing to edit or delete.
-                if (!isDefault) {
-                    Box {
-                        IconButton(onClick = { menuOpen = true }) {
-                            Icon(
-                                Icons.Default.MoreVert,
-                                "Group menu",
-                                tint = Accent,
-                            )
-                        }
-                        DropdownMenu(
-                            expanded = menuOpen,
-                            onDismissRequest = { menuOpen = false },
-                            modifier = Modifier.background(BgRaised),
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("Edit", color = TextPrimary) },
-                                onClick = { menuOpen = false; onEditGroup() },
-                                leadingIcon = { Icon(Icons.Default.Edit, null, tint = Accent) },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Delete", color = Danger) },
-                                onClick = { menuOpen = false; onDeleteGroup() },
-                                leadingIcon = { Icon(Icons.Default.Delete, null, tint = Danger) },
-                            )
-                        }
+                    if (group.providerId.isNotEmpty()) {
+                        Spacer(Modifier.width(8.dp))
+                        Tag(provider?.name ?: group.providerId)
                     }
-                }
-            }
-
-            Spacer(Modifier.height(12.dp))
-
-            if (sessions.isEmpty()) {
-                Text(
-                    if (isDefault) "Apps without an assigned group land here."
-                    else "Long-press an app and pick this group to move it here.",
-                    color = TextMuted,
-                    fontSize = 12.sp,
-                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
-                    modifier = Modifier.padding(vertical = 4.dp),
-                )
-            } else {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    sessions.forEach { session ->
-                        AppSessionCard(
-                            session = session,
-                            allowance = allowances.firstOrNull { it.origin == session.appOrigin },
-                            tokensUsed = wallet.tokenUsage(session.appOrigin),
-                            onMove = { onMove(session) },
-                            onEditAllowance = { onEditAllowance(session) },
-                            onRevoke = { wallet.revokeSession(session) },
+                    if (!group.model.isNullOrEmpty()) {
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            group.model!!,
+                            color = Fog,
+                            style = MonoStyle.copy(fontSize = 10.sp),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .weight(1f, fill = false)
+                                .border(1.dp, Seam)
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
                         )
                     }
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    when {
+                        group.providerId.isEmpty() -> "No routing — apps use the provider they request"
+                        pinnedCred != null -> "Using ${pinnedCred.label}"
+                        else -> "Any ${provider?.name ?: group.providerId} credential"
+                    },
+                    color = Dim,
+                    style = MonoStyle.copy(fontSize = 11.sp),
+                )
+            }
+            // The default group stays routing-neutral (ensureDefaultGroup
+            // resets it), so it has nothing to edit or delete.
+            if (!isDefault) {
+                Box {
+                    IconButton(onClick = { menuOpen = true }) {
+                        Icon(
+                            Icons.Default.MoreVert,
+                            "Group menu",
+                            tint = Phosphor,
+                        )
+                    }
+                    RetroDropdownMenu(
+                        expanded = menuOpen,
+                        onDismissRequest = { menuOpen = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Edit", color = Bone) },
+                            onClick = { menuOpen = false; onEditGroup() },
+                            leadingIcon = { Icon(Icons.Default.Edit, null, tint = Phosphor) },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Delete", color = Alarm) },
+                            onClick = { menuOpen = false; onDeleteGroup() },
+                            leadingIcon = { Icon(Icons.Default.Delete, null, tint = Alarm) },
+                        )
+                    }
+                }
+            } else {
+                Spacer(Modifier.width(12.dp))
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        if (sessions.isEmpty()) {
+            Text(
+                if (isDefault) "Apps without an assigned group land here."
+                else "Long-press an app and pick this group to move it here.",
+                color = Dim,
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .padding(end = 12.dp)
+                    .fillMaxWidth()
+                    .border(1.dp, Seam)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+            )
+        } else {
+            Column(
+                modifier = Modifier.padding(end = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                sessions.forEach { session ->
+                    AppSessionCard(
+                        session = session,
+                        allowance = allowances.firstOrNull { it.origin == session.appOrigin },
+                        tokensUsed = wallet.tokenUsage(session.appOrigin),
+                        onMove = { onMove(session) },
+                        onEditAllowance = { onEditAllowance(session) },
+                        onRevoke = { wallet.revokeSession(session) },
+                    )
                 }
             }
         }
@@ -425,32 +431,32 @@ private fun AppSessionCard(
 
     Surface(
         onClick = onMove,
-        color = BgRaised,
-        shape = RoundedCornerShape(12.dp),
+        color = Ash,
+        shape = RectangleShape,
+        border = BorderStroke(1.dp, Seam),
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(modifier = Modifier.padding(start = 12.dp, top = 8.dp, end = 4.dp, bottom = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
                     modifier = Modifier
                         .size(32.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Accent.copy(alpha = 0.15f)),
+                        .border(1.dp, SeamStrong),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         displayHost.firstOrNull()?.uppercase() ?: "?",
-                        color = Accent,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 14.sp,
+                        color = Lilac,
+                        style = MonoStyle.copy(fontSize = 13.sp),
                     )
                 }
                 Spacer(Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         displayHost,
-                        fontWeight = FontWeight.Medium,
-                        color = TextPrimary,
-                        fontSize = 14.sp,
+                        color = Bone,
+                        style = MonoStyle.copy(fontSize = 14.sp, lineHeight = 19.sp),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                         DateUtils.getRelativeTimeSpanString(
@@ -458,15 +464,15 @@ private fun AppSessionCard(
                             System.currentTimeMillis(),
                             DateUtils.MINUTE_IN_MILLIS,
                         ).toString(),
-                        color = TextMuted,
-                        fontSize = 11.sp,
+                        color = Dim,
+                        style = MonoStyle.copy(fontSize = 11.sp),
                     )
                 }
                 IconButton(onClick = onEditAllowance) {
                     Icon(
                         Icons.Default.Speed,
                         "Set limit",
-                        tint = Accent,
+                        tint = Phosphor,
                         modifier = Modifier.size(18.dp),
                     )
                 }
@@ -474,7 +480,7 @@ private fun AppSessionCard(
                     Icon(
                         Icons.Default.Close,
                         "Disconnect",
-                        tint = Danger,
+                        tint = Alarm,
                         modifier = Modifier.size(18.dp),
                     )
                 }
@@ -491,21 +497,25 @@ private fun AppSessionCard(
                 ) {
                     LinearProgressIndicator(
                         progress = { progress },
-                        modifier = Modifier.weight(1f).height(5.dp),
-                        color = if (progress >= 0.8f) Warning else Accent,
-                        trackColor = TextMuted.copy(alpha = 0.2f),
+                        modifier = Modifier.weight(1f).height(4.dp),
+                        color = if (progress >= 0.8f) Amber else Violet,
+                        trackColor = Seam,
+                        strokeCap = StrokeCap.Butt,
+                        gapSize = 0.dp,
+                        drawStopIndicator = {},
                     )
                     Text(
                         "${formatTokens(tokensUsed)} / ${formatTokens(limit)}",
-                        fontSize = 10.sp,
-                        color = TextMuted,
+                        style = MonoStyle.copy(fontSize = 10.sp),
+                        color = Dim,
+                        modifier = Modifier.padding(end = 8.dp),
                     )
                 }
             } else {
                 Text(
                     "${formatTokens(tokensUsed)} tokens used",
-                    fontSize = 11.sp,
-                    color = TextMuted,
+                    style = MonoStyle.copy(fontSize = 11.sp),
+                    color = Dim,
                 )
             }
         }
@@ -574,70 +584,67 @@ private fun MoveToGroupSheet(
         catch (_: Exception) { session.appOrigin }
     }
 
-    ModalBottomSheet(
+    RetroBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = BgCard,
     ) {
-        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Text(
+        Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+            CapsText(
                 "Move app",
-                fontWeight = FontWeight.SemiBold,
-                color = TextPrimary,
-                fontSize = 16.sp,
+                style = HeadingStyle.copy(fontSize = 20.sp, lineHeight = 26.sp),
+                color = Bone,
             )
             Spacer(Modifier.height(4.dp))
             Text(
                 displayHost,
-                color = TextSecondary,
-                fontSize = 13.sp,
+                color = Fog,
+                style = MonoStyle.copy(fontSize = 13.sp),
             )
             Spacer(Modifier.height(16.dp))
-            Text(
-                "MOVE TO GROUP",
-                color = TextMuted,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium,
-            )
+            SectionLabel("Move to group")
             Spacer(Modifier.height(8.dp))
             groups.forEach { group ->
                 val provider = Provider.find(group.providerId)
+                val current = group.id == currentGroupId
                 Surface(
                     onClick = { onSelect(group.id) },
-                    color = Color.Transparent,
-                    modifier = Modifier.fillMaxWidth(),
+                    color = if (current) VioletSoft else Color.Transparent,
+                    shape = RectangleShape,
+                    border = BorderStroke(1.dp, if (current) Violet else Seam),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 3.dp),
                 ) {
                     Row(
-                        modifier = Modifier.padding(vertical = 12.dp),
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 group.name,
                                 fontWeight = FontWeight.Medium,
-                                color = TextPrimary,
+                                color = Bone,
                                 fontSize = 14.sp,
                             )
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     if (group.providerId.isEmpty()) "No routing"
                                     else provider?.name ?: group.providerId,
-                                    color = TextSecondary,
+                                    color = Fog,
                                     fontSize = 12.sp,
                                 )
                                 if (!group.model.isNullOrEmpty()) {
-                                    Text(" · ", color = TextSecondary, fontSize = 12.sp)
+                                    Text(" · ", color = Fog, fontSize = 12.sp)
                                     Text(
                                         group.model!!,
-                                        color = TextSecondary,
-                                        fontSize = 12.sp,
-                                        fontFamily = FontFamily.Monospace,
+                                        color = Fog,
+                                        style = MonoStyle,
                                     )
                                 }
                             }
                         }
-                        if (group.id == currentGroupId) {
-                            Icon(Icons.Default.Check, null, tint = Accent)
+                        if (current) {
+                            Icon(Icons.Default.Check, null, tint = Phosphor)
                         }
                     }
                 }
@@ -645,8 +652,8 @@ private fun MoveToGroupSheet(
             Spacer(Modifier.height(12.dp))
             Text(
                 "The next request from this app will use the group's credential. Cross-family requests are translated on the fly.",
-                color = TextMuted,
-                fontSize = 11.sp,
+                color = Dim,
+                fontSize = 12.sp,
             )
             Spacer(Modifier.height(16.dp))
         }
@@ -727,32 +734,27 @@ private fun GroupEditorDialog(
         }
     }
 
-    AlertDialog(
+    RetroDialog(
         onDismissRequest = onDismiss,
-        containerColor = BgCard,
-        title = {
-            Text(
-                when {
-                    existing == null -> "New Group"
-                    isDefault -> "Default Group"
-                    else -> "Edit Group"
-                },
-                color = TextPrimary,
-            )
+        title = when {
+            existing == null -> "New Group"
+            isDefault -> "Default Group"
+            else -> "Edit Group"
         },
         text = {
             Column(
-                modifier = Modifier.heightIn(max = 480.dp),
+                modifier = Modifier
+                    .heightIn(max = 480.dp)
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 if (!isDefault) {
-                    OutlinedTextField(
+                    RetroTextField(
                         value = name,
                         onValueChange = { name = it },
-                        label = { Text("Group name") },
-                        placeholder = { Text("e.g. Coding") },
+                        label = "Group name",
+                        placeholder = "e.g. Coding",
                         modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
                     )
                 }
 
@@ -760,23 +762,26 @@ private fun GroupEditorDialog(
                     expanded = providerExpanded,
                     onExpandedChange = { providerExpanded = !providerExpanded },
                 ) {
-                    OutlinedTextField(
+                    RetroTextField(
                         value = providerName,
                         onValueChange = {},
                         readOnly = true,
-                        label = { Text("Provider") },
+                        label = "Provider",
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = providerExpanded) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .menuAnchor(),
+                        fieldModifier = Modifier.menuAnchor(),
                     )
                     ExposedDropdownMenu(
                         expanded = providerExpanded,
                         onDismissRequest = { providerExpanded = false },
+                        shape = RectangleShape,
+                        containerColor = Crypt,
+                        tonalElevation = 0.dp,
+                        shadowElevation = 0.dp,
+                        border = BorderStroke(1.dp, SeamStrong),
                     ) {
                         Provider.all.forEach { provider ->
                             DropdownMenuItem(
-                                text = { Text(provider.name) },
+                                text = { Text(provider.name, color = Bone) },
                                 onClick = {
                                     providerId = provider.id
                                     pinnedCredentialId = null  // provider change invalidates any pin
@@ -792,22 +797,25 @@ private fun GroupEditorDialog(
                         expanded = credentialExpanded,
                         onExpandedChange = { credentialExpanded = !credentialExpanded },
                     ) {
-                        OutlinedTextField(
+                        RetroTextField(
                             value = pinnedLabel,
                             onValueChange = {},
                             readOnly = true,
-                            label = { Text("Credential") },
+                            label = "Credential",
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = credentialExpanded) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .menuAnchor(),
+                            fieldModifier = Modifier.menuAnchor(),
                         )
                         ExposedDropdownMenu(
                             expanded = credentialExpanded,
                             onDismissRequest = { credentialExpanded = false },
+                            shape = RectangleShape,
+                            containerColor = Crypt,
+                            tonalElevation = 0.dp,
+                            shadowElevation = 0.dp,
+                            border = BorderStroke(1.dp, SeamStrong),
                         ) {
                             DropdownMenuItem(
-                                text = { Text("Any $providerName credential") },
+                                text = { Text("Any $providerName credential", color = Bone) },
                                 onClick = {
                                     pinnedCredentialId = null
                                     credentialExpanded = false
@@ -815,7 +823,7 @@ private fun GroupEditorDialog(
                             )
                             matchingCreds.forEach { c ->
                                 DropdownMenuItem(
-                                    text = { Text(c.label) },
+                                    text = { Text(c.label, color = Bone) },
                                     onClick = {
                                         pinnedCredentialId = c.id
                                         credentialExpanded = false
@@ -829,75 +837,71 @@ private fun GroupEditorDialog(
                     // credential. The save still goes through (permissive
                     // mode) but the user is told up front that this group
                     // won't work until a matching key is added.
-                    Surface(
-                        color = BgMain,
-                        shape = RoundedCornerShape(6.dp),
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .panel(background = Void, border = Amber.copy(alpha = 0.5f))
+                            .padding(10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.Top,
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(10.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.Top,
-                        ) {
-                            Text("⚠️", fontSize = 14.sp)
-                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text(
-                                    "No $providerName credential",
-                                    color = TextPrimary,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium,
-                                )
-                                Text(
-                                    "This group can be saved, but apps using it will fail until you add a $providerName key.",
-                                    color = TextMuted,
-                                    fontSize = 11.sp,
-                                )
-                            }
+                        Icon(Icons.Default.Warning, null, tint = Amber, modifier = Modifier.size(16.dp))
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                "No $providerName credential",
+                                color = Amber,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            Text(
+                                "This group can be saved, but apps using it will fail until you add a $providerName key.",
+                                color = Fog,
+                                fontSize = 11.sp,
+                            )
                         }
                     }
                 }
 
-                OutlinedTextField(
+                RetroTextField(
                     value = model,
                     onValueChange = { model = it },
-                    label = { Text("Model (optional)") },
-                    placeholder = { Text("e.g. claude-sonnet-4-5") },
+                    label = "Model (optional)",
+                    placeholder = "e.g. claude-sonnet-4-5",
+                    mono = true,
                     modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
                 )
 
                 val info = modelInfo
                 if (info != null) {
-                    Text(info, color = TextMuted, fontSize = 11.sp)
+                    Text(info, color = Dim, style = MonoStyle.copy(fontSize = 11.sp))
                 } else {
                     Text(
                         "Leave empty to pass through. Set to override (required for cross-family routing).",
-                        color = TextMuted,
+                        color = Dim,
                         fontSize = 11.sp,
                     )
                 }
 
                 if (suggestedModels.isNotEmpty()) {
-                    Text("Suggested models", color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                    SectionLabel("Suggested models")
                     suggestedModels.forEach { (id, displayName) ->
                         Surface(
                             onClick = { model = id },
-                            color = BgMain,
-                            shape = RoundedCornerShape(6.dp),
+                            color = Void,
+                            shape = RectangleShape,
+                            border = BorderStroke(1.dp, if (model == id) Violet else Seam),
                         ) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                             ) {
-                                Text(displayName, color = TextPrimary, fontSize = 12.sp)
+                                Text(displayName, color = Bone, fontSize = 12.sp)
                                 Text(
                                     id,
-                                    color = TextMuted,
-                                    fontSize = 11.sp,
-                                    fontFamily = FontFamily.Monospace,
+                                    color = Dim,
+                                    style = MonoStyle.copy(fontSize = 11.sp),
                                 )
                             }
                         }
@@ -905,12 +909,13 @@ private fun GroupEditorDialog(
                 }
 
                 error?.let {
-                    Text(it, color = Danger, fontSize = 12.sp)
+                    Text(it, color = Alarm, fontSize = 12.sp)
                 }
             }
         },
         confirmButton = {
-            TextButton(
+            DialogButton(
+                "Save",
                 onClick = {
                     try {
                         val credentialPin = pinnedCredentialId?.takeIf { id -> matchingCreds.any { it.id == id } }
@@ -938,10 +943,10 @@ private fun GroupEditorDialog(
                     }
                 },
                 enabled = isDefault || name.isNotBlank(),
-            ) { Text("Save") }
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            DialogButton("Cancel", onClick = onDismiss, color = Fog)
         },
     )
 }
@@ -968,34 +973,33 @@ private fun AllowanceDialog(
         )
     }
 
-    AlertDialog(
+    RetroDialog(
         onDismissRequest = onDismiss,
-        containerColor = BgCard,
-        title = { Text("Token Limit", color = TextPrimary) },
+        title = "Token Limit",
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(origin, color = TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Text(origin, color = Fog, style = MonoStyle.copy(fontSize = 13.sp))
 
-                OutlinedTextField(
+                RetroTextField(
                     value = totalLimit,
                     onValueChange = { totalLimit = it },
-                    label = { Text("Total token limit") },
-                    placeholder = { Text("Unlimited") },
+                    label = "Total token limit",
+                    placeholder = "Unlimited",
+                    mono = true,
                     modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 )
 
                 if (providers.isNotEmpty()) {
-                    Text("Per provider", color = TextSecondary, fontSize = 12.sp)
+                    SectionLabel("Per provider")
                     providers.forEach { id ->
-                        OutlinedTextField(
+                        RetroTextField(
                             value = providerLimits[id] ?: "",
                             onValueChange = { providerLimits = providerLimits + (id to it) },
-                            label = { Text(Provider.find(id)?.name ?: id) },
-                            placeholder = { Text("Unlimited") },
+                            label = Provider.find(id)?.name ?: id,
+                            placeholder = "Unlimited",
+                            mono = true,
                             modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         )
                     }
@@ -1003,23 +1007,21 @@ private fun AllowanceDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = {
+            DialogButton("Save", onClick = {
                 val total = totalLimit.toIntOrNull()?.takeIf { it > 0 }
                 val pLimits = providerLimits
                     .mapValues { (_, v) -> v.toIntOrNull() ?: 0 }
                     .filterValues { it > 0 }
                     .takeIf { it.isNotEmpty() }
                 onSave(TokenAllowance(origin = origin, totalLimit = total, providerLimits = pLimits))
-            }) { Text("Save") }
+            })
         },
         dismissButton = {
             Row {
                 if (allowance != null) {
-                    TextButton(onClick = onRemove) {
-                        Text("Remove", color = Danger)
-                    }
+                    DialogButton("Remove", onClick = onRemove, color = Alarm)
                 }
-                TextButton(onClick = onDismiss) { Text("Cancel") }
+                DialogButton("Cancel", onClick = onDismiss, color = Fog)
             }
         },
     )

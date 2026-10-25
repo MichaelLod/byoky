@@ -2,9 +2,10 @@ package com.byoky.app.ui.screens
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
@@ -13,75 +14,58 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.byoky.app.BuildConfig
 import com.byoky.app.data.WalletStore
 import com.byoky.app.proxy.TranslationEngine
+import com.byoky.app.ui.components.DangerButton
+import com.byoky.app.ui.components.DialogButton
+import com.byoky.app.ui.components.RetroDialog
+import com.byoky.app.ui.components.RetroTopBar
+import com.byoky.app.ui.components.SectionLabel
+import com.byoky.app.ui.components.dotGrid
+import com.byoky.app.ui.components.panel
 import com.byoky.app.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(wallet: WalletStore) {
     val context = LocalContext.current
     var showResetWalletConfirm by remember { mutableStateOf(false) }
 
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Settings") },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = BgMain,
-                    titleContentColor = TextPrimary,
-                ),
-            )
-        },
-        containerColor = BgMain,
+        modifier = Modifier
+            .background(Void)
+            .dotGrid(),
+        topBar = { RetroTopBar(title = "Settings") },
+        containerColor = Color.Transparent,
     ) { padding ->
         Column(
             modifier = Modifier
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+                .padding(horizontal = 20.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             // Security
-            Card(
-                colors = CardDefaults.cardColors(containerColor = BgCard),
-                shape = RoundedCornerShape(16.dp),
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Text("Security", fontWeight = FontWeight.SemiBold, color = TextPrimary)
-                    Spacer(Modifier.height(16.dp))
+            SettingsCard(title = "Security") {
+                SettingsRow(
+                    icon = Icons.Default.Lock,
+                    title = "Lock Wallet",
+                    onClick = { wallet.lock() },
+                )
 
-                    Surface(
-                        onClick = { wallet.lock() },
-                        color = BgCard,
-                        shape = RoundedCornerShape(8.dp),
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(Icons.Default.Lock, null, tint = Accent, modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.width(12.dp))
-                            Text("Lock Wallet", color = TextPrimary)
-                        }
-                    }
+                Spacer(Modifier.height(8.dp))
 
-                    Spacer(Modifier.height(12.dp))
-
-                    InfoRow("Encryption", "AES-256-GCM")
-                    InfoRow("Key Derivation", "PBKDF2 (600K)")
-                    InfoRow("Storage", "On this device only")
-                }
+                InfoRow("Encryption", "AES-256-GCM")
+                InfoRow("Key Derivation", "PBKDF2 (600K)")
+                InfoRow("Storage", "On this device only")
             }
 
             BackupSection(wallet)
@@ -92,120 +76,129 @@ fun SettingsScreen(wallet: WalletStore) {
             }
 
             // About
-            Card(
-                colors = CardDefaults.cardColors(containerColor = BgCard),
-                shape = RoundedCornerShape(16.dp),
-            ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Text("About", fontWeight = FontWeight.SemiBold, color = TextPrimary)
-                    Spacer(Modifier.height(16.dp))
+            SettingsCard(title = "About") {
+                InfoRow("Version", BuildConfig.VERSION_NAME)
 
-                    InfoRow("Version", BuildConfig.VERSION_NAME)
+                Spacer(Modifier.height(8.dp))
 
-                    Spacer(Modifier.height(8.dp))
+                SettingsRow(
+                    icon = Icons.Default.Code,
+                    title = "GitHub",
+                    external = true,
+                    onClick = {
+                        context.startActivity(
+                            Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/MichaelLod/byoky"))
+                        )
+                    },
+                )
 
-                    Surface(
-                        onClick = {
-                            context.startActivity(
-                                Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/MichaelLod/byoky"))
-                            )
-                        },
-                        color = BgCard,
-                        shape = RoundedCornerShape(8.dp),
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(Icons.Default.Code, null, tint = Accent, modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.width(12.dp))
-                            Text("GitHub", color = TextPrimary)
-                            Spacer(Modifier.weight(1f))
-                            Icon(Icons.AutoMirrored.Filled.OpenInNew, null, tint = TextMuted, modifier = Modifier.size(16.dp))
-                        }
-                    }
-
-                    Spacer(Modifier.height(4.dp))
-
-                    Surface(
-                        onClick = {
-                            context.startActivity(
-                                Intent(Intent.ACTION_VIEW, Uri.parse("https://byoky.com"))
-                            )
-                        },
-                        color = BgCard,
-                        shape = RoundedCornerShape(8.dp),
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(Icons.Default.Language, null, tint = Accent, modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.width(12.dp))
-                            Text("Website", color = TextPrimary)
-                            Spacer(Modifier.weight(1f))
-                            Icon(Icons.AutoMirrored.Filled.OpenInNew, null, tint = TextMuted, modifier = Modifier.size(16.dp))
-                        }
-                    }
-                }
+                SettingsRow(
+                    icon = Icons.Default.Language,
+                    title = "Website",
+                    external = true,
+                    onClick = {
+                        context.startActivity(
+                            Intent(Intent.ACTION_VIEW, Uri.parse("https://byoky.com"))
+                        )
+                    },
+                )
             }
 
             // Danger Zone
-            Card(
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = BgCard),
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Danger Zone", color = Danger, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "Reset wallet permanently deletes all keys and settings on this device. Export a backup first if you want to keep them.",
-                        color = TextMuted,
-                        fontSize = 11.sp,
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    OutlinedButton(
-                        onClick = { showResetWalletConfirm = true },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Danger),
-                    ) {
-                        Icon(Icons.Default.Refresh, null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Reset Wallet")
-                    }
-                }
+            SettingsCard(title = "Danger Zone", titleColor = Alarm) {
+                Text(
+                    "Reset wallet permanently deletes all keys and settings on this device. Export a backup first if you want to keep them.",
+                    color = Fog,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                )
+                Spacer(Modifier.height(12.dp))
+                DangerButton(
+                    "Reset Wallet",
+                    onClick = { showResetWalletConfirm = true },
+                    icon = Icons.Default.Refresh,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
+
+            Spacer(Modifier.height(8.dp))
         }
     }
 
     if (showResetWalletConfirm) {
-        AlertDialog(
+        RetroDialog(
             onDismissRequest = { showResetWalletConfirm = false },
-            containerColor = BgCard,
-            title = { Text("Reset Wallet?", color = Danger) },
+            title = "Reset Wallet?",
+            titleColor = Alarm,
             text = {
                 Text(
                     "All keys on this device will be permanently deleted. This cannot be undone.",
-                    color = TextSecondary,
                     fontSize = 13.sp,
                 )
             },
             confirmButton = {
-                TextButton(
+                DialogButton(
+                    "Reset",
                     onClick = {
                         showResetWalletConfirm = false
                         wallet.resetWallet()
                     },
-                ) { Text("Reset", color = Danger) }
+                    color = Alarm,
+                )
             },
             dismissButton = {
-                TextButton(onClick = { showResetWalletConfirm = false }) { Text("Cancel") }
+                DialogButton("Cancel", onClick = { showResetWalletConfirm = false }, color = Fog)
             },
         )
+    }
+}
+
+/** A settings group: crypt panel with a mono section label. */
+@Composable
+internal fun SettingsCard(
+    title: String,
+    titleColor: Color = Dim,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .panel()
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+    ) {
+        SectionLabel(title, color = titleColor)
+        Spacer(Modifier.height(10.dp))
+        content()
+    }
+}
+
+/** A tappable row inside a settings group: phosphor icon, title, optional external-link mark. */
+@Composable
+internal fun SettingsRow(
+    icon: ImageVector,
+    title: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    subtitle: String? = null,
+    external: Boolean = false,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = if (enabled) Phosphor else Dim, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = if (enabled) Bone else Dim)
+            if (subtitle != null) Text(subtitle, color = Dim, fontSize = 12.sp)
+        }
+        if (external) {
+            Icon(Icons.AutoMirrored.Filled.OpenInNew, null, tint = Dim, modifier = Modifier.size(16.dp))
+        }
     }
 }
 
@@ -223,59 +216,40 @@ private fun TranslationDebugCard() {
     var report by remember { mutableStateOf<String?>(null) }
     var running by remember { mutableStateOf(false) }
 
-    Card(
-        colors = CardDefaults.cardColors(containerColor = BgCard),
-        shape = RoundedCornerShape(16.dp),
-    ) {
-        Column(modifier = Modifier.padding(20.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.BugReport, null, tint = Accent, modifier = Modifier.size(20.dp))
-                Spacer(Modifier.width(10.dp))
-                Text("Translation Engine (debug)", fontWeight = FontWeight.SemiBold, color = TextPrimary)
-            }
+    SettingsCard(title = "Translation Engine (debug)") {
+        Text(
+            "Verify the @byoky/core JS bundle loads in JavaScriptSandbox and round-trips a real translation.",
+            color = Fog,
+            fontSize = 13.sp,
+        )
+        Spacer(Modifier.height(4.dp))
+        SettingsRow(
+            icon = Icons.Default.PlayArrow,
+            title = if (running) "Running self-test…" else "Run self-test",
+            onClick = {
+                if (running) return@SettingsRow
+                running = true
+                report = "Running…"
+                scope.launch {
+                    val result = withContext(Dispatchers.IO) {
+                        TranslationEngine.get(context).runSelfTest()
+                    }
+                    report = result
+                    running = false
+                }
+            },
+        )
+        report?.let {
             Spacer(Modifier.height(8.dp))
             Text(
-                "Verify the @byoky/core JS bundle loads in JavaScriptSandbox and round-trips a real translation.",
-                color = TextSecondary,
-                fontSize = 13.sp,
+                it,
+                color = Fog,
+                style = MonoStyle.copy(fontSize = 11.5.sp, lineHeight = 18.sp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .panel(background = Ink)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
             )
-            Spacer(Modifier.height(12.dp))
-            Surface(
-                onClick = {
-                    if (running) return@Surface
-                    running = true
-                    report = "Running…"
-                    scope.launch {
-                        val result = withContext(Dispatchers.IO) {
-                            TranslationEngine.get(context).runSelfTest()
-                        }
-                        report = result
-                        running = false
-                    }
-                },
-                color = BgCard,
-                shape = RoundedCornerShape(8.dp),
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.Default.PlayArrow, null, tint = Accent, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Text(if (running) "Running self-test…" else "Run self-test", color = TextPrimary)
-                }
-            }
-            report?.let {
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    it,
-                    color = TextSecondary,
-                    fontSize = 12.sp,
-                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                )
-            }
         }
     }
 }
@@ -285,10 +259,11 @@ private fun InfoRow(label: String, value: String) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
+            .padding(vertical = 5.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, color = TextSecondary, fontSize = 14.sp)
-        Text(value, color = TextPrimary, fontSize = 14.sp)
+        Text(label, color = Fog, fontSize = 14.sp)
+        Text(value, color = Bone, style = MonoStyle.copy(fontSize = 13.sp))
     }
 }

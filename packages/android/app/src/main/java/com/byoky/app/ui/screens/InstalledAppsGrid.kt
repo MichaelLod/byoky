@@ -1,14 +1,13 @@
 package com.byoky.app.ui.screens
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.*
@@ -17,14 +16,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.byoky.app.data.InstalledApp
 import com.byoky.app.data.WalletStore
+import com.byoky.app.ui.components.CapsText
+import com.byoky.app.ui.components.PrimaryButton
+import com.byoky.app.ui.components.RetroDropdownMenu
+import com.byoky.app.ui.components.panel
 import com.byoky.app.ui.theme.*
 
 /**
@@ -48,26 +49,26 @@ fun InstalledAppsGrid(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            Icon(Icons.Default.Apps, contentDescription = null, modifier = Modifier.size(48.dp), tint = TextMuted)
-            Spacer(Modifier.height(16.dp))
-            Text("No apps yet", fontWeight = FontWeight.SemiBold, color = TextPrimary)
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .border(1.dp, SeamStrong),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Default.Apps, contentDescription = null, modifier = Modifier.size(28.dp), tint = Phosphor)
+            }
+            Spacer(Modifier.height(18.dp))
+            CapsText("No apps yet", style = HeadingStyle, color = Bone)
             Spacer(Modifier.height(8.dp))
             Text(
                 "Add a web app by its address. It opens inside the wallet and uses your keys without ever seeing them.",
-                fontSize = 13.sp,
-                color = TextSecondary,
+                fontSize = 14.sp,
+                lineHeight = 20.sp,
+                color = Fog,
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(24.dp))
-            Button(
-                onClick = onAddApp,
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Accent),
-            ) {
-                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("Add app")
-            }
+            PrimaryButton("Add app", onClick = onAddApp, icon = Icons.Default.Add)
         }
         return
     }
@@ -87,8 +88,8 @@ fun InstalledAppsGrid(
         item(span = { GridItemSpan(maxLineSpan) }) {
             Text(
                 "Long-press an app for more options.",
-                fontSize = 11.sp,
-                color = TextMuted,
+                style = MonoStyle.copy(fontSize = 11.sp),
+                color = Dim,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             )
@@ -119,36 +120,33 @@ private fun AppIconItem(
             Box(
                 modifier = Modifier
                     .size(56.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(AccentSoft),
+                    .panel(border = SeamStrong),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     text = app.name.take(1).uppercase(),
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Accent,
+                    style = HeadingStyle.copy(fontSize = 24.sp, lineHeight = 28.sp),
+                    color = Lilac,
                 )
             }
 
-            DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+            RetroDropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                 if (app.enabled) {
                     DropdownMenuItem(
-                        text = { Text("Open") },
+                        text = { Text("Open", color = Bone) },
                         onClick = { showMenu = false; onOpen() },
-                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null) },
+                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, tint = Phosphor) },
                     )
                 }
                 DropdownMenuItem(
-                    text = { Text(if (app.enabled) "Disable" else "Enable") },
+                    text = { Text(if (app.enabled) "Disable" else "Enable", color = Bone) },
                     onClick = { wallet.toggleApp(app.id); showMenu = false },
-                    leadingIcon = { Icon(if (app.enabled) Icons.Default.PowerSettingsNew else Icons.Default.Power, contentDescription = null) },
+                    leadingIcon = { Icon(if (app.enabled) Icons.Default.PowerSettingsNew else Icons.Default.Power, contentDescription = null, tint = Phosphor) },
                 )
                 DropdownMenuItem(
-                    text = { Text("Remove") },
+                    text = { Text("Remove", color = Alarm) },
                     onClick = { wallet.uninstallApp(app.id); showMenu = false },
-                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
-                    colors = MenuDefaults.itemColors(textColor = MaterialTheme.colorScheme.error),
+                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = Alarm) },
                 )
             }
         }
@@ -157,8 +155,8 @@ private fun AppIconItem(
 
         Text(
             text = app.name,
-            fontSize = 11.sp,
-            color = TextSecondary,
+            fontSize = 12.sp,
+            color = Fog,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,

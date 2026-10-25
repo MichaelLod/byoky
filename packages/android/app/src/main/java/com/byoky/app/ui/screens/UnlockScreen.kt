@@ -4,7 +4,6 @@ import android.os.SystemClock
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Visibility
@@ -13,15 +12,29 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.byoky.app.data.UnlockResult
 import com.byoky.app.data.WalletStore
+import com.byoky.app.ui.components.BracketAction
 import com.byoky.app.ui.components.BrandMark
+import com.byoky.app.ui.components.CapsText
+import com.byoky.app.ui.components.DialogButton
+import com.byoky.app.ui.components.Muninn
+import com.byoky.app.ui.components.PrimaryButton
+import com.byoky.app.ui.components.RavenMood
+import com.byoky.app.ui.components.RetroDialog
+import com.byoky.app.ui.components.RetroTextField
+import com.byoky.app.ui.components.StatusLine
+import com.byoky.app.ui.components.StatusPill
+import com.byoky.app.ui.components.dotGrid
+import com.byoky.app.ui.components.rememberRavenGaze
+import com.byoky.app.ui.components.scanlines
+import com.byoky.app.ui.components.watchedBy
 import com.byoky.app.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -69,41 +82,71 @@ fun UnlockScreen(wallet: WalletStore) {
         }
     }
 
+    val gaze = rememberRavenGaze()
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(BgMain)
-            .padding(24.dp),
+            .background(Void)
+            .dotGrid()
+            .watchedBy(gaze)
+            .scanlines()
+            .systemBarsPadding()
+            .padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BrandMark()
+            Spacer(Modifier.weight(1f))
+            StatusPill("Locked", color = Dim)
+        }
+
         Spacer(Modifier.weight(1f))
 
-        BrandMark(modifier = Modifier.size(120.dp))
+        // Muninn sleeps while the wallet is locked and wakes up while the
+        // password is checked; the wallet screen finishes with a nod.
+        Muninn(
+            if (unlocking) RavenMood.WATCHING else RavenMood.ASLEEP,
+            modifier = Modifier.size(210.dp),
+            gaze = gaze,
+        )
 
-        Spacer(Modifier.height(24.dp))
+        StatusLine(if (unlocking) "Unlocking" else "Wallet locked")
 
-        Text(
-            "Byoky Wallet",
-            fontSize = 28.sp,
-            fontWeight = FontWeight.Bold,
-            color = TextPrimary,
+        Spacer(Modifier.height(8.dp))
+
+        CapsText(
+            if (unlocking) "Muninn is waking" else "Muninn is asleep",
+            style = DisplayStyle,
+            color = Bone,
+            textAlign = TextAlign.Center,
         )
 
         Spacer(Modifier.height(8.dp))
 
         Text(
-            "Enter your master password to unlock",
-            color = TextSecondary,
+            "Your keys are encrypted on this phone. Enter your master password to wake Muninn.",
+            color = Fog,
+            fontSize = 15.sp,
+            lineHeight = 22.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 8.dp),
         )
 
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(28.dp))
 
-        OutlinedTextField(
+        RetroTextField(
             value = password,
             onValueChange = { password = it; error = null },
-            label = { Text("Master password") },
+            label = "Master password",
+            mono = true,
             leadingIcon = {
-                Icon(Icons.Filled.Lock, contentDescription = null, tint = TextMuted, modifier = Modifier.size(18.dp))
+                Icon(Icons.Filled.Lock, contentDescription = null, modifier = Modifier.size(18.dp))
             },
             trailingIcon = {
                 IconButton(
@@ -113,46 +156,38 @@ fun UnlockScreen(wallet: WalletStore) {
                     Icon(
                         if (showPassword) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
                         contentDescription = if (showPassword) "Hide password" else "Show password",
-                        tint = TextMuted,
                         modifier = Modifier.size(18.dp),
                     )
                 }
             },
             visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
-            singleLine = true,
             enabled = lockoutRemaining <= 0 && !unlocking,
+            isError = error != null || lockoutRemaining > 0,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp)
-                .offset(x = shakeAnim.value.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = Accent,
-                unfocusedBorderColor = Border,
-                focusedContainerColor = BgRaised,
-                unfocusedContainerColor = BgRaised,
-            ),
-            shape = RoundedCornerShape(12.dp),
+                .offset { IntOffset(shakeAnim.value.dp.roundToPx(), 0) },
         )
 
         if (lockoutRemaining > 0) {
             Spacer(Modifier.height(8.dp))
             Text(
                 "Too many attempts. Try again in ${lockoutRemaining}s",
-                color = Danger,
-                fontSize = 12.sp,
+                color = Alarm,
+                style = MonoStyle,
             )
         } else {
             error?.let {
                 Spacer(Modifier.height(8.dp))
-                Text(it, color = Danger, fontSize = 12.sp)
+                Text(it, color = Alarm, style = MonoStyle)
             }
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(14.dp))
 
-        Button(
+        PrimaryButton(
+            if (unlocking) "Unlocking…" else "Unlock",
             onClick = {
-                if (unlocking) return@Button
+                if (unlocking) return@PrimaryButton
                 unlocking = true
                 scope.launch {
                     // Key derivation runs on Dispatchers.Default inside unlock().
@@ -172,58 +207,50 @@ fun UnlockScreen(wallet: WalletStore) {
                 }
             },
             enabled = password.isNotEmpty() && lockoutRemaining <= 0 && !unlocking,
+            busy = unlocking,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp)
                 .height(52.dp),
-            shape = RoundedCornerShape(12.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Accent,
-                disabledContainerColor = Accent.copy(alpha = 0.3f),
-            ),
+        )
+
+        Spacer(Modifier.height(4.dp))
+
+        BracketAction("Forgot password?", onClick = { showResetDialog = true }, color = Dim)
+
+        Spacer(Modifier.weight(1f))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            if (unlocking) {
-                CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
-                Spacer(Modifier.width(10.dp))
-                Text("Unlocking…", fontWeight = FontWeight.SemiBold)
-            } else {
-                Text("Unlock", fontWeight = FontWeight.SemiBold)
-            }
+            Text("Keys stay on this device", style = MonoStyle.copy(fontSize = 11.sp), color = Dim)
+            Text("AES-256-GCM", style = MonoStyle.copy(fontSize = 11.sp), color = Dim)
         }
-
-        Spacer(Modifier.weight(1f))
-
-        TextButton(onClick = { showResetDialog = true }) {
-            Text("Forgot password?", color = TextMuted)
-        }
-
-        Spacer(Modifier.weight(1f))
     }
 
     if (showResetDialog) {
-        AlertDialog(
+        RetroDialog(
             onDismissRequest = { showResetDialog = false },
-            title = { Text("Reset Wallet?", color = TextPrimary) },
+            title = "Reset Wallet?",
+            titleColor = Alarm,
             text = {
-                Text(
-                    "This will permanently delete all API keys, sessions, and settings. This cannot be undone.",
-                    color = TextSecondary,
-                )
+                Text("This will permanently delete all API keys, sessions, and settings. This cannot be undone.")
             },
             confirmButton = {
-                TextButton(onClick = {
-                    showResetDialog = false
-                    wallet.resetWallet()
-                }) {
-                    Text("Reset", color = Danger)
-                }
+                DialogButton(
+                    "Reset",
+                    onClick = {
+                        showResetDialog = false
+                        wallet.resetWallet()
+                    },
+                    color = Alarm,
+                )
             },
             dismissButton = {
-                TextButton(onClick = { showResetDialog = false }) {
-                    Text("Cancel", color = TextSecondary)
-                }
+                DialogButton("Cancel", onClick = { showResetDialog = false }, color = Fog)
             },
-            containerColor = BgCard,
         )
     }
 }

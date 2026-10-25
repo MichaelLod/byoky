@@ -7,7 +7,6 @@ import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Upload
@@ -15,8 +14,8 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -29,6 +28,9 @@ import com.byoky.app.data.PasswordStrength
 import com.byoky.app.data.UnlockResult
 import com.byoky.app.data.WalletBackup
 import com.byoky.app.data.WalletStore
+import com.byoky.app.ui.components.DialogButton
+import com.byoky.app.ui.components.RetroDialog
+import com.byoky.app.ui.components.RetroTextField
 import com.byoky.app.ui.theme.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -122,34 +124,27 @@ fun BackupSection(wallet: WalletStore) {
         }
     }
 
-    Card(
-        colors = CardDefaults.cardColors(containerColor = BgCard),
-        shape = RoundedCornerShape(16.dp),
-    ) {
-        Column(modifier = Modifier.padding(20.dp)) {
-            Text("Backup", fontWeight = FontWeight.SemiBold, color = TextPrimary)
-            Spacer(Modifier.height(4.dp))
-            Text(
-                "Move keys to another phone or the browser extension with a password-protected .byoky file. Nothing is uploaded anywhere.",
-                color = TextSecondary,
-                fontSize = 13.sp,
-            )
-            Spacer(Modifier.height(12.dp))
-            BackupRow(
-                icon = { Icon(Icons.Default.Upload, null, tint = if (credentials.isEmpty()) TextMuted else Accent, modifier = Modifier.size(20.dp)) },
-                title = "Export backup",
-                subtitle = if (credentials.isEmpty()) "Add keys before exporting" else null,
-                enabled = credentials.isNotEmpty() && progress == null,
-                onClick = { showExportPassword = true },
-            )
-            BackupRow(
-                icon = { Icon(Icons.Default.Download, null, tint = Accent, modifier = Modifier.size(20.dp)) },
-                title = "Import backup",
-                subtitle = null,
-                enabled = progress == null,
-                onClick = { openDocument.launch(arrayOf("*/*")) },
-            )
-        }
+    SettingsCard(title = "Backup") {
+        Text(
+            "Move keys to another phone or the browser extension with a password-protected .byoky file. Nothing is uploaded anywhere.",
+            color = Fog,
+            fontSize = 13.sp,
+            lineHeight = 18.sp,
+        )
+        Spacer(Modifier.height(4.dp))
+        SettingsRow(
+            icon = Icons.Default.Upload,
+            title = "Export backup",
+            subtitle = if (credentials.isEmpty()) "Add keys before exporting" else null,
+            enabled = credentials.isNotEmpty() && progress == null,
+            onClick = { showExportPassword = true },
+        )
+        SettingsRow(
+            icon = Icons.Default.Download,
+            title = "Import backup",
+            enabled = progress == null,
+            onClick = { openDocument.launch(arrayOf("*/*")) },
+        )
     }
 
     if (showExportPassword) {
@@ -202,12 +197,11 @@ fun BackupSection(wallet: WalletStore) {
     }
 
     result?.let { message ->
-        AlertDialog(
+        RetroDialog(
             onDismissRequest = { result = null },
-            containerColor = BgCard,
-            title = { Text(message.title, color = TextPrimary) },
-            text = { Text(message.body, color = TextSecondary, fontSize = 13.sp) },
-            confirmButton = { TextButton(onClick = { result = null }) { Text("OK") } },
+            title = message.title,
+            text = { Text(message.body, fontSize = 13.sp) },
+            confirmButton = { DialogButton("OK", onClick = { result = null }) },
         )
     }
 }
@@ -228,36 +222,6 @@ private fun importSummaryText(summary: WalletBackup.ImportSummary): String {
 }
 
 @Composable
-private fun BackupRow(
-    icon: @Composable () -> Unit,
-    title: String,
-    subtitle: String?,
-    enabled: Boolean,
-    onClick: () -> Unit,
-) {
-    Surface(
-        onClick = onClick,
-        enabled = enabled,
-        color = BgCard,
-        shape = RoundedCornerShape(8.dp),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            icon()
-            Spacer(Modifier.width(12.dp))
-            Column {
-                Text(title, color = if (enabled) TextPrimary else TextMuted)
-                if (subtitle != null) Text(subtitle, color = TextMuted, fontSize = 12.sp)
-            }
-        }
-    }
-}
-
-@Composable
 private fun PasswordField(
     value: String,
     onValueChange: (String) -> Unit,
@@ -265,11 +229,11 @@ private fun PasswordField(
     isError: Boolean = false,
 ) {
     var visible by remember { mutableStateOf(false) }
-    OutlinedTextField(
+    RetroTextField(
         value = value,
         onValueChange = onValueChange,
-        label = { Text(label) },
-        singleLine = true,
+        label = label,
+        mono = true,
         isError = isError,
         visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
         trailingIcon = {
@@ -277,7 +241,6 @@ private fun PasswordField(
                 Icon(
                     if (visible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
                     contentDescription = if (visible) "Hide password" else "Show password",
-                    tint = TextMuted,
                 )
             }
         },
@@ -302,15 +265,13 @@ private fun ExportPasswordDialog(wallet: WalletStore, onDismiss: () -> Unit, onC
     val strongEnough = PasswordStrength.isAcceptableForExport(password)
     val matches = password == confirm
 
-    AlertDialog(
+    RetroDialog(
         onDismissRequest = onDismiss,
-        containerColor = BgCard,
-        title = { Text("Export backup", color = TextPrimary) },
+        title = "Export backup",
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
                     "Confirm it's you, then choose a password to encrypt the backup. You'll need that password to import the file on another device; it can't be recovered.",
-                    color = TextSecondary,
                     fontSize = 13.sp,
                 )
                 PasswordField(
@@ -319,20 +280,23 @@ private fun ExportPasswordDialog(wallet: WalletStore, onDismiss: () -> Unit, onC
                     "Wallet password",
                     isError = walletPasswordError != null,
                 )
-                walletPasswordError?.let { Text(it, color = Danger, fontSize = 12.sp) }
+                walletPasswordError?.let { Text(it, color = Alarm, fontSize = 12.sp) }
                 PasswordField(password, { password = it }, "Export password")
                 if (password.isNotEmpty()) {
                     val color = when (strength.score) {
-                        0, 1 -> Danger
-                        2 -> Warning
-                        else -> Success
+                        0, 1 -> Alarm
+                        2 -> Amber
+                        else -> Signal
                     }
                     Column {
                         LinearProgressIndicator(
                             progress = { (strength.score + 1) / 5f },
                             modifier = Modifier.fillMaxWidth().height(4.dp),
                             color = color,
-                            trackColor = BgHover,
+                            trackColor = Seam,
+                            strokeCap = StrokeCap.Butt,
+                            gapSize = 0.dp,
+                            drawStopIndicator = {},
                         )
                         Spacer(Modifier.height(4.dp))
                         Text(
@@ -349,12 +313,13 @@ private fun ExportPasswordDialog(wallet: WalletStore, onDismiss: () -> Unit, onC
                     isError = confirm.isNotEmpty() && !matches,
                 )
                 if (confirm.isNotEmpty() && !matches) {
-                    Text("Passwords do not match", color = Danger, fontSize = 12.sp)
+                    Text("Passwords do not match", color = Alarm, fontSize = 12.sp)
                 }
             }
         },
         confirmButton = {
-            TextButton(
+            DialogButton(
+                if (verifying) "Checking…" else "Choose location",
                 onClick = {
                     verifying = true
                     scope.launch {
@@ -367,9 +332,9 @@ private fun ExportPasswordDialog(wallet: WalletStore, onDismiss: () -> Unit, onC
                     }
                 },
                 enabled = walletPassword.isNotEmpty() && strongEnough && matches && !verifying,
-            ) { Text(if (verifying) "Checking…" else "Choose location") }
+            )
         },
-        dismissButton = { TextButton(onClick = onDismiss, enabled = !verifying) { Text("Cancel") } },
+        dismissButton = { DialogButton("Cancel", onClick = onDismiss, color = Fog, enabled = !verifying) },
     )
 }
 
@@ -381,58 +346,63 @@ private fun ImportPasswordDialog(
     onConfirm: (String) -> Unit,
 ) {
     var password by remember { mutableStateOf("") }
-    AlertDialog(
+    RetroDialog(
         onDismissRequest = onDismiss,
-        containerColor = BgCard,
-        title = { Text("Import backup", color = TextPrimary) },
+        title = "Import backup",
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(fileName, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                Text(fileName, color = Bone, style = MonoStyle.copy(fontSize = 13.sp), fontWeight = FontWeight.Medium)
                 Text(
                     "Keys from the file are added to this wallet. Existing keys are never replaced or deleted, and exact duplicates are skipped.",
-                    color = TextSecondary,
                     fontSize = 13.sp,
                 )
                 PasswordField(password, { password = it }, "Backup password", isError = error != null)
-                error?.let { Text(it, color = Danger, fontSize = 12.sp) }
+                error?.let { Text(it, color = Alarm, fontSize = 12.sp) }
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(password) }, enabled = password.isNotEmpty()) { Text("Import") }
+            DialogButton("Import", onClick = { onConfirm(password) }, enabled = password.isNotEmpty())
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { DialogButton("Cancel", onClick = onDismiss, color = Fog) },
     )
 }
 
 @Composable
 private fun BackupProgressDialog(progress: WalletBackup.Progress, onCancel: (() -> Unit)?) {
-    AlertDialog(
+    RetroDialog(
         onDismissRequest = {},
         properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
-        containerColor = BgCard,
-        title = { Text(progress.message, color = TextPrimary, fontSize = 16.sp) },
+        title = progress.message,
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (progress.total > 0) {
                     LinearProgressIndicator(
                         progress = { progress.done.toFloat() / progress.total },
                         modifier = Modifier.fillMaxWidth(),
-                        color = Accent,
-                        trackColor = BgHover,
+                        color = Violet,
+                        trackColor = Seam,
+                        strokeCap = StrokeCap.Butt,
+                        gapSize = 0.dp,
+                        drawStopIndicator = {},
                     )
-                    Text("${progress.done} of ${progress.total}", color = TextMuted, fontSize = 12.sp)
+                    Text("${progress.done} of ${progress.total}", color = Dim, style = MonoStyle)
                 } else {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = Accent, trackColor = BgHover)
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = Violet,
+                        trackColor = Seam,
+                        strokeCap = StrokeCap.Butt,
+                        gapSize = 0.dp,
+                    )
                 }
                 Text(
                     "Each key is protected with 600,000 rounds of key stretching, so this can take a moment.",
-                    color = TextSecondary,
                     fontSize = 12.sp,
                 )
             }
         },
         confirmButton = {},
-        dismissButton = onCancel?.let { cancel -> { TextButton(onClick = cancel) { Text("Cancel") } } },
+        dismissButton = onCancel?.let { cancel -> { DialogButton("Cancel", onClick = cancel, color = Fog) } },
     )
 }
 

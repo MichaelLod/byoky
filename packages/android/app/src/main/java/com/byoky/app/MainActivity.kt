@@ -2,8 +2,10 @@ package com.byoky.app
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.ui.graphics.toArgb
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
@@ -11,6 +13,7 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import com.byoky.app.data.WalletStore
 import com.byoky.app.ui.screens.AppNavigation
 import com.byoky.app.ui.theme.ByokyTheme
+import com.byoky.app.ui.theme.Void
 
 class MainActivity : ComponentActivity() {
     private lateinit var lifecycleObserver: DefaultLifecycleObserver
@@ -20,7 +23,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        // Dark only: light system-bar icons over void, whatever the system theme.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(Void.toArgb()),
+            navigationBarStyle = SystemBarStyle.dark(Void.toArgb()),
+        )
 
         val wallet = wallet
 

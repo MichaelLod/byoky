@@ -1,17 +1,22 @@
 package com.byoky.app.ui.components
 
 import androidx.annotation.DrawableRes
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.byoky.app.R
+import com.byoky.app.ui.theme.Lilac
+import com.byoky.app.ui.theme.SeamStrong
 
 /** Map a provider id to its brand-mark drawable, or null when unknown. */
 @DrawableRes
@@ -55,5 +60,23 @@ fun ProviderIcon(
             tint = tint,
             modifier = modifier.size(size),
         )
+    }
+}
+
+/** A provider's mark in the square seam-strong tile used on cards and rows. */
+@Composable
+fun ProviderTile(
+    providerId: String,
+    modifier: Modifier = Modifier,
+    size: Dp = 40.dp,
+    iconSize: Dp = 20.dp,
+) {
+    Box(
+        modifier = modifier
+            .size(size)
+            .border(1.dp, SeamStrong),
+        contentAlignment = Alignment.Center,
+    ) {
+        ProviderIcon(providerId = providerId, tint = Lilac, size = iconSize)
     }
 }

@@ -1,22 +1,17 @@
 package com.byoky.app.ui.components
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.byoky.app.data.WalletStore
@@ -43,35 +38,35 @@ fun RetiredFeaturesNotice(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .background(Accent.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
-            .border(1.dp, Accent, RoundedCornerShape(10.dp))
-            .padding(12.dp),
+            .panel(background = VioletSoft, border = Violet)
+            .padding(start = 14.dp, top = 12.dp, bottom = 4.dp, end = 6.dp),
         verticalAlignment = Alignment.Top,
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(
+            CapsText(
                 "Byoky is now fully local",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = TextPrimary,
+                style = HeadingStyle.copy(fontSize = 14.sp),
+                color = Bone,
             )
             Spacer(Modifier.height(4.dp))
             Text(
                 "Cloud sync, gifts and phone pairing have been retired. Your keys on this device are untouched. To move keys to another device, use Export in Settings.",
-                fontSize = 12.sp,
-                color = TextSecondary,
+                fontSize = 13.sp,
+                lineHeight = 18.sp,
+                color = Fog,
             )
             if (onOpenSettings != null) {
-                TextButton(
+                BracketAction(
+                    "Open Settings",
                     onClick = onOpenSettings,
-                    contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp),
-                ) {
-                    Text("Open Settings", fontSize = 12.sp, color = Accent, fontWeight = FontWeight.SemiBold)
-                }
+                    modifier = Modifier.offset(x = (-12).dp),
+                )
+            } else {
+                Spacer(Modifier.height(8.dp))
             }
         }
-        IconButton(onClick = { wallet.dismissRetiredFeaturesNotice() }, modifier = Modifier.size(24.dp)) {
-            Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = TextMuted, modifier = Modifier.size(14.dp))
+        IconButton(onClick = { wallet.dismissRetiredFeaturesNotice() }, modifier = Modifier.size(32.dp)) {
+            Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = Fog, modifier = Modifier.size(16.dp))
         }
     }
 }

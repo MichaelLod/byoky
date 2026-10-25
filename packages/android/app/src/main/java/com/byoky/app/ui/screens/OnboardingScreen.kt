@@ -2,41 +2,52 @@ package com.byoky.app.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.byoky.app.data.WalletStore
+import com.byoky.app.ui.components.BracketAction
 import com.byoky.app.ui.components.BrandMark
+import com.byoky.app.ui.components.CapsText
+import com.byoky.app.ui.components.Muninn
+import com.byoky.app.ui.components.PrimaryButton
+import com.byoky.app.ui.components.RavenMood
+import com.byoky.app.ui.components.RetroTextField
+import com.byoky.app.ui.components.StatusLine
+import com.byoky.app.ui.components.dotGrid
+import com.byoky.app.ui.components.rememberRavenGaze
+import com.byoky.app.ui.components.scanlines
+import com.byoky.app.ui.components.watchedBy
 import com.byoky.app.ui.theme.*
 import kotlinx.coroutines.launch
 
 internal data class PasswordQualityResult(
-    val icon: androidx.compose.ui.graphics.vector.ImageVector,
+    val icon: ImageVector,
     val message: String,
-    val color: androidx.compose.ui.graphics.Color,
+    val color: Color,
     val isAcceptable: Boolean,
 ) {
     companion object {
         fun evaluate(password: String): PasswordQualityResult {
-            if (password.length < 12) return PasswordQualityResult(Icons.Default.Warning, "Minimum 12 characters", androidx.compose.ui.graphics.Color(0xFFFB923C), false)
-            if (password.toSet().size < 4) return PasswordQualityResult(Icons.Default.Warning, "Too many repeated characters", androidx.compose.ui.graphics.Color(0xFFFB923C), false)
+            if (password.length < 12) return PasswordQualityResult(Icons.Default.Warning, "Minimum 12 characters", Amber, false)
+            if (password.toSet().size < 4) return PasswordQualityResult(Icons.Default.Warning, "Too many repeated characters", Amber, false)
             val hasLower = password.any { it.isLowerCase() }
             val hasUpper = password.any { it.isUpperCase() }
             val hasDigit = password.any { it.isDigit() }
             val hasSymbol = password.any { !it.isLetterOrDigit() }
             val classCount = listOf(hasLower, hasUpper, hasDigit, hasSymbol).count { it }
-            if (classCount < 2) return PasswordQualityResult(Icons.Default.Warning, "Use a mix of letters, numbers, or symbols", androidx.compose.ui.graphics.Color(0xFFFB923C), false)
-            if (classCount >= 3 && password.length >= 16) return PasswordQualityResult(Icons.Default.Shield, "Strong password", Success, true)
-            return PasswordQualityResult(Icons.Default.CheckCircle, "Fair — consider adding more variety", androidx.compose.ui.graphics.Color(0xFFFACC15), true)
+            if (classCount < 2) return PasswordQualityResult(Icons.Default.Warning, "Use a mix of letters, numbers, or symbols", Amber, false)
+            if (classCount >= 3 && password.length >= 16) return PasswordQualityResult(Icons.Default.Shield, "Strong password", Signal, true)
+            return PasswordQualityResult(Icons.Default.CheckCircle, "Fair — consider adding more variety", Phosphor, true)
         }
     }
 }
@@ -51,125 +62,117 @@ fun OnboardingScreen(wallet: WalletStore) {
     var error by remember { mutableStateOf<String?>(null) }
     var creating by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val gaze = rememberRavenGaze()
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(BgMain)
-            .padding(24.dp),
+            .background(Void)
+            .dotGrid()
+            .watchedBy(gaze)
+            .scanlines()
+            .systemBarsPadding()
+            .padding(horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        BrandMark(modifier = Modifier.align(Alignment.Start).padding(top = 16.dp))
+
         Spacer(Modifier.weight(1f))
 
         if (step == OnboardingStep.WELCOME) {
-            BrandMark(modifier = Modifier.size(140.dp))
+            Muninn(RavenMood.WATCHING, modifier = Modifier.size(220.dp), gaze = gaze)
 
-            Spacer(Modifier.height(24.dp))
+            StatusLine("New wallet")
 
-            Text(
-                "Byoky Wallet",
-                fontSize = 32.sp,
-                fontWeight = FontWeight.Bold,
-                color = TextPrimary,
-            )
+            Spacer(Modifier.height(10.dp))
+
+            CapsText("Byoky Wallet", style = DisplayStyle, color = Bone, textAlign = TextAlign.Center)
 
             Spacer(Modifier.height(12.dp))
 
             Text(
                 "Your encrypted wallet for AI API keys. Keys stay on this device; apps you open in the wallet use them without ever seeing them.",
-                color = TextSecondary,
+                color = Fog,
+                fontSize = 15.sp,
+                lineHeight = 22.sp,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.padding(horizontal = 16.dp),
+                modifier = Modifier.padding(horizontal = 8.dp),
             )
 
             Spacer(Modifier.height(32.dp))
 
-            Button(
+            PrimaryButton(
+                "Get Started",
                 onClick = { step = OnboardingStep.PASSWORD },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Accent),
-            ) {
-                Text("Get Started", fontWeight = FontWeight.SemiBold)
-            }
+            )
 
         } else {
             // Password step
-            BrandMark(
-                modifier = Modifier.size(100.dp),
-            )
+            Muninn(RavenMood.WATCHING, modifier = Modifier.size(120.dp), gaze = gaze)
 
-            Spacer(Modifier.height(24.dp))
+            StatusLine("New wallet")
 
-            Text(
+            Spacer(Modifier.height(10.dp))
+
+            CapsText(
                 "Set Master Password",
-                fontSize = 28.sp,
-                fontWeight = FontWeight.Bold,
-                color = TextPrimary,
+                style = DisplayStyle.copy(fontSize = 26.sp, lineHeight = 30.sp),
+                color = Bone,
+                textAlign = TextAlign.Center,
             )
 
             Spacer(Modifier.height(8.dp))
 
             Text(
                 "This password encrypts all your API keys. It's never stored — only a hash is kept to verify unlock.",
-                color = TextSecondary,
+                color = Fog,
+                fontSize = 14.sp,
+                lineHeight = 20.sp,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.padding(horizontal = 16.dp),
+                modifier = Modifier.padding(horizontal = 8.dp),
             )
 
             Spacer(Modifier.height(24.dp))
 
-            OutlinedTextField(
+            RetroTextField(
                 value = password,
                 onValueChange = { password = it },
-                label = { Text("Master password") },
+                label = "Master password",
+                mono = true,
                 visualTransformation = PasswordVisualTransformation(),
-                singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = Accent,
-                    unfocusedBorderColor = Border,
-                    focusedContainerColor = BgRaised,
-                    unfocusedContainerColor = BgRaised,
-                ),
-                shape = RoundedCornerShape(12.dp),
             )
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(14.dp))
 
-            OutlinedTextField(
+            RetroTextField(
                 value = confirmPassword,
                 onValueChange = { confirmPassword = it },
-                label = { Text("Confirm password") },
+                label = "Confirm password",
+                mono = true,
                 visualTransformation = PasswordVisualTransformation(),
-                singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = Accent,
-                    unfocusedBorderColor = Border,
-                    focusedContainerColor = BgRaised,
-                    unfocusedContainerColor = BgRaised,
-                ),
-                shape = RoundedCornerShape(12.dp),
             )
 
             if (password.isNotEmpty()) {
                 val quality = PasswordQualityResult.evaluate(password)
                 Spacer(Modifier.height(8.dp))
                 Row(
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Icon(quality.icon, null, tint = quality.color, modifier = Modifier.size(14.dp))
-                    Text(quality.message, color = quality.color, fontSize = 12.sp)
+                    Text(quality.message, color = quality.color, style = MonoStyle)
                 }
             }
 
             error?.let {
                 Spacer(Modifier.height(8.dp))
-                Text(it, color = Danger, fontSize = 12.sp)
+                Text(it, color = Alarm, fontSize = 12.sp)
             }
 
             Spacer(Modifier.height(24.dp))
@@ -177,9 +180,10 @@ fun OnboardingScreen(wallet: WalletStore) {
             val quality = if (password.isNotEmpty()) PasswordQualityResult.evaluate(password) else null
             val isValid = quality?.isAcceptable == true && password == confirmPassword
 
-            Button(
+            PrimaryButton(
+                if (creating) "Creating wallet…" else "Create Wallet",
                 onClick = {
-                    if (creating) return@Button
+                    if (creating) return@PrimaryButton
                     creating = true
                     error = null
                     scope.launch {
@@ -193,36 +197,27 @@ fun OnboardingScreen(wallet: WalletStore) {
                     }
                 },
                 enabled = isValid && !creating,
+                busy = creating,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Accent,
-                    disabledContainerColor = Accent.copy(alpha = 0.3f),
-                ),
-            ) {
-                if (creating) {
-                    CircularProgressIndicator(
-                        color = androidx.compose.ui.graphics.Color.White,
-                        strokeWidth = 2.dp,
-                        modifier = Modifier.size(20.dp),
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Text("Creating wallet…", fontWeight = FontWeight.SemiBold)
-                } else {
-                    Text("Create Wallet", fontWeight = FontWeight.SemiBold)
-                }
-            }
+            )
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(8.dp))
 
-            TextButton(onClick = { step = OnboardingStep.WELCOME }) {
-                Text("Back", color = TextSecondary)
-            }
+            BracketAction("Back", onClick = { step = OnboardingStep.WELCOME }, color = Fog)
         }
 
         Spacer(Modifier.weight(1f))
-        Spacer(Modifier.height(32.dp))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text("Keys stay on this device", style = MonoStyle.copy(fontSize = 11.sp), color = Dim)
+            Text("AES-256-GCM", style = MonoStyle.copy(fontSize = 11.sp), color = Dim)
+        }
     }
 }

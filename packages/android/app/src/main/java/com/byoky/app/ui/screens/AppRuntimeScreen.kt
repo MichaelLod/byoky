@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -26,8 +27,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -38,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -51,6 +51,7 @@ import com.byoky.app.data.InstalledApp
 import com.byoky.app.data.WalletStore
 import com.byoky.app.proxy.ProxyService
 import com.byoky.app.runtime.AppBridge
+import com.byoky.app.ui.components.RetroTopBar
 import com.byoky.app.ui.theme.*
 
 /**
@@ -77,7 +78,7 @@ fun AppRuntimeScreen(wallet: WalletStore, appId: String, onClose: () -> Unit) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            RetroTopBar(
                 title = {
                     Column {
                         Text(
@@ -90,8 +91,8 @@ fun AppRuntimeScreen(wallet: WalletStore, appId: String, onClose: () -> Unit) {
                         if (app != null) {
                             Text(
                                 app.origin.removePrefix("https://"),
-                                fontSize = 11.sp,
-                                color = TextMuted,
+                                style = MonoStyle.copy(fontSize = 11.sp, lineHeight = 15.sp),
+                                color = Phosphor,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -100,23 +101,19 @@ fun AppRuntimeScreen(wallet: WalletStore, appId: String, onClose: () -> Unit) {
                 },
                 navigationIcon = {
                     IconButton(onClick = onClose) {
-                        Icon(Icons.Default.Close, contentDescription = "Close app", tint = TextSecondary)
+                        Icon(Icons.Default.Close, contentDescription = "Close app")
                     }
                 },
                 actions = {
                     if (webView != null) {
                         IconButton(onClick = { webView?.reload() }) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Reload", tint = TextSecondary)
+                            Icon(Icons.Default.Refresh, contentDescription = "Reload")
                         }
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = BgMain,
-                    titleContentColor = TextPrimary,
-                ),
             )
         },
-        containerColor = BgMain,
+        containerColor = Void,
     ) { padding ->
         Box(modifier = Modifier.padding(padding).fillMaxSize()) {
             when {
@@ -137,9 +134,12 @@ fun AppRuntimeScreen(wallet: WalletStore, appId: String, onClose: () -> Unit) {
             if (progress in 1..99) {
                 LinearProgressIndicator(
                     progress = { progress / 100f },
-                    modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter),
-                    color = Accent,
-                    trackColor = BgHover,
+                    modifier = Modifier.fillMaxWidth().height(2.dp).align(Alignment.TopCenter),
+                    color = Violet,
+                    trackColor = Seam,
+                    strokeCap = StrokeCap.Butt,
+                    gapSize = 0.dp,
+                    drawStopIndicator = {},
                 )
             }
         }
@@ -149,7 +149,7 @@ fun AppRuntimeScreen(wallet: WalletStore, appId: String, onClose: () -> Unit) {
 @Composable
 private fun RuntimeMessage(text: String) {
     Box(modifier = Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
-        Text(text, color = TextSecondary, fontSize = 14.sp, textAlign = TextAlign.Center)
+        Text(text, color = Fog, fontSize = 14.sp, textAlign = TextAlign.Center)
     }
 }
 

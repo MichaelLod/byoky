@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Same as values/themes.xml plus windowLightNavigationBar, which needs API 27. -->
-    <style name="Theme.Byoky" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:statusBarColor">#fafaf9</item>
-        <item name="android:navigationBarColor">#fafaf9</item>
-        <item name="android:windowBackground">#fafaf9</item>
-        <item name="android:windowLightStatusBar">true</item>
-        <item name="android:windowLightNavigationBar">true</item>
+    <style name="Theme.Byoky" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">@color/brand_void</item>
+        <item name="android:navigationBarColor">@color/brand_void</item>
+        <item name="android:windowBackground">@color/brand_void</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
     </style>
 </resources>

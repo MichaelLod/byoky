@@ -1,24 +1,29 @@
 package com.byoky.app.ui.screens
 
-import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.byoky.app.data.Credential
 import com.byoky.app.data.Provider
 import com.byoky.app.data.RequestLog
 import com.byoky.app.data.formatTokens
+import com.byoky.app.ui.components.CapsText
+import com.byoky.app.ui.components.RetroBottomSheet
+import com.byoky.app.ui.components.SectionLabel
+import com.byoky.app.ui.components.panel
 import com.byoky.app.ui.theme.*
 
 private enum class StatsRange(val label: String, val millis: Long?) {
@@ -36,10 +41,7 @@ fun WalletStatsSheet(
     requestLogs: List<RequestLog>,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = BgRaised,
-    ) {
+    RetroBottomSheet(onDismissRequest = onDismiss) {
         val cred = credentials.firstOrNull { it.id == credentialId }
         if (cred == null) MissingStats()
         else CredentialStatsContent(credential = cred, requestLogs = requestLogs)
@@ -54,7 +56,7 @@ private fun MissingStats() {
             .padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("No data", color = TextSecondary)
+        Text("No data", color = Fog)
     }
 }
 
@@ -112,16 +114,16 @@ private fun CredentialStatsContent(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Column {
-            Text(
+            CapsText(
                 credential.label,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-                color = TextPrimary,
+                style = HeadingStyle.copy(fontSize = 22.sp, lineHeight = 28.sp),
+                color = Bone,
             )
+            Spacer(Modifier.height(2.dp))
             Text(
                 "${provider?.name ?: credential.providerId} · shared across credentials of this provider",
                 fontSize = 12.sp,
-                color = TextSecondary,
+                color = Fog,
             )
         }
 
@@ -139,7 +141,7 @@ private fun CredentialStatsContent(
         if (filtered.isEmpty()) {
             Text(
                 "No usage in this period.",
-                color = TextSecondary,
+                color = Fog,
                 fontSize = 13.sp,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
@@ -175,26 +177,25 @@ private fun CredentialStatsContent(
 @Composable
 private fun RangePicker(selected: StatsRange, onSelect: (StatsRange) -> Unit) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(BgCard),
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         StatsRange.entries.forEach { r ->
             val isSelected = r == selected
             Surface(
+                selected = isSelected,
                 onClick = { onSelect(r) },
                 modifier = Modifier.weight(1f),
-                color = if (isSelected) Accent else BgCard,
-                shape = RoundedCornerShape(10.dp),
+                color = if (isSelected) Violet else Color.Transparent,
+                shape = RectangleShape,
+                border = BorderStroke(1.dp, if (isSelected) Violet else SeamStrong),
             ) {
-                Text(
+                CapsText(
                     r.label,
-                    modifier = Modifier.padding(vertical = 8.dp),
+                    modifier = Modifier.padding(vertical = 9.dp),
                     textAlign = TextAlign.Center,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 14.sp,
-                    color = if (isSelected) TextPrimary else TextSecondary,
+                    style = MonoLabelStyle.copy(fontSize = 13.sp, letterSpacing = 0.08.em),
+                    color = if (isSelected) Color.White else Fog,
                 )
             }
         }
@@ -203,35 +204,29 @@ private fun RangePicker(selected: StatsRange, onSelect: (StatsRange) -> Unit) {
 
 @Composable
 private fun StatCell(label: String, value: String, modifier: Modifier = Modifier) {
-    Card(
-        modifier = modifier,
-        colors = CardDefaults.cardColors(containerColor = BgCard),
-        shape = RoundedCornerShape(12.dp),
+    Column(
+        modifier = modifier
+            .panel(background = Ash)
+            .padding(vertical = 14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 14.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(value, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = TextPrimary)
-            Spacer(Modifier.height(4.dp))
-            Text(label, color = TextSecondary, fontSize = 11.sp)
-        }
+        Text(value, style = MonoStyle.copy(fontSize = 18.sp, lineHeight = 24.sp), fontWeight = FontWeight.Medium, color = Bone)
+        Spacer(Modifier.height(4.dp))
+        SectionLabel(label)
     }
 }
 
 @Composable
 private fun SectionCard(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = BgCard),
-        shape = RoundedCornerShape(12.dp),
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .panel(background = Ash)
+            .padding(14.dp),
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Text(title, fontWeight = FontWeight.SemiBold, color = TextPrimary)
-            Spacer(Modifier.height(8.dp))
-            content()
-        }
+        SectionLabel(title)
+        Spacer(Modifier.height(6.dp))
+        content()
     }
 }
 
@@ -250,16 +245,16 @@ private fun KeyValueRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 title,
-                fontSize = 13.sp,
-                color = TextPrimary,
+                style = MonoStyle.copy(fontSize = 13.sp, lineHeight = 18.sp),
+                color = Bone,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             if (subtitle != null) {
-                Text(subtitle, fontSize = 11.sp, color = TextSecondary)
+                Text(subtitle, style = MonoStyle.copy(fontSize = 11.sp), color = Dim)
             }
         }
-        Text(value, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
+        Text(value, style = MonoStyle.copy(fontSize = 13.sp), fontWeight = FontWeight.Medium, color = Bone)
     }
 }
 

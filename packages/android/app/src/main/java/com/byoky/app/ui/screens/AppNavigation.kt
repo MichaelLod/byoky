@@ -2,23 +2,22 @@ package com.byoky.app.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -27,11 +26,17 @@ import com.byoky.app.data.AppOpenGate
 import com.byoky.app.data.InstalledApp
 import com.byoky.app.data.WalletStatus
 import com.byoky.app.data.WalletStore
-import com.byoky.app.ui.theme.Accent
-import com.byoky.app.ui.theme.AccentHover
-import com.byoky.app.ui.theme.BgCard
-import com.byoky.app.ui.theme.TextPrimary
-import com.byoky.app.ui.theme.TextSecondary
+import com.byoky.app.ui.components.CapsText
+import com.byoky.app.ui.components.GhostButton
+import com.byoky.app.ui.components.Muninn
+import com.byoky.app.ui.components.PrimaryButton
+import com.byoky.app.ui.components.RavenFrame
+import com.byoky.app.ui.components.RavenMood
+import com.byoky.app.ui.components.RetroDropdownMenu
+import com.byoky.app.ui.components.StatusLine
+import com.byoky.app.ui.components.cornerBrackets
+import com.byoky.app.ui.components.panel
+import com.byoky.app.ui.theme.*
 
 private const val APP_RUNTIME_ROUTE = "app/{appId}"
 
@@ -67,6 +72,9 @@ private fun MainScreen(wallet: WalletStore) {
         .takeIf { it >= 0 } ?: if (currentRoute == "settings") 0 else -1
     val showFab = !inAppRuntime && currentRoute != "settings"
 
+    // Muninn nods once in the wallet header when the wallet has just been unlocked.
+    var unlockNodPending by remember { mutableStateOf(true) }
+
     // Set while asking to reconnect an app the user disconnected.
     var reconnectPrompt by remember { mutableStateOf<AppOpenGate.Decision.ConfirmReconnect?>(null) }
 
@@ -80,35 +88,45 @@ private fun MainScreen(wallet: WalletStore) {
     }
 
     Scaffold(
+        containerColor = Void,
+        // Each tab draws its own header under the status bar; only the
+        // navigation bar is reserved here.
+        contentWindowInsets = WindowInsets.navigationBars,
         floatingActionButton = {
             if (showFab) {
                 Box {
                     Box(
                         modifier = Modifier
-                            .shadow(elevation = 8.dp, shape = CircleShape, ambientColor = Accent, spotColor = Accent)
-                            .clip(CircleShape)
-                            .background(Brush.linearGradient(colors = listOf(AccentHover, Accent)))
+                            .drawBehind {
+                                val ring = 4.dp.toPx()
+                                drawRect(
+                                    Violet.copy(alpha = 0.2f),
+                                    topLeft = Offset(-ring, -ring),
+                                    size = Size(size.width + 2 * ring, size.height + 2 * ring),
+                                )
+                            }
+                            .background(Violet)
                             .size(56.dp)
                             .clickable { fabMenuOpen = true },
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(Icons.Default.Add, contentDescription = "Open add menu", tint = Color.White)
                     }
-                    DropdownMenu(
+                    RetroDropdownMenu(
                         expanded = fabMenuOpen,
                         onDismissRequest = { fabMenuOpen = false },
                     ) {
                         DropdownMenuItem(
-                            text = { Text("Add credential") },
-                            leadingIcon = { Icon(Icons.Default.Key, null, tint = Accent) },
+                            text = { Text("Add credential", color = Bone) },
+                            leadingIcon = { Icon(Icons.Default.Key, null, tint = Phosphor) },
                             onClick = {
                                 fabMenuOpen = false
                                 showAddCredential = true
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text("Add app") },
-                            leadingIcon = { Icon(Icons.Default.Apps, null, tint = Accent) },
+                            text = { Text("Add app", color = Bone) },
+                            leadingIcon = { Icon(Icons.Default.Apps, null, tint = Phosphor) },
                             onClick = {
                                 fabMenuOpen = false
                                 showAddApp = true
@@ -121,13 +139,24 @@ private fun MainScreen(wallet: WalletStore) {
         bottomBar = {
             if (!inAppRuntime) {
                 NavigationBar(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    windowInsets = WindowInsets(left = 8.dp, right = 8.dp),
+                    containerColor = Ink,
+                    tonalElevation = 0.dp,
+                    windowInsets = WindowInsets.navigationBars
+                        .only(WindowInsetsSides.Bottom)
+                        .add(WindowInsets(left = 8.dp, right = 8.dp)),
+                    modifier = Modifier.drawBehind {
+                        drawRect(Seam, size = Size(size.width, 1.dp.toPx()))
+                    },
                 ) {
                     tabs.forEachIndexed { index, (label, icon, route) ->
                         NavigationBarItem(
-                            icon = { Icon(icon, contentDescription = label) },
-                            label = { Text(label, fontSize = androidx.compose.ui.unit.TextUnit(10f, androidx.compose.ui.unit.TextUnitType.Sp)) },
+                            icon = { Icon(icon, contentDescription = label, modifier = Modifier.size(22.dp)) },
+                            label = {
+                                CapsText(
+                                    label,
+                                    style = MonoStyle.copy(fontSize = 10.sp, letterSpacing = 0.1.em),
+                                )
+                            },
                             selected = selectedTab == index,
                             onClick = {
                                 navController.navigate(route) {
@@ -136,9 +165,11 @@ private fun MainScreen(wallet: WalletStore) {
                                 }
                             },
                             colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = Accent,
-                                selectedTextColor = Accent,
-                                indicatorColor = Accent.copy(alpha = 0.12f),
+                                selectedIconColor = Lilac,
+                                selectedTextColor = Lilac,
+                                indicatorColor = Color.Transparent,
+                                unselectedIconColor = Dim,
+                                unselectedTextColor = Dim,
                             ),
                         )
                     }
@@ -157,6 +188,8 @@ private fun MainScreen(wallet: WalletStore) {
                     onNavigateToSettings = {
                         navController.navigate("settings") { launchSingleTop = true }
                     },
+                    nodOnAppear = unlockNodPending,
+                    onNodShown = { unlockNodPending = false },
                 )
             }
             composable("apps") {
@@ -206,29 +239,71 @@ private fun MainScreen(wallet: WalletStore) {
     }
 }
 
-/** Asked before reopening an app whose access the user revoked. */
+/**
+ * Asked before reopening an app whose access the user revoked: the wallet's
+ * connection request, with Muninn on alert.
+ */
 @Composable
 private fun ReconnectAppDialog(
     prompt: AppOpenGate.Decision.ConfirmReconnect,
     onReconnect: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
+    Dialog(
         onDismissRequest = onDismiss,
-        containerColor = BgCard,
-        title = { Text("Reconnect ${prompt.app.name}?", color = TextPrimary) },
-        text = {
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(horizontal = 16.dp)
+                .widthIn(max = 440.dp)
+                .fillMaxWidth()
+                .panel()
+                .cornerBrackets()
+                .padding(20.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Muninn(RavenMood.ALERT, modifier = Modifier.size(96.dp), frame = RavenFrame.BUST)
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    StatusLine("Connection request")
+                    Spacer(Modifier.height(6.dp))
+                    CapsText(
+                        "Reconnect ${prompt.app.name}?",
+                        style = HeadingStyle.copy(fontSize = 20.sp, lineHeight = 24.sp),
+                        color = Bone,
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .panel(background = Void, border = SeamStrong)
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+            ) {
+                Text(prompt.host, style = MonoStyle.copy(fontSize = 15.sp, lineHeight = 20.sp), color = Bone)
+                Spacer(Modifier.height(2.dp))
+                Text("wants to connect to your wallet again", fontSize = 13.sp, color = Fog)
+            }
+
+            Spacer(Modifier.height(12.dp))
+
             Text(
                 "You disconnected ${prompt.host}. Reconnecting lets it send AI requests through your keys again. It never sees the keys.",
-                color = TextSecondary,
+                color = Fog,
                 fontSize = 13.sp,
+                lineHeight = 19.sp,
             )
-        },
-        confirmButton = {
-            TextButton(onClick = onReconnect) { Text("Reconnect", color = Accent) }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        },
-    )
+
+            Spacer(Modifier.height(20.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                GhostButton("Cancel", onClick = onDismiss, modifier = Modifier.weight(1f))
+                PrimaryButton("Reconnect", onClick = onReconnect, modifier = Modifier.weight(1f))
+            }
+        }
+    }
 }

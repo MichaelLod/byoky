@@ -1,5 +1,6 @@
 package com.byoky.app.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -7,6 +8,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -14,6 +16,11 @@ import androidx.compose.ui.unit.sp
 import com.byoky.app.data.AppUrl
 import com.byoky.app.data.InstalledApp
 import com.byoky.app.data.WalletStore
+import com.byoky.app.ui.components.DialogButton
+import com.byoky.app.ui.components.RetroDialog
+import com.byoky.app.ui.components.RetroTextField
+import com.byoky.app.ui.components.RetroTopBar
+import com.byoky.app.ui.components.dotGrid
 import com.byoky.app.ui.theme.*
 
 /** The Apps tab: the user's installed web apps plus "Add app". */
@@ -25,21 +32,20 @@ fun InstalledAppsScreen(
     onAddApp: () -> Unit,
 ) {
     Scaffold(
+        modifier = Modifier
+            .background(Void)
+            .dotGrid(),
         topBar = {
-            TopAppBar(
-                title = { Text("Apps") },
+            RetroTopBar(
+                title = "Apps",
                 actions = {
                     IconButton(onClick = onAddApp) {
-                        Icon(Icons.Default.Add, contentDescription = "Add app", tint = Accent)
+                        Icon(Icons.Default.Add, contentDescription = "Add app", tint = Phosphor)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = BgMain,
-                    titleContentColor = TextPrimary,
-                ),
             )
         },
-        containerColor = BgMain,
+        containerColor = Color.Transparent,
     ) { padding ->
         InstalledAppsGrid(
             wallet = wallet,
@@ -73,25 +79,23 @@ internal fun AddAppDialog(
         }
     }
 
-    AlertDialog(
+    RetroDialog(
         onDismissRequest = onDismiss,
-        containerColor = BgCard,
-        title = { Text("Add app", color = TextPrimary) },
+        title = "Add app",
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text(
                     "Enter the address of a web app that supports Byoky. It opens inside the wallet, and your keys never leave this device.",
-                    color = TextSecondary,
                     fontSize = 13.sp,
                 )
-                OutlinedTextField(
+                RetroTextField(
                     value = url,
                     onValueChange = { url = it; error = null },
-                    label = { Text("App URL") },
-                    placeholder = { Text("https://app.example.com") },
-                    singleLine = true,
+                    label = "App URL",
+                    placeholder = "https://app.example.com",
+                    mono = true,
                     isError = error != null,
-                    supportingText = valid?.let { v -> { Text("Opens ${v.origin.removePrefix("https://")}", color = TextMuted) } },
+                    supportingText = valid?.let { v -> "Opens ${v.origin.removePrefix("https://")}" },
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Uri,
                         imeAction = ImeAction.Next,
@@ -99,30 +103,29 @@ internal fun AddAppDialog(
                     ),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                OutlinedTextField(
+                RetroTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Name (optional)") },
-                    placeholder = { Text(valid?.suggestedName ?: "App name") },
-                    singleLine = true,
+                    label = "Name (optional)",
+                    placeholder = valid?.suggestedName ?: "App name",
                     modifier = Modifier.fillMaxWidth(),
                 )
                 val sharedHost = valid?.origin?.removePrefix("https://")?.substringBefore(':')
                 if (sharedHost != null && AppUrl.isSharedHosting(sharedHost)) {
                     Text(
                         "$sharedHost is shared hosting. Every page served from it, not just this app, will be able to use your wallet. Only add it if you trust everything published there.",
-                        color = Warning,
+                        color = Amber,
                         fontSize = 12.sp,
                     )
                 }
-                error?.let { Text(it, color = Danger, fontSize = 12.sp) }
+                error?.let { Text(it, color = Alarm, fontSize = 12.sp) }
             }
         },
         confirmButton = {
-            TextButton(onClick = { submit() }, enabled = url.isNotBlank()) { Text("Add and open") }
+            DialogButton("Add and open", onClick = { submit() }, enabled = url.isNotBlank())
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            DialogButton("Cancel", onClick = onDismiss, color = Fog)
         },
     )
 }
