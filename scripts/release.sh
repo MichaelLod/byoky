@@ -621,7 +621,8 @@ elif [ -n "${CHROME_EXTENSION_ID:-}" ] && [ -n "${CHROME_CLIENT_ID:-}" ]; then
     --client-id "$CHROME_CLIENT_ID" \
     --client-secret "$CHROME_CLIENT_SECRET" \
     --refresh-token "$CHROME_REFRESH_TOKEN" \
-    --auto-publish
+    --auto-publish \
+    || echo "  WARN: Chrome upload failed; the other stores still go out (retry with ./scripts/release.sh retry)"
 else
   echo "  Skipping Chrome Web Store (credentials not configured)"
 fi
