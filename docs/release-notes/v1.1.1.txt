@@ -1,0 +1,7 @@
+Security and reliability update.
+• Connected apps can only use AI endpoints (chat, embeddings, model lists), never your provider account's files, batches or settings.
+• Per-app token limits are enforced reliably, also for cancelled and parallel requests.
+• The wallet locks itself again after a period of inactivity.
+• Cancelling a request in an app now stops it at the provider.
+• Fixes for routing between providers, streaming and file uploads.
+Using the desktop bridge? Update it and set it up again: byoky.com/docs
