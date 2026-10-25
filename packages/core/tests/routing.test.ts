@@ -276,6 +276,16 @@ describe('auto cross-family translation', () => {
     expect(decision!.swap).toBeUndefined();
   });
 
+  it('auto-translates for apps in the default group, which binds no provider', () => {
+    const credentials = [cred('c1', 'anthropic')];
+    const defaultGroup = { id: 'default', name: 'Default', providerId: '', createdAt: 0 } as Group;
+
+    const decision = resolveRoute('openai', defaultGroup, credentials);
+
+    expect(decision?.credential.id).toBe('c1');
+    expect(decision?.translation?.dstProviderId).toBe('anthropic');
+  });
+
   it('auto-translates gemini → openai against the openai flagship', () => {
     const credentials = [cred('c1', 'openai')];
 

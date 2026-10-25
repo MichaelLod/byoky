@@ -120,8 +120,9 @@ export function resolveRoute(
   //    route around it even when every group-based path fails to resolve a
   //    credential (stale pin, missing dst key, etc.) — returning null in
   //    those cases surfaces the stale config via NO_CREDENTIAL so the user
-  //    notices and fixes it.
-  if (!group) {
+  //    notices and fixes it. The default group binds nothing (empty
+  //    providerId), so apps in it count as unbound.
+  if (!group?.providerId) {
     const auto = resolveAutoCrossFamilyRoute(requestedProviderId, credentials);
     if (auto) {
       return { credential: auto.cred, translation: auto.translation };

@@ -79,6 +79,110 @@ export function validateProxyUrl(
 }
 
 /**
+ * Path segments that mark provider-side storage or account management (files,
+ * batches, fine-tunes, assistants, org admin, key provisioning). An approved
+ * app may only make inference calls; these would let it read data other apps
+ * stored under the same key, or change the account. The iOS and Android
+ * wallets carry identical copies of this rule.
+ */
+const BLOCKED_PATH_SEGMENTS = new Set([
+  'files', 'upload', 'uploads', 'batches', 'batch', 'fine_tuning', 'fine-tunes', 'fine_tunes',
+  'assistants', 'threads', 'vector_stores', 'organization', 'organizations', 'admin', 'projects',
+  'evals', 'containers', 'cachedcontents', 'realtime', 'keys', 'api_keys', 'invites', 'users', 'webhooks',
+]);
+
+/**
+ * Whether a response with no readable usage should be charged an estimate:
+ * only text generation (chat, completions, messages, responses) is, and only
+ * when the reply is JSON or SSE. Embeddings, images, audio and the like would
+ * be wildly overcharged by a bytes-based guess, and local servers bill
+ * nothing. The iOS and Android wallets apply the same rule.
+ */
+export function shouldEstimateUsage(upstreamProviderId: string, appUrl: string, contentType: string): boolean {
+  if (LOCAL_HTTP_PROVIDERS.has(upstreamProviderId)) return false;
+  const type = contentType.toLowerCase();
+  if (!type.includes('json') && !type.includes('text/event-stream')) return false;
+  let path: string;
+  try {
+    path = new URL(appUrl).pathname;
+  } catch {
+    return false;
+  }
+  const last = path.slice(path.lastIndexOf('/') + 1);
+  if (/:(stream)?[Gg]enerateContent$/.test(last)) return true;
+  const segments = path.toLowerCase().split('/').filter((s) => s.length > 0);
+  return GENERATION_PATH_SUFFIXES.some((suffix) => endsWithSegments(segments, suffix));
+}
+
+const GENERATION_PATH_SUFFIXES = [
+  'chat/completions', 'completions', 'responses', 'messages', 'chat', 'complete', 'generate',
+].map((s) => s.split('/'));
+
+/** Gemini's `models/{model}:{action}` inference actions. */
+const GEMINI_POST_ACTIONS = new Set([
+  'generateContent', 'streamGenerateContent', 'countTokens', 'embedContent', 'batchEmbedContents',
+]);
+
+/** Trailing path segments of the inference endpoints, across provider dialects. */
+const POST_PATH_SUFFIXES = [
+  'chat/completions', 'completions', 'responses', 'responses/input_tokens', 'embeddings', 'moderations',
+  'audio/speech', 'audio/transcriptions', 'audio/translations', 'images/generations', 'images/edits',
+  'images/variations', 'messages', 'messages/count_tokens', 'complete', 'chat', 'embed', 'rerank',
+  'generate', 'api/show',
+].map((s) => s.split('/'));
+
+function endsWithSegments(segments: string[], suffix: string[]): boolean {
+  if (suffix.length > segments.length) return false;
+  const offset = segments.length - suffix.length;
+  return suffix.every((s, i) => segments[offset + i] === s);
+}
+
+/**
+ * Whether an app may make this request through the wallet: GET only for model
+ * listing, POST only to inference endpoints, nothing else (no DELETE, no
+ * files, batches or account management). Only the path is checked; the
+ * origin is validateProxyUrl's job.
+ */
+export function isAllowedProxyRequest(method: string, url: string): boolean {
+  let path: string;
+  try {
+    path = new URL(url).pathname;
+  } catch {
+    return false;
+  }
+  // Upstream servers decode %-escapes, so /v1/%74hreads must count as
+  // /v1/threads. A segment that doesn't decode is refused outright.
+  // A decoded segment holding a separator (%2F, %5C, %3B) would split
+  // differently upstream, so it's refused too.
+  let raw: string[];
+  try {
+    raw = path.split('/').filter((s) => s.length > 0).map((s) => decodeURIComponent(s));
+  } catch {
+    return false;
+  }
+  if (raw.some((s) => /[/\\;]/.test(s) || s === '.' || s === '..')) return false;
+  const segments = raw.map((s) => s.toLowerCase());
+  if (segments.some((s) => BLOCKED_PATH_SEGMENTS.has(s))) return false;
+
+  switch (method.toUpperCase()) {
+    case 'GET': {
+      const n = segments.length;
+      if (n >= 1 && segments[n - 1] === 'models') return true;
+      if (n >= 2 && segments[n - 2] === 'models' && !segments[n - 1].includes(':')) return true;
+      return endsWithSegments(segments, ['api', 'tags']) || endsWithSegments(segments, ['api', 'version']);
+    }
+    case 'POST': {
+      const last = raw[raw.length - 1] ?? '';
+      const colon = last.lastIndexOf(':');
+      if (colon !== -1 && GEMINI_POST_ACTIONS.has(last.slice(colon + 1))) return true;
+      return POST_PATH_SUFFIXES.some((suffix) => endsWithSegments(segments, suffix));
+    }
+    default:
+      return false;
+  }
+}
+
+/**
  * Allow-list of forwardable client header names (lowercase). Anything not on
  * this list is dropped before we hit the upstream provider.
  *
@@ -331,8 +435,10 @@ export function parseUsage(
   body: string,
 ): { inputTokens: number; outputTokens: number } | undefined {
   try {
-    // For streaming responses (SSE), try to find usage in the last data chunk
-    if (body.includes('data: ')) {
+    // For streaming responses (SSE), try to find usage in the last data chunk.
+    // SSE frames start a line with "data: "; a JSON reply merely containing
+    // that text (e.g. "metadata: …" in the model's output) is not a stream.
+    if (/^data: /m.test(body)) {
       const lines = body.split('\n').filter((l) => l.startsWith('data: ') && !l.includes('[DONE]'));
 
       // Anthropic streaming: input_tokens is in message_start.message.usage,
@@ -345,7 +451,7 @@ export function parseUsage(
             const parsed = JSON.parse(line.replace('data: ', ''));
             if (parsed.type === 'message_start') {
               const u = (parsed.message as Record<string, unknown>)?.usage as Record<string, number> | undefined;
-              if (u?.input_tokens != null) inputTokens = u.input_tokens;
+              if (u?.input_tokens != null) inputTokens = anthropicInputTokens(u);
             } else if (parsed.type === 'message_delta') {
               const u = parsed.usage as Record<string, number> | undefined;
               if (u?.output_tokens != null) outputTokens = u.output_tokens;
@@ -426,6 +532,17 @@ function sanitizeTokenCounts(
 /**
  * Extract token usage from a parsed provider response object.
  */
+/**
+ * Anthropic reports prompt-cache reads and writes apart from input_tokens.
+ * They're still prompt tokens the app sent, and an allowance that ignored
+ * them could be run down almost for free with large cached prompts. The iOS
+ * and Android wallets count them the same way.
+ */
+function anthropicInputTokens(usage: Record<string, number>): number {
+  const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+  return n(usage.input_tokens) + n(usage.cache_creation_input_tokens) + n(usage.cache_read_input_tokens);
+}
+
 export function extractUsageFromParsed(
   providerId: string,
   parsed: Record<string, unknown>,
@@ -434,7 +551,7 @@ export function extractUsageFromParsed(
   if (providerId === 'anthropic') {
     const usage = parsed.usage as Record<string, number> | undefined;
     if (usage?.input_tokens != null && usage?.output_tokens != null) {
-      return sanitizeTokenCounts(usage.input_tokens, usage.output_tokens);
+      return sanitizeTokenCounts(anthropicInputTokens(usage), usage.output_tokens);
     }
   }
 
@@ -478,6 +595,19 @@ export function extractUsageFromParsed(
   const usage = parsed.usage as Record<string, number> | undefined;
   if (usage?.prompt_tokens != null && usage?.completion_tokens != null) {
     return sanitizeTokenCounts(usage.prompt_tokens, usage.completion_tokens);
+  }
+  // Embeddings report prompt tokens only.
+  if (usage?.prompt_tokens != null && usage.completion_tokens == null && usage.input_tokens == null) {
+    return sanitizeTokenCounts(usage.prompt_tokens, 0);
+  }
+
+  // OpenAI Responses API: { usage: { input_tokens, output_tokens } }, and in
+  // streams the final `response.completed` event carries the whole response.
+  const responsesUsage = (parsed.type === 'response.completed'
+    ? (parsed.response as Record<string, unknown> | undefined)?.usage
+    : usage) as Record<string, number> | undefined;
+  if (responsesUsage?.input_tokens != null && responsesUsage?.output_tokens != null) {
+    return sanitizeTokenCounts(responsesUsage.input_tokens, responsesUsage.output_tokens);
   }
 
   return undefined;

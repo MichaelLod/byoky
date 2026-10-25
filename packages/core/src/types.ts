@@ -265,6 +265,8 @@ export enum ByokyErrorCode {
   INVALID_KEY = 'INVALID_KEY',
   TOKEN_EXPIRED = 'TOKEN_EXPIRED',
   PROXY_ERROR = 'PROXY_ERROR',
+  /** The app called an endpoint outside the inference allowlist (files, batches, admin, …). */
+  ENDPOINT_NOT_ALLOWED = 'ENDPOINT_NOT_ALLOWED',
   RELAY_CONNECTION_FAILED = 'RELAY_CONNECTION_FAILED',
   RELAY_DISCONNECTED = 'RELAY_DISCONNECTED',
   UNKNOWN = 'UNKNOWN',

@@ -202,9 +202,31 @@ describe('security invariants', () => {
       expect(bg).toContain('connectRateLimit.delete(key)');
     });
 
-    it('has rate limiting on OAuth flow', () => {
-      expect(bg).toContain('isOAuthRateLimited');
-      expect(bg).toContain('OAUTH_RATE_LIMIT');
+    it('has no OAuth sign-in flow that web pages could start', () => {
+      // No provider has an oauthConfig; the dormant flow was reachable from
+      // localhost pages, so it's gone along with the identity permission.
+      expect(bg).not.toContain("'startOAuth'");
+      expect(bg).not.toContain('launchWebAuthFlow');
+    });
+
+    it('lets web pages reach only the bridge actions', () => {
+      expect(bg).toContain("const ALLOWED_CONTENT_ACTIONS = ['startBridgeProxy', 'checkBridge'];");
+    });
+
+    it('only proxies inference and model-listing endpoints for apps', () => {
+      const proxySection = bg.slice(bg.indexOf("if (port.name !== 'byoky-proxy') return;"), bg.indexOf('// --- Helpers ---'));
+      expect(proxySection).toContain('isAllowedProxyRequest(msg.method, msg.url)');
+    });
+
+    it('aborts the upstream request when the app or tab goes away', () => {
+      const proxySection = bg.slice(bg.indexOf("if (port.name !== 'byoky-proxy') return;"), bg.indexOf('// --- Helpers ---'));
+      expect(proxySection).toContain('upstreamAbort.abort()');
+      expect(proxySection).toContain('signal: upstreamAbort.signal');
+    });
+
+    it('keeps the idle lock across service worker restarts', () => {
+      expect(bg).toContain('_lastActivity');
+      expect(bg).toContain('lockIfIdle()');
     });
 
     it('wraps credential decryption in try-catch', () => {
@@ -237,8 +259,15 @@ describe('security invariants', () => {
     });
 
     it('checks allowance in handleBridgeProxyRequest', () => {
-      const bridgeHandler = bg.slice(bg.indexOf('handleBridgeProxyRequest'));
-      expect(bridgeHandler).toContain('checkAllowance');
+      const start = bg.indexOf('async function handleBridgeProxyRequest');
+      const bridgeHandler = bg.slice(start, bg.indexOf('\n  }\n', start));
+      expect(bridgeHandler).toContain('checkAndReserveAllowance');
+    });
+
+    it('checks allowance and reserves in one step on the page path', () => {
+      const proxySection = bg.slice(bg.indexOf("if (port.name !== 'byoky-proxy') return;"), bg.indexOf('// --- Helpers ---'));
+      expect(proxySection).toContain('await checkAndReserveAllowance(');
+      expect(proxySection).not.toContain('reserveTokens(');
     });
 
     it('validates bridge proxy providerId against session providers', () => {
@@ -277,11 +306,6 @@ describe('security invariants', () => {
       expect(usageSection).toContain("usageOrigin === 'unknown'");
       // Must deny when origin is unknown
       expect(usageSection).not.toContain("usageOrigin !== 'unknown' && usageOrigin !== session.appOrigin");
-    });
-
-    it('validates OAuth token response before encrypting', () => {
-      expect(bg).toContain('OAuth provider returned no access token');
-      expect(bg).toContain("typeof tokens.access_token !== 'string'");
     });
 
     it('does not leak raw OAuth error responses', () => {

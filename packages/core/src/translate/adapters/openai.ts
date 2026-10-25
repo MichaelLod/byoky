@@ -38,7 +38,9 @@ export const openaiAdapter: FamilyAdapter = {
   matchesChatEndpoint(url: string): boolean {
     try {
       const u = new URL(url);
-      return u.pathname === CHAT_ENDPOINT || u.pathname.endsWith(CHAT_ENDPOINT);
+      // OpenAI-compatible providers mount it under other prefixes
+      // (/chat/completions on DeepSeek and Perplexity, /openai/v1/… on Groq).
+      return u.pathname.endsWith('/chat/completions');
     } catch {
       return false;
     }

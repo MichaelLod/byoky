@@ -7,6 +7,8 @@ import {
   injectStreamUsageOptions,
   computeAllowanceCheck,
   validateProxyUrl,
+  isAllowedProxyRequest,
+  shouldEstimateUsage,
   resolveProviderBaseUrl,
   detectRequestCapabilities,
   rewriteToolNamesInJSONBody,
@@ -77,6 +79,88 @@ describe('validateProxyUrl', () => {
     expect(validateProxyUrl('ollama', 'http://[::1]:11434/v1/chat/completions', 'http://[::1]:11434')).toBe(true);
     expect(validateProxyUrl('ollama', 'http://192.168.1.5:11434/v1/chat/completions', 'http://192.168.1.5:11434')).toBe(false);
     expect(validateProxyUrl('lm_studio', 'http://evil.example:1234/v1/chat/completions', 'http://evil.example:1234')).toBe(false);
+  });
+});
+
+// ── shouldEstimateUsage ─────────────────────────────────
+
+describe('shouldEstimateUsage', () => {
+  const cases: [string, string, string, boolean][] = [
+    ['openai', 'https://api.openai.com/v1/chat/completions', 'text/event-stream', true],
+    ['anthropic', 'https://api.anthropic.com/v1/messages', 'application/json', true],
+    ['gemini', 'https://generativelanguage.googleapis.com/v1beta/models/g:streamGenerateContent?alt=sse', 'text/event-stream', true],
+    ['openai', 'https://api.openai.com/v1/responses', 'application/json; charset=utf-8', true],
+    ['openai', 'https://api.openai.com/v1/embeddings', 'application/json', false],
+    ['openai', 'https://api.openai.com/v1/images/generations', 'application/json', false],
+    ['openai', 'https://api.openai.com/v1/audio/speech', 'audio/mpeg', false],
+    ['openai', 'https://api.openai.com/v1/chat/completions', 'text/html', false],
+    ['anthropic', 'https://api.anthropic.com/v1/messages/count_tokens', 'application/json', false],
+    ['ollama', 'http://localhost:11434/api/chat', 'application/x-ndjson', false],
+    ['lm_studio', 'http://localhost:1234/v1/chat/completions', 'application/json', false],
+  ];
+  it.each(cases)('%s %s (%s) → %s', (provider, url, type, expected) => {
+    expect(shouldEstimateUsage(provider, url, type)).toBe(expected);
+  });
+});
+
+// ── isAllowedProxyRequest ───────────────────────────────
+
+describe('isAllowedProxyRequest', () => {
+  // The iOS and Android wallets test the same vectors against their copies of this rule.
+  const cases: [string, string, boolean][] = [
+    ['GET', 'https://api.openai.com/v1/models', true],
+    ['GET', 'https://api.openai.com/v1/models/gpt-4o', true],
+    ['GET', 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro', true],
+    ['GET', 'https://openrouter.ai/api/v1/models', true],
+    ['GET', 'http://localhost:11434/api/tags', true],
+    ['GET', 'http://localhost:11434/api/version', true],
+    ['POST', 'https://api.anthropic.com/v1/messages?beta=true', true],
+    ['POST', 'https://api.anthropic.com/v1/messages/count_tokens', true],
+    ['POST', 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent', true],
+    ['POST', 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:streamGenerateContent?alt=sse', true],
+    ['POST', 'https://api.groq.com/openai/v1/chat/completions', true],
+    ['POST', 'https://api.fireworks.ai/inference/v1/chat/completions', true],
+    ['POST', 'https://api.deepseek.com/chat/completions', true],
+    ['POST', 'https://api.openai.com/v1/responses', true],
+    ['POST', 'https://api.openai.com/v1/embeddings', true],
+    ['POST', 'https://api.openai.com/v1/audio/transcriptions', true],
+    ['POST', 'https://api.cohere.com/v2/chat', true],
+    ['POST', 'https://x.openai.azure.com/openai/deployments/gpt4/chat/completions?api-version=2024-10-21', true],
+    ['POST', 'http://localhost:11434/api/chat', true],
+    ['POST', 'http://localhost:11434/api/generate', true],
+    ['POST', 'https://api.anthropic.com/v1/messages/batches', false],
+    ['GET', 'https://api.anthropic.com/v1/messages/batches/b1/results', false],
+    ['GET', 'https://api.openai.com/v1/files', false],
+    ['GET', 'https://api.openai.com/v1/files/f1/content', false],
+    ['POST', 'https://api.openai.com/v1/fine_tuning/jobs', false],
+    ['POST', 'https://api.openai.com/v1/threads/t1/messages', false],
+    ['GET', 'https://api.openai.com/v1/responses/r1', false],
+    ['GET', 'https://api.openai.com/v1/chat/completions', false],
+    ['DELETE', 'https://api.openai.com/v1/models/ft-x', false],
+    ['POST', 'https://api.openai.com/v1/organization/admin_api_keys', false],
+    ['POST', 'https://generativelanguage.googleapis.com/upload/v1beta/files', false],
+    ['POST', 'https://generativelanguage.googleapis.com/v1beta/cachedContents', false],
+    ['POST', 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:tuneModel', false],
+    ['POST', 'https://openrouter.ai/api/v1/keys', false],
+    ['POST', 'https://api.openai.com/v1/foochat', false],
+    ['PUT', 'https://api.anthropic.com/v1/messages', false],
+    ['POST', 'not a url', false],
+    ['POST', 'https://api.openai.com/v1/%74hreads/t1/messages', false],
+    ['GET', 'https://api.openai.com/v1/fil%65s', false],
+    ['POST', 'https://api.openai.com/v1/%E0%A4%A/chat/completions', false],
+    ['POST', 'https://api.openai.com/v1/threads%2Ft1/messages', false],
+    ['POST', 'https://api.openai.com/v1/files%2Fx/chat/completions', false],
+    ['POST', 'https://api.openai.com/v1/x%5Cy/chat/completions', false],
+    // WHATWG URL resolves %2E%2E itself, and fetch sends the resolved path.
+    ['POST', 'https://api.openai.com/v1/%2E%2E/chat/completions', true],
+  ];
+  it.each(cases)('%s %s → %s', (method, url, allowed) => {
+    expect(isAllowedProxyRequest(method, url)).toBe(allowed);
+  });
+
+  it('compares path segments case-insensitively', () => {
+    expect(isAllowedProxyRequest('get', 'https://api.openai.com/V1/FILES')).toBe(false);
+    expect(isAllowedProxyRequest('post', 'https://api.openai.com/V1/Chat/Completions')).toBe(true);
   });
 });
 
@@ -382,6 +466,43 @@ describe('extractUsageFromParsed', () => {
 // ── parseUsage ─────────────────────────────────────────
 
 describe('parseUsage', () => {
+  it('reads embeddings usage, which has prompt tokens only', () => {
+    expect(parseUsage('openai', JSON.stringify({ data: [], usage: { prompt_tokens: 42, total_tokens: 42 } })))
+      .toEqual({ inputTokens: 42, outputTokens: 0 });
+  });
+
+  it('reads OpenAI Responses API usage, streamed and not', () => {
+    expect(parseUsage('openai', JSON.stringify({ object: 'response', usage: { input_tokens: 30, output_tokens: 9 } })))
+      .toEqual({ inputTokens: 30, outputTokens: 9 });
+    const sse = [
+      'event: response.output_text.delta',
+      'data: {"type":"response.output_text.delta","delta":"hi"}',
+      'event: response.completed',
+      'data: {"type":"response.completed","response":{"usage":{"input_tokens":12,"output_tokens":4}}}',
+    ].join('\n');
+    expect(parseUsage('openai', sse)).toEqual({ inputTokens: 12, outputTokens: 4 });
+  });
+
+  it('counts Anthropic prompt-cache reads and writes as input', () => {
+    const body = JSON.stringify({
+      usage: { input_tokens: 10, cache_creation_input_tokens: 200, cache_read_input_tokens: 3000, output_tokens: 7 },
+    });
+    expect(parseUsage('anthropic', body)).toEqual({ inputTokens: 3210, outputTokens: 7 });
+    const sse = [
+      'data: {"type":"message_start","message":{"usage":{"input_tokens":4,"cache_read_input_tokens":96,"output_tokens":1}}}',
+      'data: {"type":"message_delta","usage":{"output_tokens":20}}',
+    ].join('\n');
+    expect(parseUsage('anthropic', sse)).toEqual({ inputTokens: 100, outputTokens: 20 });
+  });
+
+  it('reads a JSON reply whose text contains "data: " as JSON, not SSE', () => {
+    const body = JSON.stringify({
+      choices: [{ message: { content: 'metadata: none\ndata: x' } }],
+      usage: { prompt_tokens: 12, completion_tokens: 5 },
+    });
+    expect(parseUsage('openai', body)).toEqual({ inputTokens: 12, outputTokens: 5 });
+  });
+
   it('parses Anthropic JSON response', () => {
     const body = JSON.stringify({
       id: 'msg_123',

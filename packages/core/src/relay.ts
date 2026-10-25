@@ -86,7 +86,12 @@ export type RelayMessage =
   | RelayPing
   | RelayPong;
 
-const MAX_RELAY_MESSAGE_SIZE = 1_048_576; // 1 MB
+/**
+ * Largest serialized relay message (string length) either side accepts.
+ * parseRelayMessage drops anything bigger without a reply, so senders must
+ * check before sending or the other side never answers.
+ */
+export const MAX_RELAY_MESSAGE_SIZE = 1_048_576; // 1 MB
 
 export function parseRelayMessage(data: unknown): RelayMessage | null {
   try {

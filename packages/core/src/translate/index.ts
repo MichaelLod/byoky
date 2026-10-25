@@ -39,6 +39,9 @@ export function translateRequest(ctx: TranslationContext, body: string): string 
   const src = getAdapter(ctx.srcFamily);
   const dst = getAdapter(ctx.dstFamily);
   const ir = src.parseRequest(body);
+  // Gemini asks for a stream in the URL (:streamGenerateContent), so its
+  // body carries no flag; the caller's context does.
+  if (ctx.isStreaming) ir.stream = true;
   return dst.serializeRequest(ctx, ir);
 }
 
