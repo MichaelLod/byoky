@@ -1,6 +1,6 @@
 {
   "name": "@byoky/bridge",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Local HTTP proxy + native messaging bridge that lets CLI tools (Claude Code, OpenClaw) route through the Byoky wallet",
   "type": "module",
   "main": "dist/host.js",

@@ -1,7 +1,7 @@
 {
   "name": "@byoky/core",
   "description": "Shared types, crypto, protocol and translation for Byoky — the MetaMask for API keys",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
