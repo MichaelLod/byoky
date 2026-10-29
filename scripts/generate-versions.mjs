@@ -61,11 +61,14 @@ async function getFirefoxVersion() {
   // though it no longer returns the listing.
   const pub = await fetchSafe('https://addons.mozilla.org/api/v5/addons/addon/byoky%40byoky.com/')
   const pubData = pub ? await pub.json().catch(() => ({})) : {}
-  if (pubData.is_disabled_by_mozilla || pubData.is_disabled_by_developer) {
+  if (pubData.is_disabled_by_mozilla || pubData.is_disabled_by_developer || pubData.is_disabled) {
     return { platform: 'Firefox', version: null, status: 'unavailable' }
   }
-  // No flags means the lookup itself failed, so we can't tell whether it's installable.
-  if (!('is_disabled_by_mozilla' in pubData)) return { platform: 'Firefox', version: null, status: 'unknown' }
+  // A listed add-on returns its listing (with `status`), a disabled one only
+  // the flags. Neither means the lookup itself failed.
+  if (!('is_disabled_by_mozilla' in pubData) && !('status' in pubData)) {
+    return { platform: 'Firefox', version: null, status: 'unknown' }
+  }
 
   const { AMO_API_KEY, AMO_API_SECRET } = process.env
   if (!AMO_API_KEY || !AMO_API_SECRET) return { platform: 'Firefox', version: null, status: 'unknown' }
@@ -74,14 +77,17 @@ async function getFirefoxVersion() {
   const p = Buffer.from(JSON.stringify({ iss: AMO_API_KEY, jti: Math.random().toString(36), iat: now, exp: now + 60 })).toString('base64url')
   const s = createHmac('sha256', AMO_API_SECRET).update(`${h}.${p}`).digest('base64url')
   const res = await fetchSafe(
-    'https://addons.mozilla.org/api/v5/addons/addon/byoky%40byoky.com/versions/?page_size=1',
+    'https://addons.mozilla.org/api/v5/addons/addon/byoky%40byoky.com/versions/?page_size=10',
     { headers: { Authorization: `JWT ${h}.${p}.${s}` } }
   )
   if (!res) return { platform: 'Firefox', version: null, status: 'unknown' }
   const data = await res.json().catch(() => ({}))
-  const v = data.results?.[0]
-  if (!v) return { platform: 'Firefox', version: null, status: 'unknown' }
-  return { platform: 'Firefox', version: v.version, status: v.file?.status === 'public' ? 'live' : 'pending' }
+  const latest = data.results?.[0]
+  if (!latest) return { platform: 'Firefox', version: null, status: 'unknown' }
+  // Newest first: a version in review sits above the one users get.
+  const live = data.results.find((v) => v.file?.status === 'public')
+  if (!live) return { platform: 'Firefox', version: latest.version, status: 'pending' }
+  return { platform: 'Firefox', version: live.version, status: 'live' }
 }
 
 async function getIOSVersion() {
