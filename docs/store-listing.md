@@ -58,9 +58,9 @@ Keep your AI API keys in one encrypted wallet. Apps connect to it and never see 
 - Permission justifications:
   - `storage`: encrypted credentials and wallet settings.
   - `sidePanel`: the wallet UI in the side panel.
-  - `identity`: OAuth sign-in for providers that support it (Google).
   - `nativeMessaging`: talk to the local `@byoky/bridge` for CLI tools.
-  - `alarms`: only if still in the manifest; justify it with what it's used for.
+  - `alarms`: a once-a-minute check that locks the wallet after the idle timeout and restarts the local bridge for CLI tools if it stopped.
+  - No `identity` justification: 1.1.1 dropped that permission, so delete any text left for it.
   - host permissions: the AI provider APIs the wallet proxies to.
 - Remove any justification text that mentions vault.byoky.com, relay.byoky.com, gifts or the token pool.
 
