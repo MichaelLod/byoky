@@ -62,10 +62,6 @@ export function InstallWalletButton({
     return p.version ? `v${p.version}` : '';
   };
 
-  const rollout = data?.local;
-  const chrome = find('Chrome');
-  const showLoadUnpacked = Boolean(rollout && chrome?.pending === rollout);
-
   return (
     <div className="install-wallet-wrap" ref={containerRef}>
       <button
@@ -83,18 +79,6 @@ export function InstallWalletButton({
             <span className="install-wallet-menu-name">Chrome</span>
             <span className="install-wallet-menu-version">{versionLabel('Chrome')}</span>
           </a>
-          {showLoadUnpacked && (
-            <a
-              href={`https://github.com/MichaelLod/byoky/releases/download/v${rollout}/byoky-chrome-v${rollout}.zip`}
-              target="_blank"
-              rel="noopener noreferrer"
-              role="menuitem"
-              title="Download unpacked build — load via chrome://extensions → Load unpacked"
-            >
-              <span className="install-wallet-menu-name">Chrome (load unpacked)</span>
-              <span className="install-wallet-menu-version">v{rollout}</span>
-            </a>
-          )}
           <a href={FIREFOX_URL} target="_blank" rel="noopener noreferrer" role="menuitem">
             <span className="install-wallet-menu-name">Firefox</span>
             <span className="install-wallet-menu-version">{versionLabel('Firefox')}</span>

@@ -323,11 +323,9 @@ function Troubleshooting() {
         service-worker evictions. <strong>v0.9.13</strong> closes the last
         gap — when MV3 evicts the service worker mid-session, the bridge
         auto-restarts on the next keepalive tick instead of leaving Claude
-        Code stuck on <code>ECONNREFUSED</code>. v0.9.13 is live on the
-        Chrome Web Store and Firefox — update there, or grab it from the{' '}
-        <a className="oc-link" href="https://github.com/MichaelLod/byoky/releases/latest">latest GitHub release</a>
-        {' '}and load unpacked. On older builds the only workaround is clicking
-        the wallet popup every ~15 minutes to reset the timer.
+        Code stuck on <code>ECONNREFUSED</code>. Update from the Chrome Web
+        Store or Firefox Add-ons. On older builds the only workaround is
+        clicking the wallet popup every ~15 minutes to reset the timer.
       </>,
     ],
     [

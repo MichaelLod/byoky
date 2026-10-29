@@ -161,19 +161,6 @@ export function Navbar() {
                     </a>
                   );
                 })}
-                {versions && versions.platforms.find((p) => p.platform === 'Chrome')?.pending === versions.local && (
-                  <a
-                    href={`https://github.com/MichaelLod/byoky/releases/download/v${versions.local}/byoky-chrome-v${versions.local}.zip`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="install-dropdown-item"
-                    title="Download unpacked build — load via chrome://extensions → Load unpacked"
-                  >
-                    <DropdownIcon name="chrome" />
-                    <span className="install-dropdown-item-label">Chrome (load unpacked)</span>
-                    <span className="install-dropdown-item-version">v{versions.local}</span>
-                  </a>
-                )}
               </div>
             )}
           </div>
