@@ -15,6 +15,8 @@
  *   mac/      5 screenshots 2880×1800
  *   play/     6 phone 1080×1920, feature graphic 1024×500, icon 512×512
  *             (the last two from android-store-assets.ts)
+ *   producthunt/  7 gallery images 1270×760, thumbnail 240×240 (icon-512.png
+ *             downscaled); listing text in producthunt/listing.md
  * plus one contact sheet per store in composites/1.1.1-contact/ (or the
  * directory given with --contact <dir>).
  *
@@ -23,10 +25,11 @@
  *
  *   cd marketing && pnpm compose [-- --only chrome,ios] [-- --contact <dir>]
  *
- * The pre-1.1.1 composer (old look, Product Hunt images) is compose-legacy.ts.
+ * The pre-1.1.1 composer (old look, old Product Hunt images) is compose-legacy.ts.
  */
 import fs from 'fs';
 import path from 'path';
+import sharp from 'sharp';
 import { buildPlayAssets } from './android-store-assets';
 import {
   APP_ICON, C, Kit, MARKETING, ROOT, Rendered, asset, brackets, esc, glow, headline, muninn, page, statusLine,
@@ -70,11 +73,16 @@ function landscapeText(copy: Copy, o: { left: number; width: number; u: number; 
   </div>`;
 }
 
-/** The popup floating on the right, framed like the featured panel. */
-function chromeSlide(shot: string, copy: Copy): string {
-  const W = 1280, H = 800, u = 1;
-  const pw = 396, ph = 660; // 360×600 CSS px at 1.1
-  const px = 790, py = Math.round((H - ph) / 2);
+/**
+ * The popup floating on the right, framed like the featured panel. Laid out
+ * for 1280×800; a shorter canvas (Product Hunt's 1270×760) scales the popup
+ * down to fit and keeps the same margins, so nothing is cropped.
+ */
+function chromeSlide(shot: string, copy: Copy, W = 1280, H = 800): string {
+  const u = 1;
+  const ph = Math.min(660, H - 130); // 360×600 CSS px at 1.1, or less when the canvas is shorter
+  const pw = Math.round((ph * 360) / 600);
+  const px = W - 94 - pw, py = Math.round((H - ph) / 2);
   const css = `.popup { position:absolute; left:${px}px; top:${py}px; width:${pw}px; height:${ph}px; border:1px solid ${C.seamStrong};
       box-shadow: 0 0 0 1px rgba(124,58,237,0.28), 0 30px 90px rgba(124,58,237,0.22); }
     .popup img { display:block; width:100%; height:100%; }`;
@@ -240,6 +248,124 @@ function promoMarquee(popup: string): string {
     ${brackets({ x: px, y: py, w: pw, h: ph }, 12)}`);
 }
 
+// ── Product Hunt gallery (1270×760) ──────────────────────────────────────
+// The Chrome slides re-laid out at 1270×760 (chromeSlide scales the popup),
+// plus a cover with Muninn, a phones slide and a developer slide. Same rules
+// as the stores: only today's features, no brand other than provider names
+// as compatibility facts.
+
+const PH_W = 1270, PH_H = 760;
+
+/** First gallery image: the pitch, Muninn and the wallet. */
+function phCover(popup: string): string {
+  const W = PH_W, H = PH_H, u = 1;
+  const ph = 630, pw = 378, px = W - 94 - pw, py = Math.round((H - ph) / 2);
+  const css = `.popup { position:absolute; left:${px}px; top:${py}px; width:${pw}px; height:${ph}px; border:1px solid ${C.seamStrong};
+      box-shadow: 0 0 0 1px rgba(124,58,237,0.28), 0 30px 90px rgba(124,58,237,0.25); }
+    .popup img { display:block; width:100%; height:100%; }
+    .facts { font: 500 13px "IBM Plex Mono", monospace; letter-spacing:0.14em; text-transform:uppercase; color:${C.fog}; white-space:nowrap; }
+    .facts b { font-weight:500; color:${C.phosphor}; }`;
+  const facts = ['13 providers', 'No servers', 'AES-256-GCM', 'MIT'].map((f) => esc(f)).join(' <b>·</b> ');
+  return page(W, H, u, css, `
+    <div class="layer dots"></div>
+    ${glow(px + pw / 2, H / 2, 560, 0.26)}
+    ${glow(470, 600, 300, 0.2)}
+    <div class="layer scan"></div>
+    <div style="position:absolute; left:92px; top:96px; width:620px;">
+      <div style="font-size:15px">${statusLine('Wallet unlocked')}</div>
+      <h1 style="font-size:64px; margin-top:18px">${headline('One wallet for\nyour *AI keys*')}</h1>
+      <p class="sub" style="font-size:21px; margin-top:22px; max-width:470px">Apps connect to the wallet. Your keys stay encrypted on your device.</p>
+      <div class="facts" style="margin-top:26px">${facts}</div>
+    </div>
+    <div style="position:absolute; left:318px; top:396px">${muninn({ size: 350, look: 5 })}</div>
+    <div class="lockup" style="position:absolute; left:92px; bottom:52px; font-size:19px">
+      <img src="${APP_ICON}" style="width:32px; height:32px">BYOKY
+    </div>
+    <div class="popup"><img src="${asset(popup)}"></div>
+    ${brackets({ x: px, y: py, w: pw, h: ph }, 16)}`);
+}
+
+/** A phone screenshot in a plain bezel, `imgH` pixels tall. */
+function phoneFrame(shot: string, device: 'iphone' | 'android', x: number, y: number, imgH: number, srcW: number, srcH: number): string {
+  const bezel = 6;
+  const imgW = (imgH * srcW) / srcH;
+  const r = device === 'iphone' ? imgW * 0.135 : imgW * 0.085;
+  const camera =
+    device === 'iphone'
+      ? `<div style="position:absolute; left:${bezel + imgW * 0.3575}px; top:${bezel + imgW * 0.026}px; width:${imgW * 0.285}px; height:${imgW * 0.084}px; border-radius:${imgW}px; background:#000;"></div>`
+      : `<div style="position:absolute; left:${bezel + imgW / 2 - imgW * 0.016}px; top:${bezel + imgW * 0.022}px; width:${imgW * 0.032}px; height:${imgW * 0.032}px; border-radius:50%; background:#000;"></div>`;
+  return `<div style="position:absolute; left:${x}px; top:${y}px; width:${imgW + 2 * bezel}px; height:${imgH + 2 * bezel}px; padding:${bezel}px; background:${C.ink};
+      border:2px solid ${C.seamStrong}; border-radius:${r + bezel}px; box-shadow: 0 0 0 1px rgba(124,58,237,0.22), 0 30px 90px rgba(124,58,237,0.2);">
+      <img src="${asset(shot)}" style="display:block; width:${imgW}px; height:${imgH}px; border-radius:${r}px;">${camera}</div>`;
+}
+
+/** iPhone and Android side by side. */
+function phPhones(iphone: string, android: string, copy: Copy): string {
+  const W = PH_W, H = PH_H, u = 1;
+  const frameH = 600, imgH = frameH - 12;
+  const iW = (imgH * 1320) / 2868 + 12, aW = (imgH * 1080) / 2424 + 12;
+  const gap = 28;
+  const right = W - 94;
+  const ax = right - aW, ix = ax - gap - iW;
+  const fy = Math.round((H - frameH) / 2);
+  return page(W, H, u, '', `
+    <div class="layer dots"></div>
+    ${glow((ix + right) / 2, H / 2, 560, 0.24)}
+    <div class="layer scan"></div>
+    ${landscapeText(copy, { left: 92, width: 470, u, h: H })}
+    ${phoneFrame(iphone, 'iphone', ix, fy, imgH, 1320, 2868)}
+    ${phoneFrame(android, 'android', ax, fy, imgH, 1080, 2424)}
+    ${brackets({ x: ix, y: fy, w: right - ix, h: frameH }, 16)}`);
+}
+
+/** The SDK in an app, as on byoky.com (packages/web/app/page.tsx, CodeBlock). */
+function phDevelopers(copy: Copy): string {
+  const W = PH_W, H = PH_H, u = 1;
+  const k = (s: string) => `<span style="color:${C.phosphor}">${s}</span>`; // keyword
+  const t = (s: string) => `<span style="color:${C.bone}; font-weight:500">${s}</span>`; // type
+  const s = (v: string) => `<span style="color:${C.signal}">${esc(v)}</span>`; // string
+  const c = (v: string) => `<span style="color:${C.dim}">${esc(v)}</span>`; // comment
+  const p = (v: string) => `<span style="color:${C.lilac}">${v}</span>`; // property
+  const lines = [
+    `${k('import')} ${t('Anthropic')} ${k('from')} ${s("'@anthropic-ai/sdk'")};`,
+    `${k('import')} { ${t('Byoky')} } ${k('from')} ${s("'@byoky/sdk'")};`,
+    '',
+    `${k('const')} ${p('session')} = ${k('await new')} ${t('Byoky')}().${p('connect')}({`,
+    `  ${p('providers')}: [{ ${p('id')}: ${s("'anthropic'")}, ${p('required')}: ${k('true')} }],`,
+    `  ${p('modal')}: ${k('true')},`,
+    '});',
+    '',
+    c('// The official SDK. The key stays in the wallet.'),
+    `${k('const')} ${p('client')} = ${k('new')} ${t('Anthropic')}({`,
+    `  ${p('apiKey')}: ${p('session')}.${p('sessionKey')},`,
+    `  ${p('fetch')}: ${p('session')}.${p('createFetch')}(${s("'anthropic'")}),`,
+    '});',
+  ];
+  const cw = 540, ch = 412; // title bar + 13 lines
+  const cx = W - 94 - cw, cy = Math.round((H - ch - 67) / 2); // centre the window plus the two log lines under it
+  const css = `
+    .code { position:absolute; left:${cx}px; top:${cy}px; width:${cw}px; height:${ch}px; background:${C.ink}; border:1px solid ${C.seamStrong};
+      box-shadow: 0 0 0 1px rgba(124,58,237,0.24), 0 30px 90px rgba(124,58,237,0.22); }
+    .code .bar { height:40px; display:flex; align-items:center; justify-content:space-between; padding:0 18px; background:${C.crypt}; border-bottom:1px solid ${C.seam};
+      font: 500 12px "IBM Plex Mono", monospace; letter-spacing:0.14em; text-transform:uppercase; color:${C.dim}; }
+    .code .bar b { font-weight:500; color:${C.fog}; }
+    .code pre { margin:0; padding:22px 24px; font: 400 14.5px/1.72 "IBM Plex Mono", monospace; color:${C.fog}; white-space:pre; }
+    .term { position:absolute; left:${cx}px; top:${cy + ch + 22}px; width:${cw}px; font: 500 13px "IBM Plex Mono", monospace; letter-spacing:0.04em; color:${C.fog}; }
+    .term div + div { margin-top:8px; }
+    .term .pr { color:${C.phosphor}; } .term .ok { color:${C.signal}; }`;
+  return page(W, H, u, css, `
+    <div class="layer dots"></div>
+    ${glow(cx + cw / 2, H / 2, 560, 0.22)}
+    <div class="layer scan"></div>
+    ${landscapeText(copy, { left: 92, width: 500, u, h: H })}
+    <div class="code"><div class="bar"><b>app.ts</b><span>@byoky/sdk</span></div><pre>${lines.join('\n')}</pre></div>
+    <div class="term">
+      <div><span class="pr">&gt;</span> localhost:3000 wants to connect · <span class="ok">approved</span></div>
+      <div><span class="pr">&gt;</span> POST /v1/messages <span class="ok">200</span> · streaming</div>
+    </div>
+    ${brackets({ x: cx, y: cy, w: cw, h: ch }, 16)}`);
+}
+
 // ── Copy ─────────────────────────────────────────────────────────────────
 
 const COPY = {
@@ -252,6 +378,8 @@ const COPY = {
   reconnect: { status: 'Connection request', title: 'You decide\n*who connects*', sub: 'Disconnect an app any time. It has to ask before it comes back.' },
   stats: { status: 'Usage · last 7 days', title: 'See every\n*request*', sub: 'Requests and tokens for each key, model and app.' },
   macApp: { status: 'Extension on', title: 'Switch it\non *once*', sub: 'Open Byoky and turn on its extension. Then your wallet is one click away in the toolbar.' },
+  phones: { status: 'iOS · Android', title: 'On your\n*phone* too', sub: 'Open any web app in the built-in browser. iPhone gets a Safari extension too.' },
+  developers: { status: 'For developers', title: 'Your users\nbring the *keys*', sub: 'Keep the official SDKs and swap in Byoky’s fetch. Your app never holds a key.' },
 } satisfies Record<string, Copy | ((s: string) => Copy)>;
 
 // ── Stores ───────────────────────────────────────────────────────────────
@@ -342,6 +470,32 @@ async function play(kit: Kit): Promise<Rendered[]> {
   return out;
 }
 
+async function producthunt(kit: Kit): Promise<Rendered[]> {
+  const ext = (f: string) => raw('store-extension', f);
+  const out: Rendered[] = [];
+  const slides: [string, string][] = [
+    ['one-wallet', phCover(ext('dashboard.png'))],
+    ['approve-connections', chromeSlide(ext('approval.png'), COPY.approve, PH_W, PH_H)],
+    ['limits-per-app', chromeSlide(ext('connected-apps-allowance.png'), COPY.limits, PH_W, PH_H)],
+    ['route-providers', chromeSlide(ext('connected-apps-drag.png'), COPY.route, PH_W, PH_H)],
+    ['on-your-phone', phPhones(raw('store-ios', 'iphone-wallet.png'), raw('store-android', 'connected.png'), COPY.phones)],
+    ['for-developers', phDevelopers(COPY.developers)],
+    ['locked-tight', chromeSlide(ext('unlock.png'), COPY.locked, PH_W, PH_H)],
+  ];
+  for (const [i, [slug, html]] of slides.entries()) {
+    out.push(await kit.render(path.join(OUT, 'producthunt', name(i + 1, slug, PH_W, PH_H)), PH_W, PH_H, html));
+  }
+  // Thumbnail: the raven-head app icon, downscaled (not redrawn) from the web icon.
+  const icon = path.join(ROOT, 'packages/web/public/icon-512.png');
+  const meta = await sharp(icon).metadata();
+  if (meta.width !== 512 || meta.height !== 512) throw new Error(`${icon}: ${meta.width}×${meta.height}, expected 512×512`);
+  const thumb = path.join(OUT, 'producthunt', 'thumbnail-240x240.png');
+  await sharp(icon).resize(240, 240, { kernel: 'lanczos3' }).flatten({ background: C.void }).removeAlpha().png({ compressionLevel: 9 }).toFile(thumb);
+  console.log(`  ${path.relative(ROOT, thumb)}  240×240`);
+  out.push({ file: thumb, width: 240, height: 240 });
+  return out;
+}
+
 // ── Run ──────────────────────────────────────────────────────────────────
 
 (async () => {
@@ -354,9 +508,11 @@ async function play(kit: Kit): Promise<Rendered[]> {
     if (want('ios')) sets.ios = await ios(kit);
     if (want('mac')) sets.mac = await mac(kit);
     if (want('play')) sets.play = await play(kit);
+    if (want('producthunt')) sets.producthunt = await producthunt(kit);
 
     const titles: Record<string, string> = {
       chrome: 'Chrome Web Store', firefox: 'Firefox Add-ons', ios: 'App Store · iPhone 6.9" + iPad 13"', mac: 'Mac App Store', play: 'Google Play',
+      producthunt: 'Product Hunt gallery + thumbnail',
     };
     fs.mkdirSync(CONTACT, { recursive: true });
     for (const [store, items] of Object.entries(sets)) {

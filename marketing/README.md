@@ -41,6 +41,7 @@ the 512 px icon from `packages/android/` after checking it.
 | App Store | 6 × iPhone 1320×2868 (6.9"), 5 × iPad 2064×2752 (13") |
 | Mac App Store | 5 × 2880×1800 |
 | Google Play | 6 × 1080×1920, feature graphic 1024×500, icon 512×512 |
+| Product Hunt | 7 × 1270×760 gallery, thumbnail 240×240 (`--only producthunt`; listing text in `producthunt/listing.md`) |
 
 The pre-1.1.1 composer (old look, Product Hunt and social images that
 `make-producthunt*.ts` read) is kept as `compose-legacy.ts`
