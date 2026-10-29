@@ -25,6 +25,11 @@ const plexMono = IBM_Plex_Mono({
   display: 'swap',
 });
 
+// Render every page per request: the CSP's script nonce (middleware.ts) is
+// new for each response, and Next.js can only put it on the inline scripts
+// of a page it is rendering, not of one prerendered at build time.
+export const dynamic = 'force-dynamic';
+
 export const viewport: Viewport = {
   themeColor: '#07060A',
   colorScheme: 'dark',

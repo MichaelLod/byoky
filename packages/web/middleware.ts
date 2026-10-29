@@ -1,5 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+/**
+ * Content-Security-Policy, set here rather than in next.config so each
+ * response gets its own script nonce: scripts must be same-origin or carry
+ * it. Next.js reads the nonce from the request's CSP header and adds it to
+ * the inline scripts it renders (the RSC payload), which is why pages render
+ * per request (app/layout.tsx). Dev mode needs 'unsafe-eval' for React
+ * Refresh, so it gets no CSP.
+ */
+function contentSecurityPolicy(nonce: string): string {
+  return [
+    "default-src 'self'",
+    `script-src 'self' 'nonce-${nonce}'`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: https://avatars.githubusercontent.com https://unpkg.com https://api.producthunt.com",
+    "connect-src 'self' https://api.github.com",
+    "frame-ancestors 'none'",
+  ].join('; ') + ';';
+}
+
+function newNonce(): string {
+  return btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
+}
+
 export function middleware(request: NextRequest) {
   const hostname = request.headers.get('host') ?? '';
 
@@ -11,14 +34,21 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(url, 301);
   }
 
+  const csp = process.env.NODE_ENV === 'development' ? null : contentSecurityPolicy(newNonce());
+  const requestHeaders = new Headers(request.headers);
+  if (csp) requestHeaders.set('Content-Security-Policy', csp);
+
   // Rewrite chat.byoky.com to /chat (URL stays as chat.byoky.com)
+  let response: NextResponse;
   if (hostname.startsWith('chat.')) {
     const url = request.nextUrl.clone();
     url.pathname = '/chat' + url.pathname.replace(/^\/$/, '');
-    return NextResponse.rewrite(url);
+    response = NextResponse.rewrite(url, { request: { headers: requestHeaders } });
+  } else {
+    response = NextResponse.next({ request: { headers: requestHeaders } });
   }
-
-  return NextResponse.next();
+  if (csp) response.headers.set('Content-Security-Policy', csp);
+  return response;
 }
 
 export const config = {

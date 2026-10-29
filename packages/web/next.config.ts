@@ -24,8 +24,8 @@ const nextConfig: NextConfig = {
     ];
   },
   async headers() {
-    // Dev mode needs 'unsafe-eval' for React Refresh / HMR. Skip the strict
-    // CSP entirely in dev — production keeps the full lockdown.
+    // Dev mode skips the security headers, as it does the CSP (middleware.ts,
+    // where it carries a per-response script nonce).
     if (process.env.NODE_ENV === 'development') {
       return [];
     }
@@ -36,10 +36,6 @@ const nextConfig: NextConfig = {
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'X-Frame-Options', value: 'DENY' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-          {
-            key: 'Content-Security-Policy',
-            value: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://avatars.githubusercontent.com https://unpkg.com https://api.producthunt.com; connect-src 'self' https://api.github.com; frame-ancestors 'none';",
-          },
         ],
       },
     ];

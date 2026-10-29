@@ -551,9 +551,30 @@ describe('security invariants', () => {
 
   describe('web security headers', () => {
     const nextConfig = readFile('packages/web/next.config.ts');
+    const middleware = readFile('packages/web/middleware.ts');
+    const layout = readFile('packages/web/app/layout.tsx');
 
-    it('sets Content-Security-Policy', () => {
-      expect(nextConfig).toContain('Content-Security-Policy');
+    it('sets Content-Security-Policy with a per-response script nonce', () => {
+      expect(middleware).toContain("response.headers.set('Content-Security-Policy', csp)");
+      // Next.js takes the nonce for its inline scripts from the request header.
+      expect(middleware).toContain("requestHeaders.set('Content-Security-Policy', csp)");
+      expect(middleware).toContain("`script-src 'self' 'nonce-${nonce}'`");
+      expect(middleware).toContain('crypto.getRandomValues');
+      // Pages must render per request for the nonce to reach them.
+      expect(layout).toContain("export const dynamic = 'force-dynamic'");
+    });
+
+    it('allows no inline script without the nonce', () => {
+      const scriptSrc = middleware.match(/`script-src [^`]*`/);
+      expect(scriptSrc).not.toBeNull();
+      expect(scriptSrc![0]).not.toContain('unsafe-inline');
+      expect(scriptSrc![0]).not.toContain('unsafe-eval');
+      // A second, static CSP would have to allow the inline scripts itself.
+      expect(nextConfig).not.toContain('Content-Security-Policy');
+    });
+
+    it('denies framing in the CSP', () => {
+      expect(middleware).toContain("\"frame-ancestors 'none'\"");
     });
 
     it('sets X-Content-Type-Options', () => {
