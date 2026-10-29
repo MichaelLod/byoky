@@ -38,9 +38,10 @@ export function middleware(request: NextRequest) {
   const requestHeaders = new Headers(request.headers);
   if (csp) requestHeaders.set('Content-Security-Policy', csp);
 
-  // Rewrite chat.byoky.com to /chat (URL stays as chat.byoky.com)
+  // Rewrite chat.byoky.com to /chat (URL stays as chat.byoky.com). Files
+  // from public/ (versions.json, logo.svg) are served as they are.
   let response: NextResponse;
-  if (hostname.startsWith('chat.')) {
+  if (hostname.startsWith('chat.') && !/\.[a-z0-9]+$/i.test(request.nextUrl.pathname)) {
     const url = request.nextUrl.clone();
     url.pathname = '/chat' + url.pathname.replace(/^\/$/, '');
     response = NextResponse.rewrite(url, { request: { headers: requestHeaders } });
