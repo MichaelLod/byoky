@@ -9,7 +9,7 @@ import {
   type Credential,
 } from '@byoky/core';
 import { CREDENTIAL_SECRET_FIELDS, openCredentialSecret, upgradeWallet, type WalletStorage } from '../lib/wallet-upgrade';
-import { readTrustedSites } from '../lib/trusted-sites';
+import { readTrustState } from '../lib/trust-state';
 import fixture from './fixtures/wallet-1.1.1.json';
 
 const { PASSWORD } = fixture;
@@ -87,10 +87,10 @@ describe('wallet upgrade from 1.1.1', () => {
       .toBe('fixture-refresh-token');
 
     // Trusted sites: kept as they were, now verifiable with the new key.
-    const read = await readTrustedSites(storage.data, result!.macKey);
-    expect(read).toEqual({ sites: fixture.storage.trustedSites, intact: true });
+    const read = await readTrustState(storage.data, result!.macKey);
+    expect(read).toEqual({ sites: fixture.storage.trustedSites, revoked: [], intact: true });
     const derived = await deriveWalletMacKey(PASSWORD, hash);
-    expect((await readTrustedSites(storage.data, derived!)).intact).toBe(true);
+    expect((await readTrustState(storage.data, derived!)).intact).toBe(true);
   }, 60_000);
 
   it('runs once: an upgraded wallet is left alone', async () => {
@@ -125,7 +125,7 @@ describe('wallet upgrade from 1.1.1', () => {
     const storage = memoryStorage(fixture.storage, 2);
     await expect(upgradeWallet(storage, PASSWORD)).rejects.toThrow('storage write failed');
     expect(isLegacyPasswordHash(storage.data.passwordHash as string)).toBe(true);
-    expect(storage.data.trustedSitesMac).toBeUndefined();
+    expect(storage.data.trustMac).toBeUndefined();
     // Credentials already rebound still decrypt in the meantime.
     expect(await Promise.all(creds(storage).map((c) => secret(c, true)))).toHaveLength(4);
 
@@ -133,7 +133,7 @@ describe('wallet upgrade from 1.1.1', () => {
     expect(result!.rebound).toBe(0);
     expect(isLegacyPasswordHash(storage.data.passwordHash as string)).toBe(false);
     expect(await Promise.all(creds(storage).map((c) => secret(c, false)))).toContain('azure-fixture-key');
-    expect((await readTrustedSites(storage.data, result!.macKey)).sites).toHaveLength(2);
+    expect((await readTrustState(storage.data, result!.macKey)).sites).toHaveLength(2);
   }, 60_000);
 
   it('keeps a credential added while it ran', async () => {
@@ -164,7 +164,7 @@ describe('wallet upgrade from 1.1.1', () => {
     };
     expect(await upgradeWallet(storage, PASSWORD, { exclusive })).toBeNull();
     expect(storage.data.passwordHash).toBe(theirs);
-    expect(storage.data.trustedSitesMac).toBeUndefined();
+    expect(storage.data.trustMac).toBeUndefined();
   }, 60_000);
 
   it('writes nothing into a wallet reset while it ran', async () => {

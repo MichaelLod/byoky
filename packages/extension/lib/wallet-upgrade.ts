@@ -10,20 +10,20 @@ import {
   type Credential,
   type CredentialSecretField,
 } from '@byoky/core';
-import { TRUSTED_SITES_KEY, parseTrustedSites, signTrustedSites } from './trusted-sites';
+import { TRUST_STATE_KEYS, adoptLegacyTrustState, signTrustState } from './trust-state';
 
 /**
  * Storage format since 1.1.2, and the one-time upgrade from earlier ones.
  *
  * Every credential secret is encrypted under the master password with its
  * record bound in as additional authenticated data (credentialAad), and the
- * trusted-sites list carries a MAC (trusted-sites.ts) keyed from a format-2
- * password hash. Wallets written before 1.1.2 have neither. upgradeWallet
- * converts one on the first unlock:
+ * trust state (trusted sites and revoked origins) carries a MAC
+ * (trust-state.ts) keyed from a format-2 password hash. Wallets written
+ * before 1.1.2 have neither. upgradeWallet converts one on the first unlock:
  *
  *   1. rebinds every unbound credential secret, and writes the credentials;
- *   2. writes the format-2 password hash together with the signed
- *      trusted-sites list, in one storage write.
+ *   2. writes the format-2 password hash together with the signed trust
+ *      state, in one storage write.
  *
  * The format-1 hash is the marker of a wallet not yet upgraded. Until step 2
  * replaces it, unbound secrets still decrypt (openCredentialSecret), so
@@ -158,16 +158,15 @@ export async function upgradeWallet(
     if (!wrote) return null;
   }
 
-  // 2. New password hash and the signed trusted-sites list, together. A
-  // malformed stored list is dropped rather than signed.
+  // 2. New password hash and the signed trust state, together. Malformed
+  // stored lists are dropped rather than signed (adoptLegacyTrustState).
   const newHash = await hashPassword(password);
   const macKey = await deriveWalletMacKey(password, newHash);
   if (!macKey) throw new Error('Could not derive the wallet key');
   const wrote = await exclusive(async () => {
     if (!(await unchanged())) return false;
-    const { [TRUSTED_SITES_KEY]: rawSites } = await storage.get([TRUSTED_SITES_KEY]);
-    const sites = parseTrustedSites(rawSites) ?? [];
-    await storage.set({ passwordHash: newHash, ...(await signTrustedSites(sites, macKey)) });
+    const state = adoptLegacyTrustState(await storage.get(TRUST_STATE_KEYS));
+    await storage.set({ passwordHash: newHash, ...(await signTrustState(state, macKey)) });
     return true;
   });
   return wrote ? { macKey, rebound: count, unreadable } : null;

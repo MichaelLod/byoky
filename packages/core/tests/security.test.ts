@@ -248,18 +248,33 @@ describe('security invariants', () => {
       expect(add).not.toMatch(/encrypt\(cleanValue, masterPassword\)/);
     });
 
-    it('only honors and writes a signed trusted-sites list', () => {
+    it('only honors and writes a signed trust state (trusted sites and revocations)', () => {
       // Reads go through the MAC check; writes are re-signed.
       expect(bg).not.toMatch(/as TrustedSite\[\]/);
-      expect(bg).not.toMatch(/storage\.local\.set\(\{\s*trustedSites/);
-      const get = bg.slice(bg.indexOf('async function getTrustedSites'), bg.indexOf('async function updateTrustedSites'));
-      expect(get).toContain('readTrustedSites(stored, key)');
-      expect(get).toContain('if (!key) return [];');
-      const update = bg.slice(bg.indexOf('async function updateTrustedSites'), bg.indexOf('async function addTrustedSite'));
-      expect(update).toContain('signTrustedSites(');
+      expect(bg).not.toMatch(/storage\.local\.set\(\{\s*(trustedSites|revokedOrigins)/);
+      const get = bg.slice(bg.indexOf('async function getTrustState'), bg.indexOf('async function updateTrustState'));
+      expect(get).toContain('readTrustState(');
+      expect(get).toContain('if (!key) return emptyTrustState();');
+      // A refused state is dropped whole: fail closed.
+      expect(get).toContain('if (!read.intact) await browser.storage.local.set(await droppedTrustState(key));');
+      const update = bg.slice(bg.indexOf('async function updateTrustState'), bg.indexOf('async function addTrustedSite'));
+      expect(update).toContain('signTrustState(');
+      expect(update).toContain('read.intact ? { sites: read.sites, revoked: read.revoked } : emptyTrustState()');
       // Removing a trusted site re-signs the list, so it needs the unlocked wallet.
       const remove = bg.slice(bg.indexOf("case 'removeTrustedSite'"), bg.indexOf("case 'addTrustedSite'"));
       expect(remove).toContain("if (!masterPassword) return { error: 'Wallet is locked' };");
+    });
+
+    it('decides silent trust from the verified state, revocations included', () => {
+      // No revocation list restored from unverified storage at start-up.
+      expect(bg).not.toContain('restoreRevokedOrigins');
+      expect(bg).not.toMatch(/revokedOrigins\.(has|add|delete)\(/);
+      expect(bg.match(/silentTrustFor\(trust, /g)).toHaveLength(2);
+      expect(bg.match(/const trust = await getTrustState\(\);|getTrustState\(\)\.then\(\(trust\) =>/g)).toHaveLength(2);
+      // A revocation is recorded before the app is told its session is gone.
+      const revoke = bg.slice(bg.indexOf("case 'revokeSession'"), bg.indexOf("case 'checkBridge'"));
+      expect(revoke.indexOf('await recordRevocation(s.appOrigin)')).toBeGreaterThan(-1);
+      expect(revoke.indexOf('await recordRevocation(s.appOrigin)')).toBeLessThan(revoke.indexOf('broadcastRevocation(s)'));
     });
 
     it('clears authorizedBridgeSessionKey on session revocation', () => {

@@ -7,7 +7,6 @@ import {
   type SessionSwap,
   type RequestLogEntry,
   type PendingApproval,
-  type TrustedSite,
   type TokenAllowance,
   type ConnectRequest,
   type ConnectResponse,
@@ -53,7 +52,16 @@ import {
 import type { Runtime } from 'wxt/browser';
 import { exportVaultFile, importVaultFile } from '../lib/vault-file';
 import { openCredentialSecret, upgradeWallet } from '../lib/wallet-upgrade';
-import { TRUSTED_SITES_KEY, TRUSTED_SITES_MAC_KEY, readTrustedSites, signTrustedSites } from '../lib/trusted-sites';
+import {
+  REVOKED_ORIGINS_KEY,
+  TRUST_STATE_KEYS,
+  droppedTrustState,
+  emptyTrustState,
+  readTrustState,
+  signTrustState,
+  silentTrustFor,
+  type TrustState,
+} from '../lib/trust-state';
 
 declare const chrome: {
   sidePanel?: {
@@ -241,28 +249,6 @@ export default defineBackground(() => {
     } catch {}
   }
 
-  // Origins whose session the user revoked. Their next connect needs a
-  // manual approval even if the site is trusted, or the SDK's automatic
-  // reconnect would silently undo the revocation. Cleared when the user
-  // approves the site again.
-  const revokedOrigins = new Set<string>();
-
-  async function persistRevokedOrigins() {
-    try {
-      await browser.storage.local.set({ revokedOrigins: [...revokedOrigins] });
-    } catch {}
-  }
-
-  async function restoreRevokedOrigins() {
-    try {
-      const data = await browser.storage.local.get('revokedOrigins');
-      if (Array.isArray(data.revokedOrigins)) {
-        for (const origin of data.revokedOrigins) {
-          if (typeof origin === 'string') revokedOrigins.add(origin);
-        }
-      }
-    } catch {}
-  }
 
   async function clearPersistedSessions() {
     if (!hasSessionStorage) return;
@@ -408,7 +394,7 @@ export default defineBackground(() => {
   // CLI tools (Hermes, Claude Code) can hit :19280 without waiting for the
   // user to re-run `byoky-bridge connect`.
   const sessionRestored = restoreSession();
-  const sessionsRestored = Promise.all([sessionRestored, restoreSessions(), restoreRevokedOrigins()])
+  const sessionsRestored = Promise.all([sessionRestored, restoreSessions()])
     // restoreSession drops the password when the wallet idled out while the
     // worker was stopped; the app sessions loaded alongside go with it.
     .then(() => { if (!masterPassword) sessions.clear(); })
@@ -1144,15 +1130,15 @@ export default defineBackground(() => {
 
       // If already unlocked, check trusted sites and either auto-approve or notify for approval
       if (masterPassword) {
-        getTrustedSites().then((trustedSites) => {
+        getTrustState().then((trust) => {
           const entry = pendingApprovals.get(approval.id);
           if (!entry) return;
-          const trustedSite = trustedSites.find((s) => s.origin === origin);
-          if (trustedSite && trustedSite.allowedProviders?.length && !revokedOrigins.has(origin)) {
+          const trustedSite = silentTrustFor(trust, origin);
+          if (trustedSite) {
             // Scope to the providers the user originally approved for this trusted site
             const scopedProviders = scopeProvidersForTrust(
               message.payload.providers,
-              trustedSite.allowedProviders,
+              trustedSite.allowedProviders ?? [],
             );
             if (scopedProviders) {
               pendingApprovals.delete(approval.id);
@@ -1586,8 +1572,9 @@ export default defineBackground(() => {
               authorizedBridgePort = null;
               persistAuthorizedBridgeSessionKey();
             }
-            revokedOrigins.add(s.appOrigin);
-            persistRevokedOrigins();
+            // Recorded before the app hears of it, so its reconnect is already
+            // held for approval.
+            await recordRevocation(s.appOrigin);
             broadcastRevocation(s);
             break;
           }
@@ -1636,16 +1623,17 @@ export default defineBackground(() => {
         if (!pending) return { success: false, error: 'Approval not found' };
 
         pendingApprovals.delete(approvalId);
-        if (revokedOrigins.delete(pending.approval.appOrigin)) persistRevokedOrigins();
 
         // Resolve which providers are being approved
         const approvedProviderIds = pending.approval.providers.length > 0
           ? pending.approval.providers.map((p) => p.id)
           : (await getStoredCredentials()).map((c) => c.providerId);
 
+        // Approving clears a revocation. If the trust state can't be signed
+        // (the wallet upgrade failed), the connection still goes ahead; the
+        // site just asks again next time.
+        await clearRevocation(pending.approval.appOrigin).catch(() => {});
         if (trust) {
-          // If the trust can't be signed (the wallet upgrade failed), the
-          // connection still goes ahead; the site just asks again next time.
           await addTrustedSite(pending.approval.appOrigin, approvedProviderIds).catch(() => {});
         }
 
@@ -1675,7 +1663,7 @@ export default defineBackground(() => {
       }
 
       case 'getTrustedSites':
-        return { sites: await getTrustedSites() };
+        return { sites: (await getTrustState()).sites };
 
       case 'removeTrustedSite': {
         // The list is re-signed, which needs the unlocked wallet.
@@ -3091,14 +3079,14 @@ export default defineBackground(() => {
   async function processPendingAfterUnlock() {
     if (pendingApprovals.size === 0) return;
 
-    const trustedSites = await getTrustedSites();
+    const trust = await getTrustState();
 
     for (const [id, entry] of pendingApprovals) {
-      const trustedSite = trustedSites.find((s) => s.origin === entry.approval.appOrigin);
-      if (trustedSite && trustedSite.allowedProviders?.length && !revokedOrigins.has(entry.approval.appOrigin)) {
+      const trustedSite = silentTrustFor(trust, entry.approval.appOrigin);
+      if (trustedSite) {
         const scopedProviders = scopeProvidersForTrust(
           entry.approval.providers,
-          trustedSite.allowedProviders,
+          trustedSite.allowedProviders ?? [],
         );
         if (scopedProviders) {
           pendingApprovals.delete(id);
@@ -3240,53 +3228,79 @@ export default defineBackground(() => {
     walletUpgradePromise = null;
   }
 
-  // --- Trusted sites (integrity: lib/trusted-sites.ts) ---
+  // --- Trust state: trusted sites and revoked origins (lib/trust-state.ts) ---
 
   /**
-   * The trusted sites, verified against their MAC; empty while locked. A
-   * list that fails verification is dropped from storage: its sites need a
-   * manual approval again.
+   * The trusted sites and revoked origins, verified against their MAC;
+   * empty while locked. A state that fails verification is dropped from
+   * storage whole, which fails closed: no site keeps its trust.
    */
-  async function getTrustedSites(): Promise<TrustedSite[]> {
+  async function getTrustState(): Promise<TrustState> {
     const key = await walletMacKey();
-    if (!key) return [];
+    if (!key) return emptyTrustState();
     return serializedStorage(async () => {
-      const stored = await browser.storage.local.get([TRUSTED_SITES_KEY, TRUSTED_SITES_MAC_KEY]);
-      const { sites, intact } = await readTrustedSites(stored, key);
-      if (!intact) await browser.storage.local.set(await signTrustedSites([], key));
+      const read = await readTrustState(await browser.storage.local.get(TRUST_STATE_KEYS), key);
+      if (!read.intact) await browser.storage.local.set(await droppedTrustState(key));
       // Locked while this ran: trust nothing.
-      return masterPassword ? sites : [];
+      return masterPassword ? { sites: read.sites, revoked: read.revoked } : emptyTrustState();
     });
   }
 
-  /** Change the trusted sites and re-sign them. Throws while locked. */
-  async function updateTrustedSites(update: (sites: TrustedSite[]) => TrustedSite[]) {
+  /** Change the trust state and re-sign it. Throws while locked. */
+  async function updateTrustState(update: (state: TrustState) => TrustState) {
     const key = await walletMacKey();
     if (!key) throw new Error('Wallet is locked');
     await serializedStorage(async () => {
-      const stored = await browser.storage.local.get([TRUSTED_SITES_KEY, TRUSTED_SITES_MAC_KEY]);
-      // A list that fails verification is started over, not built on.
-      const { sites } = await readTrustedSites(stored, key);
-      await browser.storage.local.set(await signTrustedSites(update(sites), key));
+      const read = await readTrustState(await browser.storage.local.get(TRUST_STATE_KEYS), key);
+      // A state that fails verification is dropped and started over, not
+      // built on.
+      const base = read.intact ? { sites: read.sites, revoked: read.revoked } : emptyTrustState();
+      const next = update(base);
+      if (read.intact && next === base) return;
+      await browser.storage.local.set(await signTrustState(next, key));
     });
   }
 
   async function addTrustedSite(origin: string, allowedProviders: string[]) {
-    await updateTrustedSites((sites) => {
-      const existing = sites.find((s) => s.origin === origin);
-      if (existing) {
-        // Merge new providers into existing trust entry
-        const merged = new Set([...(existing.allowedProviders ?? []), ...allowedProviders]);
-        existing.allowedProviders = [...merged];
-      } else {
-        sites.push({ origin, trustedAt: Date.now(), allowedProviders });
-      }
-      return sites;
+    await updateTrustState((state) => {
+      const existing = state.sites.find((s) => s.origin === origin);
+      if (!existing) return { ...state, sites: [...state.sites, { origin, trustedAt: Date.now(), allowedProviders }] };
+      // Merge new providers into existing trust entry
+      const merged = [...new Set([...(existing.allowedProviders ?? []), ...allowedProviders])];
+      return { ...state, sites: state.sites.map((s) => (s === existing ? { ...s, allowedProviders: merged } : s)) };
     });
   }
 
   async function removeTrustedSite(origin: string) {
-    await updateTrustedSites((sites) => sites.filter((s) => s.origin !== origin));
+    await updateTrustState((state) => ({ ...state, sites: state.sites.filter((s) => s.origin !== origin) }));
+  }
+
+  /**
+   * Hold the origin's next connect for a manual approval even if the site
+   * is trusted, or the SDK's automatic reconnect would silently undo the
+   * revocation. Cleared when the user approves the site again.
+   */
+  async function recordRevocation(origin: string) {
+    try {
+      await updateTrustState((state) => (
+        state.revoked.includes(origin) ? state : { ...state, revoked: [...state.revoked, origin] }
+      ));
+    } catch {
+      // No wallet key: the wallet is still at format 1 because its upgrade
+      // failed, and nothing is trusted until it succeeds. Keep the
+      // revocation the pre-1.1.2 way, unsigned, for the upgrade to sign in.
+      await serializedStorage(async () => {
+        const data = await browser.storage.local.get(REVOKED_ORIGINS_KEY);
+        const revoked = Array.isArray(data[REVOKED_ORIGINS_KEY]) ? (data[REVOKED_ORIGINS_KEY] as unknown[]) : [];
+        if (!revoked.includes(origin)) await browser.storage.local.set({ [REVOKED_ORIGINS_KEY]: [...revoked, origin] });
+      }).catch(() => {});
+    }
+  }
+
+  async function clearRevocation(origin: string) {
+    await updateTrustState((state) => (
+      state.revoked.includes(origin) ? { ...state, revoked: state.revoked.filter((o) => o !== origin) } : state
+    ));
   }
 
   // --- Token allowances ---
