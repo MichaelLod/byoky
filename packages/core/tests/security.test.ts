@@ -255,7 +255,7 @@ describe('security invariants', () => {
       const get = bg.slice(bg.indexOf('async function getTrustState'), bg.indexOf('async function updateTrustState'));
       expect(get).toContain('readTrustState(');
       expect(get).toContain('if (!key) return emptyTrustState();');
-      // A refused state is dropped whole: fail closed.
+      // A refused state is dropped whole (fail closed) and the user told.
       expect(get).toContain('if (!read.intact) await browser.storage.local.set(await droppedTrustState(key));');
       const update = bg.slice(bg.indexOf('async function updateTrustState'), bg.indexOf('async function addTrustedSite'));
       expect(update).toContain('signTrustState(');

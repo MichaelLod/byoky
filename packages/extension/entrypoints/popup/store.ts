@@ -37,6 +37,8 @@ interface WalletState {
   groups: Group[];
   appGroups: AppGroups;
   showRetiredFeaturesNotice: boolean;
+  /** The trust state failed its integrity check and was reset (see TrustResetNotice). */
+  showTrustResetNotice: boolean;
   currentPage: Page;
   modal: 'add-credential' | null;
   loading: boolean;
@@ -46,6 +48,8 @@ interface WalletState {
   setup: (password: string) => Promise<void>;
   dismissRetiredFeaturesNotice: () => Promise<void>;
   markRetiredFeaturesNoticeSeen: () => Promise<void>;
+  dismissTrustResetNotice: () => Promise<void>;
+  markTrustResetNoticeSeen: () => Promise<void>;
   unlock: (password: string) => Promise<boolean>;
   lock: () => Promise<void>;
   syncLockState: () => Promise<boolean>;
@@ -105,6 +109,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   groups: [],
   appGroups: {},
   showRetiredFeaturesNotice: false,
+  showTrustResetNotice: false,
   currentPage: 'unlock',
   modal: null,
   loading: true,
@@ -160,6 +165,16 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   // so it shows once and doesn't return the next time the popup opens.
   markRetiredFeaturesNoticeSeen: async () => {
     await sendInternal('dismissRetiredFeaturesNotice');
+  },
+
+  dismissTrustResetNotice: async () => {
+    await sendInternal('dismissTrustResetNotice');
+    set({ showTrustResetNotice: false });
+  },
+
+  // Same as markRetiredFeaturesNoticeSeen: shown once, then only this session.
+  markTrustResetNoticeSeen: async () => {
+    await sendInternal('dismissTrustResetNotice');
   },
 
   unlock: async (password: string) => {
@@ -357,6 +372,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       groups: [],
       appGroups: {},
       showRetiredFeaturesNotice: false,
+      showTrustResetNotice: false,
       currentPage: 'setup',
       modal: null,
       error: null,
@@ -392,6 +408,10 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       requestLog: (logResult.log ?? []) as RequestLogEntry[],
       pendingApprovals: (approvalResult.approvals ?? []) as PendingApproval[],
       trustedSites: (trustedResult.sites ?? []) as TrustedSite[],
+      // The flag is raised when the background drops the trust state, which
+      // checking it for this very call may have done. Once seen, it is
+      // cleared in storage, so later refreshes leave the notice as it is.
+      showTrustResetNotice: get().showTrustResetNotice || trustedResult.trustReset === true,
       tokenAllowances: (allowanceResult.allowances ?? []) as TokenAllowance[],
       tokenUsage: (allowanceResult.usage ?? {}) as Record<string, Record<string, number>>,
       groups: (groupsResult.groups ?? []) as Group[],

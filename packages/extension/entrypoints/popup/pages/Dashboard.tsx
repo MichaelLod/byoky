@@ -6,6 +6,7 @@ import {
   type CredentialMeta,
 } from '@byoky/core';
 import { RetiredFeaturesNotice } from '../components/RetiredFeaturesNotice';
+import { TrustResetNotice } from '../components/TrustResetNotice';
 import { ProviderIcon } from '../components/ProviderIcon';
 
 function formatTokens(n: number): string {
@@ -53,6 +54,7 @@ export function Dashboard() {
 
   return (
     <div>
+      <TrustResetNotice />
       <RetiredFeaturesNotice />
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <h2 className="page-title" style={{ marginBottom: 0 }}>Credentials</h2>

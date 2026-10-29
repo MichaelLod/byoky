@@ -15,7 +15,8 @@ import { signMac, verifyMac, type TrustedSite } from '@byoky/core';
  *   - While locked nothing is trusted. Connect requests queue for approval
  *     as before, and on unlock are checked against the verified state.
  *   - A state that fails verification (either list edited, deleted or
- *     malformed, or unsigned on an upgraded wallet) is dropped whole. That
+ *     malformed, or unsigned on an upgraded wallet) is dropped whole and
+ *     TRUST_RESET_NOTICE_KEY is raised, so the popup can say why. Dropping
  *     fails closed: with the revocations unknown, no site keeps its trust,
  *     so a deleted revocation can't let a trusted site reconnect silently.
  *     The sites need a manual approval again, as revoked ones do.
@@ -29,6 +30,8 @@ import { signMac, verifyMac, type TrustedSite } from '@byoky/core';
 export const TRUSTED_SITES_KEY = 'trustedSites';
 export const REVOKED_ORIGINS_KEY = 'revokedOrigins';
 export const TRUST_MAC_KEY = 'trustMac';
+/** Set when a dropped trust state should be explained to the user. Just a flag. */
+export const TRUST_RESET_NOTICE_KEY = 'trustResetNotice';
 export const TRUST_STATE_KEYS = [TRUSTED_SITES_KEY, REVOKED_ORIGINS_KEY, TRUST_MAC_KEY];
 
 export interface TrustState {
@@ -98,9 +101,9 @@ export async function signTrustState(state: TrustState, key: CryptoKey): Promise
   };
 }
 
-/** The storage write that drops a refused state: both lists emptied. */
+/** The storage write that drops a refused state: both lists emptied, notice raised. */
 export async function droppedTrustState(key: CryptoKey): Promise<Record<string, unknown>> {
-  return signTrustState(emptyTrustState(), key);
+  return { ...(await signTrustState(emptyTrustState(), key)), [TRUST_RESET_NOTICE_KEY]: true };
 }
 
 /** Verify the stored state (the storage entries above) against `key`. */
@@ -119,10 +122,12 @@ export async function readTrustState(stored: Record<string, unknown>, key: Crypt
  * The pre-1.1.2 unsigned lists, as the wallet upgrade signs them in. A
  * malformed trusted list is dropped; so is the trusted list when the
  * revocations are malformed, since the revoked sites are unknown then.
+ * `dropped` says whether any trust was lost that way.
  */
-export function adoptLegacyTrustState(stored: Record<string, unknown>): TrustState {
+export function adoptLegacyTrustState(stored: Record<string, unknown>): { state: TrustState; dropped: boolean } {
   const sites = parseTrustedSites(stored[TRUSTED_SITES_KEY]);
   const revoked = parseRevokedOrigins(stored[REVOKED_ORIGINS_KEY]);
-  if (!sites || !revoked) return emptyTrustState();
-  return { sites, revoked };
+  if (!sites) return { state: emptyTrustState(), dropped: true };
+  if (!revoked) return { state: emptyTrustState(), dropped: sites.length > 0 };
+  return { state: { sites, revoked }, dropped: false };
 }

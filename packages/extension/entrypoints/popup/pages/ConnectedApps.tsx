@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useWalletStore } from '../store';
+import { TrustResetNotice } from '../components/TrustResetNotice';
 import {
   PROVIDERS,
   type TokenAllowance, type Group, type Session, type CredentialMeta,
@@ -122,6 +123,7 @@ export function ConnectedApps() {
 
   return (
     <div>
+      <TrustResetNotice />
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <h2 className="page-title" style={{ marginBottom: 0 }}>Connected Apps</h2>
         {sessions.length > 1 && (

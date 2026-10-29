@@ -4,6 +4,7 @@ import {
   TRUSTED_SITES_KEY,
   REVOKED_ORIGINS_KEY,
   TRUST_MAC_KEY,
+  TRUST_RESET_NOTICE_KEY,
   adoptLegacyTrustState,
   droppedTrustState,
   parseRevokedOrigins,
@@ -139,8 +140,9 @@ describe('trust state integrity', () => {
     expect(await readTrustState(extra, key)).toEqual({ ...legacy, intact: true });
   });
 
-  it('drops a refused state with a signed empty one', async () => {
+  it('drops a refused state with a signed empty one and raises the notice flag', async () => {
     const dropped = await droppedTrustState(key);
+    expect(dropped[TRUST_RESET_NOTICE_KEY]).toBe(true);
     expect(await readTrustState(dropped, key)).toEqual({ sites: [], revoked: [], intact: true });
   });
 });
@@ -163,11 +165,16 @@ describe('trust state migration', () => {
   const legacy = { ...fixture.storage, [REVOKED_ORIGINS_KEY]: ['https://chat.example.com'] };
 
   it('adopts the 1.1.1 lists, dropping trust when either is malformed', () => {
-    expect(adoptLegacyTrustState(legacy)).toEqual({ sites: fixture.storage.trustedSites, revoked: ['https://chat.example.com'] });
-    expect(adoptLegacyTrustState({})).toEqual({ sites: [], revoked: [] });
-    expect(adoptLegacyTrustState({ ...legacy, [TRUSTED_SITES_KEY]: 'x' })).toEqual({ sites: [], revoked: [] });
+    expect(adoptLegacyTrustState(legacy)).toEqual({
+      state: { sites: fixture.storage.trustedSites, revoked: ['https://chat.example.com'] },
+      dropped: false,
+    });
+    expect(adoptLegacyTrustState({})).toEqual({ state: { sites: [], revoked: [] }, dropped: false });
+    expect(adoptLegacyTrustState({ ...legacy, [TRUSTED_SITES_KEY]: 'x' })).toEqual({ state: { sites: [], revoked: [] }, dropped: true });
     // Revocations unreadable: the revoked sites are unknown, so no site keeps its trust.
-    expect(adoptLegacyTrustState({ ...legacy, [REVOKED_ORIGINS_KEY]: {} })).toEqual({ sites: [], revoked: [] });
+    expect(adoptLegacyTrustState({ ...legacy, [REVOKED_ORIGINS_KEY]: {} })).toEqual({ state: { sites: [], revoked: [] }, dropped: true });
+    // Nothing was trusted, so nothing was lost.
+    expect(adoptLegacyTrustState({ [REVOKED_ORIGINS_KEY]: {} })).toEqual({ state: { sites: [], revoked: [] }, dropped: false });
   });
 
   it('signs both 1.1.1 lists on the first unlock, in the same write as the new hash', async () => {
@@ -182,12 +189,14 @@ describe('trust state migration', () => {
     const read = await readTrustState(storage.data, result!.macKey);
     expect(read).toEqual({ sites: fixture.storage.trustedSites, revoked: ['https://chat.example.com'], intact: true });
     expect(silentlyTrusted(read, 'https://chat.example.com')).toBe(false);
+    expect(storage.data[TRUST_RESET_NOTICE_KEY]).toBeUndefined();
   }, 60_000);
 
-  it('drops trust when the 1.1.1 revocations are malformed', async () => {
+  it('drops trust and raises the notice when the 1.1.1 revocations are malformed', async () => {
     const storage = memoryStorage({ ...legacy, [REVOKED_ORIGINS_KEY]: 'https://chat.example.com' });
     const result = await upgradeWallet(storage, fixture.PASSWORD);
     expect(await readTrustState(storage.data, result!.macKey)).toEqual({ sites: [], revoked: [], intact: true });
+    expect(storage.data[TRUST_RESET_NOTICE_KEY]).toBe(true);
   }, 60_000);
 
   it('never adopts an unsigned state after the upgrade, nor one with a revocation deleted', async () => {

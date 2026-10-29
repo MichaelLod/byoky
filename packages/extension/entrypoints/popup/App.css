@@ -1707,6 +1707,19 @@ code {
   line-height: 1.5;
 }
 
+/* A notice about something that went wrong, rather than news. */
+.notice.notice-warning {
+  border-color: var(--amber);
+}
+
+.notice-warning .notice-title {
+  color: var(--amber);
+}
+
+.notice-warning .notice-text:last-child {
+  margin-bottom: 0;
+}
+
 /* ─── Confirm dialog ─── */
 
 .dialog-backdrop {

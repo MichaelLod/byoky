@@ -188,6 +188,7 @@ describe('wallet upgrade from 1.1.1', () => {
     expect(result).toMatchObject({ rebound: 0, unreadable: 1 });
     expect((creds(storage)[0] as { encryptedKey: string }).encryptedKey).toBe(foreign);
     expect(storage.data.trustedSites).toEqual([]);
+    expect(storage.data.trustResetNotice).toBe(true);
   }, 60_000);
 
   it('refuses to bind under a wrong password and changes nothing', async () => {

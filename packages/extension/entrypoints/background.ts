@@ -54,6 +54,7 @@ import { exportVaultFile, importVaultFile } from '../lib/vault-file';
 import { openCredentialSecret, upgradeWallet } from '../lib/wallet-upgrade';
 import {
   REVOKED_ORIGINS_KEY,
+  TRUST_RESET_NOTICE_KEY,
   TRUST_STATE_KEYS,
   droppedTrustState,
   emptyTrustState,
@@ -1662,8 +1663,16 @@ export default defineBackground(() => {
         return { success: true };
       }
 
-      case 'getTrustedSites':
-        return { sites: (await getTrustState()).sites };
+      case 'getTrustedSites': {
+        // Read after the check, which is what may have raised the flag.
+        const sites = (await getTrustState()).sites;
+        const flag = await browser.storage.local.get(TRUST_RESET_NOTICE_KEY);
+        return { sites, trustReset: flag[TRUST_RESET_NOTICE_KEY] === true };
+      }
+
+      case 'dismissTrustResetNotice':
+        await browser.storage.local.remove(TRUST_RESET_NOTICE_KEY);
+        return { success: true };
 
       case 'removeTrustedSite': {
         // The list is re-signed, which needs the unlocked wallet.
@@ -3233,7 +3242,8 @@ export default defineBackground(() => {
   /**
    * The trusted sites and revoked origins, verified against their MAC;
    * empty while locked. A state that fails verification is dropped from
-   * storage whole, which fails closed: no site keeps its trust.
+   * storage whole, which fails closed: no site keeps its trust, and the
+   * popup is told why (TRUST_RESET_NOTICE_KEY).
    */
   async function getTrustState(): Promise<TrustState> {
     const key = await walletMacKey();
@@ -3257,7 +3267,10 @@ export default defineBackground(() => {
       const base = read.intact ? { sites: read.sites, revoked: read.revoked } : emptyTrustState();
       const next = update(base);
       if (read.intact && next === base) return;
-      await browser.storage.local.set(await signTrustState(next, key));
+      await browser.storage.local.set({
+        ...(await signTrustState(next, key)),
+        ...(read.intact ? {} : { [TRUST_RESET_NOTICE_KEY]: true }),
+      });
     });
   }
 

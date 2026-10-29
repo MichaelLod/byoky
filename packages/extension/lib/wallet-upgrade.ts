@@ -10,7 +10,7 @@ import {
   type Credential,
   type CredentialSecretField,
 } from '@byoky/core';
-import { TRUST_STATE_KEYS, adoptLegacyTrustState, signTrustState } from './trust-state';
+import { TRUST_RESET_NOTICE_KEY, TRUST_STATE_KEYS, adoptLegacyTrustState, signTrustState } from './trust-state';
 
 /**
  * Storage format since 1.1.2, and the one-time upgrade from earlier ones.
@@ -159,14 +159,19 @@ export async function upgradeWallet(
   }
 
   // 2. New password hash and the signed trust state, together. Malformed
-  // stored lists are dropped rather than signed (adoptLegacyTrustState).
+  // stored lists are dropped rather than signed (adoptLegacyTrustState),
+  // and the popup told why.
   const newHash = await hashPassword(password);
   const macKey = await deriveWalletMacKey(password, newHash);
   if (!macKey) throw new Error('Could not derive the wallet key');
   const wrote = await exclusive(async () => {
     if (!(await unchanged())) return false;
-    const state = adoptLegacyTrustState(await storage.get(TRUST_STATE_KEYS));
-    await storage.set({ passwordHash: newHash, ...(await signTrustState(state, macKey)) });
+    const { state, dropped } = adoptLegacyTrustState(await storage.get(TRUST_STATE_KEYS));
+    await storage.set({
+      passwordHash: newHash,
+      ...(await signTrustState(state, macKey)),
+      ...(dropped ? { [TRUST_RESET_NOTICE_KEY]: true } : {}),
+    });
     return true;
   });
   return wrote ? { macKey, rebound: count, unreadable } : null;
