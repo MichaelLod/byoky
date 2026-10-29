@@ -235,6 +235,33 @@ describe('security invariants', () => {
       expect(fn).toContain('Failed to decrypt credential');
     });
 
+    it('binds stored credential secrets to their record', () => {
+      // Secrets are only read through openCredentialSecret, which checks the
+      // record binding, and unbound ones only before the 1.1.2 upgrade.
+      expect(bg).not.toMatch(/\bdecrypt\(/);
+      const fn = bg.slice(bg.indexOf('async function decryptCredentialKey'), bg.indexOf('async function logRequest'));
+      expect(fn).toContain('openCredentialSecret(');
+      expect(fn).toContain('isLegacyPasswordHash(passwordHash)');
+      // New keys are sealed with the record as additional authenticated data.
+      const add = bg.slice(bg.indexOf("case 'addCredential'"), bg.indexOf("case 'renameCredential'"));
+      expect(add).toContain('credentialAad(');
+      expect(add).not.toMatch(/encrypt\(cleanValue, masterPassword\)/);
+    });
+
+    it('only honors and writes a signed trusted-sites list', () => {
+      // Reads go through the MAC check; writes are re-signed.
+      expect(bg).not.toMatch(/as TrustedSite\[\]/);
+      expect(bg).not.toMatch(/storage\.local\.set\(\{\s*trustedSites/);
+      const get = bg.slice(bg.indexOf('async function getTrustedSites'), bg.indexOf('async function updateTrustedSites'));
+      expect(get).toContain('readTrustedSites(stored, key)');
+      expect(get).toContain('if (!key) return [];');
+      const update = bg.slice(bg.indexOf('async function updateTrustedSites'), bg.indexOf('async function addTrustedSite'));
+      expect(update).toContain('signTrustedSites(');
+      // Removing a trusted site re-signs the list, so it needs the unlocked wallet.
+      const remove = bg.slice(bg.indexOf("case 'removeTrustedSite'"), bg.indexOf("case 'addTrustedSite'"));
+      expect(remove).toContain("if (!masterPassword) return { error: 'Wallet is locked' };");
+    });
+
     it('clears authorizedBridgeSessionKey on session revocation', () => {
       const revokeSection = bg.slice(bg.indexOf("case 'revokeSession'"), bg.indexOf("case 'checkBridge'"));
       expect(revokeSection).toContain('authorizedBridgeSessionKey');

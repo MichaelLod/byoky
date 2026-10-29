@@ -20,9 +20,11 @@ import {
   type TranslationContext,
   type ModelFamily,
   DEFAULT_GROUP_ID,
-  decrypt,
   encrypt,
+  credentialAad,
   verifyPassword,
+  isLegacyPasswordHash,
+  deriveWalletMacKey,
   PROVIDERS,
   buildHeaders,
   parseModel,
@@ -50,6 +52,8 @@ import {
 } from '@byoky/core';
 import type { Runtime } from 'wxt/browser';
 import { exportVaultFile, importVaultFile } from '../lib/vault-file';
+import { openCredentialSecret, upgradeWallet } from '../lib/wallet-upgrade';
+import { TRUSTED_SITES_KEY, TRUSTED_SITES_MAC_KEY, readTrustedSites, signTrustedSites } from '../lib/trusted-sites';
 
 declare const chrome: {
   sidePanel?: {
@@ -132,6 +136,11 @@ export default defineBackground(() => {
     [Symbol.iterator]() { return _pendingMap[Symbol.iterator](); },
   };
   let masterPassword: string | null = null;
+  // The wallet MAC key, which signs the trusted-sites list, and the one-time
+  // upgrade of a pre-1.1.2 wallet. Both hang off the master password and are
+  // forgotten with it; see walletMacKey and ensureWalletUpgraded.
+  let walletMacKeyPromise: Promise<CryptoKey | null> | null = null;
+  let walletUpgradePromise: Promise<CryptoKey | null> | null = null;
   let unlockFailures = 0;
   let unlockLockedUntil = 0;
 
@@ -351,6 +360,7 @@ export default defineBackground(() => {
   function autoLock() {
     if (!masterPassword) return;
     masterPassword = null;
+    forgetWalletKeys();
     sessions.clear();
     clearPersistedSessions();
     authorizedBridgeSessionKey = null;
@@ -1394,13 +1404,22 @@ export default defineBackground(() => {
         const { password } = message.payload as { password: string };
         const data = await browser.storage.local.get('passwordHash');
         if (!data.passwordHash) return { success: false };
-        const valid = await verifyPassword(password, data.passwordHash as string);
+        const storedHash = data.passwordHash as string;
+        // A format-2 hash yields the wallet MAC key from the same PBKDF2 run
+        // that checks the password. A format-1 hash is a wallet from before
+        // 1.1.2, which the upgrade started below converts.
+        const legacyHash = isLegacyPasswordHash(storedHash);
+        const macKey = legacyHash ? null : await deriveWalletMacKey(password, storedHash);
+        const valid = legacyHash ? await verifyPassword(password, storedHash) : macKey !== null;
         if (valid) {
           masterPassword = password;
+          forgetWalletKeys();
+          if (macKey) walletMacKeyPromise = Promise.resolve(macKey);
           clearPasswordFailures();
           lastActivityPersistedAt = 0;
           persistSession();
           resetIdleTimer();
+          ensureWalletUpgraded().catch(() => {});
           processPendingAfterUnlock();
         } else {
           recordPasswordFailure();
@@ -1410,6 +1429,7 @@ export default defineBackground(() => {
 
       case 'lock':
         masterPassword = null;
+        forgetWalletKeys();
         sessions.clear();
         clearPersistedSessions();
         authorizedBridgeSessionKey = null;
@@ -1449,11 +1469,6 @@ export default defineBackground(() => {
           storedBaseUrl = resolved;
         }
         const cleanValue = cValue.replace(/\s+/g, '');
-        // Local providers run unauthenticated — empty key is allowed and we skip
-        // the encryption step entirely, storing an empty string as the marker.
-        const encValue = cleanValue ? await encrypt(cleanValue, masterPassword) : '';
-        const data = await browser.storage.local.get('credentials');
-        const creds = (data.credentials ?? []) as Array<Record<string, unknown>>;
         const newCred: Record<string, unknown> = {
           id: crypto.randomUUID(),
           providerId: cpId,
@@ -1462,13 +1477,21 @@ export default defineBackground(() => {
           createdAt: Date.now(),
         };
         if (storedBaseUrl) newCred.baseUrl = storedBaseUrl;
-        if (cAuth === 'api_key') {
-          newCred.encryptedKey = encValue;
-        } else {
-          newCred.encryptedAccessToken = encValue;
-        }
-        creds.push(newCred);
-        await browser.storage.local.set({ credentials: creds });
+        const secretField = cAuth === 'api_key' ? 'encryptedKey' : 'encryptedAccessToken';
+        // Local providers run unauthenticated — empty key is allowed and we skip
+        // the encryption step entirely, storing an empty string as the marker.
+        // A key is bound to this record (id, provider, base URL), so it can't
+        // be moved into another one.
+        newCred[secretField] = cleanValue
+          ? await encrypt(cleanValue, masterPassword, credentialAad({ id: newCred.id as string, providerId: cpId, baseUrl: storedBaseUrl }, secretField))
+          : '';
+        // Credential writes are serialized with the wallet upgrade's.
+        await serializedStorage(async () => {
+          const data = await browser.storage.local.get('credentials');
+          const creds = (data.credentials ?? []) as Array<Record<string, unknown>>;
+          creds.push(newCred);
+          await browser.storage.local.set({ credentials: creds });
+        });
 
         refreshSessionProviders();
         return { success: true };
@@ -1478,21 +1501,25 @@ export default defineBackground(() => {
         const { id: rnId, label: rnLabel } = message.payload as { id: string; label: string };
         const newLabel = rnLabel.trim();
         if (!newLabel) return { error: 'Label cannot be empty' };
-        const rnData = await browser.storage.local.get('credentials');
-        const rnCreds = (rnData.credentials ?? []) as Array<Record<string, unknown>>;
-        const rnIdx = rnCreds.findIndex((c) => c.id === rnId);
-        if (rnIdx < 0) return { error: 'Credential not found' };
-        rnCreds[rnIdx] = { ...rnCreds[rnIdx], label: newLabel };
-        await browser.storage.local.set({ credentials: rnCreds });
-        return { success: true };
+        return serializedStorage(async () => {
+          const rnData = await browser.storage.local.get('credentials');
+          const rnCreds = (rnData.credentials ?? []) as Array<Record<string, unknown>>;
+          const rnIdx = rnCreds.findIndex((c) => c.id === rnId);
+          if (rnIdx < 0) return { error: 'Credential not found' };
+          rnCreds[rnIdx] = { ...rnCreds[rnIdx], label: newLabel };
+          await browser.storage.local.set({ credentials: rnCreds });
+          return { success: true };
+        });
       }
 
       case 'removeCredential': {
         const { id: rmId } = message.payload as { id: string };
-        const rmData = await browser.storage.local.get('credentials');
-        const rmCreds = (rmData.credentials ?? []) as Array<{ id: string }>;
-        await browser.storage.local.set({
-          credentials: rmCreds.filter((c) => c.id !== rmId),
+        await serializedStorage(async () => {
+          const rmData = await browser.storage.local.get('credentials');
+          const rmCreds = (rmData.credentials ?? []) as Array<{ id: string }>;
+          await browser.storage.local.set({
+            credentials: rmCreds.filter((c) => c.id !== rmId),
+          });
         });
         // Clear any group pin pointing at the removed credential
         const groups = await getGroups();
@@ -1514,12 +1541,14 @@ export default defineBackground(() => {
           return { error: 'Wallet already initialized' };
         }
         const { passwordHash: setupHash } = message.payload as { passwordHash: string };
+        forgetWalletKeys();
         await browser.storage.local.set({ passwordHash: setupHash, credentials: [] });
         return { success: true };
       }
 
       case 'resetWallet': {
         masterPassword = null;
+        forgetWalletKeys();
         sessions.clear();
         clearPersistedSessions();
         authorizedBridgeSessionKey = null;
@@ -1528,7 +1557,8 @@ export default defineBackground(() => {
         clearSessionStorage();
         if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
         clearPasswordFailures();
-        await browser.storage.local.clear();
+        // After any in-flight upgrade write, which then finds the wallet gone.
+        await serializedStorage(() => browser.storage.local.clear());
         return { success: true };
       }
 
@@ -1600,6 +1630,8 @@ export default defineBackground(() => {
           approvalId: string;
           trust: boolean;
         };
+        // Approvals wait out a locked wallet; trusting a site needs the key.
+        if (!masterPassword) return { success: false, error: 'Wallet is locked' };
         const pending = pendingApprovals.get(approvalId);
         if (!pending) return { success: false, error: 'Approval not found' };
 
@@ -1612,7 +1644,9 @@ export default defineBackground(() => {
           : (await getStoredCredentials()).map((c) => c.providerId);
 
         if (trust) {
-          await addTrustedSite(pending.approval.appOrigin, approvedProviderIds);
+          // If the trust can't be signed (the wallet upgrade failed), the
+          // connection still goes ahead; the site just asks again next time.
+          await addTrustedSite(pending.approval.appOrigin, approvedProviderIds).catch(() => {});
         }
 
         const response = await createSession(
@@ -1644,6 +1678,8 @@ export default defineBackground(() => {
         return { sites: await getTrustedSites() };
 
       case 'removeTrustedSite': {
+        // The list is re-signed, which needs the unlocked wallet.
+        if (!masterPassword) return { error: 'Wallet is locked' };
         const { origin } = message.payload as { origin: string };
         await removeTrustedSite(origin);
         return { success: true };
@@ -1675,6 +1711,8 @@ export default defineBackground(() => {
           return { error: 'Incorrect wallet password' };
         }
         clearPasswordFailures();
+        // Stored secrets are read bound to their record (lib/wallet-upgrade.ts).
+        if (!(await walletUpgraded())) return { error: WALLET_UPGRADE_FAILED };
         const encryptedVault = await exportVaultFile(await getStoredCredentials(), masterPassword, exportPassword);
         return { encryptedVault };
       }
@@ -1684,13 +1722,16 @@ export default defineBackground(() => {
         const { encryptedVault: impVault, importPassword: impPw } = message.payload as {
           encryptedVault: string; importPassword: string;
         };
+        if (!(await walletUpgraded())) return { error: WALLET_UPGRADE_FAILED };
         // Merge, never replace: existing credentials (and the group pins that
         // reference them) stay untouched; duplicates of them are skipped.
         const result = await importVaultFile(impVault, impPw, await getStoredCredentials(), masterPassword);
         if (!result.ok) return { error: result.error };
         if (result.added.length > 0) {
-          const latest = await getStoredCredentials();
-          await browser.storage.local.set({ credentials: [...latest, ...result.added] });
+          await serializedStorage(async () => {
+            const latest = await getStoredCredentials();
+            await browser.storage.local.set({ credentials: [...latest, ...result.added] });
+          });
           refreshSessionProviders();
         }
         return { success: true, count: result.added.length, skipped: result.skipped, rejected: result.rejected };
@@ -2756,7 +2797,8 @@ export default defineBackground(() => {
   async function decryptCredentialKey(
     credential: Credential,
   ): Promise<string> {
-    if (!masterPassword) throw new Error('Wallet is locked');
+    const password = masterPassword;
+    if (!password) throw new Error('Wallet is locked');
 
     // Local providers (Ollama, LM Studio) may be stored with an empty key
     // when the user didn't set auth on their local server. No ciphertext,
@@ -2766,10 +2808,16 @@ export default defineBackground(() => {
     }
 
     try {
+      // A secret only decrypts for the record it was bound to. Unbound ones
+      // predate 1.1.2 and are accepted only until the wallet upgrade has
+      // rebound them (lib/wallet-upgrade.ts): after that, a blob moved into
+      // another record is refused rather than sent to that record's host.
+      const { passwordHash } = await browser.storage.local.get('passwordHash');
+      const allowUnbound = typeof passwordHash === 'string' && isLegacyPasswordHash(passwordHash);
       if (credential.authMethod === 'api_key') {
-        return await decrypt(credential.encryptedKey, masterPassword);
+        return await openCredentialSecret(credential, 'encryptedKey', credential.encryptedKey, password, allowUnbound);
       }
-      return await decrypt(credential.encryptedAccessToken, masterPassword);
+      return await openCredentialSecret(credential, 'encryptedAccessToken', credential.encryptedAccessToken, password, allowUnbound);
     } catch {
       throw new Error('Failed to decrypt credential');
     }
@@ -3131,29 +3179,114 @@ export default defineBackground(() => {
     }
   }
 
+  // --- Wallet keys and the pre-1.1.2 upgrade ---
+
+  const WALLET_UPGRADE_FAILED = 'Could not upgrade the wallet. Lock and unlock it, then try again';
+
+  /**
+   * Run the one-time upgrade of a wallet written before 1.1.2
+   * (lib/wallet-upgrade.ts), at most once per unlock. Resolves to the wallet
+   * MAC key under the new password hash, or null when there was nothing to
+   * upgrade or the wallet is locked. A failed upgrade rejects, and the next
+   * call tries again.
+   */
+  function ensureWalletUpgraded(): Promise<CryptoKey | null> {
+    const password = masterPassword;
+    if (!password) return Promise.resolve(null);
+    if (!walletUpgradePromise) {
+      const pending = upgradeWallet(browser.storage.local, password, { exclusive: serializedStorage })
+        .then((result) => result?.macKey ?? null);
+      walletUpgradePromise = pending;
+      pending.catch(() => { if (walletUpgradePromise === pending) walletUpgradePromise = null; });
+    }
+    return walletUpgradePromise;
+  }
+
+  /** Whether the wallet is at the 1.1.2 format, upgrading it if needed. */
+  async function walletUpgraded(): Promise<boolean> {
+    try {
+      await ensureWalletUpgraded();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * The wallet MAC key, which signs the trusted-sites list. It is derived
+   * from the master password, so it's null while the wallet is locked (and
+   * while a failed upgrade leaves it at format 1): nothing is trusted then.
+   */
+  function walletMacKey(): Promise<CryptoKey | null> {
+    const password = masterPassword;
+    if (!password) return Promise.resolve(null);
+    if (!walletMacKeyPromise) {
+      const pending = ensureWalletUpgraded()
+        .then(async (upgradedKey) => {
+          if (upgradedKey) return upgradedKey;
+          const { passwordHash } = await browser.storage.local.get('passwordHash');
+          return typeof passwordHash === 'string' ? deriveWalletMacKey(password, passwordHash) : null;
+        })
+        .catch(() => null);
+      walletMacKeyPromise = pending;
+      // A missing key isn't cached, so a retried upgrade can still supply it.
+      pending.then((key) => { if (!key && walletMacKeyPromise === pending) walletMacKeyPromise = null; });
+    }
+    return walletMacKeyPromise;
+  }
+
+  function forgetWalletKeys() {
+    walletMacKeyPromise = null;
+    walletUpgradePromise = null;
+  }
+
+  // --- Trusted sites (integrity: lib/trusted-sites.ts) ---
+
+  /**
+   * The trusted sites, verified against their MAC; empty while locked. A
+   * list that fails verification is dropped from storage: its sites need a
+   * manual approval again.
+   */
   async function getTrustedSites(): Promise<TrustedSite[]> {
-    const data = await browser.storage.local.get('trustedSites');
-    return (data.trustedSites as TrustedSite[]) ?? [];
+    const key = await walletMacKey();
+    if (!key) return [];
+    return serializedStorage(async () => {
+      const stored = await browser.storage.local.get([TRUSTED_SITES_KEY, TRUSTED_SITES_MAC_KEY]);
+      const { sites, intact } = await readTrustedSites(stored, key);
+      if (!intact) await browser.storage.local.set(await signTrustedSites([], key));
+      // Locked while this ran: trust nothing.
+      return masterPassword ? sites : [];
+    });
+  }
+
+  /** Change the trusted sites and re-sign them. Throws while locked. */
+  async function updateTrustedSites(update: (sites: TrustedSite[]) => TrustedSite[]) {
+    const key = await walletMacKey();
+    if (!key) throw new Error('Wallet is locked');
+    await serializedStorage(async () => {
+      const stored = await browser.storage.local.get([TRUSTED_SITES_KEY, TRUSTED_SITES_MAC_KEY]);
+      // A list that fails verification is started over, not built on.
+      const { sites } = await readTrustedSites(stored, key);
+      await browser.storage.local.set(await signTrustedSites(update(sites), key));
+    });
   }
 
   async function addTrustedSite(origin: string, allowedProviders: string[]) {
-    const sites = await getTrustedSites();
-    const existing = sites.find((s) => s.origin === origin);
-    if (existing) {
-      // Merge new providers into existing trust entry
-      const merged = new Set([...(existing.allowedProviders ?? []), ...allowedProviders]);
-      existing.allowedProviders = [...merged];
-    } else {
-      sites.push({ origin, trustedAt: Date.now(), allowedProviders });
-    }
-    await browser.storage.local.set({ trustedSites: sites });
+    await updateTrustedSites((sites) => {
+      const existing = sites.find((s) => s.origin === origin);
+      if (existing) {
+        // Merge new providers into existing trust entry
+        const merged = new Set([...(existing.allowedProviders ?? []), ...allowedProviders]);
+        existing.allowedProviders = [...merged];
+      } else {
+        sites.push({ origin, trustedAt: Date.now(), allowedProviders });
+      }
+      return sites;
+    });
   }
 
   async function removeTrustedSite(origin: string) {
-    const sites = await getTrustedSites();
-    await browser.storage.local.set({
-      trustedSites: sites.filter((s) => s.origin !== origin),
-    });
+    await updateTrustedSites((sites) => sites.filter((s) => s.origin !== origin));
   }
 
   // --- Token allowances ---

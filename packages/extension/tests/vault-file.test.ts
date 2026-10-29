@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { encrypt, decrypt, type Credential } from '@byoky/core';
+import { encrypt, decrypt, credentialAad, isBoundCiphertext, type Credential, type CredentialSecretField } from '@byoky/core';
 import {
   exportVaultFile,
   importVaultFile,
@@ -7,20 +7,30 @@ import {
   MAX_VAULT_FILE_CREDENTIALS,
   type VaultFileCrypto,
 } from '../lib/vault-file';
+import fixture from './fixtures/wallet-1.1.1.json';
 
 // Reversible stand-in for the 600k-iteration PBKDF2 scheme, so the merge
-// logic can be exercised quickly. Decrypting with the wrong password throws,
-// like AES-GCM does.
+// logic can be exercised quickly. Decrypting with the wrong password or the
+// wrong additional data (or with none, for bound data) throws, like AES-GCM.
 const fake: VaultFileCrypto = {
-  async encrypt(plain, pw) {
-    return `enc(${pw}):${encodeURIComponent(plain)}`;
+  async encrypt(plain, pw, aad) {
+    return `${fakePrefix(pw, aad)}${encodeURIComponent(plain)}`;
   },
-  async decrypt(ct, pw) {
-    const prefix = `enc(${pw}):`;
+  async decrypt(ct, pw, aad) {
+    const prefix = fakePrefix(pw, aad);
     if (!ct.startsWith(prefix)) throw new Error('decrypt failed');
     return decodeURIComponent(ct.slice(prefix.length));
   },
 };
+
+function fakePrefix(pw: string, aad: string | undefined): string {
+  return aad === undefined ? `enc(${pw}):` : `enc(${pw})[${aad}]:`;
+}
+
+/** Stored secrets are bound to their record; file secrets aren't. */
+function bound(cred: { id: string; providerId: string; baseUrl?: string }, field: CredentialSecretField): string {
+  return credentialAad(cred, field);
+}
 
 const MASTER_A = 'master-password-A';
 const MASTER_B = 'master-password-B';
@@ -33,7 +43,7 @@ async function apiKeyCred(id: string, providerId: string, key: string, pw: strin
     label: `${providerId} ${id}`,
     authMethod: 'api_key',
     createdAt: 1_700_000_000_000,
-    encryptedKey: key ? await cipher.encrypt(key, pw) : '',
+    encryptedKey: key ? await cipher.encrypt(key, pw, bound({ id, providerId, baseUrl }, 'encryptedKey')) : '',
     ...(baseUrl ? { baseUrl } : {}),
   };
 }
@@ -46,14 +56,15 @@ async function oauthCred(id: string, access: string, refresh: string | undefined
     authMethod: 'oauth',
     createdAt: 1_700_000_000_000,
     expiresAt: 1_800_000_000_000,
-    encryptedAccessToken: await cipher.encrypt(access, pw),
-    ...(refresh ? { encryptedRefreshToken: await cipher.encrypt(refresh, pw) } : {}),
+    encryptedAccessToken: await cipher.encrypt(access, pw, bound({ id, providerId: 'gemini' }, 'encryptedAccessToken')),
+    ...(refresh ? { encryptedRefreshToken: await cipher.encrypt(refresh, pw, bound({ id, providerId: 'gemini' }, 'encryptedRefreshToken')) } : {}),
   };
 }
 
 async function secretOf(cred: Credential, pw: string, cipher: VaultFileCrypto): Promise<string> {
+  const field = cred.authMethod === 'api_key' ? 'encryptedKey' : 'encryptedAccessToken';
   const enc = cred.authMethod === 'api_key' ? cred.encryptedKey : cred.encryptedAccessToken;
-  return enc ? cipher.decrypt(enc, pw) : '';
+  return enc ? cipher.decrypt(enc, pw, bound(cred, field)) : '';
 }
 
 /** Build a file by hand, the way an older wallet (or another platform) would. */
@@ -85,10 +96,10 @@ describe('.byoky vault file', () => {
     if (!result.ok) throw new Error(result.error);
     expect(result.skipped).toBe(0);
     const [anthropic, gemini, ollama] = result.added;
-    expect(await decrypt((anthropic as { encryptedKey: string }).encryptedKey, MASTER_B)).toBe('sk-ant-api03-test');
+    expect(await decrypt((anthropic as { encryptedKey: string }).encryptedKey, MASTER_B, bound(anthropic, 'encryptedKey'))).toBe('sk-ant-api03-test');
     const g = gemini as { encryptedAccessToken: string; encryptedRefreshToken: string; expiresAt: number };
-    expect(await decrypt(g.encryptedAccessToken, MASTER_B)).toBe('ya29.access');
-    expect(await decrypt(g.encryptedRefreshToken, MASTER_B)).toBe('1//refresh');
+    expect(await decrypt(g.encryptedAccessToken, MASTER_B, bound(gemini, 'encryptedAccessToken'))).toBe('ya29.access');
+    expect(await decrypt(g.encryptedRefreshToken, MASTER_B, bound(gemini, 'encryptedRefreshToken'))).toBe('1//refresh');
     expect(g.expiresAt).toBe(1_800_000_000_000);
     expect(ollama).toMatchObject({ providerId: 'ollama', encryptedKey: '', baseUrl: 'http://localhost:11434' });
   }, 60_000);
@@ -230,7 +241,7 @@ describe('.byoky vault file', () => {
 
   it('exports a credential whose stored refresh token is unreadable, minus that token', async () => {
     const cred = await oauthCred('a1', 'ya29.access', undefined, MASTER_A, fake);
-    (cred as { encryptedRefreshToken?: string }).encryptedRefreshToken = await fake.encrypt('1//foreign', 'some-other-master');
+    (cred as { encryptedRefreshToken?: string }).encryptedRefreshToken = await fake.encrypt('1//foreign', 'some-other-master', bound(cred, 'encryptedRefreshToken'));
 
     const payload = JSON.parse(await fake.decrypt(await exportVaultFile([cred], MASTER_A, EXPORT_PW, fake), EXPORT_PW));
     expect(payload.credentials[0]).not.toHaveProperty('encryptedRefreshToken');
@@ -239,4 +250,74 @@ describe('.byoky vault file', () => {
     const broken = await apiKeyCred('a2', 'openai', 'sk-1', 'not-the-master', fake);
     await expect(exportVaultFile([broken], MASTER_A, EXPORT_PW, fake)).rejects.toThrow();
   });
+
+  it('refuses to export a stored secret moved into another record', async () => {
+    // The anthropic key's ciphertext, planted in an Azure record that points elsewhere.
+    const real = await apiKeyCred('a1', 'anthropic', 'sk-ant-real', MASTER_A, fake);
+    const planted = {
+      ...(await apiKeyCred('a2', 'azure_openai', 'unused', MASTER_A, fake, 'https://evil.openai.azure.com')),
+      encryptedKey: (real as { encryptedKey: string }).encryptedKey,
+    } as Credential;
+    await expect(exportVaultFile([planted], MASTER_A, EXPORT_PW, fake)).rejects.toThrow();
+  });
+
+  it('does not match an existing credential whose secret was moved into it', async () => {
+    const real = await apiKeyCred('b1', 'openai', 'sk-shared', MASTER_B, fake);
+    const planted = {
+      ...(await apiKeyCred('b2', 'mistral', 'unused', MASTER_B, fake)),
+      encryptedKey: (real as { encryptedKey: string }).encryptedKey,
+    } as Credential;
+    const file = await exportVaultFile([await apiKeyCred('a1', 'mistral', 'sk-shared', MASTER_A, fake)], MASTER_A, EXPORT_PW, fake);
+    // The planted record can't be read, so the file's mistral key is new.
+    const result = await importVaultFile(file, EXPORT_PW, [planted], MASTER_B, fake);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.added).toHaveLength(1);
+  });
+});
+
+describe('.byoky files from 1.1.1', () => {
+  const { EXPORT_PASSWORD, vaultFile } = fixture;
+  const MASTER = 'master-password-of-the-importing-wallet';
+
+  it('import, with every secret bound to its new record', async () => {
+    const result = await importVaultFile(vaultFile, EXPORT_PASSWORD, [], MASTER);
+    if (!result.ok) throw new Error(result.error);
+    expect(result.skipped).toBe(0);
+    expect(result.added.map((c) => [c.providerId, c.authMethod, c.baseUrl])).toEqual([
+      ['anthropic', 'api_key', undefined],
+      ['anthropic', 'oauth', undefined],
+      ['azure_openai', 'api_key', 'https://contoso.openai.azure.com'],
+      ['ollama', 'api_key', 'http://localhost:11434'],
+    ]);
+    const [key, oauth, azure, ollama] = result.added as unknown as Array<Record<string, string>>;
+    for (const enc of [key.encryptedKey, oauth.encryptedAccessToken, oauth.encryptedRefreshToken, azure.encryptedKey]) {
+      expect(isBoundCiphertext(enc)).toBe(true);
+    }
+    expect(await decrypt(key.encryptedKey, MASTER, bound(result.added[0], 'encryptedKey'))).toBe('sk-ant-api03-fixture-key');
+    expect(await decrypt(oauth.encryptedAccessToken, MASTER, bound(result.added[1], 'encryptedAccessToken'))).toBe('sk-ant-oat01-fixture-token');
+    expect(await decrypt(oauth.encryptedRefreshToken, MASTER, bound(result.added[1], 'encryptedRefreshToken'))).toBe('fixture-refresh-token');
+    expect(await decrypt(azure.encryptedKey, MASTER, bound(result.added[2], 'encryptedKey'))).toBe('azure-fixture-key');
+    expect(ollama.encryptedKey).toBe('');
+    // Bound to the new record, so not usable under another provider.
+    await expect(decrypt(azure.encryptedKey, MASTER, bound({ ...result.added[2], providerId: 'openai' }, 'encryptedKey'))).rejects.toThrow();
+  }, 60_000);
+
+  it('round-trip: a wallet that imported one exports a file 1.1.1 can read', async () => {
+    const imported = await importVaultFile(vaultFile, EXPORT_PASSWORD, [], MASTER);
+    if (!imported.ok) throw new Error(imported.error);
+    const file = await exportVaultFile(imported.added, MASTER, 'another export password');
+
+    // Same payload layout and version as 1.1.1 wrote, file secrets unbound.
+    const ours = JSON.parse(await decrypt(file, 'another export password'));
+    const theirs = JSON.parse(await decrypt(vaultFile, EXPORT_PASSWORD));
+    expect(ours.version).toBe(theirs.version);
+    expect(ours.credentials.map((c: object) => Object.keys(c).sort()))
+      .toEqual(theirs.credentials.map((c: object) => Object.keys(c).sort()));
+    for (const c of ours.credentials as Array<Record<string, string>>) {
+      for (const enc of [c.encryptedKey, c.encryptedAccessToken, c.encryptedRefreshToken]) {
+        if (enc) expect(isBoundCiphertext(enc)).toBe(false);
+      }
+    }
+    expect(await decrypt(ours.credentials[0].encryptedKey, 'another export password')).toBe('sk-ant-api03-fixture-key');
+  }, 60_000);
 });

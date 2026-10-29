@@ -1,0 +1,64 @@
+{
+  "//": "Written by byoky 1.1.1 (commit b0d0f60): browser.storage.local of an unlocked-once wallet plus a .byoky export of it. Test secrets only.",
+  "PASSWORD": "fixture master password 1.1.1",
+  "EXPORT_PASSWORD": "fixture export password 1.1.1",
+  "storage": {
+    "passwordHash": "LCZBsLE0ZSRzGue4HyzLzeMVIhGHD0i8DRIIjXGGwJwe1AicyZQkAcomFMbUdVG7",
+    "credentials": [
+      {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "providerId": "anthropic",
+        "label": "Anthropic key",
+        "authMethod": "api_key",
+        "createdAt": 1760000000000,
+        "encryptedKey": "f9YOBbU2ksbonwd9Yai52GSDBiv0KyHNcPNZx58sup5NwILYp9PnAeyH/kPTlfImnrq/ZNoupqmcVKZ/Lf5LCEhvWjU="
+      },
+      {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "providerId": "anthropic",
+        "label": "Claude setup token",
+        "authMethod": "oauth",
+        "createdAt": 1760000000001,
+        "encryptedAccessToken": "qr6bhTpswYINrGufNrmL6zG7s6X1QG78Rd2h71bMH4EcUKZk56CkGDaFjHkr4oBNlAdmCx8WL+o+n05N7BMs28zhmlh6/Q==",
+        "encryptedRefreshToken": "xfQ4KdXxQXUzra/eWjIpKxEdsQMUIAMPp8RcHuxbivZOkhRjIrd2JL1e1Q+2PZTzcHk9oDGSOTL1OkAoEVR8NBU=",
+        "expiresAt": 1900000000000
+      },
+      {
+        "id": "33333333-3333-4333-8333-333333333333",
+        "providerId": "azure_openai",
+        "label": "Azure",
+        "authMethod": "api_key",
+        "createdAt": 1760000000002,
+        "baseUrl": "https://contoso.openai.azure.com",
+        "encryptedKey": "B/991GeFM6r4beUMIUOD8DlleILU8TB7uHl20nOZ7Dg1Q7WLTZQPeOG4DchX6XmVQUAPaKaCckGgZJhSXg=="
+      },
+      {
+        "id": "44444444-4444-4444-8444-444444444444",
+        "providerId": "ollama",
+        "label": "Ollama",
+        "authMethod": "api_key",
+        "createdAt": 1760000000003,
+        "baseUrl": "http://localhost:11434",
+        "encryptedKey": ""
+      }
+    ],
+    "trustedSites": [
+      {
+        "origin": "https://chat.example.com",
+        "trustedAt": 1760000100000,
+        "allowedProviders": [
+          "anthropic"
+        ]
+      },
+      {
+        "origin": "http://localhost:3000",
+        "trustedAt": 1760000200000,
+        "allowedProviders": [
+          "anthropic",
+          "azure_openai"
+        ]
+      }
+    ]
+  },
+  "vaultFile": "BVouWoOJISOJbxS8QZ7j0EMcXTRz9sO4fVEUFUO7Ukcm0DStIEbI62a0OugPuNRxDxjLKSPEJiY3dQA5EVSNVj1LoMHHJskC94Uc7C45jYEBy/5fDhhjHjkGc2VLAZpiszPCSn5iPKc/C5X8BYMRPWvyA+uYxxg0eG9EBTa2xxlfeuLQ3axIqfPwl/gt9jDqI9mmOWw94XrESI1BsDxCJhbjHvroet/aQ5KdzubwZmo2sjIgpwxBiyxwZmkrnEyd9+vh0l+ugw0++1lGO+Q9RBfPKnQVugkFqdsvBxoQR+zHbmBNVT//c0WHy7qnu9B2M+MJPubJdrE/GMm0SBMSkSHV6O6yz92Wxm8Ola8uJHznNL6dBKFeUbYpc9n5TW8kSYdSBpjdejXzqpkJ2gkx1zVw2bN2G7Auwe2/sZze8KIfI55ywHWT8KkjOf0CEAkmAw2BDtgm+QQGcXi27eafROL+f9/vj05bzK41k52G9K++qwS+kpGeOVQFfdlm4qDrhzv9SFnDBMRij6yHqtYCaxH46cBIxAGAWUqBJKMaFhxEkQYmIok2Fm25LokvJBceUXjIydL8rJEA9Cr6kTE/zLkGpIpoQw8yQTJqTwvQ4KQgg4t9KYqp7RrMn98Jh+fgO+1nDW72dLfBc0eiFl5h9xNoT+ykGDfjfTsTEAkEWeCV89CR8/+8wwCchyd8vhLa9jiSMzR9XUkcfCSTEnxcLSB/EaGEbb7yPEyY9PMD91/5lOxO5SMkYurEN1JmZ10KlW2/hrec+W/zy26gekRSx7vQTrm3Wzyj37qW8tb+9XyoXNTYVhYmWsN+4K+m5/YA0eZNknXXZsOBjVe1FxkzkOdl7d2/qQA8mPDytWJH6lqYOw4FMkBZaDO+wUqegaF4MQlBFPCklSXCnUnJKIA2EUj+RkOaoFxJTBEgrJQGtBqY1BKi3T3Dntdkqwilzhpc7ouzbbvsjTRV2DLNEgMM+sc015/K815KmjgLsplFGg0BGRpDN3HqnPTcJmo82rd6TJ8uRBnRBVkmI+Gyh8mfJNCKQY5K3RLQPSxsMA4lr3vk0EgrcGcuY0rSREYgZcnHeEfAiLOR9ZBcMmCLKKLWMSTxONu8IDXNWXRJV8NNIsUQwkLxJRKGb+sKlxqLXO4/GiQlqC7zaoHt0uekadXtcC0qBUrN+5Oi7YjuKjO5lnfwVZn+HJ+J1QRarK9tIUaAzNA5pPcjGjFbzSKywAj0hBTc8kx2VuaGdlyTTcyyL6YGChbgwGOFdHTXNzROcZ+meIy1vrN3KHq15l9BV1r/MnYXIJedldzK7MfrhKbiNC0h2SlQv1lWyvSavM6fHO45BgJG4CzsZYrqI5h4G1Zx7RpdZB5Bsk2N8GN4HnpxpLli+menwClsukBLCSVH9RLfIdhPXrQNvArNW7O3hwB6oq4+OKibaRf3ma7ZffymyVFXo2C17idH9c+R1/i5YqF6AHoX3pNn+L5hVM1ZuIFuFLkF4XqdsHSA+6Rjuf7NK+20kDwDkDxeb5Ss4nc4DmITZ5Aw8nz9B1ltGjJUXgxEuk4B97djqETD8S2ctG43ybQJAu1t3JhVsp3mkArha1n6Fq20NQanTDUKJr4FLJzBhFkwv5g6hYGNuS3Yz9amHbY9bGa78A=="
+}

@@ -1,10 +1,12 @@
 import {
   encrypt as coreEncrypt,
   decrypt as coreDecrypt,
+  credentialAad,
   PROVIDERS,
   resolveProviderBaseUrl,
   type AuthMethod,
   type Credential,
+  type CredentialSecretField,
 } from '@byoky/core';
 
 /**
@@ -27,6 +29,13 @@ import {
  * `baseUrl` is only written for providers without a fixed host (Azure
  * OpenAI, Ollama, LM Studio). Files written before this module may also
  * carry `lastUsedAt`, `gifts` and `giftedCredentials`; importers ignore them.
+ *
+ * Unlike secrets stored in the wallet, file secrets aren't bound to their
+ * entry with additional authenticated data (credentialAad): the outer
+ * envelope's GCM tag already covers every entry, so nothing in a file can
+ * be edited or reshuffled without the export password. Keeping the inner
+ * format as it was keeps files readable by 1.1.1 and the mobile apps, and
+ * older files importable, without a version bump.
  *
  * An imported file is untrusted input. On import:
  *   - more than MAX_VAULT_FILE_CREDENTIALS entries, a structurally malformed
@@ -68,9 +77,13 @@ export interface VaultFilePayload {
   credentials: VaultFileCredential[];
 }
 
+/**
+ * @byoky/core's encrypt/decrypt. `aad` is set for secrets stored in the
+ * wallet, which are bound to their record, and unset for the file's own.
+ */
 export interface VaultFileCrypto {
-  encrypt(plaintext: string, password: string): Promise<string>;
-  decrypt(ciphertext: string, password: string): Promise<string>;
+  encrypt(plaintext: string, password: string, aad?: string): Promise<string>;
+  decrypt(ciphertext: string, password: string, aad?: string): Promise<string>;
 }
 
 const defaultCrypto: VaultFileCrypto = { encrypt: coreEncrypt, decrypt: coreDecrypt };
@@ -84,10 +97,10 @@ export type VaultImportResult =
   | { ok: false; error: string };
 
 /**
- * Serialize `credentials` (secrets encrypted under `masterPassword`) into
- * the contents of a `.byoky` file, re-encrypting every secret under
- * `exportPassword`. Throws if an API key or access token can't be
- * decrypted.
+ * Serialize `credentials` (secrets encrypted under `masterPassword`, bound
+ * to their record) into the contents of a `.byoky` file, re-encrypting
+ * every secret under `exportPassword`. Throws if an API key or access token
+ * can't be decrypted.
  */
 export async function exportVaultFile(
   credentials: Credential[],
@@ -105,12 +118,14 @@ export async function exportVaultFile(
     };
     const baseUrl = customBaseUrl(cred.providerId, cred.baseUrl);
     if (baseUrl) out.baseUrl = baseUrl;
+    const from = (field: CredentialSecretField) => ({ password: masterPassword, aad: credentialAad(cred, field) });
+    const to = { password: exportPassword };
     if (cred.authMethod === 'api_key') {
-      out.encryptedKey = await reencrypt(cred.encryptedKey, masterPassword, exportPassword, cipher);
+      out.encryptedKey = await reencrypt(cred.encryptedKey, from('encryptedKey'), to, cipher);
     } else {
-      out.encryptedAccessToken = await reencrypt(cred.encryptedAccessToken, masterPassword, exportPassword, cipher);
+      out.encryptedAccessToken = await reencrypt(cred.encryptedAccessToken, from('encryptedAccessToken'), to, cipher);
       if (cred.expiresAt !== undefined) out.expiresAt = cred.expiresAt;
-      const refresh = await reencryptOptional(cred.encryptedRefreshToken, masterPassword, exportPassword, cipher);
+      const refresh = await reencryptOptional(cred.encryptedRefreshToken, from('encryptedRefreshToken'), to, cipher);
       if (refresh) out.encryptedRefreshToken = refresh;
     }
     return out;
@@ -182,7 +197,7 @@ export async function importVaultFile(
   for (const cred of fileCreds) {
     const encrypted = cred.authMethod === 'api_key' ? cred.encryptedKey : cred.encryptedAccessToken;
     try {
-      fileSecrets.push(await decryptSecret(encrypted, importPassword, cipher));
+      fileSecrets.push(await decryptSecret(encrypted, { password: importPassword }, cipher));
     } catch {
       return { ok: false, error: 'Could not decrypt a credential in the file' };
     }
@@ -190,9 +205,10 @@ export async function importVaultFile(
 
   const seen = new Set<string>();
   for (const cred of existing) {
+    const field = cred.authMethod === 'api_key' ? 'encryptedKey' : 'encryptedAccessToken';
     const encrypted = cred.authMethod === 'api_key' ? cred.encryptedKey : cred.encryptedAccessToken;
     try {
-      const secret = await decryptSecret(encrypted, masterPassword, cipher);
+      const secret = await decryptSecret(encrypted, { password: masterPassword, aad: credentialAad(cred, field) }, cipher);
       seen.add(duplicateKey(cred.providerId, secret, customBaseUrl(cred.providerId, cred.baseUrl)));
     } catch {
       // An unreadable stored credential can't be matched; it doesn't block the import.
@@ -218,11 +234,14 @@ export async function importVaultFile(
       createdAt: cred.createdAt,
       ...(cred.baseUrl ? { baseUrl: cred.baseUrl } : {}),
     };
-    const encryptedSecret = secret ? await cipher.encrypt(secret, masterPassword) : '';
+    // Stored secrets are bound to the new record (see credentialAad).
+    const to = (field: CredentialSecretField) => ({ password: masterPassword, aad: credentialAad(base, field) });
+    const primary = to(cred.authMethod === 'api_key' ? 'encryptedKey' : 'encryptedAccessToken');
+    const encryptedSecret = secret ? await cipher.encrypt(secret, primary.password, primary.aad) : '';
     if (cred.authMethod === 'api_key') {
       added.push({ ...base, authMethod: 'api_key', encryptedKey: encryptedSecret });
     } else {
-      const encryptedRefreshToken = await reencryptOptional(cred.encryptedRefreshToken, importPassword, masterPassword, cipher);
+      const encryptedRefreshToken = await reencryptOptional(cred.encryptedRefreshToken, { password: importPassword }, to('encryptedRefreshToken'), cipher);
       added.push({
         ...base,
         authMethod: 'oauth',
@@ -284,28 +303,34 @@ function duplicateKey(providerId: string, secret: string, baseUrl: string | unde
   return JSON.stringify([providerId, secret, baseUrl ?? '']);
 }
 
-/** Keyless local-provider credentials store '' rather than ciphertext. */
-async function decryptSecret(encrypted: string | undefined, password: string, cipher: VaultFileCrypto): Promise<string> {
-  if (!encrypted) return '';
-  return cipher.decrypt(encrypted, password);
+/** A password, plus the record binding for secrets stored in the wallet. */
+interface SecretKey {
+  password: string;
+  aad?: string;
 }
 
-async function reencrypt(encrypted: string | undefined, from: string, to: string, cipher: VaultFileCrypto): Promise<string> {
+/** Keyless local-provider credentials store '' rather than ciphertext. */
+async function decryptSecret(encrypted: string | undefined, key: SecretKey, cipher: VaultFileCrypto): Promise<string> {
+  if (!encrypted) return '';
+  return cipher.decrypt(encrypted, key.password, key.aad);
+}
+
+async function reencrypt(encrypted: string | undefined, from: SecretKey, to: SecretKey, cipher: VaultFileCrypto): Promise<string> {
   const plain = await decryptSecret(encrypted, from, cipher);
-  return plain ? cipher.encrypt(plain, to) : '';
+  return plain ? cipher.encrypt(plain, to.password, to.aad) : '';
 }
 
 /**
  * For refresh tokens: one that won't decrypt is already useless (see
  * importVaultFile), so it is dropped rather than failing the export.
  */
-async function reencryptOptional(encrypted: string | undefined, from: string, to: string, cipher: VaultFileCrypto): Promise<string | undefined> {
+async function reencryptOptional(encrypted: string | undefined, from: SecretKey, to: SecretKey, cipher: VaultFileCrypto): Promise<string | undefined> {
   if (!encrypted) return undefined;
   let plain: string;
   try {
-    plain = await cipher.decrypt(encrypted, from);
+    plain = await cipher.decrypt(encrypted, from.password, from.aad);
   } catch {
     return undefined;
   }
-  return cipher.encrypt(plain, to);
+  return cipher.encrypt(plain, to.password, to.aad);
 }

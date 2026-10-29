@@ -8,7 +8,7 @@ Most app developers want [`@byoky/sdk`](https://www.npmjs.com/package/@byoky/sdk
 
 - **Types and protocol:** credentials, sessions, groups, connect requests/responses, and the `BYOKY_*` message protocol between apps and wallets.
 - **Provider registry:** `PROVIDERS`, `getProvider()` and `getProviderIds()` for Anthropic, OpenAI, Gemini, Mistral, Cohere and the other supported providers.
-- **Crypto:** `encrypt()` / `decrypt()` with AES-256-GCM and a PBKDF2-SHA256 (600,000 iterations) derived key, via the Web Crypto API. The output format (`base64(salt ‖ iv ‖ ciphertext+tag)`) is shared with the mobile wallets and `.byoky` backup files.
+- **Crypto:** `encrypt()` / `decrypt()` with AES-256-GCM and a PBKDF2-SHA256 (600,000 iterations) derived key, via the Web Crypto API. The output format (`base64(salt ‖ iv ‖ ciphertext+tag)`) is shared with the mobile wallets and `.byoky` backup files. Passing `aad` binds a ciphertext to additional authenticated data (output prefixed `v2:`); the extension binds each stored key to its credential record with `credentialAad()`. `hashPassword()` writes a verifier from which `deriveWalletMacKey()` derives an HMAC key for wallet state such as the trusted-sites list.
 - **Proxy safety:** `validateProxyUrl()` and header helpers that keep a credential pinned to its own provider.
 - **Cross-provider translation:** request, response and SSE stream translation between the Anthropic, OpenAI, Gemini and Cohere API families, used by group routing.
 - **Backend relay messages:** the WebSocket message types behind `@byoky/sdk/server`.
