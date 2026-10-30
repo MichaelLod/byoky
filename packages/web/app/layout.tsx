@@ -25,6 +25,10 @@ const plexMono = IBM_Plex_Mono({
   display: 'swap',
 });
 
+// Browsers keep a favicon cached under its URL, so a new icon needs a new
+// URL. Bump this whenever the icon files in public/ change.
+const ICON_VERSION = '?v=3';
+
 // Render every page per request: the CSP's script nonce (middleware.ts) is
 // new for each response, and Next.js can only put it on the inline scripts
 // of a page it is rendering, not of one prerendered at build time.
@@ -66,16 +70,16 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: '/favicon-v2.ico', sizes: 'any' },
-      { url: '/favicon-16x16.png', sizes: '16x16', type: 'image/png' },
-      { url: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
-      { url: '/favicon-96x96.png', sizes: '96x96', type: 'image/png' },
-      { url: '/icon-192.png', sizes: '192x192', type: 'image/png' },
-      { url: '/icon-512.png', sizes: '512x512', type: 'image/png' },
-      { url: '/icon.svg', type: 'image/svg+xml' },
+      { url: `/favicon-v2.ico${ICON_VERSION}`, sizes: 'any' },
+      { url: `/favicon-16x16.png${ICON_VERSION}`, sizes: '16x16', type: 'image/png' },
+      { url: `/favicon-32x32.png${ICON_VERSION}`, sizes: '32x32', type: 'image/png' },
+      { url: `/favicon-96x96.png${ICON_VERSION}`, sizes: '96x96', type: 'image/png' },
+      { url: `/icon-192.png${ICON_VERSION}`, sizes: '192x192', type: 'image/png' },
+      { url: `/icon-512.png${ICON_VERSION}`, sizes: '512x512', type: 'image/png' },
+      { url: `/icon.svg${ICON_VERSION}`, type: 'image/svg+xml' },
     ],
-    shortcut: '/favicon-v2.ico',
-    apple: '/apple-touch-icon.png',
+    shortcut: `/favicon-v2.ico${ICON_VERSION}`,
+    apple: `/apple-touch-icon.png${ICON_VERSION}`,
   },
   openGraph: {
     title: 'Byoky — The MetaMask for API keys',
