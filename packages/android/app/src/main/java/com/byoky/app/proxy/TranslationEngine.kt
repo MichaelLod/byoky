@@ -544,10 +544,10 @@ class TranslationEngine private constructor(private val appContext: Context) {
             val ctxJson = """
                 {"srcFamily":"anthropic","dstFamily":"openai",
                  "srcProviderId":"anthropic","dstProviderId":"openai",
-                 "srcModel":"claude-sonnet-4-5","dstModel":"gpt-4o"}
+                 "srcModel":"claude-sonnet-5-5","dstModel":"gpt-5.5"}
             """.trimIndent().replace("\n", "")
             val reqBody = """
-                {"model":"claude-sonnet-4-5","max_tokens":100,
+                {"model":"claude-sonnet-5-5","max_tokens":100,
                  "messages":[{"role":"user","content":"hi"}]}
             """.trimIndent().replace("\n", "")
 

@@ -74,6 +74,16 @@ describe('template model ids', () => {
     expect(unknown).toEqual([]);
   });
 
+  it('sends only models a new account can call', () => {
+    // A deprecated model stops working at its shutdown date, and Google
+    // serves the Gemini 2.5 models only to projects that used them before
+    // (ai.google.dev/gemini-api/docs/models, checked 2026-11-01).
+    const closed = uses
+      .filter((u) => getModel(u.model)?.deprecated || /^gemini-2\.5-/.test(u.model))
+      .map((u) => `${u.file}: ${u.model}`);
+    expect(closed).toEqual([]);
+  });
+
   it('caps OpenAI reasoning models with max_completion_tokens, not max_tokens', () => {
     const openai = uses.filter((u) => {
       const m = getModel(u.model);

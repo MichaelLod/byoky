@@ -8,7 +8,7 @@
     "start": "next start"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
+    "@anthropic-ai/sdk": "^1.3.0",
     "@byoky/sdk": "^{{SDK_VERSION}}",
     "next": "^15.1.0",
     "react": "^19.0.0",

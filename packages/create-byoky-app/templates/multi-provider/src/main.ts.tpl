@@ -32,11 +32,11 @@ const PROVIDER_CONFIG: Record<
   gemini: {
     displayName: 'Google Gemini',
     testUrl:
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent',
     buildBody: () =>
       JSON.stringify({
         contents: [{ parts: [{ text: 'Say hello in one sentence.' }] }],
-        // Gemini 2.5 Flash thinks before it answers and its thinking counts
+        // Gemini 3.8 Flash thinks before it answers and its thinking counts
         // against maxOutputTokens, so a small cap can leave the reply empty.
         generationConfig: { maxOutputTokens: 1024 },
       }),

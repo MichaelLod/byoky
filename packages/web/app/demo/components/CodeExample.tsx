@@ -50,7 +50,7 @@ const client = new OpenAI({
 });
 
 const extraction = await client.chat.completions.create({
-  model: 'gpt-4o',
+  model: 'gpt-5.5',
   response_format: {
     type: 'json_schema',
     json_schema: {
@@ -288,7 +288,7 @@ async function ask(provider: string, prompt: string) {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        model: 'gpt-4o',
+        model: 'gpt-5.5',
         messages: [{ role: 'user', content: prompt }],
       }),
     });

@@ -92,7 +92,7 @@ const openaiTools = [
 
 // OpenAI-compatible providers with their endpoint and model options
 const openaiCompatible: Record<string, { url: string; models: string[]; name: string }> = {
-  openai:     { url: 'https://api.openai.com/v1/chat/completions',             models: ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-nano', 'gpt-5-mini', 'gpt-4o', 'gpt-4o-mini'],                                                name: 'OpenAI (GPT)' },
+  openai:     { url: 'https://api.openai.com/v1/chat/completions',             models: ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini'],                                                                                                       name: 'OpenAI (GPT)' },
   groq:       { url: 'https://api.groq.com/openai/v1/chat/completions',        models: ['llama-3.3-70b-versatile', 'meta-llama/llama-4-scout-17b-16e-instruct', 'llama-3.1-8b-instant'],                                name: 'Groq (Llama)' },
   deepseek:   { url: 'https://api.deepseek.com/chat/completions',              models: ['deepseek-chat', 'deepseek-reasoner'],                                                                                         name: 'DeepSeek' },
   xai:        { url: 'https://api.x.ai/v1/chat/completions',                   models: ['grok-4-fast-non-reasoning', 'grok-4-fast-reasoning', 'grok-4', 'grok-3-mini'],                                                 name: 'xAI (Grok)' },

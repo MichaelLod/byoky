@@ -950,7 +950,7 @@ private fun GroupEditorDialog(
                     value = model,
                     onValueChange = { model = it },
                     label = "Model (optional)",
-                    placeholder = "e.g. claude-sonnet-4-5",
+                    placeholder = "e.g. claude-sonnet-5-5",
                     mono = true,
                     modifier = Modifier.fillMaxWidth(),
                 )

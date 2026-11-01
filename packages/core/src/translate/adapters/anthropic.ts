@@ -372,10 +372,18 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
   }
 
   const rules = claudeRequestRules(ctx.dstModel);
+  // Some models reject a forced tool choice with a 400. Anthropic's advice
+  // for them is `auto` plus an instruction that names the tool, so the
+  // request still asks for the call the app's code expects.
+  let toolChoice = ir.toolChoice;
+  if (!rules.forcedToolChoice && (toolChoice?.type === 'any' || toolChoice?.type === 'tool')) {
+    if (ir.tools && ir.tools.length > 0) systemParts.push({ text: forcedToolInstruction(toolChoice) });
+    toolChoice = { type: 'auto' };
+  }
   // Extended thinking can't be combined with a forced tool choice. The
   // forced tool is what the app's code relies on; thinking only shapes the
   // answer, so it gives way.
-  const forcedTool = ir.toolChoice?.type === 'any' || ir.toolChoice?.type === 'tool';
+  const forcedTool = toolChoice?.type === 'any' || toolChoice?.type === 'tool';
   const wantsThinking = ir.thinking?.enabled === true && !forcedTool;
   const requestedBudget = ir.thinking?.budgetTokens;
 
@@ -437,8 +445,8 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
     }));
   }
 
-  if (ir.toolChoice) {
-    switch (ir.toolChoice.type) {
+  if (toolChoice) {
+    switch (toolChoice.type) {
       case 'auto':
         out.tool_choice = { type: 'auto' };
         break;
@@ -449,7 +457,7 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
         out.tool_choice = { type: 'none' };
         break;
       case 'tool':
-        out.tool_choice = { type: 'tool', name: ir.toolChoice.name };
+        out.tool_choice = { type: 'tool', name: toolChoice.name };
         break;
     }
   }
@@ -467,6 +475,13 @@ type ClaudeSamplingRule = 'none' | 'single';
  *  budget_tokens} only; either: adaptive, or a budget when one is asked for. */
 type ClaudeThinkingRule = 'adaptive' | 'either' | 'budget';
 
+interface ClaudeRequestRules {
+  sampling: ClaudeSamplingRule;
+  thinking: ClaudeThinkingRule;
+  /** Accepts a forced tool choice (`tool_choice` `any` or `tool`). */
+  forcedToolChoice: boolean;
+}
+
 /**
  * What a Claude model accepts, read from its id (groups accept any id, so
  * the registry can't be the only source):
@@ -475,23 +490,38 @@ type ClaudeThinkingRule = 'adaptive' | 'either' | 'budget';
  *  - Claude 4.6 takes temperature or top_p (not both) and either form of
  *    thinking (budget_tokens is deprecated there).
  *  - Earlier models take temperature or top_p and a thinking budget.
+ *  - Opus and Sonnet from 5.5 on, and Fable and Mythos from 5.1 on, reject
+ *    a forced tool choice with a 400. Haiku 5.5 and the earlier models
+ *    accept one.
  * An id that doesn't parse is treated like a current model on sampling and
  * gets adaptive thinking.
  */
-function claudeRequestRules(model: string): { sampling: ClaudeSamplingRule; thinking: ClaudeThinkingRule } {
+function claudeRequestRules(model: string): ClaudeRequestRules {
   const id = model.toLowerCase();
   const named = /claude-(opus|sonnet|haiku|fable|mythos)-(\d+)(?:[-.](\d{1,2})(?!\d))?/.exec(id);
   const legacy = named ? null : /claude-(\d+)(?:[-.](\d)(?!\d))?-(?:opus|sonnet|haiku)/.exec(id);
-  if (named && (named[1] === 'fable' || named[1] === 'mythos')) {
-    return { sampling: 'none', thinking: 'adaptive' };
-  }
   const version = named ? [named[2], named[3]] : legacy ? [legacy[1], legacy[2]] : null;
-  if (!version) return { sampling: 'single', thinking: 'adaptive' };
+  if (!version) return { sampling: 'single', thinking: 'adaptive', forcedToolChoice: true };
   const major = Number(version[0]);
   const minor = Number(version[1] ?? 0);
-  if (major > 4 || (major === 4 && minor >= 7)) return { sampling: 'none', thinking: 'adaptive' };
-  if (major === 4 && minor === 6) return { sampling: 'single', thinking: 'either' };
-  return { sampling: 'single', thinking: 'budget' };
+  const atLeast = (maj: number, min: number) => major > maj || (major === maj && minor >= min);
+  if (named && (named[1] === 'fable' || named[1] === 'mythos')) {
+    return { sampling: 'none', thinking: 'adaptive', forcedToolChoice: !atLeast(5, 1) };
+  }
+  const forcedToolChoice = !(named && (named[1] === 'opus' || named[1] === 'sonnet') && atLeast(5, 5));
+  if (atLeast(4, 7)) return { sampling: 'none', thinking: 'adaptive', forcedToolChoice };
+  if (major === 4 && minor === 6) return { sampling: 'single', thinking: 'either', forcedToolChoice };
+  return { sampling: 'single', thinking: 'budget', forcedToolChoice };
+}
+
+/**
+ * The instruction that stands in for a forced tool choice on a model that
+ * rejects one.
+ */
+function forcedToolInstruction(choice: { type: 'any' } | { type: 'tool'; name: string }): string {
+  return choice.type === 'tool'
+    ? `You must call the ${choice.name} tool in this response. Start your response with that tool call.`
+    : 'You must call one of the provided tools in this response. Start your response with a tool call.';
 }
 
 /**

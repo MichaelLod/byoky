@@ -285,7 +285,7 @@ function CursorMock() {
       </div>
       <div className="m-chat">
         <div className="chat-head">
-          <span className="model">claude-4.5-sonnet ▾</span>
+          <span className="model">claude-sonnet-4.6 ▾</span>
           <ByokyPill />
         </div>
         <div className="chat-msg">
