@@ -455,9 +455,10 @@ function Troubleshooting() {
         ))}
       </div>
       <p className="oc-note oc-note-muted">
-        The bridge logs to stderr — tail it with{' '}
-        <code>tail -f ~/Library/Logs/byoky-bridge.log</code> (macOS) if you
-        need to see raw request errors. For a deep dive on why some
+        The browser starts the bridge, so the bridge&apos;s error output goes
+        to the browser: start Chrome from a terminal to see it there, or open
+        Firefox&apos;s Browser Console. Errors from Anthropic come back to the
+        client unchanged. For a deep dive on why some
         configurations classify as third-party, see{' '}
         <a className="oc-link" href="/blog/anthropic-claude-code-fingerprint">
           Bisecting Anthropic&apos;s Claude Code fingerprint
