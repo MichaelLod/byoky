@@ -178,6 +178,20 @@ const session = await byoky.connect({
 });
 ```
 
+## Errors
+
+`connect()` and `listModels()` throw a `ByokyError` with a `code`. On `createFetch` requests, the wallet's own errors arrive as an HTTP status with `{ error: { code, message } }` in the JSON body, while a provider's own errors (401, 429, ...) arrive exactly as the provider sent them, with no Byoky code: check `res.status`.
+
+| Code | Meaning |
+|------|---------|
+| `RATE_LIMITED` | Byoky's connect throttle: more than 10 new sessions per origin in 60 s (`err.details.retryAfter` in seconds), or a 429 from `listModels()`. Never a provider 429 on a proxied request. |
+| `USER_REJECTED` | The user denied the request in the wallet, or it timed out. With `modal: true`, closing the modal rejects with `WALLET_NOT_INSTALLED` (no wallet found) or a plain `Error('User cancelled')`. |
+| `QUOTA_EXCEEDED` | HTTP 429: the spending cap the user set for your app ran out. |
+| `ENDPOINT_NOT_ALLOWED` | HTTP 403: the endpoint isn't an inference or model-list endpoint (Files, Batches, Assistants, admin APIs). |
+| `SESSION_EXPIRED` | HTTP 401: the session was revoked, the wallet locked, or it expired. Connect again. |
+
+The full list is at [byoky.com/docs#errors](https://byoky.com/docs#errors).
+
 ## Utilities
 
 ```typescript

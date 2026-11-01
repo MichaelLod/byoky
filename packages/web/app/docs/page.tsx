@@ -542,7 +542,10 @@ const byoky = new Byoky({
       <p>
         Without <code>modal</code>, <code>connect()</code> throws a <code>ByokyError</code> with code{' '}
         <code>WALLET_NOT_INSTALLED</code> when no wallet is present (and opens the store page for the
-        user&apos;s browser, if there is one). <code>USER_REJECTED</code> means the user declined.
+        user&apos;s browser, if there is one). <code>USER_REJECTED</code> means the user declined in
+        the wallet or the approval timed out. With <code>modal: true</code>, closing the modal
+        rejects with <code>WALLET_NOT_INSTALLED</code> when no wallet was found, and otherwise with
+        a plain <code>Error(&apos;User cancelled&apos;)</code>.
       </p>
 
       <h3>byoky.tryReconnect()</h3>
@@ -1195,13 +1198,18 @@ function Errors() {
       <p>
         Errors from upstream providers surface with their original HTTP status and body &mdash; so{' '}
         <code>response.status</code> and the usual <code>{`{ error: { message } }`}</code> body
-        shape work the same as hitting the provider directly.
+        shape work the same as hitting the provider directly. A provider&apos;s own 401 or 429
+        carries no Byoky code: check <code>res.status</code> (and the provider&apos;s{' '}
+        <code>Retry-After</code> header) as you would without Byoky.
       </p>
 
       <p>
-        The proxy layer adds its own error codes on top, signalled with an HTTP status and an{' '}
-        <code>error.code</code> field in the JSON body. The table below covers every value of the{' '}
-        <code>ByokyErrorCode</code> enum and what your app should do when it fires.
+        The wallet adds its own errors on top. On a <code>createFetch</code> request they arrive as
+        an HTTP status with <code>{`{ error: { code, message } }`}</code> in the JSON body;{' '}
+        <code>connect()</code> and <code>listModels()</code> throw a <code>ByokyError</code> with
+        the same <code>code</code>. The table lists the codes apps can receive and what to do
+        about each. The mobile wallets send a few codes of their own; handle a code you don&apos;t
+        recognise by its HTTP status.
       </p>
 
       <table className="docs-table">
@@ -1214,16 +1222,26 @@ function Errors() {
         </thead>
         <tbody>
           {[
-            ['WALLET_NOT_INSTALLED', 'No Byoky wallet (extension, iOS Safari extension, or in-wallet browser) was detected when connect() ran.', <>Show an install prompt — <code>getStoreUrl()</code> returns the right link per browser. Or pass <code>modal: true</code> and let the SDK do it.</>],
-            ['USER_REJECTED', 'User dismissed the connect modal or denied the permission prompt.', 'Do not auto-retry. Wait for an explicit user action before calling connect() again.'],
-            ['PROVIDER_UNAVAILABLE', 'The wallet has no credential (and no routing group) that can serve this provider.', 'Tell the user which provider you need; deep-link them into the wallet to add a credential.'],
-            ['SESSION_EXPIRED', 'Session was revoked from the wallet or aged out.', <>Call <code>byoky.connect()</code> again. <code>tryReconnect()</code> handles silent restore.</>],
+            ['WALLET_NOT_INSTALLED', <>No Byoky wallet (extension, iOS Safari extension, or in-wallet browser) was detected when <code>connect()</code> ran. With <code>modal: true</code>, it is also what <code>connect()</code> rejects with when the user closes the &ldquo;wallet not found&rdquo; dialog.</>, <>Show an install prompt — <code>getStoreUrl()</code> returns the right link per browser. Or pass <code>modal: true</code> and let the SDK do it.</>],
+            ['USER_REJECTED', 'The user denied the connect request in the wallet, or the approval timed out.', <>Do not auto-retry. Wait for an explicit user action before calling <code>connect()</code> again. With <code>modal: true</code> the modal shows the failure with a Try Again button; if the user closes it, <code>connect()</code> rejects with a plain <code>Error(&apos;User cancelled&apos;)</code> that has no code.</>],
+            ['PROVIDER_UNAVAILABLE', <>The wallet has no credential (and no routing group) that can serve this provider (HTTP 403). The wallet also sends it, with the message &ldquo;Origin mismatch&rdquo;, for a request from a page other than the one that connected. From <code>listModels()</code>: the provider has no model-list endpoint, or it answered 404/405.</>, 'Tell the user which provider you need; deep-link them into the wallet to add a credential.'],
+            ['SESSION_EXPIRED', 'The session key is unknown or past its expiry (HTTP 401): the user revoked the app, the wallet locked, or 24 hours passed.', <>Call <code>byoky.connect()</code> again. <code>tryReconnect()</code> handles silent restore.</>],
             ['NO_SESSION', 'A silent reconnect found no live session for this origin.', <>Expected on first visit. Fall back to <code>connect()</code> when the user is ready.</>],
-            ['RATE_LIMITED', 'Upstream provider returned 429 (their rate limit, not byoky\'s).', <>Back off and retry. Honour the upstream <code>Retry-After</code> header.</>],
+            ['RATE_LIMITED', <>Byoky&apos;s own connect throttle: this origin asked for a new session more than 10 times in 60 seconds. <code>err.details.retryAfter</code> gives the seconds to wait. <code>listModels()</code> also throws it when the provider answers 429.</>, <>Wait <code>retryAfter</code> seconds before calling <code>connect()</code> again. A provider&apos;s 429 on a <code>createFetch</code> request is not this code (see above).</>],
             ['QUOTA_EXCEEDED', 'A spending cap the user set for your app in the wallet ran out (HTTP 429).', 'Do not retry. Surface a "budget exhausted" UI — the user can raise the cap in their wallet.'],
-            ['INVALID_KEY', 'Stored credential was rejected by the provider (401).', 'Prompt the user to update the credential in their wallet.'],
+            ['ENDPOINT_NOT_ALLOWED', <>The request went to an endpoint outside the inference allowlist, such as the Files, Batches or Assistants APIs (HTTP 403). See <a href="#allowed-endpoints" style={{ color: 'var(--phosphor)' }}>Allowed endpoints</a>.</>, 'Not retryable. Send the content inline in the inference request instead.'],
+            ['WALLET_LOCKED', 'The wallet is locked (HTTP 423).', 'Ask the user to unlock their wallet, then retry.'],
+            ['INVALID_URL', <>The request URL isn&apos;t on the provider&apos;s registered host, e.g. <code>api.mistral.ai</code> for <code>mistral</code> (HTTP 403).</>, <>Fix the URL: use the provider&apos;s official API host with <code>createFetch(id)</code>.</>],
+            ['ROUTING_UNSUPPORTED', 'The user routed your app to another provider, and only chat requests can be routed; a model list or token count can\'t (HTTP 400).', 'Fall back, e.g. to a hardcoded model list.'],
+            ['TRANSLATION_NOT_SUPPORTED', 'A request routed to another provider family had a binary or multipart body, which translation can\'t convert (HTTP 400).', 'Send a JSON body, or ask the user to route your app to the provider you call.'],
+            ['TRANSLATION_FAILED', 'The wallet couldn\'t translate a routed request or response between provider formats (HTTP 502).', 'Surface the message; the request may use a feature the destination provider lacks.'],
+            ['SWAP_FAILED', 'The wallet couldn\'t point a routed request at the provider the user chose (HTTP 502).', 'Surface the message and ask the user to check the routing group in their wallet.'],
+            ['BRIDGE_UNAVAILABLE', 'The credential is a Claude setup token, which needs the Byoky Bridge, and the bridge isn\'t installed (or the browser is Safari) (HTTP 503).', 'Tell the user: they can install the bridge or add an Anthropic API key instead.'],
+            ['BRIDGE_ERROR', 'The Byoky Bridge failed while carrying a setup-token request (HTTP 502).', 'Safe to retry once.'],
+            ['EXTENSION_ERROR', <>The extension dropped the message, for example because it was updated or reloaded while the page was open. <code>connect()</code> rejects with it.</>, 'Ask the user to reload the page.'],
+            ['INVALID_KEY', <>Only from <code>listModels()</code>: the models endpoint answered 401 or 403. Proxied requests never carry it; a provider&apos;s 401 reaches you as the provider sent it.</>, 'Prompt the user to check the credential in their wallet.'],
             ['TOKEN_EXPIRED', 'Reserved; no wallet sends it. An expired Claude setup token comes back as Anthropic\'s own 401 response.', 'Nothing to handle. On a 401 from the provider, ask the user to replace the credential in their wallet.'],
-            ['PROXY_ERROR', 'Generic proxy-layer failure (extension crashed, native message dropped, etc.).', 'Safe to retry once. Surface a generic error if it repeats.'],
+            ['PROXY_ERROR', 'Generic proxy-layer failure: the provider couldn\'t be reached, the extension crashed, a native message was dropped (HTTP 502).', 'Safe to retry once. Surface a generic error if it repeats.'],
             ['RELAY_CONNECTION_FAILED', 'Your backend relay WebSocket could not reach the browser.', 'Check your relay URL and that the user\'s tab is still open; retry with backoff.'],
             ['RELAY_DISCONNECTED', 'Relay peer disconnected mid-request (user closed tab, network drop).', <>Reopen the relay via <code>session.createRelay(url)</code>.</>],
             ['UNKNOWN', 'Anything that doesn\'t map to a specific code (last-resort fallback).', 'Log the original message and surface a generic error. Treat as transient.'],
@@ -1289,9 +1307,10 @@ function Limits() {
 
       <h3>Connection rate limits</h3>
       <p>
-        The wallet rate-limits how often a single origin can ask for a session, per the table below.
-        Hitting the limit returns a <code>RATE_LIMITED</code> proxy error during{' '}
-        <code>connect()</code>. The cap resets on a sliding 60-second window.
+        The wallet rate-limits how often a single origin can ask for a new session, per the table
+        below. Over the limit, <code>connect()</code> throws a <code>ByokyError</code> with code{' '}
+        <code>RATE_LIMITED</code> and <code>details.retryAfter</code> in seconds. The cap resets on
+        a sliding 60-second window; reconnecting to a live session doesn&apos;t count.
       </p>
       <table className="docs-table">
         <thead>
@@ -1310,9 +1329,9 @@ function Limits() {
         </tbody>
       </table>
       <p>
-        Provider-side rate limits (the <code>HTTP 429</code> from Anthropic, OpenAI, etc.) are
-        unaffected by these caps and surface as a <code>RATE_LIMITED</code> error with the upstream{' '}
-        <code>Retry-After</code> header preserved.
+        Provider-side rate limits are separate from this cap. A provider&apos;s{' '}
+        <code>HTTP 429</code> reaches your app as the provider sent it, with its own body and{' '}
+        <code>Retry-After</code> header and no Byoky code, so check <code>res.status</code>.
       </p>
 
       <h3 id="allowed-endpoints">Allowed endpoints</h3>
