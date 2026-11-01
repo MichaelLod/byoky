@@ -530,9 +530,9 @@ function WalkthroughScene() {
 /* ── Cross-Provider: one app, routed to another family ──────── */
 
 const CROSS_PROVIDERS = [
-  { tag: 'AN', name: 'Anthropic', model: 'claude-sonnet-4', shape: 'messages' },
-  { tag: 'OA', name: 'OpenAI', model: 'gpt-4o', shape: 'chat.completions' },
-  { tag: 'GE', name: 'Gemini', model: 'gemini-2.0-flash', shape: 'generateContent' },
+  { tag: 'AN', name: 'Anthropic', model: 'claude-sonnet-4-6', shape: 'messages' },
+  { tag: 'OA', name: 'OpenAI', model: 'gpt-5.5', shape: 'chat.completions' },
+  { tag: 'GE', name: 'Gemini', model: 'gemini-3.8-flash', shape: 'generateContent' },
   { tag: 'GR', name: 'Groq', model: 'llama-3.3-70b', shape: 'chat.completions' },
 ];
 

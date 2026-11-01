@@ -134,7 +134,7 @@ export default function OpenClawTutorial() {
           <Code>{`openclaw models set byoky-anthropic/claude-sonnet-4-6`}</Code>
           <p>
             Swap the model for whichever you actually have a key for:{' '}
-            <code>byoky-openai/gpt-4.1</code>, <code>byoky-gemini/gemini-2.5-pro</code>,{' '}
+            <code>byoky-openai/gpt-5.5</code>, <code>byoky-gemini/gemini-2.5-pro</code>,{' '}
             <code>byoky-xai/grok-3</code>, etc. <code>openclaw models list --all</code>{' '}
             shows every option.
           </p>

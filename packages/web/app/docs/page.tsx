@@ -769,9 +769,8 @@ function ProvidersSection() {
       <h3>Capability matrix</h3>
       <p>
         What each family supports natively at the wire-format level. Capabilities below this baseline
-        depend on the specific model — e.g. <code>gpt-5.4-nano</code> drops vision, Cohere&apos;s
-        Command A drops vision and JSON mode. Always check the provider&apos;s docs for the exact
-        model you target.
+        depend on the specific model — e.g. Cohere&apos;s Command A drops vision and JSON mode.
+        Always check the provider&apos;s docs for the exact model you target.
       </p>
       <table className="docs-table">
         <thead>
@@ -994,7 +993,7 @@ for (let round = 0; round < 5; round++) {
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ model: 'gpt-4o', tools, messages }),
+    body: JSON.stringify({ model: 'gpt-5.5', tools, messages }),
   });
   const data = await res.json();
   const msg = data.choices[0].message;
@@ -1028,7 +1027,7 @@ const res = await fetch('https://api.openai.com/v1/chat/completions', {
   method: 'POST',
   headers: { 'content-type': 'application/json' },
   body: JSON.stringify({
-    model: 'gpt-4o',
+    model: 'gpt-5.5',
     messages: [{ role: 'user', content: 'Extract: "Jane, jane@acme.co, Acme"' }],
     response_format: {
       type: 'json_schema',
@@ -1122,7 +1121,7 @@ function Vision() {
 
       <h3>OpenAI</h3>
       <Code lang="typescript">{`body: JSON.stringify({
-  model: 'gpt-4o',
+  model: 'gpt-5.5',
   messages: [{
     role: 'user',
     content: [
