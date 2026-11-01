@@ -12,13 +12,74 @@ import {
   type CapabilitySet,
 } from '../../src/models.js';
 import type { RequestLogEntry } from '../../src/types.js';
+import type { IRRequest } from '../../src/translate/ir.js';
+import { anthropicAdapter } from '../../src/translate/adapters/anthropic.js';
 
 describe('MODELS', () => {
   it('contains the documented Anthropic frontier models', () => {
     const ids = MODELS.map((m) => m.id);
+    expect(ids).toContain('claude-opus-5-5');
+    expect(ids).toContain('claude-sonnet-5-5');
+    expect(ids).toContain('claude-haiku-5-5');
+    expect(ids).toContain('claude-fable-5-1');
     expect(ids).toContain('claude-opus-4-7');
     expect(ids).toContain('claude-sonnet-4-6');
     expect(ids).toContain('claude-haiku-4-5-20251001');
+  });
+
+  it('contains the Gemini model Google points new projects to', () => {
+    expect(getModel('gemini-3.8-flash')?.family).toBe('gemini');
+  });
+
+  it('has no shut-down models', () => {
+    // Requests to these fail at the provider (checked 2026-11-01).
+    const shutDown = [
+      'claude-sonnet-4-20250514',
+      'claude-opus-4-20250514',
+      'claude-opus-4-1-20250805',
+      'claude-3-7-sonnet-20250219',
+      'claude-3-5-haiku-20241022',
+      'gemini-2.0-flash',
+      'gemini-2.0-flash-lite',
+      'gemini-3.1-flash-lite-preview',
+    ];
+    const ids = MODELS.map((m) => m.id);
+    for (const id of shutDown) expect(ids, id).not.toContain(id);
+  });
+
+  it('dates every deprecation and names its replacement', () => {
+    const deprecated = MODELS.filter((m) => m.deprecated);
+    expect(deprecated.map((m) => m.id)).toContain('gpt-5.4-nano');
+    for (const m of deprecated) {
+      expect(m.deprecated!.shutdown, m.id).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(m.deprecated!.replacement, m.id).not.toBe('');
+    }
+  });
+
+  it('marks the Claude models that reject a forced tool choice', () => {
+    expect(getModel('claude-opus-5-5')?.capabilities.toolChoice).toBe(false);
+    expect(getModel('claude-sonnet-5-5')?.capabilities.toolChoice).toBe(false);
+    expect(getModel('claude-fable-5-1')?.capabilities.toolChoice).toBe(false);
+    expect(getModel('claude-haiku-5-5')?.capabilities.toolChoice).toBe(true);
+  });
+
+  it('agrees with the Anthropic serializer on forced tool choice', () => {
+    const ir: IRRequest = {
+      system: [],
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'x' }] }],
+      maxTokens: 100,
+      tools: [{ name: 'f', parameters: { type: 'object', properties: {} } }],
+      toolChoice: { type: 'tool', name: 'f' },
+    };
+    for (const m of modelsForFamily('anthropic')) {
+      const out = JSON.parse(
+        anthropicAdapter.serializeRequest(
+          { srcFamily: 'openai', dstFamily: 'anthropic', srcModel: 'gpt-5.5', dstModel: m.id, isStreaming: false, requestId: 'r' },
+          ir,
+        ),
+      ) as { tool_choice?: { type: string } };
+      expect(out.tool_choice?.type === 'tool', m.id).toBe(m.capabilities.toolChoice);
+    }
   });
 
   it('contains the documented OpenAI frontier models', () => {
@@ -44,6 +105,10 @@ describe('MODELS', () => {
 });
 
 describe('DEFAULT_MODELS', () => {
+  it('never names a deprecated model', () => {
+    for (const id of Object.values(DEFAULT_MODELS)) expect(getModel(id)?.deprecated, id).toBeUndefined();
+  });
+
   it('points at registered models for each family', () => {
     expect(getModel(DEFAULT_MODELS.anthropic)).toBeDefined();
     expect(getModel(DEFAULT_MODELS.openai)).toBeDefined();

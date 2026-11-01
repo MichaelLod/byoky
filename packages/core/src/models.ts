@@ -18,11 +18,19 @@ export type { CapabilitySet } from './types.js';
  * still work for pass-through (no translation) requests; they just can't be
  * the *destination* of a translated request.
  *
- * last verified: 2026-05-07
+ * last verified: 2026-11-01
  *  - Anthropic: platform.claude.com/docs/en/about-claude/models/overview
- *  - OpenAI:    developers.openai.com/api/docs/models
- *  - Gemini:    ai.google.dev/gemini-api/docs/models
+ *               platform.claude.com/docs/en/about-claude/model-deprecations
+ *  - OpenAI:    developers.openai.com/api/docs/models (and /models/<id>)
+ *               developers.openai.com/api/docs/deprecations
+ *  - Gemini:    ai.google.dev/gemini-api/docs/models (and /models/<id>)
+ *               ai.google.dev/gemini-api/docs/deprecations
  *  - Cohere:    docs.cohere.com/docs/models
+ *               docs.cohere.com/docs/deprecations
+ *
+ * Shut-down models are removed. A deprecated model stays until its shutdown
+ * date, with `deprecated` set, because it still works for the apps that
+ * use it; it is never a default.
  */
 
 /**
@@ -65,6 +73,12 @@ export interface ModelEntry {
   /** Maximum tokens the model can produce in a single response. */
   maxOutput: number;
   capabilities: ModelCapabilities;
+  /**
+   * Set once the provider has announced a shutdown. The model works until
+   * `shutdown` (an ISO date); `replacement` is the provider's recommended
+   * successor, which may not be in this registry.
+   */
+  deprecated?: { shutdown: string; replacement: string };
 }
 
 /**
@@ -84,6 +98,44 @@ const FRONTIER: ModelCapabilities = {
 
 export const MODELS: ModelEntry[] = [
   // ─── Anthropic ───────────────────────────────────────────────────────────
+  // Opus 5.5, Sonnet 5.5 and Fable 5.1 reject a forced tool_choice (`any` /
+  // `tool`) with a 400; Haiku 5.5 accepts one.
+  {
+    id: 'claude-opus-5-5',
+    providerId: 'anthropic',
+    family: 'anthropic',
+    displayName: 'Claude Opus 5.5',
+    contextWindow: 1_000_000,
+    maxOutput: 128_000,
+    capabilities: { ...FRONTIER, toolChoice: false },
+  },
+  {
+    id: 'claude-sonnet-5-5',
+    providerId: 'anthropic',
+    family: 'anthropic',
+    displayName: 'Claude Sonnet 5.5',
+    contextWindow: 1_000_000,
+    maxOutput: 128_000,
+    capabilities: { ...FRONTIER, toolChoice: false },
+  },
+  {
+    id: 'claude-haiku-5-5',
+    providerId: 'anthropic',
+    family: 'anthropic',
+    displayName: 'Claude Haiku 5.5',
+    contextWindow: 1_000_000,
+    maxOutput: 128_000,
+    capabilities: FRONTIER,
+  },
+  {
+    id: 'claude-fable-5-1',
+    providerId: 'anthropic',
+    family: 'anthropic',
+    displayName: 'Claude Fable 5.1',
+    contextWindow: 1_000_000,
+    maxOutput: 128_000,
+    capabilities: { ...FRONTIER, toolChoice: false },
+  },
   {
     id: 'claude-opus-4-7',
     providerId: 'anthropic',
@@ -99,7 +151,7 @@ export const MODELS: ModelEntry[] = [
     family: 'anthropic',
     displayName: 'Claude Sonnet 4.6',
     contextWindow: 1_000_000,
-    maxOutput: 64_000,
+    maxOutput: 128_000,
     capabilities: FRONTIER,
   },
   {
@@ -152,15 +204,28 @@ export const MODELS: ModelEntry[] = [
       // The nano variant is text-only at the chat-completions surface.
       vision: false,
     },
+    deprecated: { shutdown: '2027-04-01', replacement: 'gpt-6-luna' },
   },
 
   // ─── Google Gemini ───────────────────────────────────────────────────────
+  {
+    id: 'gemini-3.8-flash',
+    providerId: 'gemini',
+    family: 'gemini',
+    displayName: 'Gemini 3.8 Flash',
+    contextWindow: 1_048_576,
+    maxOutput: 65_536,
+    capabilities: FRONTIER,
+  },
+  // Google serves the 2.5 models only to projects that used them before;
+  // they are not deprecated, but new projects get an error and should use
+  // 3.8 Flash.
   {
     id: 'gemini-2.5-pro',
     providerId: 'gemini',
     family: 'gemini',
     displayName: 'Gemini 2.5 Pro',
-    contextWindow: 1_000_000,
+    contextWindow: 1_048_576,
     maxOutput: 65_536,
     capabilities: FRONTIER,
   },
@@ -169,7 +234,7 @@ export const MODELS: ModelEntry[] = [
     providerId: 'gemini',
     family: 'gemini',
     displayName: 'Gemini 2.5 Flash',
-    contextWindow: 1_000_000,
+    contextWindow: 1_048_576,
     maxOutput: 65_536,
     capabilities: FRONTIER,
   },
@@ -197,12 +262,15 @@ export const MODELS: ModelEntry[] = [
  * families and the user hasn't pinned a specific model on the group.
  *
  * Pick the family flagship: highest-capability, broadest context, full feature
- * set. The mini/nano variants are not defaults — users can opt in explicitly.
+ * set, and callable by every account. The mini/nano variants are not
+ * defaults — users can opt in explicitly. Gemini's is 3.8 Flash, the model
+ * Google points new projects to: 2.5 Pro is closed to new projects, and
+ * translation hasn't been checked against Gemini 4 Argon's request rules.
  */
 export const DEFAULT_MODELS: Record<ModelFamily, string> = {
   anthropic: 'claude-sonnet-4-6',
   openai: 'gpt-5.5',
-  gemini: 'gemini-2.5-pro',
+  gemini: 'gemini-3.8-flash',
   cohere: 'command-a-03-2025',
 };
 
