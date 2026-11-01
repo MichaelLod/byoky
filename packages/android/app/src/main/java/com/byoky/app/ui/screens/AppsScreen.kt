@@ -274,7 +274,7 @@ fun AppsScreen(wallet: WalletStore) {
 
     if (confirmDisconnectAll) {
         ConfirmDestructiveDialog(
-            title = "Disconnect ${sessions.size} apps?",
+            title = "Disconnect ${sessions.size} app${if (sessions.size == 1) "" else "s"}?",
             body = "They lose access to your keys. Open an app again from the Apps tab to reconnect it.",
             confirmLabel = "Disconnect all",
             onConfirm = {
