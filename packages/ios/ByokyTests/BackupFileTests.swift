@@ -52,6 +52,32 @@ final class BackupFileTests: XCTestCase {
         XCTAssertEqual(contents.entries[4].secret, "sk-ant-oat01-FIXTURE-setup-token")
     }
 
+    /// A file that went through an editor or mail client: lines wrapped at 76
+    /// with CRLF, a trailing newline and a byte-order mark. The extension and
+    /// Android open it, so iOS must too.
+    func testOpensALineWrappedFile() throws {
+        let original = BackupFixture.fileContents.trimmingCharacters(in: .whitespacesAndNewlines)
+        var lines: [String] = []
+        var rest = Substring(original)
+        while !rest.isEmpty {
+            lines.append(String(rest.prefix(76)))
+            rest = rest.dropFirst(76)
+        }
+        XCTAssertGreaterThan(lines.count, 1)
+        let wrapped = "\u{FEFF}" + lines.joined(separator: "\r\n") + "\n"
+
+        let contents = try BackupFile.open(wrapped, password: BackupFixture.password)
+        let expected = try BackupFile.open(original, password: BackupFixture.password)
+        XCTAssertEqual(contents.entries, expected.entries)
+        XCTAssertEqual(contents.unsupportedCount, expected.unsupportedCount)
+    }
+
+    func testWhitespaceOnlyFileIsInvalid() {
+        XCTAssertThrowsError(try BackupFile.open(" \r\n\t\u{FEFF}", password: "pw")) { error in
+            XCTAssertEqual(error as? BackupFile.BackupError, .invalidFormat)
+        }
+    }
+
     func testFixtureWithWrongPassword() {
         XCTAssertThrowsError(try BackupFile.open(BackupFixture.fileContents, password: "not-the-password")) { error in
             XCTAssertEqual(error as? BackupFile.BackupError, .wrongPasswordOrCorrupted)
