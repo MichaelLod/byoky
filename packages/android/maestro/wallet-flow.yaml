@@ -11,6 +11,7 @@ tags:
 #      Anthropic saves the key as "Anthropic", not "OpenAI".
 #   2. A setup token shows as "Setup Token" on its card, as in the sheet.
 #   3. A local server's URL shows on its card and can be changed there.
+#   4. Settings has a back arrow.
 #
 # Run:
 #   cd packages/android/maestro
@@ -42,9 +43,10 @@ tags:
 - extendedWaitUntil:
     visible: "1 credential"
     timeout: 30000
-- assertVisible: "Setup Token"
-- assertNotVisible: "OpenAI"
-- assertNotVisible: "OAuth"
+# The card reads "Anthropic · Setup Token".
+- assertVisible: "Anthropic · Setup Token"
+- assertNotVisible: ".*OpenAI.*"
+- assertNotVisible: ".*OAuth.*"
 
 # 3. Ollama with its default server URL, then point it at 127.0.0.1.
 - tapOn: "Open add menu"
@@ -77,3 +79,9 @@ tags:
 - tapOn: "Save"
 - assertVisible: "http://127.0.0.1:11434"
 - assertNotVisible: "http://localhost:11434"
+
+# 4. Settings is pushed from the Wallet tab and has a back arrow.
+- tapOn: "Settings"
+- assertVisible: "Security"
+- tapOn: "Back"
+- assertVisible: "2 credentials"
