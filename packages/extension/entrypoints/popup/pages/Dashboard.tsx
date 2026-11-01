@@ -17,33 +17,62 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
-interface ProviderUsage {
+interface Usage {
   requests: number;
   inputTokens: number;
   outputTokens: number;
 }
 
-// Aggregate last 7 days of successful requests per provider. Per-credential
-// granularity isn't possible (request log carries providerId only), so
-// multiple credentials of the same provider share these numbers.
-function computeUsageByProvider(log: RequestLogEntry[]): Map<string, ProviderUsage> {
+/** credentialId: the key that served the request, recorded by the background (WP-A F033). */
+type LogEntry = RequestLogEntry & { credentialId?: string };
+
+type Attribution = { credentialId: string } | { sharedBy: string } | null;
+
+/**
+ * Which key served a request. Entries name it; entries logged before that
+ * only name the provider (the one actually called, under translation), which
+ * pins them to a key only when the wallet holds one key of that provider.
+ * Otherwise they are shared by all of that provider's keys. null: the key is
+ * gone.
+ */
+function attribute(entry: LogEntry, credentials: CredentialMeta[]): Attribution {
+  if (entry.credentialId) {
+    return credentials.some((c) => c.id === entry.credentialId) ? { credentialId: entry.credentialId } : null;
+  }
+  const provider = entry.actualProviderId ?? entry.providerId;
+  const keys = credentials.filter((c) => c.providerId === provider);
+  if (keys.length === 1) return { credentialId: keys[0].id };
+  return keys.length > 1 ? { sharedBy: provider } : null;
+}
+
+function addTo(map: Map<string, Usage>, key: string, entry: LogEntry) {
+  const usage = map.get(key) ?? { requests: 0, inputTokens: 0, outputTokens: 0 };
+  usage.requests++;
+  usage.inputTokens += entry.inputTokens ?? 0;
+  usage.outputTokens += entry.outputTokens ?? 0;
+  map.set(key, usage);
+}
+
+// Last 7 days of successful requests, per key, plus the older-style entries
+// that can only be told apart by provider.
+function computeUsageByCredential(log: LogEntry[], credentials: CredentialMeta[]) {
   const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  const byProvider = new Map<string, ProviderUsage>();
+  const byCredential = new Map<string, Usage>();
+  const sharedByProvider = new Map<string, Usage>();
   for (const entry of log) {
     if (entry.timestamp < cutoff) continue;
     if (entry.status >= 400) continue;
-    const usage = byProvider.get(entry.providerId) ?? { requests: 0, inputTokens: 0, outputTokens: 0 };
-    usage.requests++;
-    usage.inputTokens += entry.inputTokens ?? 0;
-    usage.outputTokens += entry.outputTokens ?? 0;
-    byProvider.set(entry.providerId, usage);
+    const who = attribute(entry, credentials);
+    if (!who) continue;
+    if ('credentialId' in who) addTo(byCredential, who.credentialId, entry);
+    else addTo(sharedByProvider, who.sharedBy, entry);
   }
-  return byProvider;
+  return { byCredential, sharedByProvider };
 }
 
 export function Dashboard() {
   const { credentials, requestLog, lock, removeCredential } = useWalletStore();
-  const usageByProvider = useMemo(() => computeUsageByProvider(requestLog), [requestLog]);
+  const usage = useMemo(() => computeUsageByCredential(requestLog, credentials), [requestLog, credentials]);
   const [statsCredentialId, setStatsCredentialId] = useState<string | null>(null);
 
   return (
@@ -69,7 +98,8 @@ export function Dashboard() {
           <CredentialCard
             key={cred.id}
             cred={cred}
-            usage={usageByProvider.get(cred.providerId)}
+            usage={usage.byCredential.get(cred.id)}
+            shared={usage.sharedByProvider.get(cred.providerId)}
             onOpenStats={() => setStatsCredentialId(cred.id)}
             onRemove={() => removeCredential(cred.id)}
           />
@@ -90,12 +120,15 @@ export function Dashboard() {
 
 interface CredentialCardProps {
   cred: CredentialMeta;
-  usage: ProviderUsage | undefined;
+  /** This key's own usage. */
+  usage: Usage | undefined;
+  /** Earlier usage that can't be told apart among this provider's keys. */
+  shared: Usage | undefined;
   onOpenStats: () => void;
   onRemove: () => void;
 }
 
-function CredentialCard({ cred, usage, onOpenStats, onRemove }: CredentialCardProps) {
+function CredentialCard({ cred, usage, shared, onOpenStats, onRemove }: CredentialCardProps) {
   const { renameCredential } = useWalletStore();
   const provider = PROVIDERS[cred.providerId];
   const [editing, setEditing] = useState(false);
@@ -249,6 +282,11 @@ function CredentialCard({ cred, usage, onOpenStats, onRemove }: CredentialCardPr
             <span className="usage-mini-tag">output</span>
           </span>
         </span>
+        {shared && shared.requests > 0 && (
+          <span className="usage-mini-shared">
+            +{shared.requests} earlier, all {provider?.name ?? cred.providerId} keys
+          </span>
+        )}
       </button>
     </div>
   );
@@ -278,18 +316,33 @@ function StatsSheet({ credentialId, credentials, requestLog, onClose }: StatsShe
 
   return (
     <Modal title={title} onClose={onClose}>
-      {cred && <CredentialStats cred={cred} requestLog={requestLog} />}
+      {cred && <CredentialStats cred={cred} credentials={credentials} requestLog={requestLog} />}
     </Modal>
   );
 }
 
-function CredentialStats({ cred, requestLog }: { cred: CredentialMeta; requestLog: RequestLogEntry[] }) {
+function CredentialStats({ cred, credentials, requestLog }: {
+  cred: CredentialMeta;
+  credentials: CredentialMeta[];
+  requestLog: LogEntry[];
+}) {
   const [range, setRange] = useState<TimeRange>('7d');
   const provider = PROVIDERS[cred.providerId];
-  const filtered = useMemo(
-    () => filterByTime(requestLog, range).filter((e) => e.providerId === cred.providerId && e.status < 400),
-    [requestLog, range, cred.providerId],
-  );
+  const { filtered, sharedCount } = useMemo(() => {
+    const mine: LogEntry[] = [];
+    let shared = 0;
+    for (const e of filterByTime(requestLog, range)) {
+      if (e.status >= 400) continue;
+      const who = attribute(e, credentials);
+      if (!who) continue;
+      if ('credentialId' in who) {
+        if (who.credentialId === cred.id) mine.push(e);
+      } else if (who.sharedBy === cred.providerId) {
+        shared++;
+      }
+    }
+    return { filtered: mine, sharedCount: shared };
+  }, [requestLog, range, cred.id, cred.providerId, credentials]);
 
   const byModel = new Map<string, { requests: number; inputTokens: number; outputTokens: number }>();
   const byApp = new Map<string, { origin: string; requests: number; inputTokens: number; outputTokens: number }>();
@@ -317,8 +370,14 @@ function CredentialStats({ cred, requestLog }: { cred: CredentialMeta; requestLo
   return (
     <>
       <p className="card-subtitle" style={{ marginBottom: '12px' }}>
-        {provider?.name ?? cred.providerId} · shared across all credentials of this provider
+        {provider?.name ?? cred.providerId} · this key only
       </p>
+      {sharedCount > 0 && (
+        <p className="card-subtitle" style={{ marginBottom: '12px' }}>
+          Not counted: {sharedCount} earlier {sharedCount === 1 ? 'request' : 'requests'}, shared by
+          all {provider?.name ?? cred.providerId} keys.
+        </p>
+      )}
 
       <div className="usage-range-toggle">
         {(['24h', '7d', '30d', 'all'] as TimeRange[]).map((r) => (

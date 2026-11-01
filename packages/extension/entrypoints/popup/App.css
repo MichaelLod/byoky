@@ -2124,6 +2124,14 @@ html.popup .app {
   color: var(--text-muted);
 }
 
+.usage-mini-shared {
+  display: block;
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
 .usage-mini-empty {
   font-size: 12px;
   color: var(--text-muted);
