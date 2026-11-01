@@ -769,7 +769,7 @@ export function startCallbackServer(opts: CallbackServerOptions): Promise<Callba
           res.end();
           return;
         }
-        const MAX_BODY_SIZE = 64_000;
+        const MAX_BODY_SIZE = 1_048_576; // 1MB
         let body = '';
         let oversized = false;
         req.on('data', (chunk: Buffer) => {

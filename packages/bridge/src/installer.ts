@@ -76,10 +76,10 @@ export function uninstall(): void {
 export function status(): void {
   const { registered, missing } = getRegistrationStatus();
   for (const browser of registered) {
-    console.log(`  ✓ ${browser}: registered`);
+    console.log(`  \u2713 ${browser}: registered`);
   }
   for (const browser of missing) {
-    console.log(`  ✗ ${browser}: not registered`);
+    console.log(`  \u2717 ${browser}: not registered`);
   }
   if (registered.length === 0 && missing.length === 0) {
     console.log('  No supported browser found.');
