@@ -197,15 +197,6 @@ export default defineContentScript({
       }
     });
 
-    // Persistent port for receiving notifications (revocations, provider
-    // updates) from background. They carry a session key, so the background
-    // only sends this frame the ones for sessions of its own origin.
-    //
-    // The port closes whenever the background service worker shuts down
-    // (after ~30 s idle in MV3), so it is reopened, but only while an SDK in
-    // this frame listens: reopening it in every frame of every tab would keep
-    // waking the worker. The background needs no message to register a
-    // port; it keys notifications by the port's sender origin.
     // Once no SDK in this frame listens, the notify connection closes, so
     // it stops waking the service worker.
     function releaseSdkPort(port: MessagePort) {
@@ -218,10 +209,23 @@ export default defineContentScript({
       }
       // disconnect() doesn't fire this side's onDisconnect, so nothing
       // schedules a reopen.
-      notifyPort?.disconnect();
+      try {
+        notifyPort?.disconnect();
+      } catch {
+        // Already cut off from the extension.
+      }
       notifyPort = null;
     }
 
+    // Persistent port for receiving notifications (revocations, provider
+    // updates) from background. They carry a session key, so the background
+    // only sends this frame the ones for sessions of its own origin.
+    //
+    // The port closes whenever the background service worker shuts down
+    // (after ~30 s idle in MV3), so it is reopened, but only while an SDK in
+    // this frame listens: reopening it in every frame of every tab would keep
+    // waking the worker. The background needs no message to register a
+    // port; it keys notifications by the port's sender origin.
     function forwardNotification(msg: unknown) {
       // Push to registered SDK notification ports (secure channel)
       for (const port of notifyPorts) {
