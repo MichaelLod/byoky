@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -35,7 +36,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
-fun SettingsScreen(wallet: WalletStore) {
+fun SettingsScreen(wallet: WalletStore, onBack: () -> Unit) {
     val context = LocalContext.current
     var showResetWalletConfirm by remember { mutableStateOf(false) }
 
@@ -43,7 +44,17 @@ fun SettingsScreen(wallet: WalletStore) {
         modifier = Modifier
             .background(Void)
             .dotGrid(),
-        topBar = { RetroTopBar(title = "Settings") },
+        topBar = {
+            // Pushed from the Wallet tab, so it gets a way back like any pushed screen.
+            RetroTopBar(
+                title = "Settings",
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+            )
+        },
         containerColor = Color.Transparent,
     ) { padding ->
         Column(

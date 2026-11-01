@@ -207,7 +207,9 @@ private fun MainScreen(wallet: WalletStore) {
                     onClose = { navController.popBackStack() },
                 )
             }
-            composable("settings") { SettingsScreen(wallet) }
+            composable("settings") {
+                SettingsScreen(wallet, onBack = { navController.popBackStack() })
+            }
         }
     }
 
