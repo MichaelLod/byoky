@@ -12,6 +12,7 @@ import {
   hashPassword,
 } from '@byoky/core';
 import { lockedUntilFrom } from './hooks/useLockoutCountdown';
+import { describeOrigin } from './utils/origin';
 
 type Page =
   | 'setup'
@@ -330,20 +331,33 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     await get().refreshData();
   },
 
+  // Both leave the approval page through refreshData once the queue is
+  // empty, unless there is an error to read first.
   approveConnect: async (approvalId: string, trust: boolean) => {
-    await sendInternal('approveConnect', { approvalId, trust });
-    await get().refreshData();
-    if (get().pendingApprovals.length === 0) {
-      set({ currentPage: 'dashboard' });
+    set({ error: null });
+    const origin = get().pendingApprovals.find((a) => a.id === approvalId)?.appOrigin;
+    const result = await sendInternal('approveConnect', { approvalId, trust });
+    if (!result?.success) {
+      // The background drops a request after two minutes, and the app has
+      // already been told it timed out: approving it now connects nothing.
+      set({
+        error: result?.error === 'Approval not found'
+          ? `The request from ${origin ? describeOrigin(origin).label : 'this app'} expired. Ask the app to connect again.`
+          : ((result?.error as string | undefined) ?? 'Could not approve the request'),
+      });
     }
+    await get().refreshData();
   },
 
   rejectConnect: async (approvalId: string) => {
-    await sendInternal('rejectConnect', { approvalId });
-    await get().refreshData();
-    if (get().pendingApprovals.length === 0) {
-      set({ currentPage: 'dashboard' });
+    set({ error: null });
+    const result = await sendInternal('rejectConnect', { approvalId });
+    // A request that is already gone (timed out, or answered in another
+    // wallet view) needs no rejecting.
+    if (!result?.success && result?.error !== 'Approval not found') {
+      set({ error: (result?.error as string | undefined) ?? 'Could not reject the request' });
     }
+    await get().refreshData();
   },
 
   removeTrustedSite: async (origin: string) => {
@@ -455,11 +469,19 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       }),
     );
 
+    const pendingApprovals = (approvalResult.approvals ?? []) as PendingApproval[];
+    // The queue can empty without this view acting on it: approved in another
+    // wallet view, timed out, or auto-approved for a trusted site. The
+    // approval page has no nav, so don't leave it showing an empty queue,
+    // unless it is showing an error the user should read first.
+    const leaveApproval = get().currentPage === 'approval' && pendingApprovals.length === 0 && !get().error;
+
     set({
+      ...(leaveApproval ? { currentPage: 'dashboard' as const } : {}),
       credentials: metas,
       sessions: (sessionResult.sessions ?? []) as Session[],
       requestLog: (logResult.log ?? []) as RequestLogEntry[],
-      pendingApprovals: (approvalResult.approvals ?? []) as PendingApproval[],
+      pendingApprovals,
       trustedSites: (trustedResult.sites ?? []) as TrustedSite[],
       // The flag is raised when the background drops the trust state, which
       // checking it for this very call may have done. Once seen, it is

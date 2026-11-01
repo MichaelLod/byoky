@@ -68,14 +68,20 @@ function routeLabel(route: Route): string {
 }
 
 export function ApprovalRequest() {
-  const { pendingApprovals } = useWalletStore();
+  const { pendingApprovals, error, navigate } = useWalletStore();
 
   if (pendingApprovals.length === 0) {
+    // Reached when approving fails and nothing else is queued: keep the
+    // error on screen, with a way back (this page has no nav).
     return (
       <div>
         <h2 className="page-title">Connection Request</h2>
+        {error && <div className="error">{error}</div>}
         <div className="empty-state">
           <p>No pending requests.</p>
+          <button className="btn btn-secondary" style={{ marginTop: '12px' }} onClick={() => navigate('dashboard')}>
+            Back to wallet
+          </button>
         </div>
       </div>
     );
@@ -93,7 +99,7 @@ export function ApprovalRequest() {
 }
 
 function ApprovalCard({ approval, queued }: { approval: PendingApproval; queued: number }) {
-  const { credentials, groups, appGroups, approveConnect, rejectConnect } = useWalletStore();
+  const { credentials, groups, appGroups, error, approveConnect, rejectConnect } = useWalletStore();
   const [trust, setTrust] = useState(false);
   // Host and port, since trust is granted per full origin.
   const origin = describeOrigin(approval.appOrigin);
@@ -118,6 +124,8 @@ function ApprovalCard({ approval, queued }: { approval: PendingApproval; queued:
           <h2 className="page-title">Connection Request</h2>
         </div>
       </div>
+
+      {error && <div className="error">{error}</div>}
 
       <div className="approval-card">
         <div className="approval-origin">{origin.label}</div>

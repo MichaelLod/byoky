@@ -45,6 +45,9 @@ export default function App() {
         });
       } else if (msg.action === 'usageUpdated') {
         useWalletStore.getState().refreshData();
+      } else if (msg.action === 'approvalsChanged') {
+        // A request was answered, timed out or auto-approved somewhere else.
+        if (useWalletStore.getState().isUnlocked) useWalletStore.getState().refreshData();
       }
     }
     try {

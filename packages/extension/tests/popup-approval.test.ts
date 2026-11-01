@@ -186,3 +186,67 @@ describe('approval says which key will serve each provider (F092)', () => {
     expect(tags(view.container)).toEqual([['OpenAI', 'No key']]);
   });
 });
+
+describe('approval page never dead-ends (F051)', () => {
+  it.each(['sessionChanged', 'approvalsChanged', 'usageUpdated'])(
+    'goes back to the dashboard when the queue empties elsewhere (%s)',
+    async (action) => {
+      bg.state.approvals = [approval('a1', 'https://app.example')];
+      view = await mount(App);
+      expect(useWalletStore.getState().currentPage).toBe('approval');
+      expect(view.container.querySelector('nav')).toBeNull();
+
+      bg.state.approvals = [];
+      await bg.broadcast(action);
+
+      expect(useWalletStore.getState().currentPage).toBe('dashboard');
+      expect(view.container.querySelector('nav')).not.toBeNull();
+    },
+  );
+
+  it('approving a timed-out request says it expired and offers a way back', async () => {
+    bg.state.approvals = [approval('a1', 'https://app.example')];
+    view = await mount(App);
+    const { container } = view;
+    bg.state.approvals = [];   // the background dropped it after 120 s
+
+    await run(() => buttonByText(container, 'Approve')!.click());
+
+    expect(useWalletStore.getState().currentPage).toBe('approval');
+    expect(container.querySelector('.error')?.textContent).toBe(
+      'The request from app.example expired. Ask the app to connect again.',
+    );
+    await run(() => buttonByText(container, 'Back to wallet')!.click());
+    expect(useWalletStore.getState().currentPage).toBe('dashboard');
+    expect(container.querySelector('nav')).not.toBeNull();
+  });
+
+  it('names the expired request when another one is still queued', async () => {
+    bg.state.approvals = [approval('a1', 'https://first.example'), approval('a2', 'https://second.example')];
+    view = await mount(App);
+    const { container } = view;
+    bg.state.approvals = [approval('a2', 'https://second.example')];
+
+    await run(() => buttonByText(container, 'Approve')!.click());
+
+    expect(container.querySelector('.error')?.textContent).toContain('The request from first.example expired');
+    expect(container.querySelector('.approval-origin')?.textContent).toBe('second.example');
+  });
+
+  it('shows other approve errors as they are', async () => {
+    bg.state.approvals = [approval('a1', 'https://app.example')];
+    bg.handlers.approveConnect = () => ({ success: false, error: 'Wallet is locked' });
+    view = await mount(App);
+    await run(() => buttonByText(view!.container, 'Approve')!.click());
+    expect(view.container.querySelector('.error')?.textContent).toBe('Wallet is locked');
+  });
+
+  it('rejecting a request that is already gone just moves on', async () => {
+    bg.state.approvals = [approval('a1', 'https://app.example')];
+    view = await mount(App);
+    bg.state.approvals = [];
+    await run(() => buttonByText(view!.container, 'Reject')!.click());
+    expect(useWalletStore.getState().error).toBeNull();
+    expect(useWalletStore.getState().currentPage).toBe('dashboard');
+  });
+});
