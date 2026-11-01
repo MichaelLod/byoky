@@ -146,6 +146,15 @@ describe('group errors are shown, not swallowed (F122)', () => {
     expect(container.querySelector('.group-section .error')?.textContent).toBe('Group name must be 1-200 characters');
   });
 
+  it('leaves an add-credential error to the sheet', async () => {
+    bg.handlers.addCredential = () => ({ error: 'Invalid key' });
+    const container = await openConnectedApps();
+    await run(() => useWalletStore.getState().openModal('add-credential'));
+    await run(() => useWalletStore.getState().addApiKey('anthropic', 'Personal', 'sk-ant-x'));
+    expect([...container.querySelectorAll('.error')].map((e) => e.textContent)).toEqual(['Invalid key']);
+    expect(container.querySelector('[role=dialog] .error')).not.toBeNull();
+  });
+
   it('shows delete and move errors at the top', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     bg.handlers.deleteGroup = () => ({ error: 'Wallet is locked' });

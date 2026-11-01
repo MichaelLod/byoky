@@ -43,7 +43,7 @@ export function ConnectedApps() {
     requestLog, tokenAllowances, tokenUsage, setAllowance, removeAllowance, resetAppUsage,
     groups, appGroups, credentials,
     createGroup, updateGroup, deleteGroup, setAppGroup,
-    error, clearError,
+    error, clearError, modal,
   } = useWalletStore();
   const [editingOrigin, setEditingOrigin] = useState<string | null>(null);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
@@ -124,9 +124,10 @@ export function ConnectedApps() {
     setPendingMove(null);
   }
 
-  // Errors from creating or editing a group show in its form; the rest
-  // (moving an app, deleting a group) show here.
-  const formOpen = showCreateGroup || editingGroupId !== null;
+  // Errors from creating or editing a group show in its form, and the add
+  // credential sheet shows its own; the rest (moving an app, deleting a
+  // group) show here.
+  const formOpen = showCreateGroup || editingGroupId !== null || modal !== null;
 
   return (
     <div>
