@@ -262,8 +262,10 @@ describe('security invariants', () => {
       const get = bg.slice(bg.indexOf('async function getTrustState'), bg.indexOf('async function updateTrustState'));
       expect(get).toContain('readTrustState(');
       expect(get).toContain('if (!key) return emptyTrustState();');
-      // A refused state is dropped whole (fail closed) and the user told.
-      expect(get).toContain('if (!read.intact) await browser.storage.local.set(await droppedTrustState(key));');
+      // A refused state (forged, or older than one already seen) is dropped
+      // whole (fail closed) and the user told.
+      expect(get).toContain('readTrustState(await browser.storage.local.get(TRUST_STATE_KEYS), key, trustEpochHighWater)');
+      expect(get).toMatch(/if \(!read\.intact\) \{\s*const epoch = nextTrustEpoch\(read\.epoch\);\s*await browser\.storage\.local\.set\(await droppedTrustState\(key, epoch\)\);/);
       const update = bg.slice(bg.indexOf('async function updateTrustState'), bg.indexOf('async function addTrustedSite'));
       expect(update).toContain('signTrustState(');
       expect(update).toContain('read.intact ? { sites: read.sites, revoked: read.revoked } : emptyTrustState()');

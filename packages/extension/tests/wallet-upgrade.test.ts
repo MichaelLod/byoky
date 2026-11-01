@@ -89,7 +89,7 @@ describe('wallet upgrade from 1.1.1', () => {
 
     // Trusted sites: kept as they were, now verifiable with the new key.
     const read = await readTrustState(storage.data, result!.macKey);
-    expect(read).toEqual({ sites: fixture.storage.trustedSites, revoked: [], intact: true });
+    expect(read).toEqual({ sites: fixture.storage.trustedSites, revoked: [], intact: true, epoch: 1 });
     const derived = await deriveWalletMacKey(PASSWORD, hash);
     expect((await readTrustState(storage.data, derived!)).intact).toBe(true);
   }, 60_000);

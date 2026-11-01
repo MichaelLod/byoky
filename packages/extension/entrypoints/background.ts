@@ -183,6 +183,10 @@ export default defineBackground(() => {
   let walletUpgradePromise: Promise<CryptoKey | null> | null = null;
   let unlockFailures = 0;
   let unlockLockedUntil = 0;
+  // The highest trust-state epoch seen this browser session. A state older
+  // than this was put back from a snapshot (see lib/trust-state.ts). Kept
+  // in storage.session too, so a worker restart doesn't forget it.
+  let trustEpochHighWater = 0;
 
   // Unlock and re-authentication (before export) share one lockout, so
   // neither is an unthrottled oracle for the master password.
@@ -251,7 +255,8 @@ export default defineBackground(() => {
   async function restoreSession() {
     if (!hasSessionStorage) return;
     try {
-      const data = await browser.storage.session.get(['_mp', '_lastActivity', '_unlockFailures', '_unlockLockedUntil']);
+      const data = await browser.storage.session.get(['_mp', '_lastActivity', '_unlockFailures', '_unlockLockedUntil', '_trustEpoch']);
+      if (typeof data._trustEpoch === 'number') trustEpochHighWater = Math.max(trustEpochHighWater, data._trustEpoch);
       if (typeof data._unlockFailures === 'number') unlockFailures = data._unlockFailures;
       if (typeof data._unlockLockedUntil === 'number') unlockLockedUntil = data._unlockLockedUntil;
       if (data._mp) {
@@ -1629,6 +1634,7 @@ export default defineBackground(() => {
         }
         const { passwordHash: setupHash } = message.payload as { passwordHash: string };
         forgetWalletKeys();
+        forgetTrustEpoch();
         await browser.storage.local.set({ passwordHash: setupHash, credentials: [] });
         // Other open views leave their setup screen.
         browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'sessionChanged' }).catch(() => {});
@@ -1646,6 +1652,7 @@ export default defineBackground(() => {
         clearSessionStorage();
         if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
         clearPasswordFailures();
+        forgetTrustEpoch();
         // After any in-flight upgrade write, which then finds the wallet gone.
         await serializedStorage(() => browser.storage.local.clear());
         browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'sessionChanged' }).catch(() => {});
@@ -3517,8 +3524,18 @@ export default defineBackground(() => {
     const key = await walletMacKey();
     if (!key) return emptyTrustState();
     return serializedStorage(async () => {
-      const read = await readTrustState(await browser.storage.local.get(TRUST_STATE_KEYS), key);
-      if (!read.intact) await browser.storage.local.set(await droppedTrustState(key));
+      const read = await readTrustState(await browser.storage.local.get(TRUST_STATE_KEYS), key, trustEpochHighWater);
+      if (!read.intact) {
+        const epoch = nextTrustEpoch(read.epoch);
+        await browser.storage.local.set(await droppedTrustState(key, epoch));
+        noteTrustEpoch(epoch);
+      } else if (read.epoch === 0 && (read.sites.length > 0 || read.revoked.length > 0)) {
+        // Signed before states had an epoch: re-signed with one.
+        await browser.storage.local.set(await signTrustState(read, key, 1));
+        noteTrustEpoch(1);
+      } else {
+        noteTrustEpoch(read.epoch);
+      }
       // Locked while this ran: trust nothing.
       return masterPassword ? { sites: read.sites, revoked: read.revoked } : emptyTrustState();
     });
@@ -3529,17 +3546,35 @@ export default defineBackground(() => {
     const key = await walletMacKey();
     if (!key) throw new Error('Wallet is locked');
     await serializedStorage(async () => {
-      const read = await readTrustState(await browser.storage.local.get(TRUST_STATE_KEYS), key);
+      const read = await readTrustState(await browser.storage.local.get(TRUST_STATE_KEYS), key, trustEpochHighWater);
       // A state that fails verification is dropped and started over, not
       // built on.
       const base = read.intact ? { sites: read.sites, revoked: read.revoked } : emptyTrustState();
       const next = update(base);
       if (read.intact && next === base) return;
+      const epoch = nextTrustEpoch(read.epoch);
       await browser.storage.local.set({
-        ...(await signTrustState(next, key)),
+        ...(await signTrustState(next, key, epoch)),
         ...(read.intact ? {} : { [TRUST_RESET_NOTICE_KEY]: true }),
       });
+      noteTrustEpoch(epoch);
     });
+  }
+
+  function nextTrustEpoch(stored: number): number {
+    return Math.max(stored, trustEpochHighWater) + 1;
+  }
+
+  function noteTrustEpoch(epoch: number) {
+    if (epoch <= trustEpochHighWater) return;
+    trustEpochHighWater = epoch;
+    if (hasSessionStorage) browser.storage.session.set({ _trustEpoch: epoch }).catch(() => {});
+  }
+
+  /** A new or reset wallet starts its trust state over. */
+  function forgetTrustEpoch() {
+    trustEpochHighWater = 0;
+    if (hasSessionStorage) browser.storage.session.remove('_trustEpoch').catch(() => {});
   }
 
   async function addTrustedSite(origin: string, allowedProviders: string[]) {

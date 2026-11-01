@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { hashPassword, deriveWalletMacKey, type TrustedSite } from '@byoky/core';
+import { hashPassword, deriveWalletMacKey, signMac, type TrustedSite } from '@byoky/core';
 import {
   TRUSTED_SITES_KEY,
   REVOKED_ORIGINS_KEY,
+  TRUST_EPOCH_KEY,
   TRUST_MAC_KEY,
   TRUST_RESET_NOTICE_KEY,
   adoptLegacyTrustState,
@@ -24,7 +25,7 @@ const SITES: TrustedSite[] = [
 // The user revoked chat.example.com's session; it stays trusted, but its next
 // connect must be approved by hand.
 const STATE: TrustState = { sites: SITES, revoked: ['https://chat.example.com'] };
-const REFUSED = { sites: [], revoked: [], intact: false };
+const REFUSED = { sites: [], revoked: [], intact: false, epoch: 0 };
 
 let key: CryptoKey;
 let otherKey: CryptoKey;
@@ -36,7 +37,7 @@ beforeAll(async () => {
 
 /** A signed state with `edit` applied to the stored entries afterwards, MAC kept. */
 async function tampered(edit: (stored: Record<string, unknown>) => void): Promise<Record<string, unknown>> {
-  const stored = structuredClone(await signTrustState(STATE, key));
+  const stored = structuredClone(await signTrustState(STATE, key, 3));
   edit(stored);
   return stored;
 }
@@ -58,10 +59,10 @@ describe('trust state integrity', () => {
   });
 
   it('accepts a state it signed', async () => {
-    const stored = await signTrustState(STATE, key);
-    expect(Object.keys(stored).sort()).toEqual([REVOKED_ORIGINS_KEY, TRUST_MAC_KEY, TRUSTED_SITES_KEY]);
+    const stored = await signTrustState(STATE, key, 3);
+    expect(Object.keys(stored).sort()).toEqual([REVOKED_ORIGINS_KEY, TRUST_EPOCH_KEY, TRUST_MAC_KEY, TRUSTED_SITES_KEY]);
     const read = await readTrustState(stored, key);
-    expect(read).toEqual({ ...STATE, intact: true });
+    expect(read).toEqual({ ...STATE, intact: true, epoch: 3 });
     expect(silentlyTrusted(read, 'https://chat.example.com')).toBe(false);
     expect(silentlyTrusted(read, 'http://localhost:3000')).toBe(true);
   });
@@ -108,7 +109,7 @@ describe('trust state integrity', () => {
     expect(await readTrustState(unsigned, key)).toEqual(REFUSED);
     expect(await readTrustState({ ...unsigned, [TRUST_MAC_KEY]: 42 }, key)).toEqual(REFUSED);
     expect(await readTrustState({ ...unsigned, [TRUST_MAC_KEY]: '!!' }, key)).toEqual(REFUSED);
-    expect(await readTrustState(await signTrustState(STATE, otherKey), key)).toEqual(REFUSED);
+    expect(await readTrustState(await signTrustState(STATE, otherKey, 3), key)).toEqual(REFUSED);
     // Revocations alone, unsigned, aren't a state this wallet wrote either.
     expect(await readTrustState({ [REVOKED_ORIGINS_KEY]: ['https://a.example'] }, key)).toEqual(REFUSED);
   });
@@ -124,9 +125,9 @@ describe('trust state integrity', () => {
   });
 
   it('needs no MAC for a wallet that never stored any trust state', async () => {
-    expect(await readTrustState({}, key)).toEqual({ sites: [], revoked: [], intact: true });
+    expect(await readTrustState({}, key)).toEqual({ sites: [], revoked: [], intact: true, epoch: 0 });
     expect(await readTrustState({ [TRUSTED_SITES_KEY]: [], [REVOKED_ORIGINS_KEY]: [] }, key))
-      .toEqual({ sites: [], revoked: [], intact: true });
+      .toEqual({ sites: [], revoked: [], intact: true, epoch: 0 });
     // An emptied state that still carries a MAC was emptied behind the wallet's back.
     const emptied = await tampered((st) => { st[TRUSTED_SITES_KEY] = []; st[REVOKED_ORIGINS_KEY] = []; });
     expect((await readTrustState(emptied, key)).intact).toBe(false);
@@ -134,18 +135,50 @@ describe('trust state integrity', () => {
 
   it('covers entries without allowedProviders, and ignores extra fields', async () => {
     const legacy = { sites: [{ origin: 'https://old.example', trustedAt: 5 }], revoked: [] };
-    const stored = await signTrustState(legacy, key);
-    expect(await readTrustState(stored, key)).toEqual({ ...legacy, intact: true });
+    const stored = await signTrustState(legacy, key, 1);
+    expect(await readTrustState(stored, key)).toEqual({ ...legacy, intact: true, epoch: 1 });
     const scoped = { ...stored, [TRUSTED_SITES_KEY]: [{ origin: 'https://old.example', trustedAt: 5, allowedProviders: ['anthropic'] }] };
     expect((await readTrustState(scoped, key)).intact).toBe(false);
     const extra = { ...stored, [TRUSTED_SITES_KEY]: [{ origin: 'https://old.example', trustedAt: 5, note: 'x' }] };
-    expect(await readTrustState(extra, key)).toEqual({ ...legacy, intact: true });
+    expect(await readTrustState(extra, key)).toEqual({ ...legacy, intact: true, epoch: 1 });
   });
 
   it('drops a refused state with a signed empty one and raises the notice flag', async () => {
-    const dropped = await droppedTrustState(key);
+    const dropped = await droppedTrustState(key, 4);
     expect(dropped[TRUST_RESET_NOTICE_KEY]).toBe(true);
-    expect(await readTrustState(dropped, key)).toEqual({ sites: [], revoked: [], intact: true });
+    expect(await readTrustState(dropped, key)).toEqual({ sites: [], revoked: [], intact: true, epoch: 4 });
+  });
+
+  // F084: the MAC alone can't tell a current state from an older one
+  // signed under the same key.
+  it('refuses a state older than the newest one seen', async () => {
+    const before = await signTrustState({ sites: SITES, revoked: [] }, key, 3);
+    const after = await signTrustState({ sites: [], revoked: [SITES[1].origin] }, key, 4);
+    expect((await readTrustState(after, key, 4)).intact).toBe(true);
+    // The snapshot from before the revocation, put back: a valid MAC, but stale.
+    expect(await readTrustState(before, key, 4)).toEqual(REFUSED);
+    expect((await readTrustState(before, key, 3)).intact).toBe(true);
+    // So is a deleted state, once one was seen.
+    expect(await readTrustState({}, key, 4)).toEqual(REFUSED);
+  });
+
+  it('covers the epoch with the MAC', async () => {
+    const stored = await signTrustState(STATE, key, 3);
+    expect(await readTrustState({ ...stored, [TRUST_EPOCH_KEY]: 9 }, key)).toEqual(REFUSED);
+    for (const epoch of [0, -1, 2.5, '3', null, Number.MAX_SAFE_INTEGER + 2]) {
+      expect(await readTrustState({ ...stored, [TRUST_EPOCH_KEY]: epoch }, key), String(epoch)).toEqual(REFUSED);
+    }
+  });
+
+  it('reads a state signed before epochs as epoch 0, until something newer was seen', async () => {
+    const v1Mac = await signMac(key, JSON.stringify([
+      'byoky:trust:1',
+      STATE.sites.map((s) => [s.origin, s.trustedAt, s.allowedProviders ?? null]),
+      STATE.revoked,
+    ]));
+    const v1 = { [TRUSTED_SITES_KEY]: STATE.sites, [REVOKED_ORIGINS_KEY]: STATE.revoked, [TRUST_MAC_KEY]: v1Mac };
+    expect(await readTrustState(v1, key)).toEqual({ ...STATE, intact: true, epoch: 0 });
+    expect(await readTrustState(v1, key, 1)).toEqual(REFUSED);
   });
 });
 
@@ -187,9 +220,9 @@ describe('trust state migration', () => {
     const result = await upgradeWallet(storage, fixture.PASSWORD);
 
     const final = writes.at(-1)!;
-    expect(Object.keys(final).sort()).toEqual(['passwordHash', REVOKED_ORIGINS_KEY, TRUST_MAC_KEY, TRUSTED_SITES_KEY]);
+    expect(Object.keys(final).sort()).toEqual(['passwordHash', REVOKED_ORIGINS_KEY, TRUST_EPOCH_KEY, TRUST_MAC_KEY, TRUSTED_SITES_KEY]);
     const read = await readTrustState(storage.data, result!.macKey);
-    expect(read).toEqual({ sites: fixture.storage.trustedSites, revoked: ['https://chat.example.com'], intact: true });
+    expect(read).toEqual({ sites: fixture.storage.trustedSites, revoked: ['https://chat.example.com'], intact: true, epoch: 1 });
     expect(silentlyTrusted(read, 'https://chat.example.com')).toBe(false);
     expect(storage.data[TRUST_RESET_NOTICE_KEY]).toBeUndefined();
   }, 60_000);
@@ -197,7 +230,7 @@ describe('trust state migration', () => {
   it('drops trust and raises the notice when the 1.1.1 revocations are malformed', async () => {
     const storage = memoryStorage({ ...legacy, [REVOKED_ORIGINS_KEY]: 'https://chat.example.com' });
     const result = await upgradeWallet(storage, fixture.PASSWORD);
-    expect(await readTrustState(storage.data, result!.macKey)).toEqual({ sites: [], revoked: [], intact: true });
+    expect(await readTrustState(storage.data, result!.macKey)).toEqual({ sites: [], revoked: [], intact: true, epoch: 1 });
     expect(storage.data[TRUST_RESET_NOTICE_KEY]).toBe(true);
   }, 60_000);
 

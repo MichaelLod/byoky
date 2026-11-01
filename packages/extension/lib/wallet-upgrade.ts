@@ -202,7 +202,7 @@ export async function upgradeWallet(
     const { state, dropped } = adoptLegacyTrustState(await storage.get(TRUST_STATE_KEYS));
     await storage.set({
       passwordHash: newHash,
-      ...(await signTrustState(state, macKey)),
+      ...(await signTrustState(state, macKey, 1)),
       ...(dropped ? { [TRUST_RESET_NOTICE_KEY]: true } : {}),
     });
     return true;
