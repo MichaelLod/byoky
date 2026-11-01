@@ -12,6 +12,7 @@ import type {
   IRStreamEvent,
   IRStopReason,
   IRImageSource,
+  IRDocumentBlock,
   IRToolResultContent,
 } from '../ir.js';
 import { isIRError } from '../ir.js';
@@ -89,7 +90,8 @@ type OpenAIMessageContent = string | OpenAIContentPart[];
 
 type OpenAIContentPart =
   | { type: 'text'; text: string }
-  | { type: 'image_url'; image_url: { url: string } | string };
+  | { type: 'image_url'; image_url: { url: string } | string }
+  | { type: 'file'; file: { filename?: string; file_data?: string; file_id?: string } };
 
 interface OpenAIToolCall {
   id: string;
@@ -302,9 +304,26 @@ function parseOpenAIUserContent(content: OpenAIMessageContent): IRContentBlock[]
       const url = extractOpenAIImageUrl((part as { image_url: { url: string } | string }).image_url);
       const source = parseImageUrl(url);
       if (source) out.push({ type: 'image', source });
+    } else if (part.type === 'file') {
+      const doc = parseOpenAIFilePart((part as { file?: { filename?: unknown; file_data?: unknown } }).file);
+      if (doc) out.push(doc);
     }
   }
   return out;
+}
+
+/** A file part with inline data (file_id refers to OpenAI's own storage). */
+function parseOpenAIFilePart(
+  file: { filename?: unknown; file_data?: unknown } | undefined,
+): IRDocumentBlock | null {
+  if (!file || typeof file.file_data !== 'string' || !file.file_data) return null;
+  const title = typeof file.filename === 'string' && file.filename ? { title: file.filename } : {};
+  const match = /^data:([^;,]+);base64,(.+)$/.exec(file.file_data);
+  // Chat completions takes PDFs here; bare base64 is one.
+  const source = match
+    ? { kind: 'base64' as const, mediaType: match[1], data: match[2] }
+    : { kind: 'base64' as const, mediaType: 'application/pdf', data: file.file_data };
+  return { type: 'document', source, ...title };
 }
 
 function parseOpenAIAssistantMessage(
@@ -487,6 +506,9 @@ function serializeMessageToOpenAI(msg: IRMessage): OpenAIMessage[] {
 function serializeUserMessageToOpenAI(msg: IRMessage): OpenAIMessage[] {
   const out: OpenAIMessage[] = [];
   const userParts: OpenAIContentPart[] = [];
+  // Tool messages take text only. Images and documents a tool returned go
+  // into the user message that follows the tool messages.
+  const toolAttachments: OpenAIContentPart[] = [];
 
   for (const block of msg.content) {
     switch (block.type) {
@@ -498,18 +520,34 @@ function serializeUserMessageToOpenAI(msg: IRMessage): OpenAIMessage[] {
         if (url) userParts.push({ type: 'image_url', image_url: { url } });
         break;
       }
-      case 'tool_result':
-        out.push({
-          role: 'tool',
-          tool_call_id: block.toolUseId,
-          content: flattenIRToolResultContent(block.content),
-        });
+      case 'document':
+        userParts.push(irDocumentToOpenAIPart(block));
         break;
+      case 'tool_result': {
+        const attachments: OpenAIContentPart[] = [];
+        if (block.content.kind === 'blocks') {
+          for (const inner of block.content.blocks) {
+            if (inner.type === 'image') {
+              attachments.push({ type: 'image_url', image_url: { url: irImageSourceToDataUrl(inner.source) } });
+            } else if (inner.type === 'document' && inner.source.kind !== 'text') {
+              attachments.push(irDocumentToOpenAIPart(inner));
+            }
+          }
+        }
+        let text = flattenIRToolResultContent(block.content);
+        if (attachments.length > 0) {
+          if (!text) text = TOOL_ATTACHMENTS_NOTE;
+          toolAttachments.push({ type: 'text', text: `Attachments from tool call ${block.toolUseId}:` }, ...attachments);
+        }
+        out.push({ role: 'tool', tool_call_id: block.toolUseId, content: text });
+        break;
+      }
       // thinking/tool_use inside a user message — drop (invalid for user role)
       default:
         break;
     }
   }
+  userParts.unshift(...toolAttachments);
 
   if (userParts.length > 0) {
     if (userParts.every((p) => p.type === 'text')) {
@@ -553,10 +591,30 @@ function irImageSourceToDataUrl(source: IRImageSource): string {
   return source.url;
 }
 
+/** Stands in for the text of a tool result that returned only attachments. */
+const TOOL_ATTACHMENTS_NOTE = '[The tool returned attachments; they follow in the next user message.]';
+
+/**
+ * A document as a chat-completions content part: inline file data, or text.
+ * Chat completions can't fetch a document by URL.
+ */
+function irDocumentToOpenAIPart(doc: IRDocumentBlock): OpenAIContentPart {
+  const { source } = doc;
+  if (source.kind === 'text') return { type: 'text', text: source.text };
+  if (source.kind === 'url') {
+    throw new TranslationError(
+      'UNSUPPORTED_FEATURE',
+      'OpenAI chat completions cannot read a document by URL; send it inline.',
+    );
+  }
+  const filename = doc.title ?? (source.mediaType === 'application/pdf' ? 'document.pdf' : 'document');
+  return { type: 'file', file: { filename, file_data: `data:${source.mediaType};base64,${source.data}` } };
+}
+
 function flattenIRToolResultContent(content: IRToolResultContent): string {
   if (content.kind === 'text') return content.text;
   return content.blocks
-    .map((b) => (b.type === 'text' ? b.text : ''))
+    .map((b) => (b.type === 'text' ? b.text : b.type === 'document' && b.source.kind === 'text' ? b.source.text : ''))
     .filter((s) => s.length > 0)
     .join('\n');
 }

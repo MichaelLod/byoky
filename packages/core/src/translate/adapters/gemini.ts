@@ -10,6 +10,7 @@ import type {
   IRStreamEvent,
   IRStopReason,
   IRImageSource,
+  IRDocumentSource,
   IRToolResultContent,
 } from '../ir.js';
 import { isIRError } from '../ir.js';
@@ -380,16 +381,21 @@ function parseGeminiContent(
     if ('text' in part && typeof part.text === 'string') {
       blocks.push({ type: 'text', text: part.text });
     } else if ('inlineData' in part && part.inlineData) {
-      blocks.push({
-        type: 'image',
-        source: {
-          kind: 'base64',
-          mediaType: part.inlineData.mimeType,
-          data: part.inlineData.data,
-        },
-      });
+      const { mimeType, data } = part.inlineData;
+      // Images stay images; anything else (PDF, text, audio, ...) is a
+      // document, which destinations take or refuse explicitly.
+      blocks.push(
+        isNonImageType(mimeType)
+          ? { type: 'document', source: { kind: 'base64', mediaType: mimeType, data } }
+          : { type: 'image', source: { kind: 'base64', mediaType: mimeType, data } },
+      );
     } else if ('fileData' in part && part.fileData) {
-      blocks.push({ type: 'image', source: { kind: 'url', url: part.fileData.fileUri } });
+      const { mimeType, fileUri } = part.fileData;
+      blocks.push(
+        isNonImageType(mimeType)
+          ? { type: 'document', source: { kind: 'url', url: fileUri, ...(mimeType ? { mediaType: mimeType } : {}) } }
+          : { type: 'image', source: { kind: 'url', url: fileUri } },
+      );
     } else if ('functionCall' in part && part.functionCall) {
       const fc = part.functionCall;
       // An id-less call gets a deterministic one (the same history gives the
@@ -591,6 +597,16 @@ function serializeMessageToGemini(
       signed = true;
     }
     parts.push(wire);
+    // functionResponse.response holds JSON only; images and documents a
+    // tool returned travel as parts next to it.
+    if (block.type === 'tool_result' && block.content.kind === 'blocks') {
+      for (const inner of block.content.blocks) {
+        if (inner.type === 'image') parts.push(irImageToGeminiPart(inner.source));
+        else if (inner.type === 'document' && inner.source.kind !== 'text') {
+          parts.push(irDocumentToGeminiPart(inner.source));
+        }
+      }
+    }
   }
   if (parts.length === 0) return null;
   return {
@@ -608,6 +624,8 @@ function serializeBlockToGemini(
       return { text: block.text };
     case 'image':
       return irImageToGeminiPart(block.source);
+    case 'document':
+      return irDocumentToGeminiPart(block.source);
     case 'tool_use':
       return {
         functionCall: {
@@ -639,6 +657,21 @@ function irImageToGeminiPart(source: IRImageSource): GeminiPart {
   return { fileData: { fileUri: source.url } };
 }
 
+/** Gemini reads PDFs and other documents inline or by URI. */
+function irDocumentToGeminiPart(source: IRDocumentSource): GeminiPart {
+  if (source.kind === 'base64') {
+    return { inlineData: { mimeType: source.mediaType, data: source.data } };
+  }
+  if (source.kind === 'url') {
+    return { fileData: { ...(source.mediaType ? { mimeType: source.mediaType } : {}), fileUri: source.url } };
+  }
+  return { text: source.text };
+}
+
+function isNonImageType(mimeType: string | undefined): boolean {
+  return typeof mimeType === 'string' && mimeType.length > 0 && !mimeType.startsWith('image/');
+}
+
 /**
  * Gemini's functionResponse.response is a protobuf Struct, so it must be a
  * JSON object. Text that parses to an object is passed through as is; any
@@ -647,9 +680,10 @@ function irImageToGeminiPart(source: IRImageSource): GeminiPart {
  */
 function parseToolResultForGemini(content: IRToolResultContent): Record<string, unknown> {
   if (content.kind === 'text') return toStruct(content.text);
-  // Blocks → flatten text blocks into a string and wrap.
+  // Blocks → flatten the text (and plain-text documents) into a string and
+  // wrap; images and binary documents go next to the functionResponse.
   const text = content.blocks
-    .map((b) => (b.type === 'text' ? b.text : ''))
+    .map((b) => (b.type === 'text' ? b.text : b.type === 'document' && b.source.kind === 'text' ? b.source.text : ''))
     .filter((s) => s.length > 0)
     .join('\n');
   return toStruct(text);

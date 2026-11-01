@@ -10,6 +10,7 @@ import type {
   IRStreamEvent,
   IRStopReason,
   IRImageSource,
+  IRDocumentSource,
   IRToolResultContent,
 } from '../ir.js';
 import { isIRError } from '../ir.js';
@@ -468,6 +469,7 @@ function serializeMessageToCohere(msg: IRMessage): CohereMessage[] {
 function serializeUserMessageToCohere(msg: IRMessage): CohereMessage[] {
   const out: CohereMessage[] = [];
   const userParts: CohereUserContentPart[] = [];
+  const toolAttachments: CohereUserContentPart[] = [];
 
   for (const block of msg.content) {
     switch (block.type) {
@@ -479,17 +481,35 @@ function serializeUserMessageToCohere(msg: IRMessage): CohereMessage[] {
         if (url) userParts.push({ type: 'image_url', image_url: { url } });
         break;
       }
-      case 'tool_result':
-        out.push({
-          role: 'tool',
-          tool_call_id: block.toolUseId,
-          content: flattenIRToolResultContent(block.content),
-        });
+      case 'document':
+        userParts.push({ type: 'text', text: documentText(block.source) });
         break;
+      case 'tool_result': {
+        // Tool messages take text only. Images a tool returned go into the
+        // user message that follows the tool messages.
+        const images: CohereUserContentPart[] = [];
+        if (block.content.kind === 'blocks') {
+          for (const inner of block.content.blocks) {
+            if (inner.type === 'image') {
+              images.push({ type: 'image_url', image_url: { url: irImageSourceToUrl(inner.source) } });
+            } else if (inner.type === 'document' && inner.source.kind !== 'text') {
+              throw binaryDocumentError();
+            }
+          }
+        }
+        let text = flattenIRToolResultContent(block.content);
+        if (images.length > 0) {
+          if (!text) text = TOOL_ATTACHMENTS_NOTE;
+          toolAttachments.push({ type: 'text', text: `Attachments from tool call ${block.toolUseId}:` }, ...images);
+        }
+        out.push({ role: 'tool', tool_call_id: block.toolUseId, content: text });
+        break;
+      }
       default:
         break;
     }
   }
+  userParts.unshift(...toolAttachments);
 
   if (userParts.length > 0) {
     if (userParts.every((p) => p.type === 'text')) {
@@ -544,10 +564,26 @@ function irImageSourceToUrl(source: IRImageSource): string {
   return source.url;
 }
 
+/** Stands in for the text of a tool result that returned only images. */
+const TOOL_ATTACHMENTS_NOTE = '[The tool returned images; they follow in the next user message.]';
+
+/** Cohere chat takes documents as text only. */
+function documentText(source: IRDocumentSource): string {
+  if (source.kind === 'text') return source.text;
+  throw binaryDocumentError();
+}
+
+function binaryDocumentError(): TranslationError {
+  return new TranslationError(
+    'UNSUPPORTED_FEATURE',
+    'Cohere does not accept PDF or other binary documents; only plain-text documents can be translated.',
+  );
+}
+
 function flattenIRToolResultContent(content: IRToolResultContent): string {
   if (content.kind === 'text') return content.text;
   return content.blocks
-    .map((b) => (b.type === 'text' ? b.text : ''))
+    .map((b) => (b.type === 'text' ? b.text : b.type === 'document' && b.source.kind === 'text' ? b.source.text : ''))
     .filter((s) => s.length > 0)
     .join('\n');
 }

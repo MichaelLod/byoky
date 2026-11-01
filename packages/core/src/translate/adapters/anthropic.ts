@@ -13,6 +13,7 @@ import type {
   IRStopReason,
   IRToolResultContent,
   IRImageSource,
+  IRDocumentSource,
 } from '../ir.js';
 import { isIRError } from '../ir.js';
 
@@ -82,6 +83,7 @@ interface AnthropicMessage {
 type AnthropicContentBlock =
   | { type: 'text'; text: string }
   | { type: 'image'; source: AnthropicImageSource }
+  | { type: 'document'; source: AnthropicDocumentSource; title?: string }
   | { type: 'tool_use'; id: string; name: string; input: unknown }
   | {
       type: 'tool_result';
@@ -95,6 +97,13 @@ type AnthropicContentBlock =
 type AnthropicImageSource =
   | { type: 'base64'; media_type: string; data: string }
   | { type: 'url'; url: string };
+
+/** PDF as base64 or URL, or plain text. (Content and file sources aren't
+ *  translatable: file ids belong to Anthropic's Files API.) */
+type AnthropicDocumentSource =
+  | { type: 'base64'; media_type: string; data: string }
+  | { type: 'url'; url: string }
+  | { type: 'text'; media_type: 'text/plain'; data: string };
 
 interface AnthropicTool {
   name: string;
@@ -246,6 +255,16 @@ function parseAnthropicContentBlock(
       const irSrc = parseAnthropicImageSource(src);
       return irSrc ? { type: 'image', source: irSrc } : null;
     }
+    case 'document': {
+      const doc = block as { source?: AnthropicDocumentSource; title?: unknown };
+      const irSrc = parseAnthropicDocumentSource(doc.source);
+      if (!irSrc) return null;
+      return {
+        type: 'document',
+        source: irSrc,
+        ...(typeof doc.title === 'string' && doc.title ? { title: doc.title } : {}),
+      };
+    }
     case 'tool_use': {
       const tu = block as Extract<AnthropicContentBlock, { type: 'tool_use' }>;
       return { type: 'tool_use', id: tu.id, name: tu.name, input: tu.input ?? {} };
@@ -286,6 +305,23 @@ function parseAnthropicImageSource(
   }
   if (src.type === 'url' && typeof src.url === 'string') {
     return { kind: 'url', url: src.url };
+  }
+  return null;
+}
+
+function parseAnthropicDocumentSource(
+  src: AnthropicDocumentSource | undefined,
+): IRDocumentSource | null {
+  if (!src || typeof src !== 'object') return null;
+  if (src.type === 'base64' && typeof src.media_type === 'string' && typeof src.data === 'string') {
+    return { kind: 'base64', mediaType: src.media_type, data: src.data };
+  }
+  // Anthropic fetches URL documents as PDFs.
+  if (src.type === 'url' && typeof src.url === 'string') {
+    return { kind: 'url', url: src.url, mediaType: 'application/pdf' };
+  }
+  if (src.type === 'text' && typeof src.data === 'string') {
+    return { kind: 'text', text: src.data };
   }
   return null;
 }
@@ -516,6 +552,12 @@ function serializeContentBlockToAnthropic(
       return { type: 'text', text: block.text };
     case 'image':
       return { type: 'image', source: irImageSourceToAnthropic(block.source) };
+    case 'document':
+      return {
+        type: 'document',
+        source: irDocumentSourceToAnthropic(block.source),
+        ...(block.title ? { title: block.title } : {}),
+      };
     case 'tool_use':
       return { type: 'tool_use', id: block.id, name: block.name, input: block.input };
     case 'tool_result': {
@@ -545,6 +587,20 @@ function serializeContentBlockToAnthropic(
       if (!block.signature) return null;
       return { type: 'thinking', thinking: block.text, signature: block.signature };
   }
+}
+
+/** Anthropic documents are PDFs (base64 or URL) or plain text. */
+function irDocumentSourceToAnthropic(source: IRDocumentSource): AnthropicDocumentSource {
+  if (source.kind === 'text') return { type: 'text', media_type: 'text/plain', data: source.text };
+  const mediaType = source.kind === 'base64' ? source.mediaType : source.mediaType ?? 'application/pdf';
+  if (mediaType !== 'application/pdf') {
+    throw new TranslationError(
+      'UNSUPPORTED_FEATURE',
+      `Anthropic accepts PDF and plain-text documents only, not ${mediaType}.`,
+    );
+  }
+  if (source.kind === 'base64') return { type: 'base64', media_type: mediaType, data: source.data };
+  return { type: 'url', url: source.url };
 }
 
 function irImageSourceToAnthropic(source: IRImageSource): AnthropicImageSource {
