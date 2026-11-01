@@ -1411,7 +1411,7 @@ function Limits() {
 
       <h3>What is <em>not</em> capped</h3>
       <ul>
-        <li>Token usage — billed and metered by the upstream provider, not byoky (unless the user sets a spending cap for your app).</li>
+        <li>Token usage — billed and metered by the upstream provider, not Byoky (unless the user sets a spending cap for your app).</li>
         <li>Concurrent requests per session — bounded only by the user&apos;s connection.</li>
         <li>Number of providers per session — request as many as the app actually needs.</li>
         <li>Number of connected apps per wallet.</li>

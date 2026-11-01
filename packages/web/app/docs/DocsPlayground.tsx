@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Byoky, type ByokySession } from '@byoky/sdk';
+import { Byoky, ByokyErrorCode, type ByokySession } from '@byoky/sdk';
 import { Playground, type PlaygroundTab } from '../demo/components/Playground';
 import '../demo/demo.css';
 
@@ -59,8 +59,10 @@ export function DocsPlayground({ open, tab, provider, onClose }: Props) {
       });
       onConnected(s);
     } catch (e) {
-      const err = e as Error;
-      if (err.message !== 'User cancelled') setError(err.message);
+      const err = e as Error & { code?: string };
+      // Closing the connect modal: a plain 'User cancelled', or
+      // WALLET_NOT_INSTALLED after the modal's install guidance.
+      if (err.message !== 'User cancelled' && err.code !== ByokyErrorCode.WALLET_NOT_INSTALLED) setError(err.message);
     } finally {
       setConnecting(false);
     }
