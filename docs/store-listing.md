@@ -91,8 +91,16 @@ Add "Connect with Byoky" to your app in two lines with @byoky/sdk and keep using
   - `nativeMessaging`: talk to the local `@byoky/bridge` for CLI tools.
   - `alarms`: a once-a-minute check that locks the wallet after the idle timeout and restarts the local bridge for CLI tools if it stopped.
   - No `identity` justification: 1.1.1 dropped that permission, so delete any text left for it.
-  - host permissions: the AI provider APIs the wallet proxies to.
+  - Host permission justification: the block below. The dashboard has one field for all host access, and Chrome counts the two `<all_urls>` content scripts as host access too (one of them runs in the page's MAIN world), so the text has to cover both the provider hosts and every site.
 - Remove any justification text that mentions vault.byoky.com, relay.byoky.com, gifts or the token pool.
+
+**Host permission justification** (also for Firefox reviewers who ask why the add-on runs on all sites; keep it in line with "Broad host access and content scripts" on byoky.com/privacy):
+
+```
+Provider hosts: the wallet sends the API requests of apps the user has approved to the AI provider the user picked, and adds the user's key inside the extension. The key never reaches the website.
+
+All sites: websites built with the Byoky SDK talk to the wallet through window messages, so a content script runs on every page. It only relays messages whose type starts with BYOKY_ between the page and the extension. A second script sets one read-only marker in the page (window.__byoky__) so the SDK can detect the extension. Neither script reads page content, forms, cookies or browsing history. A site gets no access to the wallet until the user approves it in the extension.
+```
 
 ## Firefox Add-ons
 
