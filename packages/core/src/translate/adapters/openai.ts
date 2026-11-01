@@ -119,7 +119,14 @@ interface OpenAIResponse {
     completion_tokens?: number;
     total_tokens?: number;
   };
-  error?: { message?: string; type?: string; code?: string };
+  // OpenAI and most compatible hosts send an error object; xAI sends the
+  // message as a string with a top-level `code`.
+  error?: { message?: string; type?: string; code?: string | number | null } | string;
+  code?: unknown;
+  // Mistral errors carry a top-level message (string or object) or detail.
+  message?: unknown;
+  detail?: unknown;
+  type?: unknown;
 }
 
 interface OpenAIChoice {
@@ -567,14 +574,34 @@ function parseResponse(body: string): IRResponseOrError {
     );
   }
 
+  if (typeof parsed.error === 'string') {
+    return {
+      error: {
+        type: 'api_error',
+        message: parsed.error,
+        ...(typeof parsed.code === 'string' && parsed.code ? { code: parsed.code } : {}),
+      },
+    };
+  }
   if (parsed.error) {
     return {
       error: {
         type: parsed.error.type ?? 'api_error',
         message: parsed.error.message ?? 'OpenAI API error',
-        ...(parsed.error.code ? { code: parsed.error.code } : {}),
+        ...(parsed.error.code != null && parsed.error.code !== '' ? { code: String(parsed.error.code) } : {}),
       },
     };
+  }
+  if (!Array.isArray(parsed.choices)) {
+    const detail = parsed.message ?? parsed.detail;
+    if (detail != null) {
+      return {
+        error: {
+          type: typeof parsed.type === 'string' && parsed.type ? parsed.type : 'api_error',
+          message: typeof detail === 'string' ? detail : JSON.stringify(detail),
+        },
+      };
+    }
   }
 
   const choice = parsed.choices?.[0];

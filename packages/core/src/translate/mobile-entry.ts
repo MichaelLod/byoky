@@ -28,6 +28,7 @@ import {
   translateRequest as _translateRequest,
   translateResponse as _translateResponse,
   createStreamTranslator as _createStreamTranslator,
+  translateErrorResponse as _translateErrorResponse,
 } from './index.js';
 import {
   familyOf,
@@ -206,6 +207,13 @@ interface MobileBridge {
    */
   rewriteClaudeCodeJSONBody(mapJson: string, body: string): string;
 
+  /**
+   * Translate an upstream error body (non-2xx) into the app's dialect.
+   * Returns null when the body isn't a recognisable error (e.g. an HTML 502
+   * page); the caller then delivers the raw body.
+   */
+  translateErrorResponse(ctxJson: string, body: string): string | null;
+
   /** Bundle version, for native side to assert against expected core version. */
   readonly version: string;
 
@@ -332,6 +340,10 @@ const bridge: MobileBridge = {
   rewriteClaudeCodeJSONBody(mapJson, body) {
     const map = JSON.parse(mapJson) as Record<string, string>;
     return _rewriteToolNamesInJSONBody(body, map);
+  },
+  translateErrorResponse(ctxJson, body) {
+    const ctx = JSON.parse(ctxJson) as TranslationContext;
+    return _translateErrorResponse(ctx, body);
   },
   version: '0.5.3',
   urlImpl,

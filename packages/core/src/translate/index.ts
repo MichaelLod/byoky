@@ -12,7 +12,8 @@
 
 import type { TranslationContext } from './types.js';
 import { getAdapter } from './adapter.js';
-import type { IRStreamEvent } from './ir.js';
+import type { IRResponseOrError, IRStreamEvent } from './ir.js';
+import { isIRError } from './ir.js';
 import { registerAdapter } from './adapter.js';
 import { anthropicAdapter } from './adapters/anthropic.js';
 import { openaiAdapter } from './adapters/openai.js';
@@ -55,6 +56,28 @@ export function translateResponse(ctx: TranslationContext, body: string): string
   const dst = getAdapter(ctx.dstFamily);
   const src = getAdapter(ctx.srcFamily);
   const ir = dst.parseResponse(body);
+  return src.serializeResponse(ctx, ir);
+}
+
+/**
+ * Translate an upstream error body (a non-2xx response) from the destination
+ * dialect into the source dialect, so the app's SDK can read it.
+ *
+ * Returns null when the body isn't an error the destination adapter
+ * recognises (not JSON, an HTML page from a proxy or CDN, or a shape that
+ * parses as a success); the caller then passes the raw body through rather
+ * than failing the request.
+ */
+export function translateErrorResponse(ctx: TranslationContext, body: string): string | null {
+  const dst = getAdapter(ctx.dstFamily);
+  const src = getAdapter(ctx.srcFamily);
+  let ir: IRResponseOrError;
+  try {
+    ir = dst.parseResponse(body);
+  } catch {
+    return null;
+  }
+  if (!isIRError(ir)) return null;
   return src.serializeResponse(ctx, ir);
 }
 

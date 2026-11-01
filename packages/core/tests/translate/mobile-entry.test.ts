@@ -42,3 +42,24 @@ describe('mobile bridge buildTranslationContext', () => {
     expect(toGroq.max_tokens).toBe(256);
   });
 });
+
+describe('mobile bridge translateErrorResponse', () => {
+  const b = bridge as unknown as Bridge & { translateErrorResponse(ctxJson: string, body: string): string | null };
+
+  it('translates an OpenAI 401 for an Anthropic app', () => {
+    const ctxJson = b.buildTranslationContext('anthropic', 'openai', 'claude-sonnet-4-6', 'gpt-5.5', false, 'r1');
+    const out = b.translateErrorResponse(
+      ctxJson,
+      JSON.stringify({ error: { message: 'Incorrect API key provided', type: 'invalid_request_error', code: 'invalid_api_key' } }),
+    );
+    expect(JSON.parse(out!)).toEqual({
+      type: 'error',
+      error: { type: 'invalid_request_error', message: 'Incorrect API key provided' },
+    });
+  });
+
+  it('returns null for a non-JSON body', () => {
+    const ctxJson = b.buildTranslationContext('anthropic', 'openai', 'claude-sonnet-4-6', 'gpt-5.5', false, 'r1');
+    expect(b.translateErrorResponse(ctxJson, '<html>502</html>')).toBeNull();
+  });
+});
