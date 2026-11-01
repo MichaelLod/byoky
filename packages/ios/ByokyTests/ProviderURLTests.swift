@@ -61,6 +61,18 @@ final class ProviderURLTests: XCTestCase {
         XCTAssertNil(Provider.normalizedEndpoint("localhost:11434", for: "ollama"))
     }
 
+    /// On a phone, Ollama and LM Studio run on another machine: the form
+    /// suggests an https address (no http://localhost prefill) and that
+    /// suggestion is one the wallet accepts.
+    func testLocalServerSuggestionIsAnAcceptedHttpsAddress() {
+        XCTAssertTrue(Provider.localServerPlaceholder.hasPrefix("https://"))
+        for provider in ["ollama", "lm_studio"] {
+            XCTAssertEqual(Provider.normalizedEndpoint(Provider.localServerPlaceholder, for: provider), Provider.localServerPlaceholder)
+            XCTAssertNotNil(Provider.normalizedEndpoint("https://my-mac.tail1234.ts.net:11434", for: provider))
+            XCTAssertNil(Provider.normalizedEndpoint("http://mac.local:11434", for: provider))
+        }
+    }
+
     func testCredentialsWithoutEndpointAreRefused() {
         XCTAssertEqual(Provider.missingEndpointMessage(providerId: "azure_openai", credentialBaseUrl: nil),
                        "Add your Azure endpoint in the wallet")

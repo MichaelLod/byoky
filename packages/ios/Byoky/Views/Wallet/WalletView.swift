@@ -272,7 +272,7 @@ struct EndpointEditorView: View {
         NavigationStack {
             List {
                 Section {
-                    TextField(isAzure ? "https://<resource>.openai.azure.com" : "http://localhost:11434", text: $endpoint)
+                    TextField(isAzure ? "https://<resource>.openai.azure.com" : Provider.localServerPlaceholder, text: $endpoint)
                         .keyboardType(.URL)
                         .textContentType(.URL)
                         .textInputAutocapitalization(.never)
@@ -282,7 +282,7 @@ struct EndpointEditorView: View {
                     if !endpoint.trimmingCharacters(in: .whitespaces).isEmpty && !isValid {
                         Text(isAzure
                              ? "Use your resource endpoint, like https://contoso.openai.azure.com"
-                             : "Use http://localhost:<port>, http://127.0.0.1:<port>, or an https:// address")
+                             : Provider.localServerURLError)
                             .font(.caption)
                             .foregroundStyle(Theme.alarm)
                     }

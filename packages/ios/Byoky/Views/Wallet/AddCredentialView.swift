@@ -76,14 +76,6 @@ struct CredentialEntryView: View {
         requiresEndpoint && !baseUrl.trimmingCharacters(in: .whitespaces).isEmpty && normalizedEndpoint == nil
     }
 
-    private var defaultBaseUrlForProvider: String {
-        switch provider.id {
-        case "ollama": return "http://localhost:11434"
-        case "lm_studio": return "http://localhost:1234"
-        default: return ""
-        }
-    }
-
     private var isValid: Bool {
         if label.isEmpty { return false }
         if requiresEndpoint && normalizedEndpoint == nil { return false }
@@ -134,14 +126,15 @@ struct CredentialEntryView: View {
 
             if isLocalProvider {
                 Section {
-                    TextField("http://localhost:11434", text: $baseUrl)
+                    TextField(Provider.localServerPlaceholder, text: $baseUrl)
+                        .keyboardType(.URL)
                         .textContentType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .font(.mono(15))
                         .accessibilityIdentifier("credentialEntry.baseUrl")
                     if showsEndpointError {
-                        Text("Use http://localhost:<port>, http://127.0.0.1:<port>, or an https:// address")
+                        Text(Provider.localServerURLError)
                             .font(.caption)
                             .foregroundStyle(Theme.alarm)
                     }
@@ -151,10 +144,10 @@ struct CredentialEntryView: View {
                     ListFooter {
                         VStack(alignment: .leading, spacing: 6) {
                             Text(provider.id == "ollama"
-                                 ? "Where your Ollama server is running. Make sure `ollama serve` is active."
-                                 : "Where your LM Studio server is running. Start the \"Local Server\" in LM Studio.")
+                                 ? "Ollama runs on another computer, like your Mac. Enter an https:// address for it that this device can reach, for example through Tailscale Serve or a reverse proxy with TLS. Plain http:// only reaches a server on this device."
+                                 : "LM Studio runs on another computer, like your Mac. Start its server there and enter an https:// address for it that this device can reach, for example through Tailscale Serve or a reverse proxy with TLS. Plain http:// only reaches a server on this device.")
                             Label {
-                                Text("The server must be reachable from this device. Apps using this credential fail whenever the server is offline.")
+                                Text("Apps using this credential fail whenever the server is offline or out of reach.")
                             } icon: {
                                 Image(systemName: "exclamationmark.triangle.fill")
                             }
@@ -221,9 +214,6 @@ struct CredentialEntryView: View {
         }
         .onAppear {
             label = provider.name
-            if isLocalProvider && baseUrl.isEmpty {
-                baseUrl = defaultBaseUrlForProvider
-            }
         }
     }
 
@@ -250,4 +240,11 @@ struct CredentialEntryView: View {
             self.error = error.localizedDescription
         }
     }
+}
+
+extension Provider {
+    /// Ollama and LM Studio can't run on an iPhone, so their server is on
+    /// another machine and has to be reached over https.
+    static let localServerPlaceholder = "https://my-mac.example.ts.net"
+    static let localServerURLError = "Use an https:// address. Plain http:// only reaches this device."
 }
