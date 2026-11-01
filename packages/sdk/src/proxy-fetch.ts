@@ -50,10 +50,7 @@ export function createProxyFetch(
       // 120 s, which cut off slow non-streaming generations; the official
       // SDKs then retried, so one call was sent and billed three times.
       const timeout = timeoutMs > 0 ? setTimeout(() => {
-        resolved = true;
-        cleanup();
-        cancel();
-        reject(new ByokyError(
+        fail(new ByokyError(
           ByokyErrorCode.PROXY_ERROR,
           `Proxy request timed out: no response from the wallet within ${Math.round(timeoutMs / 1000)}s. If Byoky was just updated, reload the page.`,
           { timeout: timeoutMs },
@@ -79,10 +76,7 @@ export function createProxyFetch(
                 headers: new Headers(data.headers),
               });
             } catch {
-              resolved = true;
-              cleanup();
-              cancel();
-              reject(new ByokyError(ByokyErrorCode.PROXY_ERROR, 'Invalid response from the wallet'));
+              fail(new ByokyError(ByokyErrorCode.PROXY_ERROR, 'Invalid response from the wallet'));
               break;
             }
             resolved = true;
@@ -98,9 +92,7 @@ export function createProxyFetch(
             try {
               bytes = data.chunkEncoding === 'base64' ? base64ToBytes(data.chunk) : encoder.encode(data.chunk);
             } catch {
-              writer.abort(new ByokyError(ByokyErrorCode.PROXY_ERROR, 'Invalid response chunk from the wallet')).catch(() => {});
-              cleanup();
-              cancel();
+              fail(new ByokyError(ByokyErrorCode.PROXY_ERROR, 'Invalid response chunk from the wallet'));
               break;
             }
             writer.write(bytes).catch(() => {});
@@ -138,9 +130,9 @@ export function createProxyFetch(
         }
       };
 
-      // Like fetch: reject while waiting for headers, error the body after.
-      const onAbort = () => {
-        const reason = abortReason(signal!);
+      // Stops the request, wallet side included. Like fetch: rejects while
+      // waiting for headers, errors the body after.
+      function fail(reason: unknown) {
         cleanup();
         cancel();
         if (resolved) {
@@ -149,7 +141,9 @@ export function createProxyFetch(
           resolved = true;
           reject(reason);
         }
-      };
+      }
+
+      const onAbort = () => fail(abortReason(signal!));
       signal?.addEventListener('abort', onAbort);
 
       function cleanup() {

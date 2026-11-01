@@ -384,6 +384,19 @@ describe('createProxyFetch', () => {
       expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
     });
 
+    it('rejects instead of hanging on a bad chunk before the headers', async () => {
+      const proxyFetch = createProxyFetch('openai', { current: 'byk_session' });
+      const fetchPromise = proxyFetch('https://api.openai.com/v1/audio/speech', { method: 'POST', body: '{}' });
+      await new Promise((r) => setTimeout(r, 10));
+      const requestId = postedMessages[0].data.requestId as string;
+
+      simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_CHUNK', requestId, chunk: '%%%', chunkEncoding: 'base64' });
+
+      await expect(fetchPromise).rejects.toMatchObject({ code: 'PROXY_ERROR' });
+      await new Promise((r) => setTimeout(r, 10));
+      expect(postedMessages.filter((m) => m.data.type === 'BYOKY_PROXY_CANCEL')).toHaveLength(1);
+    });
+
     it('errors the body on a chunk that is not base64', async () => {
       const proxyFetch = createProxyFetch('openai', { current: 'byk_session' });
       const fetchPromise = proxyFetch('https://api.openai.com/v1/audio/speech', { method: 'POST', body: '{}' });
