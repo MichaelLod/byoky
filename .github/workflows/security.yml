@@ -88,8 +88,15 @@ jobs:
       # vitest run; this covers the whole repo. -I skips binary files.
       - name: Check for literal bidi control characters
         run: |
-          if LC_ALL=C.UTF-8 grep -rnIP '[\x{202A}-\x{202E}\x{2066}-\x{2069}]' . --exclude-dir=node_modules --exclude-dir=.git; then
+          # grep exits 1 when nothing matches; anything above 1 means the
+          # check itself failed, which must not pass as clean.
+          rc=0
+          LC_ALL=C.UTF-8 grep -rnIP '[\x{202A}-\x{202E}\x{2066}-\x{2069}]' . --exclude-dir=node_modules --exclude-dir=.git || rc=$?
+          if [ "$rc" -eq 0 ]; then
             echo "::error::Literal bidi control character found; write it as an escape sequence"
+            exit 1
+          elif [ "$rc" -ne 1 ]; then
+            echo "::error::The bidi check could not run (grep exit $rc)"
             exit 1
           fi
 
