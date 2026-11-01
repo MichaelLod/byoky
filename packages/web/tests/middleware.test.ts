@@ -75,7 +75,7 @@ describe('Content-Security-Policy', () => {
       "default-src 'self'",
       "script-src 'self' 'nonce-NONCE'",
       "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: https://avatars.githubusercontent.com https://unpkg.com https://api.producthunt.com",
+      "img-src 'self' data: blob: https://avatars.githubusercontent.com https://unpkg.com https://api.producthunt.com",
       "connect-src 'self' https://api.github.com",
       "frame-ancestors 'none';",
     ]);

@@ -13,7 +13,8 @@ function contentSecurityPolicy(nonce: string): string {
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}'`,
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: https://avatars.githubusercontent.com https://unpkg.com https://api.producthunt.com",
+    // blob: for the chat's attached-image preview (URL.createObjectURL).
+    "img-src 'self' data: blob: https://avatars.githubusercontent.com https://unpkg.com https://api.producthunt.com",
     "connect-src 'self' https://api.github.com",
     "frame-ancestors 'none'",
   ].join('; ') + ';';
