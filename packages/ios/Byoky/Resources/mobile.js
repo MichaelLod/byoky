@@ -44,6 +44,44 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
   };
   var MODELS = [
     // ─── Anthropic ───────────────────────────────────────────────────────────
+    // Opus 5.5, Sonnet 5.5 and Fable 5.1 reject a forced tool_choice (`any` /
+    // `tool`) with a 400; Haiku 5.5 accepts one.
+    {
+      id: "claude-opus-5-5",
+      providerId: "anthropic",
+      family: "anthropic",
+      displayName: "Claude Opus 5.5",
+      contextWindow: 1e6,
+      maxOutput: 128e3,
+      capabilities: { ...FRONTIER, toolChoice: false }
+    },
+    {
+      id: "claude-sonnet-5-5",
+      providerId: "anthropic",
+      family: "anthropic",
+      displayName: "Claude Sonnet 5.5",
+      contextWindow: 1e6,
+      maxOutput: 128e3,
+      capabilities: { ...FRONTIER, toolChoice: false }
+    },
+    {
+      id: "claude-haiku-5-5",
+      providerId: "anthropic",
+      family: "anthropic",
+      displayName: "Claude Haiku 5.5",
+      contextWindow: 1e6,
+      maxOutput: 128e3,
+      capabilities: FRONTIER
+    },
+    {
+      id: "claude-fable-5-1",
+      providerId: "anthropic",
+      family: "anthropic",
+      displayName: "Claude Fable 5.1",
+      contextWindow: 1e6,
+      maxOutput: 128e3,
+      capabilities: { ...FRONTIER, toolChoice: false }
+    },
     {
       id: "claude-opus-4-7",
       providerId: "anthropic",
@@ -59,7 +97,7 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
       family: "anthropic",
       displayName: "Claude Sonnet 4.6",
       contextWindow: 1e6,
-      maxOutput: 64e3,
+      maxOutput: 128e3,
       capabilities: FRONTIER
     },
     {
@@ -110,15 +148,28 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
         ...FRONTIER,
         // The nano variant is text-only at the chat-completions surface.
         vision: false
-      }
+      },
+      deprecated: { shutdown: "2027-04-01", replacement: "gpt-6-luna" }
     },
     // ─── Google Gemini ───────────────────────────────────────────────────────
+    {
+      id: "gemini-3.8-flash",
+      providerId: "gemini",
+      family: "gemini",
+      displayName: "Gemini 3.8 Flash",
+      contextWindow: 1048576,
+      maxOutput: 65536,
+      capabilities: FRONTIER
+    },
+    // Google serves the 2.5 models only to projects that used them before;
+    // they are not deprecated, but new projects get an error and should use
+    // 3.8 Flash.
     {
       id: "gemini-2.5-pro",
       providerId: "gemini",
       family: "gemini",
       displayName: "Gemini 2.5 Pro",
-      contextWindow: 1e6,
+      contextWindow: 1048576,
       maxOutput: 65536,
       capabilities: FRONTIER
     },
@@ -127,7 +178,7 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
       providerId: "gemini",
       family: "gemini",
       displayName: "Gemini 2.5 Flash",
-      contextWindow: 1e6,
+      contextWindow: 1048576,
       maxOutput: 65536,
       capabilities: FRONTIER
     },
@@ -151,7 +202,7 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
   var DEFAULT_MODELS = {
     anthropic: "claude-sonnet-4-6",
     openai: "gpt-5.5",
-    gemini: "gemini-2.5-pro",
+    gemini: "gemini-3.8-flash",
     cohere: "command-a-03-2025"
   };
   function getModel(id) {
@@ -367,7 +418,12 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
       });
     }
     const rules = claudeRequestRules(ctx.dstModel);
-    const forcedTool = ir.toolChoice?.type === "any" || ir.toolChoice?.type === "tool";
+    let toolChoice = ir.toolChoice;
+    if (!rules.forcedToolChoice && (toolChoice?.type === "any" || toolChoice?.type === "tool")) {
+      if (ir.tools && ir.tools.length > 0) systemParts.push({ text: forcedToolInstruction(toolChoice) });
+      toolChoice = { type: "auto" };
+    }
+    const forcedTool = toolChoice?.type === "any" || toolChoice?.type === "tool";
     const wantsThinking = ir.thinking?.enabled === true && !forcedTool;
     const requestedBudget = ir.thinking?.budgetTokens;
     const dst = getModel(ctx.dstModel);
@@ -404,7 +460,7 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
     }
     if (typeof topP === "number") out.top_p = topP;
     if (typeof topK === "number") out.top_k = topK;
-    if (ir.stopSequences && ir.stopSequences.length > 0) out.stop_sequences = ir.stopSequences.slice();
+    if (ir.stopSequences && ir.stopSequences.length > 0) out.stop_sequences = anthropicStopSequences(ir.stopSequences);
     if (typeof ir.stream === "boolean") out.stream = ir.stream;
     if (ir.userId) out.metadata = { user_id: ir.userId };
     if (ir.tools && ir.tools.length > 0) {
@@ -414,8 +470,8 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
         input_schema: t.parameters ?? { type: "object", properties: {} }
       }));
     }
-    if (ir.toolChoice) {
-      switch (ir.toolChoice.type) {
+    if (toolChoice) {
+      switch (toolChoice.type) {
         case "auto":
           out.tool_choice = { type: "auto" };
           break;
@@ -426,7 +482,7 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
           out.tool_choice = { type: "none" };
           break;
         case "tool":
-          out.tool_choice = { type: "tool", name: ir.toolChoice.name };
+          out.tool_choice = { type: "tool", name: toolChoice.name };
           break;
       }
     }
@@ -439,16 +495,21 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
     const id = model.toLowerCase();
     const named = /claude-(opus|sonnet|haiku|fable|mythos)-(\d+)(?:[-.](\d{1,2})(?!\d))?/.exec(id);
     const legacy = named ? null : /claude-(\d+)(?:[-.](\d)(?!\d))?-(?:opus|sonnet|haiku)/.exec(id);
-    if (named && (named[1] === "fable" || named[1] === "mythos")) {
-      return { sampling: "none", thinking: "adaptive" };
-    }
     const version = named ? [named[2], named[3]] : legacy ? [legacy[1], legacy[2]] : null;
-    if (!version) return { sampling: "single", thinking: "adaptive" };
+    if (!version) return { sampling: "single", thinking: "adaptive", forcedToolChoice: true };
     const major = Number(version[0]);
     const minor = Number(version[1] ?? 0);
-    if (major > 4 || major === 4 && minor >= 7) return { sampling: "none", thinking: "adaptive" };
-    if (major === 4 && minor === 6) return { sampling: "single", thinking: "either" };
-    return { sampling: "single", thinking: "budget" };
+    const atLeast = (maj, min) => major > maj || major === maj && minor >= min;
+    if (named && (named[1] === "fable" || named[1] === "mythos")) {
+      return { sampling: "none", thinking: "adaptive", forcedToolChoice: !atLeast(5, 1) };
+    }
+    const forcedToolChoice = !(named && (named[1] === "opus" || named[1] === "sonnet") && atLeast(5, 5));
+    if (atLeast(4, 7)) return { sampling: "none", thinking: "adaptive", forcedToolChoice };
+    if (major === 4 && minor === 6) return { sampling: "single", thinking: "either", forcedToolChoice };
+    return { sampling: "single", thinking: "budget", forcedToolChoice };
+  }
+  function forcedToolInstruction(choice) {
+    return choice.type === "tool" ? `You must call the ${choice.name} tool in this response. Start your response with that tool call.` : "You must call one of the provided tools in this response. Start your response with a tool call.";
   }
   function anthropicThinking(rule, requestedBudget, maxTokens) {
     const useBudget = rule === "budget" || rule === "either" && typeof requestedBudget === "number";
@@ -538,6 +599,10 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
       return { type: "base64", media_type: source.mediaType, data: source.data };
     }
     return { type: "url", url: source.url };
+  }
+  function anthropicStopSequences(stops) {
+    const kept = stops.filter((s) => s.trim().length > 0);
+    return kept.length > 0 ? kept : void 0;
   }
   function parseResponse(body) {
     let parsed;
@@ -989,7 +1054,7 @@ data: ${JSON.stringify(data)}
     if (typeof parsed.top_p === "number") ir.topP = parsed.top_p;
     if (parsed.stop != null) {
       const raw = Array.isArray(parsed.stop) ? parsed.stop : [parsed.stop];
-      const stops = raw.filter((s) => typeof s === "string" && s.trim().length > 0);
+      const stops = raw.filter((s) => typeof s === "string" && s.length > 0);
       if (stops.length > 0) ir.stopSequences = stops;
     }
     if (typeof parsed.stream === "boolean") ir.stream = parsed.stream;
@@ -1155,7 +1220,7 @@ data: ${JSON.stringify(data)}
       const text = ir.system.map((p) => p.text).join("\n\n");
       if (text) out.messages.push({ role: "system", content: text });
     }
-    const acceptsImages = openAIAcceptsImages(ctx.dstModel);
+    const acceptsImages = openAIAcceptsImages(ctx.dstModel, ctx.dstProviderId);
     for (const msg of ir.messages) {
       for (const wire of serializeMessageToOpenAI(msg, ctx.dstModel, acceptsImages)) {
         out.messages.push(wire);
@@ -1225,8 +1290,11 @@ data: ${JSON.stringify(data)}
     if (msg.role === "user") return serializeUserMessageToOpenAI(msg, model, acceptsImages);
     return serializeAssistantMessageToOpenAI(msg);
   }
-  function openAIAcceptsImages(model) {
-    return getModel(model)?.capabilities.vision !== false;
+  var VISION_BY_DEFAULT_PROVIDERS = /* @__PURE__ */ new Set(["openai", "azure_openai"]);
+  function openAIAcceptsImages(model, dstProviderId) {
+    const entry = getModel(model) ?? (dstProviderId === "openrouter" && model.startsWith("openai/") ? getModel(model.slice("openai/".length)) : void 0);
+    if (entry) return entry.capabilities.vision;
+    return VISION_BY_DEFAULT_PROVIDERS.has(dstProviderId ?? "openai");
   }
   function serializeUserMessageToOpenAI(msg, model, acceptsImages) {
     const out = [];
@@ -3966,7 +4034,8 @@ ${systemText}
       // Local OpenAI-compatible servers. They work as routing destinations
       // (the credential's loopback base URL is used, see rewriteProxyUrl), but
       // auto-routing never picks them: there is no model routing could name
-      // for them (see autoRouteModelFor in routing.ts).
+      // for them (see autoRouteModelFor in routing.ts). Nor does it send a
+      // request meant for one to another provider: only a group does that.
       "ollama",
       "lm_studio"
     ]),
