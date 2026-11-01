@@ -11,6 +11,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { SCRIPTS } from './helpers.mjs'
 
+// A whole run bumps with BSD sed and PlistBuddy, like release.sh on a Mac.
+const MAC_ONLY = { skip: process.platform !== 'darwin' && 'release.sh past the bump needs macOS (BSD sed, PlistBuddy)' }
+
 const NOT_PENDING = { localVersion: '1.1.1', results: [{ id: 'chrome', version: '1.1.1', pending: false }] }
 
 function write(path, text, mode) {
@@ -318,7 +321,7 @@ test('a failing test stops the release before the bump', (t) => {
 
 const unzipList = (zip) => execFileSync('unzip', ['-l', zip], { encoding: 'utf8' })
 
-test('a release from main bumps, commits, pushes main and the tag together, and reports each store', (t) => {
+test('a release from main bumps, commits, pushes main and the tag together, and reports each store', MAC_ONLY, (t) => {
   const s = sandbox()
   t.after(s.cleanup)
   // A zip left by an earlier, failed run must not keep its old files.
@@ -339,7 +342,7 @@ test('a release from main bumps, commits, pushes main and the tag together, and 
   assert.match(unzipList(join(s.work, 'dist/byoky-source-v1.1.2.zip')), /tsconfig\.base\.json[\s\S]*BUILD-FIREFOX\.md/)
 })
 
-test('--allow-branch pushes the release commit to main', (t) => {
+test('--allow-branch pushes the release commit to main', MAC_ONLY, (t) => {
   const s = sandbox()
   t.after(s.cleanup)
   s.git('checkout', '-q', '-b', 'release/1.1.2')
@@ -349,7 +352,7 @@ test('--allow-branch pushes the release commit to main', (t) => {
   assert.throws(() => s.origin('rev-parse', '--verify', 'refs/heads/release/1.1.2'))
 })
 
-test('npm packages already published are skipped', (t) => {
+test('npm packages already published are skipped', MAC_ONLY, (t) => {
   const s = sandbox()
   t.after(s.cleanup)
   const r = s.run(['1.1.2', '--yes', '--skip-mobile'], { STUB_NPM_PUBLISHED: '@byoky/core @byoky/sdk' })
@@ -358,7 +361,7 @@ test('npm packages already published are skipped', (t) => {
   assert.equal((r.calls.match(/^pnpm publish /gm) ?? []).length, 3, r.calls)
 })
 
-test('a failure after the bump says how to undo it, and the next run explains the bumped tree', (t) => {
+test('a failure after the bump says how to undo it, and the next run explains the bumped tree', MAC_ONLY, (t) => {
   const s = sandbox()
   t.after(s.cleanup)
   const r = s.run(['1.1.2', '--yes', '--skip-mobile'], { STUB_PNPM_FAIL: 'build' })
@@ -371,7 +374,7 @@ test('a failure after the bump says how to undo it, and the next run explains th
   assert.match(again.out, /package\.json has 1\.1\.2 but the last commit 1\.1\.1: an earlier run bumped the tree and stopped before committing/)
 })
 
-test('a failed npm publish after the push points to retry', (t) => {
+test('a failed npm publish after the push points to retry', MAC_ONLY, (t) => {
   const s = sandbox()
   t.after(s.cleanup)
   const r = s.run(['1.1.2', '--yes', '--skip-mobile'], { STUB_PNPM_FAIL: 'publish --access public --no-git-checks' })
