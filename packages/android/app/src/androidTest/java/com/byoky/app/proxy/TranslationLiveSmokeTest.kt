@@ -48,7 +48,8 @@ class TranslationLiveSmokeTest {
     private lateinit var engine: TranslationEngine
     private val http = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
+        // Gemini 3.8 Flash can take a couple of minutes to answer.
+        .readTimeout(180, TimeUnit.SECONDS)
         .build()
 
     private val anthropicReqBody = """
@@ -127,12 +128,12 @@ class TranslationLiveSmokeTest {
         val ctxJson = """
             {"srcFamily":"anthropic","dstFamily":"gemini",
              "srcProviderId":"anthropic","dstProviderId":"gemini",
-             "srcModel":"claude-haiku-4-5-20251001","dstModel":"gemini-2.5-flash"}
+             "srcModel":"claude-haiku-4-5-20251001","dstModel":"gemini-3.8-flash"}
         """.trimIndent().replace("\n", "")
 
         val translatedReq = engine.translateRequest(ctxJson, anthropicReqBody)
         val rawResponse = postJson(
-            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+            url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
             body = translatedReq,
             headers = mapOf("x-goog-api-key" to key),
         )
@@ -151,7 +152,7 @@ class TranslationLiveSmokeTest {
         val ctxJson = """
             {"srcFamily":"anthropic","dstFamily":"cohere",
              "srcProviderId":"anthropic","dstProviderId":"cohere",
-             "srcModel":"claude-haiku-4-5-20251001","dstModel":"command-r-plus"}
+             "srcModel":"claude-haiku-4-5-20251001","dstModel":"command-a-03-2025"}
         """.trimIndent().replace("\n", "")
 
         val translatedReq = engine.translateRequest(ctxJson, anthropicReqBody)

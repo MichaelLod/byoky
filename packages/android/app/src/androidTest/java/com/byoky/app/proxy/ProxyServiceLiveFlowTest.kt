@@ -126,7 +126,7 @@ class ProxyServiceLiveFlowTest {
 
         val response = proxy.proxyRequest(
             providerId = "gemini",
-            path = "/v1beta/models/gemini-2.5-flash:generateContent",
+            path = "/v1beta/models/gemini-3.8-flash:generateContent",
             method = "POST",
             headers = mapOf("content-type" to "application/json"),
             body = body.toByteArray(Charsets.UTF_8),
