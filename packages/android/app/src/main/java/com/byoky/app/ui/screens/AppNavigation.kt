@@ -13,6 +13,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -148,13 +149,18 @@ private fun MainScreen(wallet: WalletStore) {
                         drawRect(Seam, size = Size(size.width, 1.dp.toPx()))
                     },
                 ) {
+                    // One line, never broken mid-word; at the largest font
+                    // sizes the tracking goes so "CONNECTED" still fits.
+                    val labelTracking = if (LocalDensity.current.fontScale > 1.5f) 0.em else 0.1.em
                     tabs.forEachIndexed { index, (label, icon, route) ->
                         NavigationBarItem(
                             icon = { Icon(icon, contentDescription = label, modifier = Modifier.size(22.dp)) },
                             label = {
                                 CapsText(
                                     label,
-                                    style = MonoStyle.copy(fontSize = 10.sp, letterSpacing = 0.1.em),
+                                    style = MonoStyle.copy(fontSize = 10.sp, letterSpacing = labelTracking),
+                                    maxLines = 1,
+                                    softWrap = false,
                                 )
                             },
                             selected = selectedTab == index,

@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -448,24 +449,23 @@ private fun CredentialCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Spacer(Modifier.height(2.dp))
-                Row {
-                    Text(
-                        provider?.name ?: credential.providerId,
-                        style = MonoStyle,
-                        color = Dim,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    Text(" · ", style = MonoStyle, color = Dim)
-                    CapsText(
-                        // OAuth on Android is always an Anthropic setup token; say so, as the add sheet does.
-                        if (credential.authMethod == AuthMethod.API_KEY) "API Key" else "Setup Token",
-                        style = MonoStyle,
-                        color = if (credential.authMethod == AuthMethod.API_KEY) Fog else Phosphor,
-                        maxLines = 1,
-                    )
-                }
+                val providerName = provider?.name ?: credential.providerId
+                // OAuth on Android is always an Anthropic setup token; say so, as the add sheet does.
+                val typeLabel = if (credential.authMethod == AuthMethod.API_KEY) "API Key" else "Setup Token"
+                // One text, so at large font sizes it wraps between words
+                // instead of cutting the provider name down to an ellipsis.
+                Text(
+                    buildAnnotatedString {
+                        append(providerName)
+                        append(" · ")
+                        withStyle(SpanStyle(color = if (credential.authMethod == AuthMethod.API_KEY) Fog else Phosphor)) {
+                            append(typeLabel.uppercase())
+                        }
+                    },
+                    style = MonoStyle,
+                    color = Dim,
+                    modifier = Modifier.semantics { contentDescription = "$providerName · $typeLabel" },
+                )
                 if (provider?.requiresCustomBaseUrl == true) {
                     CredentialEndpoint(credential, onEdit = onEditEndpoint)
                 }

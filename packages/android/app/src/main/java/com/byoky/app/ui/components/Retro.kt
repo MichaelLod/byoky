@@ -106,6 +106,7 @@ fun CapsText(
     color: Color = Color.Unspecified,
     textAlign: TextAlign? = null,
     maxLines: Int = Int.MAX_VALUE,
+    softWrap: Boolean = true,
 ) {
     Text(
         text.uppercase(),
@@ -114,6 +115,7 @@ fun CapsText(
         color = color,
         textAlign = textAlign,
         maxLines = maxLines,
+        softWrap = softWrap,
         overflow = TextOverflow.Ellipsis,
     )
 }

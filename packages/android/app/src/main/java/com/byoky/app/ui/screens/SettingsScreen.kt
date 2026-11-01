@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.byoky.app.BuildConfig
@@ -267,14 +268,22 @@ private fun TranslationDebugCard() {
 
 @Composable
 private fun InfoRow(label: String, value: String) {
+    // The value takes what the label leaves and wraps there, right-aligned,
+    // so the two never run into each other at large font sizes.
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 5.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(label, color = Fog, fontSize = 14.sp)
-        Text(value, color = Bone, style = MonoStyle.copy(fontSize = 13.sp))
+        Text(
+            value,
+            color = Bone,
+            style = MonoStyle.copy(fontSize = 13.sp),
+            textAlign = TextAlign.End,
+            modifier = Modifier.weight(1f),
+        )
     }
 }

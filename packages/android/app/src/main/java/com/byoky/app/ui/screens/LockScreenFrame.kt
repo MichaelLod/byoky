@@ -76,13 +76,21 @@ internal fun LockScreenFrame(
 
 @Composable
 private fun LockScreenFooter() {
+    // The left text wraps when space runs out (large font sizes); the cipher
+    // name stays whole on the right instead of breaking at its hyphens.
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = 16.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Bottom,
     ) {
-        Text("Keys stay on this device", style = MonoStyle.copy(fontSize = 11.sp), color = Dim)
-        Text("AES-256-GCM", style = MonoStyle.copy(fontSize = 11.sp), color = Dim)
+        Text(
+            "Keys stay on this device",
+            style = MonoStyle.copy(fontSize = 11.sp),
+            color = Dim,
+            modifier = Modifier.weight(1f),
+        )
+        Text("AES-256-GCM", style = MonoStyle.copy(fontSize = 11.sp), color = Dim, maxLines = 1, softWrap = false)
     }
 }
