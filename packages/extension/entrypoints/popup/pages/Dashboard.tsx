@@ -8,6 +8,7 @@ import {
 import { RetiredFeaturesNotice } from '../components/RetiredFeaturesNotice';
 import { TrustResetNotice } from '../components/TrustResetNotice';
 import { ProviderIcon } from '../components/ProviderIcon';
+import { Modal } from '../components/Modal';
 import { describeOrigin } from '../utils/origin';
 
 function formatTokens(n: number): string {
@@ -270,34 +271,13 @@ interface StatsSheetProps {
 }
 
 function StatsSheet({ credentialId, credentials, requestLog, onClose }: StatsSheetProps) {
-  useEffect(() => {
-    function onKey(e: globalThis.KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
-    }
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
   const cred = credentials.find((c) => c.id === credentialId);
   const title = cred?.label ?? 'Stats';
 
   return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
-      <div className="modal-sheet" onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title}>
-        <div className="modal-header">
-          <span className="modal-title">{title}</span>
-          <button className="icon-btn" onClick={onClose} aria-label="Close">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
-        </div>
-        <div className="modal-body">
-          {cred && <CredentialStats cred={cred} requestLog={requestLog} />}
-        </div>
-      </div>
-    </div>
+    <Modal title={title} onClose={onClose}>
+      {cred && <CredentialStats cred={cred} requestLog={requestLog} />}
+    </Modal>
   );
 }
 

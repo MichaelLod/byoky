@@ -2178,6 +2178,12 @@ code {
   animation: modal-slide-up 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
+/* Focus lands on the dialog itself only when it has no control to take it. */
+.modal-sheet:focus-visible,
+.dialog:focus-visible {
+  outline: none;
+}
+
 @keyframes modal-slide-up {
   from { transform: translateY(20px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }

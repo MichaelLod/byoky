@@ -1,4 +1,5 @@
 import { useState, useRef, type FormEvent } from 'react';
+import { useDialogFocus } from '../hooks/useDialogFocus';
 import { useWalletStore } from '../store';
 import {
   checkPasswordStrength,
@@ -110,6 +111,9 @@ function ConfirmResetModal({
   onConfirm: () => void | Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  // Cancel first: the other button wipes the wallet. No Escape mid-reset.
+  useDialogFocus(dialogRef, { onEscape: busy ? undefined : onCancel, initialFocus: '[data-initial-focus]' });
 
   async function handleConfirm() {
     setBusy(true);
@@ -122,13 +126,13 @@ function ConfirmResetModal({
 
   return (
     <div className="dialog-backdrop">
-      <div className="dialog" role="alertdialog" aria-modal="true" aria-label="Reset Wallet?">
+      <div ref={dialogRef} className="dialog" role="alertdialog" aria-modal="true" aria-label="Reset Wallet?" tabIndex={-1}>
         <h3 className="dialog-title danger">Reset Wallet?</h3>
         <p className="dialog-text">
           All keys on this device will be permanently deleted. This cannot be undone.
         </p>
         <div className="dialog-actions">
-          <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={busy}>
+          <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={busy} data-initial-focus>
             Cancel
           </button>
           <button
