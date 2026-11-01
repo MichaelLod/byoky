@@ -3,7 +3,7 @@ import XCTest
 
 /// `.byoky` backup compatibility with @byoky/core and the extension's
 /// vault-file.ts. `BackupFixture` was produced by the real core `encrypt()`
-/// under Node WebCrypto.
+/// under Node WebCrypto (scripts/gen-backup-fixtures.mjs).
 final class BackupFileTests: XCTestCase {
     private let crypto = CryptoService.shared
 
