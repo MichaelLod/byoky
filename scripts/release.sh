@@ -755,6 +755,7 @@ verify() {
 verify pnpm install --frozen-lockfile
 verify pnpm build:core
 verify pnpm build:sdk
+verify pnpm --filter @byoky/bridge build
 verify pnpm --filter @byoky/extension exec wxt prepare
 verify pnpm typecheck
 verify pnpm test

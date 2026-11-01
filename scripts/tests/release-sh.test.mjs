@@ -358,7 +358,9 @@ test('the tests run before anything is bumped, the native ones included', (t) =>
   t.after(s.cleanup)
   const r = s.run(['1.1.2', '--dry'])
   assert.equal(r.code, 0, r.out)
-  const order = ['pnpm install --frozen-lockfile', 'pnpm build:core', 'pnpm build:sdk', 'pnpm typecheck', 'pnpm test',
+  // The typecheck needs the bridge's dist (the OpenClaw plugin imports its types).
+  const order = ['pnpm install --frozen-lockfile', 'pnpm build:core', 'pnpm build:sdk', 'pnpm --filter @byoky/bridge build',
+    'pnpm --filter @byoky/extension exec wxt prepare', 'pnpm typecheck', 'pnpm test',
     'gradlew :app:testDebugUnitTest', 'xcrun simctl create byoky-release-tests-']
   let at = -1
   for (const step of order) {

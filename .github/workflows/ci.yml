@@ -80,7 +80,8 @@ jobs:
         run: node scripts/gen-backup-fixtures.mjs --check
 
   # The npm packages that CI otherwise never builds: the bridge, the OpenClaw
-  # plugin (which inlines the bridge's dist) and the scaffolder.
+  # plugin (which inlines the bridge's dist) and the scaffolder; and the
+  # typecheck of every package, which needs all of those builds.
   packages:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -101,8 +102,13 @@ jobs:
           pnpm --filter @byoky/openclaw-plugin build
           pnpm --filter create-byoky-app build
 
-      - name: Typecheck create-byoky-app
-        run: pnpm --filter create-byoky-app typecheck
+      # Every package with a typecheck script: core, sdk, extension, bridge,
+      # the OpenClaw plugin and create-byoky-app. The plugin resolves the
+      # bridge's dist types and the extension WXT's generated .wxt types.
+      - name: Typecheck
+        run: |
+          pnpm --filter @byoky/extension exec wxt prepare
+          pnpm typecheck
 
       # OpenClaw's own install-time scanner on the plugin as it would be
       # published; a critical finding makes OpenClaw flag or refuse it.
