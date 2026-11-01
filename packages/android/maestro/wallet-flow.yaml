@@ -12,6 +12,7 @@ tags:
 #   2. A setup token shows as "Setup Token" on its card, as in the sheet.
 #   3. A local server's URL shows on its card and can be changed there.
 #   4. Settings has a back arrow.
+#   5. Deleting a routing group asks first.
 #
 # Run:
 #   cd packages/android/maestro
@@ -85,3 +86,20 @@ tags:
 - assertVisible: "Security"
 - tapOn: "Back"
 - assertVisible: "2 credentials"
+
+# 5. Deleting a routing group asks first.
+- tapOn: "Connected"
+- tapOn: "New group"
+- tapOn: "Group name"
+- inputText: "Coding"
+- hideKeyboard
+- tapOn: "Save"
+- tapOn: "Group menu"
+- tapOn: "Delete"
+- assertVisible: "Delete group \"Coding\"\\?"
+- tapOn: "Cancel"
+- assertVisible: "Coding"
+- tapOn: "Group menu"
+- tapOn: "Delete"
+- tapOn: "Delete"
+- assertNotVisible: "Coding"
