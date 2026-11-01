@@ -146,7 +146,10 @@ const ANTHROPIC_MODELS: ModelDef[] = [
 ];
 
 // GPT-5.5 and GPT-5.4 bill prompts over 272K tokens at twice the input and
-// 1.5 times the output price.
+// 1.5 times the output price. GPT-6 Astra and Luna, in the registry, are not
+// here: OpenClaw sends tools on every turn, and Chat Completions takes none
+// for Astra and takes them for Luna only with reasoning_effort 'none', which
+// OpenClaw never sends.
 const OPENAI_MODELS: ModelDef[] = [
   {
     id: 'gpt-5.5',
