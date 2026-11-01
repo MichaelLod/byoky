@@ -1,6 +1,14 @@
 import { useWalletStore } from '../store';
 import { PROVIDERS } from '@byoky/core';
 
+// The log keeps the last 500 requests, so older days show up too.
+function formatWhen(timestamp: number): string {
+  const when = new Date(timestamp);
+  return when.toDateString() === new Date().toDateString()
+    ? when.toLocaleTimeString()
+    : when.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
 export function RequestHistory() {
   const { requestLog } = useWalletStore();
 
@@ -11,7 +19,7 @@ export function RequestHistory() {
       {requestLog.length === 0 ? (
         <div className="empty-state">
           <p>No requests yet.</p>
-          <p>Requests made through byoky will appear here.</p>
+          <p>Requests made through Byoky will appear here.</p>
         </div>
       ) : (
         <div className="log-block">
@@ -35,7 +43,7 @@ export function RequestHistory() {
                   </div>
                   <div className="log-meta">
                     {entry.appOrigin} &middot;{' '}
-                    {new Date(entry.timestamp).toLocaleTimeString()}
+                    {formatWhen(entry.timestamp)}
                   </div>
                   {entry.error && (
                     <div className="log-error">

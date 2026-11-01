@@ -50,6 +50,8 @@ interface WalletState {
   error: string | null;
   /** When the password lockout ends (epoch ms), while one is running. */
   lockedUntil: number | null;
+  /** When this view last approved a request, so the raven can nod. */
+  approvedAt: number | null;
 
   init: () => Promise<void>;
   setup: (password: string) => Promise<void>;
@@ -127,6 +129,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   submitting: false,
   error: null,
   lockedUntil: null,
+  approvedAt: null,
 
   init: async () => {
     const initResult = await sendInternal('isInitialized');
@@ -354,6 +357,8 @@ export const useWalletStore = create<WalletState>((set, get) => ({
           ? `The request from ${origin ? describeOrigin(origin).label : 'this app'} expired. Ask the app to connect again.`
           : ((result?.error as string | undefined) ?? 'Could not approve the request'),
       });
+    } else {
+      set({ approvedAt: Date.now() });
     }
     await get().refreshData();
   },

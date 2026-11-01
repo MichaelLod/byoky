@@ -14,7 +14,9 @@ import { Raven } from './components/Raven';
 import { Modal } from './components/Modal';
 
 export default function App() {
-  const { currentPage, modal, sessions, credentials, pendingApprovals, loading, isUnlocked, init, closeModal } = useWalletStore();
+  const {
+    currentPage, modal, sessions, credentials, pendingApprovals, loading, isUnlocked, approvedAt, init, closeModal,
+  } = useWalletStore();
   const justUnlocked = useJustUnlocked(currentPage, loading);
   useActivityPing(isUnlocked);
 
@@ -149,10 +151,13 @@ export default function App() {
             <span className="status-dot" />
             Unlocked · {credentials.length} {credentials.length === 1 ? 'key' : 'keys'}
           </span>
+          {/* Nods once after an unlock and after each approval: a new
+              approval remounts it. */}
           <Raven
+            key={approvedAt ?? 'unlocked'}
             view="head"
             size={42}
-            state={justUnlocked ? 'nod-then-watching' : 'watching'}
+            state={justUnlocked || approvedAt ? 'nod-then-watching' : 'watching'}
             label="Muninn is awake"
           />
         </div>

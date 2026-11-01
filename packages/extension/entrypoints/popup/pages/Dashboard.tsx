@@ -90,7 +90,7 @@ export function Dashboard() {
         <div className="empty-state">
           <p>No API keys or tokens yet.</p>
           <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '8px' }}>
-            Tap the + button to add a credential. Apps you connect use it through the wallet and never see the key.
+            Click the + button to add a credential. Apps you connect use it through the wallet and never see the key.
           </p>
         </div>
       ) : (
