@@ -46,7 +46,7 @@ export const metadata: Metadata = {
     template: '%s — Byoky',
   },
   description:
-    'Keep every AI API key in one wallet. Apps connect to the wallet, the wallet proxies their calls, and your keys never leave Byoky. No servers, no accounts. 13 providers, fully open source.',
+    'Keep every AI API key in one wallet. Apps connect to the wallet, the wallet proxies their calls, and your keys never leave Byoky. No servers, no accounts. 13 cloud providers plus Ollama and LM Studio, fully open source.',
   keywords: [
     'AI API key wallet',
     'LLM API key manager',
@@ -85,7 +85,6 @@ export const metadata: Metadata = {
     title: 'Byoky — The MetaMask for API keys',
     description:
       'Keep every AI API key in one wallet. Apps connect to the wallet. Your keys never leave Byoky. No servers, no accounts, fully open source.',
-    url: 'https://byoky.com',
     siteName: 'Byoky',
     type: 'website',
   },
@@ -115,7 +114,7 @@ export default function RootLayout({
               applicationCategory: 'BrowserApplication',
               operatingSystem: 'Chrome, Firefox, iOS, Android',
               description:
-                'The MetaMask for API keys. Keep every AI API key in one wallet, encrypted locally with AES-256-GCM. Apps connect to the wallet and never see your keys. No servers, no accounts, 13 providers, open source.',
+                'The MetaMask for API keys. Keep every AI API key in one wallet, encrypted locally with AES-256-GCM. Apps connect to the wallet and never see your keys. No servers, no accounts, 13 cloud providers plus Ollama and LM Studio, open source.',
               url: 'https://byoky.com',
               offers: {
                 '@type': 'Offer',

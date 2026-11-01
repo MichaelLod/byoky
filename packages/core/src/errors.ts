@@ -13,7 +13,7 @@ export class ByokyError extends Error {
   static walletNotInstalled() {
     return new ByokyError(
       ByokyErrorCode.WALLET_NOT_INSTALLED,
-      'byoky wallet extension is not installed',
+      'Byoky wallet is not installed',
     );
   }
 

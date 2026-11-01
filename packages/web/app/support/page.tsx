@@ -46,9 +46,9 @@ export default function Support() {
           <li>
             <strong>Which providers are supported?</strong>
             <p>
-              Byoky supports 13 providers: Anthropic, OpenAI, Google Gemini, Mistral, Cohere,
+              Byoky supports 13 cloud providers: Anthropic, OpenAI, Google Gemini, Mistral, Cohere,
               xAI, DeepSeek, Perplexity, Groq, Together AI, Fireworks AI, OpenRouter, and Azure
-              OpenAI.
+              OpenAI. It also runs local models through Ollama and LM Studio.
             </p>
           </li>
           <li>

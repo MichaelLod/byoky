@@ -14,7 +14,7 @@ export default function Privacy() {
     <div className="container" style={{ paddingTop: '120px', paddingBottom: '80px', maxWidth: '680px' }}>
       <h1 style={{ fontSize: '32px', marginBottom: '8px' }}>Privacy Policy</h1>
       <p style={{ color: 'var(--dim)', marginBottom: '40px', fontSize: '13px', fontFamily: 'var(--font-code)' }}>
-        Last updated: October 23, 2026
+        Last updated: November 1, 2026
       </p>
 
       <Section title="Summary">
@@ -182,38 +182,6 @@ export default function Privacy() {
           other device. Where you keep that file is up to you; it does not pass through our
           servers.
         </p>
-      </Section>
-
-      <Section title="Limited Use disclosure (Google API Services)">
-        <p>
-          Byoky&apos;s use and transfer of information received from Google APIs (specifically,
-          OAuth tokens issued via{' '}
-          <code>oauth2.googleapis.com</code> for the Google Generative Language API) adheres to
-          the{' '}
-          <a
-            href="https://developers.google.com/terms/api-services-user-data-policy"
-            style={{ color: 'var(--phosphor)' }}
-          >
-            Google API Services User Data Policy
-          </a>
-          , including the Limited Use requirements. In particular:
-        </p>
-        <ul>
-          <li>
-            We use Google user data only to provide the user-facing feature you requested
-            (calling Gemini on your behalf with your account&apos;s OAuth token).
-          </li>
-          <li>
-            We do not transfer Google user data except as necessary to provide that feature, to
-            comply with applicable law, or as part of a merger, acquisition, or sale of assets
-            with notice to users.
-          </li>
-          <li>We do not use Google user data for advertising.</li>
-          <li>
-            We do not allow humans to read Google user data unless we have your affirmative
-            consent, it is necessary for security, or it is required by law.
-          </li>
-        </ul>
       </Section>
 
       <Section title="Native messaging (Byoky Bridge)">

@@ -7,7 +7,7 @@ const examples = [
     label: 'Native SDK',
     filename: 'native-sdk.ts',
     description:
-      'Use any provider SDK as-is. Just swap in createFetch — full API compatibility, including streaming.',
+      'Use any provider SDK as-is. Just swap in createFetch — inference API compatibility, including streaming.',
     code: `import Anthropic from '@anthropic-ai/sdk';
 import { Byoky } from '@byoky/sdk';
 
@@ -20,10 +20,11 @@ const session = await byoky.connect({
 const client = new Anthropic({
   apiKey: session.sessionKey,
   fetch: session.createFetch('anthropic'),
+  dangerouslyAllowBrowser: true, // apiKey is a session token, not a key
 });
 
 const message = await client.messages.create({
-  model: 'claude-sonnet-4-20250514',
+  model: 'claude-sonnet-4-6',
   max_tokens: 1024,
   messages: [{ role: 'user', content: 'Hello!' }],
 });`,
@@ -45,6 +46,7 @@ const session = await new Byoky().connect({
 const client = new OpenAI({
   apiKey: session.sessionKey,
   fetch: session.createFetch('openai'),
+  dangerouslyAllowBrowser: true, // apiKey is a session token, not a key
 });
 
 const extraction = await client.chat.completions.create({
@@ -90,10 +92,11 @@ const session = await new Byoky().connect({
 const client = new Anthropic({
   apiKey: session.sessionKey,
   fetch: session.createFetch('anthropic'),
+  dangerouslyAllowBrowser: true, // apiKey is a session token, not a key
 });
 
 const stream = client.messages.stream({
-  model: 'claude-sonnet-4-20250514',
+  model: 'claude-sonnet-4-6',
   max_tokens: 1024,
   messages: [{ role: 'user', content: 'Write a haiku about security.' }],
 });
@@ -122,10 +125,11 @@ const session = await new Byoky().connect({
 const client = new Anthropic({
   apiKey: session.sessionKey,
   fetch: session.createFetch('anthropic'),
+  dangerouslyAllowBrowser: true, // apiKey is a session token, not a key
 });
 
 const response = await client.messages.create({
-  model: 'claude-sonnet-4-20250514',
+  model: 'claude-sonnet-4-6',
   max_tokens: 1024,
   tools: [{
     name: 'get_weather',
@@ -153,7 +157,7 @@ const response = await client.messages.create({
     label: 'Vision',
     filename: 'vision.ts',
     description:
-      'Analyze images with Claude or GPT-4o. File uploads go through the proxy — the API never sees your key.',
+      'Analyze images with Claude or GPT. The image goes inline through the proxy — your app never sees the key.',
     code: `import Anthropic from '@anthropic-ai/sdk';
 import { Byoky } from '@byoky/sdk';
 
@@ -165,6 +169,7 @@ const session = await new Byoky().connect({
 const client = new Anthropic({
   apiKey: session.sessionKey,
   fetch: session.createFetch('anthropic'),
+  dangerouslyAllowBrowser: true, // apiKey is a session token, not a key
 });
 
 // Read a file from an <input> or drag-and-drop
@@ -174,7 +179,7 @@ const base64 = btoa(
 );
 
 const response = await client.messages.create({
-  model: 'claude-sonnet-4-20250514',
+  model: 'claude-sonnet-4-6',
   max_tokens: 1024,
   messages: [{
     role: 'user',
@@ -229,7 +234,7 @@ wss.on('connection', async (ws) => {
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 1024,
       messages: [{ role: 'user', content: 'Hello!' }],
     }),
@@ -271,7 +276,7 @@ async function ask(provider: string, prompt: string) {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 1024,
         messages: [{ role: 'user', content: prompt }],
       }),
@@ -324,7 +329,7 @@ curl http://127.0.0.1:19280/anthropic/v1/messages \\
   -H "content-type: application/json" \\
   -H "anthropic-version: 2023-06-01" \\
   -d '{
-    "model": "claude-sonnet-4-20250514",
+    "model": "claude-sonnet-4-6",
     "max_tokens": 1024,
     "messages": [{"role": "user", "content": "Hello!"}]
   }'`,

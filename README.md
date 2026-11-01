@@ -22,7 +22,7 @@
 
 **Byoky** (Bring Your Own Key) is a wallet for your AI credentials: a browser extension plus iOS and Android apps. You add your API keys and setup tokens once, and they're encrypted on your device. Apps connect to the wallet the way dapps connect to MetaMask. They ask for access, you approve, and the wallet makes their LLM calls for them. The app never sees the key.
 
-- **One wallet, every provider.** Anthropic, OpenAI, Gemini, Mistral and nine more, plus custom endpoints. Add a key once and use it in every Byoky-enabled app.
+- **One wallet, every provider.** Anthropic, OpenAI, Gemini, Mistral and nine more, plus local models through Ollama and LM Studio. Add a key once and use it in every Byoky-enabled app.
 - **Apps connect instead of copying keys.** No more pasting `sk-...` into a settings page. Approve an app, see every request it makes, set spending caps, revoke it with one click.
 - **No servers.** No accounts, no cloud sync, no relay. Byoky doesn't run anything that sits between you and your provider. The wallet talks only to the AI providers you add.
 - **Groups.** Bucket connected apps by purpose ("Personal", "Work"), pin each group to a credential, then drag apps between groups to switch which key they use. Live sessions reroute without code changes.
@@ -90,17 +90,18 @@ const session = await byoky.connect({
 const client = new Anthropic({
   apiKey: session.sessionKey,
   fetch: session.createFetch('anthropic'),
+  dangerouslyAllowBrowser: true, // safe with Byoky: apiKey is a session token, not a key
 });
 
 // Everything works exactly like normal, including streaming
 const message = await client.messages.create({
-  model: 'claude-sonnet-4-20250514',
+  model: 'claude-sonnet-4-6',
   max_tokens: 1024,
   messages: [{ role: 'user', content: 'Hello!' }],
 });
 ```
 
-> **Two lines changed.** Full API compatibility: streaming, file uploads and vision all work. `session.sessionKey` is a per-app session token, not the user's key. Sessions auto-reconnect if the extension restarts.
+> **Pass Byoky's `fetch` and session key; the rest of your code stays the same.** Streaming, vision, tool use and multipart uploads to inference endpoints all work; apps can call inference and model-list endpoints only (no Files, Batches or Assistants APIs), so images and PDFs go inline in the request. `session.sessionKey` is a per-app session token, not the user's key, which is why `dangerouslyAllowBrowser: true` is safe here: the Anthropic and OpenAI SDKs refuse to run in a browser without it, to keep real keys out of page code. Sessions auto-reconnect if the extension restarts.
 
 ### Backend Relay
 
@@ -112,7 +113,7 @@ Your backend ←WebSocket (your server)→ User's browser ←→ Byoky extension
 
 ```typescript
 // Frontend — open a relay so the backend can make LLM calls
-const session = await new Byoky().connect({ providers: [{ id: 'anthropic' }], modal: true });
+const session = await new Byoky().connect({ providers: [{ id: 'anthropic', required: true }], modal: true });
 const relay = session.createRelay('wss://your-app.com/ws/relay');
 ```
 
@@ -128,7 +129,7 @@ wss.on('connection', async (ws) => {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 1024,
       messages: [{ role: 'user', content: 'Hello!' }],
     }),
@@ -156,7 +157,7 @@ export ANTHROPIC_API_KEY=$(byoky-bridge token)
 
 ### OpenClaw Integration
 
-Use your Byoky wallet as the key provider for [OpenClaw](https://openclaw.dev). The plugin connects through the bridge, so your keys stay in the extension even when the agent runs in your terminal. See the [OpenClaw plugin](packages/openclaw-plugin) for setup.
+Use your Byoky wallet as the key provider for [OpenClaw](https://openclaw.ai). The plugin connects through the bridge, so your keys stay in the extension even when the agent runs in your terminal. See the [OpenClaw plugin](packages/openclaw-plugin) for setup.
 
 ```
 OpenClaw → HTTP → Bridge (localhost) → Native Messaging → Extension → LLM API
@@ -182,7 +183,7 @@ OpenClaw → HTTP → Bridge (localhost) → Native Messaging → Extension → 
 |----------|:-------:|:-----:|--------|
 | Anthropic | ✓ | Setup Token | Available |
 | OpenAI | ✓ | — | Available |
-| Google Gemini | ✓ | Google OAuth | Available |
+| Google Gemini | ✓ | — | Available |
 | Mistral | ✓ | — | Available |
 | Cohere | ✓ | — | Available |
 | xAI (Grok) | ✓ | — | Available |
@@ -193,7 +194,8 @@ OpenClaw → HTTP → Bridge (localhost) → Native Messaging → Extension → 
 | Fireworks AI | ✓ | — | Available |
 | OpenRouter | ✓ | — | Available |
 | Azure OpenAI | ✓ | — | Available |
-| *Custom* | ✓ | — | Extensible |
+| Ollama (local) | ✓ | — | Available |
+| LM Studio (local) | ✓ | — | Available |
 
 > **Setup Token**: Use your Claude Pro/Max subscription via `claude setup-token`. API keys use pay-per-use billing from the provider console.
 

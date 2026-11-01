@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef, Fragment } from 'react';
 import type { ByokySession } from '@byoky/sdk';
+import { cohereErrorMessage, cohereResponseText, cohereStreamText } from '../../components/chat-providers';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -81,6 +82,22 @@ const response = await fetch(
     }),
   },
 );`;
+  }
+
+  if (providerId === 'cohere') {
+    return `const fetch = session.createFetch('cohere');
+
+const response = await fetch('${p.url}', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({
+    model: '${model}',
+    messages: [{ role: 'user', content: '${msg}' }],
+    max_tokens: 1024,
+    stream: true,
+  }),
+});
+// Stream events of type 'content-delta' carry delta.message.content.text`;
   }
 
   // OpenAI-compatible providers
@@ -304,7 +321,7 @@ export function Chat({ session, initialProvider }: Props) {
   }, [initialProvider]);
 
   // Live model discovery: call session.listModels for the active provider once
-  // it's selected and not already cached. Failures (xAI has no endpoint, key
+  // it's selected and not already cached. Failures (no models endpoint, key
   // rejected, etc.) silently fall back to the hardcoded list above.
   useEffect(() => {
     if (!selectedProvider) return;
@@ -471,6 +488,27 @@ export function Chat({ session, initialProvider }: Props) {
         } else {
           const data = await response.json();
           appendToken(data.choices?.[0]?.message?.content || 'No response.');
+        }
+
+      } else if (selectedProvider === 'cohere') {
+        const allMessages = [...prevMessages, userMessage].map(m => ({ role: m.role, content: m.content }));
+        const response = await proxyFetch(providers.cohere.url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ model: currentModel, messages: allMessages, max_tokens: 1024, ...(useStream && { stream: true }) }),
+        });
+        if (!response.ok) {
+          const body = await response.json().catch(() => null);
+          throw new Error(cohereErrorMessage(body) || `API error: ${response.status}`);
+        }
+
+        if (useStream && response.body) {
+          for await (const event of parseSSE(response)) {
+            const text = cohereStreamText(event);
+            if (text) appendToken(text);
+          }
+        } else {
+          appendToken(cohereResponseText(await response.json()) || 'No response.');
         }
 
       } else if (selectedProvider in providers) {

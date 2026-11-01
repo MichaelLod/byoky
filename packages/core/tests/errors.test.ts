@@ -24,6 +24,8 @@ describe('static factory methods', () => {
     const err = ByokyError.walletNotInstalled();
     expect(err.code).toBe(ByokyErrorCode.WALLET_NOT_INSTALLED);
     expect(err.message).toContain('not installed');
+    // Shown to users as is; on a phone the wallet is an app, not an extension.
+    expect(err.message).toBe('Byoky wallet is not installed');
   });
 
   it('userRejected', () => {

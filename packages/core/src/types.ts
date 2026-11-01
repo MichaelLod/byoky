@@ -158,7 +158,12 @@ export interface ConnectRequest {
 
 export interface ProviderRequirement {
   id: ProviderId;
-  required: boolean;
+  /**
+   * A hint for the approval prompt that the app can't work without this
+   * provider. The connection succeeds without it; check
+   * `providers[id]?.available` in the response.
+   */
+  required?: boolean;
 }
 
 export interface ConnectResponse {

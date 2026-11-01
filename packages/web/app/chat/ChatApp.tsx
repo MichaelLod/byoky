@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef, Fragment } from 'react';
-import { Byoky, type ByokySession } from '@byoky/sdk';
+import { Byoky, ByokyErrorCode, type ByokySession } from '@byoky/sdk';
+import { cohereErrorMessage, cohereStreamText } from '../components/chat-providers';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -142,8 +143,10 @@ export function ChatApp() {
       });
       onConnected(s);
     } catch (e) {
-      const err = e as Error;
-      if (err.message === 'User cancelled') return;
+      const err = e as Error & { code?: string };
+      // Closing the connect modal: a plain 'User cancelled', or
+      // WALLET_NOT_INSTALLED after the modal's install guidance.
+      if (err.message === 'User cancelled' || err.code === ByokyErrorCode.WALLET_NOT_INSTALLED) return;
       setError(err.message);
     }
   }
@@ -276,6 +279,12 @@ function ChatView({ session, onDisconnect }: { session: ByokySession; onDisconne
         const response = await proxyFetch(providers.openai.url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: currentModel, messages: apiMessages, max_completion_tokens: 4096, stream: true }) });
         if (!response.ok) { const err = (await response.json()).error; throw new Error(err?.message || `API error: ${response.status}`); }
         if (response.body) { for await (const event of parseSSE(response)) { const e = event as { choices?: Array<{ delta?: { content?: string } }> }; if (e.choices?.[0]?.delta?.content) appendToken(e.choices[0].delta.content); } }
+
+      } else if (selectedProvider === 'cohere') {
+        const allMessages = [...prevMessages, userMessage].map(m => ({ role: m.role, content: m.content }));
+        const response = await proxyFetch(providers.cohere.url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: currentModel, messages: allMessages, max_tokens: 4096, stream: true }) });
+        if (!response.ok) { const body = await response.json().catch(() => null); throw new Error(cohereErrorMessage(body) || `API error: ${response.status}`); }
+        if (response.body) { for await (const event of parseSSE(response)) { const text = cohereStreamText(event); if (text) appendToken(text); } }
 
       } else if (selectedProvider in providers) {
         const allMessages = [...prevMessages, userMessage].map(m => ({ role: m.role, content: m.content }));

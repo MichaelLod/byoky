@@ -37,10 +37,11 @@ const session = await byoky.connect({
 const client = new Anthropic({
   apiKey: session.sessionKey,
   fetch: session.createFetch('anthropic'),
+  dangerouslyAllowBrowser: true, // safe with Byoky: apiKey is a session token, not a key
 });
 
 const msg = await client.messages.create({
-  model: 'claude-sonnet-4-20250514',
+  model: 'claude-sonnet-4-6',
   max_tokens: 1024,
   messages: [{ role: 'user', content: 'Hello!' }],
 });
@@ -48,8 +49,8 @@ const msg = await client.messages.create({
 
 # Session API
 
-- \`session.createFetch(providerId)\` — drop-in \`fetch\` for any provider SDK. Streaming, vision, and file uploads all work unchanged.
-- \`session.listModels(providerId)\` — discover models the user's credential can access (live per provider, including local Ollama / LM Studio installs). Returns \`{ id, displayName?, contextWindow?, capabilities?, raw }[]\`. Throws \`PROVIDER_UNAVAILABLE\` for providers without a discovery endpoint (xAI); returns a hardcoded list for Perplexity.
+- \`session.createFetch(providerId)\` — drop-in \`fetch\` for any provider SDK's inference calls. Streaming, vision, tool use and multipart uploads to inference endpoints (e.g. audio transcription) work unchanged. Only inference and model-list endpoints are allowed: no Files, Batches, Assistants, fine-tuning or admin APIs (403 \`ENDPOINT_NOT_ALLOWED\`), so send images and PDFs inline in the request.
+- \`session.listModels(providerId)\` — discover models the user's credential can access (live per provider, including local Ollama / LM Studio installs). Returns \`{ id, displayName?, contextWindow?, capabilities?, raw }[]\`. Throws \`PROVIDER_UNAVAILABLE\` for an unknown provider or when the provider's models endpoint answers 404/405; returns a hardcoded list for Perplexity.
 - \`session.createRelay(wsUrl)\` — open a WebSocket so a backend server can make LLM calls through this session.
 - \`session.getUsage()\` — returns { requests, inputTokens, outputTokens, byProvider }.
 - \`session.onDisconnect(cb)\` / \`session.onProvidersUpdated(cb)\` — lifecycle callbacks.
@@ -69,6 +70,7 @@ Frontend opens \`session.createRelay('wss://your-app.com/ws/relay')\` against a 
 # Rules
 
 - Use native provider SDKs (Anthropic, OpenAI, Google GenAI, etc.). Pass \`session.createFetch(id)\` as \`fetch\` and \`session.sessionKey\` as \`apiKey\`.
+- In browser code, also pass \`dangerouslyAllowBrowser: true\` to the Anthropic and OpenAI SDKs, or their constructors throw. It is safe here: \`apiKey\` is a Byoky session token, and the real key stays in the wallet.
 - Never collect or prompt the user for an API key — Byoky replaces that entirely.
 - Users install one of: Chrome/Firefox extension, the iOS app (Safari extension or its in-wallet browser), or the Android app (in-wallet browser). Each wallet serves apps on its own device; there is no cross-device pairing. The SDK's \`modal: true\` detects the wallet and, when none is found, shows install links plus a hint to open the page in the Byoky app's built-in browser on phones.
 - CLI tools and desktop apps don't use the SDK — they send plain HTTP to \`@byoky/bridge\` on localhost, which forwards to the extension.
@@ -236,7 +238,10 @@ function Overview() {
                                           Keys stay here. Always.`}</Code>
 
       <p>
-        Two lines changed. Full API compatibility. Streaming, file uploads, and vision all work.
+        Pass the session&apos;s <code>fetch</code> and key to the provider SDK you already use; the
+        rest of your code stays the same. Streaming, vision, tool use and inline images and PDFs
+        all work through the wallet. Apps can call inference and model-list endpoints only (see{' '}
+        <a href="#allowed-endpoints" style={{ color: 'var(--phosphor)' }}>Allowed endpoints</a>).
         Sessions auto-reconnect if the extension restarts.
       </p>
 
@@ -383,17 +388,29 @@ const session = await byoky.connect({
 const client = new Anthropic({
   apiKey: session.sessionKey,
   fetch: session.createFetch('anthropic'),
+  dangerouslyAllowBrowser: true, // safe with Byoky: apiKey is a session token, not a key
 });
 
 const message = await client.messages.create({
-  model: 'claude-sonnet-4-20250514',
+  model: 'claude-sonnet-4-6',
   max_tokens: 1024,
   messages: [{ role: 'user', content: 'Hello!' }],
 });`}</Code>
 
       <p>
-        That&apos;s it. Full API compatibility &mdash; streaming, file uploads, and vision all work
-        unchanged.
+        That&apos;s it. Streaming, vision, tool use and multipart uploads to inference endpoints
+        work unchanged. Storage APIs such as Files and Batches are blocked; see{' '}
+        <a href="#allowed-endpoints" style={{ color: 'var(--phosphor)' }}>Allowed endpoints</a>.
+      </p>
+
+      <h3>Why dangerouslyAllowBrowser?</h3>
+      <p>
+        The official Anthropic and OpenAI SDKs refuse to run in a browser unless you pass{' '}
+        <code>dangerouslyAllowBrowser: true</code>; without it their constructors throw. The guard
+        exists because a real API key in page code can be read by anyone who opens the page. With
+        Byoky, <code>apiKey</code> is <code>session.sessionKey</code>, a per-app session token that
+        only works through the wallet the user approved. The real key never reaches the page, so the
+        flag is safe here.
       </p>
     </Section>
   );
@@ -499,8 +516,10 @@ const byoky = new Byoky({
 });`}</Code>
 
       <Prop name="providers" type="ProviderRequirement[]">
-        List of providers your app needs. <code>required: true</code> means connection fails if the
-        user doesn&apos;t have that provider.
+        List of providers your app needs. <code>required: true</code> marks one your app can&apos;t
+        work without: the wallet points it out in the approval prompt, but the connection still
+        succeeds when the user has no key for it. After connecting, check{' '}
+        <code>session.providers[id]?.available</code>.
       </Prop>
       <Prop name="capabilities" type="string[]">
         Optional list of capabilities your app intends to use, passed through to the wallet with the
@@ -525,7 +544,10 @@ const byoky = new Byoky({
       <p>
         Without <code>modal</code>, <code>connect()</code> throws a <code>ByokyError</code> with code{' '}
         <code>WALLET_NOT_INSTALLED</code> when no wallet is present (and opens the store page for the
-        user&apos;s browser, if there is one). <code>USER_REJECTED</code> means the user declined.
+        user&apos;s browser, if there is one). <code>USER_REJECTED</code> means the user declined in
+        the wallet or the approval timed out. With <code>modal: true</code>, closing the modal
+        rejects with <code>WALLET_NOT_INSTALLED</code> when no wallet was found, and otherwise with
+        a plain <code>Error(&apos;User cancelled&apos;)</code>.
       </p>
 
       <h3>byoky.tryReconnect()</h3>
@@ -585,12 +607,14 @@ function SessionApi() {
 const client = new Anthropic({
   apiKey: session.sessionKey,
   fetch: session.createFetch('anthropic'),
+  dangerouslyAllowBrowser: true,
 });
 
 // OpenAI
 const client = new OpenAI({
   apiKey: session.sessionKey,
   fetch: session.createFetch('openai'),
+  dangerouslyAllowBrowser: true,
 });
 
 // Or raw fetch
@@ -598,7 +622,7 @@ const fetch = session.createFetch('anthropic');
 const res = await fetch('https://api.anthropic.com/v1/messages', {
   method: 'POST',
   headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' },
-  body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1024, messages: [...] }),
+  body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1024, messages: [...] }),
 });`}</Code>
 
       <h3>session.listModels(providerId)</h3>
@@ -653,19 +677,22 @@ session.proxyUrl    // deprecated — internal transport marker, don't rely on i
 session.providers   // Record<ProviderId, ProviderStatus>
 
 interface ProviderStatus {
-  // true: the wallet has a working credential for this provider
-  //       and will hit the provider directly.
-  // false: your app can still call createFetch(id) — the wallet may route
-  //        it through another provider via cross-provider translation.
+  // true: the wallet can serve this provider, with a credential of its
+  //       own or by routing it to another provider the user set up.
+  // false: it can't right now; createFetch(id) requests will fail.
   available: boolean;
 
   // How the credential authenticates upstream.
   authMethod: 'api_key' | 'oauth';
 }`}</Code>
       <p>
-        Check <code>providers[id].available</code> before assuming direct access. A provider marked{' '}
-        <code>available: false</code> may still work if the user has set up cross-provider routing.
-        See <a href="#cross-provider" style={{ color: 'var(--phosphor)' }}>Cross-Provider Routing</a>.
+        Check <code>session.providers[id]?.available</code> before calling a provider, and use{' '}
+        <code>?.</code>: a provider the wallet can&apos;t serve may be missing from the record.{' '}
+        <code>available: true</code> doesn&apos;t mean a direct key: the user may route your app to
+        another provider (see{' '}
+        <a href="#cross-provider" style={{ color: 'var(--phosphor)' }}>Cross-Provider Routing</a>).
+        When the user adds a credential or changes routing, <code>onProvidersUpdated</code> fires
+        with the new record.
       </p>
     </Section>
   );
@@ -803,10 +830,11 @@ function Streaming() {
 const client = new Anthropic({
   apiKey: session.sessionKey,
   fetch: session.createFetch('anthropic'),
+  dangerouslyAllowBrowser: true,
 });
 
 const stream = client.messages.stream({
-  model: 'claude-sonnet-4-20250514',
+  model: 'claude-sonnet-4-6',
   max_tokens: 1024,
   messages: [{ role: 'user', content: 'Write a haiku.' }],
 });
@@ -831,7 +859,7 @@ const res = await fetch('https://api.anthropic.com/v1/messages', {
     'anthropic-version': '2023-06-01',
   },
   body: JSON.stringify({
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-6',
     max_tokens: 1024,
     stream: true,
     messages: [{ role: 'user', content: 'Hello!' }],
@@ -899,7 +927,7 @@ for (let round = 0; round < 5; round++) {
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 1024,
       tools,
       messages,
@@ -1026,7 +1054,7 @@ const contact = JSON.parse(data.choices[0].message.content);`}</Code>
     'anthropic-version': '2023-06-01',
   },
   body: JSON.stringify({
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-6',
     max_tokens: 1024,
     messages: [{
       role: 'user',
@@ -1060,7 +1088,7 @@ function Vision() {
 
       <h3>Anthropic</h3>
       <Code lang="typescript">{`body: JSON.stringify({
-  model: 'claude-sonnet-4-20250514',
+  model: 'claude-sonnet-4-6',
   max_tokens: 1024,
   messages: [{
     role: 'user',
@@ -1140,7 +1168,11 @@ const options = models.map(m => ({
           <tr><th>Provider</th><th>Endpoint hit</th><th>Notes</th></tr>
         </thead>
         <tbody>
-          <tr><td><code>openai</code>, <code>groq</code>, <code>deepseek</code>, <code>mistral</code>, <code>fireworks</code>, <code>openrouter</code>, <code>lm_studio</code></td><td><code>/v1/models</code></td><td>OpenAI-compatible <code>{`{data:[...]}`}</code> shape</td></tr>
+          <tr><td><code>openai</code>, <code>mistral</code>, <code>xai</code>, <code>lm_studio</code></td><td><code>/v1/models</code></td><td>OpenAI-compatible <code>{`{data:[...]}`}</code> shape</td></tr>
+          <tr><td><code>openrouter</code></td><td><code>/api/v1/models</code></td><td>OpenAI-compatible shape</td></tr>
+          <tr><td><code>groq</code></td><td><code>/openai/v1/models</code></td><td>OpenAI-compatible shape</td></tr>
+          <tr><td><code>deepseek</code></td><td><code>/models</code></td><td>OpenAI-compatible shape</td></tr>
+          <tr><td><code>fireworks</code></td><td><code>/inference/v1/models</code></td><td>OpenAI-compatible shape</td></tr>
           <tr><td><code>anthropic</code></td><td><code>/v1/models</code></td><td>Includes capabilities (<code>vision</code>, <code>thinking</code>, <code>structured_outputs</code>)</td></tr>
           <tr><td><code>gemini</code></td><td><code>/v1beta/models</code></td><td>Filters out embedding-only models; strips the <code>models/</code> prefix from IDs</td></tr>
           <tr><td><code>cohere</code></td><td><code>/v1/models</code></td><td>Filters to chat-capable models; reads <code>features</code> for capabilities</td></tr>
@@ -1148,7 +1180,6 @@ const options = models.map(m => ({
           <tr><td><code>azure_openai</code></td><td><code>/openai/models?api-version=...</code></td><td>Returns deployments rather than upstream model IDs</td></tr>
           <tr><td><code>ollama</code></td><td><code>/api/tags</code></td><td>Lists what the user has <code>ollama pull</code>&apos;d locally</td></tr>
           <tr><td><code>perplexity</code></td><td>—</td><td>No public endpoint; returns a hardcoded Sonar list</td></tr>
-          <tr><td><code>xai</code></td><td>—</td><td>Endpoint not documented; throws <code>PROVIDER_UNAVAILABLE</code></td></tr>
         </tbody>
       </table>
 
@@ -1157,7 +1188,7 @@ const options = models.map(m => ({
         <code>listModels</code> can throw a <code>ByokyError</code> with one of these codes:
       </p>
       <ul>
-        <li><code>PROVIDER_UNAVAILABLE</code> — the provider has no models endpoint, or returned 404/405.</li>
+        <li><code>PROVIDER_UNAVAILABLE</code> — the provider id is unknown, or its models endpoint returned 404/405.</li>
         <li><code>INVALID_KEY</code> — credential rejected by the provider (401/403).</li>
         <li><code>RATE_LIMITED</code> — upstream returned 429.</li>
         <li><code>PROXY_ERROR</code> — anything else (transport failure, malformed response).</li>
@@ -1175,13 +1206,18 @@ function Errors() {
       <p>
         Errors from upstream providers surface with their original HTTP status and body &mdash; so{' '}
         <code>response.status</code> and the usual <code>{`{ error: { message } }`}</code> body
-        shape work the same as hitting the provider directly.
+        shape work the same as hitting the provider directly. A provider&apos;s own 401 or 429
+        carries no Byoky code: check <code>res.status</code> (and the provider&apos;s{' '}
+        <code>Retry-After</code> header) as you would without Byoky.
       </p>
 
       <p>
-        The proxy layer adds its own error codes on top, signalled with an HTTP status and an{' '}
-        <code>error.code</code> field in the JSON body. The table below covers every value of the{' '}
-        <code>ByokyErrorCode</code> enum and what your app should do when it fires.
+        The wallet adds its own errors on top. On a <code>createFetch</code> request they arrive as
+        an HTTP status with <code>{`{ error: { code, message } }`}</code> in the JSON body;{' '}
+        <code>connect()</code> and <code>listModels()</code> throw a <code>ByokyError</code> with
+        the same <code>code</code>. The table lists the codes apps can receive and what to do
+        about each. The mobile wallets send a few codes of their own; handle a code you don&apos;t
+        recognise by its HTTP status.
       </p>
 
       <table className="docs-table">
@@ -1194,16 +1230,30 @@ function Errors() {
         </thead>
         <tbody>
           {[
-            ['WALLET_NOT_INSTALLED', 'No Byoky wallet (extension, iOS Safari extension, or in-wallet browser) was detected when connect() ran.', <>Show an install prompt — <code>getStoreUrl()</code> returns the right link per browser. Or pass <code>modal: true</code> and let the SDK do it.</>],
-            ['USER_REJECTED', 'User dismissed the connect modal or denied the permission prompt.', 'Do not auto-retry. Wait for an explicit user action before calling connect() again.'],
-            ['PROVIDER_UNAVAILABLE', 'The wallet has no credential (and no routing group) that can serve this provider.', 'Tell the user which provider you need; deep-link them into the wallet to add a credential.'],
-            ['SESSION_EXPIRED', 'Session was revoked from the wallet or aged out.', <>Call <code>byoky.connect()</code> again. <code>tryReconnect()</code> handles silent restore.</>],
+            ['WALLET_NOT_INSTALLED', <>No Byoky wallet (extension, iOS Safari extension, or in-wallet browser) was detected when <code>connect()</code> ran. With <code>modal: true</code>, it is also what <code>connect()</code> rejects with when the user closes the &ldquo;wallet not found&rdquo; dialog.</>, <>Show an install prompt — <code>getStoreUrl()</code> returns the right link per browser. Or pass <code>modal: true</code> and let the SDK do it.</>],
+            ['USER_REJECTED', 'The user denied the connect request in the wallet, or the approval timed out.', <>Do not auto-retry. Wait for an explicit user action before calling <code>connect()</code> again. With <code>modal: true</code> the modal shows the failure with a Try Again button; if the user closes it, <code>connect()</code> rejects with a plain <code>Error(&apos;User cancelled&apos;)</code> that has no code.</>],
+            ['PROVIDER_UNAVAILABLE', <>The wallet has no credential (and no routing group) that can serve this provider (HTTP 403). From <code>listModels()</code>: the provider has no model-list endpoint, or it answered 404/405.</>, 'Tell the user which provider you need; deep-link them into the wallet to add a credential.'],
+            ['SESSION_EXPIRED', 'The session key is unknown or past its expiry (HTTP 401): the user revoked the app, the wallet locked, or 24 hours passed.', <>Call <code>byoky.connect()</code> again. <code>tryReconnect()</code> handles silent restore.</>],
             ['NO_SESSION', 'A silent reconnect found no live session for this origin.', <>Expected on first visit. Fall back to <code>connect()</code> when the user is ready.</>],
-            ['RATE_LIMITED', 'Upstream provider returned 429 (their rate limit, not byoky\'s).', <>Back off and retry. Honour the upstream <code>Retry-After</code> header.</>],
+            ['RATE_LIMITED', <>Byoky&apos;s own connect throttle: this origin asked for a new session more than 10 times in 60 seconds. <code>err.details.retryAfter</code> gives the seconds to wait. <code>listModels()</code> also throws it when the provider answers 429.</>, <>Wait <code>retryAfter</code> seconds before calling <code>connect()</code> again. A provider&apos;s 429 on a <code>createFetch</code> request is not this code (see above).</>],
             ['QUOTA_EXCEEDED', 'A spending cap the user set for your app in the wallet ran out (HTTP 429).', 'Do not retry. Surface a "budget exhausted" UI — the user can raise the cap in their wallet.'],
-            ['INVALID_KEY', 'Stored credential was rejected by the provider (401).', 'Prompt the user to update the credential in their wallet.'],
-            ['TOKEN_EXPIRED', 'OAuth access token expired and the refresh attempt failed.', <>Call <code>connect()</code> again — the wallet will re-run OAuth.</>],
-            ['PROXY_ERROR', 'Generic proxy-layer failure (extension crashed, native message dropped, etc.).', 'Safe to retry once. Surface a generic error if it repeats.'],
+            ['ENDPOINT_NOT_ALLOWED', <>The request went to an endpoint outside the inference allowlist, such as the Files, Batches or Assistants APIs (HTTP 403). See <a href="#allowed-endpoints" style={{ color: 'var(--phosphor)' }}>Allowed endpoints</a>.</>, 'Not retryable. Send the content inline in the inference request instead.'],
+            ['WALLET_LOCKED', 'The wallet is locked (HTTP 423).', 'Ask the user to unlock their wallet, then retry.'],
+            ['INVALID_URL', <>The request URL isn&apos;t on the provider&apos;s registered host, e.g. <code>api.mistral.ai</code> for <code>mistral</code> (HTTP 403).</>, <>Fix the URL: use the provider&apos;s official API host with <code>createFetch(id)</code>.</>],
+            ['ROUTING_UNSUPPORTED', 'The user routed your app to another provider, and only chat requests can be routed; a model list or token count can\'t (HTTP 400).', 'Fall back, e.g. to a hardcoded model list.'],
+            ['TRANSLATION_NOT_SUPPORTED', 'A request routed to another provider family had a binary or multipart body, which translation can\'t convert (HTTP 400).', 'Send a JSON body, or ask the user to route your app to the provider you call.'],
+            ['TRANSLATION_FAILED', 'The wallet couldn\'t translate a routed request or response between provider formats (HTTP 502).', 'Surface the message; the request may use a feature the destination provider lacks.'],
+            ['SWAP_FAILED', 'The wallet couldn\'t point a routed request at the provider the user chose (HTTP 502).', 'Surface the message and ask the user to check the routing group in their wallet.'],
+            ['BRIDGE_UNAVAILABLE', 'The credential is a Claude setup token, which needs the Byoky Bridge, and the bridge isn\'t installed (or the browser is Safari) (HTTP 503).', 'Tell the user: they can install the bridge or add an Anthropic API key instead.'],
+            ['BRIDGE_ERROR', 'The Byoky Bridge failed while carrying a setup-token request (HTTP 502).', 'Safe to retry once.'],
+            ['ORIGIN_MISMATCH', 'A request came from a different origin than the page that connected (HTTP 403). Sessions belong to one origin.', 'Connect from the page that makes the requests.'],
+            ['ORIGIN_UNSUPPORTED', <><code>connect()</code> ran in a sandboxed frame or a page with an opaque origin (a <code>data:</code> URL, for example), which can&apos;t hold a session.</>, 'Connect from a normal https page (or localhost).'],
+            ['INVALID_REQUEST', <>The wallet rejected malformed <code>connect()</code> options, e.g. a provider entry without a string <code>id</code>, or more than 32 providers.</>, <>Fix the options: <code>providers</code> is a list of <code>{`{ id, required? }`}</code>.</>],
+            ['WALLET_RELOADED', <>Byoky was updated or reloaded while this page was open, so the page lost its line to the wallet. Requests get HTTP 503 and <code>connect()</code> rejects with it; the session&apos;s <code>onDisconnect</code> fires.</>, 'Ask the user to reload the page. Retrying without a reload fails the same way.'],
+            ['EXTENSION_ERROR', <>The extension dropped the message, for example because it was updated or reloaded while the page was open. <code>connect()</code> rejects with it.</>, 'Ask the user to reload the page.'],
+            ['INVALID_KEY', <>Only from <code>listModels()</code>: the models endpoint answered 401 or 403. Proxied requests never carry it; a provider&apos;s 401 reaches you as the provider sent it.</>, 'Prompt the user to check the credential in their wallet.'],
+            ['TOKEN_EXPIRED', 'Reserved; no wallet sends it. An expired Claude setup token comes back as Anthropic\'s own 401 response.', 'Nothing to handle. On a 401 from the provider, ask the user to replace the credential in their wallet.'],
+            ['PROXY_ERROR', 'Generic proxy-layer failure: the provider couldn\'t be reached, the extension crashed, a native message was dropped (HTTP 502).', 'Safe to retry once. Surface a generic error if it repeats.'],
             ['RELAY_CONNECTION_FAILED', 'Your backend relay WebSocket could not reach the browser.', 'Check your relay URL and that the user\'s tab is still open; retry with backoff.'],
             ['RELAY_DISCONNECTED', 'Relay peer disconnected mid-request (user closed tab, network drop).', <>Reopen the relay via <code>session.createRelay(url)</code>.</>],
             ['UNKNOWN', 'Anything that doesn\'t map to a specific code (last-resort fallback).', 'Log the original message and surface a generic error. Treat as transient.'],
@@ -1269,9 +1319,10 @@ function Limits() {
 
       <h3>Connection rate limits</h3>
       <p>
-        The wallet rate-limits how often a single origin can ask for a session, per the table below.
-        Hitting either limit returns a <code>RATE_LIMITED</code> proxy error during{' '}
-        <code>connect()</code>. These caps reset on a sliding 60-second window.
+        The wallet rate-limits how often a single origin can ask for a new session, per the table
+        below. Over the limit, <code>connect()</code> throws a <code>ByokyError</code> with code{' '}
+        <code>RATE_LIMITED</code> and <code>details.retryAfter</code> in seconds. The cap resets on
+        a sliding 60-second window; reconnecting to a live session doesn&apos;t count.
       </p>
       <table className="docs-table">
         <thead>
@@ -1287,17 +1338,41 @@ function Limits() {
             <td><code>10</code></td>
             <td>60 seconds</td>
           </tr>
-          <tr>
-            <td>OAuth refresh attempts per origin</td>
-            <td><code>3</code></td>
-            <td>60 seconds</td>
-          </tr>
         </tbody>
       </table>
       <p>
-        Provider-side rate limits (the <code>HTTP 429</code> from Anthropic, OpenAI, etc.) are
-        unaffected by these caps and surface as a <code>RATE_LIMITED</code> error with the upstream{' '}
-        <code>Retry-After</code> header preserved.
+        Provider-side rate limits are separate from this cap. A provider&apos;s{' '}
+        <code>HTTP 429</code> reaches your app as the provider sent it, with its own body and{' '}
+        <code>Retry-After</code> header and no Byoky code, so check <code>res.status</code>.
+      </p>
+
+      <h3 id="allowed-endpoints">Allowed endpoints</h3>
+      <p>
+        An app that connects with the SDK, in the page or through a backend relay, can only make
+        inference calls through the wallet. This keeps one app from reading what another app
+        stored under the same key. Every wallet (extension, iOS, Android) applies the same rule:
+      </p>
+      <ul>
+        <li>
+          <strong>POST</strong> to inference endpoints: chat completions, completions, responses,
+          messages (and token counting), embeddings, moderations, audio speech, transcription and
+          translation, image generation, edits and variations, Gemini&apos;s <code>generateContent</code>,{' '}
+          <code>streamGenerateContent</code>, <code>countTokens</code> and embedding actions,
+          Cohere&apos;s chat, embed and rerank, and Ollama&apos;s generate, chat and show.
+        </li>
+        <li>
+          <strong>GET</strong> for model lists only (<code>/models</code> and{' '}
+          <code>/models/&#123;id&#125;</code>), plus Ollama&apos;s <code>/api/tags</code> and{' '}
+          <code>/api/version</code>.
+        </li>
+      </ul>
+      <p>
+        Everything else gets HTTP 403 with <code>code: &apos;ENDPOINT_NOT_ALLOWED&apos;</code>: the
+        Files and Uploads APIs, Batches, fine-tuning, Assistants, Threads, Vector stores,
+        Gemini&apos;s <code>cachedContents</code>, Realtime, and organization, project and key
+        management, as well as any <code>DELETE</code>, <code>PUT</code> or <code>PATCH</code>.
+        Send images, PDFs and other content inline (base64) in the inference request instead of
+        uploading them first. The bridge for CLI tools doesn&apos;t apply this rule.
       </p>
 
       <h3>Session lifetime</h3>
@@ -1316,17 +1391,31 @@ function Limits() {
         </li>
       </ul>
 
-      <h3>Bridge body size</h3>
-      <p>
-        When apps route through <code>@byoky/bridge</code> (CLI / desktop), the bridge caps a single
-        request body at <strong>10 MB</strong>. Larger bodies fail with a{' '}
-        <code>413 Payload Too Large</code> at the proxy. The browser proxy path has no equivalent
-        cap, but very large bodies still incur extra latency from chunking.
-      </p>
+      <h3>Request body size</h3>
+      <ul>
+        <li>
+          <strong>Backend relay:</strong> a request your server sends through{' '}
+          <code>@byoky/sdk/server</code> may be at most <strong>1 MB</strong> once serialized
+          (URL, headers and body together). Above that, <code>client.createFetch()</code> throws a{' '}
+          <code>ByokyError</code> with code <code>PROXY_ERROR</code> and the message{' '}
+          &ldquo;Request too large for the relay&rdquo;. Inline images count at their base64
+          size (a third larger than the file), so an image over about 750 KB doesn&apos;t fit.
+          Responses aren&apos;t capped: they stream back in pieces.
+        </li>
+        <li>
+          <strong>Bridge</strong> (CLI / desktop): <code>@byoky/bridge</code> caps a single
+          request body at <strong>10 MB</strong>. Larger bodies fail with a{' '}
+          <code>413 Payload Too Large</code> at the proxy.
+        </li>
+        <li>
+          <strong>In-page <code>createFetch</code>:</strong> no cap of its own; the provider&apos;s
+          request limit applies. Very large bodies still add some latency.
+        </li>
+      </ul>
 
       <h3>What is <em>not</em> capped</h3>
       <ul>
-        <li>Token usage — billed and metered by the upstream provider, not byoky (unless the user sets a spending cap for your app).</li>
+        <li>Token usage — billed and metered by the upstream provider, not Byoky (unless the user sets a spending cap for your app).</li>
         <li>Concurrent requests per session — bounded only by the user&apos;s connection.</li>
         <li>Number of providers per session — request as many as the app actually needs.</li>
         <li>Number of connected apps per wallet.</li>
@@ -1350,12 +1439,18 @@ function BackendRelay() {
       <Code lang="typescript" demo="relay" provider="anthropic">{`import { Byoky } from '@byoky/sdk';
 
 const session = await new Byoky().connect({
-  providers: [{ id: 'anthropic' }],
+  providers: [{ id: 'anthropic', required: true }],
   modal: true,
 });
 
 // Open relay so your backend can make calls through this session
 const relay = session.createRelay('wss://your-app.com/ws/relay');`}</Code>
+
+      <p>
+        Each request your backend sends over the relay may be at most 1 MB serialized; larger
+        ones throw <code>PROXY_ERROR</code> before they are sent. See{' '}
+        <a href="#limits" style={{ color: 'var(--phosphor)' }}>Limits &amp; Quotas</a>.
+      </p>
 
       <h3>Backend (Node.js)</h3>
       <Code lang="typescript">{`import { ByokyServer } from '@byoky/sdk/server';
@@ -1373,7 +1468,7 @@ wss.on('connection', async (ws) => {
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 1024,
       messages: [{ role: 'user', content: 'Hello!' }],
     }),
@@ -1395,13 +1490,28 @@ function Bridge() {
 
       <h3>Setup</h3>
       <Code lang="bash">{`npm install -g @byoky/bridge
-byoky-bridge install   # register native messaging host (macOS, Linux)`}</Code>
+byoky-bridge install   # register native messaging host (macOS, Linux)
+byoky-bridge connect   # approve a session, start the proxy on 127.0.0.1:19280
+
+# more than one provider:
+byoky-bridge connect --providers anthropic,openai`}</Code>
 
       <h3>Usage</h3>
       <p>
-        Once installed, the bridge starts automatically when the extension needs it. CLI tools
-        (like OpenClaw) make HTTP requests to <code>http://127.0.0.1:19280/&#123;provider&#125;/</code>,
-        which the bridge forwards to the extension.
+        Installing registers the bridge but doesn&apos;t start the proxy. <code>byoky-bridge
+        connect</code> opens a browser tab, you approve the session in the wallet, and the
+        extension starts the proxy on <code>127.0.0.1:19280</code>. CLI tools then make HTTP
+        requests to <code>http://127.0.0.1:19280/&#123;provider&#125;/</code>, which the bridge
+        forwards to the extension. The OpenClaw plugin runs this connect step itself when you log
+        in.
+      </p>
+      <p>
+        The proxy comes back on its own when the browser recycles the extension&apos;s service
+        worker, as long as the session is valid and the wallet is unlocked. Run{' '}
+        <code>byoky-bridge connect</code> again after a browser restart, after the wallet locks,
+        or when the session expires (24 hours). A client that gets <code>ECONNREFUSED
+        127.0.0.1:19280</code> is the sign that the proxy isn&apos;t running: run{' '}
+        <code>byoky-bridge connect</code>.
       </p>
       <p>
         Every request must carry the bridge token, so other programs on the machine can&apos;t
@@ -1840,6 +1950,10 @@ const docsStyles = `
   margin-top: 28px;
   margin-bottom: 10px;
   color: var(--bone);
+  scroll-margin-top: 80px;
+  /* Headings like session.onProvidersUpdated(callback) have no break
+     opportunity and would widen the page on a phone. */
+  overflow-wrap: anywhere;
 }
 
 .docs-section-body {
@@ -1969,12 +2083,14 @@ const docsStyles = `
 .docs-prop-name {
   font-weight: 600;
   font-size: 14px;
+  overflow-wrap: anywhere;
 }
 
 .docs-prop-type {
   font-size: 12px;
   color: var(--dim);
   font-family: var(--font-code);
+  overflow-wrap: anywhere;
 }
 
 .docs-prop-desc {

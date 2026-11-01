@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Byoky, type ByokySession } from '@byoky/sdk';
+import { Byoky, ByokyErrorCode, type ByokySession } from '@byoky/sdk';
 import { Playground, type PlaygroundTab } from './components/Playground';
 import { CodeExample } from './components/CodeExample';
 
@@ -58,8 +58,10 @@ export function DemoApp() {
       });
       onConnected(s);
     } catch (e) {
-      const err = e as Error;
-      if (err.message === 'User cancelled') return;
+      const err = e as Error & { code?: string };
+      // Closing the connect modal: a plain 'User cancelled', or
+      // WALLET_NOT_INSTALLED after the modal's install guidance.
+      if (err.message === 'User cancelled' || err.code === ByokyErrorCode.WALLET_NOT_INSTALLED) return;
       setError(err.message);
     }
   }
@@ -137,8 +139,8 @@ export function DemoApp() {
 
               <h2>Connect your Byoky wallet</h2>
               <p>
-                This demo uses your own API keys to chat with Claude, GPT-4o, Gemini,
-                and 10 more providers. Your keys never leave your device.
+                This demo uses your own API keys to chat with Claude, GPT, Gemini,
+                and 9 more providers. Your keys never leave your device.
               </p>
               <button className="btn btn-primary btn-lg" onClick={handleConnect}>
                 <WalletIcon />

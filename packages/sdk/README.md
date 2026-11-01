@@ -25,14 +25,17 @@ import Anthropic from '@anthropic-ai/sdk';
 const client = new Anthropic({
   apiKey: session.sessionKey,
   fetch: session.createFetch('anthropic'),
+  dangerouslyAllowBrowser: true, // safe with Byoky: apiKey is a session token, not a key
 });
 
 const msg = await client.messages.create({
-  model: 'claude-sonnet-4-20250514',
+  model: 'claude-sonnet-4-6',
   max_tokens: 1024,
   messages: [{ role: 'user', content: 'Hello!' }],
 });
 ```
+
+The Anthropic and OpenAI SDKs refuse to run in a browser unless you pass `dangerouslyAllowBrowser: true`, to keep real API keys out of page code. With Byoky the `apiKey` is a per-app session token and the real key stays in the wallet, so the flag is safe.
 
 ## Connection Modes
 
@@ -98,7 +101,7 @@ const session = await byoky.connect({
 
 | Option | Type | Description |
 |--------|------|-------------|
-| `providers` | `ProviderRequirement[]` | Providers to request access to |
+| `providers` | `ProviderRequirement[]` | Providers to request access to. `required: true` is a hint the wallet shows in the approval prompt; the connection succeeds without that provider, so check `session.providers[id]?.available` |
 | `modal` | `boolean \| ModalOptions` | Show built-in connect UI |
 
 ### `byoky.tryReconnect()`
@@ -114,8 +117,8 @@ const session = await byoky.tryReconnect();
 | Property / Method | Description |
 |-------------------|-------------|
 | `sessionKey` | Unique session identifier |
-| `providers` | Map of available providers with auth method |
-| `createFetch(providerId)` | Create a proxied `fetch` function |
+| `providers` | Map of providers: `available` (the wallet can serve it, directly or by routing) and `authMethod` |
+| `createFetch(providerId)` | Create a proxied `fetch` function for the provider's inference and model-list endpoints (Files, Batches, Assistants and admin APIs get 403 `ENDPOINT_NOT_ALLOWED`) |
 | `listModels(providerId)` | Discover models available to the user's credential (live, per provider) |
 | `createRelay(wsUrl)` | Open a WebSocket relay to your backend |
 | `disconnect()` | End the session |
@@ -155,8 +158,7 @@ const local = await session.listModels('ollama');
 
 Returned shape: `{ id, providerId, displayName?, contextWindow?, capabilities?, raw }`.
 Perplexity has no public model-list endpoint, so a hardcoded Sonar list is
-returned. xAI does not document a `/v1/models` endpoint either — calling
-`listModels('xai')` will throw `PROVIDER_UNAVAILABLE`.
+returned.
 
 When listing fails, the error says who refused: the wallet's own answers keep
 their code (`PROVIDER_UNAVAILABLE` when the wallet has no credential for the
@@ -190,6 +192,8 @@ client.close();                      // Close connection
 client.onClose(() => { ... });       // Disconnect callback
 ```
 
+A request sent over the relay may be at most 1 MB once serialized (URL, headers and body); a larger one throws `ByokyError` `PROXY_ERROR` ("Request too large for the relay") before it is sent. Inline images count at their base64 size. Responses aren't capped.
+
 ### Connect Modal
 
 The built-in modal connects to the wallet when one is present, and otherwise shows install guidance (store link for the current browser, a hint to use the Byoky app's built-in browser on phones). If the user dismisses it without a wallet, `connect()` rejects with `WALLET_NOT_INSTALLED`; a cancelled approval rejects with `Error('User cancelled')`.
@@ -208,6 +212,20 @@ const session = await byoky.connect({
 });
 ```
 
+## Errors
+
+`connect()` and `listModels()` throw a `ByokyError` with a `code`. On `createFetch` requests, the wallet's own errors arrive as an HTTP status with `{ error: { code, message } }` in the JSON body, while a provider's own errors (401, 429, ...) arrive exactly as the provider sent them, with no Byoky code: check `res.status`.
+
+| Code | Meaning |
+|------|---------|
+| `RATE_LIMITED` | Byoky's connect throttle: more than 10 new sessions per origin in 60 s (`err.details.retryAfter` in seconds), or a 429 from `listModels()`. Never a provider 429 on a proxied request. |
+| `USER_REJECTED` | The user denied the request in the wallet, or it timed out. With `modal: true`, closing the modal rejects with `WALLET_NOT_INSTALLED` (no wallet found) or a plain `Error('User cancelled')`. |
+| `QUOTA_EXCEEDED` | HTTP 429: the spending cap the user set for your app ran out. |
+| `ENDPOINT_NOT_ALLOWED` | HTTP 403: the endpoint isn't an inference or model-list endpoint (Files, Batches, Assistants, admin APIs). |
+| `SESSION_EXPIRED` | HTTP 401: the session was revoked, the wallet locked, or it expired. Connect again. |
+
+The full list is at [byoky.com/docs#errors](https://byoky.com/docs#errors).
+
 ## Utilities
 
 ```typescript
@@ -220,7 +238,7 @@ if (!isExtensionInstalled()) {
 
 ## Supported Providers
 
-Anthropic, OpenAI, Google Gemini, Mistral, xAI, DeepSeek, Cohere, Groq, Perplexity, Together AI, Fireworks AI, OpenRouter, Azure OpenAI.
+Anthropic, OpenAI, Google Gemini, Mistral, xAI, DeepSeek, Cohere, Groq, Perplexity, Together AI, Fireworks AI, OpenRouter, Azure OpenAI, plus local models through Ollama and LM Studio.
 
 ## License
 
