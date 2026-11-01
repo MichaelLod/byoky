@@ -37,7 +37,7 @@ It opens a browser tab on an ephemeral loopback port, runs the Byoky SDK connect
   Providers: anthropic
 ```
 
-The proxy stays up as long as your browser is running — the extension's service worker holds the native-messaging port open. Re-run `byoky-bridge connect` after a browser restart.
+The proxy stays up as long as your browser is running — the extension's service worker holds the native-messaging port open. Re-run `byoky-bridge connect` after a browser restart, whenever the wallet has locked (by hand or after 20 idle minutes), and at least once a day: a session lasts 24 hours. Until then requests get a 401 with `"code":"bridge_session_expired"`.
 
 Point your client at it, with the bridge token as the API key:
 

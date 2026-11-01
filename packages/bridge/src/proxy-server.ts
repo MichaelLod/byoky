@@ -239,11 +239,15 @@ export function handleProxyResponse(msg: ProxyResponseMessage): void {
     clearTimeout(pending.timeout);
     pendingRequests.delete(msg.requestId);
   } else if (msg.type === 'proxy_http_error') {
-    // Translate the extension's "Unauthorized session key" into a clearer
-    // 401 — the key is dead and the user needs to reconnect via
-    // `byoky-bridge connect`. `code` lets clients tell it from a bad token.
-    const isStaleSession =
-      typeof msg.error === 'string' && /unauthorized session key/i.test(msg.error);
+    // A dead session (revoked, wallet locked, or past its 24 h) becomes a
+    // clear 401 — the user needs to reconnect via `byoky-bridge connect`,
+    // and a 502 would only make clients retry. `code` lets clients tell it
+    // from a bad token. Newer extensions send the code; older ones only
+    // the message.
+    const isStaleSession = msg.code === 'bridge_session_expired' || (
+      typeof msg.error === 'string' &&
+      /unauthorized session key|session has expired|session not found/i.test(msg.error)
+    );
     if (!pending.res.headersSent) {
       if (isStaleSession) {
         pending.res.writeHead(401, { 'Content-Type': 'application/json' });

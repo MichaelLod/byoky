@@ -462,9 +462,10 @@ async function probeBridgeSession(port: number, providerId: string): Promise<Bri
       const data = await res.json().catch(() => ({})) as { code?: string };
       return data.code === 'bridge_token_invalid' ? 'bad-token' : 'stale';
     }
+    // Bridges before 1.1.2 passed a dead session on as a 502.
     if (res.status === 502) {
       const text = await res.text().catch(() => '');
-      if (text.includes('Unauthorized session key') || text.includes('Session not found')) {
+      if (/unauthorized session key|session has expired|session not found/i.test(text)) {
         return 'stale';
       }
     }

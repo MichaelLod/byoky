@@ -61,6 +61,14 @@ function send(
 // Every byte value, starting like an MP3 frame (0xff 0xfb is not UTF-8).
 const BINARY = Buffer.concat([Buffer.from([0xff, 0xfb, 0x90, 0x64]), Buffer.from(Array.from({ length: 256 }, (_, i) => i))]);
 
+// What the extension answers for a session it no longer has, old and new.
+const STALE_REPLIES: Record<string, { error: string; status?: number; code?: string }> = {
+  revoked: { error: 'Unauthorized session key' },
+  expired: { error: 'Session has expired' },
+  gone: { error: 'Session not found or wallet locked' },
+  coded: { error: 'Bridge session expired', status: 401, code: 'bridge_session_expired' },
+};
+
 // Stands in for the extension: records what the bridge sends over native
 // messaging and answers each request with a small JSON body.
 let sent: ProxyMessageOut[] = [];
@@ -97,6 +105,11 @@ function fakeExtension(msg: ProxyMessageOut): void {
       headers: { 'content-type': 'text/event-stream' },
     });
     handleProxyResponse({ type: 'proxy_http_response_chunk', requestId: msg.requestId, chunk: 'data: 1\n\n' });
+    return;
+  }
+  const stale = STALE_REPLIES[msg.url.slice(msg.url.lastIndexOf('/') + 1)];
+  if (stale) {
+    handleProxyResponse({ type: 'proxy_http_error', requestId: msg.requestId, ...stale });
     return;
   }
   if (msg.url.endsWith('/v1/models')) {
@@ -200,6 +213,15 @@ describe('extension replies', () => {
   it('tells the extension it reports direct fetches', async () => {
     await send(port, '/anthropic/v1/messages', { headers: { 'x-api-key': TOKEN }, body: '{}' });
     expect((sent[0] as ProxyRequestOut).reportsDirectFetch).toBe(true);
+  });
+
+  it.each(Object.keys(STALE_REPLIES))('turns a dead session (%s) into a 401 with the reconnect hint', async (kind) => {
+    const res = await send(port, `/anthropic/v1/${kind}`, { headers: { 'x-api-key': TOKEN }, body: '{}' });
+    expect(res.status).toBe(401);
+    expect(JSON.parse(res.body)).toMatchObject({
+      code: 'bridge_session_expired',
+      hint: expect.stringContaining('byoky-bridge connect'),
+    });
   });
 
   it('passes an error status and code through to the client', async () => {
