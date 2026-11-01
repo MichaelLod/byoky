@@ -20,6 +20,8 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
     private var lockObserver: AnyCancellable?
     /// Idle timeout of upstream requests (`URLRequest.timeoutInterval`).
     private let upstreamTimeout: TimeInterval
+    /// Largest error body of a translated request held for translation.
+    private let maxTranslatedErrorBytes: Int
 
     /// How long an upstream request may go without data. Non-streaming
     /// replies send their headers only once generation ends, which for long
@@ -31,12 +33,14 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
         wallet: WalletStore,
         appOrigin: String,
         upstream: ProxyURLSession = .shared,
-        upstreamTimeout: TimeInterval = NativeBridgeHandler.defaultUpstreamTimeout
+        upstreamTimeout: TimeInterval = NativeBridgeHandler.defaultUpstreamTimeout,
+        maxTranslatedErrorBytes: Int = NativeBridgeHandler.defaultMaxTranslatedErrorBytes
     ) {
         self.wallet = wallet
         self.appOrigin = appOrigin
         self.upstream = upstream
         self.upstreamTimeout = upstreamTimeout
+        self.maxTranslatedErrorBytes = maxTranslatedErrorBytes
         super.init()
         // `status` is only ever set on the main actor.
         lockObserver = wallet.$status.sink { [weak self] status in
@@ -602,24 +606,22 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             if !(200..<300).contains(httpResponse.statusCode) {
                 // The provider's error, in the app's dialect when core can
                 // translate it (as the extension does); otherwise as sent.
-                var accumulated = Data()
+                // Only a body within maxTranslatedErrorBytes is held for
+                // that; a longer one goes out as it arrives.
+                var errorBody = TranslatedErrorBody(limit: maxTranslatedErrorBytes)
                 var chunk = Data()
                 for try await byte in bytes {
                     chunk.append(byte)
                     if chunk.count >= 65_536 {
                         meter.consume(chunk)
-                        accumulated.append(chunk)
+                        deliverChunk(requestId, errorBody.append(chunk))
                         chunk.removeAll(keepingCapacity: true)
                     }
                 }
                 meter.consume(chunk)
-                accumulated.append(chunk)
                 meter.markComplete()
-                let upstreamBody = String(decoding: accumulated, as: UTF8.self)
-                let translatedError = accumulated.count <= Self.maxTranslatedErrorBytes
-                    ? engine.translateErrorResponse(contextJson: ctxJson, body: upstreamBody)
-                    : nil
-                deliverChunk(requestId, translatedError ?? upstreamBody)
+                deliverChunk(requestId, errorBody.append(chunk))
+                deliverChunk(requestId, errorBody.finish { engine.translateErrorResponse(contextJson: ctxJson, body: $0) })
             } else if isEventStream(httpResponse) {
                 // Undo tool renames on the Anthropic stream first, then
                 // translate it back to the app's dialect.
@@ -1050,8 +1052,8 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
     nonisolated static let invalidResponseMessage = "The provider sent an invalid response"
 
     /// Largest error body handed to core for translation into the app's
-    /// dialect; a bigger one is passed on as sent.
-    private static let maxTranslatedErrorBytes = 1_048_576
+    /// dialect; a bigger one is passed on as sent, as it arrives.
+    nonisolated static let defaultMaxTranslatedErrorBytes = 1_048_576
 
     /// HTTP status of a proxy error, as the extension and Android send it.
     nonisolated static func status(forErrorCode code: String) -> Int {
@@ -1119,4 +1121,40 @@ private func injectStreamUsageOptions(providerId: String, body: String?) -> Stri
     guard let injected = try? JSONSerialization.data(withJSONObject: parsed),
           let result = String(data: injected, encoding: .utf8) else { return body }
     return result
+}
+
+/// A translated request's error body (non-2xx). It is held for translation
+/// into the app's dialect only up to `limit` bytes: once it grows past that,
+/// what was held and everything after it is passed on as sent, as it
+/// arrives, so a huge or endless error body is never buffered whole.
+struct TranslatedErrorBody {
+    let limit: Int
+    private var held = Data()
+    private var passingThrough = false
+    private var decoder = UTF8ChunkDecoder()
+
+    init(limit: Int) {
+        self.limit = limit
+    }
+
+    /// Take the next bytes of the body. Returns the text to deliver now:
+    /// empty while the body is still held for translation.
+    mutating func append(_ bytes: Data) -> String {
+        if passingThrough { return decoder.decode(bytes) }
+        held.append(bytes)
+        guard held.count > limit else { return "" }
+        passingThrough = true
+        let text = decoder.decode(held)
+        held = Data()
+        return text
+    }
+
+    /// The body ended: the rest to deliver. A body within the limit goes
+    /// through `translate`, and as sent when that gives nil.
+    mutating func finish(translate: (String) -> String?) -> String {
+        if passingThrough { return decoder.finish() }
+        let body = String(decoding: held, as: UTF8.self)
+        held = Data()
+        return translate(body) ?? body
+    }
 }

@@ -517,9 +517,15 @@ class ProxyService(
             sink.onMeta(response.code, statusText(response), responseHeaders(response))
             when {
                 !response.isSuccessful -> {
-                    val full = readText(response, meter)
-                    val translated = if (full.length <= MAX_TRANSLATED_ERROR_CHARS) engine.translateErrorResponse(ctxJson, full) else null
-                    sink.onChunk(translated ?: full)
+                    // Only a body within MAX_TRANSLATED_ERROR_CHARS is held
+                    // for translation; a longer one goes out as it arrives.
+                    val errorBody = TranslatedErrorBody(MAX_TRANSLATED_ERROR_CHARS)
+                    streamText(response, meter) { text ->
+                        val now = errorBody.append(text)
+                        if (now.isNotEmpty()) sink.onChunk(now)
+                    }
+                    val rest = errorBody.finish { engine.translateErrorResponse(ctxJson, it) }
+                    if (rest.isNotEmpty()) sink.onChunk(rest)
                 }
                 isStreaming -> {
                     val handle = engine.createStreamTranslator(ctxJson)
@@ -788,8 +794,11 @@ class ProxyService(
          */
         const val UPSTREAM_READ_TIMEOUT_SECONDS = 600L
 
-        /** Largest error body handed to core for translation into the app's dialect. */
-        private const val MAX_TRANSLATED_ERROR_CHARS = 1_000_000
+        /**
+         * Largest error body handed to core for translation into the app's
+         * dialect; a bigger one is passed on as sent, as it arrives.
+         */
+        internal const val MAX_TRANSLATED_ERROR_CHARS = 1_000_000
 
         /**
          * The upstream client. Redirects are never followed: OkHttp would

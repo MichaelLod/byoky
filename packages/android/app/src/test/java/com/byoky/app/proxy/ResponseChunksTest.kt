@@ -32,4 +32,23 @@ class ResponseChunksTest {
         assertEquals("base64", parsed.getString("chunkEncoding"))
         assertArrayEquals(audio, Base64.getDecoder().decode(parsed.getString("chunk")))
     }
+
+    /** Within the limit an error body is translated; past it, passed on as sent from the moment it crosses (R2-05). */
+    @Test
+    fun translatedErrorBodyHoldsOnlyUpToItsLimit() {
+        val small = TranslatedErrorBody(limit = 8)
+        assertEquals("", small.append("{\"e\":"))
+        assertEquals("", small.append("1}"))
+        assertEquals("translated:{\"e\":1}", small.finish { "translated:$it" })
+
+        val untranslatable = TranslatedErrorBody(limit = 8)
+        assertEquals("", untranslatable.append("<html>"))
+        assertEquals("<html>", untranslatable.finish { null })
+
+        val large = TranslatedErrorBody(limit = 8)
+        assertEquals("", large.append("01234"))
+        assertEquals("0123456789", large.append("56789"))
+        assertEquals("-tail", large.append("-tail"))
+        assertEquals("", large.finish { throw AssertionError("never translated") })
+    }
 }

@@ -323,6 +323,52 @@ final class NativeBridgeE2ETests: XCTestCase {
         XCTAssertEqual(inner["message"] as? String, "invalid x-api-key")
         XCTAssertNil(body["type"], "an OpenAI error has no top-level type")
     }
+
+    /// A routed request's error body past the translation limit is passed
+    /// on as it arrives, not first read whole into memory (R2-05).
+    @MainActor
+    func testOversizedTranslatedErrorIsPassedOnAsItArrives() async throws {
+        // A smaller limit than the default 1 MiB keeps the test quick.
+        let limit = 100_000
+        let h = try await BridgeHarness.make(self, provider: "anthropic", maxTranslatedErrorBytes: limit)
+        let filler = String(repeating: "é", count: limit / 2 + 50_000)
+        let error = #"{"type":"error","error":{"type":"invalid_request_error","message":""# + filler + #""}}"#
+        let bytes = Data(error.utf8)
+        // Delivered by the stub in 16 KiB pieces, as from a network.
+        let pieces = stride(from: 0, to: bytes.count, by: 16_384).map { bytes.subdata(in: $0..<min($0 + 16_384, bytes.count)) }
+        StubUpstream.script(.init(status: 400, chunks: pieces))
+
+        let replies = try await h.proxy(body: #"{"model":"gpt-5.5","messages":[{"role":"user","content":"hi"}]}"#, timeoutMs: 30_000)
+
+        XCTAssertEqual(replies.first?["status"] as? Int, 400)
+        XCTAssertEqual(replies.last?.type, "BYOKY_PROXY_RESPONSE_DONE")
+        let chunks = replies.filter { $0.type == "BYOKY_PROXY_RESPONSE_CHUNK" }.compactMap { $0["chunk"] as? String }
+        XCTAssertEqual(chunks.joined(), error, "passed on as sent, multi-byte characters intact")
+        XCTAssertGreaterThan(chunks.count, 1)
+        let first = try XCTUnwrap(chunks.first)
+        XCTAssertLessThanOrEqual(first.utf8.count, limit + 65_536, "held no more than the limit plus one read")
+    }
+
+    /// The error-body holder: within the limit it is translated, past it
+    /// passed on as sent from the moment it crosses (R2-05).
+    func testTranslatedErrorBodyHoldsOnlyUpToItsLimit() {
+        var small = TranslatedErrorBody(limit: 8)
+        XCTAssertEqual(small.append(Data("{\"e\":".utf8)), "")
+        XCTAssertEqual(small.append(Data("1}".utf8)), "")
+        XCTAssertEqual(small.finish { "translated:" + $0 }, "translated:{\"e\":1}")
+
+        var untranslatable = TranslatedErrorBody(limit: 8)
+        XCTAssertEqual(untranslatable.append(Data("<html>".utf8)), "")
+        XCTAssertEqual(untranslatable.finish { _ in nil }, "<html>")
+
+        var large = TranslatedErrorBody(limit: 8)
+        let body = Data("0123456789é-tail".utf8)
+        XCTAssertEqual(large.append(body.prefix(5)), "")
+        // Crosses the limit in the middle of "é": what's complete goes out.
+        XCTAssertEqual(large.append(body.subdata(in: 5..<11)), "0123456789")
+        XCTAssertEqual(large.append(body.subdata(in: 11..<body.count)), "é-tail")
+        XCTAssertEqual(large.finish { _ in XCTFail("never translated"); return nil }, "")
+    }
 }
 
 // MARK: - Harness
@@ -341,12 +387,16 @@ final class BridgeHarness: NSObject, WKNavigationDelegate {
 
     /// A wallet with one `provider` key and, for providers other than
     /// OpenAI, a group routing the app to it (cross-family translation).
-    static func make(_ test: XCTestCase, provider: String = "openai") async throws -> BridgeHarness {
+    static func make(
+        _ test: XCTestCase,
+        provider: String = "openai",
+        maxTranslatedErrorBytes: Int = NativeBridgeHandler.defaultMaxTranslatedErrorBytes
+    ) async throws -> BridgeHarness {
         let wallet = WalletStore.shared
         try XCTSkipUnless(wallet.status == .uninitialized, "needs a simulator without a wallet")
         try wallet.createPassword("e2e-\(UUID().uuidString)")
         StubUpstream.reset()
-        let harness = BridgeHarness(wallet: wallet)
+        let harness = BridgeHarness(wallet: wallet, maxTranslatedErrorBytes: maxTranslatedErrorBytes)
         test.addTeardownBlock { @MainActor in
             harness.handler.close()
             harness.webView.removeFromSuperview()
@@ -362,11 +412,14 @@ final class BridgeHarness: NSObject, WKNavigationDelegate {
         return harness
     }
 
-    private init(wallet: WalletStore) {
+    private init(wallet: WalletStore, maxTranslatedErrorBytes: Int) {
         self.wallet = wallet
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StubUpstream.self]
-        handler = NativeBridgeHandler(wallet: wallet, appOrigin: Self.origin, upstream: ProxyURLSession(configuration: configuration))
+        handler = NativeBridgeHandler(
+            wallet: wallet, appOrigin: Self.origin, upstream: ProxyURLSession(configuration: configuration),
+            maxTranslatedErrorBytes: maxTranslatedErrorBytes
+        )
         let config = WKWebViewConfiguration()
         config.userContentController.addUserScript(WKUserScript(
             source: AppWebView.bridgeJavaScript, injectionTime: .atDocumentStart, forMainFrameOnly: true
