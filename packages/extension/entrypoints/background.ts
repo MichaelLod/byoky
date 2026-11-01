@@ -218,6 +218,10 @@ export default defineBackground(() => {
   // It only decides whether to open the side panel in the page's gesture;
   // handleConnect still reads the verified state before trusting anyone.
   let silentTrustSnapshot = new Map<string, string[]>();
+  // The snapshot as setSilentTrustSnapshot last wrote it to storage.session
+  // (serialized), so an unchanged one isn't written again on every trust
+  // read. Unknown until its first write in this worker's lifetime.
+  let storedSilentTrust: string | undefined;
   // The highest trust-state epoch seen this browser session. A state older
   // than this was put back from a snapshot (see lib/trust-state.ts). Kept
   // in storage.session too, so a worker restart doesn't forget it.
@@ -3674,10 +3678,14 @@ export default defineBackground(() => {
   function setSilentTrustSnapshot(snapshot: Map<string, string[]>) {
     silentTrustSnapshot = snapshot;
     if (!hasSessionStorage) return;
+    const serialized = JSON.stringify([...snapshot]);
+    if (serialized === storedSilentTrust) return;
+    storedSilentTrust = serialized;
     const stored = snapshot.size > 0
       ? browser.storage.session.set({ _silentTrust: [...snapshot] })
       : browser.storage.session.remove('_silentTrust');
-    stored.catch(() => {});
+    // Not written: the next call writes it, changed or not.
+    stored.catch(() => { storedSilentTrust = undefined; });
   }
 
   /** The snapshot setSilentTrustSnapshot kept in storage.session. */
