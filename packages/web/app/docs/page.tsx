@@ -1412,13 +1412,28 @@ function Bridge() {
 
       <h3>Setup</h3>
       <Code lang="bash">{`npm install -g @byoky/bridge
-byoky-bridge install   # register native messaging host (macOS, Linux)`}</Code>
+byoky-bridge install   # register native messaging host (macOS, Linux)
+byoky-bridge connect   # approve a session, start the proxy on 127.0.0.1:19280
+
+# more than one provider:
+byoky-bridge connect --providers anthropic,openai`}</Code>
 
       <h3>Usage</h3>
       <p>
-        Once installed, the bridge starts automatically when the extension needs it. CLI tools
-        (like OpenClaw) make HTTP requests to <code>http://127.0.0.1:19280/&#123;provider&#125;/</code>,
-        which the bridge forwards to the extension.
+        Installing registers the bridge but doesn&apos;t start the proxy. <code>byoky-bridge
+        connect</code> opens a browser tab, you approve the session in the wallet, and the
+        extension starts the proxy on <code>127.0.0.1:19280</code>. CLI tools then make HTTP
+        requests to <code>http://127.0.0.1:19280/&#123;provider&#125;/</code>, which the bridge
+        forwards to the extension. The OpenClaw plugin runs this connect step itself when you log
+        in.
+      </p>
+      <p>
+        The proxy comes back on its own when the browser recycles the extension&apos;s service
+        worker, as long as the session is valid and the wallet is unlocked. Run{' '}
+        <code>byoky-bridge connect</code> again after a browser restart, after the wallet locks,
+        or when the session expires (24 hours). A client that gets <code>ECONNREFUSED
+        127.0.0.1:19280</code> is the sign that the proxy isn&apos;t running: run{' '}
+        <code>byoky-bridge connect</code>.
       </p>
       <p>
         Every request must carry the bridge token, so other programs on the machine can&apos;t
