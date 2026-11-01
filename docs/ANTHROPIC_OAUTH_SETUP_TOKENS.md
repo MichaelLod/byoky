@@ -21,7 +21,7 @@ Anthropic supports three credential types for API access. Byoky must handle all 
 Created via `claude login` CLI command. Long-lived (~1 year), scoped to inference.
 
 - **Auth header:** `Authorization: Bearer <token>`
-- **Models:** Current generation only with exact version names (e.g., `claude-sonnet-4-20250514`, `claude-opus-4-20250514`). **No aliases** (`-latest`), **no legacy models** (3.5, 3.0).
+- **Models:** Current generation only, by exact model id (e.g., `claude-sonnet-5-5`, `claude-opus-5-5`). **No aliases** (`-latest`), **no legacy models** (3.5, 3.0). The 2026-03-20 test used `claude-sonnet-4-20250514` and `claude-opus-4-20250514`, both retired on 2026-06-15.
 - **Expiry:** ~1 year
 - **Billing:** Claude Max/Pro subscription (weekly quota, not pay-per-token)
 - **Extra headers:** Required (see below)
@@ -83,6 +83,8 @@ Without this, requests return `400 Error`.
 | `claude-haiku-3-5-20241022` | ✅ | ❌ 404 |
 | `claude-3-5-sonnet-20241022` | ✅ | ❌ 404 |
 | `claude-3-opus-20240229` | ✅ | ❌ 404 |
+
+These are the 2026-03-20 results. Every model in the table has been retired since (Claude Sonnet 4 and Opus 4 on 2026-06-15, the 3.x models earlier), so requests to them now fail with any credential. Current models use dateless ids such as `claude-sonnet-5-5` and `claude-opus-5-5`; they were not part of this test. Retirement dates: platform.claude.com/docs/en/about-claude/model-deprecations.
 
 ## OAuth Token Lifecycle
 
@@ -158,7 +160,7 @@ The extension tells the SDK what's available:
 { available: true, models: ['*'], authMethod: 'api_key' }
 
 // For Setup/OAuth credential  
-{ available: true, models: ['claude-sonnet-4-20250514', 'claude-opus-4-20250514'], authMethod: 'oauth' }
+{ available: true, models: ['claude-sonnet-5-5', 'claude-opus-5-5'], authMethod: 'oauth' }
 ```
 
 ## Source
