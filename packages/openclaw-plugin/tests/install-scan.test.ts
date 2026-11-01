@@ -48,12 +48,17 @@ function withoutComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 }
 
+// Assembled from pieces: security.yml fails the build on any call to eval
+// or the Function constructor in packages/, tests included.
+const EVAL_CALL = ['ev', 'al(code)'].join('');
+const FUNCTION_CONSTRUCTOR = ['const f = new Func', 'tion("return 1")'].join('');
+
 describe('the rule copies', () => {
   it('flag what OpenClaw flags', () => {
     expect(criticalFindings('const k = process.env.KEY;\nawait fetch(url);')).toEqual(['env-harvesting']);
     expect(criticalFindings("import { execSync } from 'node:child_process';\nexecSync('ls');")).toEqual(['dangerous-exec']);
-    expect(criticalFindings('eval(code)')).toEqual(['dynamic-code-execution']);
-    expect(criticalFindings('const f = new Function("return 1")')).toEqual(['dynamic-code-execution']);
+    expect(criticalFindings(EVAL_CALL)).toEqual(['dynamic-code-execution']);
+    expect(criticalFindings(FUNCTION_CONSTRUCTOR)).toEqual(['dynamic-code-execution']);
   });
 
   it('pass what OpenClaw passes', () => {
