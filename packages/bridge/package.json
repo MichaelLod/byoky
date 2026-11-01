@@ -18,6 +18,10 @@
       "types": "./dist/native-manifest.d.ts",
       "import": "./dist/native-manifest.js"
     },
+    "./loopback-page": {
+      "types": "./dist/loopback-page.d.ts",
+      "import": "./dist/loopback-page.js"
+    },
     "./package.json": "./package.json"
   },
   "bin": {

@@ -19,7 +19,7 @@ import {
   type ProviderAuthContext,
   type ProviderAuthResult,
 } from 'openclaw/plugin-sdk/core';
-import { createServer, type Server } from 'node:http';
+import { createServer } from 'node:http';
 import { writeFileSync, mkdirSync, existsSync, chmodSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,6 +29,9 @@ import { createRequire } from 'node:module';
 // `byoky-bridge install` share one allow-list and one token file.
 import { HOST_NAME, buildManifest } from '@byoky/bridge/native-manifest';
 import { loadOrCreateToken } from '@byoky/bridge/token';
+import {
+  cleanPageMessage, createPageNonce, isFromPage, isPageHost, sameSecret,
+} from '@byoky/bridge/loopback-page';
 
 type ProviderApi = 'anthropic-messages' | 'openai-completions';
 
@@ -53,6 +56,11 @@ interface ByokyProvider {
 }
 
 const DEFAULT_BRIDGE_PORT = 19280;
+// The login page's port. Fixed: the wallet knows OpenClaw by the page's
+// origin, with its spending cap and routing group, so it must not change
+// between logins. (`byoky-bridge connect` uses 19281.)
+export const CALLBACK_PORT = 19282;
+const CALLBACK_TIMEOUT_MS = 180_000;
 
 // --- Model catalogs per provider ---
 
@@ -448,7 +456,7 @@ type BridgeSessionState = 'ok' | 'stale' | 'bad-token';
 // (which gets rotated on extension reload, wallet unlock, or a newer auth).
 // 'stale' means the wallet must be reconnected; 'bad-token' means the running
 // bridge predates the current ~/.byoky-bridge/token and must be restarted.
-async function probeBridgeSession(port: number, providerId: string): Promise<BridgeSessionState> {
+export async function probeBridgeSession(port: number, providerId: string): Promise<BridgeSessionState> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
@@ -612,24 +620,37 @@ async function runProviderAuth(
       : 'Opening your browser to connect every provider in your Byoky wallet.\nUnlock your wallet and approve the connection.',
   );
 
-  const result = await startCallbackServer(ctx, provider?.id ?? null);
-
+  const progress = ctx.prompter.progress(`Waiting for approval in the browser (http://127.0.0.1:${CALLBACK_PORT})…`);
+  let result: CallbackResult;
   try {
-    const selected = provider
-      ? result.providers.filter((id) => id === provider.id)
-      : result.providers;
-
-    if (selected.length === 0) {
-      if (provider) {
-        throw new Error(`${provider.name} not available in your Byoky wallet`);
-      }
-      throw new Error('No providers found in your Byoky wallet');
-    }
-
-    return buildAuthResult(selected, result.port, provider, overrides);
-  } finally {
-    result.server.close();
+    result = await startCallbackServer({
+      requestProviderId: provider?.id ?? null,
+      openUrl: (url) => ctx.openUrl(url),
+      // The tab stays open for a retry, so keep waiting, but show it now.
+      onPageError: (message) => progress.update(`The browser tab reported: ${message}. Try again there, or press Ctrl-C.`),
+    });
+  } catch (err) {
+    progress.stop('Could not open the login page');
+    throw err;
   }
+  if (!result.ok) {
+    progress.stop('Not connected');
+    throw new Error(result.message);
+  }
+  progress.stop('Wallet connected');
+
+  const selected = provider
+    ? result.providers.filter((id) => id === provider.id)
+    : result.providers;
+
+  if (selected.length === 0) {
+    if (provider) {
+      throw new Error(`${provider.name} not available in your Byoky wallet`);
+    }
+    throw new Error('No providers found in your Byoky wallet');
+  }
+
+  return buildAuthResult(selected, result.port, provider, overrides);
 }
 
 interface PluginOverrides {
@@ -746,32 +767,76 @@ function buildAuthResult(
 
 // --- Local callback server ---
 
-interface AuthResult {
-  providers: string[];
-  port: number;
-  server: Server;
+export type CallbackResult =
+  | { ok: true; providers: string[]; port: number }
+  | { ok: false; reason: 'timeout' | 'page-error'; message: string };
+
+export interface CallbackServerOptions {
+  requestProviderId: string | null;
+  openUrl: (url: string) => void | Promise<void>;
+  /** The page hit an error; it stays open for a retry. */
+  onPageError?: (message: string) => void;
+  /** For tests. */
+  port?: number;
+  timeoutMs?: number;
 }
 
-async function startCallbackServer(
-  ctx: ProviderAuthContext,
-  requestProviderId: string | null,
-): Promise<AuthResult> {
-  return new Promise((resolve) => {
+/**
+ * Serves the login page and waits for it to report the wallet's providers.
+ * Resolves (and closes the server) on success, or on timeout with the last
+ * error the page reported; rejects only when the port can't be bound.
+ */
+export function startCallbackServer(opts: CallbackServerOptions): Promise<CallbackResult> {
+  const port = opts.port ?? CALLBACK_PORT;
+  const timeoutMs = opts.timeoutMs ?? CALLBACK_TIMEOUT_MS;
+  // Only the served page knows this, so only it can report back.
+  const nonce = createPageNonce();
+
+  return new Promise((resolve, reject) => {
     let resolved = false;
+    let lastError: string | null = null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const finish = (result: CallbackResult) => {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timer);
+      // close() waits for open connections, and the tab keeps its sockets.
+      server.close();
+      server.closeAllConnections();
+      resolve(result);
+    };
+
+    // Counted from the user's last step in the tab, not from opening it.
+    const armTimer = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => finish(lastError
+        ? { ok: false, reason: 'page-error', message: `The browser tab reported: ${lastError}` }
+        : {
+          ok: false,
+          reason: 'timeout',
+          message: `Timed out waiting for the browser tab. Run the login again and approve it within ${Math.round(timeoutMs / 60_000)} minutes.`,
+        }), timeoutMs);
+    };
 
     const server = createServer((req, res) => {
-      res.setHeader('Access-Control-Allow-Origin', 'http://127.0.0.1');
-      res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      res.setHeader('Cache-Control', 'no-store');
 
-      if (req.method === 'OPTIONS') {
-        res.writeHead(204);
+      // A page on another site that rebinds its hostname to 127.0.0.1
+      // would reach this server under its own Host name.
+      if (!isPageHost(req, port)) {
+        res.writeHead(403);
         res.end();
         return;
       }
 
-      if (req.method === 'POST' && req.url === '/callback') {
-        const MAX_BODY_SIZE = 1_048_576; // 1MB
+      if (req.method === 'POST' && (req.url === '/callback' || req.url === '/started')) {
+        if (!isFromPage(req, port)) {
+          res.writeHead(403);
+          res.end();
+          return;
+        }
+        const MAX_BODY_SIZE = 64_000;
         let body = '';
         let oversized = false;
         req.on('data', (chunk: Buffer) => {
@@ -787,21 +852,36 @@ async function startCallbackServer(
             res.end('Request body too large');
             return;
           }
+          let data: { nonce?: unknown; error?: unknown; providers?: unknown; bridgePort?: unknown };
           try {
-            const data = JSON.parse(body);
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ ok: true }));
-            if (!resolved) {
-              resolved = true;
-              resolve({
-                providers: Array.isArray(data.providers) ? data.providers : [],
-                port: typeof data.bridgePort === 'number' ? data.bridgePort : DEFAULT_BRIDGE_PORT,
-                server,
-              });
-            }
+            data = JSON.parse(body);
           } catch {
             res.writeHead(400);
             res.end('Invalid JSON');
+            return;
+          }
+          if (typeof data.nonce !== 'string' || !sameSecret(data.nonce, nonce)) {
+            res.writeHead(403);
+            res.end();
+            return;
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true }));
+          if (resolved) return;
+          if (req.url === '/started') {
+            armTimer();
+          } else if (typeof data.error === 'string') {
+            lastError = cleanPageMessage(data.error) || 'unknown error';
+            armTimer();
+            opts.onPageError?.(lastError);
+          } else {
+            finish({
+              ok: true,
+              providers: Array.isArray(data.providers)
+                ? data.providers.filter((id): id is string => typeof id === 'string' && VALID_PROVIDER_IDS.has(id))
+                : [],
+              port: isValidBridgePort(data.bridgePort) ? data.bridgePort : DEFAULT_BRIDGE_PORT,
+            });
           }
         });
         return;
@@ -824,28 +904,33 @@ async function startCallbackServer(
 
       if (req.method === 'GET') {
         res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end(buildAuthPage(requestProviderId));
+        res.end(buildAuthPage(opts.requestProviderId, nonce));
         return;
       }
 
-      res.writeHead(404);
+      res.writeHead(req.method === 'POST' ? 404 : 405, { Allow: 'GET, POST' });
       res.end();
     });
 
-    server.listen(0, '127.0.0.1', () => {
-      const addr = server.address();
-      if (typeof addr === 'object' && addr) {
-        ctx.openUrl(`http://127.0.0.1:${addr.port}`);
-      }
+    server.once('error', (err: NodeJS.ErrnoException) => {
+      resolved = true;
+      clearTimeout(timer);
+      reject(err.code === 'EADDRINUSE'
+        ? new Error(`Port ${port} is already in use — another OpenClaw login with Byoky may be running. Finish or close it and try again.`)
+        : err);
     });
 
-    setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        resolve({ providers: [], port: DEFAULT_BRIDGE_PORT, server });
-      }
-    }, 120_000);
+    server.listen(port, '127.0.0.1', () => {
+      armTimer();
+      void Promise.resolve(opts.openUrl(`http://127.0.0.1:${port}`)).catch(() => {
+        // The URL is shown in the terminal; the user can open it by hand.
+      });
+    });
   });
+}
+
+function isValidBridgePort(port: unknown): port is number {
+  return typeof port === 'number' && Number.isInteger(port) && port >= 1024 && port <= 65535;
 }
 
 // --- Browser SDK bundle (served to the auth page) ---
@@ -865,7 +950,7 @@ function readAuthSdkBundle(): string {
 
 const VALID_PROVIDER_IDS = new Set(PROVIDERS.map((p) => p.id));
 
-function buildAuthPage(requestProviderId: string | null): string {
+function buildAuthPage(requestProviderId: string | null, nonce: string): string {
   let providersJson: string;
   if (requestProviderId && VALID_PROVIDER_IDS.has(requestProviderId)) {
     providersJson = JSON.stringify([{ id: requestProviderId, required: true }]);
@@ -1108,6 +1193,16 @@ function buildAuthPage(requestProviderId: string | null): string {
         status.className = 'status ' + (kind || 'waiting');
       }
 
+      // Reports to the OpenClaw login waiting in the terminal.
+      async function report(path, body) {
+        const res = await fetch(path, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(Object.assign({ nonce: ${JSON.stringify(nonce)} }, body)),
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+      }
+
       async function startBridge(sessionKey) {
         return new Promise((resolve, reject) => {
           const bridgeRequestId = crypto.randomUUID();
@@ -1135,6 +1230,8 @@ function buildAuthPage(requestProviderId: string | null): string {
         btn.disabled = true;
         btn.textContent = 'Connecting…';
         setStatus('Opening wallet…', 'waiting');
+        // Restarts the login's timeout: it counts from this click.
+        report('/started', {}).catch(() => {});
         try {
           if (!window.ByokySDK || !window.ByokySDK.Byoky) {
             throw new Error('SDK failed to load');
@@ -1170,13 +1267,13 @@ function buildAuthPage(requestProviderId: string | null): string {
             'success',
           );
 
-          await fetch('/callback', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(callbackBody),
-          });
-
           btn.style.display = 'none';
+          try {
+            await report('/callback', callbackBody);
+          } catch {
+            setStatus('OpenClaw stopped waiting for this tab. Run the login command again.', 'error');
+            return;
+          }
           setTimeout(() => { setStatus('Done — you can close this tab.', 'success'); }, 1500);
         } catch (err) {
           const msg = err && err.message ? err.message : String(err);
@@ -1184,6 +1281,8 @@ function buildAuthPage(requestProviderId: string | null): string {
             setStatus('Cancelled. Click connect to try again.', 'waiting');
           } else {
             setStatus('Error: ' + msg, 'error');
+            // OpenClaw shows it too and keeps waiting for a retry here.
+            report('/callback', { error: msg }).catch(() => {});
           }
           btn.disabled = false;
           btn.textContent = 'Try again';

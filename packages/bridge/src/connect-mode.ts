@@ -22,14 +22,14 @@
  * :19280 is held alive by the extension's service worker afterwards.
  */
 
-import { createServer, type IncomingMessage, type Server } from 'node:http';
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createServer, type Server } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { platform } from 'node:os';
 import { loadOrCreateToken } from './token.js';
+import { cleanPageMessage, createPageNonce, isFromPage, isPageHost, sameSecret } from './loopback-page.js';
 
 export interface ConnectOptions {
   /** Port the bridge proxy is asked to listen on. */
@@ -66,43 +66,13 @@ export async function runConnect(opts: ConnectOptions): Promise<ConnectResult> {
   return { providers, port: opts.port };
 }
 
-/**
- * Text the page reports, made safe to print: no control characters (an
- * escape sequence could rewrite the terminal) and no longer than 300.
- */
-export function cleanPageMessage(text: string): string {
-  // C0, DEL, C1 and the bidi overrides/isolates.
-  const cleaned = text.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, '').trim();
-  return cleaned.length > 300 ? `${cleaned.slice(0, 299)}…` : cleaned;
-}
-
-function sameSecret(a: string, b: string): boolean {
-  // Hashing first keeps differing lengths from leaking.
-  return timingSafeEqual(createHash('sha256').update(a).digest(), createHash('sha256').update(b).digest());
-}
-
-/**
- * Whether a request came from the approval page itself. A same-origin POST
- * carries the page's Origin; JSON from any other origin needs a CORS
- * preflight, which this server never grants.
- */
-function isFromPage(req: IncomingMessage, origins: string[]): boolean {
-  const contentType = req.headers['content-type'] ?? '';
-  if (!/^application\/json\b/i.test(contentType)) return false;
-  const origin = req.headers['origin'];
-  if (typeof origin === 'string') return origins.includes(origin);
-  return req.headers['sec-fetch-site'] === 'same-origin';
-}
-
 /** Serves the approval page; resolves once the page reports success. */
 export function runHandshake(opts: ConnectOptions): Promise<void> {
   const handshakePort = opts.handshakePort ?? DEFAULT_HANDSHAKE_PORT;
   const timeoutMs = opts.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS;
   const openBrowser = opts.openBrowser ?? openInBrowser;
   // Only the served page knows this, so only it can finish the handshake.
-  const nonce = randomBytes(24).toString('base64url');
-  const hosts = [`127.0.0.1:${handshakePort}`, `localhost:${handshakePort}`];
-  const origins = hosts.map((h) => `http://${h}`);
+  const nonce = createPageNonce();
 
   return new Promise((resolvePromise, rejectPromise) => {
     let resolved = false;
@@ -114,14 +84,14 @@ export function runHandshake(opts: ConnectOptions): Promise<void> {
 
       // A page on another site that rebinds its hostname to 127.0.0.1
       // would reach this server under its own Host name.
-      if (!hosts.includes(req.headers.host ?? '')) {
+      if (!isPageHost(req, handshakePort)) {
         res.writeHead(403);
         res.end();
         return;
       }
 
       if (req.method === 'POST' && req.url === '/done') {
-        if (!isFromPage(req, origins)) {
+        if (!isFromPage(req, handshakePort)) {
           res.writeHead(403);
           res.end();
           return;

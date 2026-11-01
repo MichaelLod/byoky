@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { request, type IncomingHttpHeaders } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
-import { runHandshake, cleanPageMessage, DEFAULT_HANDSHAKE_PORT } from '../src/connect-mode.js';
+import { runHandshake, DEFAULT_HANDSHAKE_PORT } from '../src/connect-mode.js';
+import { cleanPageMessage } from '../src/loopback-page.js';
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
