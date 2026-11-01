@@ -95,6 +95,8 @@ describe('background: proxy boundary', () => {
     const { payload } = await connectApproved(h, APP, { providers: [{ id: 'anthropic', required: true }] });
     const r = await h.proxy(OTHER, chat(payload.sessionKey)).result;
     expect(r.error.status).toBe(403);
+    // Not PROVIDER_UNAVAILABLE, which tells developers to ask for a key (F083).
+    expect(r.error.error.code).toBe('ORIGIN_MISMATCH');
     expect(h.fetch).not.toHaveBeenCalled();
   });
 

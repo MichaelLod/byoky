@@ -49,6 +49,7 @@ import {
 import type { Runtime } from 'wxt/browser';
 import { exportVaultFile, importVaultFile } from '../lib/vault-file';
 import { KEYLESS_PROVIDERS, openCredentialSecret, upgradeWallet } from '../lib/wallet-upgrade';
+import { isProviderIdList, parseProviderRequirements } from '../lib/connect-request';
 import {
   REVOKED_ORIGINS_KEY,
   TRUST_RESET_NOTICE_KEY,
@@ -539,7 +540,7 @@ export default defineBackground(() => {
           const session = sessions.get(sessionKey);
           if (session) {
             const disconnectOrigin = resolveOrigin(sender);
-            if (disconnectOrigin === session.appOrigin) {
+            if (disconnectOrigin !== 'unknown' && disconnectOrigin === session.appOrigin) {
               sessions.delete(sessionKey);
               persistSessions();
               if (authorizedBridgeSessionKey === sessionKey) {
@@ -656,7 +657,7 @@ export default defineBackground(() => {
           type: 'BYOKY_PROXY_RESPONSE_ERROR',
           requestId: msg.requestId,
           status: 403,
-          error: { code: 'PROVIDER_UNAVAILABLE', message: 'Origin mismatch — request rejected' },
+          error: { code: 'ORIGIN_MISMATCH', message: 'Origin mismatch — request rejected' },
         });
         return;
       }
@@ -1075,6 +1076,26 @@ export default defineBackground(() => {
     sender: Runtime.MessageSender,
   ): Promise<unknown> {
     const origin = resolveOrigin(sender);
+    const refuse = (code: string, text: string) => ({
+      type: 'BYOKY_ERROR',
+      requestId: message.id,
+      payload: { code, message: text },
+    });
+
+    // A sandboxed frame (or a page without an origin) has nothing to show
+    // the user, bind a session to or trust.
+    if (origin === 'unknown') {
+      return refuse('ORIGIN_UNSUPPORTED', 'Byoky cannot connect from a sandboxed frame or a page without an origin');
+    }
+
+    // Any page can send this. Check it before it is queued for the popup to
+    // render, or signed into the trust state once approved.
+    const raw = message.payload as unknown;
+    const providers = raw && typeof raw === 'object' && !Array.isArray(raw)
+      ? parseProviderRequirements((raw as ConnectRequest).providers)
+      : null;
+    if (!providers) return refuse('INVALID_REQUEST', 'Invalid connect request');
+    const request: ConnectRequest = { providers, reconnectOnly: (raw as ConnectRequest).reconnectOnly === true };
 
     // Cheap path: reuse an active session for this origin. Don't gate on
     // the rate limit — every page load calls connect(), and reusing the
@@ -1086,7 +1107,7 @@ export default defineBackground(() => {
 
     // Silent reconnect probe with no session is also cheap — answer NO_SESSION
     // without consuming the rate-limit budget.
-    if (message.payload.reconnectOnly) {
+    if (request.reconnectOnly) {
       return {
         type: 'BYOKY_ERROR',
         requestId: message.id,
@@ -1123,7 +1144,7 @@ export default defineBackground(() => {
     const approval: PendingApproval = {
       id: crypto.randomUUID(),
       appOrigin: origin,
-      providers: message.payload.providers ?? [],
+      providers,
       timestamp: Date.now(),
     };
 
@@ -1146,13 +1167,13 @@ export default defineBackground(() => {
           if (trustedSite) {
             // Scope to the providers the user originally approved for this trusted site
             const scopedProviders = scopeProvidersForTrust(
-              message.payload.providers,
+              providers,
               trustedSite.allowedProviders ?? [],
             );
             if (scopedProviders) {
               pendingApprovals.delete(approval.id);
               createSession(
-                { ...message, payload: { ...message.payload, providers: scopedProviders } },
+                { id: message.id, payload: { ...request, providers: scopedProviders } },
                 origin,
               ).then((response) => entry.resolve(response));
               return;
@@ -1557,7 +1578,7 @@ export default defineBackground(() => {
         // Reachable from localhost pages via the content script. Only the
         // app that owns the session may bind the bridge to it.
         const bridgeSession = sessions.get(sessionKey);
-        if (!bridgeSession || !sender || resolveOrigin(sender) !== bridgeSession.appOrigin) {
+        if (!bridgeSession || !sender || resolveOrigin(sender) === 'unknown' || resolveOrigin(sender) !== bridgeSession.appOrigin) {
           return { success: false, error: 'Invalid session' };
         }
         // The page picks the port. Only a plain unprivileged TCP port: a
@@ -1645,7 +1666,10 @@ export default defineBackground(() => {
 
       case 'addTrustedSite': {
         if (!masterPassword) return { error: 'Wallet is locked' };
-        const { origin, allowedProviders } = message.payload as { origin: string; allowedProviders: string[] };
+        const { origin, allowedProviders } = message.payload as { origin: unknown; allowedProviders: unknown };
+        if (typeof origin !== 'string' || origin === 'unknown' || !isProviderIdList(allowedProviders)) {
+          return { error: 'Invalid trusted site' };
+        }
         await addTrustedSite(origin, allowedProviders);
         return { success: true };
       }
@@ -3211,6 +3235,10 @@ export default defineBackground(() => {
   }
 
   async function addTrustedSite(origin: string, allowedProviders: string[]) {
+    // Anything else would make the signed state unreadable (parseTrustedSites)
+    // and so wipe every trusted site; an opaque origin would trust every
+    // sandboxed frame on every site.
+    if (origin === 'unknown' || !isProviderIdList(allowedProviders)) throw new Error('Invalid trusted site');
     await updateTrustState((state) => {
       const existing = state.sites.find((s) => s.origin === origin);
       if (!existing) return { ...state, sites: [...state.sites, { origin, trustedAt: Date.now(), allowedProviders }] };

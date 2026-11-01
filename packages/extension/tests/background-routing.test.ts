@@ -196,3 +196,49 @@ describe('background: records without a key', () => {
     expect(upstream(h).url).toBe('https://ollama.example/v1/chat/completions');
   });
 });
+
+describe('background: connect requests from pages', () => {
+  // F075: the page's provider list went into the approval unchecked; a
+  // malformed one blanked the popup, and a numeric id approved with trust
+  // made the signed trust state unreadable.
+  it('refuses a malformed connect request before queueing it', async () => {
+    const h = await startBackground({ local: await walletStorage(KEYS) });
+    await h.unlock();
+    for (const payload of [{ providers: [{ id: {} }] }, { providers: [null] }, { providers: 'abc' }, { providers: [{ id: 123 }] }, null, 'x']) {
+      const { response } = h.connect(APP, payload as Record<string, unknown>);
+      expect((await response).payload.code, JSON.stringify(payload)).toBe('INVALID_REQUEST');
+    }
+    expect((await h.internal('getPendingApprovals')).approvals).toHaveLength(0);
+  });
+
+  it('queues the normalized provider list', async () => {
+    const h = await startBackground({ local: await walletStorage(KEYS) });
+    await h.unlock();
+    h.connect(APP, { providers: [{ id: 'openai' }, { id: 'openai', required: true, extra: 1 }] });
+    await h.until(async () => (await h.internal('getPendingApprovals')).approvals.length === 1);
+    expect((await h.internal('getPendingApprovals')).approvals[0].providers).toEqual([{ id: 'openai', required: true }]);
+  });
+
+  it('never signs a non-string provider into the trust state', async () => {
+    const h = await startBackground({ local: await walletStorage(KEYS) });
+    await h.unlock();
+    await connectApproved(h, APP, { providers: [{ id: 'openai', required: true }] }, true);
+    expect(await h.internal('addTrustedSite', { origin: 'https://b.example', allowedProviders: [123] }))
+      .toEqual({ error: 'Invalid trusted site' });
+    const { sites, trustReset } = await h.internal('getTrustedSites');
+    expect(sites.map((s: { origin: string }) => s.origin)).toEqual([APP]);
+    expect(trustReset).toBe(false);
+  });
+
+  // F083: an opaque origin (sandboxed frame) was queued as 'unknown', and
+  // trusting it trusted every sandboxed frame on every site.
+  it('refuses a connect from an opaque origin', async () => {
+    const h = await startBackground({ local: await walletStorage(KEYS) });
+    await h.unlock();
+    const { response } = h.connect(null, { providers: [{ id: 'openai', required: true }] });
+    expect((await response).payload.code).toBe('ORIGIN_UNSUPPORTED');
+    expect((await h.internal('getPendingApprovals')).approvals).toHaveLength(0);
+    expect(await h.internal('addTrustedSite', { origin: 'unknown', allowedProviders: ['openai'] })).toEqual({ error: 'Invalid trusted site' });
+    expect((await h.internal('getTrustedSites')).sites).toEqual([]);
+  });
+});

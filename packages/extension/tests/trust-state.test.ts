@@ -53,6 +53,8 @@ describe('trust state integrity', () => {
     expect(silentTrustFor(STATE, 'https://unknown.example')).toBeUndefined();
     expect(silentTrustFor({ sites: [{ origin: 'https://a.example', trustedAt: 1 }], revoked: [] }, 'https://a.example')).toBeUndefined();
     expect(silentTrustFor({ sites: [{ origin: 'https://a.example', trustedAt: 1, allowedProviders: [] }], revoked: [] }, 'https://a.example')).toBeUndefined();
+    // 'unknown' is the background's name for an opaque origin, never a site.
+    expect(silentTrustFor({ sites: [{ origin: 'unknown', trustedAt: 1, allowedProviders: ['openai'] }], revoked: [] }, 'unknown')).toBeUndefined();
   });
 
   it('accepts a state it signed', async () => {

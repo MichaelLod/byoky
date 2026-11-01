@@ -78,7 +78,8 @@ export function parseRevokedOrigins(raw: unknown): string[] | null {
  * otherwise, including for every origin of a dropped (empty) state.
  */
 export function silentTrustFor(state: TrustState, origin: string): TrustedSite | undefined {
-  if (state.revoked.includes(origin)) return undefined;
+  // 'unknown' stands for an opaque origin (a sandboxed frame anywhere), never a site.
+  if (origin === 'unknown' || state.revoked.includes(origin)) return undefined;
   const site = state.sites.find((s) => s.origin === origin);
   return site?.allowedProviders?.length ? site : undefined;
 }
