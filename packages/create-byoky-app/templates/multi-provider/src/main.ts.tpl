@@ -13,7 +13,7 @@ const PROVIDER_CONFIG: Record<
     testUrl: 'https://api.anthropic.com/v1/messages',
     buildBody: () =>
       JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 128,
         messages: [{ role: 'user', content: 'Say hello in one sentence.' }],
       }),
@@ -23,19 +23,22 @@ const PROVIDER_CONFIG: Record<
     testUrl: 'https://api.openai.com/v1/chat/completions',
     buildBody: () =>
       JSON.stringify({
-        model: 'gpt-4o-mini',
-        max_tokens: 128,
+        model: 'gpt-5.4-mini',
+        // GPT-5 models reject max_tokens; max_completion_tokens works on every chat model.
+        max_completion_tokens: 128,
         messages: [{ role: 'user', content: 'Say hello in one sentence.' }],
       }),
   },
   gemini: {
     displayName: 'Google Gemini',
     testUrl:
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent',
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
     buildBody: () =>
       JSON.stringify({
         contents: [{ parts: [{ text: 'Say hello in one sentence.' }] }],
-        generationConfig: { maxOutputTokens: 128 },
+        // Gemini 2.5 Flash thinks before it answers and its thinking counts
+        // against maxOutputTokens, so a small cap can leave the reply empty.
+        generationConfig: { maxOutputTokens: 1024 },
       }),
   },
 };
