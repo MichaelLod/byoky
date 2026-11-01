@@ -157,7 +157,7 @@ claude`}</Code>
             <code>claude</code>.
           </p>
           <p className="oc-note oc-note-muted">
-            Pro tip: run <code>claude --model claude-sonnet-4-5</code> (or
+            Pro tip: run <code>claude --model claude-sonnet-5-5</code> (or
             whichever model your plan covers) if you hit a model access
             error.
           </p>

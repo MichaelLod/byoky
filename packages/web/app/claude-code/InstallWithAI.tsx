@@ -44,7 +44,7 @@ Troubleshooting cheatsheet (only mention if the relevant error shows up):
 - HTTP 401 "Missing or invalid bridge token" → ANTHROPIC_API_KEY isn't the bridge token in this shell. Re-export it with \`export ANTHROPIC_API_KEY=$(byoky-bridge token)\`.
 - "invalid x-api-key" or "Invalid bearer token" → the wallet credential is bad or expired. Ask me to swap it.
 - "rate_limit_error" → my Anthropic account is being throttled upstream. Wait a few minutes.
-- Claude Code complains about missing model → override with \`--model claude-sonnet-4-5\` (or another model my plan has access to).
+- Claude Code complains about missing model → override with \`--model claude-sonnet-5-5\` (or another model my plan has access to).
 
 Rules:
 - Run one command at a time and show me the output before moving on.
