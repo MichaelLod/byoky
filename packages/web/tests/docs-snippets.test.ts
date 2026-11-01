@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import ts from 'typescript';
 import { describe, it, expect } from 'vitest';
 
 // The code developers copy from the READMEs, /docs, /demo and the landing
@@ -58,6 +59,54 @@ describe('docs snippets', () => {
     expect(block).toContain('createFetch');
     expect(block).toContain('dangerouslyAllowBrowser');
   });
+
+  it('pass connect() options that type-check, and `required` may be left out', () => {
+    // Every `.connect({ ... })` options literal in the docs, checked against
+    // the real ConnectRequest type the way a strict TypeScript app would.
+    const literals: string[] = [];
+    for (const file of SNIPPET_FILES) {
+      const text = read(file);
+      const re = /\.connect\(\{/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(text)) !== null) {
+        const start = m.index + m[0].length - 1;
+        let depth = 0;
+        let i = start;
+        do {
+          if (text[i] === '{') depth++;
+          else if (text[i] === '}') depth--;
+          i++;
+        } while (depth > 0 && i < text.length);
+        const literal = text.slice(start, i);
+        if (!literal.includes('...')) literals.push(literal); // skip `providers: [...]` placeholders
+      }
+    }
+    expect(literals.length).toBeGreaterThan(10);
+
+    const source = [
+      `import type { ConnectRequest } from '${resolve(ROOT, 'packages/core/src/types')}';`,
+      `type Options = ConnectRequest & { modal?: boolean | { container?: HTMLElement; theme?: Record<string, string> } };`,
+      // An app that doesn't mark anything required.
+      `export const minimal: Options = { providers: [{ id: 'anthropic' }] };`,
+      ...literals.map((l, i) => `export const s${i}: Options = ${l};`),
+    ].join('\n');
+    const fileName = resolve(__dirname, '__docs_snippets__.ts');
+    const options: ts.CompilerOptions = {
+      strict: true, noEmit: true, skipLibCheck: true, target: ts.ScriptTarget.ES2022,
+      module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler,
+      lib: ['lib.es2022.d.ts', 'lib.dom.d.ts'], types: [],
+    };
+    const host = ts.createCompilerHost(options);
+    const getSourceFile = host.getSourceFile.bind(host);
+    host.getSourceFile = (name, version, ...rest) =>
+      name === fileName ? ts.createSourceFile(name, source, version) : getSourceFile(name, version, ...rest);
+    const fileExists = host.fileExists.bind(host);
+    host.fileExists = (name) => name === fileName || fileExists(name);
+    const program = ts.createProgram([fileName], options, host);
+    const errors = ts.getPreEmitDiagnostics(program, program.getSourceFile(fileName))
+      .map((d) => ts.flattenDiagnosticMessageText(d.messageText, '\n'));
+    expect(errors).toEqual([]);
+  }, 30_000);
 
   it('use no retired Claude model IDs', () => {
     // Retired on 2026-06-15; requests to them fail with not_found_error.
