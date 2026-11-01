@@ -449,28 +449,32 @@ function irImageToGeminiPart(source: IRImageSource): GeminiPart {
 }
 
 /**
- * Gemini's functionResponse.response is expected to be an object. If the IR
- * tool result is text, wrap it as {result: text} unless it already parses as
- * JSON (in which case emit the parsed object so downstream code can inspect it).
+ * Gemini's functionResponse.response is a protobuf Struct, so it must be a
+ * JSON object. Text that parses to an object is passed through as is; any
+ * other parsed value (array, number, boolean, null, string) and text that
+ * isn't JSON is wrapped as {result: value}.
  */
-function parseToolResultForGemini(content: IRToolResultContent): unknown {
-  if (content.kind === 'text') {
-    try {
-      return JSON.parse(content.text);
-    } catch {
-      return { result: content.text };
-    }
-  }
+function parseToolResultForGemini(content: IRToolResultContent): Record<string, unknown> {
+  if (content.kind === 'text') return toStruct(content.text);
   // Blocks → flatten text blocks into a string and wrap.
   const text = content.blocks
     .map((b) => (b.type === 'text' ? b.text : ''))
     .filter((s) => s.length > 0)
     .join('\n');
+  return toStruct(text);
+}
+
+function toStruct(text: string): Record<string, unknown> {
+  let parsed: unknown;
   try {
-    return JSON.parse(text);
+    parsed = JSON.parse(text);
   } catch {
     return { result: text };
   }
+  if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    return parsed as Record<string, unknown>;
+  }
+  return { result: parsed };
 }
 
 // ─── parseResponse ────────────────────────────────────────────────────────

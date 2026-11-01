@@ -324,3 +324,46 @@ describe('geminiAdapter stream parsing', () => {
     }
   });
 });
+
+describe('geminiAdapter.serializeRequest — functionResponse.response is always an object', () => {
+  function responseFor(content: IRRequest['messages'][number]['content'][number]): unknown {
+    const ir: IRRequest = {
+      system: [],
+      messages: [
+        { role: 'assistant', content: [{ type: 'tool_use', id: 'fc1', name: 'lookup', input: {} }] },
+        { role: 'user', content: [content] },
+      ],
+    };
+    const out = JSON.parse(geminiAdapter.serializeRequest(ctx(), ir)) as {
+      contents: Array<{ parts: Array<{ functionResponse?: { response?: unknown } }> }>;
+    };
+    return out.contents[1].parts[0].functionResponse?.response;
+  }
+  const textResult = (text: string) =>
+    ({ type: 'tool_result', toolUseId: 'fc1', content: { kind: 'text', text } }) as const;
+
+  it.each([
+    ['[1,2,3]', { result: [1, 2, 3] }],
+    ['42', { result: 42 }],
+    ['true', { result: true }],
+    ['null', { result: null }],
+    ['"done"', { result: 'done' }],
+    ['plain text', { result: 'plain text' }],
+  ])('wraps %s', (text, expected) => {
+    expect(responseFor(textResult(text))).toEqual(expected);
+  });
+
+  it('passes a JSON object through unwrapped', () => {
+    expect(responseFor(textResult('{"temp":18}'))).toEqual({ temp: 18 });
+  });
+
+  it('wraps non-object JSON in the blocks form too', () => {
+    expect(
+      responseFor({
+        type: 'tool_result',
+        toolUseId: 'fc1',
+        content: { kind: 'blocks', blocks: [{ type: 'text', text: '[1,2]' }] },
+      }),
+    ).toEqual({ result: [1, 2] });
+  });
+});
