@@ -50,7 +50,9 @@ final class WalletStore: ObservableObject {
     private let appConsent = AppConsentStore()
 
     /// Idle time after which the wallet locks, in the foreground or not.
-    private let autoLockTimeout: TimeInterval = 900
+    let autoLockTimeout: TimeInterval = 900
+    /// Where auto-lock reads the time and how its idle timer waits.
+    var autoLockClock = AutoLockClock.system
     private var backgroundTime: Date?
     private var lastActivity = Date()
     private var idleLockTask: Task<Void, Never>?
@@ -565,15 +567,30 @@ final class WalletStore: ObservableObject {
     // anywhere in the app (RootView) or a request from an app in the
     // in-wallet browser. Time in the background counts as idle.
 
+    /// The time source and the idle timer's sleep. The app uses the system
+    /// clock; tests swap in a clock they move by hand.
+    struct AutoLockClock {
+        var now: () -> Date
+        /// Waits about this many seconds (returns early when cancelled).
+        var sleep: (TimeInterval) async -> Void
+
+        static var system: AutoLockClock {
+            AutoLockClock(
+                now: { Date() },
+                sleep: { seconds in try? await Task.sleep(for: .seconds(seconds)) }
+            )
+        }
+    }
+
     /// Restart the idle clock.
     func noteActivity() {
         guard status == .unlocked else { return }
-        lastActivity = Date()
+        lastActivity = autoLockClock.now()
     }
 
     func recordBackgroundTime() {
         if status == .unlocked {
-            backgroundTime = Date()
+            backgroundTime = autoLockClock.now()
         }
     }
 
@@ -583,7 +600,7 @@ final class WalletStore: ObservableObject {
     func checkAutoLock() {
         defer { backgroundTime = nil }
         guard status == .unlocked else { return }
-        let now = Date()
+        let now = autoLockClock.now()
         let idle = now.timeIntervalSince(lastActivity)
         let away = backgroundTime.map { now.timeIntervalSince($0) } ?? 0
         if idle > autoLockTimeout || away > autoLockTimeout {
@@ -592,17 +609,17 @@ final class WalletStore: ObservableObject {
     }
 
     private func startIdleTimer() {
-        lastActivity = Date()
+        lastActivity = autoLockClock.now()
         idleLockTask?.cancel()
         idleLockTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self, self.status == .unlocked else { return }
-                let remaining = self.autoLockTimeout - Date().timeIntervalSince(self.lastActivity)
+                let remaining = self.autoLockTimeout - self.autoLockClock.now().timeIntervalSince(self.lastActivity)
                 if remaining <= 0 {
                     self.lock()
                     return
                 }
-                try? await Task.sleep(for: .seconds(remaining))
+                await self.autoLockClock.sleep(remaining)
             }
         }
     }
