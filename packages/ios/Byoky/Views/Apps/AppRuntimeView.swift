@@ -564,19 +564,30 @@ struct AppWebView: UIViewRepresentable {
         }
 
         /// Follows the web view's progress and back history for the toolbar.
+        /// The values reach SwiftUI on the next turn of the main queue: the
+        /// first ones change while `makeUIView` runs, inside a view update,
+        /// where publishing is not allowed.
         func attach(to webView: WKWebView, startURL: URL) {
             browser.webView = webView
             browser.startURL = startURL
             let browser = browser
+            func publish(_ update: @escaping (AppBrowserState) -> Void) {
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated { update(browser) }
+                }
+            }
             observations = [
                 webView.observe(\.estimatedProgress, options: [.initial, .new]) { webView, _ in
-                    MainActor.assumeIsolated { browser.progress = webView.estimatedProgress }
+                    let progress = webView.estimatedProgress
+                    publish { $0.progress = progress }
                 },
                 webView.observe(\.isLoading, options: [.initial, .new]) { webView, _ in
-                    MainActor.assumeIsolated { browser.isLoading = webView.isLoading }
+                    let isLoading = webView.isLoading
+                    publish { $0.isLoading = isLoading }
                 },
                 webView.observe(\.canGoBack, options: [.initial, .new]) { webView, _ in
-                    MainActor.assumeIsolated { browser.canGoBack = webView.canGoBack }
+                    let canGoBack = webView.canGoBack
+                    publish { $0.canGoBack = canGoBack }
                 },
             ]
         }
