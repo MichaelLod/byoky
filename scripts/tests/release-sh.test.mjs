@@ -215,3 +215,25 @@ test('no store credentials is an error unless --skip-store-uploads', (t) => {
   assert.match(r.out, /ERROR: No store credentials/)
   assert.equal(s.run(['1.1.2', '--dry', '--skip-store-uploads'], none).code, 0)
 })
+
+// --- uncommitted changes ---
+
+test('uncommitted and untracked files are an error unless --allow-dirty', (t) => {
+  const s = sandbox()
+  t.after(s.cleanup)
+  write(join(s.work, 'packages/core/src/new-file.ts'), 'export {}\n')
+  const untracked = s.run(['1.1.2', '--dry'])
+  assert.equal(untracked.code, 1, untracked.out)
+  assert.match(untracked.out, /ERROR: Uncommitted or untracked files would ship/)
+  assert.match(untracked.out, /\?\? packages\//)
+
+  rmSync(join(s.work, 'packages/core'), { recursive: true })
+  writeFileSync(join(s.work, '.gitignore'), 'dist/\nbuild/\nchanged/\n')
+  const modified = s.run(['1.1.2', '--dry'])
+  assert.equal(modified.code, 1, modified.out)
+  assert.match(modified.out, / M \.gitignore/)
+
+  const allowed = s.run(['1.1.2', '--dry', '--allow-dirty'])
+  assert.equal(allowed.code, 0, allowed.out)
+  assert.match(allowed.out, /WARN: Uncommitted changes \(--allow-dirty\): they are BUILT AND SHIPPED but NOT committed/)
+})

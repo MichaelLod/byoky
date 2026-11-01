@@ -241,6 +241,7 @@ SKIP_STORE_UPLOADS=false
 ASSUME_YES=false
 ALLOW_PENDING=false
 ALLOW_BRANCH=false
+ALLOW_DIRTY=false
 NEW_VERSION=""
 
 for arg in "$@"; do
@@ -251,6 +252,7 @@ for arg in "$@"; do
     --yes)     ASSUME_YES=true ;;
     --allow-pending) ALLOW_PENDING=true ;;
     --allow-branch) ALLOW_BRANCH=true ;;
+    --allow-dirty) ALLOW_DIRTY=true ;;
     *)         NEW_VERSION="$arg" ;;
   esac
 done
@@ -258,7 +260,7 @@ done
 if [ -z "$NEW_VERSION" ]; then
   CURRENT=$(node -p "require('./package.json').version")
   echo "Usage: ./scripts/release.sh <new-version> [--dry] [--skip-mobile] [--skip-store-uploads] [--yes]"
-  echo "                                           [--allow-pending] [--allow-branch]"
+  echo "                                           [--allow-pending] [--allow-branch] [--allow-dirty]"
   echo "       ./scripts/release.sh status"
   echo "       ./scripts/release.sh retry [--allow-pending]"
   echo ""
@@ -273,6 +275,8 @@ if [ -z "$NEW_VERSION" ]; then
   echo "  --allow-branch         Release from a branch other than main (e.g. a worktree);"
   echo "                         HEAD must contain origin/main, and the release commit is"
   echo "                         pushed to main all the same"
+  echo "  --allow-dirty          Release with uncommitted or untracked files: they are"
+  echo "                         built and shipped but NOT committed or tagged"
   echo ""
   echo "Releases go out from main: fast-forward main to the work, release from the main"
   echo "checkout. The release commit and tag v<version> are pushed to origin main."
@@ -330,9 +334,14 @@ else
   SKIP_ANDROID=true
 fi
 
-# Check git state
-if ! git diff --quiet HEAD 2>/dev/null; then
-  WARNINGS+=("Working tree has uncommitted changes — they will be included in the release commit")
+# Check git state. Everything is built from the working tree, but only the
+# version files are committed: an uncommitted or untracked change would ship
+# in the npm packages and store builds without being in the tag.
+DIRTY=$(git status --porcelain --untracked-files=normal)
+if [ -n "$DIRTY" ] && [ "$ALLOW_DIRTY" = true ]; then
+  WARNINGS+=("Uncommitted changes (--allow-dirty): they are BUILT AND SHIPPED but NOT committed or tagged")
+elif [ -n "$DIRTY" ]; then
+  ERRORS+=("Uncommitted or untracked files would ship without being in the release commit or tag. Commit or stash them, or pass --allow-dirty:"$'\n'"$(echo "$DIRTY" | sed 's/^/           /')")
 fi
 
 # The release commit and tag go to main, on top of what origin has. A release
@@ -723,6 +732,14 @@ git add \
 # Also stage the synced mobile bundles if they changed
 git add packages/ios/Byoky/Resources/mobile.js 2>/dev/null || true
 git add packages/android/app/src/main/assets/mobile.js 2>/dev/null || true
+
+# The tree was clean before the bump, so anything still unstaged was changed
+# by the build. It's derived from the tagged sources, but say so.
+LEFT_OVER=$(git status --porcelain --untracked-files=normal | grep -v '^[MADRC] ' || true)
+if [ -n "$LEFT_OVER" ] && [ "$ALLOW_DIRTY" = false ]; then
+  echo "  WARN: the build changed files that the release commit leaves out:"
+  echo "$LEFT_OVER" | sed 's/^/    /'
+fi
 
 git commit -m "Bump to v${NEW_VERSION} (native ${NEW_NATIVE_VERSION}/${NEW_VERSION_CODE})"
 git tag "v${NEW_VERSION}"
