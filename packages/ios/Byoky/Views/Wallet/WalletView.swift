@@ -37,6 +37,7 @@ struct WalletView: View {
                         .padding(.horizontal, 16)
                         .padding(.bottom, 24)
                     }
+                    .contentMargins(.bottom, FloatingActionMenu.clearance, for: .scrollContent)
                 } else {
                     List {
                         header
@@ -47,6 +48,7 @@ struct WalletView: View {
                     }
                     .listStyle(.plain)
                     .scrollContentBackground(.hidden)
+                    .contentMargins(.bottom, FloatingActionMenu.clearance, for: .scrollContent)
                 }
             }
             .background(ScreenBackground())

@@ -63,6 +63,7 @@ struct AppsView: View {
                 }
             }
             .retroList()
+            .contentMargins(.bottom, FloatingActionMenu.clearance, for: .scrollContent)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {

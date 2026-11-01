@@ -37,6 +37,7 @@ struct InstalledAppsGrid: View {
             .padding(.top, 4)
             .padding(.bottom, 24)
         }
+        .contentMargins(.bottom, FloatingActionMenu.clearance, for: .scrollContent)
     }
 
     private var emptyState: some View {
