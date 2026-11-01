@@ -1,17 +1,21 @@
 package com.byoky.app.ui.screens
 
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.webkit.RenderProcessGoneDetail
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -171,6 +175,16 @@ private fun AppWebView(
         onDispose { bridge.dispose() }
     }
 
+    // <input type=file>: Android WebView shows no picker of its own, so the
+    // page's request goes to the system file picker and is answered once.
+    val fileRequest = remember { FileChooserRequest() }
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        fileRequest.finish(pickedFiles(result.resultCode, result.data))
+    }
+    DisposableEffect(fileRequest) {
+        onDispose { fileRequest.finish(null) }
+    }
+
     val openExternally: (Uri) -> Unit = { uri ->
         try {
             context.startActivity(
@@ -214,6 +228,20 @@ private fun AppWebView(
                     override fun onProgressChanged(view: WebView, newProgress: Int) {
                         onProgress(newProgress)
                     }
+
+                    override fun onShowFileChooser(
+                        webView: WebView,
+                        filePathCallback: ValueCallback<Array<Uri>>,
+                        fileChooserParams: FileChooserParams,
+                    ): Boolean {
+                        fileRequest.start(filePathCallback)
+                        try {
+                            filePicker.launch(fileChooserParams.createIntent())
+                        } catch (_: ActivityNotFoundException) {
+                            fileRequest.finish(null)
+                        }
+                        return true
+                    }
                 }
                 loadUrl(app.url)
                 onCreated(this)
@@ -224,6 +252,30 @@ private fun AppWebView(
             view.destroy()
         },
     )
+}
+
+/** The page's pending file request. Every callback is answered exactly once, null when cancelled. */
+private class FileChooserRequest {
+    private var callback: ValueCallback<Array<Uri>>? = null
+
+    fun start(newCallback: ValueCallback<Array<Uri>>) {
+        finish(null)
+        callback = newCallback
+    }
+
+    fun finish(uris: Array<Uri>?) {
+        val pending = callback ?: return
+        callback = null
+        pending.onReceiveValue(uris)
+    }
+}
+
+/** The files the picker returned, one or several, or null when it was cancelled. */
+private fun pickedFiles(resultCode: Int, data: Intent?): Array<Uri>? {
+    if (resultCode != Activity.RESULT_OK) return null
+    WebChromeClient.FileChooserParams.parseResult(resultCode, data)?.let { return it }
+    val clip = data?.clipData ?: return null
+    return Array(clip.itemCount) { clip.getItemAt(it).uri }
 }
 
 private class AppWebViewClient(
