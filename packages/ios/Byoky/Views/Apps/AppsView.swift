@@ -235,10 +235,18 @@ struct AppsView: View {
                         Image(systemName: "ellipsis.circle")
                             .font(.callout)
                             .foregroundStyle(Theme.phosphor)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
                     }
+                    .accessibilityLabel("Options for \(group.name)")
+                    // The glyph keeps its place at the card's edge.
+                    .padding(.trailing, -12)
                 }
             }
-            .listRowInsets(EdgeInsets(top: 18, leading: RetroRowBackground.inset, bottom: 6, trailing: RetroRowBackground.inset))
+            // Every header is as tall as the 44pt options button, so the
+            // Default group's lines up with the others.
+            .frame(minHeight: 44)
+            .listRowInsets(EdgeInsets(top: 4, leading: RetroRowBackground.inset, bottom: 0, trailing: RetroRowBackground.inset))
         } footer: {
             ListFooter {
                 if group.providerId.isEmpty {

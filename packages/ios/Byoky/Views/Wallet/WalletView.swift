@@ -250,9 +250,12 @@ private struct RetiredFeaturesBanner: View {
                 Image(systemName: "xmark")
                     .font(.caption)
                     .foregroundStyle(Theme.dim)
-                    .frame(width: 24, height: 24)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            // A 44pt target over the card's padding; the glyph stays put.
+            .padding(-10)
             .accessibilityLabel("Dismiss")
             .accessibilityIdentifier("wallet.retiredNotice.dismiss")
         }
@@ -387,9 +390,12 @@ struct CredentialRow: View {
                     Image(systemName: "pencil")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(Theme.dim)
-                        .frame(width: 28, height: 28)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderless)
+                // A 44pt target in the 28pt slot the pencil had.
+                .padding(-8)
                 .accessibilityLabel("Rename credential")
                 .accessibilityIdentifier("wallet.credential.rename")
 
