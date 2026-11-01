@@ -3,6 +3,10 @@
  *
  * These tests codify the security properties established during the audit.
  * If any of these fail, a security regression has been introduced.
+ *
+ * They read source text, which a comment or a dead branch can satisfy. The
+ * background's behaviour (lockout, lock, origin binding, allowances,
+ * approvals) is tested by running it: packages/extension/tests/background*.test.ts.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -83,8 +87,9 @@ describe('security invariants', () => {
     });
 
     it('uses deny-by-default for the proxy port origin', () => {
-      // A missing origin must deny rather than fall through.
-      expect(bg).toContain('!portOrigin ||');
+      // A missing origin must deny rather than fall through, and the check
+      // must be the whole condition (not `if (x && (...))`).
+      expect(bg).toMatch(/\bif \(!portOrigin \|\| portOrigin !== session\.appOrigin\) \{/);
       expect(bg).not.toMatch(/portOrigin && portOrigin !== session\.appOrigin/);
     });
 
@@ -172,8 +177,9 @@ describe('security invariants', () => {
     it('has brute-force protection on unlock', () => {
       expect(bg).toContain('unlockFailures');
       expect(bg).toContain('unlockLockedUntil');
-      // Verify actual lockout behavior: 5 failures triggers lock
-      expect(bg).toContain('unlockFailures >= 5');
+      // Verify actual lockout behavior: 5 failures triggers lock (exactly 5,
+      // not 50 or 500)
+      expect(bg).toMatch(/\bunlockFailures >= 5\)/);
       // Verify lockout uses exponential backoff
       expect(bg).toContain('Math.pow(2, exponent)');
     });
@@ -191,7 +197,8 @@ describe('security invariants', () => {
 
     it('clears sessions on wallet lock', () => {
       const lockSection = bg.slice(bg.indexOf("case 'lock'"), bg.indexOf("case 'isUnlocked'"));
-      expect(lockSection).toContain('sessions.clear()');
+      // A statement of its own, not behind a condition.
+      expect(lockSection).toMatch(/^\s*sessions\.clear\(\);$/m);
       expect(lockSection).toContain('authorizedBridgeSessionKey = null');
     });
 
