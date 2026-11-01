@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { useWalletStore } from '../store';
 import { TrustResetNotice } from '../components/TrustResetNotice';
+import { LimitsHoldNotice } from '../components/LimitsHoldNotice';
 import {
   PROVIDERS,
   type TokenAllowance, type Group, type Session, type CredentialMeta,
@@ -132,6 +133,7 @@ export function ConnectedApps() {
 
   return (
     <div>
+      <LimitsHoldNotice />
       <TrustResetNotice />
       {error && !formOpen && <div className="error">{error}</div>}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>

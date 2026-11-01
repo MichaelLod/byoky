@@ -7,6 +7,7 @@ import {
 } from '@byoky/core';
 import { RetiredFeaturesNotice } from '../components/RetiredFeaturesNotice';
 import { TrustResetNotice } from '../components/TrustResetNotice';
+import { LimitsHoldNotice } from '../components/LimitsHoldNotice';
 import { ProviderIcon } from '../components/ProviderIcon';
 import { Modal } from '../components/Modal';
 import { describeOrigin } from '../utils/origin';
@@ -77,6 +78,7 @@ export function Dashboard() {
 
   return (
     <div>
+      <LimitsHoldNotice />
       <TrustResetNotice />
       <RetiredFeaturesNotice />
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
