@@ -15,7 +15,7 @@ describe('familyOf', () => {
   });
 
   it('classifies all openai-compatible providers in the openai family', () => {
-    for (const id of ['openai', 'azure_openai', 'groq', 'together', 'deepseek', 'xai', 'perplexity', 'fireworks', 'openrouter', 'mistral']) {
+    for (const id of ['openai', 'azure_openai', 'groq', 'together', 'deepseek', 'xai', 'perplexity', 'fireworks', 'openrouter', 'mistral', 'ollama', 'lm_studio']) {
       expect(familyOf(id)).toBe('openai');
     }
   });
@@ -130,8 +130,11 @@ describe('rewriteProxyUrl', () => {
   });
 
   it('uses a safe override for custom-host providers and refuses an unsafe one', () => {
+    // Azure's v1 API lives under /openai on the resource root.
     expect(rewriteProxyUrl('azure_openai', 'gpt-4o', false, 'https://myres.openai.azure.com'))
-      .toBe('https://myres.openai.azure.com/v1/chat/completions');
+      .toBe('https://myres.openai.azure.com/openai/v1/chat/completions');
+    expect(rewriteProxyUrl('azure_openai', 'gpt-4o', true, 'https://myres.cognitiveservices.azure.com/'))
+      .toBe('https://myres.cognitiveservices.azure.com/openai/v1/chat/completions');
     expect(rewriteProxyUrl('azure_openai', 'gpt-4o', false)).toBeNull();
     expect(rewriteProxyUrl('azure_openai', 'gpt-4o', false, 'http://myres.openai.azure.com')).toBeNull();
     expect(rewriteProxyUrl('azure_openai', 'gpt-4o', false, 'https://u:p@myres.openai.azure.com')).toBeNull();

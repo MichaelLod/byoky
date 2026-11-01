@@ -5,7 +5,9 @@ import {
   resolveSameFamilySwapRoute,
   resolveAutoCrossFamilyRoute,
   buildNoCredentialMessage,
+  autoRouteModelFor,
 } from '../src/routing.js';
+import { rewriteProxyUrl, familyOf } from '../src/translate/index.js';
 import type { Credential, Group } from '../src/types.js';
 
 function cred(id: string, providerId: string): Credential {
@@ -51,15 +53,39 @@ describe('resolveRoute', () => {
       expect(decision!.swap).toBeUndefined();
     });
 
-    it('skips cross-family when group has no model', () => {
+    it('translates against the destination provider\'s routing model when the group has none', () => {
       const credentials = [cred('c1', 'anthropic')];
       const g = group('anthropic'); // no model
 
       const decision = resolveRoute('openai', g, credentials);
 
-      // No model → no cross-family. Falls through to direct lookup, which
-      // also fails (no openai credential).
-      expect(decision).toBeNull();
+      expect(decision!.credential.id).toBe('c1');
+      expect(decision!.translation).toEqual({
+        srcProviderId: 'openai',
+        dstProviderId: 'anthropic',
+        dstModel: 'claude-sonnet-4-6',
+      });
+    });
+
+    it('keeps routing a model-less group past the app\'s own key, not around it', () => {
+      // The group's provider wins over the app's own key once routing can
+      // name a model for it.
+      const credentials = [cred('c1', 'anthropic'), cred('c2', 'gemini')];
+
+      const decision = resolveRoute('anthropic', group('gemini'), credentials);
+
+      expect(decision!.credential.id).toBe('c2');
+      expect(decision!.translation?.dstModel).toBe('gemini-2.5-pro');
+    });
+
+    it('skips cross-family when neither the group nor the provider names a model', () => {
+      // DeepSeek has no routing default (it doesn't serve OpenAI's models).
+      const credentials = [cred('c1', 'deepseek')];
+
+      expect(resolveRoute('anthropic', group('deepseek'), credentials)).toBeNull();
+      // The message names the real problem: the group needs a model.
+      expect(buildNoCredentialMessage('anthropic', ['deepseek'], group('deepseek')))
+        .toBe("This app's group routes it to deepseek, which needs a model to translate anthropic requests. Set a model on the group.");
     });
 
     it('prefers pinned credential id over any-of-provider lookup', () => {
@@ -69,6 +95,16 @@ describe('resolveRoute', () => {
       const decision = resolveRoute('openai', g, credentials);
 
       expect(decision!.credential.id).toBe('c2');
+    });
+
+    it('ignores a pin to another provider\'s key (no cross-provider key send)', () => {
+      // A tampered or stale group pins an OpenAI key while binding Anthropic:
+      // the OpenAI key must never be sent to Anthropic.
+      const credentials = [cred('c1', 'anthropic'), cred('c2', 'openai')];
+      const g = group('anthropic', { model: 'claude-sonnet-4-5', credentialId: 'c2' });
+
+      expect(resolveCrossFamilyRoute(g, 'gemini', credentials)).toBeUndefined();
+      expect(resolveRoute('gemini', g, credentials)).toBeNull();
     });
 
     it('returns null when pin id is stale (no silent fallback)', () => {
@@ -108,6 +144,18 @@ describe('resolveRoute', () => {
       const decision = resolveRoute('groq', g, credentials);
 
       expect(decision!.swap?.dstModel).toBe('gpt-4o');
+    });
+
+    it('ignores a pin to another provider\'s key', () => {
+      // Group binds Azure but pins a planted record of another provider:
+      // the swap must not hand that credential to the Azure destination.
+      const credentials = [cred('c1', 'openai'), { ...cred('planted', 'groq'), encryptedKey: '' }];
+      const g = group('azure_openai', { credentialId: 'planted' });
+
+      expect(resolveSameFamilySwapRoute(g, 'openai', credentials)).toBeUndefined();
+      const decision = resolveRoute('openai', g, credentials);
+      expect(decision?.swap).toBeUndefined();
+      expect(decision?.credential.id).toBe('c1');
     });
 
     it('does not swap when both providers are the same', () => {
@@ -152,6 +200,13 @@ describe('resolveRoute', () => {
       const decision = resolveRoute('openai', g, credentials);
 
       expect(decision!.credential.id).toBe('c2');
+    });
+
+    it('refuses a same-provider pin that names another provider\'s key', () => {
+      const credentials = [cred('c1', 'openai'), cred('c2', 'anthropic')];
+      const g = group('openai', { credentialId: 'c2' });
+
+      expect(resolveRoute('openai', g, credentials)).toBeNull();
     });
 
     it('surfaces modelOverride when same-provider group pins a model', () => {
@@ -306,15 +361,16 @@ describe('auto cross-family translation', () => {
   });
 
   it('is skipped when a group is set — group cross-family rules still win', () => {
-    const credentials = [cred('c1', 'anthropic'), cred('c2', 'gemini')];
-    // Group binds gemini without a model → step 1 (cross-family) rejects it
-    // for lack of model, step 2 (same-family) rejects it (different family),
-    // step 3 (direct) fails (no openai cred). Auto must NOT pick anthropic
-    // here — the group explicitly pointed to gemini, and silently routing
-    // past the group's intent would overwrite user config.
-    const g = group('gemini'); // no model → cross-family disabled
+    const credentials = [cred('c1', 'anthropic'), cred('c2', 'deepseek')];
+    // Group binds deepseek without a model, and routing names none for
+    // deepseek → step 1 (cross-family) rejects it, step 2 (same-family)
+    // rejects it (different family), step 3 (direct) fails (no gemini cred).
+    // Auto must NOT pick anthropic here — the group explicitly pointed to
+    // deepseek, and silently routing past the group's intent would
+    // overwrite user config.
+    const g = group('deepseek');
 
-    const decision = resolveRoute('openai', g, credentials);
+    const decision = resolveRoute('gemini', g, credentials);
 
     expect(decision).toBeNull();
   });
@@ -374,5 +430,76 @@ describe('auto cross-family translation', () => {
     const decision = resolveAutoCrossFamilyRoute('unknown' as never, credentials);
 
     expect(decision).toBeUndefined();
+  });
+});
+
+describe('autoRouteModelFor (F015)', () => {
+  it('names only models each provider serves', () => {
+    expect(autoRouteModelFor('anthropic')).toBe('claude-sonnet-4-6');
+    expect(autoRouteModelFor('openai')).toBe('gpt-5.5');
+    expect(autoRouteModelFor('gemini')).toBe('gemini-2.5-pro');
+    expect(autoRouteModelFor('cohere')).toBe('command-a-03-2025');
+    expect(autoRouteModelFor('openrouter')).toBe('openai/gpt-5.5');
+    for (const id of ['deepseek', 'groq', 'mistral', 'xai', 'together', 'fireworks', 'perplexity', 'azure_openai', 'ollama', 'lm_studio', 'not-real', 'constructor', '__proto__']) {
+      expect(autoRouteModelFor(id), id).toBeUndefined();
+    }
+  });
+
+  it('never sends OpenAI\'s model to DeepSeek or Groq', () => {
+    expect(resolveRoute('anthropic', undefined, [cred('d', 'deepseek')])).toBeNull();
+    expect(resolveRoute('anthropic', undefined, [cred('g', 'groq')])).toBeNull();
+  });
+
+  it('skips a provider without a routing model and picks the next candidate', () => {
+    const groq: Credential = { ...cred('g', 'groq'), createdAt: 500 };
+    const openai: Credential = { ...cred('o', 'openai'), createdAt: 100 };
+
+    const decision = resolveRoute('anthropic', undefined, [groq, openai]);
+
+    expect(decision!.credential.id).toBe('o');
+    expect(decision!.translation?.dstModel).toBe('gpt-5.5');
+  });
+
+  it('routes to OpenRouter with its own name for the OpenAI model', () => {
+    const decision = resolveAutoCrossFamilyRoute('anthropic', [cred('r', 'openrouter')]);
+    expect(decision?.translation.dstModel).toBe('openai/gpt-5.5');
+  });
+});
+
+describe('local OpenAI-compatible servers (F032)', () => {
+  const ollama: Credential = { ...cred('ol', 'ollama'), baseUrl: 'http://localhost:11434' };
+  const lmStudio: Credential = { ...cred('lm', 'lm_studio'), baseUrl: 'http://127.0.0.1:1234' };
+
+  it('are in the openai family', () => {
+    expect(familyOf('ollama')).toBe('openai');
+    expect(familyOf('lm_studio')).toBe('openai');
+  });
+
+  it('rewrite onto the credential\'s loopback server only', () => {
+    expect(rewriteProxyUrl('ollama', 'llama3.1', false, 'http://localhost:11434'))
+      .toBe('http://localhost:11434/v1/chat/completions');
+    expect(rewriteProxyUrl('lm_studio', 'qwen', true, 'http://127.0.0.1:1234/'))
+      .toBe('http://127.0.0.1:1234/v1/chat/completions');
+    expect(rewriteProxyUrl('ollama', 'llama3.1', false)).toBeNull();
+    expect(rewriteProxyUrl('ollama', 'llama3.1', false, 'http://192.168.1.5:11434')).toBeNull();
+  });
+
+  it('take an openai app\'s requests as a same-family swap', () => {
+    const decision = resolveRoute('openai', group('ollama', { model: 'llama3.1' }), [ollama, cred('o', 'openai')]);
+    expect(decision!.credential.id).toBe('ol');
+    expect(decision!.swap).toEqual({ srcProviderId: 'openai', dstProviderId: 'ollama', dstModel: 'llama3.1' });
+  });
+
+  it('take an anthropic app\'s requests through translation when the group names a model', () => {
+    const decision = resolveRoute('anthropic', group('lm_studio', { model: 'qwen' }), [lmStudio]);
+    expect(decision!.credential.id).toBe('lm');
+    expect(decision!.translation).toEqual({ srcProviderId: 'anthropic', dstProviderId: 'lm_studio', dstModel: 'qwen' });
+    // Without a model there is nothing to translate to.
+    expect(resolveRoute('anthropic', group('lm_studio'), [lmStudio])).toBeNull();
+  });
+
+  it('are never picked by auto-routing', () => {
+    expect(resolveAutoCrossFamilyRoute('anthropic', [ollama, lmStudio])).toBeUndefined();
+    expect(resolveRoute('gemini', undefined, [ollama, cred('a', 'anthropic')])!.credential.id).toBe('a');
   });
 });

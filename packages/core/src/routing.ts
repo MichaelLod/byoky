@@ -13,8 +13,9 @@
  *
  * Resolution order:
  *   1. Cross-family translation — group binds to a different provider family
- *      AND has a model pinned. The request body, response, and SSE stream all
- *      get translated by the translation layer.
+ *      AND a destination model is known (the group's own, or the provider's
+ *      routing default from autoRouteModelFor). The request body, response,
+ *      and SSE stream all get translated by the translation layer.
  *   2. Same-family swap — group binds to a different provider in the SAME
  *      family (e.g. Groq → OpenAI, both openai dialect). No translation; just
  *      a URL rewrite + credential swap + optional model substitution.
@@ -23,10 +24,17 @@
  *   4. Auto cross-family translation — no group, no direct credential, but the
  *      user holds a credential in a different translatable family. Silently
  *      pick one (most-recently-used first, then family order) and translate
- *      against the family flagship model. This is opportunistic: group rules
- *      above still win, so explicit user config is never overwritten.
- *   5. None of the above — the caller should surface a NO_CREDENTIAL error
- *      built via buildNoCredentialMessage to give the user actionable advice.
+ *      against that provider's routing model (autoRouteModelFor); providers
+ *      without one are skipped. This is opportunistic: group rules above
+ *      still win, so explicit user config is never overwritten.
+ *   5. None of the above — the caller should surface a PROVIDER_UNAVAILABLE
+ *      error (status 403) built via buildNoCredentialMessage to give the user
+ *      actionable advice.
+ *
+ * A group's credential pin only counts when that credential belongs to the
+ * group's provider. Groups are stored without integrity protection, so a pin
+ * to another provider's key (tampered or stale) resolves to nothing instead
+ * of sending that key, and the prompt, to the group's provider.
  */
 
 import type {
@@ -43,6 +51,46 @@ import type {
 import { shouldTranslate, sameFamily } from './translate/index.js';
 import { familyOf } from './translate/families.js';
 import { DEFAULT_MODELS, type ModelFamily } from './models.js';
+
+/**
+ * The model routing names when it picks a provider and nothing else names
+ * one: the auto cross-family fallback, and a cross-family group saved
+ * without a model. Only ids each provider is known to serve. The family
+ * flagship from DEFAULT_MODELS is an OpenAI id, which DeepSeek, Groq,
+ * Mistral and the other OpenAI-compatible providers reject, so they are left
+ * out, as are Azure (the model names a deployment) and the local servers
+ * (Ollama, LM Studio), whose models only the user knows.
+ */
+const AUTO_ROUTE_MODELS: Partial<Record<ProviderId, string>> = {
+  anthropic: DEFAULT_MODELS.anthropic,
+  openai: DEFAULT_MODELS.openai,
+  gemini: DEFAULT_MODELS.gemini,
+  cohere: DEFAULT_MODELS.cohere,
+  // OpenRouter names OpenAI's models with an `openai/` prefix.
+  openrouter: `openai/${DEFAULT_MODELS.openai}`,
+};
+
+/**
+ * The model routing uses for `providerId` when nothing else names one, or
+ * undefined when routing can't pick one for that provider (see
+ * AUTO_ROUTE_MODELS). Exposed to the mobile apps through the core bundle so
+ * all platforms pick the same model.
+ */
+export function autoRouteModelFor(providerId: ProviderId): string | undefined {
+  return Object.prototype.hasOwnProperty.call(AUTO_ROUTE_MODELS, providerId)
+    ? AUTO_ROUTE_MODELS[providerId]
+    : undefined;
+}
+
+/**
+ * The credential a group's pin names, if it belongs to the group's provider.
+ * A pin to another provider's key resolves to nothing, like a stale pin.
+ */
+function pinnedCredential(group: Group, credentials: Credential[]): Credential | undefined {
+  return credentials.find(
+    (c) => c.id === group.credentialId && c.providerId === group.providerId,
+  );
+}
 
 /**
  * The full routing decision for a single (requestedProviderId, group) pair.
@@ -92,10 +140,11 @@ export function resolveRoute(
 
   // 3. Direct credential. Two sub-cases:
   //    (a) Group binds the requested provider AND pins a specific credential
-  //        id → return that pin verbatim. If the pin id no longer exists,
-  //        return null. We deliberately do NOT silently fall back to a
-  //        different credential of the same provider — pins exist for cost
-  //        attribution and a silent swap masks the user's intent.
+  //        id → return that pin verbatim. If the pin id no longer exists (or
+  //        names another provider's key), return null. We deliberately do NOT
+  //        silently fall back to a different credential of the same provider
+  //        — pins exist for cost attribution and a silent swap masks the
+  //        user's intent.
   //    (b) No pin → use any credential of the provider, most-recently-used
   //        first.
   //
@@ -108,7 +157,7 @@ export function resolveRoute(
       ? group.model
       : undefined;
   if (group && group.providerId === requestedProviderId && group.credentialId) {
-    const pinned = credentials.find((c) => c.id === group.credentialId);
+    const pinned = pinnedCredential(group, credentials);
     return pinned ? { credential: pinned, modelOverride } : null;
   }
   const direct = credentials.find((c) => c.providerId === requestedProviderId);
@@ -119,8 +168,8 @@ export function resolveRoute(
   //    expresses the user's explicit routing intent, so we never silently
   //    route around it even when every group-based path fails to resolve a
   //    credential (stale pin, missing dst key, etc.) — returning null in
-  //    those cases surfaces the stale config via NO_CREDENTIAL so the user
-  //    notices and fixes it. The default group binds nothing (empty
+  //    those cases surfaces the stale config via PROVIDER_UNAVAILABLE so the
+  //    user notices and fixes it. The default group binds nothing (empty
   //    providerId), so apps in it count as unbound.
   if (!group?.providerId) {
     const auto = resolveAutoCrossFamilyRoute(requestedProviderId, credentials);
@@ -136,7 +185,10 @@ export function resolveRoute(
  * Auto cross-family translation — tier-4 fallback. Fires when the user has
  * no credential for the requested provider and no group binding steering
  * them elsewhere. Picks any translatable credential they hold, targeting the
- * family flagship via DEFAULT_MODELS.
+ * model autoRouteModelFor names for its provider. Credentials of providers
+ * it names none for (OpenAI-compatible hosts other than OpenAI and
+ * OpenRouter, Azure, local servers) are skipped: routing would otherwise send
+ * them a model they don't serve.
  *
  * Candidate ordering:
  *  1. Most-recently-used credential first (lastUsedAt desc). A user who just
@@ -154,6 +206,7 @@ export function resolveRoute(
  *  - the requested provider itself is outside any known family (translation
  *    needs both ends in a family)
  *  - no credential in the user's wallet is translatable against the request
+ *    with a model routing can name
  */
 export function resolveAutoCrossFamilyRoute(
   requestedProviderId: ProviderId,
@@ -174,9 +227,7 @@ export function resolveAutoCrossFamilyRoute(
 
   for (const cred of sorted) {
     if (!shouldTranslate(requestedProviderId, cred.providerId)) continue;
-    const dstFamily = familyOf(cred.providerId);
-    if (!dstFamily) continue;
-    const dstModel = DEFAULT_MODELS[dstFamily];
+    const dstModel = autoRouteModelFor(cred.providerId);
     if (!dstModel) continue;
     return {
       cred,
@@ -207,9 +258,12 @@ function familyOrder(providerId: ProviderId): number {
  * Cross-family routing. Returns undefined unless ALL of the following hold:
  *  1. A group is set
  *  2. group.providerId !== requestedProviderId
- *  3. group.model is set (translation can't pick a destination model on its own)
+ *  3. A destination model is known: group.model, or else the provider's
+ *     routing default (autoRouteModelFor). The group editor calls the model
+ *     optional; without a default (Azure, local servers, most
+ *     OpenAI-compatible hosts) the group needs one.
  *  4. The provider pair is translatable (both in known families with adapters)
- *  5. A credential resolves for group.providerId — pin is enforced strictly
+ *  5. A credential of group.providerId resolves — pin is enforced strictly
  *     (no silent fallback to any-credential-of-provider when the pin id is
  *     stale; that would mask cost-attribution intent)
  */
@@ -220,14 +274,15 @@ export function resolveCrossFamilyRoute(
 ): { cred: Credential; translation: SessionTranslation } | undefined {
   if (!group) return undefined;
   if (group.providerId === requestedProviderId) return undefined;
-  if (!group.model) return undefined;
+  const dstModel = group.model || autoRouteModelFor(group.providerId);
+  if (!dstModel) return undefined;
   if (!shouldTranslate(requestedProviderId, group.providerId)) return undefined;
 
   // When a pin is set we honor it strictly: a stale pin returns undefined
   // rather than silently swapping to a different credential of the same
-  // provider. The caller surfaces NO_CREDENTIAL so the user notices.
+  // provider. The caller surfaces PROVIDER_UNAVAILABLE so the user notices.
   const cred = group.credentialId
-    ? credentials.find((c) => c.id === group.credentialId)
+    ? pinnedCredential(group, credentials)
     : credentials.find((c) => c.providerId === group.providerId);
   if (!cred) return undefined;
 
@@ -236,7 +291,7 @@ export function resolveCrossFamilyRoute(
     translation: {
       srcProviderId: requestedProviderId,
       dstProviderId: group.providerId,
-      dstModel: group.model,
+      dstModel,
     },
   };
 }
@@ -268,7 +323,7 @@ export function resolveSameFamilySwapRoute(
 
   // Strict pin enforcement: stale pin → undefined, never silently swap.
   const cred = group.credentialId
-    ? credentials.find((c) => c.id === group.credentialId)
+    ? pinnedCredential(group, credentials)
     : credentials.find((c) => c.providerId === group.providerId);
   if (!cred) return undefined;
 
@@ -283,12 +338,13 @@ export function resolveSameFamilySwapRoute(
 }
 
 /**
- * Build an actionable NO_CREDENTIAL error message. The resolver returns null
- * for one of three reasons; this function picks the right message for each.
- *
- * Three branches by data shape:
+ * Build an actionable message for the PROVIDER_UNAVAILABLE error the caller
+ * sends when the resolver returns null. This function picks the right
+ * message for the data shape:
  *   1. Group binds to a provider != requested → user has a routing rule but
- *      the destination has no key. Tell them to add it or rebind the group.
+ *      it can't be served. If they hold a key for the destination, the group
+ *      needs a model to translate with (no routing default for that
+ *      provider); otherwise tell them to add the key or rebind the group.
  *   2. Group binds to the requested provider (or no group) and the user has
  *      *some* credentials → tell them to move the app to a group bound to
  *      one of their existing keys, or add the missing key.
@@ -302,6 +358,10 @@ export function buildNoCredentialMessage(
   const req = requestedProviderId;
   const groupBinding = group?.providerId;
   if (groupBinding && groupBinding !== req) {
+    const modelMissing = !group?.model && !autoRouteModelFor(groupBinding);
+    if (modelMissing && userCredentialProviderIds.includes(groupBinding) && shouldTranslate(req, groupBinding)) {
+      return `This app's group routes it to ${groupBinding}, which needs a model to translate ${req} requests. Set a model on the group.`;
+    }
     return `No ${groupBinding} API key found. Add a ${groupBinding} key to your wallet, or assign this app to a provider you already have a key for.`;
   }
   if (userCredentialProviderIds.length > 0) {

@@ -31,6 +31,12 @@ const FAMILY_PROVIDERS: Record<ModelFamily, ReadonlySet<ProviderId>> = {
     'fireworks',
     'openrouter',
     'mistral',
+    // Local OpenAI-compatible servers. They work as routing destinations
+    // (the credential's loopback base URL is used, see rewriteProxyUrl), but
+    // auto-routing never picks them: there is no model routing could name
+    // for them (see autoRouteModelFor in routing.ts).
+    'ollama',
+    'lm_studio',
   ]),
   gemini: new Set<ProviderId>(['gemini']),
   cohere: new Set<ProviderId>(['cohere']),

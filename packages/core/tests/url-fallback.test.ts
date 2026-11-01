@@ -589,7 +589,7 @@ describe('core URL callers with the global URL removed and the fallback installe
     expect(v).toContain(true);
     expect(v).toContain(false);
     const r = rewriteResults(OVERRIDES).map((c) => c[1]);
-    expect(r).toContain('https://myres.openai.azure.com/v1/chat/completions');
+    expect(r).toContain('https://myres.openai.azure.com/openai/v1/chat/completions');
     expect(r).toContain(null);
   });
 
@@ -623,7 +623,9 @@ describe('core URL callers with the global URL removed and the fallback installe
   it('rewriteProxyUrl: Azure override works and fixed hosts ignore overrides under the fallback', () => {
     withFallbackGlobal(() => {
       expect(rewriteProxyUrl('azure_openai', 'gpt-4o', false, 'https://x.openai.azure.com'))
-        .toBe('https://x.openai.azure.com/v1/chat/completions');
+        .toBe('https://x.openai.azure.com/openai/v1/chat/completions');
+      expect(rewriteProxyUrl('azure_openai', 'gpt-4o', false, 'https://x.openai.azure.com:8443'))
+        .toBe('https://x.openai.azure.com:8443/openai/v1/chat/completions');
       expect(rewriteProxyUrl('azure_openai', 'gpt-4o', false, 'http://x.openai.azure.com')).toBeNull();
       expect(rewriteProxyUrl('anthropic', 'claude-sonnet-4-6', false, 'https://evil.example'))
         .toBe('https://api.anthropic.com/v1/messages');
@@ -707,6 +709,6 @@ describe.skipIf(!existsSync(SHIPPED_BUNDLE))('shipped mobile bundle in a context
     expect(bridge.urlImpl).toBe('native');
     expect(vm.runInContext('URL', ctx)).toBe(HostURL);
     expect(bridge.rewriteProxyUrl('azure_openai', 'gpt-4o', false, 'https://x.openai.azure.com'))
-      .toBe('https://x.openai.azure.com/v1/chat/completions');
+      .toBe('https://x.openai.azure.com/openai/v1/chat/completions');
   });
 });

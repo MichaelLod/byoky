@@ -38,6 +38,7 @@ import {
 } from './families.js';
 import { installURLFallback } from './url-fallback.js';
 import { modelsForProvider, getModel } from '../models.js';
+import { autoRouteModelFor as _autoRouteModelFor } from '../routing.js';
 import {
   detectRequestCapabilities as _detectRequestCapabilities,
   rewriteToolNamesForClaudeCode as _rewriteToolNamesForClaudeCode,
@@ -206,6 +207,15 @@ interface MobileBridge {
    */
   rewriteClaudeCodeJSONBody(mapJson: string, body: string): string;
 
+  /**
+   * The model routing names for `providerId` when nothing else does (the
+   * auto cross-family fallback, a cross-family group saved without a
+   * model), or null when routing can't pick one for that provider and must
+   * skip it. Mirrors `autoRouteModelFor` in routing.ts, so the native
+   * resolvers pick the same model as the extension.
+   */
+  autoRouteModelFor(providerId: string): string | null;
+
   /** Bundle version, for native side to assert against expected core version. */
   readonly version: string;
 
@@ -331,6 +341,9 @@ const bridge: MobileBridge = {
   rewriteClaudeCodeJSONBody(mapJson, body) {
     const map = JSON.parse(mapJson) as Record<string, string>;
     return _rewriteToolNamesInJSONBody(body, map);
+  },
+  autoRouteModelFor(providerId) {
+    return _autoRouteModelFor(providerId) ?? null;
   },
   version: '0.5.3',
   urlImpl,
