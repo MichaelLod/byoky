@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Component, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useWalletStore } from './store';
 import { Setup } from './pages/Setup';
 import { Unlock } from './pages/Unlock';
@@ -147,14 +147,17 @@ export default function App() {
       )}
       <main className={`content ${showFab ? 'has-fab' : ''}`}>
         <div key={currentPage} className="page-enter">
-          {currentPage === 'setup' && <Setup />}
-          {currentPage === 'unlock' && <Unlock />}
-          {currentPage === 'dashboard' && <Dashboard />}
-          {currentPage === 'connect' && <Connect />}
-          {currentPage === 'connected-apps' && <ConnectedApps />}
-          {currentPage === 'approval' && <ApprovalRequest />}
-          {currentPage === 'request-history' && <RequestHistory />}
-          {currentPage === 'settings' && <Settings />}
+          {/* Starts over with each page and each request at the head of the queue. */}
+          <PageErrorBoundary key={currentPage === 'approval' ? pendingApprovals[0]?.id : undefined}>
+            {currentPage === 'setup' && <Setup />}
+            {currentPage === 'unlock' && <Unlock />}
+            {currentPage === 'dashboard' && <Dashboard />}
+            {currentPage === 'connect' && <Connect />}
+            {currentPage === 'connected-apps' && <ConnectedApps />}
+            {currentPage === 'approval' && <ApprovalRequest />}
+            {currentPage === 'request-history' && <RequestHistory />}
+            {currentPage === 'settings' && <Settings />}
+          </PageErrorBoundary>
         </div>
       </main>
       {showFab && <FloatingActionMenu />}
@@ -164,6 +167,46 @@ export default function App() {
         </Modal>
       )}
       <div className="scanlines" aria-hidden="true" />
+    </div>
+  );
+}
+
+/**
+ * A page that throws while rendering would otherwise unmount the whole popup
+ * and leave a blank panel. This keeps the header and offers the ways out:
+ * rejecting the request at the head of the queue (a page can send a request
+ * the approval screen can't show) and locking the wallet.
+ */
+class PageErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  render() {
+    return this.state.failed ? <PageFailed /> : this.props.children;
+  }
+}
+
+function PageFailed() {
+  const { pendingApprovals, isUnlocked, rejectConnect, lock } = useWalletStore();
+  const head = pendingApprovals[0];
+  return (
+    <div className="empty-state" role="alert">
+      <p>Something went wrong showing this page.</p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
+        {head && (
+          <button className="btn btn-secondary" onClick={() => rejectConnect(head.id)}>
+            Reject the connection request
+          </button>
+        )}
+        {isUnlocked && (
+          <button className="btn btn-secondary" onClick={() => lock()}>
+            Lock wallet
+          </button>
+        )}
+      </div>
     </div>
   );
 }

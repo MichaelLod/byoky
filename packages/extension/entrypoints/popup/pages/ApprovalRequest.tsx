@@ -4,6 +4,21 @@ import { PROVIDERS, type PendingApproval } from '@byoky/core';
 import { Raven } from '../components/Raven';
 import { describeOrigin } from '../utils/origin';
 
+/**
+ * The providers a request lists, as far as they can be shown. The list comes
+ * from the web page as sent, so it may not be an array of { id } objects.
+ */
+function requestedProviderList(providers: unknown): { id: string; required: boolean }[] {
+  if (!Array.isArray(providers)) return [];
+  return providers
+    .filter((p): p is { id?: unknown; required?: unknown } => typeof p === 'object' && p !== null)
+    .map((p) => ({ id: String(p.id), required: p.required === true }));
+}
+
+function providerName(id: string): string {
+  return Object.prototype.hasOwnProperty.call(PROVIDERS, id) ? PROVIDERS[id].name : id;
+}
+
 export function ApprovalRequest() {
   const { pendingApprovals } = useWalletStore();
 
@@ -36,9 +51,10 @@ function ApprovalCard({ approval, queued }: { approval: PendingApproval; queued:
   const origin = describeOrigin(approval.appOrigin);
 
   // Show which providers the app is requesting
+  const listed = requestedProviderList(approval.providers);
   const requestedProviders =
-    approval.providers.length > 0
-      ? approval.providers
+    listed.length > 0
+      ? listed
       : credentials.map((c) => ({ id: c.providerId, required: false }));
 
   return (
@@ -64,12 +80,11 @@ function ApprovalCard({ approval, queued }: { approval: PendingApproval; queued:
       <div className="approval-section">
         <div className="approval-section-label">Requesting access to:</div>
         <div className="approval-providers">
-          {requestedProviders.map((p) => {
-            const provider = PROVIDERS[p.id];
+          {requestedProviders.map((p, i) => {
             const hasCred = credentials.some((c) => c.providerId === p.id);
             return (
-              <div key={p.id} className="approval-provider-row">
-                <span>{provider?.name ?? p.id}</span>
+              <div key={`${i}:${p.id}`} className="approval-provider-row">
+                <span>{providerName(p.id)}</span>
                 <span className={`result-tag ${hasCred ? 'ready' : 'missing'}${p.required ? ' required' : ''}`}>
                   {hasCred ? 'Key ready' : 'No key'}
                   {p.required && ' · required'}

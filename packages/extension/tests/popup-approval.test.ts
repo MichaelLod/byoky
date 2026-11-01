@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { bg, mount, run, buttonByText, type Mounted } from './helpers/popup-harness';
 
 type Store = typeof import('../entrypoints/popup/store');
@@ -95,5 +95,51 @@ describe('approval headline names the full origin (F093)', () => {
     view = await mount(App);
     expect(view.container.querySelector('.approval-origin')?.textContent).toBe('localhost:3000');
     expect(view.container.querySelector('.result-tag.alarm')).toBeNull();
+  });
+});
+
+describe('a malformed request or record does not blank the popup (F076)', () => {
+  // React reports errors caught by a boundary on the console.
+  beforeEach(() => { vi.spyOn(console, 'error').mockImplementation(() => {}); });
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it.each([
+    ['an object id', [{ id: {} }]],
+    ['a null entry', [null]],
+    ['a string list', 'abc'],
+    ['a number id', [{ id: 123 }]],
+  ])('shows a request whose providers have %s', async (_label, providers) => {
+    bg.state.approvals = [approval('a1', 'https://evil.example', providers)];
+    view = await mount(App);
+    const { container } = view;
+    expect(container.querySelector('.approval-origin')?.textContent).toBe('evil.example');
+    expect(buttonByText(container, 'Reject')).toBeDefined();
+  });
+
+  it('falls back to Reject and Lock when the approval page still throws', async () => {
+    // appOrigin comes from the background, so this can't happen today; it
+    // stands in for any render error on the approval page.
+    bg.state.approvals = [{ id: 'a1', appOrigin: {}, providers: [], timestamp: 1 }];
+    view = await mount(App);
+    const { container } = view;
+    expect(container.querySelector('.logo')).not.toBeNull();
+    expect(container.textContent).toContain('Something went wrong showing this page.');
+
+    await run(() => buttonByText(container, 'Reject the connection request')!.click());
+    expect(bg.payloads('rejectConnect')).toEqual([{ approvalId: 'a1' }]);
+    expect(useWalletStore.getState().currentPage).toBe('dashboard');
+    expect(container.textContent).not.toContain('Something went wrong');
+  });
+
+  it('offers Lock when another page throws', async () => {
+    bg.state.credentials = [{ id: 'c1', providerId: 'anthropic', label: { bad: true }, authMethod: 'api_key', createdAt: 1 }];
+    bg.handlers.lock = () => ({ success: true });
+    view = await mount(App);
+    const { container } = view;
+    expect(container.textContent).toContain('Something went wrong showing this page.');
+    expect(buttonByText(container, 'Reject the connection request')).toBeUndefined();
+    await run(() => buttonByText(container, 'Lock wallet')!.click());
+    expect(bg.actions()).toContain('lock');
+    expect(useWalletStore.getState().currentPage).toBe('unlock');
   });
 });
