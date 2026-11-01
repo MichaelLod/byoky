@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { LIVE, bridgeBin, launchWallet, loadApiKeys, startServer, type Wallet } from '../fixtures';
+import { LIVE, bridgeBin, launchWallet, loadSetupToken, startServer, type Wallet } from '../fixtures';
+import { getManifestLocations } from '../../packages/bridge/src/native-manifest';
 import { execSync } from 'node:child_process';
 import { spawn as spawnPty, type IPty } from '@lydell/node-pty';
 import fs from 'node:fs';
@@ -18,7 +19,8 @@ import path from 'node:path';
 //     plugin is installed from a `pnpm pack` of packages/openclaw-plugin
 //     unless BYOKY_OPENCLAW_PLUGIN names another spec or tarball
 //   - openclaw installed globally
-//   - ANTHROPIC_API_KEY in .env.local starting with sk-ant-oat01-
+//   - ANTHROPIC_SETUP_TOKEN in .env.local (sk-ant-oat01-..., from
+//     `claude setup-token`); one agent call counts against its subscription
 
 const PASSWORD = 'MyStr0ng!P@ssw0rd';
 
@@ -128,6 +130,13 @@ test.describe('OpenClaw + byoky extension + bridge full flow', () => {
 
     // Register the native-messaging manifest inside the isolated HOME so
     // openclaw's preflight doesn't hit the interactive "register?" prompt.
+    // The installer registers only browsers that have run (their data
+    // directory exists), and this HOME is empty, so give it Chromium's.
+    // The preflight only checks for the manifest: the wallet's own Chromium
+    // gets its manifest in its profile (fixtures.ts).
+    const chromium = getManifestLocations(openclawHome, process.platform).find((l) => l.browser === 'Chromium');
+    if (!chromium) throw new Error(`byoky-bridge install doesn't support ${process.platform}`);
+    fs.mkdirSync(chromium.profileDirs[0], { recursive: true });
     execSync(`${JSON.stringify(process.execPath)} ${JSON.stringify(bridgeBin())} install`, {
       env: { ...process.env, HOME: openclawHome },
       stdio: 'inherit',
@@ -166,9 +175,7 @@ test.describe('OpenClaw + byoky extension + bridge full flow', () => {
   });
 
   test('add anthropic setup token credential', async () => {
-    const keys = loadApiKeys();
-    expect(keys.anthropic.startsWith('sk-ant-oat01-')).toBe(true);
-    await addCredential(wallet, 'anthropic', 'OC Anthropic', keys.anthropic);
+    await addCredential(wallet, 'anthropic', 'OC Anthropic', loadSetupToken());
   });
 
   test('openclaw models auth login + approve in popup', async () => {
