@@ -22,8 +22,9 @@ export interface ByokyServerOptions {
   helloTimeout?: number;
   /**
    * Fail a relayed request when the browser sends nothing for it for this
-   * long, in ms. Resets on every response chunk, so long streams are fine.
-   * Default: 120000. Set to 0 to disable.
+   * long, in ms. Resets on every response chunk, so long streams are fine,
+   * but a non-streaming response sends nothing until generation is done.
+   * Default: 600000 (10 minutes). Set to 0 to disable.
    */
   requestTimeout?: number;
 }
@@ -45,7 +46,7 @@ export class ByokyServer {
   constructor(options: ByokyServerOptions = {}) {
     this.pingInterval = options.pingInterval ?? 30_000;
     this.helloTimeout = options.helloTimeout ?? 10_000;
-    this.requestTimeout = options.requestTimeout ?? 120_000;
+    this.requestTimeout = options.requestTimeout ?? 600_000;
   }
 
   handleConnection(ws: WebSocketLike): Promise<ByokyClient> {

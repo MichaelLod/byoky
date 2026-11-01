@@ -7,10 +7,25 @@ import { randomId } from './id.js';
 // a stream body for them.
 const NULL_BODY_STATUSES = new Set([204, 205, 304]);
 
+/** Default for ProxyFetchOptions.timeout: 10 minutes, as in the official OpenAI and Anthropic SDKs. */
+export const DEFAULT_REQUEST_TIMEOUT = 600_000;
+
+export interface ProxyFetchOptions {
+  /**
+   * How long to wait for the response headers, in ms; 0 waits forever. A
+   * non-streaming response sends its headers only once generation is
+   * done, so this has to outlast the longest generation. The caller's
+   * AbortSignal still cancels at any time. Default: DEFAULT_REQUEST_TIMEOUT.
+   */
+  timeout?: number;
+}
+
 export function createProxyFetch(
   providerId: string,
   sessionKeyRef: { current: string },
+  options: ProxyFetchOptions = {},
 ): typeof fetch {
+  const timeoutMs = options.timeout ?? DEFAULT_REQUEST_TIMEOUT;
   return async (
     input: RequestInfo | URL,
     init?: RequestInit,
@@ -30,11 +45,19 @@ export function createProxyFetch(
       const encoder = new TextEncoder();
       let resolved = false;
 
-      const timeout = setTimeout(() => {
+      // A backstop for a wallet that never answers. It used to be a fixed
+      // 120 s, which cut off slow non-streaming generations; the official
+      // SDKs then retried, so one call was sent and billed three times.
+      const timeout = timeoutMs > 0 ? setTimeout(() => {
+        resolved = true;
         cleanup();
         cancel();
-        reject(new Error('Proxy request timed out'));
-      }, 120_000);
+        reject(new ByokyError(
+          ByokyErrorCode.PROXY_ERROR,
+          `Proxy request timed out: no response from the wallet within ${Math.round(timeoutMs / 1000)}s. If Byoky was just updated, reload the page.`,
+          { timeout: timeoutMs },
+        ));
+      }, timeoutMs) : undefined;
 
       // Use MessageChannel for secure response delivery — page scripts
       // cannot intercept or spoof messages on a transferred port.

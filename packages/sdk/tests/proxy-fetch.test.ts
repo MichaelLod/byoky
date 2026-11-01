@@ -383,6 +383,71 @@ describe('createProxyFetch', () => {
     });
   });
 
+  describe('header timeout', () => {
+    // Port messages travel on the real event loop; only setTimeout is faked.
+    const settle = async () => { for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r)); };
+
+    beforeEach(() => { vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }); });
+    afterEach(() => { vi.useRealTimers(); });
+
+    function cancels() {
+      return postedMessages.filter((m) => m.data.type === 'BYOKY_PROXY_CANCEL');
+    }
+
+    it.each([
+      ['130 s', 130_000],
+      ['9 minutes', 9 * 60_000],
+    ])('waits for headers that take %s (a slow non-streaming generation)', async (_label, delay) => {
+      const proxyFetch = createProxyFetch('openai', { current: 'byk_session' });
+      let state = 'pending';
+      const fetchPromise = proxyFetch('https://api.openai.com/v1/chat/completions', { method: 'POST', body: '{"model":"o3"}' });
+      fetchPromise.then(() => { state = 'resolved'; }, () => { state = 'rejected'; });
+      await settle();
+      const requestId = postedMessages[0].data.requestId as string;
+
+      await vi.advanceTimersByTimeAsync(delay);
+      expect(state).toBe('pending');
+      expect(cancels()).toHaveLength(0);
+
+      simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_META', requestId, status: 200, statusText: 'OK', headers: {} });
+      simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_CHUNK', requestId, chunk: '{"ok":true}' });
+      simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_DONE', requestId });
+      await settle();
+
+      expect(state).toBe('resolved');
+      expect(await (await fetchPromise).json()).toEqual({ ok: true });
+      // One upstream request: nothing was cancelled, so nothing retries.
+      expect(postedMessages.filter((m) => m.data.type === 'BYOKY_PROXY_REQUEST')).toHaveLength(1);
+    });
+
+    it('gives up after 10 minutes with a ByokyError and cancels the request', async () => {
+      const proxyFetch = createProxyFetch('openai', { current: 'byk_session' });
+      const fetchPromise = proxyFetch('https://api.openai.com/v1/chat/completions');
+      const outcome = fetchPromise.catch((err: unknown) => err);
+      await settle();
+
+      await vi.advanceTimersByTimeAsync(600_000);
+      const err = await outcome;
+      expect(err).toMatchObject({ name: 'ByokyError', code: 'PROXY_ERROR', message: expect.stringContaining('reload the page') });
+      await settle();
+      expect(cancels()).toHaveLength(1);
+    });
+
+    it('takes its timeout from the options, and 0 waits forever', async () => {
+      const short = createProxyFetch('openai', { current: 'byk_session' }, { timeout: 5_000 });
+      const shortOutcome = short('https://api.openai.com/v1/models').catch((err: unknown) => err);
+      const never = createProxyFetch('openai', { current: 'byk_session' }, { timeout: 0 });
+      let neverState = 'pending';
+      never('https://api.openai.com/v1/models').then(() => { neverState = 'settled'; }, () => { neverState = 'settled'; });
+      await settle();
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(await shortOutcome).toMatchObject({ code: 'PROXY_ERROR' });
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      expect(neverState).toBe('pending');
+    });
+  });
+
   describe('abort signal', () => {
     function cancelMessages() {
       return postedMessages.filter((m) => m.data.type === 'BYOKY_PROXY_CANCEL');

@@ -197,6 +197,27 @@ describe('ByokyServer', () => {
     await expect(fetchFn('https://api.anthropic.com/v1/messages')).rejects.toThrow('timed out');
   });
 
+  it('waits 10 minutes by default for a non-streaming response to start', async () => {
+    vi.useFakeTimers();
+    try {
+      const server = new ByokyServer({ pingInterval: 0 });
+      const clientPromise = server.handleConnection(ws);
+      ws.simulateMessage({ type: 'relay:hello', sessionId: 'sess-1', providers: {} });
+      const client = await clientPromise;
+
+      let state = 'pending';
+      client.createFetch('openai')('https://api.openai.com/v1/chat/completions')
+        .then(() => { state = 'resolved'; }, () => { state = 'rejected'; });
+      await vi.advanceTimersByTimeAsync(9 * 60_000);
+      expect(state).toBe('pending');
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(state).toBe('rejected');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps a stream open while chunks arrive and fails it once it stalls', async () => {
     const server = new ByokyServer({ pingInterval: 0, requestTimeout: 80 });
     const clientPromise = server.handleConnection(ws);

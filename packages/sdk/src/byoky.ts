@@ -62,11 +62,20 @@ export interface ByokySession extends ConnectResponse {
 }
 
 export interface ByokyOptions {
+  /** How long connect() waits for the wallet's answer, in ms. Default: 60000. */
   timeout?: number;
+  /**
+   * How long a proxied request waits for the response headers, in ms; 0
+   * waits forever. A non-streaming response sends its headers only once
+   * generation is done, so keep this above your longest generation.
+   * Default: 600000 (10 minutes, as in the official OpenAI and Anthropic SDKs).
+   */
+  requestTimeout?: number;
 }
 
 export class Byoky {
   private timeout: number;
+  private requestTimeout: number | undefined;
   // Snapshot of the last user-initiated connect request, so reconnects can
   // fall back from `reconnectOnly` to a full connect when the wallet has
   // dropped the session (browser restart / extension reload).
@@ -74,6 +83,7 @@ export class Byoky {
 
   constructor(options: ByokyOptions = {}) {
     this.timeout = options.timeout ?? 60_000;
+    this.requestTimeout = options.requestTimeout;
   }
 
   /**
@@ -228,7 +238,7 @@ export class Byoky {
     const session: ByokySession = {
       ...response,
       createFetch: (providerId: string) => {
-        const proxyFetch = createProxyFetch(providerId, sessionKeyRef);
+        const proxyFetch = createProxyFetch(providerId, sessionKeyRef, { timeout: this.requestTimeout });
         return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
           // The retry below sends the request again, so a stream body or a
           // Request input's body is read into bytes once, up front.

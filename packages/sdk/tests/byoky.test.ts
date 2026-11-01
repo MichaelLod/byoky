@@ -443,6 +443,20 @@ describe('Byoky', () => {
     expect(disconnectCb).toHaveBeenCalledTimes(1);
   });
 
+  it('passes requestTimeout to the session fetch', async () => {
+    const connectPromise = new Byoky({ requestTimeout: 50 }).connect();
+    await new Promise((r) => setTimeout(r, 10));
+    simulateResponse({
+      type: 'BYOKY_CONNECT_RESPONSE',
+      requestId: postedMessages[0].data.requestId,
+      payload: { sessionKey: 'byk_rt', proxyUrl: 'extension-proxy', providers: {} },
+    });
+    const session = await connectPromise;
+
+    await expect(session.createFetch('openai')('https://api.openai.com/v1/models'))
+      .rejects.toMatchObject({ code: ByokyErrorCode.PROXY_ERROR, message: expect.stringContaining('timed out') });
+  });
+
   describe('createFetch bodies', () => {
     async function connectSession(sessionKey: string) {
       const connectPromise = new Byoky().connect();
