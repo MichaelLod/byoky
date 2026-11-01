@@ -565,3 +565,65 @@ describe('cross-family dispatch — Gemini function responses without ids', () =
     expect(tool?.tool_call_id).toBe('toolu_01');
   });
 });
+
+describe('cross-family dispatch — Gemini 3 thought signatures', () => {
+  const openaiHistory = JSON.stringify({
+    model: 'gpt-5.5',
+    messages: [
+      { role: 'user', content: 'Weather in Paris and Rome?' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'get_weather', arguments: '{"city":"Paris"}' } },
+          { id: 'call_2', type: 'function', function: { name: 'get_weather', arguments: '{"city":"Rome"}' } },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'call_1', content: '{"temp":21}' },
+      { role: 'tool', tool_call_id: 'call_2', content: '{"temp":25}' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [{ id: 'call_3', type: 'function', function: { name: 'get_time', arguments: '{}' } }],
+      },
+      { role: 'tool', tool_call_id: 'call_3', content: '"12:00"' },
+    ],
+  });
+  const anthropicHistory = JSON.stringify({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 100,
+    messages: [
+      { role: 'user', content: 'Weather?' },
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'get_weather', input: { city: 'Paris' } }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: '{"temp":21}' }] },
+    ],
+  });
+
+  type GeminiOut = { contents: Array<{ role: string; parts: Array<{ functionCall?: unknown; thoughtSignature?: string }> }> };
+  const signatures = (out: GeminiOut) =>
+    out.contents
+      .filter((c) => c.role === 'model')
+      .map((c) => c.parts.map((p) => (p.functionCall ? p.thoughtSignature ?? null : 'not-a-call')));
+
+  it('openai → gemini 3 signs the first function call of each model turn', () => {
+    const out = JSON.parse(
+      translateRequest({ ...ctx('openai', 'gemini'), dstModel: 'gemini-3-pro-preview' }, openaiHistory),
+    ) as GeminiOut;
+    expect(signatures(out)).toEqual([
+      ['skip_thought_signature_validator', null],
+      ['skip_thought_signature_validator'],
+    ]);
+  });
+
+  it('anthropic → gemini 3 signs the function call', () => {
+    const out = JSON.parse(
+      translateRequest({ ...ctx('anthropic', 'gemini'), dstModel: 'gemini-3-flash-preview' }, anthropicHistory),
+    ) as GeminiOut;
+    expect(signatures(out)).toEqual([['skip_thought_signature_validator']]);
+  });
+
+  it('gemini 2.5 gets no signature', () => {
+    const out = JSON.parse(translateRequest(ctx('openai', 'gemini'), openaiHistory)) as GeminiOut;
+    expect(JSON.stringify(out)).not.toContain('thoughtSignature');
+  });
+});

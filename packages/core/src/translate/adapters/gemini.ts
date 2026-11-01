@@ -30,7 +30,10 @@ import { isIRError } from '../ir.js';
  *  - Function calls in responses are NOT deltaed in streaming: a single
  *    frame contains a complete `functionCall` with fully-formed args.
  *  - No `[DONE]` terminator — HTTP stream end is the signal.
- *  - tools + responseMimeType:'application/json' is a 400 on 2.5 series.
+ *  - tools + responseMimeType:'application/json' is a 400 on the 2.5 series;
+ *    the translation refuses the combination for every model.
+ *  - Gemini 3 validates thought signatures on the function calls of the
+ *    current turn (see THOUGHT_SIGNATURE_SKIP).
  *  - The `STOP` finish reason is used for both normal end and tool-calling
  *    turns; IR distinguishes them by whether the content has tool_use blocks.
  */
@@ -88,7 +91,7 @@ type GeminiPart =
   | { text: string }
   | { inlineData: { mimeType: string; data: string } }
   | { fileData: { mimeType?: string; fileUri: string } }
-  | { functionCall: { id?: string; name: string; args?: unknown } }
+  | { functionCall: { id?: string; name: string; args?: unknown }; thoughtSignature?: string }
   | { functionResponse: { id?: string; name: string; response: unknown } };
 
 interface GeminiToolGroup {
@@ -421,7 +424,7 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
   if (ir.tools && ir.tools.length > 0 && ir.responseFormat) {
     throw new TranslationError(
       'UNSUPPORTED_FEATURE',
-      'Gemini does not support combining tools with JSON response format on the 2.5 series.',
+      'Combining tools with JSON response format is not supported when translating to Gemini.',
     );
   }
 
@@ -445,7 +448,7 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
 
   const contents: GeminiContent[] = [];
   for (const msg of ir.messages) {
-    const c = serializeMessageToGemini(msg, toolUseNames);
+    const c = serializeMessageToGemini(msg, toolUseNames, signsFunctionCalls(ctx.dstModel));
     if (c) contents.push(c);
   }
 
@@ -559,14 +562,35 @@ function isEmptyRecord(value: unknown): boolean {
   return value !== null && typeof value === 'object' && Object.keys(value).length === 0;
 }
 
+/**
+ * Gemini 3 rejects (400) a request whose current turn has a model function
+ * call without the thought signature Gemini attached to it. Calls that
+ * came from another family have no signature; Google documents this value
+ * for function calls the API did not generate.
+ */
+const THOUGHT_SIGNATURE_SKIP = 'skip_thought_signature_validator';
+
+/** Gemini 1.x and 2.x don't validate thought signatures; later models do. */
+function signsFunctionCalls(model: string): boolean {
+  return !/(?:^|\/)gemini-[12](?:[.-]|$)/i.test(model);
+}
+
 function serializeMessageToGemini(
   msg: IRMessage,
   toolUseNames: Map<string, string>,
+  signFunctionCalls: boolean,
 ): GeminiContent | null {
   const parts: GeminiPart[] = [];
+  let signed = false;
   for (const block of msg.content) {
     const wire = serializeBlockToGemini(block, toolUseNames);
-    if (wire) parts.push(wire);
+    if (!wire) continue;
+    // The signature goes on the first function call of each model step.
+    if (signFunctionCalls && msg.role === 'assistant' && !signed && 'functionCall' in wire) {
+      wire.thoughtSignature = THOUGHT_SIGNATURE_SKIP;
+      signed = true;
+    }
+    parts.push(wire);
   }
   if (parts.length === 0) return null;
   return {
