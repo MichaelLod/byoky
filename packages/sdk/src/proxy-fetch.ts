@@ -1,12 +1,11 @@
-import type { SerializedFormDataEntry } from '@byoky/core';
 import { ByokyError, ByokyErrorCode } from '@byoky/core';
+import { encodeBody, fetchParts } from './body.js';
 import { resolveMessageTarget } from './detect.js';
 import { randomId } from './id.js';
 
-interface ReadBodyResult {
-  body: string;
-  bodyEncoding?: 'base64' | 'formdata';
-}
+// Statuses whose Response must have a null body; new Response() throws on
+// a stream body for them.
+const NULL_BODY_STATUSES = new Set([204, 205, 304]);
 
 export function createProxyFetch(
   providerId: string,
@@ -16,21 +15,11 @@ export function createProxyFetch(
     input: RequestInfo | URL,
     init?: RequestInit,
   ): Promise<Response> => {
-    const url =
-      typeof input === 'string'
-        ? input
-        : input instanceof URL
-          ? input.toString()
-          : input.url;
-
-    const signal = init?.signal ?? undefined;
+    const { url, method, headers, signal, body } = await fetchParts(input, init);
     if (signal?.aborted) throw abortReason(signal);
 
-    const method = init?.method ?? 'GET';
-    const headers = init?.headers
-      ? Object.fromEntries(new Headers(init.headers).entries())
-      : {};
-    const bodyResult = init?.body ? await readBody(init.body, headers['content-type']) : undefined;
+    const bodyResult = body ? await encodeBody(body, headers['content-type']) : undefined;
+    if (bodyResult?.contentType && !headers['content-type']) headers['content-type'] = bodyResult.contentType;
     if (signal?.aborted) throw abortReason(signal);
 
     const requestId = randomId();
@@ -56,19 +45,27 @@ export function createProxyFetch(
         if (data?.requestId !== requestId) return;
 
         switch (data.type) {
-          case 'BYOKY_PROXY_RESPONSE_META':
-            if (!resolved) {
+          case 'BYOKY_PROXY_RESPONSE_META': {
+            if (resolved) break;
+            let response: Response;
+            try {
+              response = new Response(NULL_BODY_STATUSES.has(data.status) ? null : readable, {
+                status: data.status,
+                statusText: data.statusText,
+                headers: new Headers(data.headers),
+              });
+            } catch {
               resolved = true;
-              clearTimeout(timeout);
-              resolve(
-                new Response(readable, {
-                  status: data.status,
-                  statusText: data.statusText,
-                  headers: new Headers(data.headers),
-                }),
-              );
+              cleanup();
+              cancel();
+              reject(new ByokyError(ByokyErrorCode.PROXY_ERROR, 'Invalid response from the wallet'));
+              break;
             }
+            resolved = true;
+            clearTimeout(timeout);
+            resolve(response);
             break;
+          }
 
           case 'BYOKY_PROXY_RESPONSE_CHUNK':
             writer.write(encoder.encode(data.chunk)).catch(() => {});
@@ -159,89 +156,4 @@ export function createProxyFetch(
 /** What fetch rejects with on abort: the signal's reason, an AbortError by default. */
 function abortReason(signal: AbortSignal): unknown {
   return signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
-}
-
-function isTextContentType(contentType?: string): boolean {
-  if (!contentType) return true;
-  const lower = contentType.toLowerCase();
-  return lower.startsWith('text/') ||
-    lower.includes('json') ||
-    lower.includes('xml') ||
-    lower.includes('urlencoded') ||
-    lower.includes('javascript');
-}
-
-function uint8ToBase64(bytes: Uint8Array): string {
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
-}
-
-async function serializeFormData(formData: FormData): Promise<string> {
-  const entries: SerializedFormDataEntry[] = [];
-  for (const [name, value] of formData.entries()) {
-    if (typeof value === 'string') {
-      entries.push({ name, value, type: 'text' });
-    } else {
-      const buffer = await value.arrayBuffer();
-      const base64 = uint8ToBase64(new Uint8Array(buffer));
-      entries.push({
-        name,
-        value: base64,
-        type: 'file',
-        filename: value instanceof File ? value.name : undefined,
-        contentType: value.type || 'application/octet-stream',
-      });
-    }
-  }
-  return JSON.stringify(entries);
-}
-
-async function readBody(body: BodyInit, contentType?: string): Promise<ReadBodyResult | undefined> {
-  if (typeof body === 'string') return { body };
-  if (body instanceof URLSearchParams) return { body: body.toString() };
-
-  if (body instanceof FormData) {
-    return { body: await serializeFormData(body), bodyEncoding: 'formdata' };
-  }
-
-  if (body instanceof ArrayBuffer) {
-    if (isTextContentType(contentType)) {
-      return { body: new TextDecoder().decode(body) };
-    }
-    return { body: uint8ToBase64(new Uint8Array(body)), bodyEncoding: 'base64' };
-  }
-
-  if (body instanceof Blob) {
-    if (isTextContentType(contentType)) {
-      return { body: await body.text() };
-    }
-    const buffer = await body.arrayBuffer();
-    return { body: uint8ToBase64(new Uint8Array(buffer)), bodyEncoding: 'base64' };
-  }
-
-  if (body instanceof ReadableStream) {
-    const reader = body.getReader();
-    const chunks: Uint8Array[] = [];
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-    }
-    const total = chunks.reduce((acc, c) => acc + c.length, 0);
-    const combined = new Uint8Array(total);
-    let offset = 0;
-    for (const chunk of chunks) {
-      combined.set(chunk, offset);
-      offset += chunk.length;
-    }
-    if (isTextContentType(contentType)) {
-      return { body: new TextDecoder().decode(combined) };
-    }
-    return { body: uint8ToBase64(combined), bodyEncoding: 'base64' };
-  }
-
-  return undefined;
 }

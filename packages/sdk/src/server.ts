@@ -5,6 +5,7 @@ import type {
   RelayRequest,
   WebSocketLike,
 } from '@byoky/core';
+import { encodeBody, fetchParts } from './body.js';
 import {
   ByokyError,
   ByokyErrorCode,
@@ -185,15 +186,11 @@ export class ByokyServer {
         return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
           if (!connected) throw ByokyError.relayDisconnected();
 
-          const url = typeof input === 'string' ? input
-            : input instanceof URL ? input.toString()
-            : (input as Request).url;
-
-          const method = init?.method ?? 'GET';
-          const headers = init?.headers
-            ? Object.fromEntries(new Headers(init.headers).entries())
-            : {};
-          const body = init?.body ? await readBody(init.body) : undefined;
+          const { url, method, headers, body: rawBody } = await fetchParts(input, init);
+          const encoded = rawBody ? await encodeBody(rawBody, headers['content-type']) : undefined;
+          if (encoded?.contentType && !headers['content-type']) headers['content-type'] = encoded.contentType;
+          // The socket may have closed while the body was read.
+          if (!connected) throw ByokyError.relayDisconnected();
 
           const requestId = `relay-${++requestCounter}-${Date.now()}`;
           const request: RelayRequest = {
@@ -203,7 +200,8 @@ export class ByokyServer {
             url,
             method,
             headers,
-            body,
+            body: encoded?.body,
+            bodyEncoding: encoded?.bodyEncoding,
           };
 
           // The browser drops oversized relay messages without a reply, so
@@ -322,15 +320,6 @@ function buildResponse(
     statusText: meta.statusText ?? '',
     headers,
   });
-}
-
-async function readBody(body: BodyInit): Promise<string | undefined> {
-  if (typeof body === 'string') return body;
-  if (body instanceof ArrayBuffer) return new TextDecoder().decode(body);
-  if (body instanceof Uint8Array) return new TextDecoder().decode(body);
-  if (typeof Blob !== 'undefined' && body instanceof Blob) return body.text();
-  if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) return body.toString();
-  return undefined;
 }
 
 export type { WebSocketLike, RelayMessage, AuthMethod } from '@byoky/core';

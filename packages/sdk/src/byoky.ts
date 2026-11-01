@@ -1,5 +1,6 @@
 import type { ConnectRequest, ConnectResponse, ModelInfo, SessionUsage } from '@byoky/core';
 import { ByokyError, ByokyErrorCode } from '@byoky/core';
+import { replayableArgs } from './body.js';
 import { fetchModelsList } from './list-models-fetch.js';
 import { isExtensionInstalled, getStoreUrl, resolveMessageTarget } from './detect.js';
 import { createProxyFetch } from './proxy-fetch.js';
@@ -229,19 +230,18 @@ export class Byoky {
       createFetch: (providerId: string) => {
         const proxyFetch = createProxyFetch(providerId, sessionKeyRef);
         return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-          // Pre-serialize ReadableStream body so retry is possible
-          const safeInit = init?.body instanceof ReadableStream
-            ? { ...init, body: await new Response(init.body).text() }
-            : init;
+          // The retry below sends the request again, so a stream body or a
+          // Request input's body is read into bytes once, up front.
+          const [safeInput, safeInit] = await replayableArgs(input, init);
 
-          const resp = await proxyFetch(input, safeInit);
+          const resp = await proxyFetch(safeInput, safeInit);
 
           if (resp.status === 401) {
             try {
               const body = await resp.clone().json();
               if (body?.error?.code === 'SESSION_EXPIRED') {
                 if (await attemptReconnect()) {
-                  return proxyFetch(input, safeInit);
+                  return proxyFetch(safeInput, safeInit);
                 }
               }
             } catch { /* not JSON or parse error — return original response */ }

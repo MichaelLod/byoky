@@ -268,6 +268,68 @@ describe('ByokyServer', () => {
     });
   });
 
+  describe('request bodies', () => {
+    async function relayedRequest(input: RequestInfo | URL, init?: RequestInit) {
+      const clientPromise = server.handleConnection(ws);
+      ws.simulateMessage({ type: 'relay:hello', sessionId: 'sess-1', providers: {} });
+      const client = await clientPromise;
+      void client.createFetch('openai')(input, init).catch(() => {});
+      await new Promise((r) => setTimeout(r, 10));
+      return JSON.parse(ws.sentMessages[ws.sentMessages.length - 1]);
+    }
+
+    const decode = (b64: string) => Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const wav = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0xff, 0xfe, 0x00, 0x80]);
+
+    it('relays a binary Uint8Array body as exact base64', async () => {
+      const req = await relayedRequest('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { 'content-type': 'audio/wav' },
+        body: wav,
+      });
+      expect(req.bodyEncoding).toBe('base64');
+      expect(decode(req.body)).toEqual(Array.from(wav));
+    });
+
+    it('relays a FormData body with its file name and type', async () => {
+      const form = new FormData();
+      form.append('model', 'whisper-1');
+      form.append('file', new Blob([wav], { type: 'audio/wav' }), 'speech.wav');
+
+      const req = await relayedRequest('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', body: form });
+      expect(req.bodyEncoding).toBe('formdata');
+      const entries = JSON.parse(req.body);
+      expect(entries[0]).toEqual({ name: 'model', value: 'whisper-1', type: 'text' });
+      expect(entries[1]).toMatchObject({ name: 'file', type: 'file', filename: 'speech.wav', contentType: 'audio/wav' });
+      expect(decode(entries[1].value)).toEqual(Array.from(wav));
+    });
+
+    it('relays a ReadableStream body', async () => {
+      const req = await relayedRequest('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('{"model":"gpt-4o"}')); c.close(); } }),
+        duplex: 'half',
+      } as RequestInit);
+      expect(req.body).toBe('{"model":"gpt-4o"}');
+      expect(req.bodyEncoding).toBeUndefined();
+    });
+
+    it('relays a bare Request input with its method, headers and body', async () => {
+      const req = await relayedRequest(new Request('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{"model":"gpt-4o"}',
+      }));
+      expect(req).toMatchObject({
+        method: 'POST',
+        url: 'https://api.openai.com/v1/chat/completions',
+        headers: { 'content-type': 'application/json' },
+        body: '{"model":"gpt-4o"}',
+      });
+    });
+  });
+
   describe('malformed messages from the client', () => {
     async function connectAndRequest() {
       const clientPromise = server.handleConnection(ws);

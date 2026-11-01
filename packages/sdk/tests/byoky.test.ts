@@ -443,6 +443,79 @@ describe('Byoky', () => {
     expect(disconnectCb).toHaveBeenCalledTimes(1);
   });
 
+  describe('createFetch bodies', () => {
+    async function connectSession(sessionKey: string) {
+      const connectPromise = new Byoky().connect();
+      await new Promise((r) => setTimeout(r, 10));
+      simulateResponse({
+        type: 'BYOKY_CONNECT_RESPONSE',
+        requestId: postedMessages[0].data.requestId,
+        payload: {
+          sessionKey,
+          proxyUrl: 'extension-proxy',
+          providers: { openai: { available: true, authMethod: 'api_key' as const } },
+        },
+      });
+      return connectPromise;
+    }
+
+    function proxyRequests() {
+      return postedMessages.filter((m) => m.data.type === 'BYOKY_PROXY_REQUEST');
+    }
+
+    it('sends a binary stream body as exact base64, not lossy text', async () => {
+      const session = await connectSession('byk_stream');
+      const bytes = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0xff, 0xfe, 0x00, 0x80]);
+
+      void session.createFetch('openai')('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { 'content-type': 'audio/wav' },
+        body: new ReadableStream({ start(c) { c.enqueue(bytes.slice(0, 5)); c.enqueue(bytes.slice(5)); c.close(); } }),
+        duplex: 'half',
+      } as RequestInit);
+      await new Promise((r) => setTimeout(r, 10));
+
+      const [req] = proxyRequests();
+      expect(req.data.bodyEncoding).toBe('base64');
+      expect(Array.from(atob(req.data.body as string), (c) => c.charCodeAt(0))).toEqual(Array.from(bytes));
+    });
+
+    it('resends a Request input with its body after reconnecting', async () => {
+      const session = await connectSession('byk_req_old');
+
+      const fetchPromise = session.createFetch('openai')(new Request('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{"model":"gpt-4o"}',
+      }));
+      await new Promise((r) => setTimeout(r, 10));
+
+      const [first] = proxyRequests();
+      expect(first.data).toMatchObject({ method: 'POST', body: '{"model":"gpt-4o"}', sessionKey: 'byk_req_old' });
+      first.port!.postMessage({
+        type: 'BYOKY_PROXY_RESPONSE_ERROR',
+        requestId: first.data.requestId,
+        status: 401,
+        error: { code: 'SESSION_EXPIRED', message: 'Invalid or expired session' },
+      });
+      await new Promise((r) => setTimeout(r, 10));
+
+      const reconnect = postedMessages.filter((m) => m.data.type === 'BYOKY_CONNECT_REQUEST')[1];
+      reconnect.port!.postMessage({
+        type: 'BYOKY_CONNECT_RESPONSE',
+        requestId: reconnect.data.requestId,
+        payload: { sessionKey: 'byk_req_new', proxyUrl: 'extension-proxy', providers: {} },
+      });
+      await new Promise((r) => setTimeout(r, 10));
+
+      const retry = proxyRequests()[1];
+      expect(retry.data).toMatchObject({ method: 'POST', body: '{"model":"gpt-4o"}', sessionKey: 'byk_req_new' });
+      retry.port!.postMessage({ type: 'BYOKY_PROXY_RESPONSE_META', requestId: retry.data.requestId, status: 200, statusText: 'OK', headers: {} });
+      retry.port!.postMessage({ type: 'BYOKY_PROXY_RESPONSE_DONE', requestId: retry.data.requestId });
+      expect((await fetchPromise).status).toBe(200);
+    });
+  });
+
   describe('session persistence', () => {
     it('persists session to sessionStorage on connect', async () => {
       const byoky = new Byoky();

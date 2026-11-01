@@ -9,6 +9,7 @@ import {
   parseRelayMessage,
   WS_READY_STATE,
 } from '@byoky/core';
+import { decodeBody } from './body.js';
 import { createProxyFetch } from './proxy-fetch.js';
 import { randomId } from './id.js';
 
@@ -119,7 +120,7 @@ export function createRelayClient(
   };
 
   async function handleRequest(req: RelayRequest) {
-    const { requestId, providerId, url, method, headers, body } = req;
+    const { requestId, providerId, url, method, headers } = req;
     const controller = new AbortController();
     inFlight.set(requestId, controller);
 
@@ -128,7 +129,7 @@ export function createRelayClient(
       const response = await proxyFetch(url, {
         method,
         headers,
-        body,
+        body: decodeBody(req.body, req.bodyEncoding),
         signal: controller.signal,
       });
 
