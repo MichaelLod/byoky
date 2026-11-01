@@ -3,9 +3,7 @@ import { useWalletStore } from '../store';
 import {
   PROVIDERS,
   DEFAULT_GROUP_ID,
-  resolveAutoCrossFamilyRoute,
-  resolveCrossFamilyRoute,
-  resolveSameFamilySwapRoute,
+  resolveRoute,
   type Credential,
   type CredentialMeta,
   type Group,
@@ -36,26 +34,19 @@ type Route =
   | { kind: 'none' };
 
 /**
- * Which key will serve `providerId` once approved. Mirrors createSession in
- * the background: group pin, then cross-family group route, same-family
- * swap, own key, and last the automatic cross-family fallback that serves an
- * app with any translatable key when it has no group and no key of its own.
+ * Which key will serve `providerId` once approved: core resolveRoute, the
+ * rule the background routes the session by (resolveSessionProviders),
+ * including its check that the key belongs to the provider the request is
+ * sent to.
  */
 function routeFor(providerId: string, group: Group | undefined, credentials: CredentialMeta[]): Route {
   // The resolvers read only id, providerId, createdAt and lastUsedAt.
-  const creds = credentials as unknown as Credential[];
-  const pinned = group && group.providerId === providerId && group.credentialId
-    ? creds.find((c) => c.id === group.credentialId)
-    : undefined;
-  if (pinned) return { kind: 'direct' };
-  const cross = resolveCrossFamilyRoute(group, providerId, creds);
-  if (cross) return { kind: 'translated', via: cross.cred.providerId };
-  const swap = resolveSameFamilySwapRoute(group, providerId, creds);
-  if (swap) return { kind: 'routed', via: swap.cred.providerId };
-  if (creds.some((c) => c.providerId === providerId)) return { kind: 'direct' };
-  const auto = !group?.providerId ? resolveAutoCrossFamilyRoute(providerId, creds) : undefined;
-  if (auto) return { kind: 'translated', via: auto.cred.providerId };
-  return { kind: 'none' };
+  const route = resolveRoute(providerId, group, credentials as unknown as Credential[]);
+  const destination = route?.translation?.dstProviderId ?? route?.swap?.dstProviderId ?? providerId;
+  if (!route || route.credential.providerId !== destination) return { kind: 'none' };
+  if (route.translation) return { kind: 'translated', via: route.translation.dstProviderId };
+  if (route.swap) return { kind: 'routed', via: route.swap.dstProviderId };
+  return { kind: 'direct' };
 }
 
 function routeLabel(route: Route): string {

@@ -167,6 +167,13 @@ export default defineBackground(() => {
      * if it is rejected or times out, so are they.
      */
     waiters: Array<{ message: ConnectMessage; sender: Runtime.MessageSender; resolve: (response: unknown) => void }>;
+    /**
+     * Set once the request is left for the user (not trusted, or the wallet
+     * is locked) and the wallet was shown for it. Until then it is still
+     * being checked against the trusted sites, and may be approved without
+     * a prompt.
+     */
+    askedUser?: boolean;
   };
   const _pendingMap = new Map<string, PendingEntry>();
   // Every change to the queue is broadcast, so an open popup or side panel
@@ -204,6 +211,11 @@ export default defineBackground(() => {
   // The origins the trust state last read lets connect without a prompt,
   // with their allowed providers: for decisions that can't wait for a
   // verified read (openSidePanelInGesture). Cleared with the wallet key.
+  // Kept in storage.session too and restored with the password, so a
+  // restarted worker knows it as soon as it knows the wallet is unlocked
+  // (re-reading the trust state would mean a PBKDF2 run on every wake).
+  // It only decides whether to open the side panel in the page's gesture;
+  // handleConnect still reads the verified state before trusting anyone.
   let silentTrustSnapshot = new Map<string, string[]>();
   // The highest trust-state epoch seen this browser session. A state older
   // than this was put back from a snapshot (see lib/trust-state.ts). Kept
@@ -286,7 +298,7 @@ export default defineBackground(() => {
   async function restoreSession() {
     if (!hasSessionStorage) return;
     try {
-      const data = await browser.storage.session.get(['_mp', '_lastActivity', '_unlockFailures', '_unlockLockedUntil', '_trustEpoch']);
+      const data = await browser.storage.session.get(['_mp', '_lastActivity', '_unlockFailures', '_unlockLockedUntil', '_trustEpoch', '_silentTrust']);
       if (typeof data._trustEpoch === 'number') trustEpochHighWater = Math.max(trustEpochHighWater, data._trustEpoch);
       if (typeof data._unlockFailures === 'number') unlockFailures = data._unlockFailures;
       if (typeof data._unlockLockedUntil === 'number') unlockLockedUntil = data._unlockLockedUntil;
@@ -295,11 +307,12 @@ export default defineBackground(() => {
         // was idle long enough, else keep counting from the last activity.
         const last = typeof data._lastActivity === 'number' ? data._lastActivity : 0;
         if (Date.now() - last >= IDLE_TIMEOUT_MS) {
-          await browser.storage.session.remove(['_mp', '_lastActivity', '_sessions', '_bridgeKey', '_bridgePort']);
+          await browser.storage.session.remove(['_mp', '_lastActivity', '_sessions', '_bridgeKey', '_bridgePort', '_silentTrust']);
           // An open side panel still shows the unlocked wallet; tell it.
           browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'sessionChanged' }).catch(() => {});
           return;
         }
+        silentTrustSnapshot = restoredSilentTrust(data._silentTrust);
         masterPassword = data._mp as string;
         lastActivityAt = last;
         scheduleIdleLock();
@@ -1262,7 +1275,11 @@ export default defineBackground(() => {
     // approved right now): wait for its outcome.
     const inFlight = pendingFor(origin);
     if (inFlight) {
-      openWalletUI(sender.tab?.id, panelOpened);
+      // The wallet is shown again (it may have been closed since) only for
+      // a request the user is being asked about. One still checked against
+      // the trusted sites shows it if it comes to asking, and one being
+      // approved needs nothing.
+      if (inFlight.askedUser && !settlingApprovals.has(inFlight)) openWalletUI(sender.tab?.id, panelOpened);
       return new Promise((resolve) => {
         inFlight.waiters.push({ message: { id: message.id, payload: request }, sender, resolve });
       });
@@ -1281,17 +1298,19 @@ export default defineBackground(() => {
     };
 
     return new Promise((resolve) => {
-      pendingApprovals.set(approval.id, {
+      const queued: PendingEntry = {
         approval,
         originalMessageId: message.id,
         resolve,
         tabId: sender.tab?.id,
         waiters: [],
-      });
+      };
+      pendingApprovals.set(approval.id, queued);
 
       // The wallet is shown only for a request that waits for the user, not
       // for one a trusted site gets approved without a prompt.
       const askUser = () => {
+        queued.askedUser = true;
         openWalletUI(sender.tab?.id, panelOpened);
         browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'newPendingApproval' }).catch(() => {});
       };
@@ -3593,7 +3612,7 @@ export default defineBackground(() => {
   function forgetWalletKeys() {
     walletMacKeyPromise = null;
     walletUpgradePromise = null;
-    silentTrustSnapshot = new Map();
+    setSilentTrustSnapshot(new Map());
   }
 
   // --- Trust state: trusted sites and revoked origins (lib/trust-state.ts) ---
@@ -3634,7 +3653,27 @@ export default defineBackground(() => {
     for (const site of state.sites) {
       if (silentTrustFor(state, site.origin)) snapshot.set(site.origin, site.allowedProviders ?? []);
     }
+    setSilentTrustSnapshot(snapshot);
+  }
+
+  function setSilentTrustSnapshot(snapshot: Map<string, string[]>) {
     silentTrustSnapshot = snapshot;
+    if (!hasSessionStorage) return;
+    const stored = snapshot.size > 0
+      ? browser.storage.session.set({ _silentTrust: [...snapshot] })
+      : browser.storage.session.remove('_silentTrust');
+    stored.catch(() => {});
+  }
+
+  /** The snapshot setSilentTrustSnapshot kept in storage.session. */
+  function restoredSilentTrust(stored: unknown): Map<string, string[]> {
+    const snapshot = new Map<string, string[]>();
+    if (!Array.isArray(stored)) return snapshot;
+    for (const entry of stored) {
+      if (!Array.isArray(entry) || typeof entry[0] !== 'string' || !Array.isArray(entry[1])) continue;
+      snapshot.set(entry[0], entry[1].filter((id: unknown): id is string => typeof id === 'string'));
+    }
+    return snapshot;
   }
 
   /** Change the trust state and re-sign it. Throws while locked. */
