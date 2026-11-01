@@ -17,6 +17,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|navigation|uiMode|density|fontScale|fontWeightAdjustment|layoutDirection|locale"
             android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.Byoky.Splash">
             <intent-filter>
