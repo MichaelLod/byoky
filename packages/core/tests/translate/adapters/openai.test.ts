@@ -45,6 +45,16 @@ describe('openaiAdapter.parseRequest', () => {
     expect(ir.messages).toEqual([{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }]);
   });
 
+  it('ignores stop: null and blank stop strings', () => {
+    const parse = (stop: unknown) =>
+      openaiAdapter.parseRequest(JSON.stringify({ messages: [{ role: 'user', content: 'hi' }], stop }));
+    expect(parse(null).stopSequences).toBeUndefined();
+    expect(parse('').stopSequences).toBeUndefined();
+    expect(parse([null, '  ']).stopSequences).toBeUndefined();
+    expect(parse([null, 'x']).stopSequences).toEqual(['x']);
+    expect(parse('END').stopSequences).toEqual(['END']);
+  });
+
   it('keeps system and developer messages in their original order', () => {
     const ir = openaiAdapter.parseRequest(
       JSON.stringify({

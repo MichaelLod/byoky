@@ -305,3 +305,24 @@ describe('cross-family dispatch — OpenAI developer role', () => {
     expect(out.messages[0]).toEqual({ role: 'system', content: 'Only answer in French.' });
   });
 });
+
+describe('cross-family dispatch — OpenAI stop: null', () => {
+  const body = JSON.stringify({ model: 'gpt-5.5', stop: null, messages: [{ role: 'user', content: 'Hello' }] });
+
+  it('openai → anthropic sends no stop_sequences', () => {
+    const out = JSON.parse(translateRequest(ctx('openai', 'anthropic'), body)) as Record<string, unknown>;
+    expect(out).not.toHaveProperty('stop_sequences');
+  });
+
+  it('openai → gemini sends no stopSequences', () => {
+    const out = JSON.parse(translateRequest(ctx('openai', 'gemini'), body)) as {
+      generationConfig?: Record<string, unknown>;
+    };
+    expect(out.generationConfig ?? {}).not.toHaveProperty('stopSequences');
+  });
+
+  it('openai → cohere sends no stop_sequences', () => {
+    const out = JSON.parse(translateRequest(ctx('openai', 'cohere'), body)) as Record<string, unknown>;
+    expect(out).not.toHaveProperty('stop_sequences');
+  });
+});

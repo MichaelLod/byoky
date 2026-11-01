@@ -67,7 +67,7 @@ interface OpenAIRequest {
   max_completion_tokens?: number;
   temperature?: number;
   top_p?: number;
-  stop?: string | string[];
+  stop?: string | string[] | null;
   stream?: boolean;
   stream_options?: { include_usage?: boolean };
   user?: string;
@@ -177,8 +177,12 @@ function parseRequest(body: string): IRRequest {
   }
   if (typeof parsed.temperature === 'number') ir.temperature = parsed.temperature;
   if (typeof parsed.top_p === 'number') ir.topP = parsed.top_p;
-  if (parsed.stop !== undefined) {
-    ir.stopSequences = Array.isArray(parsed.stop) ? parsed.stop : [parsed.stop];
+  if (parsed.stop != null) {
+    // Hand-built bodies send `stop: null` or `""`; neither is a stop sequence,
+    // and the other families reject null or blank entries.
+    const raw: unknown[] = Array.isArray(parsed.stop) ? parsed.stop : [parsed.stop];
+    const stops = raw.filter((s): s is string => typeof s === 'string' && s.trim().length > 0);
+    if (stops.length > 0) ir.stopSequences = stops;
   }
   if (typeof parsed.stream === 'boolean') ir.stream = parsed.stream;
   if (typeof parsed.user === 'string') ir.userId = parsed.user;
