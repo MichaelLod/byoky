@@ -89,6 +89,34 @@ describe('Byoky', () => {
     expect(typeof session.onDisconnect).toBe('function');
   });
 
+  it('lists every requested provider, marking the ones the wallet left out unavailable', async () => {
+    const connectPromise = new Byoky().connect({
+      providers: [{ id: 'anthropic', required: true }, { id: 'openai', required: false }],
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    // The mobile wallets list only the providers they hold a key for.
+    simulateResponse({
+      type: 'BYOKY_CONNECT_RESPONSE',
+      requestId: postedMessages[0].data.requestId,
+      payload: { sessionKey: 'byk_mobile', proxyUrl: 'extension-proxy', providers: { openai: { available: true, authMethod: 'api_key' } } },
+    });
+    const session = await connectPromise;
+    expect(session.providers.anthropic.available).toBe(false);
+    expect(session.providers.openai.available).toBe(true);
+
+    const updates: unknown[] = [];
+    session.onProvidersUpdated((p) => updates.push(p));
+    simulateNotification({
+      type: 'BYOKY_PROVIDERS_UPDATED',
+      payload: { sessionKey: 'byk_mobile', providers: { gemini: { available: true, authMethod: 'api_key' } } },
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(session.providers.anthropic).toEqual({ available: false, authMethod: 'api_key' });
+    expect(session.providers.openai).toEqual({ available: false, authMethod: 'api_key' });
+    expect(session.providers.gemini.available).toBe(true);
+    expect(updates).toEqual([session.providers]);
+  });
+
   it('rejects when user denies connection', async () => {
     const byoky = new Byoky();
 

@@ -193,6 +193,17 @@ export class Byoky {
 
   private buildSession(response: ConnectResponse): ByokySession {
     const sessionKeyRef = { current: response.sessionKey };
+    // Every provider the app asked for gets an entry, so
+    // session.providers[id].available reads false instead of throwing when
+    // a wallet (the mobile apps) lists only the providers it holds keys for.
+    const requested = this.lastConnectRequest?.providers ?? [];
+    const withRequested = (providers: ConnectResponse['providers']): ConnectResponse['providers'] => {
+      const out = { ...providers };
+      for (const { id } of requested) {
+        if (typeof id === 'string' && !Object.hasOwn(out, id)) out[id] = { available: false, authMethod: 'api_key' };
+      }
+      return out;
+    };
     const disconnectCallbacks = new Set<() => void>();
     const providersUpdatedCallbacks = new Set<(providers: ConnectResponse['providers']) => void>();
 
@@ -223,9 +234,9 @@ export class Byoky {
     const applyNewResponse = (newResponse: ConnectResponse) => {
       sessionKeyRef.current = newResponse.sessionKey;
       session.sessionKey = newResponse.sessionKey;
-      session.providers = newResponse.providers;
+      session.providers = withRequested(newResponse.providers);
       saveExtSession(newResponse);
-      for (const cb of providersUpdatedCallbacks) cb(newResponse.providers);
+      for (const cb of providersUpdatedCallbacks) cb(session.providers);
     };
 
     const attemptReconnect = (): Promise<boolean> => {
@@ -267,6 +278,7 @@ export class Byoky {
 
     const session: ByokySession = {
       ...response,
+      providers: withRequested(response.providers),
       createFetch: (providerId: string) => {
         const proxyFetch = createProxyFetch(providerId, sessionKeyRef, { timeout: this.requestTimeout });
         return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
@@ -330,9 +342,8 @@ export class Byoky {
         // no session key because every session in this frame is affected.
         onWalletReloaded();
       } else if (msg?.type === 'BYOKY_PROVIDERS_UPDATED' && msg.payload?.sessionKey === sessionKeyRef.current) {
-        const newProviders = msg.payload.providers as ConnectResponse['providers'];
-        session.providers = newProviders;
-        for (const cb of providersUpdatedCallbacks) cb(newProviders);
+        session.providers = withRequested(msg.payload.providers as ConnectResponse['providers']);
+        for (const cb of providersUpdatedCallbacks) cb(session.providers);
       }
     };
     {
