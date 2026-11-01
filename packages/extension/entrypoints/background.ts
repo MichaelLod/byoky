@@ -67,6 +67,14 @@ declare const chrome: {
     setPanelBehavior(opts: { openPanelOnActionClick: boolean }): void;
     open(opts: { tabId: number }): Promise<void>;
   };
+  action?: {
+    /** Chrome 127+. */
+    openPopup?(): Promise<void>;
+  };
+  runtime?: {
+    /** Chrome 116+. */
+    getContexts?(filter: { contextTypes?: string[] }): Promise<Array<{ contextType: string; documentUrl?: string }>>;
+  };
 };
 
 function base64ToUint8(base64: string): Uint8Array {
@@ -427,10 +435,12 @@ export default defineBackground(() => {
   // CLI tools (Hermes, Claude Code) can hit :19280 without waiting for the
   // user to re-run `byoky-bridge connect`.
   const sessionRestored = restoreSession();
+  // Read synchronously where awaiting isn't an option (openSidePanelInGesture).
+  let sessionsRestoredDone = false;
   const sessionsRestored = Promise.all([sessionRestored, restoreSessions()])
     // restoreSession drops the password when the wallet idled out while the
     // worker was stopped; the app sessions loaded alongside go with it.
-    .then(() => { if (!masterPassword) sessions.clear(); })
+    .then(() => { if (!masterPassword) sessions.clear(); sessionsRestoredDone = true; })
     .then(() => restoreAuthorizedBridgeSessionKey())
     .then(() => maybeAutoStartBridgeProxy());
 
@@ -562,13 +572,18 @@ export default defineBackground(() => {
       // broadcast to the side-panel's onMessage listener (which can interfere
       // in Chrome MV3 when multiple listeners exist).
       port.onMessage.addListener(async (raw: unknown) => {
-        await sessionsRestored;
         const message = raw as Record<string, unknown>;
         const sender = port.sender as Runtime.MessageSender;
+        // Before any await: Chrome opens the side panel only within the
+        // page's user gesture, which ends at this listener's first await.
+        const panelOpened = message.type === 'BYOKY_CONNECT_REQUEST'
+          ? openSidePanelInGesture(message.payload, sender)
+          : undefined;
+        await sessionsRestored;
         let response: unknown;
 
         if (message.type === 'BYOKY_CONNECT_REQUEST') {
-          response = await handleConnect(message as { id: string; payload: ConnectRequest }, sender);
+          response = await handleConnect(message as { id: string; payload: ConnectRequest }, sender, panelOpened);
         } else if (message.type === 'BYOKY_DISCONNECT') {
           const { sessionKey } = message.payload as { sessionKey: string };
           const session = sessions.get(sessionKey);
@@ -1109,9 +1124,15 @@ export default defineBackground(() => {
     };
   }
 
+  /**
+   * `panelOpened` is the side panel the port listener tried to open inside
+   * the page's gesture (Chrome), if it did; the wallet is shown some other
+   * way when that didn't work.
+   */
   async function handleConnect(
     message: { id: string; payload: ConnectRequest },
     sender: Runtime.MessageSender,
+    panelOpened?: Promise<boolean>,
   ): Promise<unknown> {
     const origin = resolveOrigin(sender);
     const refuse = (code: string, text: string) => ({
@@ -1174,7 +1195,7 @@ export default defineBackground(() => {
     // approved right now): wait for its outcome.
     const inFlight = pendingFor(origin);
     if (inFlight) {
-      openWalletUI(sender.tab?.id);
+      openWalletUI(sender.tab?.id, panelOpened);
       return new Promise((resolve) => {
         inFlight.waiters.push({ message: { id: message.id, payload: request }, sender, resolve });
       });
@@ -1192,7 +1213,7 @@ export default defineBackground(() => {
       timestamp: Date.now(),
     };
 
-    openWalletUI(sender.tab?.id);
+    openWalletUI(sender.tab?.id, panelOpened);
 
     return new Promise((resolve) => {
       pendingApprovals.set(approval.id, {
@@ -2695,14 +2716,59 @@ export default defineBackground(() => {
     }
   }
 
-  function openWalletUI(tabId?: number) {
-    // Chrome: open side panel
-    if (typeof chrome !== 'undefined' && chrome.sidePanel && tabId) {
-      chrome.sidePanel.open({ tabId }).catch(() => {});
-      return;
+  /**
+   * Chrome: open the side panel for a connect request, synchronously in the
+   * port listener, where the page's user gesture still counts. Skipped for
+   * a silent reconnect, and for an app whose session already covers the
+   * request (known once the sessions are restored). Resolves to whether
+   * the panel opened; undefined when it wasn't tried.
+   */
+  function openSidePanelInGesture(payload: unknown, sender: Runtime.MessageSender): Promise<boolean> | undefined {
+    const tabId = sender.tab?.id;
+    if (typeof chrome === 'undefined' || !chrome.sidePanel || !tabId) return undefined;
+    const request = payload && typeof payload === 'object' ? payload as ConnectRequest : undefined;
+    if (!request || request.reconnectOnly === true) return undefined;
+    const origin = resolveOrigin(sender);
+    if (origin === 'unknown') return undefined;
+    if (sessionsRestoredDone) {
+      const existing = findActiveSession(origin);
+      const providers = parseProviderRequirements(request.providers);
+      if (existing && providers && sessionCovers(existing, providers)) return undefined;
     }
+    return chrome.sidePanel.open({ tabId }).then(() => true, () => false);
+  }
 
-    // Firefox/Safari fallback: open popup as a window
+  /**
+   * Show the wallet for a request that needs the user. Chrome: the side
+   * panel (opened in the page's gesture if `panelOpened` says so; without
+   * a gesture Chrome refuses it), else the action popup, unless a wallet
+   * view is already open. Firefox and Safari, and Chrome's last resort: the
+   * popup in a window of its own.
+   */
+  function openWalletUI(tabId?: number, panelOpened?: Promise<boolean>) {
+    void (async () => {
+      if (typeof chrome !== 'undefined' && chrome.sidePanel && tabId) {
+        if (await panelOpened) return;
+        if (await chrome.sidePanel.open({ tabId }).then(() => true, () => false)) return;
+        if (await walletViewOpen()) return;
+        if (await chrome.action?.openPopup?.().then(() => true, () => false)) return;
+      }
+      openPopupWindow();
+    })().catch(() => {});
+  }
+
+  /** Whether a popup, side panel or popup window of the wallet is open (Chrome 116+). */
+  async function walletViewOpen(): Promise<boolean> {
+    try {
+      const contexts = await chrome.runtime?.getContexts?.({ contextTypes: ['SIDE_PANEL', 'POPUP', 'TAB'] });
+      const views = [browser.runtime.getURL('/popup.html'), browser.runtime.getURL('/sidepanel.html')];
+      return (contexts ?? []).some((c) => views.some((url) => c.documentUrl?.startsWith(url)));
+    } catch {
+      return false;
+    }
+  }
+
+  function openPopupWindow() {
     const popupUrl = browser.runtime.getURL('/popup.html');
     browser.windows.create({
       url: popupUrl,

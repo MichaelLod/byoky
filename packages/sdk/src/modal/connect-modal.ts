@@ -245,6 +245,7 @@ export class ConnectModal {
     this.addIcon(ICON_EXT);
     this.addHeading('Connecting...');
     this.addStatus('Waiting for wallet approval');
+    this.addText('If no Byoky window opened, click the Byoky icon in your browser toolbar to review the request.');
   }
 
   private renderNotInstalled() {
