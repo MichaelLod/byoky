@@ -760,6 +760,7 @@ function CodeBlock() {
             <span className="tk">const</span> <span className="tp">client</span> <span className="tn">=</span> <span className="tk">new</span> <span className="tt">Anthropic</span><span className="tn">(</span><span className="tn">{'{'}</span>{'\n'}
             {'  '}<span className="tp">apiKey</span><span className="tn">:</span> <span className="tp">session</span><span className="tn">.</span><span className="tp">sessionKey</span><span className="tn">,</span>{'\n'}
             {'  '}<span className="tp">fetch</span><span className="tn">:</span> <span className="tp">session</span><span className="tn">.</span><span className="tp">createFetch</span><span className="tn">(</span><span className="ts">&apos;anthropic&apos;</span><span className="tn">),</span>{'\n'}
+            {'  '}<span className="tp">dangerouslyAllowBrowser</span><span className="tn">:</span> <span className="tv">true</span><span className="tn">,</span> <span className="tc">{'// a session token, not a key'}</span>{'\n'}
             <span className="tn">{'}'});</span>
           </code>
         </pre>

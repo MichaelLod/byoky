@@ -37,10 +37,11 @@ const session = await byoky.connect({
 const client = new Anthropic({
   apiKey: session.sessionKey,
   fetch: session.createFetch('anthropic'),
+  dangerouslyAllowBrowser: true, // safe with Byoky: apiKey is a session token, not a key
 });
 
 const msg = await client.messages.create({
-  model: 'claude-sonnet-4-20250514',
+  model: 'claude-sonnet-4-6',
   max_tokens: 1024,
   messages: [{ role: 'user', content: 'Hello!' }],
 });
@@ -69,6 +70,7 @@ Frontend opens \`session.createRelay('wss://your-app.com/ws/relay')\` against a 
 # Rules
 
 - Use native provider SDKs (Anthropic, OpenAI, Google GenAI, etc.). Pass \`session.createFetch(id)\` as \`fetch\` and \`session.sessionKey\` as \`apiKey\`.
+- In browser code, also pass \`dangerouslyAllowBrowser: true\` to the Anthropic and OpenAI SDKs, or their constructors throw. It is safe here: \`apiKey\` is a Byoky session token, and the real key stays in the wallet.
 - Never collect or prompt the user for an API key — Byoky replaces that entirely.
 - Users install one of: Chrome/Firefox extension, the iOS app (Safari extension or its in-wallet browser), or the Android app (in-wallet browser). Each wallet serves apps on its own device; there is no cross-device pairing. The SDK's \`modal: true\` detects the wallet and, when none is found, shows install links plus a hint to open the page in the Byoky app's built-in browser on phones.
 - CLI tools and desktop apps don't use the SDK — they send plain HTTP to \`@byoky/bridge\` on localhost, which forwards to the extension.
@@ -236,8 +238,9 @@ function Overview() {
                                           Keys stay here. Always.`}</Code>
 
       <p>
-        Two lines changed. Full API compatibility. Streaming, file uploads, and vision all work.
-        Sessions auto-reconnect if the extension restarts.
+        Pass the session&apos;s <code>fetch</code> and key to the provider SDK you already use; the
+        rest of your code stays the same. Full API compatibility. Streaming, file uploads, and
+        vision all work. Sessions auto-reconnect if the extension restarts.
       </p>
 
       <p>
@@ -383,10 +386,11 @@ const session = await byoky.connect({
 const client = new Anthropic({
   apiKey: session.sessionKey,
   fetch: session.createFetch('anthropic'),
+  dangerouslyAllowBrowser: true, // safe with Byoky: apiKey is a session token, not a key
 });
 
 const message = await client.messages.create({
-  model: 'claude-sonnet-4-20250514',
+  model: 'claude-sonnet-4-6',
   max_tokens: 1024,
   messages: [{ role: 'user', content: 'Hello!' }],
 });`}</Code>
@@ -394,6 +398,16 @@ const message = await client.messages.create({
       <p>
         That&apos;s it. Full API compatibility &mdash; streaming, file uploads, and vision all work
         unchanged.
+      </p>
+
+      <h3>Why dangerouslyAllowBrowser?</h3>
+      <p>
+        The official Anthropic and OpenAI SDKs refuse to run in a browser unless you pass{' '}
+        <code>dangerouslyAllowBrowser: true</code>; without it their constructors throw. The guard
+        exists because a real API key in page code can be read by anyone who opens the page. With
+        Byoky, <code>apiKey</code> is <code>session.sessionKey</code>, a per-app session token that
+        only works through the wallet the user approved. The real key never reaches the page, so the
+        flag is safe here.
       </p>
     </Section>
   );
@@ -585,12 +599,14 @@ function SessionApi() {
 const client = new Anthropic({
   apiKey: session.sessionKey,
   fetch: session.createFetch('anthropic'),
+  dangerouslyAllowBrowser: true,
 });
 
 // OpenAI
 const client = new OpenAI({
   apiKey: session.sessionKey,
   fetch: session.createFetch('openai'),
+  dangerouslyAllowBrowser: true,
 });
 
 // Or raw fetch
@@ -598,7 +614,7 @@ const fetch = session.createFetch('anthropic');
 const res = await fetch('https://api.anthropic.com/v1/messages', {
   method: 'POST',
   headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' },
-  body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1024, messages: [...] }),
+  body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1024, messages: [...] }),
 });`}</Code>
 
       <h3>session.listModels(providerId)</h3>
@@ -803,10 +819,11 @@ function Streaming() {
 const client = new Anthropic({
   apiKey: session.sessionKey,
   fetch: session.createFetch('anthropic'),
+  dangerouslyAllowBrowser: true,
 });
 
 const stream = client.messages.stream({
-  model: 'claude-sonnet-4-20250514',
+  model: 'claude-sonnet-4-6',
   max_tokens: 1024,
   messages: [{ role: 'user', content: 'Write a haiku.' }],
 });
@@ -831,7 +848,7 @@ const res = await fetch('https://api.anthropic.com/v1/messages', {
     'anthropic-version': '2023-06-01',
   },
   body: JSON.stringify({
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-6',
     max_tokens: 1024,
     stream: true,
     messages: [{ role: 'user', content: 'Hello!' }],
@@ -899,7 +916,7 @@ for (let round = 0; round < 5; round++) {
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 1024,
       tools,
       messages,
@@ -1026,7 +1043,7 @@ const contact = JSON.parse(data.choices[0].message.content);`}</Code>
     'anthropic-version': '2023-06-01',
   },
   body: JSON.stringify({
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-4-6',
     max_tokens: 1024,
     messages: [{
       role: 'user',
@@ -1060,7 +1077,7 @@ function Vision() {
 
       <h3>Anthropic</h3>
       <Code lang="typescript">{`body: JSON.stringify({
-  model: 'claude-sonnet-4-20250514',
+  model: 'claude-sonnet-4-6',
   max_tokens: 1024,
   messages: [{
     role: 'user',
@@ -1373,7 +1390,7 @@ wss.on('connection', async (ws) => {
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 1024,
       messages: [{ role: 'user', content: 'Hello!' }],
     }),

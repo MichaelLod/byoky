@@ -25,14 +25,17 @@ import Anthropic from '@anthropic-ai/sdk';
 const client = new Anthropic({
   apiKey: session.sessionKey,
   fetch: session.createFetch('anthropic'),
+  dangerouslyAllowBrowser: true, // safe with Byoky: apiKey is a session token, not a key
 });
 
 const msg = await client.messages.create({
-  model: 'claude-sonnet-4-20250514',
+  model: 'claude-sonnet-4-6',
   max_tokens: 1024,
   messages: [{ role: 'user', content: 'Hello!' }],
 });
 ```
+
+The Anthropic and OpenAI SDKs refuse to run in a browser unless you pass `dangerouslyAllowBrowser: true`, to keep real API keys out of page code. With Byoky the `apiKey` is a per-app session token and the real key stays in the wallet, so the flag is safe.
 
 ## Connection Modes
 
