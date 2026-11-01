@@ -1,4 +1,5 @@
 import JavaScriptCore
+import WebKit
 import XCTest
 @testable import Byoky
 
@@ -36,10 +37,24 @@ final class BridgeSecurityTests: XCTestCase {
 
     // MARK: - Navigation
 
+    private func decision(
+        _ string: String,
+        main: Bool = true,
+        targetFrame: Bool = true,
+        type: WKNavigationType = .other
+    ) -> AppNavigationDecision {
+        AppWebView.navigationDecision(
+            for: URL(string: string)!,
+            isMainFrame: main,
+            hasTargetFrame: targetFrame,
+            navigationType: type,
+            allowedOrigin: "https://chat.example.com"
+        )
+    }
+
     func testNavigationIsLimitedToTheAppsOrigin() {
-        let origin = "https://chat.example.com"
         func allows(_ string: String, main: Bool = true) -> Bool {
-            AppWebView.allowsNavigation(to: URL(string: string)!, isMainFrame: main, allowedOrigin: origin)
+            decision(string, main: main) == .allow
         }
         XCTAssertTrue(allows("https://chat.example.com/c/1"))
         XCTAssertTrue(allows("https://chat.example.com:443/"))
@@ -51,8 +66,183 @@ final class BridgeSecurityTests: XCTestCase {
         XCTAssertFalse(allows("blob:https://chat.example.com/uuid"))
         XCTAssertTrue(allows("about:srcdoc", main: false))
         XCTAssertTrue(allows("blob:https://chat.example.com/uuid", main: false))
-        XCTAssertFalse(allows("https://evil.example.com/", main: false))
+        // Embeds (payments, captchas, video) from other https sites load in
+        // subframes, which never get the bridge.
+        XCTAssertTrue(allows("https://js.stripe.com/v3/", main: false))
+        XCTAssertFalse(NativeBridgeHandler.isTrustedFrame(isMainFrame: false, scheme: "https", host: "js.stripe.com", port: 0, appOrigin: "https://chat.example.com"))
+        XCTAssertFalse(allows("http://insecure.example.com/", main: false))
         XCTAssertFalse(allows("javascript:alert(1)", main: false))
+        XCTAssertFalse(allows("file:///etc/passwd", main: false))
+    }
+
+    /// A tapped link to another site opens in the system browser; a page
+    /// that sends itself elsewhere (redirect, script) stops with a notice.
+    func testOffOriginLinksOpenExternallyAndRedirectsAreReported() {
+        let docs = URL(string: "https://docs.example.org/keys")!
+        XCTAssertEqual(decision(docs.absoluteString, type: .linkActivated), .openExternally(docs))
+        XCTAssertEqual(decision("http://example.org/", type: .linkActivated), .openExternally(URL(string: "http://example.org/")!))
+        // example.com → www.example.com, an OAuth hop, location.href = ...
+        let www = URL(string: "https://www.chat.example.com/")!
+        XCTAssertEqual(decision(www.absoluteString, type: .other), .blockedRedirect(www))
+        XCTAssertEqual(decision(www.absoluteString, type: .formSubmitted), .blockedRedirect(www))
+        // Only http(s) leaves the app; every other scheme is dropped.
+        XCTAssertEqual(decision("javascript:alert(1)", type: .linkActivated), .cancel)
+        XCTAssertEqual(decision("file:///etc/passwd", type: .linkActivated), .cancel)
+        XCTAssertEqual(decision("data:text/html,hi", type: .linkActivated), .cancel)
+        XCTAssertEqual(decision("byoky-evil://x", type: .other), .cancel)
+    }
+
+    /// target=_blank and window.open: the app's own pages load in place,
+    /// other sites open in the system browser.
+    func testNewWindowsLoadInPlaceOrOpenExternally() {
+        XCTAssertEqual(decision("https://chat.example.com/help", targetFrame: false, type: .linkActivated), .loadInPlace)
+        let other = URL(string: "https://console.example.org/")!
+        XCTAssertEqual(decision(other.absoluteString, targetFrame: false, type: .linkActivated), .openExternally(other))
+        XCTAssertEqual(decision(other.absoluteString, targetFrame: false, type: .other), .openExternally(other))
+        XCTAssertEqual(decision("about:blank", targetFrame: false), .cancel)
+        XCTAssertEqual(decision("javascript:void(0)", targetFrame: false, type: .linkActivated), .cancel)
+    }
+
+    func testTheSameExternalLinkOpensOnceWithinTwoSeconds() {
+        var throttle = ExternalLinkThrottle()
+        let a = URL(string: "https://a.example/")!
+        let b = URL(string: "https://b.example/")!
+        let t0 = Date(timeIntervalSince1970: 1_000)
+        XCTAssertTrue(throttle.shouldOpen(a, at: t0))
+        XCTAssertFalse(throttle.shouldOpen(a, at: t0.addingTimeInterval(1.9)))
+        XCTAssertTrue(throttle.shouldOpen(b, at: t0.addingTimeInterval(2.0)))
+        XCTAssertTrue(throttle.shouldOpen(a, at: t0.addingTimeInterval(2.1)))
+        XCTAssertTrue(throttle.shouldOpen(a, at: t0.addingTimeInterval(4.2)))
+    }
+
+    // MARK: - Loading
+
+    func testOnlyRealLoadFailuresAreShown() {
+        func ignored(_ domain: String, _ code: Int) -> Bool {
+            AppBrowserState.isIgnorableLoadError(NSError(domain: domain, code: code))
+        }
+        XCTAssertTrue(ignored(NSURLErrorDomain, NSURLErrorCancelled))
+        XCTAssertTrue(ignored("WebKitErrorDomain", 102))
+        XCTAssertTrue(ignored("WebKitErrorDomain", 204))
+        XCTAssertFalse(ignored(NSURLErrorDomain, NSURLErrorCannotFindHost))
+        XCTAssertFalse(ignored(NSURLErrorDomain, NSURLErrorNotConnectedToInternet))
+        XCTAssertFalse(ignored(NSURLErrorDomain, NSURLErrorTimedOut))
+        XCTAssertFalse(ignored(NSURLErrorDomain, NSURLErrorServerCertificateUntrusted))
+        XCTAssertFalse(ignored("WebKitErrorDomain", 101))
+
+        let failing = URL(string: "https://chat.example.com/c/2")!
+        let error = NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut, userInfo: [NSURLErrorFailingURLErrorKey: failing])
+        XCTAssertEqual(AppBrowserState.failingURL(of: error), failing)
+    }
+
+    /// A failed load loads the reported address again on Reload, not the
+    /// page that was showing before it.
+    func testReloadRetriesTheFailedAddress() async throws {
+        let browser = AppBrowserState()
+        let start = URL(string: "https://reload-\(UUID().uuidString.prefix(8).lowercased()).invalid/")!
+        let coordinator = AppWebView.Coordinator(allowedOrigin: InstalledApp.origin(of: start), browser: browser)
+        let webView = AppWebView.makeWebView(url: start, allowedOrigin: InstalledApp.origin(of: start), wallet: WalletStore.shared, coordinator: coordinator)
+        defer { AppWebView.dismantleUIView(webView, coordinator: coordinator) }
+
+        // The host doesn't resolve: the failure is shown, with the address.
+        try await waitUntil { browser.notice != nil }
+        guard case .loadFailed(let host, _) = browser.notice else {
+            return XCTFail("expected a load failure, got \(String(describing: browser.notice))")
+        }
+        XCTAssertEqual(host, start.host)
+        XCTAssertEqual(browser.failedURL?.host, start.host)
+
+        browser.reload()
+        XCTAssertNil(browser.notice)
+        XCTAssertNil(browser.failedURL)
+        try await waitUntil { browser.notice != nil }
+    }
+
+    // MARK: - JavaScript dialogs
+
+    func testTheAppWebViewAnswersJavaScriptDialogs() async throws {
+        let browser = AppBrowserState()
+        let origin = "https://dialogs.example"
+        let coordinator = AppWebView.Coordinator(allowedOrigin: origin, browser: browser)
+        let webView = AppWebView.makeWebView(url: URL(string: "about:blank")!, allowedOrigin: origin, wallet: WalletStore.shared, coordinator: coordinator)
+        defer { AppWebView.dismantleUIView(webView, coordinator: coordinator) }
+        XCTAssertTrue(webView.uiDelegate === coordinator)
+        XCTAssertTrue(webView.navigationDelegate === coordinator)
+        XCTAssertTrue(webView.allowsBackForwardNavigationGestures)
+
+        var shown: [JSDialog] = []
+        coordinator.presentDialog = { dialog, _, reply in
+            shown.append(dialog)
+            switch dialog.kind {
+            case .alert: reply(true, nil)
+            case .confirm: reply(dialog.message == "Delete this chat?", nil)
+            case .prompt: reply(true, "Renamed")
+            }
+        }
+        webView.loadHTMLString("<html><body>dialogs</body></html>", baseURL: URL(string: "\(origin)/")!)
+        try await waitUntil { browser.hasCommittedPage && !webView.isLoading }
+
+        let confirmed = try await webView.evaluateJavaScript("confirm('Delete this chat?')") as? Bool
+        XCTAssertEqual(confirmed, true)
+        let declined = try await webView.evaluateJavaScript("confirm('Something else?')") as? Bool
+        XCTAssertEqual(declined, false)
+        let name = try await webView.evaluateJavaScript("prompt('Name?', 'Old')") as? String
+        XCTAssertEqual(name, "Renamed")
+        _ = try await webView.evaluateJavaScript("alert('Saved'); 1")
+
+        XCTAssertEqual(shown, [
+            JSDialog(kind: .confirm, message: "Delete this chat?", host: "dialogs.example"),
+            JSDialog(kind: .confirm, message: "Something else?", host: "dialogs.example"),
+            JSDialog(kind: .prompt(defaultText: "Old"), message: "Name?", host: "dialogs.example"),
+            JSDialog(kind: .alert, message: "Saved", host: "dialogs.example"),
+        ])
+    }
+
+    func testADialogLeftUnansweredIsCancelledOnce() {
+        var answers: [Bool] = []
+        var reply: DialogReply<Bool>? = DialogReply(fallback: false) { answers.append($0) }
+        reply?.send(true)
+        reply?.send(false)
+        reply = nil
+        XCTAssertEqual(answers, [true])
+
+        reply = DialogReply(fallback: false) { answers.append($0) }
+        reply = nil
+        XCTAssertEqual(answers, [true, false])
+    }
+
+    // MARK: - Page canvas
+
+    /// Pages without a background of their own get a white canvas once they
+    /// commit, not the wallet's void behind black text.
+    func testCommittedPagesGetAnOpaqueWhiteCanvas() async throws {
+        let browser = AppBrowserState()
+        let origin = "https://canvas.example"
+        let coordinator = AppWebView.Coordinator(allowedOrigin: origin, browser: browser)
+        let webView = AppWebView.makeWebView(url: URL(string: "about:blank")!, allowedOrigin: origin, wallet: WalletStore.shared, coordinator: coordinator)
+        defer { AppWebView.dismantleUIView(webView, coordinator: coordinator) }
+        XCTAssertFalse(webView.isOpaque)
+        XCTAssertEqual(webView.overrideUserInterfaceStyle, .light)
+
+        webView.loadHTMLString("<h2>No background</h2>", baseURL: URL(string: "\(origin)/")!)
+        try await waitUntil { browser.hasCommittedPage }
+        XCTAssertTrue(webView.isOpaque)
+        XCTAssertTrue(isWhite(webView.backgroundColor))
+        XCTAssertTrue(isWhite(webView.scrollView.backgroundColor))
+    }
+
+    private func isWhite(_ color: UIColor?) -> Bool {
+        var white: CGFloat = 0, alpha: CGFloat = 0
+        guard let color, color.getWhite(&white, alpha: &alpha) else { return false }
+        return white > 0.99 && alpha > 0.99
+    }
+
+    private func waitUntil(timeout: TimeInterval = 10, _ condition: () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() {
+            guard Date() < deadline else { return XCTFail("timed out") }
+            try await Task.sleep(for: .milliseconds(50))
+        }
     }
 
     // MARK: - Reply delivery
