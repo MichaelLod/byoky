@@ -9,8 +9,6 @@ export default defineConfig({
   // enough headroom that a slow cold-start doesn't flake.
   timeout: process.env.BYOKY_E2E_LIVE === '1' ? 180_000 : 60_000,
   expect: { timeout: 15_000 },
-  forbidOnly: !!process.env.CI,
-  reporter: 'list',
   use: {
     // The wallet is a persistent context launched in fixtures.ts, which
     // decides headless (default) vs headed (BYOKY_E2E_HEADED=1).
