@@ -2,8 +2,9 @@ package com.byoky.app.ui.screens
 
 import android.os.SystemClock
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Visibility
@@ -12,6 +13,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -31,10 +33,7 @@ import com.byoky.app.ui.components.RetroDialog
 import com.byoky.app.ui.components.RetroTextField
 import com.byoky.app.ui.components.StatusLine
 import com.byoky.app.ui.components.StatusPill
-import com.byoky.app.ui.components.dotGrid
 import com.byoky.app.ui.components.rememberRavenGaze
-import com.byoky.app.ui.components.scanlines
-import com.byoky.app.ui.components.watchedBy
 import com.byoky.app.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -84,35 +83,47 @@ fun UnlockScreen(wallet: WalletStore) {
 
     val gaze = rememberRavenGaze()
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Void)
-            .dotGrid()
-            .watchedBy(gaze)
-            .scanlines()
-            .systemBarsPadding()
-            .padding(horizontal = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            BrandMark()
-            Spacer(Modifier.weight(1f))
-            StatusPill("Locked", color = Dim)
+    fun unlock() {
+        if (password.isEmpty() || lockoutRemaining > 0 || unlocking) return
+        unlocking = true
+        scope.launch {
+            // Key derivation runs on Dispatchers.Default inside unlock().
+            when (val result = wallet.unlock(password)) {
+                is UnlockResult.Success -> { /* navigates automatically */ }
+                is UnlockResult.WrongPassword -> {
+                    error = "Wrong password"
+                    password = ""
+                    shakeOffset = 1f
+                }
+                is UnlockResult.LockedOut -> {
+                    error = "Too many attempts. Try again in ${result.secondsRemaining}s"
+                    password = ""
+                }
+            }
+            unlocking = false
         }
+    }
 
-        Spacer(Modifier.weight(1f))
-
+    LockScreenFrame(
+        gaze = gaze,
+        header = {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                BrandMark()
+                Spacer(Modifier.weight(1f))
+                StatusPill("Locked", color = Dim)
+            }
+        },
+    ) { compact ->
         // Muninn sleeps while the wallet is locked and wakes up while the
         // password is checked; the wallet screen finishes with a nod.
         Muninn(
             if (unlocking) RavenMood.WATCHING else RavenMood.ASLEEP,
-            modifier = Modifier.size(210.dp),
+            modifier = Modifier.size(if (compact) 96.dp else 210.dp),
             gaze = gaze,
         )
 
@@ -164,6 +175,9 @@ fun UnlockScreen(wallet: WalletStore) {
             visualTransformation = if (showPassword) VisualTransformation.None else PasswordVisualTransformation(),
             enabled = lockoutRemaining <= 0 && !unlocking,
             isError = error != null || lockoutRemaining > 0,
+            // The keyboard's action key unlocks, as Enter does in the extension.
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+            keyboardActions = KeyboardActions(onGo = { unlock() }),
             modifier = Modifier
                 .fillMaxWidth()
                 .offset { IntOffset(shakeAnim.value.dp.roundToPx(), 0) },
@@ -187,26 +201,7 @@ fun UnlockScreen(wallet: WalletStore) {
 
         PrimaryButton(
             if (unlocking) "Unlocking…" else "Unlock",
-            onClick = {
-                if (unlocking) return@PrimaryButton
-                unlocking = true
-                scope.launch {
-                    // Key derivation runs on Dispatchers.Default inside unlock().
-                    when (val result = wallet.unlock(password)) {
-                        is UnlockResult.Success -> { /* navigates automatically */ }
-                        is UnlockResult.WrongPassword -> {
-                            error = "Wrong password"
-                            password = ""
-                            shakeOffset = 1f
-                        }
-                        is UnlockResult.LockedOut -> {
-                            error = "Too many attempts. Try again in ${result.secondsRemaining}s"
-                            password = ""
-                        }
-                    }
-                    unlocking = false
-                }
-            },
+            onClick = { unlock() },
             enabled = password.isNotEmpty() && lockoutRemaining <= 0 && !unlocking,
             busy = unlocking,
             modifier = Modifier
@@ -217,18 +212,6 @@ fun UnlockScreen(wallet: WalletStore) {
         Spacer(Modifier.height(4.dp))
 
         BracketAction("Forgot password?", onClick = { showResetDialog = true }, color = Dim)
-
-        Spacer(Modifier.weight(1f))
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text("Keys stay on this device", style = MonoStyle.copy(fontSize = 11.sp), color = Dim)
-            Text("AES-256-GCM", style = MonoStyle.copy(fontSize = 11.sp), color = Dim)
-        }
     }
 
     if (showResetDialog) {

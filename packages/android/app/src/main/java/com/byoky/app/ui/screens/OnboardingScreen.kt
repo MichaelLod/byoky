@@ -1,11 +1,12 @@
 package com.byoky.app.ui.screens
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -21,10 +22,7 @@ import com.byoky.app.ui.components.PrimaryButton
 import com.byoky.app.ui.components.RavenMood
 import com.byoky.app.ui.components.RetroTextField
 import com.byoky.app.ui.components.StatusLine
-import com.byoky.app.ui.components.dotGrid
 import com.byoky.app.ui.components.rememberRavenGaze
-import com.byoky.app.ui.components.scanlines
-import com.byoky.app.ui.components.watchedBy
 import com.byoky.app.ui.theme.*
 import kotlinx.coroutines.launch
 
@@ -48,23 +46,27 @@ fun OnboardingScreen(wallet: WalletStore) {
     val scope = rememberCoroutineScope()
     val gaze = rememberRavenGaze()
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Void)
-            .dotGrid()
-            .watchedBy(gaze)
-            .scanlines()
-            .systemBarsPadding()
-            .padding(horizontal = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        BrandMark(modifier = Modifier.align(Alignment.Start).padding(top = 16.dp))
+    fun createWallet() {
+        if (creating || !canCreateWallet(password, confirmPassword)) return
+        creating = true
+        error = null
+        scope.launch {
+            // Hashing runs on Dispatchers.Default inside createPassword().
+            try {
+                wallet.createPassword(password)
+            } catch (e: Exception) {
+                error = e.message
+            }
+            creating = false
+        }
+    }
 
-        Spacer(Modifier.weight(1f))
-
+    LockScreenFrame(
+        gaze = gaze,
+        header = { BrandMark(modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) },
+    ) { compact ->
         if (step == OnboardingStep.WELCOME) {
-            Muninn(RavenMood.WATCHING, modifier = Modifier.size(220.dp), gaze = gaze)
+            Muninn(RavenMood.WATCHING, modifier = Modifier.size(if (compact) 96.dp else 220.dp), gaze = gaze)
 
             StatusLine("New wallet")
 
@@ -95,7 +97,7 @@ fun OnboardingScreen(wallet: WalletStore) {
 
         } else {
             // Password step
-            Muninn(RavenMood.WATCHING, modifier = Modifier.size(120.dp), gaze = gaze)
+            Muninn(RavenMood.WATCHING, modifier = Modifier.size(if (compact) 72.dp else 120.dp), gaze = gaze)
 
             StatusLine("New wallet")
 
@@ -128,6 +130,8 @@ fun OnboardingScreen(wallet: WalletStore) {
                 mono = true,
                 secret = true,
                 visualTransformation = PasswordVisualTransformation(),
+                // Next moves on to the confirm field.
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                 modifier = Modifier.fillMaxWidth(),
             )
 
@@ -149,6 +153,8 @@ fun OnboardingScreen(wallet: WalletStore) {
                 secret = true,
                 isError = mismatch,
                 visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                keyboardActions = KeyboardActions(onGo = { createWallet() }),
                 modifier = Modifier.fillMaxWidth(),
             )
 
@@ -169,25 +175,10 @@ fun OnboardingScreen(wallet: WalletStore) {
 
             Spacer(Modifier.height(24.dp))
 
-            val isValid = canCreateWallet(password, confirmPassword)
-
             PrimaryButton(
                 if (creating) "Creating wallet…" else "Create Wallet",
-                onClick = {
-                    if (creating) return@PrimaryButton
-                    creating = true
-                    error = null
-                    scope.launch {
-                        // Hashing runs on Dispatchers.Default inside createPassword().
-                        try {
-                            wallet.createPassword(password)
-                        } catch (e: Exception) {
-                            error = e.message
-                        }
-                        creating = false
-                    }
-                },
-                enabled = isValid && !creating,
+                onClick = { createWallet() },
+                enabled = canCreateWallet(password, confirmPassword) && !creating,
                 busy = creating,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -197,18 +188,6 @@ fun OnboardingScreen(wallet: WalletStore) {
             Spacer(Modifier.height(8.dp))
 
             BracketAction("Back", onClick = { step = OnboardingStep.WELCOME }, color = Fog)
-        }
-
-        Spacer(Modifier.weight(1f))
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text("Keys stay on this device", style = MonoStyle.copy(fontSize = 11.sp), color = Dim)
-            Text("AES-256-GCM", style = MonoStyle.copy(fontSize = 11.sp), color = Dim)
         }
     }
 }
