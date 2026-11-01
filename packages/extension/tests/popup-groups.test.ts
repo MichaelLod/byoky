@@ -25,7 +25,7 @@ beforeEach(() => {
   }];
   bg.state.groups = [
     { id: 'default', name: 'Default', providerId: '', createdAt: 1 },
-    { id: 'g1', name: 'Cheap', providerId: 'openai', model: 'gpt-5.4-nano', createdAt: 2 },
+    { id: 'g1', name: 'Cheap', providerId: 'cohere', model: 'command-a-03-2025', createdAt: 2 },
   ];
   bg.handlers.setAppGroup = (p: { origin: string; groupId: string }) => {
     bg.state.appGroups = { ...bg.state.appGroups, [p.origin]: p.groupId };

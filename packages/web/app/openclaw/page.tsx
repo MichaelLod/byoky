@@ -85,7 +85,7 @@ export default function OpenClawTutorial() {
         >
           <Code>{`openclaw plugins install @byoky/openclaw-plugin`}</Code>
           <p className="oc-note">
-            The plugin registers all 13 Byoky providers with OpenClaw and
+            The plugin registers all 15 Byoky providers with OpenClaw and
             pulls in <code>@byoky/bridge</code>, the tiny local HTTP proxy
             that lets OpenClaw talk to your wallet. The native messaging host
             is registered on the next step when you first connect — no extra
@@ -134,7 +134,7 @@ export default function OpenClawTutorial() {
           <Code>{`openclaw models set byoky-anthropic/claude-sonnet-4-6`}</Code>
           <p>
             Swap the model for whichever you actually have a key for:{' '}
-            <code>byoky-openai/gpt-5.5</code>, <code>byoky-gemini/gemini-2.5-pro</code>,{' '}
+            <code>byoky-openai/gpt-5.5</code>, <code>byoky-gemini/gemini-3.8-flash</code>,{' '}
             <code>byoky-xai/grok-3</code>, etc. <code>openclaw models list --all</code>{' '}
             shows every option.
           </p>
@@ -363,9 +363,9 @@ function Troubleshooting() {
 
 function Providers() {
   const rows: [string, string, string, string][] = [
-    ['Anthropic', 'byoky-anthropic', 'Claude Opus 4, Sonnet 4, Haiku 4.5', 'claude'],
-    ['OpenAI', 'byoky-openai', 'GPT-4.1, o3, o4-mini, GPT-4.1 Mini', 'openai'],
-    ['Google Gemini', 'byoky-gemini', 'Gemini 2.5 Pro, 2.5 Flash', 'gemini'],
+    ['Anthropic', 'byoky-anthropic', 'Claude Opus 5.5, Sonnet 5.5, Haiku 5.5, Fable 5.1, Opus 4.7, Sonnet 4.6, Haiku 4.5', 'claude'],
+    ['OpenAI', 'byoky-openai', 'GPT-5.5, GPT-5.4, GPT-5.4 Mini, GPT-5.4 Nano', 'openai'],
+    ['Google Gemini', 'byoky-gemini', 'Gemini 3.8 Flash (2.5 Pro and 2.5 Flash for past users)', 'gemini'],
     ['xAI', 'byoky-xai', 'Grok 3, Grok 3 Mini', 'grok'],
     ['DeepSeek', 'byoky-deepseek', 'DeepSeek V3, R1', 'deepseek'],
     ['Mistral', 'byoky-mistral', 'Mistral Large', 'mistral'],
@@ -375,12 +375,14 @@ function Providers() {
     ['Together AI', 'byoky-together', 'Set model manually', 'together'],
     ['Fireworks AI', 'byoky-fireworks', 'Set model manually', 'fireworks'],
     ['OpenRouter', 'byoky-openrouter', 'Set model manually', 'openrouter'],
-    ['Azure OpenAI', 'byoky-azure_openai', 'Set model manually', 'azureai'],
+    ['Azure OpenAI', 'byoky-azure_openai', 'Set your deployment name as the model', 'azureai'],
+    ['Ollama', 'byoky-ollama', 'Set model manually', 'ollama'],
+    ['LM Studio', 'byoky-lm_studio', 'Set model manually', 'lmstudio'],
   ];
   return (
     <section className="oc-section">
       <h2>Available providers</h2>
-      <p>The plugin registers all 13 Byoky providers with OpenClaw:</p>
+      <p>The plugin registers all {rows.length} Byoky providers with OpenClaw:</p>
       <div className="oc-table">
         <div className="oc-table-head">
           <span>Provider</span>

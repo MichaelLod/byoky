@@ -26,10 +26,12 @@
     import { Byoky } from '@byoky/sdk';
 
     // Cheapest viable models per provider so live runs are ~free.
+    // gemini-3.5-flash-lite answers in about a second and spends no output
+    // tokens on thinking first; Gemini 3.8 Flash takes up to minutes.
     const CHEAP_MODELS = {
       anthropic: 'claude-haiku-4-5-20251001',
       openai: 'gpt-4o-mini',
-      gemini: 'gemini-2.0-flash',
+      gemini: 'gemini-3.5-flash-lite',
     };
     const PROMPT = 'Reply with the single word OK.';
     const MAX_TOKENS = 30;

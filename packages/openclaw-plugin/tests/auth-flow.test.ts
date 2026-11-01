@@ -6,6 +6,7 @@ import { platform, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ProviderAuthContext, ProviderAuthResult } from 'openclaw/plugin-sdk/core';
 import { getManifestLocations, registerHostAt } from '../../bridge/src/native-manifest.js';
+import { DEFAULT_MODELS, getModel, modelsForProvider } from '../../core/src/models.js';
 import { FakeWallet, type WalletKind } from '../../bridge/tests/helpers/fake-wallet.js';
 import { openLoginPage } from '../../bridge/tests/helpers/login-page.js';
 
@@ -133,6 +134,33 @@ describe('login', () => {
     expect(providers['byoky-anthropic'].apiKey).toBe('test-token');
     expect(providers['byoky-anthropic'].models.every((m) => m.maxTokens === 2048)).toBe(true);
     expect(stops).toContain('Wallet connected');
+  });
+
+  it('configures the models of Byoky\'s registry, with its context windows, output limits and image input', async () => {
+    registeredHome();
+    const run = authRuns().byoky(context());
+    await expect.poll(() => opened.length).toBe(1);
+    await post('/callback', { nonce: await pageNonce(), providers: ['anthropic', 'openai', 'gemini'], bridgePort: 19280 });
+    const result = await run;
+    type Model = { id: string; input: string[]; contextWindow: number; maxTokens: number };
+    const providers = (result.configPatch as { models: { providers: Record<string, { models: Model[] }> } }).models.providers;
+
+    for (const providerId of ['anthropic', 'openai', 'gemini'] as const) {
+      const catalog = providers[`byoky-${providerId}`].models;
+      const registry = modelsForProvider(providerId);
+      // The registry drops shut-down models, so nothing here is one.
+      expect(catalog.map((m) => m.id).sort(), providerId).toEqual(registry.map((m) => m.id).sort());
+      for (const m of catalog) {
+        const entry = getModel(m.id)!;
+        expect(m.contextWindow, m.id).toBe(entry.contextWindow);
+        expect(m.input.includes('image'), m.id).toBe(entry.capabilities.vision);
+        // Anthropic's are capped by anthropicMaxTokens (default 4096).
+        expect(m.maxTokens, m.id).toBe(providerId === 'anthropic' ? 4096 : entry.maxOutput);
+      }
+    }
+    // A model new projects can call, not one limited to past users.
+    expect(providers['byoky-gemini'].models[0].id).toBe(DEFAULT_MODELS.gemini);
+    expect(result.defaultModel).toBe('byoky-anthropic/claude-opus-5-5');
   });
 
   it('fails with the error the page reported, not "not in your wallet"', async () => {

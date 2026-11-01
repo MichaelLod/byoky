@@ -25,7 +25,11 @@ import type { TranslationContext } from '../../../src/translate/types.js';
 const GEMINI_KEY = process.env.GEMINI_API_KEY;
 const OPENAI_KEY = process.env.OPENAI_API_KEY;
 
-const GEMINI_DST_MODEL = 'gemini-2.5-flash';
+// The registry's Gemini default; Google serves the 2.5 models only to
+// projects that used them before.
+const GEMINI_DST_MODEL = 'gemini-3.8-flash';
+// Gemini 3.8 Flash can take a couple of minutes to answer.
+const GEMINI_TIMEOUT = 240_000;
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com';
 
 function anthropicToGeminiCtx(streaming = false): TranslationContext {
@@ -43,7 +47,7 @@ function geminiToOpenAICtx(): TranslationContext {
   return {
     srcFamily: 'gemini',
     dstFamily: 'openai',
-    srcModel: 'gemini-2.5-flash',
+    srcModel: GEMINI_DST_MODEL,
     dstModel: 'gpt-5.4-nano',
     isStreaming: false,
     requestId: 'live-gemini',
@@ -60,9 +64,9 @@ const GEMINI_HEADERS = GEMINI_KEY
 describe.skipIf(!GEMINI_KEY)('live anthropic→gemini — non-streaming chat', () => {
   it('translates a simple chat turn end-to-end', async () => {
     const c = anthropicToGeminiCtx(false);
-    // max_tokens has to leave room for the gemini-2.5-flash default thinking
-    // budget (8192) — too small a budget hits MAX_TOKENS before any visible
-    // output is emitted. Pick something well above the default budget.
+    // max_tokens has to leave room for Gemini's default thinking, which
+    // counts against it: too small a budget hits MAX_TOKENS before any
+    // visible output is emitted. Pick something well above it.
     const anthropicRequest = {
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 16384,
@@ -98,13 +102,13 @@ describe.skipIf(!GEMINI_KEY)('live anthropic→gemini — non-streaming chat', (
     expect((text!.text ?? '').length).toBeGreaterThan(0);
     expect(parsed.usage.input_tokens).toBeGreaterThan(0);
     expect(parsed.usage.output_tokens).toBeGreaterThan(0);
-  }, 30_000);
+  }, GEMINI_TIMEOUT);
 });
 
 describe.skipIf(!GEMINI_KEY)('live anthropic→gemini — streaming chat', () => {
   it('translates an SSE stream end-to-end', async () => {
     const c = anthropicToGeminiCtx(true);
-    // See note above about gemini-2.5-flash thinking budget vs max_tokens.
+    // See note above about Gemini's thinking vs max_tokens.
     const anthropicRequest = {
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 16384,
@@ -160,7 +164,7 @@ describe.skipIf(!GEMINI_KEY)('live anthropic→gemini — streaming chat', () =>
 
     const md = events.find((e) => e.event === 'message_delta');
     expect(md).toBeDefined();
-  }, 30_000);
+  }, GEMINI_TIMEOUT);
 });
 
 describe.skipIf(!GEMINI_KEY)('live anthropic→gemini — tool use', () => {
@@ -208,7 +212,7 @@ describe.skipIf(!GEMINI_KEY)('live anthropic→gemini — tool use', () => {
     const input = toolUse!.input as { city?: string };
     expect(input.city).toBeTruthy();
     expect(parsed.stop_reason).toBe('tool_use');
-  }, 30_000);
+  }, GEMINI_TIMEOUT);
 });
 
 /** Tiny 1×1 red PNG as base64 — minimal image payload for vision tests. */
@@ -262,7 +266,7 @@ describe.skipIf(!GEMINI_KEY)('live anthropic→gemini — vision (image)', () =>
     const text = parsed.content.find((b) => b.type === 'text');
     expect(text).toBeDefined();
     expect((text!.text ?? '').length).toBeGreaterThan(0);
-  }, 30_000);
+  }, GEMINI_TIMEOUT);
 });
 
 describe.skipIf(!GEMINI_KEY || !OPENAI_KEY)('live gemini→openai — non-streaming chat', () => {

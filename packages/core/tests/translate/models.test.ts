@@ -10,6 +10,7 @@ import {
   capabilityLabel,
   EMPTY_CAPABILITY_SET,
   type CapabilitySet,
+  type ModelEntry,
 } from '../../src/models.js';
 import type { RequestLogEntry } from '../../src/types.js';
 import type { IRRequest } from '../../src/translate/ir.js';
@@ -89,6 +90,12 @@ describe('MODELS', () => {
     expect(ids).toContain('gpt-5.4-nano');
   });
 
+  it('marks which models take images', () => {
+    // gpt-5.4-nano takes images on Chat Completions (checked live 2026-11-01).
+    expect(getModel('gpt-5.4-nano')?.capabilities.vision).toBe(true);
+    expect(getModel('command-a-03-2025')?.capabilities.vision).toBe(false);
+  });
+
   it('every entry has a non-zero context window and max output', () => {
     for (const m of MODELS) {
       expect(m.contextWindow).toBeGreaterThan(0);
@@ -161,7 +168,8 @@ describe('modelsForFamily', () => {
 
 describe('capabilityGaps', () => {
   const gpt54 = getModel('gpt-5.4')!;
-  const nano = getModel('gpt-5.4-nano')!;
+  // A text-only model of the same family, so only vision differs.
+  const textOnly: ModelEntry = { ...gpt54, id: 'text-only-model', capabilities: { ...gpt54.capabilities, vision: false } };
 
   it('returns empty when used capabilities are a subset of model capabilities', () => {
     const used: CapabilitySet = { tools: true, vision: false, structuredOutput: false, reasoning: false };
@@ -170,12 +178,12 @@ describe('capabilityGaps', () => {
 
   it('flags vision when used by app but unsupported by model', () => {
     const used: CapabilitySet = { tools: false, vision: true, structuredOutput: false, reasoning: false };
-    // nano is text-only
-    expect(capabilityGaps(used, nano)).toEqual(['vision']);
+    expect(capabilityGaps(used, textOnly)).toEqual(['vision']);
+    expect(capabilityGaps(used, getModel('command-a-03-2025')!)).toEqual(['vision']);
   });
 
   it('does not flag capabilities the app never used', () => {
-    expect(capabilityGaps(EMPTY_CAPABILITY_SET, nano)).toEqual([]);
+    expect(capabilityGaps(EMPTY_CAPABILITY_SET, textOnly)).toEqual([]);
   });
 });
 

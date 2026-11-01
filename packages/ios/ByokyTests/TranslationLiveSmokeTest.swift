@@ -84,7 +84,7 @@ final class TranslationLiveSmokeTest: XCTestCase {
         let ctxJson = """
         {"srcFamily":"anthropic","dstFamily":"gemini",\
         "srcProviderId":"anthropic","dstProviderId":"gemini",\
-        "srcModel":"claude-haiku-4-5-20251001","dstModel":"gemini-2.5-flash"}
+        "srcModel":"claude-haiku-4-5-20251001","dstModel":"gemini-3.8-flash"}
         """
 
         let translatedReq = try TranslationEngine.shared.translateRequest(
@@ -92,7 +92,7 @@ final class TranslationLiveSmokeTest: XCTestCase {
             body: anthropicReqBody
         )
         let raw = try await postJson(
-            url: URL(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent")!,
+            url: URL(string: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent")!,
             body: translatedReq,
             headers: ["x-goog-api-key": key]
         )
@@ -139,7 +139,8 @@ final class TranslationLiveSmokeTest: XCTestCase {
     }
 
     private func postJson(url: URL, body: String, headers: [String: String]) async throws -> String {
-        var request = URLRequest(url: url, timeoutInterval: 60)
+        // Gemini 3.8 Flash can take a couple of minutes to answer.
+        var request = URLRequest(url: url, timeoutInterval: 180)
         request.httpMethod = "POST"
         request.httpBody = Data(body.utf8)
         request.setValue("application/json", forHTTPHeaderField: "content-type")
