@@ -1,4 +1,4 @@
-import type { TranslationContext } from '../types.js';
+import type { ModelShapingContext, TranslationContext } from '../types.js';
 import { TranslationError } from '../types.js';
 import { getModel } from '../../models.js';
 import type { FamilyAdapter, IRStreamParser, IRStreamSerializer } from '../adapter.js';
@@ -46,6 +46,7 @@ export const anthropicAdapter: FamilyAdapter = {
 
   parseRequest,
   serializeRequest,
+  shapeRequestForModel,
   parseResponse,
   serializeResponse,
   createStreamParser,
@@ -413,20 +414,7 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
     out.system = systemParts.map((p) => p.text).join('\n\n');
   }
 
-  let temperature = ir.temperature;
-  let topP = ir.topP;
-  let topK = ir.topK;
-  if (rules.sampling === 'none') {
-    temperature = topP = topK = undefined;
-  } else {
-    if (thinking) {
-      // With thinking: no temperature or top_k change, top_p only in [0.95, 1].
-      temperature = topK = undefined;
-      if (typeof topP === 'number' && (topP < 0.95 || topP > 1)) topP = undefined;
-    }
-    // Claude 4 models take temperature or top_p, not both.
-    if (typeof temperature === 'number') topP = undefined;
-  }
+  const { temperature, topP, topK } = claudeSampling(rules, !!thinking, ir);
   if (typeof temperature === 'number') {
     // Anthropic clamps temperature to [0, 1]; OpenAI accepts up to 2.
     out.temperature = Math.max(0, Math.min(1, temperature));
@@ -512,6 +500,93 @@ function claudeRequestRules(model: string): ClaudeRequestRules {
   if (atLeast(4, 7)) return { sampling: 'none', thinking: 'adaptive', forcedToolChoice };
   if (major === 4 && minor === 6) return { sampling: 'single', thinking: 'either', forcedToolChoice };
   return { sampling: 'single', thinking: 'budget', forcedToolChoice };
+}
+
+interface ClaudeSampling {
+  temperature?: number;
+  topP?: number;
+  topK?: number;
+}
+
+/** The sampling parameters of `requested` that a model with `rules` accepts. */
+function claudeSampling(rules: ClaudeRequestRules, thinking: boolean, requested: ClaudeSampling): ClaudeSampling {
+  if (rules.sampling === 'none') return {};
+  let { temperature, topP, topK } = requested;
+  if (thinking) {
+    // With thinking: no temperature or top_k change, top_p only in [0.95, 1].
+    temperature = topK = undefined;
+    if (typeof topP === 'number' && (topP < 0.95 || topP > 1)) topP = undefined;
+  }
+  // Claude 4 models take temperature or top_p, not both.
+  if (typeof temperature === 'number') topP = undefined;
+  return { temperature, topP, topK };
+}
+
+/**
+ * Fit an Anthropic request written for another Claude model to
+ * `ctx.dstModel`, in place (a group pins the model; nothing is translated):
+ * the rules serializeRequest follows, applied to the app's own body so
+ * every field they don't cover (cache_control, metadata, output_config, ...)
+ * is kept.
+ */
+function shapeRequestForModel(body: Record<string, unknown>, ctx: ModelShapingContext): void {
+  const rules = claudeRequestRules(ctx.dstModel);
+  const isForced = (choice: unknown): choice is Record<string, unknown> =>
+    isRecord(choice) && (choice.type === 'any' || choice.type === 'tool');
+
+  if (!rules.forcedToolChoice && isForced(body.tool_choice)) {
+    const choice = body.tool_choice;
+    if (Array.isArray(body.tools) && body.tools.length > 0) {
+      appendSystemText(
+        body,
+        forcedToolInstruction(choice.type === 'tool' ? { type: 'tool', name: String(choice.name) } : { type: 'any' }),
+      );
+    }
+    // disable_parallel_tool_use still applies to auto.
+    const auto: Record<string, unknown> = { ...choice, type: 'auto' };
+    delete auto.name;
+    body.tool_choice = auto;
+  }
+
+  const thinking = body.thinking;
+  if (isRecord(thinking) && (thinking.type === 'enabled' || thinking.type === 'adaptive')) {
+    if (isForced(body.tool_choice)) {
+      // Thinking can't be combined with a forced tool choice; the forced
+      // tool is what the app's code relies on.
+      delete body.thinking;
+    } else if (thinking.type === 'enabled' && rules.thinking === 'adaptive') {
+      const adaptive: Record<string, unknown> = { ...thinking, type: 'adaptive' };
+      delete adaptive.budget_tokens;
+      body.thinking = adaptive;
+    } else if (thinking.type === 'adaptive' && rules.thinking === 'budget') {
+      // Adaptive leaves the depth to the model; one that only takes a budget
+      // then answers without thinking, as after translation.
+      delete body.thinking;
+    }
+  }
+
+  const thinkingOn = isRecord(body.thinking) && (body.thinking.type === 'enabled' || body.thinking.type === 'adaptive');
+  const requested: ClaudeSampling = {
+    temperature: typeof body.temperature === 'number' ? body.temperature : undefined,
+    topP: typeof body.top_p === 'number' ? body.top_p : undefined,
+    topK: typeof body.top_k === 'number' ? body.top_k : undefined,
+  };
+  const kept = claudeSampling(rules, thinkingOn, requested);
+  if (requested.temperature !== undefined && kept.temperature === undefined) delete body.temperature;
+  if (requested.topP !== undefined && kept.topP === undefined) delete body.top_p;
+  if (requested.topK !== undefined && kept.topK === undefined) delete body.top_k;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Add `text` at the end of a request's system prompt, in whichever form it has. */
+function appendSystemText(body: Record<string, unknown>, text: string): void {
+  const system = body.system;
+  if (typeof system === 'string' && system.length > 0) body.system = `${system}\n\n${text}`;
+  else if (Array.isArray(system) && system.length > 0) body.system = [...system, { type: 'text', text }];
+  else body.system = text;
 }
 
 /**

@@ -1,5 +1,5 @@
 import type { ModelFamily } from '../models.js';
-import type { TranslationContext } from './types.js';
+import type { ModelShapingContext, TranslationContext } from './types.js';
 import type {
   IRRequest,
   IRResponseOrError,
@@ -48,6 +48,16 @@ export interface FamilyAdapter {
 
   /** Serialize canonical IR into a family-native request body. */
   serializeRequest(ctx: TranslationContext, ir: IRRequest): string;
+
+  /**
+   * Fit a parsed chat request in this family's own dialect, written for
+   * another model of the family, to `ctx.dstModel`: the per-model request
+   * rules serializeRequest follows, applied in place, so every field they
+   * don't cover stays as the app sent it. Throws TranslationError when the
+   * model can't serve the request at all. Absent for families whose models
+   * share one request shape.
+   */
+  shapeRequestForModel?(body: Record<string, unknown>, ctx: ModelShapingContext): void;
 
   // ─── Response (non-streaming) ───────────────────────────────────────────
 

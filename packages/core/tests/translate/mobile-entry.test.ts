@@ -63,3 +63,20 @@ describe('mobile bridge translateErrorResponse', () => {
     expect(b.translateErrorResponse(ctxJson, '<html>502</html>')).toBeNull();
   });
 });
+
+describe('mobile bridge rewriteRequestModel', () => {
+  const b = bridge as unknown as Bridge & { rewriteRequestModel(dstProviderId: string, url: string, body: string, model: string): string };
+  const url = 'https://api.openai.com/v1/chat/completions';
+
+  it('returns the body fitted to the pinned model', () => {
+    const out = JSON.parse(b.rewriteRequestModel('openai', url, JSON.stringify({ model: 'gpt-4.1', max_tokens: 64, temperature: 0.5, messages: [] }), 'gpt-5.5')) as { body: string };
+    expect(JSON.parse(out.body)).toEqual({ model: 'gpt-5.5', max_completion_tokens: 64, messages: [] });
+  });
+
+  it('returns a request the model can\'t serve as an error for the app', () => {
+    const body = JSON.stringify({ model: 'gpt-5.5', messages: [], tools: [{ type: 'function', function: { name: 'f' } }] });
+    const out = JSON.parse(b.rewriteRequestModel('openai', url, body, 'gpt-6-astra')) as { error: { code: string; message: string } };
+    expect(out.error.code).toBe('UNSUPPORTED_FEATURE');
+    expect(out.error.message).toContain('gpt-6-astra');
+  });
+});

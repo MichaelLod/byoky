@@ -29,7 +29,9 @@ import {
   translateResponse as _translateResponse,
   createStreamTranslator as _createStreamTranslator,
   translateErrorResponse as _translateErrorResponse,
+  rewriteRequestModel as _rewriteRequestModel,
 } from './index.js';
+import { TranslationError } from './types.js';
 import {
   familyOf,
   shouldTranslate as _shouldTranslate,
@@ -224,6 +226,19 @@ interface MobileBridge {
    */
   autoRouteModelFor(providerId: string): string | null;
 
+  /**
+   * Point a request at the model a group pins within the app's own family
+   * (a model override or same-family swap) and fit it to that model's
+   * request rules. Mirrors `rewriteRequestModel` in the translate layer.
+   * `dstProviderId` is the provider the request goes to, `url` the URL the
+   * app called.
+   *
+   * Returns JSON: `{"body": "..."}`, or `{"error": {"code", "message"}}`
+   * when the model can't serve the request at all (a message written for
+   * the app, so native code can send it on as it is).
+   */
+  rewriteRequestModel(dstProviderId: string, url: string, body: string, model: string): string;
+
   /** Bundle version, for native side to assert against expected core version. */
   readonly version: string;
 
@@ -357,6 +372,14 @@ const bridge: MobileBridge = {
   },
   autoRouteModelFor(providerId) {
     return _autoRouteModelFor(providerId) ?? null;
+  },
+  rewriteRequestModel(dstProviderId, url, body, model) {
+    try {
+      return JSON.stringify({ body: _rewriteRequestModel({ dstProviderId, dstModel: model, url }, body) });
+    } catch (err) {
+      if (err instanceof TranslationError) return JSON.stringify({ error: { code: err.code, message: err.message } });
+      throw err;
+    }
   },
   version: '0.5.3',
   urlImpl,

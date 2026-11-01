@@ -1,4 +1,4 @@
-import type { TranslationContext } from '../types.js';
+import type { ModelShapingContext, TranslationContext } from '../types.js';
 import { TranslationError } from '../types.js';
 import { getModel } from '../../models.js';
 import type { FamilyAdapter, IRStreamParser, IRStreamSerializer } from '../adapter.js';
@@ -53,6 +53,7 @@ export const openaiAdapter: FamilyAdapter = {
 
   parseRequest,
   serializeRequest,
+  shapeRequestForModel,
   parseResponse,
   serializeResponse,
   createStreamParser,
@@ -488,6 +489,31 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
   // separate surface that isn't a flag on the chat completions request.
 
   return JSON.stringify(out);
+}
+
+/**
+ * Fit an OpenAI Chat Completions request written for another model of the
+ * dialect to `ctx.dstModel`, in place (a group pins the model; nothing is
+ * translated): the reasoning-model rules serializeRequest follows, applied
+ * to the app's own body so every field they don't cover is kept.
+ */
+function shapeRequestForModel(body: Record<string, unknown>, ctx: ModelShapingContext): void {
+  if (!isOpenAIReasoningModel(ctx.dstModel)) return;
+  if (Array.isArray(body.tools) && body.tools.length > 0 && reasoningOffForTools(ctx.dstModel, ctx.dstProviderId)) {
+    body.reasoning_effort = 'none';
+  }
+  if (typeof body.max_tokens === 'number' && usesMaxCompletionTokens(true, ctx.dstProviderId)) {
+    if (typeof body.max_completion_tokens !== 'number') body.max_completion_tokens = body.max_tokens;
+    delete body.max_tokens;
+  }
+  // OpenAI: "When reasoning effort is not none, remove temperature, top_p,
+  // and top_logprobs. For Chat Completions, also remove logprobs."
+  if (body.reasoning_effort !== 'none') {
+    delete body.temperature;
+    delete body.top_p;
+    delete body.logprobs;
+    delete body.top_logprobs;
+  }
 }
 
 /**
