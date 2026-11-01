@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { bg, mount, run, typeInto, buttonByText, type Mounted } from './helpers/popup-harness';
 
 type Store = typeof import('../entrypoints/popup/store');
@@ -99,5 +99,64 @@ describe('apps can be moved between groups without drag and drop (F055)', () => 
     Object.assign(drag2, { dataTransfer: { setData: () => {}, effectAllowed: '' } });
     card.dispatchEvent(drag2);
     expect(drag2.defaultPrevented).toBe(false);
+  });
+});
+
+describe('group errors are shown, not swallowed (F122)', () => {
+  const nameInput = (c: HTMLElement) => c.querySelector<HTMLInputElement>('input[placeholder="e.g. Engineering"]')!;
+  const saveButton = (c: HTMLElement) => buttonByText(c.querySelector('.card')!, 'Save')!;
+
+  it('Save stays disabled until the group has a name', async () => {
+    const container = await openConnectedApps();
+    await run(() => buttonByText(container, '+ New group')!.click());
+    expect(saveButton(container).disabled).toBe(true);
+    typeInto(nameInput(container), '   ');
+    await run(() => {});
+    expect(saveButton(container).disabled).toBe(true);
+    typeInto(nameInput(container), '  Fast  ');
+    await run(() => {});
+    expect(saveButton(container).disabled).toBe(false);
+    bg.handlers.createGroup = () => ({ group: { id: 'g2' } });
+    await run(() => saveButton(container).click());
+    expect((bg.payloads('createGroup')[0] as { name: string }).name).toBe('Fast');
+  });
+
+  it('shows why the background refused a new group, and clears it on Cancel', async () => {
+    bg.handlers.createGroup = () => ({ error: 'A group with this name already exists' });
+    const container = await openConnectedApps();
+    await run(() => buttonByText(container, '+ New group')!.click());
+    typeInto(nameInput(container), 'Default');
+    await run(() => {});
+    await run(() => saveButton(container).click());
+
+    const form = container.querySelector('.card')!;
+    expect(form.querySelector('.error')?.textContent).toBe('A group with this name already exists');
+    expect(container.querySelectorAll('.error')).toHaveLength(1);
+
+    await run(() => buttonByText(form, 'Cancel')!.click());
+    expect(container.querySelector('.error')).toBeNull();
+    expect(useWalletStore.getState().error).toBeNull();
+  });
+
+  it('shows a failed edit in the edit form', async () => {
+    bg.handlers.updateGroup = () => ({ error: 'Group name must be 1-200 characters' });
+    const container = await openConnectedApps();
+    await run(() => buttonByText(container, 'Edit')!.click());
+    await run(() => buttonByText(container, 'Save')!.click());
+    expect(container.querySelector('.group-section .error')?.textContent).toBe('Group name must be 1-200 characters');
+  });
+
+  it('shows delete and move errors at the top', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    bg.handlers.deleteGroup = () => ({ error: 'Wallet is locked' });
+    const container = await openConnectedApps();
+    await run(() => buttonByText(container, 'Delete')!.click());
+    expect(container.querySelector('.error')?.textContent).toBe('Wallet is locked');
+
+    bg.handlers.setAppGroup = () => ({ error: 'Group not found' });
+    typeInto(groupSelect(container)!, 'g1');
+    await run(() => {});
+    expect(container.querySelector('.error')?.textContent).toBe('Group not found');
+    confirm.mockRestore();
   });
 });

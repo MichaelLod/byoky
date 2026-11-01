@@ -43,6 +43,7 @@ export function ConnectedApps() {
     requestLog, tokenAllowances, tokenUsage, setAllowance, removeAllowance, resetAppUsage,
     groups, appGroups, credentials,
     createGroup, updateGroup, deleteGroup, setAppGroup,
+    error, clearError,
   } = useWalletStore();
   const [editingOrigin, setEditingOrigin] = useState<string | null>(null);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
@@ -123,9 +124,14 @@ export function ConnectedApps() {
     setPendingMove(null);
   }
 
+  // Errors from creating or editing a group show in its form; the rest
+  // (moving an app, deleting a group) show here.
+  const formOpen = showCreateGroup || editingGroupId !== null;
+
   return (
     <div>
       <TrustResetNotice />
+      {error && !formOpen && <div className="error">{error}</div>}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <h2 className="page-title" style={{ marginBottom: 0 }}>Connected Apps</h2>
         {sessions.length > 1 && (
@@ -183,7 +189,11 @@ export function ConnectedApps() {
       <button
         className="btn btn-secondary btn-sm"
         style={{ marginTop: '4px', marginBottom: '12px' }}
-        onClick={() => setShowCreateGroup(true)}
+        onClick={() => {
+          clearError();
+          setEditingGroupId(null);
+          setShowCreateGroup(true);
+        }}
       >
         + New group
       </button>
@@ -192,16 +202,20 @@ export function ConnectedApps() {
         <div className="card" style={{ marginBottom: '16px' }}>
           <GroupForm
             credentials={credentials}
+            error={error}
             onSave={async (patch) => {
               const id = await createGroup({
-                name: patch.name ?? 'Untitled',
-                providerId: patch.providerId ?? 'anthropic',
+                name: patch.name,
+                providerId: patch.providerId,
                 credentialId: patch.credentialId ?? undefined,
                 model: patch.model ?? undefined,
               });
               if (id) setShowCreateGroup(false);
             }}
-            onCancel={() => setShowCreateGroup(false)}
+            onCancel={() => {
+              clearError();
+              setShowCreateGroup(false);
+            }}
           />
         </div>
       )}
@@ -254,7 +268,15 @@ export function ConnectedApps() {
                   resets it), so it has nothing to edit or delete. */}
               {!isDefault && (
                 <div style={{ display: 'flex', gap: '6px' }}>
-                  <button className="text-link bracket-link" style={{ fontSize: '11px' }} onClick={() => setEditingGroupId(editingGroupId === group.id ? null : group.id)}>
+                  <button
+                    className="text-link bracket-link"
+                    style={{ fontSize: '11px' }}
+                    onClick={() => {
+                      clearError();
+                      setShowCreateGroup(false);
+                      setEditingGroupId(editingGroupId === group.id ? null : group.id);
+                    }}
+                  >
                     Edit
                   </button>
                   <button
@@ -276,11 +298,15 @@ export function ConnectedApps() {
               <GroupForm
                 group={group}
                 credentials={credentials}
+                error={error}
                 onSave={async (patch) => {
                   const ok = await updateGroup(group.id, patch);
                   if (ok) setEditingGroupId(null);
                 }}
-                onCancel={() => setEditingGroupId(null)}
+                onCancel={() => {
+                  clearError();
+                  setEditingGroupId(null);
+                }}
               />
             )}
 
@@ -470,12 +496,15 @@ export function ConnectedApps() {
 function GroupForm({
   group,
   credentials,
+  error,
   onSave,
   onCancel,
 }: {
   group?: Group;
   credentials: CredentialMeta[];
-  onSave: (patch: { name?: string; providerId?: string; credentialId?: string | null; model?: string | null }) => void;
+  /** Why the last save was refused (the background checks the name). */
+  error: string | null;
+  onSave: (patch: { name: string; providerId: string; credentialId: string | null; model: string | null }) => void;
   onCancel: () => void;
 }) {
   const [name, setName] = useState(group?.name ?? '');
@@ -497,9 +526,13 @@ function GroupForm({
   const selectedModel = model ? getModel(model) : undefined;
   const modelInfo = selectedModel ? buildModelInfo(selectedModel) : undefined;
 
+  // The background trims the name and refuses an empty one.
+  const trimmedName = name.trim();
+
   function handleSave() {
+    if (!trimmedName) return;
     onSave({
-      name,
+      name: trimmedName,
       providerId,
       credentialId: credentialId || null,
       model: model || null,
@@ -581,8 +614,9 @@ function GroupForm({
           {modelInfo ?? 'Leave empty to pass through whatever model the app requested. Set when you want to override — required for cross-family routing.'}
         </div>
       </div>
+      {error && <div className="error">{error}</div>}
       <div style={{ display: 'flex', gap: '8px' }}>
-        <button className="btn btn-primary btn-sm" onClick={handleSave}>Save</button>
+        <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={!trimmedName}>Save</button>
         <button className="btn btn-secondary btn-sm" onClick={onCancel}>Cancel</button>
       </div>
     </div>
