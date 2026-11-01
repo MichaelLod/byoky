@@ -431,11 +431,21 @@ private fun formatUsageTokens(n: Int): String = when {
     else -> n.toString()
 }
 
+/**
+ * The label to show after picking the provider [providerName], or null to
+ * keep [currentLabel]. An auto-filled provider name follows the provider; a
+ * label the user typed stays.
+ */
+internal fun autoFilledLabel(currentLabel: String, labelIsAuto: Boolean, providerName: String): String? =
+    if (labelIsAuto || currentLabel.isBlank()) providerName else null
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
     var selectedProvider by remember { mutableStateOf<Provider?>(null) }
     var label by remember { mutableStateOf("") }
+    // True while the label is the provider name filled in for the user.
+    var labelIsAuto by remember { mutableStateOf(true) }
     var apiKey by remember { mutableStateOf("") }
     var baseUrl by remember { mutableStateOf("") }
     var authMethod by remember { mutableStateOf(AuthMethod.API_KEY) }
@@ -489,7 +499,10 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
                     Surface(
                         onClick = {
                             selectedProvider = provider
-                            if (label.isEmpty()) label = provider.name
+                            autoFilledLabel(label, labelIsAuto, provider.name)?.let {
+                                label = it
+                                labelIsAuto = true
+                            }
                             if (provider.id != "anthropic") authMethod = AuthMethod.API_KEY
                             // A server URL belongs to one provider; never carry it over.
                             baseUrl = when (provider.id) {
@@ -587,7 +600,7 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
 
                 RetroTextField(
                     value = label,
-                    onValueChange = { label = it },
+                    onValueChange = { label = it; labelIsAuto = it.isBlank() },
                     label = "Label",
                     modifier = Modifier.fillMaxWidth(),
                 )
