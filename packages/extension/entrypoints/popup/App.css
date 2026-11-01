@@ -116,6 +116,38 @@ code {
   position: relative;
 }
 
+/* popup.html shown as a toolbar popup (chrome.action.openPopup, the macOS
+   Safari popover) sizes itself to its content. Sized in vh, the content
+   depends on that size and the popup collapses to a 25px strip, so it gets
+   a fixed size. The side panel and the popup window (popup.html?window)
+   keep the fluid layout above. */
+html.popup body {
+  width: 360px;
+  min-width: 360px;
+  height: 600px;
+  min-height: 0;
+}
+
+html.popup .app {
+  height: 600px;
+  min-height: 0;
+}
+
+/* iPhone Safari shows the popup as a sheet as wide as the screen. */
+@media (hover: none) and (pointer: coarse) {
+  html.popup body {
+    width: 100%;
+    min-width: 320px;
+    height: auto;
+    min-height: 100vh;
+  }
+
+  html.popup .app {
+    height: 100vh;
+    min-height: 100vh;
+  }
+}
+
 /* Setup and unlock sit on the dot grid. */
 .app-locked {
   background-image: var(--dot-grid);
