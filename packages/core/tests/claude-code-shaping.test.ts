@@ -11,6 +11,7 @@ import {
   injectClaudeCodeSystemPrompt,
   rewriteToolNamesForClaudeCode,
 } from '../src/proxy-utils.js';
+import shapingVectors from './vectors/claude-code-shaping.json';
 
 const PREFIX = "You are Claude Code, Anthropic's official CLI for Claude.";
 const OAUTH_BETAS = [
@@ -396,5 +397,34 @@ describe('setup-token shaping round trip', () => {
     const out = r.process(frame.slice(0, 50)) + r.process(frame.slice(50)) + r.flush();
     expect(out).toContain('"name":"read_file"');
     expect(out).not.toContain('ReadFile');
+  });
+});
+
+// ── Shared vectors (also run by the iOS and Android wallets) ──
+
+describe('vectors/claude-code-shaping.json', () => {
+  const { body, headers } = shapingVectors as {
+    body: Array<{ name: string; body: string; expected: string; toolNameMap: Record<string, string> }>;
+    headers: Array<{ name: string; authMethod: string; apiKey: string; headers: Record<string, string>; expected: Record<string, string> }>;
+  };
+
+  function asJson(text: string): unknown {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text;
+    }
+  }
+
+  it.each(body.map((v) => [v.name, v] as const))('body: %s', (_name, v) => {
+    // background.ts: relocate only for third-party requests (tools renamed).
+    const { body: renamed, toolNameMap } = rewriteToolNamesForClaudeCode(v.body);
+    const shaped = injectClaudeCodeSystemPrompt(renamed, { relocateExisting: Object.keys(toolNameMap).length > 0 });
+    expect(toolNameMap).toEqual(v.toolNameMap);
+    expect(asJson(shaped!)).toEqual(asJson(v.expected));
+  });
+
+  it.each(headers.map((v) => [v.name, v] as const))('headers: %s', (_name, v) => {
+    expect(buildHeaders('anthropic', v.headers, v.apiKey, v.authMethod)).toEqual(v.expected);
   });
 });

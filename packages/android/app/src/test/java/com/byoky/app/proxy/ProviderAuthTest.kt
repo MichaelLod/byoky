@@ -3,6 +3,7 @@ package com.byoky.app.proxy
 import com.byoky.app.data.AuthMethod
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -59,6 +60,24 @@ class ProviderAuthTest {
         // another dialect); Anthropic rejects requests without one.
         assertEquals("2023-06-01", apply("anthropic", AuthMethod.OAUTH, "t")["anthropic-version"])
         assertEquals("2023-06-01", apply("anthropic", AuthMethod.API_KEY, "k")["anthropic-version"])
+    }
+
+    /** packages/core/tests/vectors/claude-code-shaping.json, "headers": core buildHeaders' output. */
+    @Test
+    fun anthropicMatchesTheSharedVectors() {
+        val vectors = SharedVectors.load("claude-code-shaping.json").getJSONArray("headers")
+        assertTrue(vectors.length() > 0)
+        for (i in 0 until vectors.length()) {
+            val v = vectors.getJSONObject(i)
+            val method = when (v.getString("authMethod")) {
+                "oauth" -> AuthMethod.OAUTH
+                "api_key" -> AuthMethod.API_KEY
+                else -> error("unknown authMethod in ${v.getString("name")}")
+            }
+            val input = v.getJSONObject("headers").let { h -> h.keys().asSequence().map { it to h.getString(it) }.toList() }
+            val expected = v.getJSONObject("expected").let { h -> h.keys().asSequence().associateWith { h.getString(it) } }
+            assertEquals(v.getString("name"), expected, apply("anthropic", method, v.getString("apiKey"), *input.toTypedArray()))
+        }
     }
 
     @Test

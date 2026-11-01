@@ -1,0 +1,176 @@
+{
+  "about": [
+    "Setup-token (Anthropic OAuth) request shaping, as the extension does it in background.ts:",
+    "rewriteToolNamesForClaudeCode, then injectClaudeCodeSystemPrompt relocating the system prompt only",
+    "when tools were renamed; and the anthropic branch of buildHeaders.",
+    "Used by packages/core/tests/claude-code-shaping.test.ts, packages/ios/ByokyTests/ClaudeCodeShapingTests.swift",
+    "and packages/android/.../proxy/{ClaudeCodeShapingTest,ProviderAuthTest}.kt.",
+    "Compare bodies as JSON (key order is not significant) unless \"expected\" is not JSON; compare header names",
+    "case-insensitively. Regenerate \"expected\" from core after a deliberate change, then sync mobile.js."
+  ],
+  "body": [
+    {
+      "name": "no system prompt",
+      "body": "{\"model\":\"claude-sonnet-4-5\",\"max_tokens\":10,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
+      "expected": "{\"model\":\"claude-sonnet-4-5\",\"max_tokens\":10,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"system\":\"You are Claude Code, Anthropic's official CLI for Claude.\"}",
+      "toolNameMap": {}
+    },
+    {
+      "name": "string system prompt",
+      "body": "{\"model\":\"m\",\"system\":\"Be terse.\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
+      "expected": "{\"model\":\"m\",\"system\":\"You are Claude Code, Anthropic's official CLI for Claude.\\n\\nBe terse.\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
+      "toolNameMap": {}
+    },
+    {
+      "name": "block-array system prompt",
+      "body": "{\"model\":\"m\",\"system\":[{\"type\":\"text\",\"text\":\"A\"},{\"type\":\"text\",\"text\":\"B\"}],\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
+      "expected": "{\"model\":\"m\",\"system\":[{\"type\":\"text\",\"text\":\"You are Claude Code, Anthropic's official CLI for Claude.\"},{\"type\":\"text\",\"text\":\"A\"},{\"type\":\"text\",\"text\":\"B\"}],\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
+      "toolNameMap": {}
+    },
+    {
+      "name": "empty system prompt",
+      "body": "{\"model\":\"m\",\"system\":\"\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
+      "expected": "{\"model\":\"m\",\"system\":\"You are Claude Code, Anthropic's official CLI for Claude.\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
+      "toolNameMap": {}
+    },
+    {
+      "name": "Claude Code tool names are left alone",
+      "body": "{\"model\":\"m\",\"system\":\"Sys\",\"tools\":[{\"name\":\"Read\",\"input_schema\":{\"type\":\"object\"}}],\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
+      "expected": "{\"model\":\"m\",\"system\":\"You are Claude Code, Anthropic's official CLI for Claude.\\n\\nSys\",\"tools\":[{\"name\":\"Read\",\"input_schema\":{\"type\":\"object\"}}],\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
+      "toolNameMap": {}
+    },
+    {
+      "name": "third-party tools are renamed and the system prompt relocated",
+      "body": "{\"model\":\"m\",\"system\":\"Framework prompt\",\"tools\":[{\"name\":\"read_file\",\"input_schema\":{\"type\":\"object\"}}],\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
+      "expected": "{\"model\":\"m\",\"system\":\"You are Claude Code, Anthropic's official CLI for Claude.\",\"tools\":[{\"name\":\"ReadFile\",\"input_schema\":{\"type\":\"object\"}}],\"messages\":[{\"role\":\"user\",\"content\":\"<system_context>\\nFramework prompt\\n</system_context>\\n\\nhi\"}]}",
+      "toolNameMap": {
+        "ReadFile": "read_file"
+      }
+    },
+    {
+      "name": "relocation into block content, with a block-array system prompt",
+      "body": "{\"model\":\"m\",\"system\":[{\"type\":\"text\",\"text\":\"You are OpenClaw.\"},{\"type\":\"text\",\"text\":\"Be careful.\"}],\"tools\":[{\"name\":\"web-search\",\"input_schema\":{\"type\":\"object\"}},{\"name\":\"getWeather\",\"input_schema\":{\"type\":\"object\"}}],\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"weather in Vienna?\"}]}]}",
+      "expected": "{\"model\":\"m\",\"system\":\"You are Claude Code, Anthropic's official CLI for Claude.\",\"tools\":[{\"name\":\"WebSearch\",\"input_schema\":{\"type\":\"object\"}},{\"name\":\"GetWeather\",\"input_schema\":{\"type\":\"object\"}}],\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"<system_context>\\nYou are OpenClaw.\\n\\nBe careful.\\n</system_context>\\n\\n\"},{\"type\":\"text\",\"text\":\"weather in Vienna?\"}]}]}",
+      "toolNameMap": {
+        "WebSearch": "web-search",
+        "GetWeather": "getWeather"
+      }
+    },
+    {
+      "name": "tool_use history is renamed with the tools",
+      "body": "{\"model\":\"m\",\"system\":\"Sys\",\"tools\":[{\"name\":\"get_weather\",\"input_schema\":{\"type\":\"object\"}}],\"messages\":[{\"role\":\"user\",\"content\":\"weather?\"},{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"get_weather\",\"input\":{\"city\":\"Vienna\"}}]},{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\",\"content\":\"sunny\"}]}]}",
+      "expected": "{\"model\":\"m\",\"system\":\"You are Claude Code, Anthropic's official CLI for Claude.\",\"tools\":[{\"name\":\"GetWeather\",\"input_schema\":{\"type\":\"object\"}}],\"messages\":[{\"role\":\"user\",\"content\":\"<system_context>\\nSys\\n</system_context>\\n\\nweather?\"},{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"GetWeather\",\"input\":{\"city\":\"Vienna\"}}]},{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\",\"content\":\"sunny\"}]}]}",
+      "toolNameMap": {
+        "GetWeather": "get_weather"
+      }
+    },
+    {
+      "name": "colliding names get distinct aliases",
+      "body": "{\"model\":\"m\",\"tools\":[{\"name\":\"read_file\"},{\"name\":\"read-file\"}],\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
+      "expected": "{\"model\":\"m\",\"tools\":[{\"name\":\"ReadFile\"},{\"name\":\"ReadFile2\"}],\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"system\":\"You are Claude Code, Anthropic's official CLI for Claude.\"}",
+      "toolNameMap": {
+        "ReadFile": "read_file",
+        "ReadFile2": "read-file"
+      }
+    },
+    {
+      "name": "a body that is not JSON passes through",
+      "body": "not json",
+      "expected": "not json",
+      "toolNameMap": {}
+    }
+  ],
+  "headers": [
+    {
+      "name": "setup token: context-1m dropped, Claude Code betas added",
+      "authMethod": "oauth",
+      "apiKey": "sk-ant-oat01-T",
+      "headers": {
+        "anthropic-beta": "context-1m-2025-08-07,tools-2024-04-04",
+        "content-type": "application/json"
+      },
+      "expected": {
+        "anthropic-beta": "tools-2024-04-04,claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14",
+        "content-type": "application/json",
+        "authorization": "Bearer sk-ant-oat01-T",
+        "user-agent": "claude-cli/2.1.76",
+        "x-app": "cli",
+        "accept": "application/json",
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      }
+    },
+    {
+      "name": "setup token: app accept and version are kept",
+      "authMethod": "oauth",
+      "apiKey": "sk-ant-oat01-T",
+      "headers": {
+        "accept": "text/event-stream",
+        "anthropic-version": "2024-01-01"
+      },
+      "expected": {
+        "accept": "text/event-stream",
+        "anthropic-version": "2024-01-01",
+        "authorization": "Bearer sk-ant-oat01-T",
+        "user-agent": "claude-cli/2.1.76",
+        "x-app": "cli",
+        "anthropic-beta": "claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14",
+        "anthropic-dangerous-direct-browser-access": "true"
+      }
+    },
+    {
+      "name": "setup token: defaults on a translated request",
+      "authMethod": "oauth",
+      "apiKey": "sk-ant-oat01-T",
+      "headers": {},
+      "expected": {
+        "authorization": "Bearer sk-ant-oat01-T",
+        "user-agent": "claude-cli/2.1.76",
+        "x-app": "cli",
+        "accept": "application/json",
+        "anthropic-beta": "claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14",
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      }
+    },
+    {
+      "name": "API key: context-1m alone removes the header",
+      "authMethod": "api_key",
+      "apiKey": "sk-ant-api03-T",
+      "headers": {
+        "anthropic-beta": "context-1m-2025-08-07",
+        "anthropic-version": "2024-01-01"
+      },
+      "expected": {
+        "anthropic-version": "2024-01-01",
+        "x-api-key": "sk-ant-api03-T",
+        "anthropic-dangerous-direct-browser-access": "true"
+      }
+    },
+    {
+      "name": "API key: context-1m among other betas, with whitespace",
+      "authMethod": "api_key",
+      "apiKey": "sk-ant-api03-T",
+      "headers": {
+        "anthropic-beta": " context-1m-2025-08-07 , tools-2024-04-04 "
+      },
+      "expected": {
+        "anthropic-beta": "tools-2024-04-04",
+        "x-api-key": "sk-ant-api03-T",
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      }
+    },
+    {
+      "name": "API key: defaults on a translated request",
+      "authMethod": "api_key",
+      "apiKey": "sk-ant-api03-T",
+      "headers": {},
+      "expected": {
+        "x-api-key": "sk-ant-api03-T",
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      }
+    }
+  ]
+}
