@@ -50,6 +50,6 @@ export function isFromPage(req: IncomingMessage, port: number): boolean {
  */
 export function cleanPageMessage(text: string): string {
   // C0, DEL, C1 and the bidi overrides/isolates.
-  const cleaned = text.replace(/[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/g, '').trim();
+  const cleaned = text.replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, '').trim();
   return cleaned.length > 300 ? `${cleaned.slice(0, 299)}…` : cleaned;
 }

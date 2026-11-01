@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { Byoky } from '../src/byoky.js';
+import { Byoky, type ByokySession } from '../src/byoky.js';
 import { ByokyError, ByokyErrorCode } from '@byoky/core';
 
 describe('Byoky', () => {
+  // Count these (or a filter of them) with .length, not toHaveLength: a
+  // failing toHaveLength prints the array, and vitest's formatter overflows
+  // its stack on the MessagePorts in it.
   let postedMessages: Array<{ data: Record<string, unknown>; port?: MessagePort }>;
 
   beforeEach(() => {
@@ -287,19 +290,24 @@ describe('Byoky', () => {
   });
 
   describe('notify port release', () => {
-    async function connectSession(sessionKey: string) {
-      const connectPromise = new Byoky().connect();
+    const latest = (type: string) => postedMessages.filter((m) => m.data.type === type).at(-1)!;
+
+    async function connectSession(
+      sessionKey: string,
+      open: () => Promise<ByokySession | null> = () => new Byoky().connect(),
+    ) {
+      const connectPromise = open();
       await new Promise((r) => setTimeout(r, 10));
       simulateResponse({
         type: 'BYOKY_CONNECT_RESPONSE',
-        requestId: postedMessages[0].data.requestId,
+        requestId: latest('BYOKY_CONNECT_REQUEST').data.requestId,
         payload: { sessionKey, proxyUrl: 'extension-proxy', providers: { anthropic: { available: true, authMethod: 'api_key' } } },
       });
-      const session = await connectPromise;
+      const session = (await connectPromise)!;
       await new Promise((r) => setTimeout(r, 10));
       // What the content script receives on its end of the notify port.
       const received: unknown[] = [];
-      const notifyPort = postedMessages.find((m) => m.data.type === 'BYOKY_REGISTER_NOTIFY')!.port!;
+      const notifyPort = latest('BYOKY_REGISTER_NOTIFY').port!;
       notifyPort.onmessage = (e) => received.push(e.data);
       return { session, received };
     }
@@ -311,6 +319,27 @@ describe('Byoky', () => {
       session.disconnect();
       await new Promise((r) => setTimeout(r, 10));
       expect(received).toEqual([unregister]);
+    });
+
+    it('unregisters the previous session when the same instance connects again', async () => {
+      const byoky = new Byoky();
+      const first = await connectSession('byk_n4', () => byoky.connect());
+      const second = await connectSession('byk_n4', () => byoky.tryReconnect());
+      expect(first.received).toEqual([unregister]);
+      expect(second.received).toEqual([]);
+
+      const third = await connectSession('byk_n4', () => byoky.connect());
+      expect(second.received).toEqual([unregister]);
+
+      // Disconnecting a replaced session leaves the live one registered.
+      first.session.disconnect();
+      second.session.disconnect();
+      await new Promise((r) => setTimeout(r, 10));
+      expect(third.received).toEqual([]);
+      third.session.disconnect();
+      await new Promise((r) => setTimeout(r, 10));
+      expect(third.received).toEqual([unregister]);
+      expect(first.received).toEqual([unregister]);
     });
 
     it('unregisters when the wallet revokes the session', async () => {
@@ -673,7 +702,7 @@ describe('Byoky', () => {
       });
       await tick();
 
-      expect(connectRequests()).toHaveLength(2);
+      expect(connectRequests().length).toBe(2);
       const reconnect = connectRequests()[1];
       reconnect.port!.postMessage({
         type: 'BYOKY_CONNECT_RESPONSE',
@@ -693,7 +722,7 @@ describe('Byoky', () => {
       relayRequest(ws, 'relay-2');
       await tick();
       expect(proxyRequests()[2].data.sessionKey).toBe('byk_new');
-      expect(connectRequests()).toHaveLength(2);
+      expect(connectRequests().length).toBe(2);
       relay.close();
     });
   });
@@ -907,7 +936,7 @@ describe('Byoky', () => {
       const result = await byoky.tryReconnect();
 
       expect(result).toBeNull();
-      expect(postedMessages).toHaveLength(0);
+      expect(postedMessages.length).toBe(0);
     });
 
     it('updates sessionStorage on auto-reconnect', async () => {
@@ -1020,7 +1049,7 @@ describe('Byoky', () => {
       const connectPromise = byoky.connect({ modal: true });
 
       expect(modalCard()!.textContent).toContain('Byoky wallet not found');
-      expect(postedMessages).toHaveLength(0);
+      expect(postedMessages.length).toBe(0);
 
       clickButton('Cancel');
       await expect(connectPromise).rejects.toMatchObject({
@@ -1037,7 +1066,7 @@ describe('Byoky', () => {
 
       clickButton('I\'ve installed it');
       expect(modalCard()!.textContent).toContain('reload this page');
-      expect(postedMessages).toHaveLength(0);
+      expect(postedMessages.length).toBe(0);
 
       (window as Record<string, unknown>).__byoky__ = { isByoky: true };
       clickButton('I\'ve installed it');

@@ -3,6 +3,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createProxyFetch } from '../src/proxy-fetch.js';
 
 describe('createProxyFetch', () => {
+  // Count these (or a filter of them) with .length, not toHaveLength: a
+  // failing toHaveLength prints the array, and vitest's formatter overflows
+  // its stack on the MessagePorts in it.
   let postedMessages: Array<{ data: Record<string, unknown>; port?: MessagePort }>;
 
   beforeEach(() => {
@@ -331,7 +334,7 @@ describe('createProxyFetch', () => {
         method: 'POST',
         body: { model: 'gpt-4o' } as unknown as BodyInit,
       })).rejects.toMatchObject({ code: 'PROXY_ERROR' });
-      expect(postedMessages).toHaveLength(0);
+      expect(postedMessages.length).toBe(0);
     });
 
     it('resolves a 204 with an empty body', async () => {
@@ -394,7 +397,7 @@ describe('createProxyFetch', () => {
 
       await expect(fetchPromise).rejects.toMatchObject({ code: 'PROXY_ERROR' });
       await new Promise((r) => setTimeout(r, 10));
-      expect(postedMessages.filter((m) => m.data.type === 'BYOKY_PROXY_CANCEL')).toHaveLength(1);
+      expect(postedMessages.filter((m) => m.data.type === 'BYOKY_PROXY_CANCEL').length).toBe(1);
     });
 
     it('errors the body on a chunk that is not base64', async () => {
@@ -435,7 +438,7 @@ describe('createProxyFetch', () => {
 
       await vi.advanceTimersByTimeAsync(delay);
       expect(state).toBe('pending');
-      expect(cancels()).toHaveLength(0);
+      expect(cancels().length).toBe(0);
 
       simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_META', requestId, status: 200, statusText: 'OK', headers: {} });
       simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_CHUNK', requestId, chunk: '{"ok":true}' });
@@ -445,7 +448,7 @@ describe('createProxyFetch', () => {
       expect(state).toBe('resolved');
       expect(await (await fetchPromise).json()).toEqual({ ok: true });
       // One upstream request: nothing was cancelled, so nothing retries.
-      expect(postedMessages.filter((m) => m.data.type === 'BYOKY_PROXY_REQUEST')).toHaveLength(1);
+      expect(postedMessages.filter((m) => m.data.type === 'BYOKY_PROXY_REQUEST').length).toBe(1);
     });
 
     it('gives up after 10 minutes with a ByokyError and cancels the request', async () => {
@@ -458,7 +461,7 @@ describe('createProxyFetch', () => {
       const err = await outcome;
       expect(err).toMatchObject({ name: 'ByokyError', code: 'PROXY_ERROR', message: expect.stringContaining('reload the page') });
       await settle();
-      expect(cancels()).toHaveLength(1);
+      expect(cancels().length).toBe(1);
     });
 
     it('takes its timeout from the options, and 0 waits forever', async () => {
@@ -491,7 +494,7 @@ describe('createProxyFetch', () => {
       ).rejects.toMatchObject({ name: 'AbortError' });
 
       await new Promise((r) => setTimeout(r, 10));
-      expect(postedMessages).toHaveLength(0);
+      expect(postedMessages.length).toBe(0);
     });
 
     it('rejects and cancels when aborted before the headers', async () => {
@@ -598,7 +601,7 @@ describe('createProxyFetch', () => {
 
       expect(await response.json()).toEqual({ ok: true });
       await new Promise((r) => setTimeout(r, 10));
-      expect(cancelMessages()).toHaveLength(0);
+      expect(cancelMessages().length).toBe(0);
     });
   });
 

@@ -251,84 +251,94 @@ const PROVIDERS: ByokyProvider[] = [
   { id: 'lm_studio', name: 'LM Studio', api: 'openai-completions', basePath: '/v1', models: EMPTY_MODELS },
 ];
 
-const byokyPlugin = {
-  id: 'byoky',
-  name: 'Byoky Wallet',
-  description:
-    'Route LLM API calls through your Byoky browser wallet — keys never leave the extension',
-  configSchema: emptyPluginConfigSchema(),
+export interface ByokyPluginOptions {
+  /** For tests. Real logins keep CALLBACK_PORT: the wallet knows OpenClaw by it. */
+  callbackPort?: number;
+}
 
-  register(api: OpenClawPluginApi) {
-    // Meta-provider: `byoky` — connects every provider available in the wallet
-    // in a single auth round. This is the recommended entry point.
-    api.registerProvider({
-      id: 'byoky',
-      label: 'Byoky Wallet (all providers)',
-      docsPath: '/providers/byoky',
-      auth: [
-        {
-          id: 'browser',
-          label: 'Byoky Wallet',
-          hint: 'Connects every provider you have in the wallet, in one step',
-          kind: 'custom',
-          run: (ctx: ProviderAuthContext) => runProviderAuth(ctx, null),
-        },
-      ],
-      wizard: {
-        setup: {
-          choiceId: 'byoky',
-          choiceLabel: 'Byoky Wallet (all providers)',
-          choiceHint: 'One auth connects every provider you have',
-          groupId: 'byoky',
-          groupLabel: 'Byoky Wallet',
-          groupHint: 'Keys never leave the extension',
-          methodId: 'browser',
-        },
-      },
-    });
+export function createByokyPlugin(options: ByokyPluginOptions = {}) {
+  const callbackPort = options.callbackPort ?? CALLBACK_PORT;
+  return {
+    id: 'byoky',
+    name: 'Byoky Wallet',
+    description:
+      'Route LLM API calls through your Byoky browser wallet — API keys stay in the extension',
+    configSchema: emptyPluginConfigSchema(),
 
-    // Per-provider variants — still registered for users who want to connect
-    // only a specific provider (or already have `byoky-anthropic` in their config).
-    for (const provider of PROVIDERS) {
-      const openclawId = `byoky-${provider.id}`;
-
+    register(api: OpenClawPluginApi) {
+      // Meta-provider: `byoky` — connects every provider available in the wallet
+      // in a single auth round. This is the recommended entry point.
       api.registerProvider({
-        id: openclawId,
-        label: `${provider.name} (via Byoky)`,
+        id: 'byoky',
+        label: 'Byoky Wallet (all providers)',
         docsPath: '/providers/byoky',
         auth: [
           {
             id: 'browser',
-            label: `${provider.name} (via Byoky)`,
-            hint: 'Route through Byoky wallet — key stays in extension',
+            label: 'Byoky Wallet',
+            hint: 'Connects every provider you have in the wallet, in one step',
             kind: 'custom',
-            run: (ctx: ProviderAuthContext) =>
-              runProviderAuth(ctx, provider),
+            run: (ctx: ProviderAuthContext) => runProviderAuth(ctx, null, callbackPort),
           },
         ],
         wizard: {
           setup: {
-            choiceId: openclawId,
-            choiceLabel: `${provider.name} (via Byoky)`,
-            choiceHint: 'Route through Byoky wallet',
+            choiceId: 'byoky',
+            choiceLabel: 'Byoky Wallet (all providers)',
+            choiceHint: 'One auth connects every provider you have',
             groupId: 'byoky',
             groupLabel: 'Byoky Wallet',
-            groupHint: 'Keys never leave the extension',
+            groupHint: 'API keys stay in the extension',
             methodId: 'browser',
           },
         },
       });
-    }
 
-    // /byoky command — bridge status + provider table
-    api.registerCommand({
-      name: 'byoky',
-      description: 'Show Byoky bridge status and connected providers',
-      acceptsArgs: false,
-      handler: async () => ({ text: await renderByokyStatus() }),
-    });
-  },
-};
+      // Per-provider variants — still registered for users who want to connect
+      // only a specific provider (or already have `byoky-anthropic` in their config).
+      for (const provider of PROVIDERS) {
+        const openclawId = `byoky-${provider.id}`;
+
+        api.registerProvider({
+          id: openclawId,
+          label: `${provider.name} (via Byoky)`,
+          docsPath: '/providers/byoky',
+          auth: [
+            {
+              id: 'browser',
+              label: `${provider.name} (via Byoky)`,
+              hint: 'Route through Byoky wallet — API keys stay in the extension',
+              kind: 'custom',
+              run: (ctx: ProviderAuthContext) =>
+                runProviderAuth(ctx, provider, callbackPort),
+            },
+          ],
+          wizard: {
+            setup: {
+              choiceId: openclawId,
+              choiceLabel: `${provider.name} (via Byoky)`,
+              choiceHint: 'Route through Byoky wallet',
+              groupId: 'byoky',
+              groupLabel: 'Byoky Wallet',
+              groupHint: 'API keys stay in the extension',
+              methodId: 'browser',
+            },
+          },
+        });
+      }
+
+      // /byoky command — bridge status + provider table
+      api.registerCommand({
+        name: 'byoky',
+        description: 'Show Byoky bridge status and connected providers',
+        acceptsArgs: false,
+        handler: async () => ({ text: await renderByokyStatus() }),
+      });
+    },
+  };
+}
+
+const byokyPlugin = createByokyPlugin();
 
 export default byokyPlugin;
 
@@ -508,6 +518,7 @@ async function runProviderAuth(
   ctx: ProviderAuthContext,
   // null = meta-provider "byoky": connect every provider the wallet exposes.
   provider: ByokyProvider | null,
+  callbackPort: number,
 ): Promise<ProviderAuthResult> {
   const ok = await ensureNativeHostRegistered(ctx);
   if (!ok) {
@@ -553,11 +564,12 @@ async function runProviderAuth(
       : 'Opening your browser to connect every provider in your Byoky wallet.\nUnlock your wallet and approve the connection.',
   );
 
-  const progress = ctx.prompter.progress(`Waiting for approval in the browser (http://127.0.0.1:${CALLBACK_PORT})…`);
+  const progress = ctx.prompter.progress(`Waiting for approval in the browser (http://127.0.0.1:${callbackPort})…`);
   let result: CallbackResult;
   try {
     result = await startCallbackServer({
       requestProviderId: provider?.id ?? null,
+      port: callbackPort,
       openUrl: (url) => ctx.openUrl(url),
       // The tab stays open for a retry, so keep waiting, but show it now.
       onPageError: (message) => progress.update(`The browser tab reported: ${message}. Try again there, or press Ctrl-C.`),
@@ -678,7 +690,7 @@ function buildAuthResult(
         .join(', ')}.`,
     );
   }
-  notes.push('Keys stay in your Byoky wallet — the bridge only relays requests.');
+  notes.push('API keys stay in your Byoky wallet; the bridge relays requests to it. A Claude setup token is the exception: Anthropic needs a non-browser client for it, so the bridge makes those calls, holding the token in memory only.');
   notes.push('The bridge must be running for API calls to work.');
   if (defaultModel) notes.push(`Default model set to ${defaultModel}.`);
   notes.push('Run `/byoky` inside OpenClaw anytime to check bridge status.');
@@ -1112,7 +1124,7 @@ function buildAuthPage(requestProviderId: string | null, nonce: string): string 
     </p>
     <p class="security">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-      <span>Keys never leave your wallet. API calls are proxied through the local Byoky Bridge.</span>
+      <span>API keys stay in your wallet; the local Byoky Bridge relays each call to it. A Claude setup token is the exception: the bridge makes those calls, holding the token in memory only.</span>
     </p>
   </div>
   <script src="/auth-sdk.js"></script>

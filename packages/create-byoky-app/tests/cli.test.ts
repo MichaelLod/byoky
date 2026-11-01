@@ -8,7 +8,8 @@ import ts from 'typescript';
 
 // Runs the CLI as a child process, laid out like the published package
 // (dist/index.js next to templates/ and package.json). The source is
-// transpiled here so the test needs no build step and runs on Node 20.
+// transpiled here so the test needs no build step and runs on every Node
+// the package supports (engines: >=22), not only those that strip types.
 
 const pkgDir = join(dirname(fileURLToPath(import.meta.url)), '..');
 const pkgVersion: string = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf-8')).version;

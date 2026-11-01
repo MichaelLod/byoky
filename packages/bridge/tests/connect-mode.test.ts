@@ -221,7 +221,8 @@ describe('connect page in the browser', () => {
 
 describe('cleanPageMessage', () => {
   it('drops control and bidi characters and caps the length', () => {
-    expect(cleanPageMessage('a\u0000b\u009bc‮d⁦e')).toBe('abcde');
+    expect(cleanPageMessage('a\u0000b\u009bc\u202ed\u2066e')).toBe('abcde');
+    expect(cleanPageMessage('\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069ok')).toBe('ok');
     const long = cleanPageMessage('x'.repeat(1000));
     expect(long).toHaveLength(300);
     expect(long.endsWith('…')).toBe(true);
