@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ByokyServer } from '../src/server.js';
 import type { WebSocketLike } from '@byoky/core';
 import { MAX_RELAY_MESSAGE_SIZE, WS_READY_STATE } from '@byoky/core';
@@ -225,6 +225,47 @@ describe('ByokyServer', () => {
     }
 
     await expect(reader.read()).rejects.toThrow('timed out');
+  });
+
+  describe('relay:hello', () => {
+    afterEach(() => { vi.useRealTimers(); });
+
+    it('is accepted once: a second hello neither renames the session nor adds a ping timer', async () => {
+      vi.useFakeTimers();
+      const server = new ByokyServer({ pingInterval: 1000, helloTimeout: 5000 });
+      const clientPromise = server.handleConnection(ws);
+      ws.simulateMessage({ type: 'relay:hello', sessionId: 'first', providers: {} });
+      const client = await clientPromise;
+
+      for (let i = 0; i < 5; i++) {
+        ws.simulateMessage({ type: 'relay:hello', sessionId: `again-${i}`, providers: { x: { available: true, authMethod: 'api_key' } } });
+      }
+      expect(client.sessionId).toBe('first');
+      expect(client.providers).toEqual({});
+
+      const pings = () => ws.sentMessages.filter((m) => m.includes('relay:ping')).length;
+      vi.advanceTimersByTime(1000);
+      expect(pings()).toBe(1);
+
+      ws.close();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('ignores a hello whose providers is not an object map', async () => {
+      const server = new ByokyServer({ pingInterval: 0, helloTimeout: 50 });
+      const clientPromise = server.handleConnection(ws);
+      ws.simulateMessage({ type: 'relay:hello', sessionId: 'x', providers: null });
+      await expect(clientPromise).rejects.toThrow('relay:hello');
+    });
+
+    it('rejects at once and leaves no timer when the socket closes before the hello', async () => {
+      vi.useFakeTimers();
+      const clientPromise = server.handleConnection(ws);
+      ws.close();
+      await expect(clientPromise).rejects.toThrow('closed before relay:hello');
+      ws.simulateMessage({ type: 'relay:hello', sessionId: 'late', providers: {} });
+      expect(vi.getTimerCount()).toBe(0);
+    });
   });
 
   describe('malformed messages from the client', () => {

@@ -53,6 +53,10 @@ export class ByokyServer {
       let sessionId = '';
       let providers: Record<string, { available: boolean; authMethod: AuthMethod }> = {};
       let connected = false;
+      // A connection says hello once. Each hello used to start another ping
+      // interval that cleanup() never cleared, and could rename the session.
+      let helloReceived = false;
+      let closed = false;
       const closeCallbacks = new Set<() => void>();
       const pendingRequests = new Map<string, {
         resolveMeta: (value: { status: number; statusText: string; headers: Record<string, string> }) => void;
@@ -65,6 +69,7 @@ export class ByokyServer {
       let requestCounter = 0;
 
       const helloTimer = setTimeout(() => {
+        closed = true;
         reject(ByokyError.relayConnectionFailed('Timed out waiting for relay:hello'));
         ws.close(4000, 'Hello timeout');
       }, this.helloTimeout);
@@ -137,6 +142,8 @@ export class ByokyServer {
       };
 
       function handleHello(msg: RelayHello) {
+        if (helloReceived || closed) return;
+        helloReceived = true;
         clearTimeout(helloTimer);
         sessionId = msg.sessionId;
         providers = msg.providers;
@@ -144,6 +151,7 @@ export class ByokyServer {
 
         // Start keepalive pings
         if (self.pingInterval > 0) {
+          clearInterval(pingTimer);
           pingTimer = setInterval(() => {
             sendRelayMessage(ws, { type: 'relay:ping', ts: Date.now() });
           }, self.pingInterval);
@@ -153,10 +161,15 @@ export class ByokyServer {
       }
 
       function cleanup() {
-        if (!connected) return;
-        connected = false;
+        if (closed) return;
+        closed = true;
         clearTimeout(helloTimer);
         if (pingTimer) clearInterval(pingTimer);
+        if (!connected) {
+          reject(ByokyError.relayConnectionFailed('Connection closed before relay:hello'));
+          return;
+        }
+        connected = false;
 
         // Reject all pending requests
         for (const pending of pendingRequests.values()) {

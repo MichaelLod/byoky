@@ -118,6 +118,11 @@ function isStringRecord(value: unknown): value is Record<string, string> {
   return isPlainObject(value) && Object.values(value).every((v) => typeof v === 'string');
 }
 
+/** A provider map apps can index and read `.available` from without a TypeError. */
+function isProviderMap(value: unknown): boolean {
+  return isPlainObject(value) && Object.values(value).every(isPlainObject);
+}
+
 export function parseRelayMessage(data: unknown): RelayMessage | null {
   try {
     if (typeof data === 'string' && data.length > MAX_RELAY_MESSAGE_SIZE) return null;
@@ -129,7 +134,7 @@ export function parseRelayMessage(data: unknown): RelayMessage | null {
     // Validate required fields per message type
     switch (raw.type) {
       case 'relay:hello':
-        if (typeof raw.sessionId !== 'string') return null;
+        if (typeof raw.sessionId !== 'string' || !isProviderMap(raw.providers)) return null;
         break;
       case 'relay:request':
         if (typeof raw.requestId !== 'string' || typeof raw.providerId !== 'string' ||
