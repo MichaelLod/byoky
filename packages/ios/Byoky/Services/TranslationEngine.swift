@@ -314,6 +314,26 @@ final class TranslationEngine {
         }
     }
 
+    /// The model routing names for `providerId` when nothing else does: the
+    /// auto cross-family fallback and a cross-family group saved without a
+    /// model (core `autoRouteModelFor`). Nil when routing must skip the
+    /// provider, and on errors (including a bundle without the export).
+    func autoRouteModel(for providerId: String) -> String? {
+        do {
+            return try queue.sync {
+                try ensureLoadedLocked()
+                guard let bridge = self.bridge,
+                      let fn = bridge.objectForKeyedSubscript("autoRouteModelFor"), !fn.isUndefined else { return nil }
+                let result = bridge.invokeMethod("autoRouteModelFor", withArguments: [providerId])
+                if pendingException() != nil { return nil }
+                guard let result, result.isString, let model = result.toString(), !model.isEmpty else { return nil }
+                return model
+            }
+        } catch {
+            return nil
+        }
+    }
+
     /// True iff `url` is the chat endpoint of `providerId`'s family: the only
     /// request shape a translation or same-family swap can carry, since both
     /// rewrite the request onto the destination's chat endpoint. False on

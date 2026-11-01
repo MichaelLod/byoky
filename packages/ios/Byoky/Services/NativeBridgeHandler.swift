@@ -102,7 +102,8 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
 
         switch type {
         case "BYOKY_CONNECT_REQUEST":
-            handleConnect(requestId: requestId, reconnectOnly: payload?["reconnectOnly"] as? Bool == true)
+            handleConnect(requestId: requestId, reconnectOnly: payload?["reconnectOnly"] as? Bool == true,
+                          requested: Self.requestedProviderIds(payload?["providers"]))
         case "BYOKY_PROXY_REQUEST":
             handleProxy(body)
         case "BYOKY_PROXY_CANCEL":
@@ -135,7 +136,7 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
 
     // MARK: - Connect
 
-    private func handleConnect(requestId: String, reconnectOnly: Bool) {
+    private func handleConnect(requestId: String, reconnectOnly: Bool, requested: [String]) {
         // Revoked in Connected Apps: no silent reconnect until the user opens
         // the app from the Apps grid again.
         if wallet.isAppAccessRevoked(origin: appOrigin) {
@@ -150,19 +151,18 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             return
         }
 
-        var providers: [String: [String: Any]] = [:]
-        for credential in wallet.credentials {
-            providers[credential.providerId] = [
-                "available": true,
-                "authMethod": credential.authMethod == .apiKey ? "api_key" : "oauth",
-            ]
+        // One entry per provider the app asked for, available when routing
+        // can serve it (as the extension answers).
+        let group = wallet.groupForOrigin(appOrigin)
+        let credentials = wallet.credentials
+        let (providers, sessionProviders) = Self.connectProviders(requested: requested, credentials: credentials) {
+            RoutingResolver.canServe(providerId: $0, group: group, credentials: credentials)
         }
 
         let key = "byk_" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
         sessionKey = key
 
-        let providerIds = Array(Set(wallet.credentials.map(\.providerId)))
-        _ = try? wallet.upsertSession(appOrigin: appOrigin, providers: providerIds)
+        _ = try? wallet.upsertSession(appOrigin: appOrigin, providers: sessionProviders)
 
         deliver(requestId: requestId, message: [
             "type": "BYOKY_CONNECT_RESPONSE",
@@ -173,6 +173,53 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
                 "proxyUrl": "",
             ] as [String: Any],
         ])
+    }
+
+    /// The connect response's `providers` map, as the extension builds it
+    /// (createSession): one entry per requested provider, available when
+    /// `canServe` finds a key for it (direct, group pin, cross-family,
+    /// same-family swap or auto-routing) and `{available: false}` otherwise,
+    /// so `session.providers[id].available` works for every requested id. An
+    /// app that names no providers gets every provider the wallet holds a key
+    /// for, as before. Also returns the providers recorded on the session.
+    nonisolated static func connectProviders(
+        requested: [String],
+        credentials: [Credential],
+        canServe: (String) -> Credential?
+    ) -> (providers: [String: [String: Any]], sessionProviders: [String]) {
+        func authMethod(_ credential: Credential) -> String {
+            credential.authMethod == .apiKey ? "api_key" : "oauth"
+        }
+        var providers: [String: [String: Any]] = [:]
+        var sessionProviders: [String] = []
+        if requested.isEmpty {
+            for credential in credentials where providers[credential.providerId] == nil {
+                providers[credential.providerId] = ["available": true, "authMethod": authMethod(credential)]
+                sessionProviders.append(credential.providerId)
+            }
+            return (providers, sessionProviders)
+        }
+        for id in requested where providers[id] == nil {
+            if let credential = canServe(id) {
+                providers[id] = ["available": true, "authMethod": authMethod(credential)]
+                sessionProviders.append(id)
+            } else {
+                providers[id] = ["available": false, "authMethod": "api_key"]
+            }
+        }
+        return (providers, sessionProviders)
+    }
+
+    /// Provider ids from a connect request's `providers` array: `{id,
+    /// required}` objects (the SDK) or bare strings. Anything else, and ids
+    /// that aren't plausible provider ids, are skipped.
+    nonisolated static func requestedProviderIds(_ value: Any?) -> [String] {
+        guard let entries = value as? [Any] else { return [] }
+        return entries.compactMap { entry -> String? in
+            let id = (entry as? String) ?? ((entry as? [String: Any])?["id"] as? String)
+            guard let id, id.range(of: #"^[a-z0-9_]{1,64}$"#, options: .regularExpression) != nil else { return nil }
+            return id
+        }
     }
 
     // MARK: - Proxy

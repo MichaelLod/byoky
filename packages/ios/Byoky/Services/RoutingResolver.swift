@@ -27,6 +27,11 @@ struct RoutingResolver {
     ///
     /// Returns `nil` (signaling "no credential available") only when none of
     /// the above yields a usable credential.
+    ///
+    /// A group's credential pin only counts when that key belongs to the
+    /// group's provider (core's `pinnedCredential`): groups aren't integrity
+    /// protected, and a pin to another provider's key must never send that
+    /// key to the group's provider.
     static func resolve(
         requestedProviderId: String,
         requestedModel: String?,
@@ -65,7 +70,7 @@ struct RoutingResolver {
             ? group?.model?.nilIfEmpty
             : nil
         if let group, group.providerId == requestedProviderId, let pinnedId = group.credentialId {
-            guard let pinned = credentials.first(where: { $0.id == pinnedId }) else { return nil }
+            guard let pinned = credentials.first(where: { $0.id == pinnedId && $0.providerId == requestedProviderId }) else { return nil }
             return RoutingDecision(credential: pinned, translation: nil, modelOverride: override)
         }
         if let cred = credentials.first(where: { $0.providerId == requestedProviderId }) {
@@ -77,7 +82,7 @@ struct RoutingResolver {
         //    providerId) counts as "no binding" because the user hasn't
         //    expressed routing intent. When the user HAS set a group, we
         //    never silently route around it; returning nil here surfaces
-        //    NO_CREDENTIAL so the stale config gets noticed.
+        //    PROVIDER_UNAVAILABLE so the stale config gets noticed.
         let hasExplicitGroup = (group?.providerId.isEmpty == false)
         if !hasExplicitGroup {
             if let auto = tryAutoCrossFamily(
@@ -93,8 +98,27 @@ struct RoutingResolver {
         return nil
     }
 
+    /// Whether a request for `providerId` from an app in `group` can be
+    /// served at all, and with which key: `resolve` with any model. A connect
+    /// request names no model, while the proxy routes every request that
+    /// carries one, so availability must not depend on it. Used for the
+    /// connect response's per-provider `available` flags.
+    static func canServe(
+        providerId: String,
+        group: Group?,
+        credentials: [Credential],
+        engine: TranslationEngine = .shared
+    ) -> Credential? {
+        resolve(requestedProviderId: providerId, requestedModel: anyModel, group: group,
+                credentials: credentials, engine: engine)?.credential
+    }
+
+    /// Stand-in source model for `canServe`; never sent anywhere.
+    private static let anyModel = "*"
+
     /// Cross-family resolution. Returns nil if any precondition fails.
-    /// Mirrors `resolveCrossFamilyRoute` exactly.
+    /// Mirrors `resolveCrossFamilyRoute` exactly: the destination model is
+    /// the group's, or else core's routing default for the group's provider.
     private static func tryCrossFamily(
         requestedProviderId: String,
         requestedModel: String?,
@@ -104,7 +128,7 @@ struct RoutingResolver {
     ) -> RoutingDecision? {
         guard let group else { return nil }
         guard group.providerId != requestedProviderId else { return nil }
-        guard let dstModel = group.model, !dstModel.isEmpty else { return nil }
+        guard let dstModel = group.model?.nilIfEmpty ?? engine.autoRouteModel(for: group.providerId) else { return nil }
         guard let srcModel = requestedModel, !srcModel.isEmpty else { return nil }
 
         // Family compatibility check via the JS bridge — single source of truth.
@@ -115,10 +139,11 @@ struct RoutingResolver {
         // Pin enforcement: when a pin is set we honor it strictly. A stale
         // pin returns nil rather than silently swapping to a different
         // credential of the same provider — that would mask the user's
-        // cost-attribution intent.
+        // cost-attribution intent. A pin to another provider's key counts
+        // as stale.
         let resolved: Credential?
         if let pinnedId = group.credentialId {
-            resolved = credentials.first(where: { $0.id == pinnedId })
+            resolved = credentials.first(where: { $0.id == pinnedId && $0.providerId == group.providerId })
         } else {
             resolved = credentials.first(where: { $0.providerId == group.providerId })
         }
@@ -165,10 +190,11 @@ struct RoutingResolver {
         }
 
         // Strict pin enforcement: stale pin → nil, no silent fallback to a
-        // different credential of the destination provider.
+        // different credential of the destination provider. A pin to another
+        // provider's key counts as stale.
         let resolved: Credential?
         if let pinnedId = group.credentialId {
-            resolved = credentials.first(where: { $0.id == pinnedId })
+            resolved = credentials.first(where: { $0.id == pinnedId && $0.providerId == group.providerId })
         } else {
             resolved = credentials.first(where: { $0.providerId == group.providerId })
         }
@@ -190,9 +216,11 @@ struct RoutingResolver {
     ///   1. Family preference: anthropic > openai > gemini > cohere > other
     ///   2. Tiebreak by `createdAt` desc (newest credential first)
     ///
-    /// Uses `defaultModelFor(family:)` to pick the family flagship as the
-    /// destination model. The `srcModel` field of RoutingTranslation is
-    /// populated from the inbound request body when available.
+    /// The destination model is core's `autoRouteModelFor` for the
+    /// candidate's provider; providers it names none for (OpenAI-compatible
+    /// hosts other than OpenAI and OpenRouter, Azure, Ollama, LM Studio) are
+    /// skipped. The `srcModel` field of RoutingTranslation is populated from
+    /// the inbound request body when available.
     private static func tryAutoCrossFamily(
         requestedProviderId: String,
         requestedModel: String?,
@@ -220,7 +248,7 @@ struct RoutingResolver {
             // Translation needs a source model to build the outbound body.
             // The extension extracts it from the request body earlier in the
             // proxy pipeline; on mobile, missing srcModel → skip auto-route
-            // and surface NO_CREDENTIAL so the user notices.
+            // and surface PROVIDER_UNAVAILABLE so the user notices.
             return nil
         }
 
@@ -228,7 +256,7 @@ struct RoutingResolver {
             guard engine.shouldTranslate(srcProviderId: requestedProviderId, dstProviderId: cred.providerId) else {
                 continue
             }
-            guard let dstModel = defaultFlagshipModel(for: cred.providerId) else { continue }
+            guard let dstModel = engine.autoRouteModel(for: cred.providerId) else { continue }
             return RoutingDecision(
                 credential: cred,
                 translation: RoutingTranslation(
@@ -245,6 +273,8 @@ struct RoutingResolver {
 
     /// Family preference index for tiebreaking auto cross-family candidate
     /// ordering. Mirrors `FAMILY_ORDER` in routing.ts — keep these in lockstep.
+    /// Ollama and LM Studio (openai family in core) stay at 99: auto-routing
+    /// never picks them, as there is no model it could name for them.
     private static func familyOrder(for providerId: String) -> Int {
         switch providerId {
         case "anthropic": return 0
@@ -257,38 +287,27 @@ struct RoutingResolver {
         }
     }
 
-    /// Flagship model id for the family containing `providerId`. Mirrors
-    /// `DEFAULT_MODELS` in `packages/core/src/models.ts` — keep in sync
-    /// whenever that map changes.
-    private static func defaultFlagshipModel(for providerId: String) -> String? {
-        switch providerId {
-        case "anthropic":
-            return "claude-sonnet-4-6"
-        case "openai", "azure_openai", "groq", "together", "deepseek",
-             "xai", "perplexity", "fireworks", "openrouter", "mistral":
-            return "gpt-5.4"
-        case "gemini":
-            return "gemini-2.5-pro"
-        case "cohere":
-            return "command-a-03-2025"
-        default:
-            return nil
-        }
-    }
-
-    /// Human-readable message for a NO_CREDENTIAL proxy error. Three cases:
-    ///   1. The app's group routes to a provider the user has no key for.
+    /// Human-readable message for a PROVIDER_UNAVAILABLE proxy error
+    /// (core's `buildNoCredentialMessage`). Three cases:
+    ///   1. The app's group routes to a provider the user has no key for,
+    ///      or has a key for but no model to translate with.
     ///   2. The user has keys, just not for the requested provider.
     ///   3. The wallet holds no keys at all.
     static func noCredentialMessage(
         requestedProviderId: String,
         userCredentialProviderIds: [String],
-        group: Group?
+        group: Group?,
+        engine: TranslationEngine = .shared
     ) -> String {
         let req = requestedProviderId
         // An empty providerId means the sentinel default group — no routing,
         // so treat as if no group were set.
         if let groupBinding = group?.providerId.nilIfEmpty, groupBinding != req {
+            let modelMissing = group?.model?.nilIfEmpty == nil && engine.autoRouteModel(for: groupBinding) == nil
+            if modelMissing, userCredentialProviderIds.contains(groupBinding),
+               engine.shouldTranslate(srcProviderId: req, dstProviderId: groupBinding) {
+                return "This app's group routes it to \(groupBinding), which needs a model to translate \(req) requests. Set a model on the group."
+            }
             return "No \(groupBinding) API key found. Add a \(groupBinding) key to your wallet, or assign this app to a provider you already have a key for."
         }
         if !userCredentialProviderIds.isEmpty {

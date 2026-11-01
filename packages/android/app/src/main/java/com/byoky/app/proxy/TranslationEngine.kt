@@ -230,6 +230,22 @@ class TranslationEngine private constructor(private val appContext: Context) {
     }
 
     /**
+     * The model routing names for [providerId] when nothing else does: the
+     * auto cross-family fallback and a cross-family group saved without a
+     * model (core `autoRouteModelFor`). Null when routing must skip the
+     * provider, and on errors (including a bundle without the export).
+     */
+    fun autoRouteModelFor(providerId: String): String? {
+        return try {
+            val expr = "(function(){var b=BYOKY_TRANSLATE;if(typeof b.autoRouteModelFor!=='function')return '';" +
+                "var m=b.autoRouteModelFor(${jsLiteral(providerId)});return m==null?'':String(m);})()"
+            evalSync(expr).ifEmpty { null }
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    /**
      * True iff `url` is the chat endpoint of `providerId`'s family, the only
      * request shape translation and same-family swaps can route. False on
      * errors / unknown providers.

@@ -8,8 +8,8 @@ import android.webkit.WebView
 import androidx.webkit.JavaScriptReplyProxy
 import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebViewCompat
-import com.byoky.app.data.AuthMethod
 import com.byoky.app.data.WalletStore
+import com.byoky.app.proxy.ConnectProviders
 import com.byoky.app.proxy.ProxyService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -86,7 +86,7 @@ class AppBridge(
         if (type != "BYOKY_DISCONNECT" && !REQUEST_ID.matches(requestId)) return
 
         when (type) {
-            "BYOKY_CONNECT_REQUEST" -> handleConnect(requestId, replyProxy)
+            "BYOKY_CONNECT_REQUEST" -> handleConnect(requestId, msg, replyProxy)
             "BYOKY_PROXY_REQUEST" -> handleProxy(msg, requestId, replyProxy)
             "BYOKY_PROXY_CANCEL" -> inFlight[requestId]?.cancel()
             "BYOKY_SESSION_STATUS" -> handleSessionStatus(requestId, msg, replyProxy)
@@ -104,7 +104,7 @@ class AppBridge(
 
     // ── Connect ──────────────────────────────────────────────────────────
 
-    private fun handleConnect(requestId: String, reply: JavaScriptReplyProxy) {
+    private fun handleConnect(requestId: String, msg: JSONObject, reply: JavaScriptReplyProxy) {
         if (!wallet.isUnlocked) {
             deliverConnectError(reply, requestId, "Wallet is locked")
             return
@@ -117,29 +117,33 @@ class AppBridge(
         }
 
         // The user opened this app from their wallet, so connecting is
-        // implicit (same as the iOS in-wallet browser). Every provider the
-        // wallet holds a key for is offered; routing can still serve other
-        // providers through groups or translation.
-        val credentials = wallet.credentials.value
-        val providers = JSONObject()
-        for (credential in credentials) {
-            if (providers.has(credential.providerId)) continue
-            providers.put(credential.providerId, JSONObject()
-                .put("available", true)
-                .put("authMethod", if (credential.authMethod == AuthMethod.OAUTH) "oauth" else "api_key"))
+        // implicit (same as the iOS in-wallet browser). Each provider the
+        // app asked for is listed, available when routing can serve it
+        // (ConnectProviders); routing asks the translation sandbox, so it is
+        // resolved off the main thread.
+        val requested = ConnectProviders.requestedIds(msg.optJSONObject("payload")?.optJSONArray("providers"))
+        scope.launch {
+            val result = ConnectProviders.build(requested, wallet.credentials.value) { id -> proxy.canServe(appOrigin, id) }
+            val providers = JSONObject()
+            for (entry in result.entries) {
+                providers.put(entry.providerId, JSONObject()
+                    .put("available", entry.available)
+                    .put("authMethod", entry.authMethod))
+            }
+            mainHandler.post {
+                if (disposed || !wallet.isUnlocked) return@post
+                val key = "app_" + UUID.randomUUID().toString().replace("-", "")
+                sessionKey = key
+                wallet.upsertSession(appOrigin, result.sessionProviders)
+                deliver(reply, JSONObject()
+                    .put("type", "BYOKY_CONNECT_RESPONSE")
+                    .put("requestId", requestId)
+                    .put("payload", JSONObject()
+                        .put("sessionKey", key)
+                        .put("providers", providers)
+                        .put("proxyUrl", "")))
+            }
         }
-
-        val key = "app_" + UUID.randomUUID().toString().replace("-", "")
-        sessionKey = key
-        wallet.upsertSession(appOrigin, credentials.map { it.providerId }.distinct())
-
-        deliver(reply, JSONObject()
-            .put("type", "BYOKY_CONNECT_RESPONSE")
-            .put("requestId", requestId)
-            .put("payload", JSONObject()
-                .put("sessionKey", key)
-                .put("providers", providers)
-                .put("proxyUrl", "")))
     }
 
     private fun deliverConnectError(reply: JavaScriptReplyProxy, requestId: String, message: String) {

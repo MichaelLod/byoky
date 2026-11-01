@@ -130,7 +130,7 @@ class ProxyService(
         try {
             val credentials = wallet.credentials.value
             val decision = resolveRouting(providerId, parsedUrl, body, group, credentials)
-                ?: throw ProxyError("NO_CREDENTIAL", noCredentialMessage(providerId, credentials, group), 403)
+                ?: throw ProxyError("PROVIDER_UNAVAILABLE", noCredentialMessage(providerId, credentials, group), 403)
             routing = decision
             val upstreamProviderId = decision.translation?.dstProviderId ?: decision.swapToProviderId ?: providerId
             if (decision.translation != null || decision.swapToProviderId != null) {
@@ -321,13 +321,29 @@ class ProxyService(
             // No engine: direct match only, still honoring the group's pinned key and model.
             ?: return RoutingResolver.resolveDirect(providerId, group, credentials)
         val srcModel = RoutingResolver.requestModel(providerId, url, body)
-        val families = object : RoutingResolver.Families {
-            override fun shouldTranslate(srcProviderId: String, dstProviderId: String) =
-                engine.shouldTranslate(srcProviderId, dstProviderId)
-            override fun sameFamily(srcProviderId: String, dstProviderId: String) =
-                engine.sameFamily(srcProviderId, dstProviderId)
-        }
-        return RoutingResolver.resolve(providerId, srcModel, group, credentials, families)
+        return RoutingResolver.resolve(providerId, srcModel, group, credentials, families(engine))
+    }
+
+    /**
+     * Whether a request for [providerId] from [appOrigin] can be served, and
+     * with which key (see [RoutingResolver.canServe]). For the connect
+     * response; without the translation engine only direct keys count, as
+     * in [resolveRouting].
+     */
+    fun canServe(appOrigin: String, providerId: String): Credential? {
+        val group = wallet.groupForOrigin(appOrigin)
+        val credentials = wallet.credentials.value
+        val engine = translationEngine ?: return RoutingResolver.resolveDirect(providerId, group, credentials)?.credential
+        return RoutingResolver.canServe(providerId, group, credentials, families(engine))
+    }
+
+    /** Family questions answered by the bundled core. */
+    private fun families(engine: TranslationEngine) = object : RoutingResolver.Families {
+        override fun shouldTranslate(srcProviderId: String, dstProviderId: String) =
+            engine.shouldTranslate(srcProviderId, dstProviderId)
+        override fun sameFamily(srcProviderId: String, dstProviderId: String) =
+            engine.sameFamily(srcProviderId, dstProviderId)
+        override fun autoRouteModel(providerId: String) = engine.autoRouteModelFor(providerId)
     }
 
     /**
@@ -722,19 +738,28 @@ class ProxyService(
     }
 
     /**
-     * Actionable NO_CREDENTIAL message:
-     *   1. The app's group routes to a provider with no key → name it.
-     *   2. The wallet has keys, just not for this provider → list them.
-     *   3. The wallet is empty → ask for any key.
+     * Actionable message for the PROVIDER_UNAVAILABLE error:
+     *   1. The group's pinned key is gone (or isn't one of its provider's).
+     *   2. The app's group routes to a provider with no key → name it; with
+     *      a key but no model to translate with → ask for a model.
+     *   3. The wallet has keys, just not for this provider → list them.
+     *   4. The wallet is empty → ask for any key.
      */
     private fun noCredentialMessage(providerId: String, credentials: List<Credential>, group: Group?): String {
         val pin = group?.credentialId
-        if (group != null && pin != null && credentials.none { it.id == pin }) {
+        if (group != null && pin != null && credentials.none { it.id == pin && it.providerId == group.providerId }) {
             return "The key this app's group \"${group.name}\" is pinned to is no longer in your wallet. Edit the group and pick another key."
         }
         // An empty providerId is the default sentinel group: no routing.
         val groupBinding = group?.providerId?.takeIf { it.isNotEmpty() }
         if (groupBinding != null && groupBinding != providerId) {
+            val engine = translationEngine
+            val modelMissing = group?.model.isNullOrEmpty() && engine?.autoRouteModelFor(groupBinding) == null
+            if (modelMissing && engine != null && credentials.any { it.providerId == groupBinding } &&
+                engine.shouldTranslate(providerId, groupBinding)
+            ) {
+                return "This app's group routes it to $groupBinding, which needs a model to translate $providerId requests. Set a model on the group."
+            }
             return "No $groupBinding API key found. Add a $groupBinding key to your wallet, or assign this app to a provider you already have a key for."
         }
         val held = credentials.map { it.providerId }.distinct().sorted()

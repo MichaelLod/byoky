@@ -29,6 +29,12 @@ object RoutingResolver {
     interface Families {
         fun shouldTranslate(srcProviderId: String, dstProviderId: String): Boolean
         fun sameFamily(srcProviderId: String, dstProviderId: String): Boolean
+
+        /**
+         * The model routing names for [providerId] when nothing else does
+         * (core `autoRouteModelFor`), or null when routing must skip it.
+         */
+        fun autoRouteModel(providerId: String): String?
     }
 
     /**
@@ -45,6 +51,11 @@ object RoutingResolver {
      *
      * Returns null (signaling "no credential available") only when none of
      * the above yields a usable credential.
+     *
+     * A group's credential pin only counts when that key belongs to the
+     * group's provider (core's `pinnedCredential`): groups aren't integrity
+     * protected, and a pin to another provider's key must never send that
+     * key to the group's provider.
      */
     fun resolve(
         requestedProviderId: String,
@@ -69,7 +80,7 @@ object RoutingResolver {
         //    providerId) counts as "no binding" because the user hasn't
         //    expressed routing intent. When the user HAS set a group, we
         //    never silently route around it; returning null here surfaces
-        //    NO_CREDENTIAL so the stale config gets noticed.
+        //    PROVIDER_UNAVAILABLE so the stale config gets noticed.
         val hasExplicitGroup = group != null && group.providerId.isNotEmpty()
         if (!hasExplicitGroup) {
             val auto = tryAutoCrossFamily(requestedProviderId, requestedModel, credentials, engine)
@@ -93,12 +104,25 @@ object RoutingResolver {
         val override = if (bindsProvider) group?.model?.takeIf { it.isNotEmpty() } else null
         val pin = if (bindsProvider) group?.credentialId else null
         val credential = if (pin != null) {
-            credentials.firstOrNull { it.id == pin }
+            credentials.firstOrNull { it.id == pin && it.providerId == requestedProviderId }
         } else {
             credentials.firstOrNull { it.providerId == requestedProviderId }
         } ?: return null
         return RoutingDecision(credential, translation = null, modelOverride = override)
     }
+
+    /**
+     * Whether a request for [providerId] from an app in [group] can be
+     * served at all, and with which key: [resolve] with any model. A connect
+     * request names no model, while the proxy routes every request that
+     * carries one, so availability must not depend on it. Used for the
+     * connect response's per-provider `available` flags.
+     */
+    fun canServe(providerId: String, group: Group?, credentials: List<Credential>, engine: Families): Credential? =
+        resolve(providerId, ANY_MODEL, group, credentials, engine)?.credential
+
+    /** Stand-in source model for [canServe]; never sent anywhere. */
+    private const val ANY_MODEL = "*"
 
     /**
      * Auto cross-family fallback — mirrors `resolveAutoCrossFamilyRoute` in
@@ -110,8 +134,10 @@ object RoutingResolver {
      *   1. Family preference: anthropic > openai > gemini > cohere > other
      *   2. Tiebreak by `createdAt` desc (newest credential first)
      *
-     * Uses `defaultFlagshipModel` to pick the family flagship as the
-     * destination model. `srcModel` is taken from the inbound request body.
+     * The destination model is core's `autoRouteModelFor` for the
+     * candidate's provider; providers it names none for (OpenAI-compatible
+     * hosts other than OpenAI and OpenRouter, Azure, Ollama, LM Studio) are
+     * skipped. `srcModel` is taken from the inbound request body.
      */
     private fun tryAutoCrossFamily(
         requestedProviderId: String,
@@ -126,7 +152,7 @@ object RoutingResolver {
 
         for (cred in autoCandidateOrder(credentials)) {
             if (!engine.shouldTranslate(requestedProviderId, cred.providerId)) continue
-            val dstModel = defaultFlagshipModel(cred.providerId) ?: continue
+            val dstModel = engine.autoRouteModel(cred.providerId)?.takeIf { it.isNotEmpty() } ?: continue
             return RoutingDecision(
                 credential = cred,
                 translation = RoutingTranslation(
@@ -155,6 +181,8 @@ object RoutingResolver {
     /**
      * Family preference index for tiebreaking auto cross-family candidate
      * ordering. Mirrors `FAMILY_ORDER` in routing.ts — keep in lockstep.
+     * Ollama and LM Studio (openai family in core) stay at 99: auto-routing
+     * never picks them, as there is no model it could name for them.
      */
     private fun familyOrder(providerId: String): Int = when (providerId) {
         "anthropic" -> 0
@@ -166,22 +194,9 @@ object RoutingResolver {
     }
 
     /**
-     * Flagship model id for the family containing `providerId`. Mirrors
-     * `DEFAULT_MODELS` in `packages/core/src/models.ts` — keep in sync
-     * whenever that map changes.
-     */
-    private fun defaultFlagshipModel(providerId: String): String? = when (providerId) {
-        "anthropic" -> "claude-sonnet-4-6"
-        "openai", "azure_openai", "groq", "together", "deepseek",
-        "xai", "perplexity", "fireworks", "openrouter", "mistral" -> "gpt-5.4"
-        "gemini" -> "gemini-2.5-pro"
-        "cohere" -> "command-a-03-2025"
-        else -> null
-    }
-
-    /**
      * Cross-family resolution. Returns null if any precondition fails.
-     * Mirrors `resolveCrossFamilyRoute` exactly.
+     * Mirrors `resolveCrossFamilyRoute` exactly: the destination model is
+     * the group's, or else core's routing default for the group's provider.
      */
     private fun tryCrossFamily(
         requestedProviderId: String,
@@ -192,8 +207,9 @@ object RoutingResolver {
     ): RoutingDecision? {
         if (group == null) return null
         if (group.providerId == requestedProviderId) return null
-        val dstModel = group.model
-        if (dstModel.isNullOrEmpty()) return null
+        val dstModel = group.model?.takeIf { it.isNotEmpty() }
+            ?: engine.autoRouteModel(group.providerId)?.takeIf { it.isNotEmpty() }
+            ?: return null
         if (requestedModel.isNullOrEmpty()) return null
 
         // Family compatibility check via the JS bridge — single source of truth.
@@ -202,9 +218,10 @@ object RoutingResolver {
         // Pin enforcement: when a pin is set we honor it strictly. A stale
         // pin returns null rather than silently swapping to a different
         // credential of the destination provider — that would mask the
-        // user's cost-attribution intent.
+        // user's cost-attribution intent. A pin to another provider's key
+        // counts as stale.
         val cred = if (group.credentialId != null) {
-            credentials.firstOrNull { it.id == group.credentialId } ?: return null
+            credentials.firstOrNull { it.id == group.credentialId && it.providerId == group.providerId } ?: return null
         } else {
             credentials.firstOrNull { it.providerId == group.providerId } ?: return null
         }
@@ -250,9 +267,10 @@ object RoutingResolver {
         if (!engine.sameFamily(requestedProviderId, group.providerId)) return null
 
         // Strict pin enforcement: stale pin → null, no silent fallback to a
-        // different credential of the destination provider.
+        // different credential of the destination provider. A pin to another
+        // provider's key counts as stale.
         val cred = if (group.credentialId != null) {
-            credentials.firstOrNull { it.id == group.credentialId } ?: return null
+            credentials.firstOrNull { it.id == group.credentialId && it.providerId == group.providerId } ?: return null
         } else {
             credentials.firstOrNull { it.providerId == group.providerId } ?: return null
         }

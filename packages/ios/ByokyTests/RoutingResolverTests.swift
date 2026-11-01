@@ -115,4 +115,133 @@ final class RoutingResolverTests: XCTestCase {
         XCTAssertEqual(decision.translation?.srcModel, "gemini-2.5-flash")
         XCTAssertEqual(decision.translation?.dstProviderId, "anthropic")
     }
+
+    // MARK: - Pins must belong to the group's provider (F010)
+
+    func testAPinToAnotherProvidersKeyIsNeverUsed() throws {
+        let claude = credential("anthropic", "Claude")
+        let openai = credential("openai", "OpenAI")
+        // Cross-family: the group binds Anthropic but pins the OpenAI key.
+        XCTAssertNil(RoutingResolver.resolve(
+            requestedProviderId: "gemini", requestedModel: "gemini-2.5-pro",
+            group: group("anthropic", pin: openai.id, model: "claude-sonnet-4-6"), credentials: [claude, openai]
+        ))
+        // Same-family swap: the group binds Groq but pins the OpenAI key; the
+        // app's own key serves its own provider instead.
+        let swap = try XCTUnwrap(RoutingResolver.resolve(
+            requestedProviderId: "openai", requestedModel: "gpt-5.5",
+            group: group("groq", pin: openai.id), credentials: [openai]
+        ))
+        XCTAssertNil(swap.swapToProviderId)
+        XCTAssertEqual(swap.credential.id, openai.id)
+        // Direct: the group binds OpenAI but pins the Anthropic key.
+        XCTAssertNil(RoutingResolver.resolve(
+            requestedProviderId: "openai", requestedModel: "gpt-5.5",
+            group: group("openai", pin: claude.id), credentials: [claude, openai]
+        ))
+    }
+
+    // MARK: - Routing models from core (F015, F099, F100)
+
+    func testAutoRoutingUsesCoresModel() throws {
+        let openai = credential("openai", "OpenAI")
+        let decision = try XCTUnwrap(RoutingResolver.resolve(
+            requestedProviderId: "anthropic", requestedModel: "claude-sonnet-4-6",
+            group: Group.makeDefault(), credentials: [openai]
+        ))
+        XCTAssertEqual(decision.translation?.dstModel, "gpt-5.5")
+        XCTAssertEqual(TranslationEngine.shared.autoRouteModel(for: "openrouter"), "openai/gpt-5.5")
+    }
+
+    func testAutoRoutingSkipsProvidersCoreNamesNoModelFor() throws {
+        let deepseek = credential("deepseek", "DeepSeek")
+        let ollama = Credential.create(providerId: "ollama", label: "Local", baseUrl: "http://localhost:11434")
+        XCTAssertNil(RoutingResolver.resolve(
+            requestedProviderId: "anthropic", requestedModel: "claude-sonnet-4-6",
+            group: nil, credentials: [deepseek, ollama]
+        ))
+        let openai = credential("openai", "OpenAI")
+        let decision = try XCTUnwrap(RoutingResolver.resolve(
+            requestedProviderId: "anthropic", requestedModel: "claude-sonnet-4-6",
+            group: nil, credentials: [deepseek, ollama, openai]
+        ))
+        XCTAssertEqual(decision.credential.id, openai.id)
+    }
+
+    func testAModelLessCrossFamilyGroupUsesTheProvidersRoutingModel() throws {
+        let claude = credential("anthropic", "Claude")
+        let openai = credential("openai", "OpenAI")
+        let decision = try XCTUnwrap(RoutingResolver.resolve(
+            requestedProviderId: "anthropic", requestedModel: "claude-sonnet-4-6",
+            group: group("openai"), credentials: [claude, openai]
+        ))
+        XCTAssertEqual(decision.credential.id, openai.id)
+        XCTAssertEqual(decision.translation?.dstModel, "gpt-5.5")
+    }
+
+    func testAModelLessGroupWithoutARoutingDefaultAsksForAModel() {
+        let deepseek = credential("deepseek", "DeepSeek")
+        XCTAssertNil(RoutingResolver.resolve(
+            requestedProviderId: "anthropic", requestedModel: "claude-sonnet-4-6",
+            group: group("deepseek"), credentials: [deepseek]
+        ))
+        XCTAssertEqual(
+            RoutingResolver.noCredentialMessage(requestedProviderId: "anthropic", userCredentialProviderIds: ["deepseek"], group: group("deepseek")),
+            "This app's group routes it to deepseek, which needs a model to translate anthropic requests. Set a model on the group."
+        )
+    }
+
+    // MARK: - Local servers (F032)
+
+    func testGroupsBoundToALocalServerRoute() throws {
+        let ollama = Credential.create(providerId: "ollama", label: "Local", baseUrl: "http://localhost:11434")
+        let openai = credential("openai", "OpenAI")
+        let swap = try XCTUnwrap(RoutingResolver.resolve(
+            requestedProviderId: "openai", requestedModel: "gpt-5.5",
+            group: group("ollama", model: "llama3.1"), credentials: [ollama, openai]
+        ))
+        XCTAssertEqual(swap.swapToProviderId, "ollama")
+        XCTAssertEqual(swap.swapDstModel, "llama3.1")
+        let translated = try XCTUnwrap(RoutingResolver.resolve(
+            requestedProviderId: "anthropic", requestedModel: "claude-sonnet-4-6",
+            group: group("ollama", model: "llama3.1"), credentials: [ollama]
+        ))
+        XCTAssertEqual(translated.translation?.dstProviderId, "ollama")
+        XCTAssertEqual(
+            TranslationEngine.shared.rewriteProxyUrl(dstProviderId: "ollama", model: "llama3.1", stream: false, overrideBaseUrl: "http://localhost:11434"),
+            "http://localhost:11434/v1/chat/completions"
+        )
+    }
+
+    // MARK: - Connect availability (F101)
+
+    func testCanServeFollowsRoutingWithoutAModel() {
+        let openai = credential("openai", "OpenAI")
+        // OpenAI key only, no group: an Anthropic app is auto-routed.
+        XCTAssertEqual(RoutingResolver.canServe(providerId: "anthropic", group: nil, credentials: [openai])?.id, openai.id)
+        // A pin to a key that's gone can't serve its provider.
+        XCTAssertNil(RoutingResolver.canServe(providerId: "openai", group: group("openai", pin: "gone"), credentials: [openai]))
+    }
+
+    func testConnectListsEveryRequestedProvider() {
+        let openai = credential("openai", "OpenAI")
+        let requested = NativeBridgeHandler.requestedProviderIds([
+            ["id": "anthropic", "required": true], "mistral", ["id": "Bad Id"], 42,
+        ])
+        XCTAssertEqual(requested, ["anthropic", "mistral"])
+        let result = NativeBridgeHandler.connectProviders(requested: requested, credentials: [openai]) { id in
+            RoutingResolver.canServe(providerId: id, group: nil, credentials: [openai])
+        }
+        XCTAssertEqual(result.providers["anthropic"]?["available"] as? Bool, true)
+        XCTAssertEqual(result.providers["anthropic"]?["authMethod"] as? String, "api_key")
+        // Same dialect as OpenAI but no group swaps to it: unavailable.
+        XCTAssertEqual(result.providers["mistral"]?["available"] as? Bool, false)
+        XCTAssertNil(result.providers["openai"])
+        XCTAssertEqual(result.sessionProviders, ["anthropic"])
+
+        // No providers named: the wallet's own providers, as before.
+        let all = NativeBridgeHandler.connectProviders(requested: [], credentials: [openai]) { _ in nil }
+        XCTAssertEqual(all.providers["openai"]?["available"] as? Bool, true)
+        XCTAssertEqual(all.sessionProviders, ["openai"])
+    }
 }
