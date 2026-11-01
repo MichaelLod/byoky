@@ -41,7 +41,10 @@ interface WalletState {
   showTrustResetNotice: boolean;
   currentPage: Page;
   modal: 'add-credential' | null;
+  /** Only while the popup first asks the background what state the wallet is in. */
   loading: boolean;
+  /** A form is waiting on the background (unlock, setup, adding a key); the page stays up. */
+  submitting: boolean;
   error: string | null;
 
   init: () => Promise<void>;
@@ -113,6 +116,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   currentPage: 'unlock',
   modal: null,
   loading: true,
+  submitting: false,
   error: null,
 
   init: async () => {
@@ -143,16 +147,18 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   },
 
   setup: async (password: string) => {
-    set({ loading: true, error: null });
+    set({ submitting: true, error: null });
     try {
       const hash = await hashPassword(password);
       await sendInternal('setupWallet', { passwordHash: hash });
       const setupResult = await sendInternal('unlock', { password });
       if (setupResult.success) {
-        set({ isInitialized: true, isUnlocked: true, currentPage: 'dashboard', loading: false });
+        set({ isInitialized: true, isUnlocked: true, currentPage: 'dashboard' });
       }
     } catch (e) {
-      set({ error: (e as Error).message, loading: false });
+      set({ error: (e as Error).message });
+    } finally {
+      set({ submitting: false });
     }
   },
 
@@ -178,17 +184,24 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   },
 
   unlock: async (password: string) => {
-    set({ loading: true, error: null });
-    const unlockResult = await sendInternal('unlock', { password });
-    if (unlockResult.success) {
-      set({ isUnlocked: true, currentPage: 'dashboard', loading: false });
-      await get().refreshData();
-      return true;
+    set({ submitting: true, error: null });
+    try {
+      const unlockResult = await sendInternal('unlock', { password });
+      if (unlockResult.success) {
+        set({ isUnlocked: true, currentPage: 'dashboard', submitting: false });
+        await get().refreshData();
+        return true;
+      }
+      // During the lockout the background refuses even the right password and
+      // says for how long; "Incorrect password" would push toward a reset.
+      set({ error: (unlockResult.error as string | undefined) ?? 'Incorrect password' });
+      return false;
+    } catch (e) {
+      set({ error: (e as Error).message });
+      return false;
+    } finally {
+      set({ submitting: false });
     }
-    // During the lockout the background refuses even the right password and
-    // says for how long; "Incorrect password" would push toward a reset.
-    set({ error: (unlockResult.error as string | undefined) ?? 'Incorrect password', loading: false });
-    return false;
   },
 
   lock: async () => {
@@ -229,30 +242,34 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   closeModal: () => set({ modal: null, error: null }),
 
   addApiKey: async (providerId: string, label: string, apiKey: string, baseUrl?: string) => {
-    set({ loading: true, error: null });
+    set({ submitting: true, error: null });
     try {
       const result = await sendInternal('addCredential', {
         providerId, label, value: apiKey, authMethod: 'api_key', baseUrl,
       });
       if (result.error) throw new Error(result.error as string);
       await get().refreshData();
-      set({ modal: null, loading: false });
+      set({ modal: null });
     } catch (e) {
-      set({ error: (e as Error).message, loading: false });
+      set({ error: (e as Error).message });
+    } finally {
+      set({ submitting: false });
     }
   },
 
   addSetupToken: async (providerId: string, label: string, token: string) => {
-    set({ loading: true, error: null });
+    set({ submitting: true, error: null });
     try {
       const result = await sendInternal('addCredential', {
         providerId, label, value: token, authMethod: 'oauth',
       });
       if (result.error) throw new Error(result.error as string);
       await get().refreshData();
-      set({ modal: null, loading: false });
+      set({ modal: null });
     } catch (e) {
-      set({ error: (e as Error).message, loading: false });
+      set({ error: (e as Error).message });
+    } finally {
+      set({ submitting: false });
     }
   },
 

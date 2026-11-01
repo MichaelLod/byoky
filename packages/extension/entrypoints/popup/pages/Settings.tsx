@@ -15,7 +15,7 @@ async function sendInternal(action: string, payload?: unknown): Promise<Record<s
 }
 
 export function Settings() {
-  const { credentials, navigate, lock, resetWallet, loading } = useWalletStore();
+  const { credentials, navigate, lock, resetWallet, submitting } = useWalletStore();
   const [modal, setModal] = useState<'export' | 'import' | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
 
@@ -70,7 +70,7 @@ export function Settings() {
           <button
             className="btn btn-danger"
             onClick={() => setConfirmReset(true)}
-            disabled={loading}
+            disabled={submitting}
           >
             Reset Wallet
           </button>

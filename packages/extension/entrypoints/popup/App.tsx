@@ -49,7 +49,9 @@ export default function App() {
     }
   }, []);
 
-  if (loading && currentPage !== 'dashboard') {
+  // Only the first check of the wallet's state blanks the popup. Forms that
+  // wait on the background keep their page (and what was typed) on screen.
+  if (loading) {
     return (
       <div className="app">
         <div className="loading">Loading...</div>

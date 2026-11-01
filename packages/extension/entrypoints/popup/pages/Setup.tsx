@@ -7,14 +7,14 @@ import { Raven } from '../components/Raven';
 type Step = 'welcome' | 'password' | 'confirm';
 
 export function Setup() {
-  const { setup, error, clearError, loading } = useWalletStore();
+  const { setup, error, clearError, submitting } = useWalletStore();
   const [step, setStep] = useState<Step>('welcome');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [localError, setLocalError] = useState('');
 
   const strength = checkPasswordStrength(password);
-  const canSubmitPassword = !loading && password.length >= MIN_PASSWORD_LENGTH && strength.score >= 2;
+  const canSubmitPassword = !submitting && password.length >= MIN_PASSWORD_LENGTH && strength.score >= 2;
 
   function goTo(next: Step) {
     setStep(next);
@@ -114,9 +114,9 @@ export function Setup() {
           <button
             type="submit"
             className="btn btn-primary"
-            disabled={loading || confirm.length === 0}
+            disabled={submitting || confirm.length === 0}
           >
-            {loading ? 'Creating...' : 'Create wallet'}
+            {submitting ? 'Creating...' : 'Create wallet'}
           </button>
 
           <button
@@ -165,7 +165,7 @@ export function Setup() {
           className="btn btn-primary"
           disabled={!canSubmitPassword}
         >
-          {loading ? 'Working...' : 'Continue'}
+          {submitting ? 'Working...' : 'Continue'}
         </button>
 
         <button

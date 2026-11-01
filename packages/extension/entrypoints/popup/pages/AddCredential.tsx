@@ -32,7 +32,7 @@ const SECRET_INPUT_PROPS = {
 } as const;
 
 export function AddCredential() {
-  const { addApiKey, addSetupToken, closeModal, error, loading, clearError } = useWalletStore();
+  const { addApiKey, addSetupToken, closeModal, error, submitting, clearError } = useWalletStore();
   const [providerId, setProviderId] = useState('anthropic');
   const [authMethod, setAuthMethod] = useState<'api_key' | 'oauth'>('api_key');
   const [label, setLabel] = useState('');
@@ -67,6 +67,7 @@ export function AddCredential() {
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (submitting) return;
     if (!label.trim()) return;
 
     const cleanKey = apiKey.replace(/\s+/g, '');
@@ -309,8 +310,8 @@ export function AddCredential() {
           >
             Cancel
           </button>
-          <button type="submit" className="btn btn-primary" disabled={loading}>
-            Save
+          <button type="submit" className="btn btn-primary" disabled={submitting}>
+            {submitting ? 'Saving...' : 'Save'}
           </button>
         </div>
       </form>

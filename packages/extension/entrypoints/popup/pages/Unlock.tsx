@@ -3,13 +3,13 @@ import { useWalletStore } from '../store';
 import { Raven } from '../components/Raven';
 
 export function Unlock() {
-  const { unlock, resetWallet, error } = useWalletStore();
+  const { unlock, resetWallet, error, submitting } = useWalletStore();
   const [password, setPassword] = useState('');
   const [showReset, setShowReset] = useState(false);
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!password) return;
+    if (!password || submitting) return;
     unlock(password);
   }
 
@@ -38,8 +38,8 @@ export function Unlock() {
               />
             </div>
 
-            <button type="submit" className="btn btn-primary">
-              Unlock
+            <button type="submit" className="btn btn-primary" disabled={submitting}>
+              {submitting ? 'Unlocking...' : 'Unlock'}
             </button>
           </form>
 
