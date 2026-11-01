@@ -1947,6 +1947,9 @@ const docsStyles = `
   margin-bottom: 10px;
   color: var(--bone);
   scroll-margin-top: 80px;
+  /* Headings like session.onProvidersUpdated(callback) have no break
+     opportunity and would widen the page on a phone. */
+  overflow-wrap: anywhere;
 }
 
 .docs-section-body {
@@ -2076,12 +2079,14 @@ const docsStyles = `
 .docs-prop-name {
   font-weight: 600;
   font-size: 14px;
+  overflow-wrap: anywhere;
 }
 
 .docs-prop-type {
   font-size: 12px;
   color: var(--dim);
   font-family: var(--font-code);
+  overflow-wrap: anywhere;
 }
 
 .docs-prop-desc {
