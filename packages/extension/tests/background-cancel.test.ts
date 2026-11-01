@@ -145,3 +145,34 @@ describe('background: setup-token requests through the bridge', () => {
   });
 });
 
+describe('background: bridge HTTP proxy sessions', () => {
+  // F085: an expired session answered 'Session has expired', then 'Session
+  // not found or wallet locked', both of which the bridge turned into a
+  // retryable 502 that blamed the lock.
+  it('answers an expired session with a 401 the bridge can act on', async () => {
+    const h = await startBackground({ local: await walletStorage([{ id: 'a1', providerId: 'anthropic', key: 'sk-ant-1' }]) });
+    await h.unlock();
+    h.nativeHost = (msg, conn) => {
+      if (msg.type === 'ping') conn.reply({ type: 'pong' });
+      if (msg.type === 'start-proxy') conn.reply({ type: 'proxy-started' });
+    };
+    const { payload } = await connectApproved(h, 'http://localhost:3000', { providers: [{ id: 'anthropic', required: true }] });
+    // Started by the app's own page (through the content script).
+    const started = await h.internal('startBridgeProxy', { sessionKey: payload.sessionKey, port: 19280 }, senderFor('http://localhost:3000'));
+    expect(started).toEqual({ success: true, port: 19280 });
+    const bridge = h.nativeConnections.find((c) => c.fromExtension.some((m) => m.type === 'start-proxy'))!;
+
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 25 * 60 * 60 * 1000);
+    bridge.reply({
+      type: 'proxy_http', requestId: 'r1', sessionKey: payload.sessionKey, providerId: 'anthropic',
+      url: ANTHROPIC_URL, method: 'POST', headers: {}, body: '{}',
+    });
+    await h.until(() => bridge.fromExtension.some((m) => m.requestId === 'r1'), 5_000, 'the reply');
+    expect(bridge.fromExtension.find((m) => m.requestId === 'r1')).toEqual({
+      type: 'proxy_http_error', requestId: 'r1', status: 401, code: 'bridge_session_expired', error: 'Bridge session expired',
+    });
+    expect(h.fetch).not.toHaveBeenCalled();
+    // The bridge's authorization went with the session.
+    expect(h.session!.data._bridgeKey).toBeUndefined();
+  });
+});

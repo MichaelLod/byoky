@@ -302,9 +302,11 @@ describe('security invariants', () => {
     });
 
     it('checks session expiry in handleBridgeProxyRequest', () => {
-      const bridgeHandler = bg.slice(bg.indexOf('handleBridgeProxyRequest'));
-      expect(bridgeHandler).toContain('expiresAt');
-      expect(bridgeHandler).toContain('Session has expired');
+      const start = bg.indexOf('async function handleBridgeProxyRequest');
+      const bridgeHandler = bg.slice(start, bg.indexOf('\n  }\n', start));
+      expect(bridgeHandler).toContain('session.expiresAt < Date.now()');
+      // A code the bridge turns into a 401 with the reconnect hint.
+      expect(bridgeHandler).toContain("code: 'bridge_session_expired'");
     });
 
     it('checks allowance in handleBridgeProxyRequest', () => {

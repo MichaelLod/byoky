@@ -2337,12 +2337,34 @@ export default defineBackground(() => {
       return;
     }
 
+    // The session ran out (24 h) or is gone: a 401 the bridge tells apart
+    // from a transient failure (it would otherwise answer a retryable 502),
+    // so CLI tools stop and the user reconnects with `byoky-bridge connect`.
     const session = sessions.get(sessionKey);
-    if (!session || !masterPassword) {
+    if (!session || session.expiresAt < Date.now()) {
+      if (session) {
+        sessions.delete(sessionKey);
+        persistSessions();
+      }
+      authorizedBridgeSessionKey = null;
+      authorizedBridgePort = null;
+      persistAuthorizedBridgeSessionKey();
       bridgeProxyPort?.postMessage({
         type: 'proxy_http_error',
         requestId,
-        error: 'Session not found or wallet locked',
+        status: 401,
+        code: 'bridge_session_expired',
+        error: 'Bridge session expired',
+      });
+      return;
+    }
+    if (!masterPassword) {
+      bridgeProxyPort?.postMessage({
+        type: 'proxy_http_error',
+        requestId,
+        status: 423,
+        code: 'WALLET_LOCKED',
+        error: 'Wallet is locked',
       });
       return;
     }
@@ -2353,17 +2375,6 @@ export default defineBackground(() => {
         type: 'proxy_http_error',
         requestId,
         error: 'Provider not available in this session',
-      });
-      return;
-    }
-
-    if (session.expiresAt < Date.now()) {
-      sessions.delete(sessionKey);
-      persistSessions();
-      bridgeProxyPort?.postMessage({
-        type: 'proxy_http_error',
-        requestId,
-        error: 'Session has expired',
       });
       return;
     }
