@@ -161,6 +161,19 @@ test('retry leaves a Chrome submission in review alone', (t) => {
   assert.match(forced.calls, /chrome-webstore-upload upload --source dist\/byoky-chrome-v1\.1\.2-store\.zip/)
 })
 
+test('retry leaves a store whose review state is unknown alone, and fails the run', (t) => {
+  const s = released(t)
+  const status = { results: [{ id: 'chrome', version: '1.1.1', pending: false, unknown: true, unknownReason: 'fetchStatus: HTTP 500' }] }
+  const r = s.run(['retry'], { STUB_STATUS_JSON: JSON.stringify(status), STUB_STATUS_CODE: '3' })
+  assert.equal(r.code, 1, r.out)
+  assert.doesNotMatch(r.calls, /chrome-webstore-upload/)
+  assert.match(r.out, /Chrome Web Store: NOT UPLOADED: its review state is unknown \(fetchStatus: HTTP 500\)/)
+
+  const forced = s.run(['retry', '--allow-pending'], { STUB_STATUS_JSON: JSON.stringify(status), STUB_STATUS_CODE: '3' })
+  assert.equal(forced.code, 0, forced.out)
+  assert.match(forced.calls, /chrome-webstore-upload upload --source dist\/byoky-chrome-v1\.1\.2-store\.zip/)
+})
+
 test('a failed retry upload is not counted and fails the run', (t) => {
   const s = released(t)
   const r = s.run(['retry'], { STUB_NPX_EXIT: '1' })
@@ -187,6 +200,21 @@ test('--dry only checks signing (ios-signing.sh --check), and a failed check is 
   const real = s.run(['1.1.2'], { STUB_SIGNING_EXIT: '1' })
   assert.equal(real.code, 1, real.out)
   assert.match(real.calls, /^ios-signing\.sh $/m)
+})
+
+// --- store reviews ---
+
+test('a pending review or an unreadable review state (store-status exit 3) stops the release unless --allow-pending', (t) => {
+  const s = sandbox()
+  t.after(s.cleanup)
+  const r = s.run(['1.1.2', '--dry'], { STUB_STATUS_CODE: '3' })
+  assert.equal(r.code, 1, r.out)
+  assert.match(r.out, /Error: a review is pending, or a store's review state couldn't be read \(above\)/)
+  assert.doesNotMatch(r.calls, /pnpm install/)
+
+  const allowed = s.run(['1.1.2', '--dry', '--allow-pending'], { STUB_STATUS_CODE: '3' })
+  assert.equal(allowed.code, 0, allowed.out)
+  assert.match(allowed.out, /WARN: a review is pending, or a store's review state is unknown \(above\); --allow-pending releases anyway/)
 })
 
 // --- branch, origin and tags ---

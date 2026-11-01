@@ -243,14 +243,20 @@ if [ "${1:-}" = "retry" ]; then
 
   # Where each store stands, from the same check the release runs. A store
   # with a submission in review is left alone: an upload would replace the
-  # submission and restart its review (--allow-pending uploads anyway).
+  # submission and restart its review. So is one whose review state couldn't
+  # be read, since it may have one (--allow-pending uploads anyway).
   STATUS_JSON=$(node scripts/store-status.mjs --json) || [ $? -eq 3 ] \
     || { echo "Error: couldn't check the stores (scripts/store-status.mjs)"; exit 1; }
   skip_pending() {
-    [ "$(status_field "$1" pending)" = true ] && [ "$ALLOW_PENDING" = false ]
+    [ "$ALLOW_PENDING" = false ] && \
+      { [ "$(status_field "$1" pending)" = true ] || [ "$(status_field "$1" unknown)" = true ]; }
   }
   pending_note() {
-    echo "v$(status_field "$1" pendingVersion) is $(status_field "$1" pendingState); skipped, an upload would restart that review"
+    if [ "$(status_field "$1" pending)" = true ]; then
+      echo "v$(status_field "$1" pendingVersion) is $(status_field "$1" pendingState); skipped, an upload would restart that review"
+    else
+      echo "NOT UPLOADED: its review state is unknown ($(status_field "$1" unknownReason)), and an upload could restart a review; run retry again, or pass --allow-pending"
+    fi
   }
 
   RETRIED=0
@@ -409,7 +415,7 @@ if [ "${1:-}" = "retry" ]; then
   fi
   # A failure above leaves its store behind; say so in the exit code too.
   for r in ${STORE_RESULTS[@]+"${STORE_RESULTS[@]}"}; do
-    case "$r" in *FAILED*|*"NO BUILD"*|*"NOT PUBLISHED"*) exit 1 ;; esac
+    case "$r" in *FAILED*|*"NO BUILD"*|*"NOT PUBLISHED"*|*"NOT UPLOADED"*) exit 1 ;; esac
   done
   exit 0
 fi
@@ -453,8 +459,9 @@ if [ -z "$NEW_VERSION" ]; then
   echo "  --skip-store-uploads   Build + npm publish + GitHub release, but skip"
   echo "                         Chrome/Firefox/App Store/Play uploads"
   echo "  --yes                  Don't ask before starting (non-interactive runs)"
-  echo "  --allow-pending        Release although a store has a review pending"
-  echo "                         (an upload restarts that review; --yes doesn't imply it)"
+  echo "  --allow-pending        Release although a store has a review pending, or its"
+  echo "                         review state can't be read (an upload restarts a pending"
+  echo "                         review; --yes doesn't imply it)"
   echo "  --allow-branch         Release from a branch other than main (e.g. a worktree);"
   echo "                         HEAD must contain origin/main, and the release commit is"
   echo "                         pushed to main all the same"
@@ -674,16 +681,18 @@ fi
 
 # --- Check store statuses ---
 # Before anything is bumped: an upload to a store with a submission still in
-# review replaces that submission and restarts its review.
+# review replaces that submission and restarts its review. A store whose
+# review state couldn't be read counts the same (store-status.mjs exit 3).
 echo "==> Checking store statuses..."
 STATUS_CODE=0
 node scripts/store-status.mjs || STATUS_CODE=$?
 echo ""
 if [ "$STATUS_CODE" -eq 3 ] && [ "$ALLOW_PENDING" = true ]; then
-  echo "  WARN: a review is pending (above); --allow-pending releases anyway."
+  echo "  WARN: a review is pending, or a store's review state is unknown (above); --allow-pending releases anyway."
   echo ""
 elif [ "$STATUS_CODE" -eq 3 ]; then
-  echo "Error: a review is pending (above). Wait until it's through, or pass --allow-pending."
+  echo "Error: a review is pending, or a store's review state couldn't be read (above). Wait until"
+  echo "       the review is through or the check works, or pass --allow-pending."
   exit 1
 elif [ "$STATUS_CODE" -ne 0 ]; then
   echo "Error: couldn't check the stores (scripts/store-status.mjs exit $STATUS_CODE)."

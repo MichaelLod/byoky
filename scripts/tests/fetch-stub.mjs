@@ -4,6 +4,7 @@
 //   { "method": "GET", "url": "<regex>", "status": 200, "body": {...} }
 //   or, for polling, "sequence": [{ "status": ..., "body": ... }, ...]: each
 //   call takes the next entry and the last one repeats.
+//   "networkError": "<message>" makes fetch reject, as on a dropped connection.
 // The first route whose method and URL regex match answers. Unmatched
 // requests get a 500, so a test sees them in the log and in the exit code.
 // FETCH_STUB_LOG: every request is appended there as a JSON line.
@@ -31,6 +32,7 @@ globalThis.fetch = async (input, init = {}) => {
     calls.set(index, n + 1)
     reply = route.sequence[Math.min(n, route.sequence.length - 1)]
   }
+  if (reply.networkError) throw new TypeError(reply.networkError)
   const status = reply.status ?? 200
   const text = reply.body === undefined ? '' : typeof reply.body === 'string' ? reply.body : JSON.stringify(reply.body)
   return new Response(status === 204 ? null : text, { status })
