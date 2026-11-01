@@ -58,6 +58,9 @@
   --font-body: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
+  /* Widest the wallet column gets; a wider side panel centers it. */
+  --column-max: 420px;
+
   --dot-grid: radial-gradient(circle at 1px 1px, rgba(167, 139, 250, 0.08) 1px, transparent 0);
   --scanlines: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.2) 0 1px, transparent 1px 3px);
 }
@@ -69,7 +72,8 @@ html {
 body {
   width: 100%;
   min-width: 320px;
-  max-width: 420px;
+  max-width: var(--column-max);
+  margin: 0 auto;
   min-height: 100vh;
   font-family: var(--font-body);
   background: var(--bg);
@@ -114,6 +118,38 @@ code {
   overflow: hidden;
   height: 100vh;
   position: relative;
+}
+
+/* popup.html shown as a toolbar popup (chrome.action.openPopup, the macOS
+   Safari popover) sizes itself to its content. Sized in vh, the content
+   depends on that size and the popup collapses to a 25px strip, so it gets
+   a fixed size. The side panel keeps the fluid layout above, and so does
+   popup.html in a tab or window of its own: main.tsx drops the class there. */
+html.popup body {
+  width: 360px;
+  min-width: 360px;
+  height: 600px;
+  min-height: 0;
+}
+
+html.popup .app {
+  height: 600px;
+  min-height: 0;
+}
+
+/* iPhone Safari shows the popup as a sheet as wide as the screen. */
+@media (hover: none) and (pointer: coarse) {
+  html.popup body {
+    width: 100%;
+    min-width: 320px;
+    height: auto;
+    min-height: 100vh;
+  }
+
+  html.popup .app {
+    height: 100vh;
+    min-height: 100vh;
+  }
 }
 
 /* Setup and unlock sit on the dot grid. */
@@ -756,6 +792,13 @@ code {
   font-size: 15px;
 }
 
+.unlock-pending {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--lilac);
+  overflow-wrap: anywhere;
+}
+
 .setup-copy {
   font-size: 12.5px;
   color: var(--text-secondary);
@@ -1120,6 +1163,46 @@ code {
   gap: 4px;
 }
 
+.app-group-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.app-group-field span {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.app-group-field select {
+  flex: 1;
+  min-width: 0;
+  min-height: 32px;
+  padding: 4px 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--seam-strong);
+  border-radius: 0;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.app-group-field select:focus {
+  border-color: var(--violet);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.app-group-field select option {
+  background: var(--crypt);
+  color: var(--text);
+}
+
 .connected-meta {
   margin-top: 8px;
   font-family: var(--font-mono);
@@ -1368,6 +1451,9 @@ code {
 .result-tag.ready { color: var(--signal); }
 .result-tag.missing { color: var(--amber); }
 .result-tag.missing.required { color: var(--alarm); }
+.result-tag.alarm { color: var(--alarm); }
+/* Served with another provider's key: may wrap in a narrow popup. */
+.result-tag.routed { color: var(--phosphor); white-space: normal; text-align: right; }
 
 .approval-trust {
   display: flex;
@@ -1924,11 +2010,6 @@ code {
   user-select: none;
 }
 
-.credential-card:focus-visible {
-  outline: 2px solid var(--violet);
-  outline-offset: 2px;
-}
-
 .card-actions {
   display: flex;
   align-items: center;
@@ -1984,10 +2065,19 @@ code {
   color: var(--text-muted);
 }
 
+/* A button (it opens the usage sheet) that looks like part of the card. */
 .credential-usage-open {
+  display: block;
+  width: 100%;
   margin-top: 12px;
-  padding-top: 10px;
+  padding: 10px 0 0;
+  border: none;
   border-top: 1px solid var(--border);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .card.tappable {
@@ -2003,6 +2093,7 @@ code {
 }
 
 .usage-mini-label {
+  display: block;
   font-family: var(--font-mono);
   font-size: 10.5px;
   text-transform: uppercase;
@@ -2018,6 +2109,7 @@ code {
 }
 
 .usage-mini-value {
+  display: block;
   font-family: var(--font-mono);
   font-size: 15px;
   font-weight: 500;
@@ -2025,9 +2117,18 @@ code {
 }
 
 .usage-mini-tag {
+  display: block;
   font-family: var(--font-mono);
   font-size: 10.5px;
   letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.usage-mini-shared {
+  display: block;
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
   color: var(--text-muted);
 }
 
@@ -2040,7 +2141,8 @@ code {
 
 .fab-root {
   position: fixed;
-  right: 20px;
+  /* Fixed to the viewport, so line it up with the centered column. */
+  right: max(20px, calc((100vw - var(--column-max)) / 2 + 20px));
   bottom: 20px;
   z-index: 50;
   display: flex;
@@ -2159,13 +2261,19 @@ code {
 
 .modal-sheet {
   width: 100%;
-  max-width: 420px;
+  max-width: var(--column-max);
   max-height: 90vh;
   background: var(--bg-raised);
   border-top: 1px solid var(--seam-strong);
   display: flex;
   flex-direction: column;
   animation: modal-slide-up 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Focus lands on the dialog itself only when it has no control to take it. */
+.modal-sheet:focus-visible,
+.dialog:focus-visible {
+  outline: none;
 }
 
 @keyframes modal-slide-up {

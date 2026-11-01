@@ -103,8 +103,8 @@ It behaves like a pet, not a logo:
 
 | State | When | What it does |
 | --- | --- | --- |
-| WATCHING | Unlock and onboarding screens, the website hero | The head (`#head`, pivot 140,96) tilts toward the pointer or finger, up to ±16° (≈0.05–0.07° per px of vertical distance). The whole bird (`#raven`) mirrors to face left once the pointer is more than ~20px left of the head. The pupil moves up to 2.6px (x) / 2.4px (y). It blinks every ~4s (eye `ry` 7 → 0.8 for 140ms, pupil hidden). |
-| ASLEEP | The wallet is locked (mobile lock screen, side panel when locked) | Head tucked: `translate(-6 26) rotate(34 140 96)`. `#eye`/`#pupil` hidden, `#eye-closed` shown, small phosphor "z z" beside it. |
+| WATCHING | The extension's unlock screen, onboarding screens, the website hero | The head (`#head`, pivot 140,96) tilts toward the pointer or finger, up to ±16° (≈0.05–0.07° per px of vertical distance). The whole bird (`#raven`) mirrors to face left once the pointer is more than ~20px left of the head. The pupil moves up to 2.6px (x) / 2.4px (y). It blinks every ~4s (eye `ry` 7 → 0.8 for 140ms, pupil hidden). |
+| ASLEEP | The wallet is locked on mobile (the lock screen) | Head tucked: `translate(-6 26) rotate(34 140 96)`. `#eye`/`#pupil` hidden, `#eye-closed` shown, small phosphor "z z" beside it. |
 | ALERT | A connection request is waiting | `#crest` shown, `#eye-glow` shown, head tilted back (−8°), pupil looking at the request (forward). |
 | NOD | Unlock succeeded, a request was approved | One quick tilt down by 18° and back (~260ms total). |
 

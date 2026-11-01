@@ -11,6 +11,8 @@ import {
   type AppGroups,
   hashPassword,
 } from '@byoky/core';
+import { lockedUntilFrom } from './hooks/useLockoutCountdown';
+import { describeOrigin } from './utils/origin';
 
 type Page =
   | 'setup'
@@ -41,8 +43,15 @@ interface WalletState {
   showTrustResetNotice: boolean;
   currentPage: Page;
   modal: 'add-credential' | null;
+  /** Only while the popup first asks the background what state the wallet is in. */
   loading: boolean;
+  /** A form is waiting on the background (unlock, setup, adding a key); the page stays up. */
+  submitting: boolean;
   error: string | null;
+  /** When the password lockout ends (epoch ms), while one is running. */
+  lockedUntil: number | null;
+  /** When this view last approved a request, so the raven can nod. */
+  approvedAt: number | null;
 
   init: () => Promise<void>;
   setup: (password: string) => Promise<void>;
@@ -52,6 +61,8 @@ interface WalletState {
   markTrustResetNoticeSeen: () => Promise<void>;
   unlock: (password: string) => Promise<boolean>;
   lock: () => Promise<void>;
+  /** Record a lockout the background reported (unlock or export re-auth); null ends it. */
+  setLockedUntil: (lockedUntil: number | null) => void;
   syncLockState: () => Promise<boolean>;
   navigate: (page: Page) => void;
   openModal: (modal: 'add-credential') => void;
@@ -73,6 +84,8 @@ interface WalletState {
   setAppGroup: (origin: string, groupId: string) => Promise<boolean>;
   resetWallet: () => Promise<void>;
   refreshData: () => Promise<void>;
+  /** Only the approval queue, which the background keeps (and reports) while locked. */
+  refreshPending: () => Promise<void>;
   clearError: () => void;
 }
 
@@ -113,7 +126,10 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   currentPage: 'unlock',
   modal: null,
   loading: true,
+  submitting: false,
   error: null,
+  lockedUntil: null,
+  approvedAt: null,
 
   init: async () => {
     const initResult = await sendInternal('isInitialized');
@@ -139,20 +155,45 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       if (get().pendingApprovals.length > 0) {
         set({ currentPage: 'approval' });
       }
+    } else if (initialized) {
+      // Requests wait out a locked wallet; the unlock screen says so.
+      await get().refreshPending();
     }
   },
 
   setup: async (password: string) => {
-    set({ loading: true, error: null });
+    set({ submitting: true, error: null });
     try {
       const hash = await hashPassword(password);
-      await sendInternal('setupWallet', { passwordHash: hash });
+      const created = await sendInternal('setupWallet', { passwordHash: hash });
+      if (created.error === 'Wallet already initialized') {
+        // Another wallet view finished setup first, with its own password.
+        // Unlocking with this one would only count as a wrong guess.
+        set({
+          isInitialized: true,
+          currentPage: 'unlock',
+          error: 'This wallet was already set up in another window. Unlock it with the password chosen there.',
+        });
+        return;
+      }
+      if (created.error) {
+        set({ error: created.error as string });
+        return;
+      }
       const setupResult = await sendInternal('unlock', { password });
       if (setupResult.success) {
-        set({ isInitialized: true, isUnlocked: true, currentPage: 'dashboard', loading: false });
+        set({ isInitialized: true, isUnlocked: true, currentPage: 'dashboard' });
+      } else {
+        set({
+          isInitialized: true,
+          currentPage: 'unlock',
+          error: (setupResult.error as string | undefined) ?? 'Your wallet was created but could not be unlocked. Enter your password to unlock it.',
+        });
       }
     } catch (e) {
-      set({ error: (e as Error).message, loading: false });
+      set({ error: (e as Error).message });
+    } finally {
+      set({ submitting: false });
     }
   },
 
@@ -178,23 +219,44 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   },
 
   unlock: async (password: string) => {
-    set({ loading: true, error: null });
-    const unlockResult = await sendInternal('unlock', { password });
-    if (unlockResult.success) {
-      set({ isUnlocked: true, currentPage: 'dashboard', loading: false });
-      await get().refreshData();
-      return true;
+    set({ submitting: true, error: null });
+    try {
+      const unlockResult = await sendInternal('unlock', { password });
+      if (unlockResult.success) {
+        set({ isUnlocked: true, currentPage: 'dashboard', submitting: false, lockedUntil: null });
+        // Requests that waited for the unlock come next: the background
+        // approves trusted sites on its own, then sends newPendingApproval
+        // for the rest, which opens the approval page.
+        await get().refreshData();
+        return true;
+      }
+      // During the lockout the background refuses even the right password and
+      // says for how long; "Incorrect password" would push toward a reset.
+      // The failure that starts the lockout reports it too, and the last two
+      // tries before it say so.
+      const lockedUntil = lockedUntilFrom(unlockResult);
+      const attemptsLeft = unlockResult.attemptsLeft;
+      let error = (unlockResult.error as string | undefined) ?? 'Incorrect password';
+      if (!lockedUntil && !unlockResult.error && (attemptsLeft === 1 || attemptsLeft === 2)) {
+        error = `Incorrect password. ${attemptsLeft} ${attemptsLeft === 1 ? 'try' : 'tries'} left before a short lockout.`;
+      }
+      set({ error, lockedUntil });
+      return false;
+    } catch (e) {
+      set({ error: (e as Error).message });
+      return false;
+    } finally {
+      set({ submitting: false });
     }
-    // During the lockout the background refuses even the right password and
-    // says for how long; "Incorrect password" would push toward a reset.
-    set({ error: (unlockResult.error as string | undefined) ?? 'Incorrect password', loading: false });
-    return false;
   },
 
   lock: async () => {
     await sendInternal('lock');
     set(LOCKED_STATE);
+    await get().refreshPending();
   },
+
+  setLockedUntil: (lockedUntil) => set({ lockedUntil }),
 
   // The background also locks on its own (auto-lock after idle) and only
   // announces it as a session change, so the popup has to ask.
@@ -229,30 +291,34 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   closeModal: () => set({ modal: null, error: null }),
 
   addApiKey: async (providerId: string, label: string, apiKey: string, baseUrl?: string) => {
-    set({ loading: true, error: null });
+    set({ submitting: true, error: null });
     try {
       const result = await sendInternal('addCredential', {
         providerId, label, value: apiKey, authMethod: 'api_key', baseUrl,
       });
       if (result.error) throw new Error(result.error as string);
       await get().refreshData();
-      set({ modal: null, loading: false });
+      set({ modal: null });
     } catch (e) {
-      set({ error: (e as Error).message, loading: false });
+      set({ error: (e as Error).message });
+    } finally {
+      set({ submitting: false });
     }
   },
 
   addSetupToken: async (providerId: string, label: string, token: string) => {
-    set({ loading: true, error: null });
+    set({ submitting: true, error: null });
     try {
       const result = await sendInternal('addCredential', {
         providerId, label, value: token, authMethod: 'oauth',
       });
       if (result.error) throw new Error(result.error as string);
       await get().refreshData();
-      set({ modal: null, loading: false });
+      set({ modal: null });
     } catch (e) {
-      set({ error: (e as Error).message, loading: false });
+      set({ error: (e as Error).message });
+    } finally {
+      set({ submitting: false });
     }
   },
 
@@ -277,20 +343,35 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     await get().refreshData();
   },
 
+  // Both leave the approval page through refreshData once the queue is
+  // empty, unless there is an error to read first.
   approveConnect: async (approvalId: string, trust: boolean) => {
-    await sendInternal('approveConnect', { approvalId, trust });
-    await get().refreshData();
-    if (get().pendingApprovals.length === 0) {
-      set({ currentPage: 'dashboard' });
+    set({ error: null });
+    const origin = get().pendingApprovals.find((a) => a.id === approvalId)?.appOrigin;
+    const result = await sendInternal('approveConnect', { approvalId, trust });
+    if (!result?.success) {
+      // The background drops a request after two minutes, and the app has
+      // already been told it timed out: approving it now connects nothing.
+      set({
+        error: result?.error === 'Approval not found'
+          ? `The request from ${origin ? describeOrigin(origin).label : 'this app'} expired. Ask the app to connect again.`
+          : ((result?.error as string | undefined) ?? 'Could not approve the request'),
+      });
+    } else {
+      set({ approvedAt: Date.now() });
     }
+    await get().refreshData();
   },
 
   rejectConnect: async (approvalId: string) => {
-    await sendInternal('rejectConnect', { approvalId });
-    await get().refreshData();
-    if (get().pendingApprovals.length === 0) {
-      set({ currentPage: 'dashboard' });
+    set({ error: null });
+    const result = await sendInternal('rejectConnect', { approvalId });
+    // A request that is already gone (timed out, or answered in another
+    // wallet view) needs no rejecting.
+    if (!result?.success && result?.error !== 'Approval not found') {
+      set({ error: (result?.error as string | undefined) ?? 'Could not reject the request' });
     }
+    await get().refreshData();
   },
 
   removeTrustedSite: async (origin: string) => {
@@ -402,11 +483,19 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       }),
     );
 
+    const pendingApprovals = (approvalResult.approvals ?? []) as PendingApproval[];
+    // The queue can empty without this view acting on it: approved in another
+    // wallet view, timed out, or auto-approved for a trusted site. The
+    // approval page has no nav, so don't leave it showing an empty queue,
+    // unless it is showing an error the user should read first.
+    const leaveApproval = get().currentPage === 'approval' && pendingApprovals.length === 0 && !get().error;
+
     set({
+      ...(leaveApproval ? { currentPage: 'dashboard' as const } : {}),
       credentials: metas,
       sessions: (sessionResult.sessions ?? []) as Session[],
       requestLog: (logResult.log ?? []) as RequestLogEntry[],
-      pendingApprovals: (approvalResult.approvals ?? []) as PendingApproval[],
+      pendingApprovals,
       trustedSites: (trustedResult.sites ?? []) as TrustedSite[],
       // The flag is raised when the background drops the trust state, which
       // checking it for this very call may have done. Once seen, it is
@@ -417,6 +506,11 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       groups: (groupsResult.groups ?? []) as Group[],
       appGroups: (groupsResult.appGroups ?? {}) as AppGroups,
     });
+  },
+
+  refreshPending: async () => {
+    const result = await sendInternal('getPendingApprovals');
+    set({ pendingApprovals: (result?.approvals ?? []) as PendingApproval[] });
   },
 
   clearError: () => set({ error: null }),

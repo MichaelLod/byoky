@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useWalletStore } from '../store';
 import { TrustResetNotice } from '../components/TrustResetNotice';
 import {
@@ -12,6 +12,7 @@ import {
   getModel,
   modelsForProvider,
 } from '@byoky/core';
+import { describeOrigin } from '../utils/origin';
 
 function timeAgo(timestamp: number): string {
   const seconds = Math.floor((Date.now() - timestamp) / 1000);
@@ -25,11 +26,7 @@ function timeAgo(timestamp: number): string {
 }
 
 function formatOrigin(origin: string): string {
-  try {
-    return new URL(origin).hostname;
-  } catch {
-    return origin;
-  }
+  return describeOrigin(origin).label;
 }
 
 function formatTokens(n: number): string {
@@ -46,11 +43,15 @@ export function ConnectedApps() {
     requestLog, tokenAllowances, tokenUsage, setAllowance, removeAllowance, resetAppUsage,
     groups, appGroups, credentials,
     createGroup, updateGroup, deleteGroup, setAppGroup,
+    error, clearError, modal,
   } = useWalletStore();
   const [editingOrigin, setEditingOrigin] = useState<string | null>(null);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [dragOriginOver, setDragOriginOver] = useState<string | null>(null);
+  // Set while the pointer is down on a card's Group select, so pressing it
+  // doesn't start dragging the card.
+  const pressingGroupSelect = useRef(false);
   const [pendingMove, setPendingMove] = useState<{
     origin: string;
     targetGroupId: string;
@@ -84,7 +85,9 @@ export function ConnectedApps() {
     ...groups.filter((g) => g.id !== DEFAULT_GROUP_ID),
   ];
 
-  async function handleDrop(targetGroupId: string, origin: string) {
+  // Both ways of moving an app end here: dropping its card on a group, and
+  // its Group select (the keyboard, screen reader and touch way).
+  async function requestMove(targetGroupId: string, origin: string) {
     setDragOriginOver(null);
     const currentGroupId = appGroups[origin] ?? DEFAULT_GROUP_ID;
     if (currentGroupId === targetGroupId) return;
@@ -121,9 +124,15 @@ export function ConnectedApps() {
     setPendingMove(null);
   }
 
+  // Errors from creating or editing a group show in its form, and the add
+  // credential sheet shows its own; the rest (moving an app, deleting a
+  // group) show here.
+  const formOpen = showCreateGroup || editingGroupId !== null || modal !== null;
+
   return (
     <div>
       <TrustResetNotice />
+      {error && !formOpen && <div className="error">{error}</div>}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <h2 className="page-title" style={{ marginBottom: 0 }}>Connected Apps</h2>
         {sessions.length > 1 && (
@@ -181,7 +190,11 @@ export function ConnectedApps() {
       <button
         className="btn btn-secondary btn-sm"
         style={{ marginTop: '4px', marginBottom: '12px' }}
-        onClick={() => setShowCreateGroup(true)}
+        onClick={() => {
+          clearError();
+          setEditingGroupId(null);
+          setShowCreateGroup(true);
+        }}
       >
         + New group
       </button>
@@ -190,16 +203,20 @@ export function ConnectedApps() {
         <div className="card" style={{ marginBottom: '16px' }}>
           <GroupForm
             credentials={credentials}
+            error={error}
             onSave={async (patch) => {
               const id = await createGroup({
-                name: patch.name ?? 'Untitled',
-                providerId: patch.providerId ?? 'anthropic',
+                name: patch.name,
+                providerId: patch.providerId,
                 credentialId: patch.credentialId ?? undefined,
                 model: patch.model ?? undefined,
               });
               if (id) setShowCreateGroup(false);
             }}
-            onCancel={() => setShowCreateGroup(false)}
+            onCancel={() => {
+              clearError();
+              setShowCreateGroup(false);
+            }}
           />
         </div>
       )}
@@ -230,7 +247,7 @@ export function ConnectedApps() {
             onDrop={(e) => {
               e.preventDefault();
               const origin = e.dataTransfer.getData(DRAG_MIME);
-              if (origin) handleDrop(group.id, origin);
+              if (origin) requestMove(group.id, origin);
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
@@ -252,7 +269,15 @@ export function ConnectedApps() {
                   resets it), so it has nothing to edit or delete. */}
               {!isDefault && (
                 <div style={{ display: 'flex', gap: '6px' }}>
-                  <button className="text-link bracket-link" style={{ fontSize: '11px' }} onClick={() => setEditingGroupId(editingGroupId === group.id ? null : group.id)}>
+                  <button
+                    className="text-link bracket-link"
+                    style={{ fontSize: '11px' }}
+                    onClick={() => {
+                      clearError();
+                      setShowCreateGroup(false);
+                      setEditingGroupId(editingGroupId === group.id ? null : group.id);
+                    }}
+                  >
                     Edit
                   </button>
                   <button
@@ -274,17 +299,21 @@ export function ConnectedApps() {
               <GroupForm
                 group={group}
                 credentials={credentials}
+                error={error}
                 onSave={async (patch) => {
                   const ok = await updateGroup(group.id, patch);
                   if (ok) setEditingGroupId(null);
                 }}
-                onCancel={() => setEditingGroupId(null)}
+                onCancel={() => {
+                  clearError();
+                  setEditingGroupId(null);
+                }}
               />
             )}
 
             {groupSessions.length === 0 ? (
               <div className="card-subtitle mono" style={{ padding: '8px 4px' }}>
-                {isDropTarget ? 'Drop to assign' : 'Drag an app here to assign it to this group'}
+                {isDropTarget ? 'Drop to assign' : 'Drag an app here, or use Group on an app card'}
               </div>
             ) : (
               groupSessions.map((session) => {
@@ -299,7 +328,14 @@ export function ConnectedApps() {
                     key={session.id}
                     className="card connected-app-card"
                     draggable
+                    onPointerDown={(e) => {
+                      pressingGroupSelect.current = (e.target as Element).closest('select') !== null;
+                    }}
                     onDragStart={(e) => {
+                      if (pressingGroupSelect.current) {
+                        e.preventDefault();
+                        return;
+                      }
                       e.dataTransfer.effectAllowed = 'move';
                       e.dataTransfer.setData(DRAG_MIME, session.appOrigin);
                     }}
@@ -312,7 +348,7 @@ export function ConnectedApps() {
                           {formatOrigin(session.appOrigin).charAt(0).toUpperCase()}
                         </div>
                         <div style={{ minWidth: 0 }}>
-                          <span className="card-title" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <span className="card-title" title={session.appOrigin} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {formatOrigin(session.appOrigin)}
                           </span>
                           <div className="card-subtitle mono">
@@ -350,6 +386,21 @@ export function ConnectedApps() {
                           );
                         })}
                     </div>
+
+                    {orderedGroups.length > 1 && (
+                      <label className="app-group-field">
+                        <span>Group</span>
+                        <select
+                          aria-label={`Group for ${session.appOrigin}`}
+                          value={group.id}
+                          onChange={(e) => requestMove(e.target.value, session.appOrigin)}
+                        >
+                          {orderedGroups.map((g) => (
+                            <option key={g.id} value={g.id}>{g.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
 
                     {/* Token usage & allowance */}
                     <div className="allowance-section">
@@ -412,7 +463,7 @@ export function ConnectedApps() {
             <div key={site.origin} className="card">
               <div className="card-header">
                 <div style={{ minWidth: 0 }}>
-                  <span className="card-title" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span className="card-title" title={site.origin} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {formatOrigin(site.origin)}
                   </span>
                   <div className="card-subtitle mono">
@@ -446,12 +497,15 @@ export function ConnectedApps() {
 function GroupForm({
   group,
   credentials,
+  error,
   onSave,
   onCancel,
 }: {
   group?: Group;
   credentials: CredentialMeta[];
-  onSave: (patch: { name?: string; providerId?: string; credentialId?: string | null; model?: string | null }) => void;
+  /** Why the last save was refused (the background checks the name). */
+  error: string | null;
+  onSave: (patch: { name: string; providerId: string; credentialId: string | null; model: string | null }) => void;
   onCancel: () => void;
 }) {
   const [name, setName] = useState(group?.name ?? '');
@@ -473,9 +527,13 @@ function GroupForm({
   const selectedModel = model ? getModel(model) : undefined;
   const modelInfo = selectedModel ? buildModelInfo(selectedModel) : undefined;
 
+  // The background trims the name and refuses an empty one.
+  const trimmedName = name.trim();
+
   function handleSave() {
+    if (!trimmedName) return;
     onSave({
-      name,
+      name: trimmedName,
       providerId,
       credentialId: credentialId || null,
       model: model || null,
@@ -557,8 +615,9 @@ function GroupForm({
           {modelInfo ?? 'Leave empty to pass through whatever model the app requested. Set when you want to override — required for cross-family routing.'}
         </div>
       </div>
+      {error && <div className="error">{error}</div>}
       <div style={{ display: 'flex', gap: '8px' }}>
-        <button className="btn btn-primary btn-sm" onClick={handleSave}>Save</button>
+        <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={!trimmedName}>Save</button>
         <button className="btn btn-secondary btn-sm" onClick={onCancel}>Cancel</button>
       </div>
     </div>

@@ -8,6 +8,8 @@ import {
 import { RetiredFeaturesNotice } from '../components/RetiredFeaturesNotice';
 import { TrustResetNotice } from '../components/TrustResetNotice';
 import { ProviderIcon } from '../components/ProviderIcon';
+import { Modal } from '../components/Modal';
+import { describeOrigin } from '../utils/origin';
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -15,41 +17,62 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
-function formatHostname(origin: string): string {
-  try {
-    return new URL(origin).hostname;
-  } catch {
-    return origin;
-  }
-}
-
-interface ProviderUsage {
+interface Usage {
   requests: number;
   inputTokens: number;
   outputTokens: number;
 }
 
-// Aggregate last 7 days of successful requests per provider. Per-credential
-// granularity isn't possible (request log carries providerId only), so
-// multiple credentials of the same provider share these numbers.
-function computeUsageByProvider(log: RequestLogEntry[]): Map<string, ProviderUsage> {
+/** credentialId: the key that served the request, recorded by the background (WP-A F033). */
+type LogEntry = RequestLogEntry & { credentialId?: string };
+
+type Attribution = { credentialId: string } | { sharedBy: string } | null;
+
+/**
+ * Which key served a request. Entries name it; entries logged before that
+ * only name the provider (the one actually called, under translation), which
+ * pins them to a key only when the wallet holds one key of that provider.
+ * Otherwise they are shared by all of that provider's keys. null: the key is
+ * gone.
+ */
+function attribute(entry: LogEntry, credentials: CredentialMeta[]): Attribution {
+  if (entry.credentialId) {
+    return credentials.some((c) => c.id === entry.credentialId) ? { credentialId: entry.credentialId } : null;
+  }
+  const provider = entry.actualProviderId ?? entry.providerId;
+  const keys = credentials.filter((c) => c.providerId === provider);
+  if (keys.length === 1) return { credentialId: keys[0].id };
+  return keys.length > 1 ? { sharedBy: provider } : null;
+}
+
+function addTo(map: Map<string, Usage>, key: string, entry: LogEntry) {
+  const usage = map.get(key) ?? { requests: 0, inputTokens: 0, outputTokens: 0 };
+  usage.requests++;
+  usage.inputTokens += entry.inputTokens ?? 0;
+  usage.outputTokens += entry.outputTokens ?? 0;
+  map.set(key, usage);
+}
+
+// Last 7 days of successful requests, per key, plus the older-style entries
+// that can only be told apart by provider.
+function computeUsageByCredential(log: LogEntry[], credentials: CredentialMeta[]) {
   const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  const byProvider = new Map<string, ProviderUsage>();
+  const byCredential = new Map<string, Usage>();
+  const sharedByProvider = new Map<string, Usage>();
   for (const entry of log) {
     if (entry.timestamp < cutoff) continue;
     if (entry.status >= 400) continue;
-    const usage = byProvider.get(entry.providerId) ?? { requests: 0, inputTokens: 0, outputTokens: 0 };
-    usage.requests++;
-    usage.inputTokens += entry.inputTokens ?? 0;
-    usage.outputTokens += entry.outputTokens ?? 0;
-    byProvider.set(entry.providerId, usage);
+    const who = attribute(entry, credentials);
+    if (!who) continue;
+    if ('credentialId' in who) addTo(byCredential, who.credentialId, entry);
+    else addTo(sharedByProvider, who.sharedBy, entry);
   }
-  return byProvider;
+  return { byCredential, sharedByProvider };
 }
 
 export function Dashboard() {
   const { credentials, requestLog, lock, removeCredential } = useWalletStore();
-  const usageByProvider = useMemo(() => computeUsageByProvider(requestLog), [requestLog]);
+  const usage = useMemo(() => computeUsageByCredential(requestLog, credentials), [requestLog, credentials]);
   const [statsCredentialId, setStatsCredentialId] = useState<string | null>(null);
 
   return (
@@ -67,7 +90,7 @@ export function Dashboard() {
         <div className="empty-state">
           <p>No API keys or tokens yet.</p>
           <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '8px' }}>
-            Tap the + button to add a credential. Apps you connect use it through the wallet and never see the key.
+            Click the + button to add a credential. Apps you connect use it through the wallet and never see the key.
           </p>
         </div>
       ) : (
@@ -75,7 +98,8 @@ export function Dashboard() {
           <CredentialCard
             key={cred.id}
             cred={cred}
-            usage={usageByProvider.get(cred.providerId)}
+            usage={usage.byCredential.get(cred.id)}
+            shared={usage.sharedByProvider.get(cred.providerId)}
             onOpenStats={() => setStatsCredentialId(cred.id)}
             onRemove={() => removeCredential(cred.id)}
           />
@@ -96,12 +120,15 @@ export function Dashboard() {
 
 interface CredentialCardProps {
   cred: CredentialMeta;
-  usage: ProviderUsage | undefined;
+  /** This key's own usage. */
+  usage: Usage | undefined;
+  /** Earlier usage that can't be told apart among this provider's keys. */
+  shared: Usage | undefined;
   onOpenStats: () => void;
   onRemove: () => void;
 }
 
-function CredentialCard({ cred, usage, onOpenStats, onRemove }: CredentialCardProps) {
+function CredentialCard({ cred, usage, shared, onOpenStats, onRemove }: CredentialCardProps) {
   const { renameCredential } = useWalletStore();
   const provider = PROVIDERS[cred.providerId];
   const [editing, setEditing] = useState(false);
@@ -155,19 +182,13 @@ function CredentialCard({ cred, usage, onOpenStats, onRemove }: CredentialCardPr
 
   const hasUsage = usage && usage.requests > 0;
 
+  // The whole card opens the usage sheet for the mouse. Keyboard and screen
+  // reader users get the usage button below; the card itself is no button,
+  // so Rename and Remove inside it work from the keyboard.
   return (
     <div
       className="card credential-card tappable"
       onClick={editing ? undefined : onOpenStats}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (editing) return;
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onOpenStats();
-        }
-      }}
     >
       <div className="card-header">
         <div className="credential-card-heading">
@@ -237,23 +258,36 @@ function CredentialCard({ cred, usage, onOpenStats, onRemove }: CredentialCardPr
         </span>
       </div>
 
-      <div className="credential-usage-open">
-        <div className="usage-mini-label">Last 7 days</div>
-        <div className="usage-mini-grid">
-          <div>
-            <div className="usage-mini-value">{hasUsage ? usage!.requests : 0}</div>
-            <div className="usage-mini-tag">requests</div>
-          </div>
-          <div>
-            <div className="usage-mini-value">{formatTokens(hasUsage ? usage!.inputTokens : 0)}</div>
-            <div className="usage-mini-tag">input</div>
-          </div>
-          <div>
-            <div className="usage-mini-value">{formatTokens(hasUsage ? usage!.outputTokens : 0)}</div>
-            <div className="usage-mini-tag">output</div>
-          </div>
-        </div>
-      </div>
+      <button
+        type="button"
+        className="credential-usage-open"
+        aria-label={`View usage for ${cred.label}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (!editing) onOpenStats();
+        }}
+      >
+        <span className="usage-mini-label">Last 7 days</span>
+        <span className="usage-mini-grid">
+          <span>
+            <span className="usage-mini-value">{hasUsage ? usage!.requests : 0}</span>
+            <span className="usage-mini-tag">requests</span>
+          </span>
+          <span>
+            <span className="usage-mini-value">{formatTokens(hasUsage ? usage!.inputTokens : 0)}</span>
+            <span className="usage-mini-tag">input</span>
+          </span>
+          <span>
+            <span className="usage-mini-value">{formatTokens(hasUsage ? usage!.outputTokens : 0)}</span>
+            <span className="usage-mini-tag">output</span>
+          </span>
+        </span>
+        {shared && shared.requests > 0 && (
+          <span className="usage-mini-shared">
+            +{shared.requests} earlier, all {provider?.name ?? cred.providerId} keys
+          </span>
+        )}
+      </button>
     </div>
   );
 }
@@ -277,44 +311,38 @@ interface StatsSheetProps {
 }
 
 function StatsSheet({ credentialId, credentials, requestLog, onClose }: StatsSheetProps) {
-  useEffect(() => {
-    function onKey(e: globalThis.KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
-    }
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
   const cred = credentials.find((c) => c.id === credentialId);
   const title = cred?.label ?? 'Stats';
 
   return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
-      <div className="modal-sheet" onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title}>
-        <div className="modal-header">
-          <span className="modal-title">{title}</span>
-          <button className="icon-btn" onClick={onClose} aria-label="Close">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
-        </div>
-        <div className="modal-body">
-          {cred && <CredentialStats cred={cred} requestLog={requestLog} />}
-        </div>
-      </div>
-    </div>
+    <Modal title={title} onClose={onClose}>
+      {cred && <CredentialStats cred={cred} credentials={credentials} requestLog={requestLog} />}
+    </Modal>
   );
 }
 
-function CredentialStats({ cred, requestLog }: { cred: CredentialMeta; requestLog: RequestLogEntry[] }) {
+function CredentialStats({ cred, credentials, requestLog }: {
+  cred: CredentialMeta;
+  credentials: CredentialMeta[];
+  requestLog: LogEntry[];
+}) {
   const [range, setRange] = useState<TimeRange>('7d');
   const provider = PROVIDERS[cred.providerId];
-  const filtered = useMemo(
-    () => filterByTime(requestLog, range).filter((e) => e.providerId === cred.providerId && e.status < 400),
-    [requestLog, range, cred.providerId],
-  );
+  const { filtered, sharedCount } = useMemo(() => {
+    const mine: LogEntry[] = [];
+    let shared = 0;
+    for (const e of filterByTime(requestLog, range)) {
+      if (e.status >= 400) continue;
+      const who = attribute(e, credentials);
+      if (!who) continue;
+      if ('credentialId' in who) {
+        if (who.credentialId === cred.id) mine.push(e);
+      } else if (who.sharedBy === cred.providerId) {
+        shared++;
+      }
+    }
+    return { filtered: mine, sharedCount: shared };
+  }, [requestLog, range, cred.id, cred.providerId, credentials]);
 
   const byModel = new Map<string, { requests: number; inputTokens: number; outputTokens: number }>();
   const byApp = new Map<string, { origin: string; requests: number; inputTokens: number; outputTokens: number }>();
@@ -342,8 +370,14 @@ function CredentialStats({ cred, requestLog }: { cred: CredentialMeta; requestLo
   return (
     <>
       <p className="card-subtitle" style={{ marginBottom: '12px' }}>
-        {provider?.name ?? cred.providerId} · shared across all credentials of this provider
+        {provider?.name ?? cred.providerId} · this key only
       </p>
+      {sharedCount > 0 && (
+        <p className="card-subtitle" style={{ marginBottom: '12px' }}>
+          Not counted: {sharedCount} earlier {sharedCount === 1 ? 'request' : 'requests'}, shared by
+          all {provider?.name ?? cred.providerId} keys.
+        </p>
+      )}
 
       <div className="usage-range-toggle">
         {(['24h', '7d', '30d', 'all'] as TimeRange[]).map((r) => (
@@ -397,8 +431,8 @@ function CredentialStats({ cred, requestLog }: { cred: CredentialMeta; requestLo
             <div key={a.origin} className="card usage-card">
               <div className="card-header" style={{ marginBottom: '0' }}>
                 <div style={{ minWidth: 0 }}>
-                  <span className="card-title mono" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 500 }}>
-                    {formatHostname(a.origin)}
+                  <span className="card-title mono" title={a.origin} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 500 }}>
+                    {describeOrigin(a.origin).label}
                   </span>
                   <div className="card-subtitle">{a.requests} request{a.requests !== 1 ? 's' : ''}</div>
                 </div>

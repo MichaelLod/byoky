@@ -1,40 +1,119 @@
 import { useState } from 'react';
 import { useWalletStore } from '../store';
-import { PROVIDERS } from '@byoky/core';
+import {
+  PROVIDERS,
+  DEFAULT_GROUP_ID,
+  resolveAutoCrossFamilyRoute,
+  resolveCrossFamilyRoute,
+  resolveSameFamilySwapRoute,
+  type Credential,
+  type CredentialMeta,
+  type Group,
+  type PendingApproval,
+} from '@byoky/core';
 import { Raven } from '../components/Raven';
+import { describeOrigin } from '../utils/origin';
 
-function formatHostname(origin: string): string {
-  try {
-    return new URL(origin).hostname;
-  } catch {
-    return origin;
+/**
+ * The providers a request lists, as far as they can be shown. The list comes
+ * from the web page as sent, so it may not be an array of { id } objects.
+ */
+function requestedProviderList(providers: unknown): { id: string; required: boolean }[] {
+  if (!Array.isArray(providers)) return [];
+  return providers
+    .filter((p): p is { id?: unknown; required?: unknown } => typeof p === 'object' && p !== null)
+    .map((p) => ({ id: String(p.id), required: p.required === true }));
+}
+
+function providerName(id: string): string {
+  return Object.prototype.hasOwnProperty.call(PROVIDERS, id) ? PROVIDERS[id].name : id;
+}
+
+type Route =
+  | { kind: 'direct' }
+  | { kind: 'translated'; via: string }
+  | { kind: 'routed'; via: string }
+  | { kind: 'none' };
+
+/**
+ * Which key will serve `providerId` once approved. Mirrors createSession in
+ * the background: group pin, then cross-family group route, same-family
+ * swap, own key, and last the automatic cross-family fallback that serves an
+ * app with any translatable key when it has no group and no key of its own.
+ */
+function routeFor(providerId: string, group: Group | undefined, credentials: CredentialMeta[]): Route {
+  // The resolvers read only id, providerId, createdAt and lastUsedAt.
+  const creds = credentials as unknown as Credential[];
+  const pinned = group && group.providerId === providerId && group.credentialId
+    ? creds.find((c) => c.id === group.credentialId)
+    : undefined;
+  if (pinned) return { kind: 'direct' };
+  const cross = resolveCrossFamilyRoute(group, providerId, creds);
+  if (cross) return { kind: 'translated', via: cross.cred.providerId };
+  const swap = resolveSameFamilySwapRoute(group, providerId, creds);
+  if (swap) return { kind: 'routed', via: swap.cred.providerId };
+  if (creds.some((c) => c.providerId === providerId)) return { kind: 'direct' };
+  const auto = !group?.providerId ? resolveAutoCrossFamilyRoute(providerId, creds) : undefined;
+  if (auto) return { kind: 'translated', via: auto.cred.providerId };
+  return { kind: 'none' };
+}
+
+function routeLabel(route: Route): string {
+  switch (route.kind) {
+    case 'direct': return 'Key ready';
+    case 'translated': return `Uses your ${providerName(route.via)} key (translated)`;
+    case 'routed': return `Routed to ${providerName(route.via)}`;
+    case 'none': return 'No key';
   }
 }
 
 export function ApprovalRequest() {
-  const { pendingApprovals, credentials, approveConnect, rejectConnect } =
-    useWalletStore();
-  const [trust, setTrust] = useState(false);
+  const { pendingApprovals, error, navigate } = useWalletStore();
 
   if (pendingApprovals.length === 0) {
+    // Reached when approving fails and nothing else is queued: keep the
+    // error on screen, with a way back (this page has no nav).
     return (
       <div>
         <h2 className="page-title">Connection Request</h2>
+        {error && <div className="error">{error}</div>}
         <div className="empty-state">
           <p>No pending requests.</p>
+          <button className="btn btn-secondary" style={{ marginTop: '12px' }} onClick={() => navigate('dashboard')}>
+            Back to wallet
+          </button>
         </div>
       </div>
     );
   }
 
-  const approval = pendingApprovals[0];
-  const hostname = formatHostname(approval.appOrigin);
+  // Keyed by request, so each one starts with "Trust this site" unticked:
+  // a tick given to one origin must not carry over to the next in the queue.
+  return (
+    <ApprovalCard
+      key={pendingApprovals[0].id}
+      approval={pendingApprovals[0]}
+      queued={pendingApprovals.length - 1}
+    />
+  );
+}
+
+function ApprovalCard({ approval, queued }: { approval: PendingApproval; queued: number }) {
+  const { credentials, groups, appGroups, error, approveConnect, rejectConnect } = useWalletStore();
+  const [trust, setTrust] = useState(false);
+  // Host and port, since trust is granted per full origin.
+  const origin = describeOrigin(approval.appOrigin);
 
   // Show which providers the app is requesting
+  const listed = requestedProviderList(approval.providers);
   const requestedProviders =
-    approval.providers.length > 0
-      ? approval.providers
+    listed.length > 0
+      ? listed
       : credentials.map((c) => ({ id: c.providerId, required: false }));
+  // A new origin joins the default group; a stale binding falls back to it.
+  const group =
+    groups.find((g) => g.id === (appGroups[approval.appOrigin] ?? DEFAULT_GROUP_ID)) ??
+    groups.find((g) => g.id === DEFAULT_GROUP_ID);
 
   return (
     <div className="approval-page">
@@ -46,22 +125,31 @@ export function ApprovalRequest() {
         </div>
       </div>
 
+      {error && <div className="error">{error}</div>}
+
       <div className="approval-card">
-        <div className="approval-origin">{hostname}</div>
+        <div className="approval-origin">{origin.label}</div>
+        {origin.insecure && (
+          <span className="result-tag alarm" title="This page loads over plain http, so anyone on the network can pose as it.">
+            Not secure
+          </span>
+        )}
         <div className="approval-subtitle">wants to connect to your wallet</div>
       </div>
 
       <div className="approval-section">
         <div className="approval-section-label">Requesting access to:</div>
         <div className="approval-providers">
-          {requestedProviders.map((p) => {
-            const provider = PROVIDERS[p.id];
-            const hasCred = credentials.some((c) => c.providerId === p.id);
+          {requestedProviders.map((p, i) => {
+            // An app asking for a provider you hold no key for may still be
+            // served, and billed, on another key: say which.
+            const route = routeFor(p.id, group, credentials);
+            const tone = route.kind === 'direct' ? 'ready' : route.kind === 'none' ? 'missing' : 'routed';
             return (
-              <div key={p.id} className="approval-provider-row">
-                <span>{provider?.name ?? p.id}</span>
-                <span className={`result-tag ${hasCred ? 'ready' : 'missing'}${p.required ? ' required' : ''}`}>
-                  {hasCred ? 'Key ready' : 'No key'}
+              <div key={`${i}:${p.id}`} className="approval-provider-row">
+                <span>{providerName(p.id)}</span>
+                <span className={`result-tag ${tone}${p.required ? ' required' : ''}`}>
+                  {routeLabel(route)}
                   {p.required && ' · required'}
                 </span>
               </div>
@@ -96,9 +184,9 @@ export function ApprovalRequest() {
 
       <div className="approval-full-origin">{approval.appOrigin}</div>
 
-      {pendingApprovals.length > 1 && (
+      {queued > 0 && (
         <div className="approval-queue">
-          +{pendingApprovals.length - 1} more pending
+          +{queued} more pending
         </div>
       )}
     </div>

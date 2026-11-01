@@ -1,10 +1,12 @@
 import { useState, useRef, type FormEvent } from 'react';
+import { useDialogFocus } from '../hooks/useDialogFocus';
 import { useWalletStore } from '../store';
 import {
   checkPasswordStrength,
   MIN_PASSWORD_LENGTH,
 } from '@byoky/core';
 import { PasswordMeter } from '../components/PasswordMeter';
+import { lockedUntilFrom, lockoutMessage, useLockoutCountdown } from '../hooks/useLockoutCountdown';
 
 async function sendInternal(action: string, payload?: unknown): Promise<Record<string, unknown>> {
   return browser.runtime.sendMessage({
@@ -15,7 +17,7 @@ async function sendInternal(action: string, payload?: unknown): Promise<Record<s
 }
 
 export function Settings() {
-  const { credentials, navigate, lock, resetWallet, loading } = useWalletStore();
+  const { credentials, navigate, lock, resetWallet, submitting } = useWalletStore();
   const [modal, setModal] = useState<'export' | 'import' | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
 
@@ -70,7 +72,7 @@ export function Settings() {
           <button
             className="btn btn-danger"
             onClick={() => setConfirmReset(true)}
-            disabled={loading}
+            disabled={submitting}
           >
             Reset Wallet
           </button>
@@ -109,6 +111,9 @@ function ConfirmResetModal({
   onConfirm: () => void | Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  // Cancel first: the other button wipes the wallet. No Escape mid-reset.
+  useDialogFocus(dialogRef, { onEscape: busy ? undefined : onCancel, initialFocus: '[data-initial-focus]' });
 
   async function handleConfirm() {
     setBusy(true);
@@ -121,13 +126,13 @@ function ConfirmResetModal({
 
   return (
     <div className="dialog-backdrop">
-      <div className="dialog" role="alertdialog" aria-modal="true" aria-label="Reset Wallet?">
+      <div ref={dialogRef} className="dialog" role="alertdialog" aria-modal="true" aria-label="Reset Wallet?" tabIndex={-1}>
         <h3 className="dialog-title danger">Reset Wallet?</h3>
         <p className="dialog-text">
           All keys on this device will be permanently deleted. This cannot be undone.
         </p>
         <div className="dialog-actions">
-          <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={busy}>
+          <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={busy} data-initial-focus>
             Cancel
           </button>
           <button
@@ -152,6 +157,14 @@ function ExportModal({ onClose }: { onClose: () => void }) {
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
   const [exporting, setExporting] = useState(false);
+  // Export re-authentication shares the unlock lockout.
+  const { lockedUntil, setLockedUntil } = useWalletStore();
+  const lockoutSeconds = useLockoutCountdown(lockedUntil, () => {
+    setLockedUntil(null);
+    setError('');
+  });
+  const lockedOut = lockoutSeconds > 0;
+  const shownError = lockedOut ? lockoutMessage(lockoutSeconds) : error;
 
   const strength = checkPasswordStrength(exportPassword);
 
@@ -179,7 +192,11 @@ function ExportModal({ onClose }: { onClose: () => void }) {
     setExporting(true);
     try {
       const exportResult = await sendInternal('exportVault', { exportPassword, currentPassword });
-      if (exportResult.error) throw new Error(exportResult.error as string);
+      if (exportResult.error) {
+        const until = lockedUntilFrom(exportResult);
+        if (until) setLockedUntil(until);
+        throw new Error(exportResult.error as string);
+      }
 
       // Download as .byoky file
       const blob = new Blob([exportResult.encryptedVault as string], { type: 'application/octet-stream' });
@@ -208,7 +225,7 @@ function ExportModal({ onClose }: { onClose: () => void }) {
         on this device or another one.
       </p>
 
-      {error && <div className="error">{error}</div>}
+      {shownError && <div className="error">{shownError}</div>}
 
       <form onSubmit={handleExport}>
         <div className="form-group">
@@ -256,7 +273,7 @@ function ExportModal({ onClose }: { onClose: () => void }) {
             type="submit"
             className="btn btn-primary"
             style={{ flex: 1 }}
-            disabled={exporting || !currentPassword || exportPassword.length < MIN_PASSWORD_LENGTH || strength.score < 2}
+            disabled={exporting || lockedOut || !currentPassword || exportPassword.length < MIN_PASSWORD_LENGTH || strength.score < 2}
           >
             {exporting ? 'Exporting...' : 'Export'}
           </button>
@@ -275,20 +292,36 @@ function ImportModal({ onClose }: { onClose: () => void }) {
   const [importing, setImporting] = useState(false);
   const [summary, setSummary] = useState<{ added: number; duplicates: number; rejected: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Only the latest pick may fill in fileData; an earlier, slower read may not.
+  const readId = useRef(0);
 
+  // A new pick replaces the old one, also when it is rejected: Import must
+  // never send an earlier file under an error about this one.
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+    setError('');
+    const input = e.target;
+    const file = input.files?.[0];
     if (!file) return;
+    const id = ++readId.current;
+    setFileData(null);
     const MAX_IMPORT_SIZE = 10 * 1024 * 1024; // 10MB
     if (file.size > MAX_IMPORT_SIZE) {
       setError('File too large (max 10MB)');
+      setFileName('');
+      input.value = '';
       return;
     }
     setFileName(file.name);
 
     const reader = new FileReader();
     reader.onload = () => {
-      setFileData(reader.result as string);
+      if (id === readId.current) setFileData(reader.result as string);
+    };
+    reader.onerror = () => {
+      if (id !== readId.current) return;
+      setError('Could not read the file');
+      setFileName('');
+      input.value = '';
     };
     reader.readAsText(file);
   }
