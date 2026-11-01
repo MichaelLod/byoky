@@ -16,6 +16,473 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
     return ADAPTERS.has(family);
   }
 
+  // src/providers.ts
+  var PROVIDERS = {
+    anthropic: {
+      id: "anthropic",
+      name: "Anthropic",
+      authMethods: ["api_key", "oauth"],
+      baseUrl: "https://api.anthropic.com"
+    },
+    openai: {
+      id: "openai",
+      name: "OpenAI",
+      authMethods: ["api_key"],
+      baseUrl: "https://api.openai.com"
+    },
+    gemini: {
+      id: "gemini",
+      name: "Google Gemini",
+      authMethods: ["api_key"],
+      baseUrl: "https://generativelanguage.googleapis.com"
+    },
+    mistral: {
+      id: "mistral",
+      name: "Mistral",
+      authMethods: ["api_key"],
+      baseUrl: "https://api.mistral.ai"
+    },
+    cohere: {
+      id: "cohere",
+      name: "Cohere",
+      authMethods: ["api_key"],
+      baseUrl: "https://api.cohere.com"
+    },
+    xai: {
+      id: "xai",
+      name: "xAI (Grok)",
+      authMethods: ["api_key"],
+      baseUrl: "https://api.x.ai"
+    },
+    deepseek: {
+      id: "deepseek",
+      name: "DeepSeek",
+      authMethods: ["api_key"],
+      baseUrl: "https://api.deepseek.com",
+      chatPath: "/chat/completions"
+    },
+    perplexity: {
+      id: "perplexity",
+      name: "Perplexity",
+      authMethods: ["api_key"],
+      baseUrl: "https://api.perplexity.ai",
+      chatPath: "/chat/completions"
+    },
+    groq: {
+      id: "groq",
+      name: "Groq",
+      authMethods: ["api_key"],
+      baseUrl: "https://api.groq.com",
+      chatPath: "/openai/v1/chat/completions"
+    },
+    together: {
+      id: "together",
+      name: "Together AI",
+      authMethods: ["api_key"],
+      baseUrl: "https://api.together.xyz"
+    },
+    fireworks: {
+      id: "fireworks",
+      name: "Fireworks AI",
+      authMethods: ["api_key"],
+      baseUrl: "https://api.fireworks.ai",
+      chatPath: "/inference/v1/chat/completions"
+    },
+    openrouter: {
+      id: "openrouter",
+      name: "OpenRouter",
+      authMethods: ["api_key"],
+      baseUrl: "https://openrouter.ai/api"
+    },
+    azure_openai: {
+      id: "azure_openai",
+      name: "Azure OpenAI",
+      authMethods: ["api_key"],
+      // Placeholder — each tenant has its own `<resource>.openai.azure.com`.
+      // The real host is stored on the credential row and used at proxy time.
+      baseUrl: "https://YOUR_RESOURCE.openai.azure.com",
+      // The credential holds the resource root; Azure's v1 API serves chat
+      // under /openai/v1 (the model field names the deployment).
+      chatPath: "/openai/v1/chat/completions",
+      requiresCustomBaseUrl: true
+    },
+    ollama: {
+      id: "ollama",
+      name: "Ollama (local)",
+      authMethods: ["api_key"],
+      // Placeholder — the real host is per-credential (typically
+      // http://localhost:11434). Ollama exposes an OpenAI-compatible surface
+      // at /v1/chat/completions.
+      baseUrl: "http://localhost:11434",
+      chatPath: "/v1/chat/completions",
+      requiresCustomBaseUrl: true
+    },
+    lm_studio: {
+      id: "lm_studio",
+      name: "LM Studio (local)",
+      authMethods: ["api_key"],
+      // Placeholder — the real host is per-credential (LM Studio defaults to
+      // http://localhost:1234). OpenAI-compatible server.
+      baseUrl: "http://localhost:1234",
+      chatPath: "/v1/chat/completions",
+      requiresCustomBaseUrl: true
+    }
+  };
+
+  // src/proxy-utils.ts
+  var LOCAL_HTTP_PROVIDERS = /* @__PURE__ */ new Set(["ollama", "lm_studio"]);
+  function isLoopbackHost(hostname) {
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" || hostname === "::1";
+  }
+  function isAllowedProtocol(providerId, u) {
+    if (u.protocol === "https:") return true;
+    if (u.protocol === "http:" && LOCAL_HTTP_PROVIDERS.has(providerId) && isLoopbackHost(u.hostname)) {
+      return true;
+    }
+    return false;
+  }
+  function resolveProviderBaseUrl(providerId, overrideBaseUrl) {
+    const provider = PROVIDERS[providerId];
+    if (!provider) return null;
+    if (!provider.requiresCustomBaseUrl) return provider.baseUrl;
+    if (!overrideBaseUrl) return null;
+    try {
+      const base = new URL(overrideBaseUrl);
+      if (!isAllowedProtocol(providerId, base)) return null;
+      if (base.username || base.password || base.search || base.hash) return null;
+      return overrideBaseUrl;
+    } catch {
+      return null;
+    }
+  }
+  var GENERATION_PATH_SUFFIXES = [
+    "chat/completions",
+    "completions",
+    "responses",
+    "messages",
+    "chat",
+    "complete",
+    "generate"
+  ].map((s) => s.split("/"));
+  var POST_PATH_SUFFIXES = [
+    "chat/completions",
+    "completions",
+    "responses",
+    "responses/input_tokens",
+    "embeddings",
+    "moderations",
+    "audio/speech",
+    "audio/transcriptions",
+    "audio/translations",
+    "images/generations",
+    "images/edits",
+    "images/variations",
+    "messages",
+    "messages/count_tokens",
+    "complete",
+    "chat",
+    "embed",
+    "rerank",
+    "generate",
+    "api/show"
+  ].map((s) => s.split("/"));
+  var MAX_BODY_PARSE_SIZE = 10485760;
+  function detectRequestCapabilities(body) {
+    const empty = {
+      tools: false,
+      vision: false,
+      structuredOutput: false,
+      reasoning: false
+    };
+    if (!body || body.length > MAX_BODY_PARSE_SIZE) return empty;
+    let parsed;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      return empty;
+    }
+    const out = { ...empty };
+    if (Array.isArray(parsed.tools) && parsed.tools.length > 0) {
+      out.tools = true;
+    }
+    const rf = parsed.response_format;
+    if (rf && typeof rf === "object" && rf.type === "json_schema") {
+      out.structuredOutput = true;
+    }
+    if (parsed.thinking != null) {
+      out.reasoning = true;
+    }
+    if (Array.isArray(parsed.messages)) {
+      outer: for (const msg of parsed.messages) {
+        const content = msg?.content;
+        if (!Array.isArray(content)) continue;
+        for (const block of content) {
+          if (!block || typeof block !== "object") continue;
+          const type = block.type;
+          if (type === "image" || type === "image_url") {
+            out.vision = true;
+            break outer;
+          }
+        }
+      }
+    }
+    return out;
+  }
+  var CLAUDE_CODE_SYSTEM_PREFIX = "You are Claude Code, Anthropic's official CLI for Claude.";
+  function injectClaudeCodeSystemPrompt(body, options) {
+    if (!body) return body;
+    try {
+      const parsed = JSON.parse(body);
+      const relocate = options?.relocateExisting === true;
+      if (relocate) {
+        const originalSystem = extractSystemText(parsed.system);
+        parsed.system = CLAUDE_CODE_SYSTEM_PREFIX;
+        if (originalSystem && Array.isArray(parsed.messages) && parsed.messages.length > 0) {
+          parsed.messages = relocateSystemToFirstUserMessage(
+            parsed.messages,
+            originalSystem
+          );
+        }
+      } else {
+        if (!parsed.system) {
+          parsed.system = CLAUDE_CODE_SYSTEM_PREFIX;
+        } else if (typeof parsed.system === "string") {
+          parsed.system = `${CLAUDE_CODE_SYSTEM_PREFIX}
+
+${parsed.system}`;
+        } else if (Array.isArray(parsed.system)) {
+          parsed.system = [{ type: "text", text: CLAUDE_CODE_SYSTEM_PREFIX }, ...parsed.system];
+        }
+      }
+      return JSON.stringify(parsed);
+    } catch {
+      return body;
+    }
+  }
+  function extractSystemText(system) {
+    if (!system) return "";
+    if (typeof system === "string") return system;
+    if (Array.isArray(system)) {
+      return system.map((block) => {
+        if (typeof block === "string") return block;
+        if (block && typeof block === "object" && block.type === "text") {
+          return String(block.text ?? "");
+        }
+        return "";
+      }).filter((s) => s.length > 0).join("\n\n");
+    }
+    return "";
+  }
+  function relocateSystemToFirstUserMessage(messages, systemText) {
+    const wrapped = `<system_context>
+${systemText}
+</system_context>
+
+`;
+    const out = [...messages];
+    const first = out[0];
+    if (!first || first.role !== "user") return out;
+    if (typeof first.content === "string") {
+      out[0] = { ...first, content: `${wrapped}${first.content}` };
+    } else if (Array.isArray(first.content)) {
+      out[0] = {
+        ...first,
+        content: [{ type: "text", text: wrapped }, ...first.content]
+      };
+    }
+    return out;
+  }
+  function rewriteToolNamesForClaudeCode(body) {
+    if (!body) return { body, toolNameMap: {} };
+    let parsed;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      return { body, toolNameMap: {} };
+    }
+    const tools = parsed.tools;
+    if (!Array.isArray(tools) || tools.length === 0) {
+      return { body, toolNameMap: {} };
+    }
+    const needsRewrite = tools.some((t) => {
+      const name = t?.name;
+      return typeof name === "string" && !/^[A-Z][A-Za-z0-9]*$/.test(name);
+    });
+    if (!needsRewrite) return { body, toolNameMap: {} };
+    const forward = {};
+    const reverse = {};
+    for (const t of tools) {
+      const name = t?.name;
+      if (typeof name !== "string") continue;
+      if (forward[name]) continue;
+      const alias = toClaudeCodeToolName(name, new Set(Object.values(forward)));
+      forward[name] = alias;
+      reverse[alias] = name;
+    }
+    parsed.tools = tools.map((t) => {
+      const tt = t;
+      if (typeof tt.name === "string" && forward[tt.name]) {
+        return { ...t, name: forward[tt.name] };
+      }
+      return t;
+    });
+    const toolChoice = parsed.tool_choice;
+    if (toolChoice?.type === "tool" && typeof toolChoice.name === "string" && forward[toolChoice.name]) {
+      parsed.tool_choice = { ...toolChoice, name: forward[toolChoice.name] };
+    }
+    const messages = parsed.messages;
+    if (Array.isArray(messages)) {
+      for (const msg of messages) {
+        const content = msg?.content;
+        if (!Array.isArray(content)) continue;
+        for (const block of content) {
+          const b = block;
+          if (b.type === "tool_use" && typeof b.name === "string" && forward[b.name]) {
+            b.name = forward[b.name];
+          }
+        }
+      }
+    }
+    return { body: JSON.stringify(parsed), toolNameMap: reverse };
+  }
+  function toClaudeCodeToolName(name, taken) {
+    let pascal = name.split(/[_\-]/).filter((p) => p.length > 0).map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join("");
+    if (pascal === name && name.length > 0) {
+      pascal = name.charAt(0).toUpperCase() + name.slice(1);
+    }
+    let candidate = pascal;
+    let n = 2;
+    while (taken.has(candidate)) {
+      candidate = `${pascal}${n}`;
+      n++;
+    }
+    return candidate;
+  }
+  function rewriteToolNamesInJSONBody(body, toolNameMap) {
+    if (Object.keys(toolNameMap).length === 0) return body;
+    let parsed;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      return body;
+    }
+    const content = parsed.content;
+    if (!Array.isArray(content)) return body;
+    let mutated = false;
+    for (const block of content) {
+      if (!block || typeof block !== "object") continue;
+      const b = block;
+      if (b.type === "tool_use" && typeof b.name === "string" && toolNameMap[b.name]) {
+        b.name = toolNameMap[b.name];
+        mutated = true;
+      }
+    }
+    return mutated ? JSON.stringify(parsed) : body;
+  }
+  function createToolNameSSERewriter(toolNameMap) {
+    if (Object.keys(toolNameMap).length === 0) {
+      return {
+        process: (chunk) => chunk,
+        flush: () => ""
+      };
+    }
+    let buffer = "";
+    return {
+      process: (chunk) => {
+        buffer += chunk;
+        let out = "";
+        let idx;
+        while ((idx = buffer.indexOf("\n\n")) !== -1) {
+          const frame = buffer.slice(0, idx + 2);
+          buffer = buffer.slice(idx + 2);
+          out += rewriteSSEFrame(frame, toolNameMap);
+        }
+        return out;
+      },
+      flush: () => {
+        const leftover = buffer;
+        buffer = "";
+        return leftover;
+      }
+    };
+  }
+  function rewriteSSEFrame(frame, toolNameMap) {
+    const dataMatch = /^data: (.+)$/m.exec(frame);
+    if (!dataMatch) return frame;
+    const dataLine = dataMatch[1];
+    try {
+      const data = JSON.parse(dataLine);
+      if (data?.type === "content_block_start" && data?.content_block?.type === "tool_use" && typeof data.content_block.name === "string" && toolNameMap[data.content_block.name]) {
+        data.content_block.name = toolNameMap[data.content_block.name];
+        const rewrittenData = JSON.stringify(data);
+        return frame.replace(dataLine, rewrittenData);
+      }
+    } catch {
+    }
+    return frame;
+  }
+
+  // src/translate/families.ts
+  var FAMILY_PROVIDERS = {
+    anthropic: /* @__PURE__ */ new Set(["anthropic"]),
+    openai: /* @__PURE__ */ new Set([
+      "openai",
+      "azure_openai",
+      "groq",
+      "together",
+      "deepseek",
+      "xai",
+      "perplexity",
+      "fireworks",
+      "openrouter",
+      "mistral",
+      // Local OpenAI-compatible servers. They work as routing destinations
+      // (the credential's loopback base URL is used, see rewriteProxyUrl), but
+      // auto-routing never picks them: there is no model routing could name
+      // for them (see autoRouteModelFor in routing.ts). Nor does it send a
+      // request meant for one to another provider: only a group does that.
+      "ollama",
+      "lm_studio"
+    ]),
+    gemini: /* @__PURE__ */ new Set(["gemini"]),
+    cohere: /* @__PURE__ */ new Set(["cohere"])
+  };
+  function familyOf(providerId) {
+    for (const family of Object.keys(FAMILY_PROVIDERS)) {
+      if (FAMILY_PROVIDERS[family].has(providerId)) return family;
+    }
+    return null;
+  }
+  function shouldTranslate(srcProviderId, dstProviderId) {
+    const src = familyOf(srcProviderId);
+    if (!src || !hasAdapter(src)) return false;
+    const dst = familyOf(dstProviderId);
+    if (!dst || !hasAdapter(dst)) return false;
+    return src !== dst;
+  }
+  function sameFamily(srcProviderId, dstProviderId) {
+    const src = familyOf(srcProviderId);
+    if (!src) return false;
+    return src === familyOf(dstProviderId);
+  }
+  function isChatCompletionsEndpoint(family, url) {
+    if (!hasAdapter(family)) return false;
+    return getAdapter(family).matchesChatEndpoint(url);
+  }
+  function rewriteProxyUrl(dstProviderId, model, stream, overrideBaseUrl) {
+    const provider = PROVIDERS[dstProviderId];
+    if (!provider) return null;
+    const family = familyOf(dstProviderId);
+    if (!family || !hasAdapter(family)) return null;
+    const rawBase = resolveProviderBaseUrl(dstProviderId, overrideBaseUrl);
+    if (!rawBase) return null;
+    const base = rawBase.replace(/\/$/, "");
+    if (provider.chatPath) {
+      return `${base}${provider.chatPath}`;
+    }
+    return getAdapter(family).buildChatUrl(base, model, stream);
+  }
+
   // src/translate/ir.ts
   function isIRError(x) {
     return x.error != null;
@@ -144,11 +611,9 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
       displayName: "GPT-5.4 nano",
       contextWindow: 4e5,
       maxOutput: 128e3,
-      capabilities: {
-        ...FRONTIER,
-        // The nano variant is text-only at the chat-completions surface.
-        vision: false
-      },
+      // Takes image input on Chat Completions too (OpenAI's model page lists
+      // text and image input; checked live 2026-11-01).
+      capabilities: FRONTIER,
       deprecated: { shutdown: "2027-04-01", replacement: "gpt-6-luna" }
     },
     // ─── Google Gemini ───────────────────────────────────────────────────────
@@ -230,6 +695,7 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
     },
     parseRequest,
     serializeRequest,
+    shapeRequestForModel,
     parseResponse,
     serializeResponse,
     createStreamParser,
@@ -443,18 +909,7 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
     if (systemParts.length > 0) {
       out.system = systemParts.map((p) => p.text).join("\n\n");
     }
-    let temperature = ir.temperature;
-    let topP = ir.topP;
-    let topK = ir.topK;
-    if (rules.sampling === "none") {
-      temperature = topP = topK = void 0;
-    } else {
-      if (thinking) {
-        temperature = topK = void 0;
-        if (typeof topP === "number" && (topP < 0.95 || topP > 1)) topP = void 0;
-      }
-      if (typeof temperature === "number") topP = void 0;
-    }
+    const { temperature, topP, topK } = claudeSampling(rules, !!thinking, ir);
     if (typeof temperature === "number") {
       out.temperature = Math.max(0, Math.min(1, temperature));
     }
@@ -507,6 +962,65 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
     if (atLeast(4, 7)) return { sampling: "none", thinking: "adaptive", forcedToolChoice };
     if (major === 4 && minor === 6) return { sampling: "single", thinking: "either", forcedToolChoice };
     return { sampling: "single", thinking: "budget", forcedToolChoice };
+  }
+  function claudeSampling(rules, thinking, requested) {
+    if (rules.sampling === "none") return {};
+    let { temperature, topP, topK } = requested;
+    if (thinking) {
+      temperature = topK = void 0;
+      if (typeof topP === "number" && (topP < 0.95 || topP > 1)) topP = void 0;
+    }
+    if (typeof temperature === "number") topP = void 0;
+    return { temperature, topP, topK };
+  }
+  function shapeRequestForModel(body, ctx) {
+    const rules = claudeRequestRules(ctx.dstModel);
+    const isForced = (choice) => isRecord(choice) && (choice.type === "any" || choice.type === "tool");
+    if (!rules.forcedToolChoice && isForced(body.tool_choice)) {
+      const choice = body.tool_choice;
+      if (Array.isArray(body.tools) && body.tools.length > 0) {
+        appendSystemText(
+          body,
+          forcedToolInstruction(choice.type === "tool" ? { type: "tool", name: String(choice.name) } : { type: "any" })
+        );
+      }
+      const auto = { ...choice, type: "auto" };
+      delete auto.name;
+      body.tool_choice = auto;
+    }
+    const thinking = body.thinking;
+    if (isRecord(thinking) && (thinking.type === "enabled" || thinking.type === "adaptive")) {
+      if (isForced(body.tool_choice)) {
+        delete body.thinking;
+      } else if (thinking.type === "enabled" && rules.thinking === "adaptive") {
+        const adaptive = { ...thinking, type: "adaptive" };
+        delete adaptive.budget_tokens;
+        body.thinking = adaptive;
+      } else if (thinking.type === "adaptive" && rules.thinking === "budget") {
+        delete body.thinking;
+      }
+    }
+    const thinkingOn = isRecord(body.thinking) && (body.thinking.type === "enabled" || body.thinking.type === "adaptive");
+    const requested = {
+      temperature: typeof body.temperature === "number" ? body.temperature : void 0,
+      topP: typeof body.top_p === "number" ? body.top_p : void 0,
+      topK: typeof body.top_k === "number" ? body.top_k : void 0
+    };
+    const kept = claudeSampling(rules, thinkingOn, requested);
+    if (requested.temperature !== void 0 && kept.temperature === void 0) delete body.temperature;
+    if (requested.topP !== void 0 && kept.topP === void 0) delete body.top_p;
+    if (requested.topK !== void 0 && kept.topK === void 0) delete body.top_k;
+  }
+  function isRecord(value) {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+  function appendSystemText(body, text) {
+    const system = body.system;
+    if (typeof system === "string" && system.length > 0) body.system = `${system}
+
+${text}`;
+    else if (Array.isArray(system) && system.length > 0) body.system = [...system, { type: "text", text }];
+    else body.system = text;
   }
   function forcedToolInstruction(choice) {
     return choice.type === "tool" ? `You must call the ${choice.name} tool in this response. Start your response with that tool call.` : "You must call one of the provided tools in this response. Start your response with a tool call.";
@@ -1013,6 +1527,7 @@ data: ${JSON.stringify(data)}
     },
     parseRequest: parseRequest2,
     serializeRequest: serializeRequest2,
+    shapeRequestForModel: shapeRequestForModel2,
     parseResponse: parseResponse2,
     serializeResponse: serializeResponse2,
     createStreamParser: createStreamParser2,
@@ -1227,15 +1742,16 @@ data: ${JSON.stringify(data)}
       }
     }
     const isReasoningDst = isOpenAIReasoningModel(ctx.dstModel);
-    const useMaxCompletionTokens = ctx.dstProviderId === "openai" || isReasoningDst && (ctx.dstProviderId == null || ctx.dstProviderId === "azure_openai");
+    const reasoningOff = isReasoningDst && !!ir.tools && ir.tools.length > 0 && reasoningOffForTools(ctx.dstModel, ctx.dstProviderId);
+    if (reasoningOff) out.reasoning_effort = "none";
     if (typeof ir.maxTokens === "number") {
-      if (useMaxCompletionTokens) out.max_completion_tokens = ir.maxTokens;
+      if (usesMaxCompletionTokens(isReasoningDst, ctx.dstProviderId)) out.max_completion_tokens = ir.maxTokens;
       else out.max_tokens = ir.maxTokens;
     }
-    if (typeof ir.temperature === "number" && !isReasoningDst) {
+    if (typeof ir.temperature === "number" && (!isReasoningDst || reasoningOff)) {
       out.temperature = ir.temperature;
     }
-    if (typeof ir.topP === "number" && !isReasoningDst) out.top_p = ir.topP;
+    if (typeof ir.topP === "number" && (!isReasoningDst || reasoningOff)) out.top_p = ir.topP;
     if (ir.stopSequences && ir.stopSequences.length > 0) out.stop = ir.stopSequences.slice();
     if (typeof ir.stream === "boolean") {
       out.stream = ir.stream;
@@ -1281,10 +1797,49 @@ data: ${JSON.stringify(data)}
     }
     return JSON.stringify(out);
   }
+  function shapeRequestForModel2(body, ctx) {
+    if (!isOpenAIReasoningModel(ctx.dstModel)) return;
+    if (Array.isArray(body.tools) && body.tools.length > 0 && reasoningOffForTools(ctx.dstModel, ctx.dstProviderId)) {
+      body.reasoning_effort = "none";
+    }
+    if (typeof body.max_tokens === "number" && usesMaxCompletionTokens(true, ctx.dstProviderId)) {
+      if (typeof body.max_completion_tokens !== "number") body.max_completion_tokens = body.max_tokens;
+      delete body.max_tokens;
+    }
+    if (body.reasoning_effort !== "none") {
+      delete body.temperature;
+      delete body.top_p;
+      delete body.logprobs;
+      delete body.top_logprobs;
+    }
+  }
+  function usesMaxCompletionTokens(isReasoning, providerId) {
+    return providerId === "openai" || isReasoning && (providerId == null || providerId === "azure_openai");
+  }
   function isOpenAIReasoningModel(model) {
     const entry = getModel(model);
-    if (entry?.family === "openai" && entry.capabilities.reasoning) return true;
-    return /^(?:o\d|gpt-5)/i.test(model.replace(/^openai\//i, ""));
+    if (entry?.family === "openai") return entry.capabilities.reasoning;
+    const id = model.replace(/^openai\//i, "");
+    if (/^o\d/i.test(id)) return true;
+    const gpt = /^gpt-(\d+)/i.exec(id);
+    return !!gpt && Number(gpt[1]) >= 5;
+  }
+  var ALWAYS_REASONING = [/^gpt-6-astra(?![a-z0-9])/i, /^gpt-6\.1-sol(?![a-z0-9])/i];
+  function reasoningOffForTools(model, providerId) {
+    if (providerId != null && providerId !== "openai" && providerId !== "azure_openai") return false;
+    const id = model.replace(/^openai\//i, "");
+    const version = /^gpt-(\d+)(?:\.(\d+))?/i.exec(id);
+    if (!version) return false;
+    const major = Number(version[1]);
+    const minor = Number(version[2] ?? 0);
+    if (major < 5 || major === 5 && minor < 6) return false;
+    if (ALWAYS_REASONING.some((re) => re.test(id))) {
+      throw new TranslationError(
+        "UNSUPPORTED_FEATURE",
+        `OpenAI's Chat Completions API doesn't take tools for ${model} (only its Responses API does). Pin this app to a model that does, such as gpt-5.5 or gpt-6-luna.`
+      );
+    }
+    return true;
   }
   function serializeMessageToOpenAI(msg, model, acceptsImages) {
     if (msg.role === "user") return serializeUserMessageToOpenAI(msg, model, acceptsImages);
@@ -3611,473 +4166,6 @@ data: [DONE]
     }
   }
 
-  // src/providers.ts
-  var PROVIDERS = {
-    anthropic: {
-      id: "anthropic",
-      name: "Anthropic",
-      authMethods: ["api_key", "oauth"],
-      baseUrl: "https://api.anthropic.com"
-    },
-    openai: {
-      id: "openai",
-      name: "OpenAI",
-      authMethods: ["api_key"],
-      baseUrl: "https://api.openai.com"
-    },
-    gemini: {
-      id: "gemini",
-      name: "Google Gemini",
-      authMethods: ["api_key"],
-      baseUrl: "https://generativelanguage.googleapis.com"
-    },
-    mistral: {
-      id: "mistral",
-      name: "Mistral",
-      authMethods: ["api_key"],
-      baseUrl: "https://api.mistral.ai"
-    },
-    cohere: {
-      id: "cohere",
-      name: "Cohere",
-      authMethods: ["api_key"],
-      baseUrl: "https://api.cohere.com"
-    },
-    xai: {
-      id: "xai",
-      name: "xAI (Grok)",
-      authMethods: ["api_key"],
-      baseUrl: "https://api.x.ai"
-    },
-    deepseek: {
-      id: "deepseek",
-      name: "DeepSeek",
-      authMethods: ["api_key"],
-      baseUrl: "https://api.deepseek.com",
-      chatPath: "/chat/completions"
-    },
-    perplexity: {
-      id: "perplexity",
-      name: "Perplexity",
-      authMethods: ["api_key"],
-      baseUrl: "https://api.perplexity.ai",
-      chatPath: "/chat/completions"
-    },
-    groq: {
-      id: "groq",
-      name: "Groq",
-      authMethods: ["api_key"],
-      baseUrl: "https://api.groq.com",
-      chatPath: "/openai/v1/chat/completions"
-    },
-    together: {
-      id: "together",
-      name: "Together AI",
-      authMethods: ["api_key"],
-      baseUrl: "https://api.together.xyz"
-    },
-    fireworks: {
-      id: "fireworks",
-      name: "Fireworks AI",
-      authMethods: ["api_key"],
-      baseUrl: "https://api.fireworks.ai",
-      chatPath: "/inference/v1/chat/completions"
-    },
-    openrouter: {
-      id: "openrouter",
-      name: "OpenRouter",
-      authMethods: ["api_key"],
-      baseUrl: "https://openrouter.ai/api"
-    },
-    azure_openai: {
-      id: "azure_openai",
-      name: "Azure OpenAI",
-      authMethods: ["api_key"],
-      // Placeholder — each tenant has its own `<resource>.openai.azure.com`.
-      // The real host is stored on the credential row and used at proxy time.
-      baseUrl: "https://YOUR_RESOURCE.openai.azure.com",
-      // The credential holds the resource root; Azure's v1 API serves chat
-      // under /openai/v1 (the model field names the deployment).
-      chatPath: "/openai/v1/chat/completions",
-      requiresCustomBaseUrl: true
-    },
-    ollama: {
-      id: "ollama",
-      name: "Ollama (local)",
-      authMethods: ["api_key"],
-      // Placeholder — the real host is per-credential (typically
-      // http://localhost:11434). Ollama exposes an OpenAI-compatible surface
-      // at /v1/chat/completions.
-      baseUrl: "http://localhost:11434",
-      chatPath: "/v1/chat/completions",
-      requiresCustomBaseUrl: true
-    },
-    lm_studio: {
-      id: "lm_studio",
-      name: "LM Studio (local)",
-      authMethods: ["api_key"],
-      // Placeholder — the real host is per-credential (LM Studio defaults to
-      // http://localhost:1234). OpenAI-compatible server.
-      baseUrl: "http://localhost:1234",
-      chatPath: "/v1/chat/completions",
-      requiresCustomBaseUrl: true
-    }
-  };
-
-  // src/proxy-utils.ts
-  var LOCAL_HTTP_PROVIDERS = /* @__PURE__ */ new Set(["ollama", "lm_studio"]);
-  function isLoopbackHost(hostname) {
-    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" || hostname === "::1";
-  }
-  function isAllowedProtocol(providerId, u) {
-    if (u.protocol === "https:") return true;
-    if (u.protocol === "http:" && LOCAL_HTTP_PROVIDERS.has(providerId) && isLoopbackHost(u.hostname)) {
-      return true;
-    }
-    return false;
-  }
-  function resolveProviderBaseUrl(providerId, overrideBaseUrl) {
-    const provider = PROVIDERS[providerId];
-    if (!provider) return null;
-    if (!provider.requiresCustomBaseUrl) return provider.baseUrl;
-    if (!overrideBaseUrl) return null;
-    try {
-      const base = new URL(overrideBaseUrl);
-      if (!isAllowedProtocol(providerId, base)) return null;
-      if (base.username || base.password || base.search || base.hash) return null;
-      return overrideBaseUrl;
-    } catch {
-      return null;
-    }
-  }
-  var GENERATION_PATH_SUFFIXES = [
-    "chat/completions",
-    "completions",
-    "responses",
-    "messages",
-    "chat",
-    "complete",
-    "generate"
-  ].map((s) => s.split("/"));
-  var POST_PATH_SUFFIXES = [
-    "chat/completions",
-    "completions",
-    "responses",
-    "responses/input_tokens",
-    "embeddings",
-    "moderations",
-    "audio/speech",
-    "audio/transcriptions",
-    "audio/translations",
-    "images/generations",
-    "images/edits",
-    "images/variations",
-    "messages",
-    "messages/count_tokens",
-    "complete",
-    "chat",
-    "embed",
-    "rerank",
-    "generate",
-    "api/show"
-  ].map((s) => s.split("/"));
-  var MAX_BODY_PARSE_SIZE = 10485760;
-  function detectRequestCapabilities(body) {
-    const empty = {
-      tools: false,
-      vision: false,
-      structuredOutput: false,
-      reasoning: false
-    };
-    if (!body || body.length > MAX_BODY_PARSE_SIZE) return empty;
-    let parsed;
-    try {
-      parsed = JSON.parse(body);
-    } catch {
-      return empty;
-    }
-    const out = { ...empty };
-    if (Array.isArray(parsed.tools) && parsed.tools.length > 0) {
-      out.tools = true;
-    }
-    const rf = parsed.response_format;
-    if (rf && typeof rf === "object" && rf.type === "json_schema") {
-      out.structuredOutput = true;
-    }
-    if (parsed.thinking != null) {
-      out.reasoning = true;
-    }
-    if (Array.isArray(parsed.messages)) {
-      outer: for (const msg of parsed.messages) {
-        const content = msg?.content;
-        if (!Array.isArray(content)) continue;
-        for (const block of content) {
-          if (!block || typeof block !== "object") continue;
-          const type = block.type;
-          if (type === "image" || type === "image_url") {
-            out.vision = true;
-            break outer;
-          }
-        }
-      }
-    }
-    return out;
-  }
-  var CLAUDE_CODE_SYSTEM_PREFIX = "You are Claude Code, Anthropic's official CLI for Claude.";
-  function injectClaudeCodeSystemPrompt(body, options) {
-    if (!body) return body;
-    try {
-      const parsed = JSON.parse(body);
-      const relocate = options?.relocateExisting === true;
-      if (relocate) {
-        const originalSystem = extractSystemText(parsed.system);
-        parsed.system = CLAUDE_CODE_SYSTEM_PREFIX;
-        if (originalSystem && Array.isArray(parsed.messages) && parsed.messages.length > 0) {
-          parsed.messages = relocateSystemToFirstUserMessage(
-            parsed.messages,
-            originalSystem
-          );
-        }
-      } else {
-        if (!parsed.system) {
-          parsed.system = CLAUDE_CODE_SYSTEM_PREFIX;
-        } else if (typeof parsed.system === "string") {
-          parsed.system = `${CLAUDE_CODE_SYSTEM_PREFIX}
-
-${parsed.system}`;
-        } else if (Array.isArray(parsed.system)) {
-          parsed.system = [{ type: "text", text: CLAUDE_CODE_SYSTEM_PREFIX }, ...parsed.system];
-        }
-      }
-      return JSON.stringify(parsed);
-    } catch {
-      return body;
-    }
-  }
-  function extractSystemText(system) {
-    if (!system) return "";
-    if (typeof system === "string") return system;
-    if (Array.isArray(system)) {
-      return system.map((block) => {
-        if (typeof block === "string") return block;
-        if (block && typeof block === "object" && block.type === "text") {
-          return String(block.text ?? "");
-        }
-        return "";
-      }).filter((s) => s.length > 0).join("\n\n");
-    }
-    return "";
-  }
-  function relocateSystemToFirstUserMessage(messages, systemText) {
-    const wrapped = `<system_context>
-${systemText}
-</system_context>
-
-`;
-    const out = [...messages];
-    const first = out[0];
-    if (!first || first.role !== "user") return out;
-    if (typeof first.content === "string") {
-      out[0] = { ...first, content: `${wrapped}${first.content}` };
-    } else if (Array.isArray(first.content)) {
-      out[0] = {
-        ...first,
-        content: [{ type: "text", text: wrapped }, ...first.content]
-      };
-    }
-    return out;
-  }
-  function rewriteToolNamesForClaudeCode(body) {
-    if (!body) return { body, toolNameMap: {} };
-    let parsed;
-    try {
-      parsed = JSON.parse(body);
-    } catch {
-      return { body, toolNameMap: {} };
-    }
-    const tools = parsed.tools;
-    if (!Array.isArray(tools) || tools.length === 0) {
-      return { body, toolNameMap: {} };
-    }
-    const needsRewrite = tools.some((t) => {
-      const name = t?.name;
-      return typeof name === "string" && !/^[A-Z][A-Za-z0-9]*$/.test(name);
-    });
-    if (!needsRewrite) return { body, toolNameMap: {} };
-    const forward = {};
-    const reverse = {};
-    for (const t of tools) {
-      const name = t?.name;
-      if (typeof name !== "string") continue;
-      if (forward[name]) continue;
-      const alias = toClaudeCodeToolName(name, new Set(Object.values(forward)));
-      forward[name] = alias;
-      reverse[alias] = name;
-    }
-    parsed.tools = tools.map((t) => {
-      const tt = t;
-      if (typeof tt.name === "string" && forward[tt.name]) {
-        return { ...t, name: forward[tt.name] };
-      }
-      return t;
-    });
-    const toolChoice = parsed.tool_choice;
-    if (toolChoice?.type === "tool" && typeof toolChoice.name === "string" && forward[toolChoice.name]) {
-      parsed.tool_choice = { ...toolChoice, name: forward[toolChoice.name] };
-    }
-    const messages = parsed.messages;
-    if (Array.isArray(messages)) {
-      for (const msg of messages) {
-        const content = msg?.content;
-        if (!Array.isArray(content)) continue;
-        for (const block of content) {
-          const b = block;
-          if (b.type === "tool_use" && typeof b.name === "string" && forward[b.name]) {
-            b.name = forward[b.name];
-          }
-        }
-      }
-    }
-    return { body: JSON.stringify(parsed), toolNameMap: reverse };
-  }
-  function toClaudeCodeToolName(name, taken) {
-    let pascal = name.split(/[_\-]/).filter((p) => p.length > 0).map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join("");
-    if (pascal === name && name.length > 0) {
-      pascal = name.charAt(0).toUpperCase() + name.slice(1);
-    }
-    let candidate = pascal;
-    let n = 2;
-    while (taken.has(candidate)) {
-      candidate = `${pascal}${n}`;
-      n++;
-    }
-    return candidate;
-  }
-  function rewriteToolNamesInJSONBody(body, toolNameMap) {
-    if (Object.keys(toolNameMap).length === 0) return body;
-    let parsed;
-    try {
-      parsed = JSON.parse(body);
-    } catch {
-      return body;
-    }
-    const content = parsed.content;
-    if (!Array.isArray(content)) return body;
-    let mutated = false;
-    for (const block of content) {
-      if (!block || typeof block !== "object") continue;
-      const b = block;
-      if (b.type === "tool_use" && typeof b.name === "string" && toolNameMap[b.name]) {
-        b.name = toolNameMap[b.name];
-        mutated = true;
-      }
-    }
-    return mutated ? JSON.stringify(parsed) : body;
-  }
-  function createToolNameSSERewriter(toolNameMap) {
-    if (Object.keys(toolNameMap).length === 0) {
-      return {
-        process: (chunk) => chunk,
-        flush: () => ""
-      };
-    }
-    let buffer = "";
-    return {
-      process: (chunk) => {
-        buffer += chunk;
-        let out = "";
-        let idx;
-        while ((idx = buffer.indexOf("\n\n")) !== -1) {
-          const frame = buffer.slice(0, idx + 2);
-          buffer = buffer.slice(idx + 2);
-          out += rewriteSSEFrame(frame, toolNameMap);
-        }
-        return out;
-      },
-      flush: () => {
-        const leftover = buffer;
-        buffer = "";
-        return leftover;
-      }
-    };
-  }
-  function rewriteSSEFrame(frame, toolNameMap) {
-    const dataMatch = /^data: (.+)$/m.exec(frame);
-    if (!dataMatch) return frame;
-    const dataLine = dataMatch[1];
-    try {
-      const data = JSON.parse(dataLine);
-      if (data?.type === "content_block_start" && data?.content_block?.type === "tool_use" && typeof data.content_block.name === "string" && toolNameMap[data.content_block.name]) {
-        data.content_block.name = toolNameMap[data.content_block.name];
-        const rewrittenData = JSON.stringify(data);
-        return frame.replace(dataLine, rewrittenData);
-      }
-    } catch {
-    }
-    return frame;
-  }
-
-  // src/translate/families.ts
-  var FAMILY_PROVIDERS = {
-    anthropic: /* @__PURE__ */ new Set(["anthropic"]),
-    openai: /* @__PURE__ */ new Set([
-      "openai",
-      "azure_openai",
-      "groq",
-      "together",
-      "deepseek",
-      "xai",
-      "perplexity",
-      "fireworks",
-      "openrouter",
-      "mistral",
-      // Local OpenAI-compatible servers. They work as routing destinations
-      // (the credential's loopback base URL is used, see rewriteProxyUrl), but
-      // auto-routing never picks them: there is no model routing could name
-      // for them (see autoRouteModelFor in routing.ts). Nor does it send a
-      // request meant for one to another provider: only a group does that.
-      "ollama",
-      "lm_studio"
-    ]),
-    gemini: /* @__PURE__ */ new Set(["gemini"]),
-    cohere: /* @__PURE__ */ new Set(["cohere"])
-  };
-  function familyOf(providerId) {
-    for (const family of Object.keys(FAMILY_PROVIDERS)) {
-      if (FAMILY_PROVIDERS[family].has(providerId)) return family;
-    }
-    return null;
-  }
-  function shouldTranslate(srcProviderId, dstProviderId) {
-    const src = familyOf(srcProviderId);
-    if (!src || !hasAdapter(src)) return false;
-    const dst = familyOf(dstProviderId);
-    if (!dst || !hasAdapter(dst)) return false;
-    return src !== dst;
-  }
-  function sameFamily(srcProviderId, dstProviderId) {
-    const src = familyOf(srcProviderId);
-    if (!src) return false;
-    return src === familyOf(dstProviderId);
-  }
-  function isChatCompletionsEndpoint(family, url) {
-    if (!hasAdapter(family)) return false;
-    return getAdapter(family).matchesChatEndpoint(url);
-  }
-  function rewriteProxyUrl(dstProviderId, model, stream, overrideBaseUrl) {
-    const provider = PROVIDERS[dstProviderId];
-    if (!provider) return null;
-    const family = familyOf(dstProviderId);
-    if (!family || !hasAdapter(family)) return null;
-    const rawBase = resolveProviderBaseUrl(dstProviderId, overrideBaseUrl);
-    if (!rawBase) return null;
-    const base = rawBase.replace(/\/$/, "");
-    if (provider.chatPath) {
-      return `${base}${provider.chatPath}`;
-    }
-    return getAdapter(family).buildChatUrl(base, model, stream);
-  }
-
   // src/translate/index.ts
   registerAdapter(anthropicAdapter);
   registerAdapter(openaiAdapter);
@@ -4089,6 +4177,24 @@ ${systemText}
     const ir = src.parseRequest(body);
     if (ctx.isStreaming) ir.stream = true;
     return dst.serializeRequest(ctx, ir);
+  }
+  function rewriteRequestModel(ctx, body) {
+    let parsed;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      return body;
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return body;
+    const request = parsed;
+    if (request.model === ctx.dstModel) return body;
+    request.model = ctx.dstModel;
+    const family = familyOf(ctx.dstProviderId);
+    const adapter = family && hasAdapter(family) ? getAdapter(family) : void 0;
+    if (adapter?.shapeRequestForModel && adapter.matchesChatEndpoint(ctx.url)) {
+      adapter.shapeRequestForModel(request, { dstModel: ctx.dstModel, dstProviderId: ctx.dstProviderId });
+    }
+    return JSON.stringify(request);
   }
   function translateResponse(ctx, body) {
     const dst = getAdapter(ctx.dstFamily);
@@ -4482,6 +4588,14 @@ ${systemText}
     },
     autoRouteModelFor(providerId) {
       return autoRouteModelFor(providerId) ?? null;
+    },
+    rewriteRequestModel(dstProviderId, url, body, model) {
+      try {
+        return JSON.stringify({ body: rewriteRequestModel({ dstProviderId, dstModel: model, url }, body) });
+      } catch (err) {
+        if (err instanceof TranslationError) return JSON.stringify({ error: { code: err.code, message: err.message } });
+        throw err;
+      }
     },
     version: "0.5.3",
     urlImpl
