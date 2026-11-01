@@ -157,7 +157,7 @@ export ANTHROPIC_API_KEY=$(byoky-bridge token)
 
 ### OpenClaw Integration
 
-Use your Byoky wallet as the key provider for [OpenClaw](https://openclaw.dev). The plugin connects through the bridge, so your keys stay in the extension even when the agent runs in your terminal. See the [OpenClaw plugin](packages/openclaw-plugin) for setup.
+Use your Byoky wallet as the key provider for [OpenClaw](https://openclaw.ai). The plugin connects through the bridge, so your keys stay in the extension even when the agent runs in your terminal. See the [OpenClaw plugin](packages/openclaw-plugin) for setup.
 
 ```
 OpenClaw → HTTP → Bridge (localhost) → Native Messaging → Extension → LLM API
