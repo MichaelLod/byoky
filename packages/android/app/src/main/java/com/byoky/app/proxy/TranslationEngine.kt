@@ -263,6 +263,22 @@ class TranslationEngine private constructor(private val appContext: Context) {
     }
 
     /**
+     * Point a request at the model a group pins within the app's own family
+     * and fit it to that model's request rules (core `rewriteRequestModel`).
+     * Null on errors, including a bundle without the export: the caller then
+     * only renames the model.
+     */
+    fun rewriteRequestModel(dstProviderId: String, url: String, body: String, model: String): ModelRewrite? {
+        return try {
+            val expr = "(function(){var b=BYOKY_TRANSLATE;if(typeof b.rewriteRequestModel!=='function')return '';" +
+                "return String(b.rewriteRequestModel(${jsLiteral(dstProviderId)}, ${jsLiteral(url)}, ${jsLiteral(body)}, ${jsLiteral(model)}));})()"
+            ModelRewrite.parse(evalSync(expr))
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    /**
      * True iff `url` is the chat endpoint of `providerId`'s family, the only
      * request shape translation and same-family swaps can route. False on
      * errors / unknown providers.

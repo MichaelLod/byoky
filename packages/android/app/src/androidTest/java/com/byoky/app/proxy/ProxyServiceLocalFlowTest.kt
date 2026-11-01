@@ -145,6 +145,38 @@ class ProxyServiceLocalFlowTest {
     }
 
     /**
+     * A group pinning another model of the app's family gets that model's
+     * request rules (R3-05). Here an OpenAI reasoning model's id on the local
+     * server: its sampling overrides go; max_tokens stays, since only OpenAI's
+     * own API wants max_completion_tokens.
+     */
+    @Test
+    fun aPinnedModelGetsItsRequestRules() {
+        val group = wallet.createGroup("Pinned", "ollama", model = "gpt-5.5")
+        wallet.setAppGroup("https://app.example", group.id)
+        server.reply = FakeServer.Reply("application/json", """{"ok":true}""".toByteArray())
+        proxy.forward("https://app.example", "ollama", "${server.base}/v1/chat/completions", "POST",
+            mapOf("content-type" to "application/json"),
+            """{"model":"llama3.1","max_tokens":64,"temperature":0.5,"messages":[]}""".toByteArray(), CollectingSink())
+        val sent = JSONObject(String(server.requests.single().body))
+        assertEquals("gpt-5.5", sent.getString("model"))
+        assertEquals(64, sent.getInt("max_tokens"))
+        assertFalse(sent.has("temperature"))
+    }
+
+    /** A body that isn't JSON keeps its bytes under a pinned model. */
+    @Test
+    fun aPinnedModelLeavesABinaryBodyIntact() {
+        val group = wallet.createGroup("Pinned", "ollama", model = "gpt-5.5")
+        wallet.setAppGroup("https://app.example", group.id)
+        server.reply = FakeServer.Reply("application/json", """{"ok":true}""".toByteArray())
+        val bytes = byteArrayOf(0xFF.toByte(), 0xFE.toByte(), 0x00, 0x7B) + ByteArray(256) { it.toByte() }
+        proxy.forward("https://app.example", "ollama", "${server.base}/v1/chat/completions", "POST",
+            mapOf("content-type" to "application/octet-stream"), bytes, CollectingSink())
+        assertArrayEquals(bytes, server.requests.single().body)
+    }
+
+    /**
      * A translated request's error body past the translation limit goes to
      * the app as it arrives, as sent, instead of first being read whole into
      * memory (R2-05).
