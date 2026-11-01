@@ -292,20 +292,36 @@ function ImportModal({ onClose }: { onClose: () => void }) {
   const [importing, setImporting] = useState(false);
   const [summary, setSummary] = useState<{ added: number; duplicates: number; rejected: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Only the latest pick may fill in fileData; an earlier, slower read may not.
+  const readId = useRef(0);
 
+  // A new pick replaces the old one, also when it is rejected: Import must
+  // never send an earlier file under an error about this one.
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+    setError('');
+    const input = e.target;
+    const file = input.files?.[0];
     if (!file) return;
+    const id = ++readId.current;
+    setFileData(null);
     const MAX_IMPORT_SIZE = 10 * 1024 * 1024; // 10MB
     if (file.size > MAX_IMPORT_SIZE) {
       setError('File too large (max 10MB)');
+      setFileName('');
+      input.value = '';
       return;
     }
     setFileName(file.name);
 
     const reader = new FileReader();
     reader.onload = () => {
-      setFileData(reader.result as string);
+      if (id === readId.current) setFileData(reader.result as string);
+    };
+    reader.onerror = () => {
+      if (id !== readId.current) return;
+      setError('Could not read the file');
+      setFileName('');
+      input.value = '';
     };
     reader.readAsText(file);
   }
