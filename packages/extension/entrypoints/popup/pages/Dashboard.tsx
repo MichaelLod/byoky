@@ -149,19 +149,13 @@ function CredentialCard({ cred, usage, onOpenStats, onRemove }: CredentialCardPr
 
   const hasUsage = usage && usage.requests > 0;
 
+  // The whole card opens the usage sheet for the mouse. Keyboard and screen
+  // reader users get the usage button below; the card itself is no button,
+  // so Rename and Remove inside it work from the keyboard.
   return (
     <div
       className="card credential-card tappable"
       onClick={editing ? undefined : onOpenStats}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (editing) return;
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onOpenStats();
-        }
-      }}
     >
       <div className="card-header">
         <div className="credential-card-heading">
@@ -231,23 +225,31 @@ function CredentialCard({ cred, usage, onOpenStats, onRemove }: CredentialCardPr
         </span>
       </div>
 
-      <div className="credential-usage-open">
-        <div className="usage-mini-label">Last 7 days</div>
-        <div className="usage-mini-grid">
-          <div>
-            <div className="usage-mini-value">{hasUsage ? usage!.requests : 0}</div>
-            <div className="usage-mini-tag">requests</div>
-          </div>
-          <div>
-            <div className="usage-mini-value">{formatTokens(hasUsage ? usage!.inputTokens : 0)}</div>
-            <div className="usage-mini-tag">input</div>
-          </div>
-          <div>
-            <div className="usage-mini-value">{formatTokens(hasUsage ? usage!.outputTokens : 0)}</div>
-            <div className="usage-mini-tag">output</div>
-          </div>
-        </div>
-      </div>
+      <button
+        type="button"
+        className="credential-usage-open"
+        aria-label={`View usage for ${cred.label}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (!editing) onOpenStats();
+        }}
+      >
+        <span className="usage-mini-label">Last 7 days</span>
+        <span className="usage-mini-grid">
+          <span>
+            <span className="usage-mini-value">{hasUsage ? usage!.requests : 0}</span>
+            <span className="usage-mini-tag">requests</span>
+          </span>
+          <span>
+            <span className="usage-mini-value">{formatTokens(hasUsage ? usage!.inputTokens : 0)}</span>
+            <span className="usage-mini-tag">input</span>
+          </span>
+          <span>
+            <span className="usage-mini-value">{formatTokens(hasUsage ? usage!.outputTokens : 0)}</span>
+            <span className="usage-mini-tag">output</span>
+          </span>
+        </span>
+      </button>
     </div>
   );
 }

@@ -1934,11 +1934,6 @@ code {
   user-select: none;
 }
 
-.credential-card:focus-visible {
-  outline: 2px solid var(--violet);
-  outline-offset: 2px;
-}
-
 .card-actions {
   display: flex;
   align-items: center;
@@ -1994,10 +1989,19 @@ code {
   color: var(--text-muted);
 }
 
+/* A button (it opens the usage sheet) that looks like part of the card. */
 .credential-usage-open {
+  display: block;
+  width: 100%;
   margin-top: 12px;
-  padding-top: 10px;
+  padding: 10px 0 0;
+  border: none;
   border-top: 1px solid var(--border);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .card.tappable {
@@ -2013,6 +2017,7 @@ code {
 }
 
 .usage-mini-label {
+  display: block;
   font-family: var(--font-mono);
   font-size: 10.5px;
   text-transform: uppercase;
@@ -2028,6 +2033,7 @@ code {
 }
 
 .usage-mini-value {
+  display: block;
   font-family: var(--font-mono);
   font-size: 15px;
   font-weight: 500;
@@ -2035,6 +2041,7 @@ code {
 }
 
 .usage-mini-tag {
+  display: block;
   font-family: var(--font-mono);
   font-size: 10.5px;
   letter-spacing: 0.04em;
