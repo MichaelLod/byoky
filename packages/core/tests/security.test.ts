@@ -279,7 +279,8 @@ describe('security invariants', () => {
       expect(bg).not.toContain('restoreRevokedOrigins');
       expect(bg).not.toMatch(/revokedOrigins\.(has|add|delete)\(/);
       expect(bg.match(/silentTrustFor\(trust, /g)).toHaveLength(2);
-      expect(bg.match(/const trust = await getTrustState\(\);|getTrustState\(\)\.then\(\(trust\) =>/g)).toHaveLength(2);
+      // (A failed read trusts nothing: emptyTrustState().)
+      expect(bg.match(/const trust = await getTrustState\(\);|getTrustState\(\)(\.catch\(\(\) => emptyTrustState\(\)\))?\.then\(\(trust\) =>/g)).toHaveLength(2);
       // A revocation is recorded before the app is told its session is gone.
       const revoke = bg.slice(bg.indexOf("case 'revokeSession'"), bg.indexOf("case 'checkBridge'"));
       expect(revoke.indexOf('await recordRevocation(s.appOrigin)')).toBeGreaterThan(-1);

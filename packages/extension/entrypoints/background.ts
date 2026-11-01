@@ -183,6 +183,10 @@ export default defineBackground(() => {
   let walletUpgradePromise: Promise<CryptoKey | null> | null = null;
   let unlockFailures = 0;
   let unlockLockedUntil = 0;
+  // The origins the trust state last read lets connect without a prompt,
+  // with their allowed providers: for decisions that can't wait for a
+  // verified read (openSidePanelInGesture). Cleared with the wallet key.
+  let silentTrustSnapshot = new Map<string, string[]>();
   // The highest trust-state epoch seen this browser session. A state older
   // than this was put back from a snapshot (see lib/trust-state.ts). Kept
   // in storage.session too, so a worker restart doesn't forget it.
@@ -1235,8 +1239,6 @@ export default defineBackground(() => {
       timestamp: Date.now(),
     };
 
-    openWalletUI(sender.tab?.id, panelOpened);
-
     return new Promise((resolve) => {
       pendingApprovals.set(approval.id, {
         approval,
@@ -1246,9 +1248,16 @@ export default defineBackground(() => {
         waiters: [],
       });
 
+      // The wallet is shown only for a request that waits for the user, not
+      // for one a trusted site gets approved without a prompt.
+      const askUser = () => {
+        openWalletUI(sender.tab?.id, panelOpened);
+        browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'newPendingApproval' }).catch(() => {});
+      };
+
       // If already unlocked, check trusted sites and either auto-approve or notify for approval
       if (masterPassword) {
-        getTrustState().then((trust) => {
+        getTrustState().catch(() => emptyTrustState()).then((trust) => {
           const entry = pendingApprovals.get(approval.id);
           if (!entry) return;
           const trustedSite = silentTrustFor(trust, origin);
@@ -1265,16 +1274,12 @@ export default defineBackground(() => {
             }
             // Requested providers outside trust scope — fall through to manual approval
           }
-          // Notify popup to show approval UI
-          browser.runtime.sendMessage({
-            type: 'BYOKY_INTERNAL',
-            action: 'newPendingApproval',
-          }).catch(() => {});
+          askUser();
         });
       } else {
         // Locked: it waits for the unlock (processPendingAfterUnlock), and an
         // open popup can already say that a request is waiting.
-        browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'newPendingApproval' }).catch(() => {});
+        askUser();
       }
 
       // Auto-reject after 2 minutes
@@ -2837,11 +2842,15 @@ export default defineBackground(() => {
     if (!request || request.reconnectOnly === true) return undefined;
     const origin = resolveOrigin(sender);
     if (origin === 'unknown') return undefined;
+    const providers = parseProviderRequirements(request.providers);
     if (sessionsRestoredDone) {
       const existing = findActiveSession(origin);
-      const providers = parseProviderRequirements(request.providers);
       if (existing && providers && sessionCovers(existing, providers)) return undefined;
     }
+    // A trusted site connects without a prompt (as far as the last verified
+    // read knows; handleConnect checks again and shows the wallet if not).
+    const allowed = masterPassword ? silentTrustSnapshot.get(origin) : undefined;
+    if (allowed && providers && scopeProvidersForTrust(providers, allowed)) return undefined;
     return chrome.sidePanel.open({ tabId }).then(() => true, () => false);
   }
 
@@ -3510,6 +3519,7 @@ export default defineBackground(() => {
   function forgetWalletKeys() {
     walletMacKeyPromise = null;
     walletUpgradePromise = null;
+    silentTrustSnapshot = new Map();
   }
 
   // --- Trust state: trusted sites and revoked origins (lib/trust-state.ts) ---
@@ -3537,8 +3547,18 @@ export default defineBackground(() => {
         noteTrustEpoch(read.epoch);
       }
       // Locked while this ran: trust nothing.
-      return masterPassword ? { sites: read.sites, revoked: read.revoked } : emptyTrustState();
+      const state = masterPassword ? { sites: read.sites, revoked: read.revoked } : emptyTrustState();
+      noteSilentTrust(state);
+      return state;
     });
+  }
+
+  function noteSilentTrust(state: TrustState) {
+    const snapshot = new Map<string, string[]>();
+    for (const site of state.sites) {
+      if (silentTrustFor(state, site.origin)) snapshot.set(site.origin, site.allowedProviders ?? []);
+    }
+    silentTrustSnapshot = snapshot;
   }
 
   /** Change the trust state and re-sign it. Throws while locked. */
@@ -3558,6 +3578,7 @@ export default defineBackground(() => {
         ...(read.intact ? {} : { [TRUST_RESET_NOTICE_KEY]: true }),
       });
       noteTrustEpoch(epoch);
+      if (masterPassword) noteSilentTrust(next);
     });
   }
 

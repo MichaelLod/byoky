@@ -83,6 +83,30 @@ describe('background: showing the wallet for a connect request', () => {
     expect(h.chrome.action.openPopup).not.toHaveBeenCalled();
   });
 
+  it('shows nothing for a trusted site that connects without a prompt', async () => {
+    const h = await chromeWallet();
+    const first = await connectApproved(h, APP, OPENAI, true);
+    // The app disconnects itself (no revocation), so its next connect is a
+    // trusted one.
+    const port = h.openPort('byoky-message', APP);
+    port.send({ type: 'BYOKY_DISCONNECT', id: 'd1', payload: { sessionKey: first.payload.sessionKey } });
+    await port.waitFor((m) => m.type === 'BYOKY_DISCONNECT_ACK');
+    h.chrome.sidePanel.open.mockClear();
+    h.chrome.action.openPopup.mockClear();
+
+    for (const userGesture of [true, false]) {
+      const reply = await h.connect(APP, OPENAI, { userGesture }).response;
+      expect(reply.type).toBe('BYOKY_CONNECT_RESPONSE');
+      await h.settle();
+      expect(h.chrome.sidePanel.open).not.toHaveBeenCalled();
+      expect(h.chrome.action.openPopup).not.toHaveBeenCalled();
+      expect(h.browser.windows.create).not.toHaveBeenCalled();
+      const p = h.openPort('byoky-message', APP);
+      p.send({ type: 'BYOKY_DISCONNECT', id: 'd2', payload: { sessionKey: reply.payload.sessionKey } });
+      await p.waitFor((m) => m.type === 'BYOKY_DISCONNECT_ACK');
+    }
+  });
+
   it('opens a popup window on Firefox', async () => {
     const h = await startBackground({ firefox: true, local: await walletStorage([{ id: 'o1', providerId: 'openai', key: 'sk-o' }]) });
     await h.unlock();
