@@ -187,6 +187,27 @@ describe('approval says which key will serve each provider (F092)', () => {
     // A group is explicit routing intent: no silent fallback to the Anthropic key.
     expect(tags(view.container)).toEqual([['OpenAI', 'No key']]);
   });
+
+  // R2-10: the popup had its own copy of the routing order, in which a pin
+  // that no longer resolves fell through to any key of the provider, while
+  // the background (core resolveRoute) leaves the provider unavailable.
+  it.each([
+    ['a key that is gone', 'a-gone'],
+    ['another provider\'s key', 'o1'],
+  ])('says No key when the app\'s group pins %s', async (_label, credentialId) => {
+    bg.state.credentials = [
+      { id: 'a1', providerId: 'anthropic', label: 'Personal', authMethod: 'api_key', createdAt: 1 },
+      { id: 'o1', providerId: 'openai', label: 'Work', authMethod: 'api_key', createdAt: 2 },
+    ];
+    bg.state.groups = [
+      { id: 'default', name: 'Default', providerId: '', createdAt: 1 },
+      { id: 'g1', name: 'Pinned', providerId: 'anthropic', credentialId, createdAt: 2 },
+    ];
+    bg.state.appGroups = { 'https://app.example': 'g1' };
+    bg.state.approvals = [approval('a1', 'https://app.example', [{ id: 'anthropic', required: true }])];
+    view = await mount(App);
+    expect(tags(view.container)).toEqual([['Anthropic', 'No key · required']]);
+  });
 });
 
 describe('approval page never dead-ends (F051)', () => {
