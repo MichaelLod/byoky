@@ -6,6 +6,7 @@ import { createProxyFetch } from './proxy-fetch.js';
 import { createRelayClient, type RelayConnection } from './relay-client.js';
 import { ConnectModal, type ModalOptions } from './modal/connect-modal.js';
 import { createMockSession, type MockConnectOptions } from './mock.js';
+import { randomId } from './id.js';
 
 // --- Session persistence helpers ---
 
@@ -306,7 +307,7 @@ export class Byoky {
     request: ConnectRequest,
   ): Promise<ConnectResponse> {
     return new Promise<ConnectResponse>((resolve, reject) => {
-      const requestId = crypto.randomUUID();
+      const requestId = randomId();
 
       const timeoutId = setTimeout(() => {
         cleanup();
@@ -364,7 +365,7 @@ export class Byoky {
     // The wallet sends no answer, so nothing listens on the reply port. It
     // and the id are still sent: older extensions drop a BYOKY_DISCONNECT
     // that carries neither.
-    const requestId = crypto.randomUUID();
+    const requestId = randomId();
     const channel = new MessageChannel();
     channel.port1.close();
 
@@ -379,7 +380,7 @@ export class Byoky {
 
   private querySessionStatus(sessionKey: string): Promise<boolean> {
     return new Promise((resolve) => {
-      const requestId = crypto.randomUUID();
+      const requestId = randomId();
       const timeout = setTimeout(() => { cleanup(); resolve(false); }, 5000);
 
       const channel = new MessageChannel();
@@ -410,7 +411,7 @@ export class Byoky {
 
   private querySessionUsage(sessionKey: string): Promise<SessionUsage> {
     return new Promise((resolve, reject) => {
-      const requestId = crypto.randomUUID();
+      const requestId = randomId();
       const timeout = setTimeout(() => {
         cleanup();
         reject(new Error('Usage query timed out'));

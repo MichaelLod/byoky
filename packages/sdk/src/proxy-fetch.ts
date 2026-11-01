@@ -1,6 +1,7 @@
 import type { SerializedFormDataEntry } from '@byoky/core';
 import { ByokyError, ByokyErrorCode } from '@byoky/core';
 import { resolveMessageTarget } from './detect.js';
+import { randomId } from './id.js';
 
 interface ReadBodyResult {
   body: string;
@@ -32,7 +33,7 @@ export function createProxyFetch(
     const bodyResult = init?.body ? await readBody(init.body, headers['content-type']) : undefined;
     if (signal?.aborted) throw abortReason(signal);
 
-    const requestId = crypto.randomUUID();
+    const requestId = randomId();
 
     return new Promise<Response>((resolve, reject) => {
       const { readable, writable } = new TransformStream<Uint8Array>();

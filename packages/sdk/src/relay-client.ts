@@ -10,6 +10,7 @@ import {
   WS_READY_STATE,
 } from '@byoky/core';
 import { createProxyFetch } from './proxy-fetch.js';
+import { randomId } from './id.js';
 
 export interface RelayConnection {
   /**
@@ -31,7 +32,7 @@ export function createRelayClient(
 ): RelayConnection {
   // Relay-specific ID announced in relay:hello — the real session key is never
   // exposed to the relay server.
-  const relayId = `relay_${crypto.randomUUID().replace(/-/g, '')}`;
+  const relayId = `relay_${randomId().replace(/-/g, '')}`;
   let status: 'connecting' | 'connected' | 'disconnected' = 'connecting';
   const closeCallbacks = new Set<(reason?: string) => void>();
   const inFlight = new Map<string, AbortController>();

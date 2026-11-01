@@ -14,6 +14,7 @@
 import { ByokyError, ByokyErrorCode } from '@byoky/core';
 import type { ByokySession } from './byoky.js';
 import { fetchModelsList } from './list-models-fetch.js';
+import { randomId } from './id.js';
 
 export interface MockConnectOptions {
   /**
@@ -125,11 +126,7 @@ export function createMockSession(options: MockConnectOptions = {}): ByokySessio
     );
   }
 
-  const sessionKey = `mock-${
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : Math.random().toString(36).slice(2)
-  }`;
+  const sessionKey = `mock-${randomId()}`;
 
   const providers: ByokySession['providers'] = {};
   for (const id of Object.keys(keys)) {
