@@ -18,6 +18,7 @@ struct WalletView: View {
     @State private var renamingCredential: Credential?
     @State private var editingEndpointFor: Credential?
     @State private var renameDraft: String = ""
+    @State private var renameError: String?
     @State private var removingCredential: Credential?
     @State private var removeTitle = ""
     @State private var greetings = 0
@@ -88,12 +89,28 @@ struct WalletView: View {
                 TextField("Label", text: $renameDraft)
                     .accessibilityIdentifier("wallet.renameCredential.field")
                 Button("Save") {
-                    try? wallet.updateCredentialLabel(id: credential.id, newLabel: renameDraft)
                     renamingCredential = nil
+                    do {
+                        try wallet.updateCredentialLabel(id: credential.id, newLabel: renameDraft)
+                    } catch WalletError.invalidInput {
+                        renameError = "The label can't be empty."
+                    } catch {
+                        renameError = error.localizedDescription
+                    }
                 }
+                .disabled(renameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityIdentifier("wallet.renameCredential.save")
                 Button("Cancel", role: .cancel) {
                     renamingCredential = nil
                 }
+            }
+            .alert("Couldn't rename", isPresented: Binding(
+                get: { renameError != nil },
+                set: { if !$0 { renameError = nil } }
+            )) {
+                Button("OK", role: .cancel) { renameError = nil }
+            } message: {
+                Text(renameError ?? "")
             }
             .alert(removeTitle, isPresented: Binding(
                 get: { removingCredential != nil },

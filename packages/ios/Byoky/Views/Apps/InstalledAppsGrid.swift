@@ -3,6 +3,8 @@ import SwiftUI
 struct InstalledAppsGrid: View {
     @EnvironmentObject var wallet: WalletStore
     let onAddApp: () -> Void
+    /// Opens an app in the in-wallet browser.
+    let onOpenApp: (InstalledApp) -> Void
 
     private var enabledApps: [InstalledApp] { wallet.installedApps.filter(\.enabled) }
     private var disabledApps: [InstalledApp] { wallet.installedApps.filter { !$0.enabled } }
@@ -58,7 +60,7 @@ struct InstalledAppsGrid: View {
     private func appGrid(apps: [InstalledApp]) -> some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 20) {
             ForEach(apps) { app in
-                AppIconView(app: app)
+                AppIconView(app: app, onOpen: onOpenApp)
             }
         }
         .padding(.horizontal)
@@ -67,13 +69,15 @@ struct InstalledAppsGrid: View {
 
 struct AppIconView: View {
     let app: InstalledApp
+    let onOpen: (InstalledApp) -> Void
     @EnvironmentObject var wallet: WalletStore
-    @State private var openRequest: InstalledApp?
+    @State private var showDisabledOptions = false
 
     var body: some View {
         VStack(spacing: 6) {
             Button {
-                if app.enabled { openRequest = app }
+                // A disabled app doesn't open, but says why and how to fix it.
+                if app.enabled { onOpen(app) } else { showDisabledOptions = true }
             } label: {
                 AsyncImage(url: URL(string: app.icon)) { image in
                     image.resizable().aspectRatio(contentMode: .fill)
@@ -94,6 +98,8 @@ struct AppIconView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(app.name)
+            .accessibilityValue(app.enabled ? "" : "Disabled")
+            .accessibilityHint(app.enabled ? "Opens the app" : "Shows options to enable it")
 
             Text(app.name)
                 .font(.mono(10.5, relativeTo: .caption2))
@@ -113,6 +119,22 @@ struct AppIconView: View {
                 Label("Remove", systemImage: "trash")
             }
         }
-        .opensInstalledApp($openRequest)
+        .confirmationDialog("\(app.name) is disabled", isPresented: $showDisabledOptions, titleVisibility: .visible) {
+            Button("Enable and Open") {
+                wallet.toggleApp(app.id)
+                var enabled = app
+                enabled.enabled = true
+                onOpen(enabled)
+            }
+            Button("Enable") {
+                wallet.toggleApp(app.id)
+            }
+            Button("Remove", role: .destructive) {
+                wallet.uninstallApp(app.id)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Disabled apps stay in your list but don't open.")
+        }
     }
 }
