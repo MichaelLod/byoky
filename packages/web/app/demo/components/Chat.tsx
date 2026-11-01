@@ -282,10 +282,14 @@ export function Chat({ session, initialProvider }: Props) {
     ? (fetchedModels[selectedProvider] ?? providers[selectedProvider].models)
     : [];
 
+  // Without a choice, the first of the provider's chat models above that the
+  // live list has: a models endpoint lists every model in its own order
+  // (OpenAI's starts with whatever it likes, moderation and transcription
+  // models included), so its first entry may not chat at all.
   const currentModel = selectedProvider
     ? (selectedModels[selectedProvider] && availableModels.includes(selectedModels[selectedProvider])
         ? selectedModels[selectedProvider]
-        : availableModels[0] ?? '')
+        : providers[selectedProvider].models.find((m) => availableModels.includes(m)) ?? availableModels[0] ?? '')
     : '';
 
   useEffect(() => {
