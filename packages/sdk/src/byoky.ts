@@ -98,8 +98,12 @@ export class Byoky {
    * present; with `modal`, shows install guidance instead.
    *
    * A session this instance returned before (from connect, tryReconnect or
-   * reconnect) is replaced: it still makes requests, but the wallet's
-   * notifications (onDisconnect, onProvidersUpdated) go to the new one.
+   * reconnect) is replaced: it still makes requests, but what the wallet
+   * reports on its own (a revoked session, changed providers, Byoky
+   * reloading) reaches only the new one. The old session's own requests can
+   * still fire its callbacks: onDisconnect when a request finds Byoky
+   * reloaded or the expired session can't be renewed, onProvidersUpdated
+   * when a request renews it.
    */
   async connect(request: ConnectRequest & {
     /** Show the built-in connect modal. Pass true or ModalOptions. */
