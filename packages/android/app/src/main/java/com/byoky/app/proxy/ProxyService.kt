@@ -422,7 +422,7 @@ class ProxyService(
         val upstreamUrl = allowedTarget(provider, url, credential)
         val apiKey = apiKey(credential, provider.name)
 
-        val outHeaders = filterHeaders(headers, DIRECT_DROPPED_HEADERS)
+        val outHeaders = HeaderPolicy.forwardedHeaders(headers)
         ProviderAuth.apply(outHeaders, providerId, credential.authMethod, apiKey)
 
         // The group is the strongest routing force: a pinned model wins over
@@ -509,7 +509,7 @@ class ProxyService(
         )
 
         val dstApiKey = apiKey(credential, Provider.find(translation.dstProviderId)?.name ?: translation.dstProviderId)
-        val outHeaders = filterHeaders(headers, ROUTED_DROPPED_HEADERS)
+        val outHeaders = HeaderPolicy.forwardedHeaders(headers, HeaderPolicy.ROUTED_EXCLUDED)
         ProviderAuth.apply(outHeaders, translation.dstProviderId, credential.authMethod, dstApiKey)
 
         // The translated body is Anthropic-shaped when the destination is
@@ -603,7 +603,7 @@ class ProxyService(
         )
 
         val dstApiKey = apiKey(credential, Provider.find(swapToProviderId)?.name ?: swapToProviderId)
-        val outHeaders = filterHeaders(headers, ROUTED_DROPPED_HEADERS)
+        val outHeaders = HeaderPolicy.forwardedHeaders(headers, HeaderPolicy.ROUTED_EXCLUDED)
         ProviderAuth.apply(outHeaders, swapToProviderId, credential.authMethod, dstApiKey)
         val swappedBody = if (!swapDstModel.isNullOrEmpty()) rewriteModel(body, swapDstModel) else body
         val outBody = injectStreamUsageOptions(swapToProviderId, swappedBody)
@@ -638,16 +638,6 @@ class ProxyService(
             .method(upper, requestBody)
             .headers(headers.toHeaders())
             .build()
-    }
-
-    /** Lower-cases names so [ProviderAuth] replaces app-sent values instead of duplicating them. */
-    private fun filterHeaders(headers: Map<String, String>, dropped: Set<String>): MutableMap<String, String> {
-        val out = mutableMapOf<String, String>()
-        for ((name, value) in headers) {
-            val lower = name.lowercase()
-            if (lower !in dropped) out[lower] = value
-        }
-        return out
     }
 
     private fun isSetupToken(providerId: String, credential: Credential): Boolean =
@@ -777,8 +767,6 @@ class ProxyService(
         // streaming responses (canonical azure_openai id, underscore).
         private val STREAM_USAGE_PROVIDERS = setOf("openai", "azure_openai", "together", "deepseek")
         private val METHODS_WITH_BODY = setOf("POST", "PUT", "PATCH")
-        private val DIRECT_DROPPED_HEADERS = setOf("host", "authorization", "x-api-key", "content-length")
-        private val ROUTED_DROPPED_HEADERS = setOf("host", "authorization", "x-api-key", "anthropic-version", "content-length")
 
         /** Logged for requests the app cancelled before any response (nginx's "client closed request"). */
         private const val CANCELLED_STATUS = 499
