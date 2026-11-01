@@ -168,3 +168,58 @@ describe('background: the bridge path fits a pinned model\'s requests too', () =
     expect(h.fetch).not.toHaveBeenCalled();
   });
 });
+
+// R4-01: OpenClaw (pi-ai) sends a thinking budget, or thinking turned off,
+// to Claude Opus 5.5, its default model, which refuses both with a 400. Its
+// users can't change those requests, so the bridge path fits a request to
+// the model it names even when no group pins one.
+describe('background: the bridge fits a local tool\'s request to the model it names', () => {
+  const OPENCLAW_BODY = {
+    model: 'claude-opus-5-5', max_tokens: 2048, stream: true, messages: [{ role: 'user', content: 'ready?' }],
+    thinking: { type: 'enabled', budget_tokens: 1024, display: 'summarized' },
+  };
+
+  async function unpinned(keys: CredentialSpec[]) {
+    const h = await startBackground({ local: await walletStorage(keys) });
+    await h.unlock();
+    const reply = await connectApproved(h, APP, { providers: [{ id: 'anthropic', required: true }] });
+    h.fetch.mockImplementation(async () => jsonResponse({ usage: { input_tokens: 1, output_tokens: 1 } }));
+    h.nativeHost = (msg, conn) => {
+      if (msg.type === 'ping') conn.reply({ type: 'pong' });
+      if (msg.type === 'start-proxy') conn.reply({ type: 'proxy-started' });
+    };
+    const sessionKey = reply.payload.sessionKey as string;
+    expect((await h.internal('startBridgeProxy', { sessionKey, port: 19280 }, senderFor(APP))).success).toBe(true);
+    const bridge = h.nativeConnections.find((c) => c.fromExtension.some((m) => m.type === 'start-proxy'))!;
+    return { h, sessionKey, bridge };
+  }
+
+  function send(bridge: FakeNativeConnection, sessionKey: string, body: string) {
+    const requestId = crypto.randomUUID();
+    bridge.reply({ type: 'proxy_http', requestId, sessionKey, providerId: 'anthropic', url: ANTHROPIC_URL, method: 'POST', headers: {}, body });
+    return requestId;
+  }
+
+  it('turns OpenClaw\'s thinking budget into adaptive thinking for Opus 5.5', async () => {
+    const { h, sessionKey, bridge } = await unpinned([{ id: 'a1', providerId: 'anthropic', key: 'sk-ant-REAL' }]);
+    send(bridge, sessionKey, JSON.stringify(OPENCLAW_BODY));
+    await h.until(() => h.fetch.mock.calls.length === 1, 5_000, 'the upstream call');
+    expect(JSON.parse(upstream(h).body)).toEqual({ ...OPENCLAW_BODY, thinking: { type: 'adaptive', display: 'summarized' } });
+  });
+
+  it('fits a setup-token request before the bridge sends it', async () => {
+    const { h, sessionKey, bridge } = await unpinned([{ id: 'oat', providerId: 'anthropic', key: 'sk-ant-oat01-test', authMethod: 'oauth' }]);
+    const requestId = send(bridge, sessionKey, JSON.stringify({ ...OPENCLAW_BODY, thinking: { type: 'disabled' } }));
+    await h.until(() => bridge.fromExtension.some((m) => m.requestId === requestId && m.type === 'proxy_direct_fetch'), 5_000, 'the direct fetch');
+    const direct = bridge.fromExtension.find((m) => m.requestId === requestId && m.type === 'proxy_direct_fetch')!;
+    expect(JSON.parse(direct.body as string)).not.toHaveProperty('thinking');
+  });
+
+  it('sends a request that already fits byte for byte', async () => {
+    const { h, sessionKey, bridge } = await unpinned([{ id: 'a1', providerId: 'anthropic', key: 'sk-ant-REAL' }]);
+    const body = '{ "model": "claude-opus-5-5", "max_tokens": 64, "thinking": { "type": "adaptive" }, "messages": [] }';
+    send(bridge, sessionKey, body);
+    await h.until(() => h.fetch.mock.calls.length === 1, 5_000, 'the upstream call');
+    expect(upstream(h).body).toBe(body);
+  });
+});

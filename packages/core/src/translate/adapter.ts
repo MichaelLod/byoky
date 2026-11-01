@@ -59,6 +59,13 @@ export interface FamilyAdapter {
    */
   shapeRequestForModel?(body: Record<string, unknown>, ctx: ModelShapingContext): void;
 
+  /**
+   * True when this family knows `model`'s request rules for certain (not
+   * by a guess for an id it can't read), so shapeRequestForModel changes
+   * only what that model would reject. Absent: never.
+   */
+  recognizesModel?(model: string): boolean;
+
   // ─── Response (non-streaming) ───────────────────────────────────────────
 
   /** Parse a family-native response body (success or error) into IR. */

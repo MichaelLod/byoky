@@ -86,6 +86,45 @@ export function rewriteRequestModel(
 }
 
 /**
+ * Fit a request to the rules of the model it already names, where it would
+ * certainly be refused otherwise: what rewriteRequestModel does for a
+ * pinned model, for a request nothing reroutes. Byoky uses it for requests
+ * from local tools (the bridge), whose request shapes the user can't fix,
+ * such as OpenClaw sending a thinking budget to a Claude model that only
+ * thinks adaptively.
+ *
+ * Applies only to a family's chat endpoint and to a model whose rules the
+ * family knows for certain (today: Claude ids). Anything else, a request
+ * that already fits, a body that isn't a JSON object, or one the model
+ * can't serve at all (left for the provider to answer) is returned byte
+ * for byte.
+ *
+ * `providerId` is the provider the request goes to, `url` the URL called.
+ */
+export function fitRequestToModel(ctx: { providerId: ProviderId; url: string }, body: string): string {
+  const family = familyOf(ctx.providerId);
+  const adapter = family && hasAdapter(family) ? getAdapter(family) : undefined;
+  if (!adapter?.shapeRequestForModel || !adapter.recognizesModel || !adapter.matchesChatEndpoint(ctx.url)) return body;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return body;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return body;
+  const request = parsed as Record<string, unknown>;
+  if (typeof request.model !== 'string' || !adapter.recognizesModel(request.model)) return body;
+  const before = JSON.stringify(request);
+  try {
+    adapter.shapeRequestForModel(request, { dstModel: request.model, dstProviderId: ctx.providerId });
+  } catch {
+    return body;
+  }
+  const after = JSON.stringify(request);
+  return after === before ? body : after;
+}
+
+/**
  * Translate a non-streaming response body from the destination family dialect
  * back to the source family dialect. The response arrives in ctx.dstFamily
  * (the upstream we actually called) and must be returned in ctx.srcFamily

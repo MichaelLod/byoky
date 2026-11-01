@@ -47,6 +47,7 @@ export const anthropicAdapter: FamilyAdapter = {
   parseRequest,
   serializeRequest,
   shapeRequestForModel,
+  recognizesModel,
   parseResponse,
   serializeResponse,
   createStreamParser,
@@ -687,6 +688,14 @@ function claudeEffort(requested: string, rules: ClaudeRequestRules, thinking: un
     if (rules.efforts.includes(CLAUDE_EFFORTS[i])) return CLAUDE_EFFORTS[i];
   }
   return rules.efforts[0];
+}
+
+/**
+ * True when `model` names a Claude model whose request rules Byoky reads
+ * from its id (claudeRequestRules), not one it would have to guess for.
+ */
+function recognizesModel(model: string): boolean {
+  return parseClaudeId(model) !== null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
