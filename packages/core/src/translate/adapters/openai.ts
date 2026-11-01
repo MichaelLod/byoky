@@ -79,6 +79,8 @@ interface OpenAIRequest {
 
 type OpenAIMessage =
   | { role: 'system'; content: OpenAIMessageContent }
+  // OpenAI's name for system instructions on GPT-5 / o-series models.
+  | { role: 'developer'; content: OpenAIMessageContent }
   | { role: 'user'; content: OpenAIMessageContent }
   | { role: 'assistant'; content: OpenAIMessageContent | null; tool_calls?: OpenAIToolCall[] }
   | { role: 'tool'; tool_call_id: string; content: OpenAIMessageContent };
@@ -152,11 +154,12 @@ function parseRequest(body: string): IRRequest {
     messages: [],
   };
 
-  // Split system messages from the conversation; the IR puts system at top level.
+  // Split system and developer messages from the conversation, in their
+  // original order; the IR puts system at top level.
   const conversation: OpenAIMessage[] = [];
   if (Array.isArray(parsed.messages)) {
     for (const m of parsed.messages) {
-      if (m && m.role === 'system') {
+      if (m && (m.role === 'system' || m.role === 'developer')) {
         const text = flattenOpenAIContent(m.content);
         if (text) ir.system.push({ text });
       } else if (m) {

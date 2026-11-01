@@ -32,6 +32,34 @@ describe('openaiAdapter.parseRequest', () => {
     expect(ir.messages[0].role).toBe('user');
   });
 
+  it('lifts role:developer messages into IR system', () => {
+    const ir = openaiAdapter.parseRequest(
+      JSON.stringify({
+        messages: [
+          { role: 'developer', content: 'Only answer in French.' },
+          { role: 'user', content: 'Hello' },
+        ],
+      }),
+    );
+    expect(ir.system).toEqual([{ text: 'Only answer in French.' }]);
+    expect(ir.messages).toEqual([{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }]);
+  });
+
+  it('keeps system and developer messages in their original order', () => {
+    const ir = openaiAdapter.parseRequest(
+      JSON.stringify({
+        messages: [
+          { role: 'developer', content: [{ type: 'text', text: 'one' }] },
+          { role: 'system', content: 'two' },
+          { role: 'user', content: 'hi' },
+          { role: 'developer', content: 'three' },
+        ],
+      }),
+    );
+    expect(ir.system).toEqual([{ text: 'one' }, { text: 'two' }, { text: 'three' }]);
+    expect(ir.messages).toHaveLength(1);
+  });
+
   it('maps role:tool messages into tool_result blocks on next user turn', () => {
     const ir = openaiAdapter.parseRequest(
       JSON.stringify({

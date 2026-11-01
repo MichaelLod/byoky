@@ -276,3 +276,32 @@ describe('cross-family dispatch — tool use request', () => {
     });
   }
 });
+
+describe('cross-family dispatch — OpenAI developer role', () => {
+  const body = JSON.stringify({
+    model: 'gpt-5.5',
+    messages: [
+      { role: 'developer', content: 'Only answer in French.' },
+      { role: 'user', content: 'Hello' },
+    ],
+  });
+
+  it('openai → anthropic puts the developer text into system', () => {
+    const out = JSON.parse(translateRequest(ctx('openai', 'anthropic'), body)) as { system?: string };
+    expect(out.system).toBe('Only answer in French.');
+  });
+
+  it('openai → gemini puts the developer text into systemInstruction', () => {
+    const out = JSON.parse(translateRequest(ctx('openai', 'gemini'), body)) as {
+      systemInstruction?: { parts: Array<{ text: string }> };
+    };
+    expect(out.systemInstruction).toEqual({ parts: [{ text: 'Only answer in French.' }] });
+  });
+
+  it('openai → cohere sends the developer text as a system message', () => {
+    const out = JSON.parse(translateRequest(ctx('openai', 'cohere'), body)) as {
+      messages: Array<{ role: string; content: unknown }>;
+    };
+    expect(out.messages[0]).toEqual({ role: 'system', content: 'Only answer in French.' });
+  });
+});
