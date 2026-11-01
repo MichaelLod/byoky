@@ -1387,13 +1387,27 @@ function Limits() {
         </li>
       </ul>
 
-      <h3>Bridge body size</h3>
-      <p>
-        When apps route through <code>@byoky/bridge</code> (CLI / desktop), the bridge caps a single
-        request body at <strong>10 MB</strong>. Larger bodies fail with a{' '}
-        <code>413 Payload Too Large</code> at the proxy. The browser proxy path has no equivalent
-        cap, but very large bodies still incur extra latency from chunking.
-      </p>
+      <h3>Request body size</h3>
+      <ul>
+        <li>
+          <strong>Backend relay:</strong> a request your server sends through{' '}
+          <code>@byoky/sdk/server</code> may be at most <strong>1 MB</strong> once serialized
+          (URL, headers and body together). Above that, <code>client.createFetch()</code> throws a{' '}
+          <code>ByokyError</code> with code <code>PROXY_ERROR</code> and the message{' '}
+          &ldquo;Request too large for the relay&rdquo;. Inline images count at their base64
+          size (a third larger than the file), so an image over about 750 KB doesn&apos;t fit.
+          Responses aren&apos;t capped: they stream back in pieces.
+        </li>
+        <li>
+          <strong>Bridge</strong> (CLI / desktop): <code>@byoky/bridge</code> caps a single
+          request body at <strong>10 MB</strong>. Larger bodies fail with a{' '}
+          <code>413 Payload Too Large</code> at the proxy.
+        </li>
+        <li>
+          <strong>In-page <code>createFetch</code>:</strong> no cap of its own; the provider&apos;s
+          request limit applies. Very large bodies still add some latency.
+        </li>
+      </ul>
 
       <h3>What is <em>not</em> capped</h3>
       <ul>
@@ -1427,6 +1441,12 @@ const session = await new Byoky().connect({
 
 // Open relay so your backend can make calls through this session
 const relay = session.createRelay('wss://your-app.com/ws/relay');`}</Code>
+
+      <p>
+        Each request your backend sends over the relay may be at most 1 MB serialized; larger
+        ones throw <code>PROXY_ERROR</code> before they are sent. See{' '}
+        <a href="#limits" style={{ color: 'var(--phosphor)' }}>Limits &amp; Quotas</a>.
+      </p>
 
       <h3>Backend (Node.js)</h3>
       <Code lang="typescript">{`import { ByokyServer } from '@byoky/sdk/server';
