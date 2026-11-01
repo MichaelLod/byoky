@@ -163,6 +163,91 @@ describe('rewriteRequestModel — Claude', () => {
   });
 });
 
+/**
+ * R4-02: thinking turned off and the effort level have per-model rules too
+ * (each 400 checked live on 2026-11-01 with the message quoted).
+ */
+describe('rewriteRequestModel — Claude thinking off and effort', () => {
+  it('leaves thinking out for a model that always thinks', () => {
+    // Opus 5.5 and Fable 5.1: 400 ""thinking.type.disabled" is not supported for this model."
+    for (const model of ['claude-opus-5-5', 'claude-fable-5-1', 'claude-fable-5', 'claude-mythos-5-1']) {
+      const out = rewrite('anthropic', model, { model: 'claude-opus-4-7', max_tokens: 64, messages: USER, thinking: { type: 'disabled' } });
+      expect(out, model).toEqual({ model, max_tokens: 64, messages: USER });
+    }
+  });
+
+  it('turns thinking off with between_tools on Sonnet 5.5', () => {
+    // 400 "To turn thinking off on this model, send "thinking": {"type": "between_tools"} instead of {"type": "disabled"}."
+    const out = rewrite('anthropic', 'claude-sonnet-5-5', { model: 'claude-sonnet-4-6', max_tokens: 64, messages: USER, thinking: { type: 'disabled' } });
+    expect(out.thinking).toEqual({ type: 'between_tools' });
+  });
+
+  it('turns between_tools back into disabled on a model that takes that', () => {
+    for (const model of ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001', 'claude-opus-5', 'claude-haiku-5-5']) {
+      const out = rewrite('anthropic', model, { model: 'claude-sonnet-5-5', max_tokens: 64, messages: USER, thinking: { type: 'between_tools' } });
+      expect(out.thinking, model).toEqual({ type: 'disabled' });
+    }
+    const always = rewrite('anthropic', 'claude-opus-5-5', { model: 'claude-sonnet-5-5', max_tokens: 64, messages: USER, thinking: { type: 'between_tools' } });
+    expect(always).not.toHaveProperty('thinking');
+  });
+
+  it('keeps thinking off as it is where the model takes it', () => {
+    for (const model of ['claude-opus-4-7', 'claude-opus-5', 'claude-sonnet-5', 'claude-haiku-5-5']) {
+      const out = rewrite('anthropic', model, { model: 'claude-opus-5-5', max_tokens: 64, messages: USER, thinking: { type: 'disabled' } });
+      expect(out.thinking, model).toEqual({ type: 'disabled' });
+    }
+  });
+
+  it('holds effort to high while thinking is off on models that turn it off only that far', () => {
+    // Opus 5: 400 "output_config.effort 'xhigh' is not supported when thinking is disabled on this model."
+    const opus5 = rewrite('anthropic', 'claude-opus-5', {
+      model: 'claude-opus-4-8', max_tokens: 64, messages: USER, thinking: { type: 'disabled' }, output_config: { effort: 'xhigh' },
+    });
+    expect(opus5.thinking).toEqual({ type: 'disabled' });
+    expect(opus5.output_config).toEqual({ effort: 'high' });
+    const sonnet = rewrite('anthropic', 'claude-sonnet-5-5', {
+      model: 'claude-opus-4-8', max_tokens: 64, messages: USER, thinking: { type: 'disabled' }, output_config: { effort: 'max', format: { type: 'json_schema' } },
+    });
+    expect(sonnet.thinking).toEqual({ type: 'between_tools' });
+    expect(sonnet.output_config).toEqual({ effort: 'high', format: { type: 'json_schema' } });
+    // With thinking on, every level is taken.
+    const on = rewrite('anthropic', 'claude-opus-5', { model: 'claude-opus-4-8', max_tokens: 64, messages: USER, output_config: { effort: 'max' } });
+    expect(on.output_config).toEqual({ effort: 'max' });
+  });
+
+  it('drops effort for a model that takes none, keeping the rest of output_config', () => {
+    // Haiku 4.5, Sonnet 4.5: 400 "This model does not support the effort parameter."
+    for (const model of ['claude-haiku-4-5-20251001', 'claude-sonnet-4-5']) {
+      const out = rewrite('anthropic', model, { model: 'claude-sonnet-4-6', max_tokens: 64, messages: USER, output_config: { effort: 'low' } });
+      expect(out, model).not.toHaveProperty('output_config');
+      const format = { type: 'json_schema', schema: { type: 'object' } };
+      const withFormat = rewrite('anthropic', model, { model: 'claude-sonnet-4-6', max_tokens: 64, messages: USER, output_config: { effort: 'low', format } });
+      expect(withFormat.output_config, model).toEqual({ format });
+    }
+  });
+
+  it('lowers an effort level the model lacks to the nearest one it has', () => {
+    // Opus 4.6: 400 "This model does not support effort level 'xhigh'. Supported levels: high, low, max, medium."
+    const fourSix = rewrite('anthropic', 'claude-opus-4-6', { model: 'claude-opus-4-7', max_tokens: 64, messages: USER, output_config: { effort: 'xhigh' } });
+    expect(fourSix.output_config).toEqual({ effort: 'high' });
+    expect(rewrite('anthropic', 'claude-sonnet-4-6', { model: 'claude-opus-4-7', max_tokens: 64, messages: USER, output_config: { effort: 'max' } }).output_config)
+      .toEqual({ effort: 'max' });
+    // Opus 4.5: 400 "This model does not support effort level 'max'. Supported levels: high, low, medium."
+    const fourFive = rewrite('anthropic', 'claude-opus-4-5', { model: 'claude-opus-4-7', max_tokens: 64, messages: USER, output_config: { effort: 'max' } });
+    expect(fourFive.output_config).toEqual({ effort: 'high' });
+    expect(rewrite('anthropic', 'claude-opus-4-5', { model: 'claude-opus-4-7', max_tokens: 64, messages: USER, output_config: { effort: 'medium' } }).output_config)
+      .toEqual({ effort: 'medium' });
+  });
+
+  it('leaves effort and thinking off alone for an id it can\'t read', () => {
+    const out = rewrite('anthropic', 'claude-next', {
+      model: 'claude-opus-4-7', max_tokens: 64, messages: USER, thinking: { type: 'between_tools' }, output_config: { effort: 'turbo' },
+    });
+    expect(out.thinking).toEqual({ type: 'between_tools' });
+    expect(out.output_config).toEqual({ effort: 'turbo' });
+  });
+});
+
 describe('rewriteRequestModel — OpenAI reasoning models', () => {
   it('moves max_tokens to max_completion_tokens and drops sampling for gpt-5.5', () => {
     // Live: 400 "Unsupported parameter: 'max_tokens' ..." and "'temperature' does not support 0.5 with this model".

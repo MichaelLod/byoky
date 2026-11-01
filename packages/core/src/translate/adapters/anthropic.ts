@@ -68,7 +68,7 @@ interface AnthropicRequest {
   metadata?: { user_id?: string };
   tools?: AnthropicTool[];
   tool_choice?: AnthropicToolChoice;
-  thinking?: { type?: 'enabled' | 'adaptive'; budget_tokens?: number };
+  thinking?: { type?: 'enabled' | 'adaptive' | 'disabled' | 'between_tools'; budget_tokens?: number };
 }
 
 interface AnthropicSystemBlock {
@@ -462,12 +462,45 @@ type ClaudeSamplingRule = 'none' | 'single';
 /** adaptive: thinking:{type:'adaptive'} only; budget: {type:'enabled',
  *  budget_tokens} only; either: adaptive, or a budget when one is asked for. */
 type ClaudeThinkingRule = 'adaptive' | 'either' | 'budget';
+/** How thinking is turned off: `disabled` ({type:'disabled'}),
+ *  `between_tools` ({type:'between_tools'}, Sonnet 5.5's off switch), or
+ *  `never` (thinking is always on; the field is left out). */
+type ClaudeThinkingOffRule = 'disabled' | 'between_tools' | 'never';
+type ClaudeEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+const CLAUDE_EFFORTS: readonly ClaudeEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 interface ClaudeRequestRules {
   sampling: ClaudeSamplingRule;
   thinking: ClaudeThinkingRule;
   /** Accepts a forced tool choice (`tool_choice` `any` or `tool`). */
   forcedToolChoice: boolean;
+  /** How the model turns thinking off; null when the id doesn't say. */
+  thinkingOff: ClaudeThinkingOffRule | null;
+  /** Thinking turns off only at effort `high` or below (a 400 at `xhigh`/`max`). */
+  thinkingOffUpToHigh: boolean;
+  /** The `output_config.effort` levels the model takes (none: it rejects the
+   *  parameter); null when the id doesn't say. */
+  efforts: readonly ClaudeEffort[] | null;
+}
+
+interface ClaudeId {
+  /** opus, sonnet, haiku, fable or mythos. */
+  line: string;
+  major: number;
+  minor: number;
+  /** Named claude-<line>-<version> (Claude 4 on); legacy ids are claude-<version>-<line>. */
+  named: boolean;
+}
+
+/** The line and version of a Claude model id, or null when it doesn't name one. */
+function parseClaudeId(model: string): ClaudeId | null {
+  const id = model.toLowerCase();
+  const named = /claude-(opus|sonnet|haiku|fable|mythos)-(\d+)(?:[-.](\d{1,2})(?!\d))?/.exec(id);
+  if (named) return { line: named[1], major: Number(named[2]), minor: Number(named[3] ?? 0), named: true };
+  const legacy = /claude-(\d+)(?:[-.](\d)(?!\d))?-(opus|sonnet|haiku)/.exec(id);
+  if (legacy) return { line: legacy[3], major: Number(legacy[1]), minor: Number(legacy[2] ?? 0), named: false };
+  return null;
 }
 
 /**
@@ -481,25 +514,64 @@ interface ClaudeRequestRules {
  *  - Opus and Sonnet from 5.5 on, and Fable and Mythos from 5.1 on, reject
  *    a forced tool choice with a 400. Haiku 5.5 and the earlier models
  *    accept one.
+ *  - Thinking can't be turned off on Opus 5.5, Fable and Mythos (from 5);
+ *    `{type:'disabled'}` is a 400 there. Sonnet 5.5 turns it off with
+ *    `{type:'between_tools'}` and answers `disabled` with a 400; every other
+ *    model answers `between_tools` with a 400. Sonnet 5.5's
+ *    `between_tools` and Opus 5's and Haiku 5.5's `disabled` hold only at
+ *    effort `high` or below.
+ *  - `output_config.effort`: Opus 4.5 takes low/medium/high, Claude 4.6
+ *    adds max, Opus 4.7 and later (every 5.x model, Fable, Mythos) add
+ *    xhigh; Sonnet 4.5, Haiku 4.5 and earlier models reject the parameter.
+ * (platform.claude.com/docs/en/api/errors, "Thinking cannot be disabled".
+ * Checked live on 2026-11-01: disabled on Opus 5.5, Sonnet 5.5 and Fable
+ * 5.1, between_tools on Sonnet 5.5, disabled at xhigh on Opus 5, effort on
+ * Haiku 4.5, Sonnet 4.5, Opus 4.6 and Opus 4.5.)
  * An id that doesn't parse is treated like a current model on sampling and
- * gets adaptive thinking.
+ * gets adaptive thinking; its thinking-off form and effort levels are left
+ * as the request has them.
  */
 function claudeRequestRules(model: string): ClaudeRequestRules {
-  const id = model.toLowerCase();
-  const named = /claude-(opus|sonnet|haiku|fable|mythos)-(\d+)(?:[-.](\d{1,2})(?!\d))?/.exec(id);
-  const legacy = named ? null : /claude-(\d+)(?:[-.](\d)(?!\d))?-(?:opus|sonnet|haiku)/.exec(id);
-  const version = named ? [named[2], named[3]] : legacy ? [legacy[1], legacy[2]] : null;
-  if (!version) return { sampling: 'single', thinking: 'adaptive', forcedToolChoice: true };
-  const major = Number(version[0]);
-  const minor = Number(version[1] ?? 0);
-  const atLeast = (maj: number, min: number) => major > maj || (major === maj && minor >= min);
-  if (named && (named[1] === 'fable' || named[1] === 'mythos')) {
-    return { sampling: 'none', thinking: 'adaptive', forcedToolChoice: !atLeast(5, 1) };
+  const claude = parseClaudeId(model);
+  if (!claude) {
+    return {
+      sampling: 'single', thinking: 'adaptive', forcedToolChoice: true,
+      thinkingOff: null, thinkingOffUpToHigh: false, efforts: null,
+    };
   }
-  const forcedToolChoice = !(named && (named[1] === 'opus' || named[1] === 'sonnet') && atLeast(5, 5));
-  if (atLeast(4, 7)) return { sampling: 'none', thinking: 'adaptive', forcedToolChoice };
-  if (major === 4 && minor === 6) return { sampling: 'single', thinking: 'either', forcedToolChoice };
-  return { sampling: 'single', thinking: 'budget', forcedToolChoice };
+  const { line, major, minor, named } = claude;
+  const atLeast = (maj: number, min: number) => major > maj || (major === maj && minor >= min);
+  const efforts: readonly ClaudeEffort[] = atLeast(4, 7)
+    ? CLAUDE_EFFORTS
+    : major === 4 && minor === 6
+      ? ['low', 'medium', 'high', 'max']
+      : named && line === 'opus' && major === 4 && minor === 5
+        ? ['low', 'medium', 'high']
+        : [];
+  if (named && (line === 'fable' || line === 'mythos')) {
+    return {
+      sampling: 'none', thinking: 'adaptive', forcedToolChoice: !atLeast(5, 1),
+      thinkingOff: atLeast(5, 0) ? 'never' : 'disabled', thinkingOffUpToHigh: false, efforts,
+    };
+  }
+  const forcedToolChoice = !(named && (line === 'opus' || line === 'sonnet') && atLeast(5, 5));
+  let thinkingOff: ClaudeThinkingOffRule = 'disabled';
+  let thinkingOffUpToHigh = false;
+  if (named && atLeast(5, 0)) {
+    if (line === 'opus') {
+      thinkingOff = atLeast(5, 5) ? 'never' : 'disabled';
+      thinkingOffUpToHigh = true;
+    } else if (line === 'sonnet' && atLeast(5, 5)) {
+      thinkingOff = 'between_tools';
+      thinkingOffUpToHigh = true;
+    } else if (line === 'haiku' && atLeast(5, 5)) {
+      thinkingOffUpToHigh = true;
+    }
+  }
+  const off = { forcedToolChoice, thinkingOff, thinkingOffUpToHigh, efforts };
+  if (atLeast(4, 7)) return { sampling: 'none', thinking: 'adaptive', ...off };
+  if (major === 4 && minor === 6) return { sampling: 'single', thinking: 'either', ...off };
+  return { sampling: 'single', thinking: 'budget', ...off };
 }
 
 interface ClaudeSampling {
@@ -526,8 +598,9 @@ function claudeSampling(rules: ClaudeRequestRules, thinking: boolean, requested:
  * Fit an Anthropic request written for another Claude model to
  * `ctx.dstModel`, in place (a group pins the model; nothing is translated):
  * the rules serializeRequest follows, applied to the app's own body so
- * every field they don't cover (cache_control, metadata, output_config, ...)
- * is kept.
+ * every field they don't cover (cache_control, metadata, output_config's
+ * other fields, ...) is kept. Thinking turned off and the effort level are
+ * fitted too, which a translated request never carries.
  */
 function shapeRequestForModel(body: Record<string, unknown>, ctx: ModelShapingContext): void {
   const rules = claudeRequestRules(ctx.dstModel);
@@ -563,6 +636,24 @@ function shapeRequestForModel(body: Record<string, unknown>, ctx: ModelShapingCo
       // then answers without thinking, as after translation.
       delete body.thinking;
     }
+  } else if (isRecord(thinking) && (thinking.type === 'disabled' || thinking.type === 'between_tools')) {
+    // Thinking off, in the form the model takes it. A model that always
+    // thinks gets no thinking field, which is what it does by default.
+    if (rules.thinkingOff === 'never') delete body.thinking;
+    else if (rules.thinkingOff && thinking.type !== rules.thinkingOff) body.thinking = { type: rules.thinkingOff };
+  }
+
+  const outputConfig = body.output_config;
+  if (isRecord(outputConfig) && typeof outputConfig.effort === 'string') {
+    const effort = claudeEffort(outputConfig.effort, rules, body.thinking);
+    if (effort === null) {
+      const rest: Record<string, unknown> = { ...outputConfig };
+      delete rest.effort;
+      if (Object.keys(rest).length > 0) body.output_config = rest;
+      else delete body.output_config;
+    } else if (effort !== outputConfig.effort) {
+      body.output_config = { ...outputConfig, effort };
+    }
   }
 
   const thinkingOn = isRecord(body.thinking) && (body.thinking.type === 'enabled' || body.thinking.type === 'adaptive');
@@ -575,6 +666,27 @@ function shapeRequestForModel(body: Record<string, unknown>, ctx: ModelShapingCo
   if (requested.temperature !== undefined && kept.temperature === undefined) delete body.temperature;
   if (requested.topP !== undefined && kept.topP === undefined) delete body.top_p;
   if (requested.topK !== undefined && kept.topK === undefined) delete body.top_k;
+}
+
+/**
+ * The `output_config.effort` level a model with `rules` takes for
+ * `requested`, with the request's thinking set to `thinking`: the highest
+ * level it supports at or below the one asked for (at most `high` when
+ * thinking is off on a model that turns it off only up to `high`), or null
+ * when the model takes no effort parameter. A level Byoky doesn't know is
+ * kept as it is.
+ */
+function claudeEffort(requested: string, rules: ClaudeRequestRules, thinking: unknown): string | null {
+  let level = CLAUDE_EFFORTS.indexOf(requested as ClaudeEffort);
+  if (level < 0) return requested;
+  const off = isRecord(thinking) && (thinking.type === 'disabled' || thinking.type === 'between_tools');
+  if (off && rules.thinkingOffUpToHigh) level = Math.min(level, CLAUDE_EFFORTS.indexOf('high'));
+  if (rules.efforts === null) return CLAUDE_EFFORTS[level];
+  if (rules.efforts.length === 0) return null;
+  for (let i = level; i >= 0; i--) {
+    if (rules.efforts.includes(CLAUDE_EFFORTS[i])) return CLAUDE_EFFORTS[i];
+  }
+  return rules.efforts[0];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
