@@ -2,9 +2,12 @@ import { useState, type FormEvent } from 'react';
 import { useWalletStore } from '../store';
 import { Raven } from '../components/Raven';
 import { lockoutMessage, useLockoutCountdown } from '../hooks/useLockoutCountdown';
+import { describeOrigin } from '../utils/origin';
 
 export function Unlock() {
-  const { unlock, resetWallet, error, submitting, lockedUntil, setLockedUntil, clearError } = useWalletStore();
+  const {
+    unlock, resetWallet, error, submitting, lockedUntil, setLockedUntil, clearError, pendingApprovals,
+  } = useWalletStore();
   const [password, setPassword] = useState('');
   const [showReset, setShowReset] = useState(false);
   // The background refuses every password until the lockout ends, so count
@@ -28,13 +31,22 @@ export function Unlock() {
     if (error && !lockedOut) clearError();
   }
 
+  // An app asked to connect while the wallet was locked; it waits for this.
+  const waiting = pendingApprovals[0];
+
   return (
     <div className="center-page">
       <div className="brand-mark">
-        <Raven state="watching" size={showReset ? 150 : 220} />
+        <Raven state={waiting ? 'alert' : 'watching'} size={showReset ? 150 : 220} />
       </div>
       <div className="status-line">Wallet locked</div>
       <h2 className="lock-title">Welcome back</h2>
+      {waiting && (
+        <p className="unlock-pending">
+          {describeOrigin(waiting.appOrigin).label} wants to connect. Unlock to review.
+          {pendingApprovals.length > 1 && ` (+${pendingApprovals.length - 1} more)`}
+        </p>
+      )}
 
       {!showReset ? (
         <>

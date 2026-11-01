@@ -26,6 +26,11 @@ export default function App() {
       const msg = message as Record<string, string> | null;
       if (!msg || msg.type !== 'BYOKY_INTERNAL') return;
       if (msg.action === 'newPendingApproval') {
+        // While locked, the unlock screen lists what is waiting instead.
+        if (!useWalletStore.getState().isUnlocked) {
+          useWalletStore.getState().refreshPending();
+          return;
+        }
         useWalletStore.getState().refreshData().then(() => {
           if (useWalletStore.getState().pendingApprovals.length > 0) {
             useWalletStore.getState().navigate('approval');
@@ -42,12 +47,14 @@ export default function App() {
         // wallet that looks open but can't add keys or approve apps.
         useWalletStore.getState().syncLockState().then((unlocked) => {
           if (unlocked) useWalletStore.getState().refreshData();
+          else useWalletStore.getState().refreshPending();
         });
       } else if (msg.action === 'usageUpdated') {
         useWalletStore.getState().refreshData();
       } else if (msg.action === 'approvalsChanged') {
         // A request was answered, timed out or auto-approved somewhere else.
         if (useWalletStore.getState().isUnlocked) useWalletStore.getState().refreshData();
+        else useWalletStore.getState().refreshPending();
       }
     }
     try {
@@ -90,7 +97,7 @@ export default function App() {
             {currentPage === 'setup' ? 'Setup' : 'Locked'}
           </span>
         )}
-        {currentPage === 'approval' && pendingApprovals.length > 0 && (
+        {(currentPage === 'approval' || currentPage === 'unlock') && pendingApprovals.length > 0 && (
           <span className="pending-pill">{pendingApprovals.length} pending</span>
         )}
         {showNav && (

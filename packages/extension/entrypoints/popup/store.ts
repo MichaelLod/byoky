@@ -82,6 +82,8 @@ interface WalletState {
   setAppGroup: (origin: string, groupId: string) => Promise<boolean>;
   resetWallet: () => Promise<void>;
   refreshData: () => Promise<void>;
+  /** Only the approval queue, which the background keeps (and reports) while locked. */
+  refreshPending: () => Promise<void>;
   clearError: () => void;
 }
 
@@ -150,6 +152,9 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       if (get().pendingApprovals.length > 0) {
         set({ currentPage: 'approval' });
       }
+    } else if (initialized) {
+      // Requests wait out a locked wallet; the unlock screen says so.
+      await get().refreshPending();
     }
   },
 
@@ -217,6 +222,9 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       if (unlockResult.success) {
         set({ isUnlocked: true, currentPage: 'dashboard', submitting: false, lockedUntil: null });
         await get().refreshData();
+        // Requests that waited for the unlock (trusted sites are approved on
+        // their own) go straight to review.
+        if (get().pendingApprovals.length > 0) set({ currentPage: 'approval' });
         return true;
       }
       // During the lockout the background refuses even the right password and
@@ -242,6 +250,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   lock: async () => {
     await sendInternal('lock');
     set(LOCKED_STATE);
+    await get().refreshPending();
   },
 
   setLockedUntil: (lockedUntil) => set({ lockedUntil }),
@@ -492,6 +501,11 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       groups: (groupsResult.groups ?? []) as Group[],
       appGroups: (groupsResult.appGroups ?? {}) as AppGroups,
     });
+  },
+
+  refreshPending: async () => {
+    const result = await sendInternal('getPendingApprovals');
+    set({ pendingApprovals: (result?.approvals ?? []) as PendingApproval[] });
   },
 
   clearError: () => set({ error: null }),
