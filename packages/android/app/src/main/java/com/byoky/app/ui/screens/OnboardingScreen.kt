@@ -162,21 +162,13 @@ fun OnboardingScreen(wallet: WalletStore) {
                 mono = true,
                 secret = true,
                 isError = mismatch,
+                // Part of the field, so it stays above the keyboard with it.
+                supportingText = if (mismatch) "Passwords do not match" else null,
                 visualTransformation = PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
                 keyboardActions = KeyboardActions(onGo = { createWallet() }),
                 modifier = Modifier.fillMaxWidth(),
             )
-
-            if (mismatch) {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "Passwords do not match",
-                    color = Alarm,
-                    fontSize = 12.sp,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
 
             error?.let {
                 Spacer(Modifier.height(8.dp))

@@ -1,6 +1,7 @@
 package com.byoky.app.ui.components
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -14,12 +15,16 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -68,6 +73,7 @@ import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -387,7 +393,7 @@ fun Modifier.bottomSeam(color: Color = Seam): Modifier =
  * it focuses the field. Secrets, keys and URLs pass [mono] for IBM Plex Mono.
  * [fieldModifier] goes on the field itself (an exposed dropdown's menuAnchor).
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun RetroTextField(
     value: String,
@@ -412,6 +418,14 @@ fun RetroTextField(
     val interactionSource = remember { MutableInteractionSource() }
     val focused by interactionSource.collectIsFocusedAsState()
     val focusRequester = remember { FocusRequester() }
+    val bringIntoView = remember { BringIntoViewRequester() }
+    if (focused) {
+        // A scrolling screen keeps only the cursor above the keyboard; this
+        // keeps the whole field in view, label and supporting text (such as
+        // an error) included, as the keyboard opens and as the text changes.
+        val imeBottom = WindowInsets.ime.getBottom(LocalDensity.current)
+        LaunchedEffect(imeBottom, supportingText) { bringIntoView.bringIntoView() }
+    }
     val textStyle = if (mono) {
         MonoStyle.copy(fontSize = 15.sp, lineHeight = 20.sp)
     } else {
@@ -442,7 +456,7 @@ fun RetroTextField(
         disabledPlaceholderColor = Dim,
     )
 
-    Column(modifier) {
+    Column(modifier.bringIntoViewRequester(bringIntoView)) {
         if (label != null) {
             // Screen readers get the label from the field itself (below), so
             // the visible caption stays out of the accessibility tree.

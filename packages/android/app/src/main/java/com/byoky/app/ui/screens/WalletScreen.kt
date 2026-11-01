@@ -456,7 +456,12 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
         else -> ""
     }
 
-    RetroBottomSheet(onDismissRequest = onDismiss) {
+    // Fully expanded only: with a half-height stop the sheet dropped back to
+    // half height whenever the keyboard opened or closed.
+    RetroBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
