@@ -263,6 +263,7 @@ const bridge: MobileBridge = {
       dstFamily,
       srcModel,
       dstModel,
+      dstProviderId,
       isStreaming,
       requestId,
     };

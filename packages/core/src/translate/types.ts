@@ -18,6 +18,12 @@ export interface TranslationContext {
   srcModel?: string;
   /** Model we substitute into the outbound request. */
   dstModel: string;
+  /**
+   * Provider we're forwarding to (e.g. 'openai', 'groq'), when the caller
+   * knows it. Hosts of one dialect differ in details the family alone
+   * doesn't settle, such as OpenAI's max_completion_tokens.
+   */
+  dstProviderId?: string;
   /** Whether the SDK asked for a streaming response. */
   isStreaming: boolean;
   /** byoky's per-request id, used to synthesize ids in the destination dialect. */

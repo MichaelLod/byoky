@@ -382,12 +382,16 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
   }
 
   // Sampling params. OpenAI reasoning models reject max_tokens and
-  // temperature/top_p — fall back to max_completion_tokens and drop
-  // sampling overrides.
-  const dst = getModel(ctx.dstModel);
-  const isReasoningDst = dst?.capabilities.reasoning === true;
+  // temperature/top_p — use max_completion_tokens and drop the sampling
+  // overrides. OpenAI itself takes max_completion_tokens for every model
+  // (max_tokens is deprecated there); the other hosts of this dialect
+  // (DeepSeek, Mistral, OpenRouter, ...) document max_tokens.
+  const isReasoningDst = isOpenAIReasoningModel(ctx.dstModel);
+  const useMaxCompletionTokens =
+    ctx.dstProviderId === 'openai' ||
+    (isReasoningDst && (ctx.dstProviderId == null || ctx.dstProviderId === 'azure_openai'));
   if (typeof ir.maxTokens === 'number') {
-    if (isReasoningDst) out.max_completion_tokens = ir.maxTokens;
+    if (useMaxCompletionTokens) out.max_completion_tokens = ir.maxTokens;
     else out.max_tokens = ir.maxTokens;
   }
   if (typeof ir.temperature === 'number' && !isReasoningDst) {
@@ -449,6 +453,18 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
   // separate surface that isn't a flag on the chat completions request.
 
   return JSON.stringify(out);
+}
+
+/**
+ * True for OpenAI reasoning models (o-series, GPT-5 family), which reject
+ * max_tokens and non-default temperature/top_p. Groups accept any model id,
+ * so besides the registry this matches the id itself, also behind
+ * OpenRouter's `openai/` prefix.
+ */
+function isOpenAIReasoningModel(model: string): boolean {
+  const entry = getModel(model);
+  if (entry?.family === 'openai' && entry.capabilities.reasoning) return true;
+  return /^(?:o\d|gpt-5)/i.test(model.replace(/^openai\//i, ''));
 }
 
 /**

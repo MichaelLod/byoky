@@ -301,3 +301,57 @@ describe('openaiAdapter stream parsing', () => {
     }
   });
 });
+
+describe('openaiAdapter.serializeRequest — reasoning models and max_completion_tokens', () => {
+  const ir: IRRequest = {
+    system: [],
+    messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+    maxTokens: 1024,
+    temperature: 0.3,
+    topP: 0.9,
+  };
+  const serialize = (overrides: Partial<TranslationContext>) =>
+    JSON.parse(openaiAdapter.serializeRequest(ctx(overrides), ir)) as Record<string, unknown>;
+
+  it.each(['gpt-5-mini', 'gpt-5.5-pro', 'gpt-5.5-2026-04-01', 'o3', 'o4-mini'])(
+    '%s gets max_completion_tokens and no sampling overrides',
+    (dstModel) => {
+      for (const dstProviderId of ['openai', undefined]) {
+        const out = serialize({ dstModel, dstProviderId });
+        expect(out.max_completion_tokens).toBe(1024);
+        expect(out).not.toHaveProperty('max_tokens');
+        expect(out).not.toHaveProperty('temperature');
+        expect(out).not.toHaveProperty('top_p');
+      }
+    },
+  );
+
+  it('a non-reasoning model on OpenAI gets max_completion_tokens and keeps sampling', () => {
+    const out = serialize({ dstModel: 'gpt-4.1', dstProviderId: 'openai' });
+    expect(out.max_completion_tokens).toBe(1024);
+    expect(out).not.toHaveProperty('max_tokens');
+    expect(out.temperature).toBe(0.3);
+    expect(out.top_p).toBe(0.9);
+  });
+
+  it('other hosts of the dialect keep max_tokens', () => {
+    const out = serialize({ dstModel: 'llama-3.3-70b-versatile', dstProviderId: 'groq' });
+    expect(out.max_tokens).toBe(1024);
+    expect(out).not.toHaveProperty('max_completion_tokens');
+    expect(out.temperature).toBe(0.3);
+  });
+
+  it('an OpenAI reasoning model behind OpenRouter keeps max_tokens but drops sampling', () => {
+    const out = serialize({ dstModel: 'openai/gpt-5', dstProviderId: 'openrouter' });
+    expect(out.max_tokens).toBe(1024);
+    expect(out).not.toHaveProperty('max_completion_tokens');
+    expect(out).not.toHaveProperty('temperature');
+    expect(out).not.toHaveProperty('top_p');
+  });
+
+  it('an unknown provider with a non-reasoning model keeps max_tokens', () => {
+    const out = serialize({ dstModel: 'gpt-4.1', dstProviderId: undefined });
+    expect(out.max_tokens).toBe(1024);
+    expect(out.temperature).toBe(0.3);
+  });
+});
