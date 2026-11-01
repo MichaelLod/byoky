@@ -11,6 +11,7 @@ import {
   rewriteToolNamesForClaudeCode,
 } from '../../../src/proxy-utils.js';
 import { isBridgeAvailable, runBridgeProxy } from './bridge-client.js';
+import { COLOR_PROMPT, RED_PNG_B64 } from './red-image.js';
 
 /**
  * Live OpenAI→Anthropic translation tests.
@@ -20,23 +21,39 @@ import { isBridgeAvailable, runBridgeProxy } from './bridge-client.js';
  * Anthropic shape, fetches Anthropic, translates the response back to
  * OpenAI shape, and verifies the SDK would receive a valid OpenAI reply.
  *
- * Skipped when ANTHROPIC_API_KEY is not set.
- *
  * ──────────────────────────────────────────────────────────────────────────
- *  Two auth modes are supported, picked by token format:
+ *  Each test runs once per auth mode whose credential is set:
  *
- *  - sk-ant-api03-... → regular API key. Sent via `x-api-key`. Direct fetch.
- *  - sk-ant-oat01-... → OAuth setup token. Cannot use x-api-key. Routed
+ *  - API key (ANTHROPIC_API_KEY, sk-ant-api03-...). Sent via `x-api-key`.
+ *    Direct fetch.
+ *  - Setup token (ANTHROPIC_SETUP_TOKEN, sk-ant-oat01-...; or an
+ *    ANTHROPIC_API_KEY that holds one). Cannot use x-api-key. Routed
  *    through the byoky bridge subprocess: build OAuth headers via
  *    buildHeaders(..., 'oauth'), inject the Claude Code system prompt,
  *    rewrite snake_case tool names to PascalCase, send through bridge
  *    native messaging, bridge does the fetch + reverse-rewrites tool
- *    names in response chunks. Requires `byoky-bridge` on PATH.
+ *    names in response chunks. Requires `byoky-bridge` on PATH. These
+ *    calls count against the Claude subscription behind the token.
  * ──────────────────────────────────────────────────────────────────────────
  */
 
-const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
-const IS_OAUTH = ANTHROPIC_KEY?.startsWith('sk-ant-oat01-') ?? false;
+const ENV_KEY = process.env.ANTHROPIC_API_KEY?.trim();
+const ENV_KEY_IS_SETUP_TOKEN = ENV_KEY?.startsWith('sk-ant-oat') ?? false;
+
+interface AuthMode {
+  name: string;
+  credential: string | undefined;
+  oauth: boolean;
+}
+
+const AUTH_MODES: AuthMode[] = [
+  { name: 'API key', credential: ENV_KEY_IS_SETUP_TOKEN ? undefined : ENV_KEY, oauth: false },
+  {
+    name: 'setup token via the bridge',
+    credential: process.env.ANTHROPIC_SETUP_TOKEN?.trim() || (ENV_KEY_IS_SETUP_TOKEN ? ENV_KEY : undefined),
+    oauth: true,
+  },
+];
 
 const DST_MODEL = 'claude-haiku-4-5-20251001';
 const SRC_MODEL = 'gpt-5.4-nano';
@@ -66,14 +83,6 @@ function bridgeAvailable(): Promise<boolean> {
 
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 
-const API_KEY_HEADERS = ANTHROPIC_KEY
-  ? {
-      'x-api-key': ANTHROPIC_KEY,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-    }
-  : ({} as Record<string, string>);
-
 /**
  * Send the prepared Anthropic request body to api.anthropic.com using the
  * appropriate auth path for the credential type. For OAuth setup tokens,
@@ -84,12 +93,12 @@ const API_KEY_HEADERS = ANTHROPIC_KEY
  * (JSON string for non-streaming, raw SSE text for streaming).
  */
 async function callAnthropic(
+  mode: AuthMode,
   anthropicBody: string,
-  isStreaming: boolean,
 ): Promise<{ status: number; headers: Record<string, string>; body: string }> {
-  if (IS_OAUTH) {
+  if (mode.oauth) {
     // Build OAuth-style headers (Bearer + Claude Code beta flags + UA spoof).
-    const oauthHeaders = buildHeaders('anthropic', { 'content-type': 'application/json' }, ANTHROPIC_KEY!, 'oauth');
+    const oauthHeaders = buildHeaders('anthropic', { 'content-type': 'application/json' }, mode.credential!, 'oauth');
     // For setup tokens, byoky must inject the Claude Code system prompt
     // (relocateExisting=true relocates any existing system content into
     // the first user message, which is what we need when the request
@@ -110,7 +119,11 @@ async function callAnthropic(
   // API key path: direct fetch.
   const response = await fetch(ANTHROPIC_API_URL, {
     method: 'POST',
-    headers: API_KEY_HEADERS,
+    headers: {
+      'x-api-key': mode.credential!,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+    },
     body: anthropicBody,
   });
   const headers: Record<string, string> = {};
@@ -127,207 +140,205 @@ async function callAnthropic(
  * decisions in `it.skipIf` at definition time, which is too early for an
  * async bridge check, so we use the runtime `t.skip()` API instead.
  */
-async function skipIfOAuthBridgeMissing(t: { skip(reason?: string): void }): Promise<boolean> {
-  if (!IS_OAUTH) return false;
+async function skipIfOAuthBridgeMissing(mode: AuthMode, t: { skip(reason?: string): void }): Promise<boolean> {
+  if (!mode.oauth) return false;
   if (await bridgeAvailable()) return false;
   t.skip('OAuth setup token requires byoky-bridge on PATH (npm install -g @byoky/bridge)');
   return true;
 }
 
-describe.skipIf(!ANTHROPIC_KEY)('live openai→anthropic — non-streaming chat', () => {
-  it('translates a simple chat turn end-to-end', async (t) => {
-    if (await skipIfOAuthBridgeMissing(t)) return;
-    const c = ctx();
-    const openAIRequest = {
-      model: SRC_MODEL,
-      messages: [{ role: 'user', content: 'Reply with exactly the word "ok" and nothing else.' }],
-      max_tokens: 10,
-    };
+for (const mode of AUTH_MODES) {
+  describe.skipIf(!mode.credential)(`live openai→anthropic (${mode.name}) — non-streaming chat`, () => {
+    it('translates a simple chat turn end-to-end', async (t) => {
+      if (await skipIfOAuthBridgeMissing(mode, t)) return;
+      const c = ctx();
+      const openAIRequest = {
+        model: SRC_MODEL,
+        messages: [{ role: 'user', content: 'Reply with exactly the word "ok" and nothing else.' }],
+        max_tokens: 10,
+      };
 
-    const anthropicBody = translateRequest(c, JSON.stringify(openAIRequest));
-    const { status, body: anthropicText } = await callAnthropic(anthropicBody, false);
-    expect(status).toBe(200);
+      const anthropicBody = translateRequest(c, JSON.stringify(openAIRequest));
+      const { status, body: anthropicText } = await callAnthropic(mode, anthropicBody);
+      expect(status).toBe(200);
 
-    const translated = translateResponse(c, anthropicText);
-    const parsed = JSON.parse(translated) as {
-      object: string;
-      model: string;
-      choices: Array<{
-        message: { role: string; content: string | null; tool_calls?: unknown };
-        finish_reason: string;
-      }>;
-      usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
-    };
+      const translated = translateResponse(c, anthropicText);
+      const parsed = JSON.parse(translated) as {
+        object: string;
+        model: string;
+        choices: Array<{
+          message: { role: string; content: string | null; tool_calls?: unknown };
+          finish_reason: string;
+        }>;
+        usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+      };
 
-    expect(parsed.object).toBe('chat.completion');
-    expect(parsed.model).toBe(SRC_MODEL);
-    expect(parsed.choices).toHaveLength(1);
-    expect(parsed.choices[0].message.role).toBe('assistant');
-    expect((parsed.choices[0].message.content ?? '').length).toBeGreaterThan(0);
-    expect(['stop', 'length', 'tool_calls']).toContain(parsed.choices[0].finish_reason);
-    expect(parsed.usage.prompt_tokens).toBeGreaterThan(0);
-    expect(parsed.usage.completion_tokens).toBeGreaterThan(0);
-    expect(parsed.usage.total_tokens).toBe(parsed.usage.prompt_tokens + parsed.usage.completion_tokens);
-  }, 30_000);
-});
+      expect(parsed.object).toBe('chat.completion');
+      expect(parsed.model).toBe(SRC_MODEL);
+      expect(parsed.choices).toHaveLength(1);
+      expect(parsed.choices[0].message.role).toBe('assistant');
+      expect((parsed.choices[0].message.content ?? '').length).toBeGreaterThan(0);
+      expect(['stop', 'length', 'tool_calls']).toContain(parsed.choices[0].finish_reason);
+      expect(parsed.usage.prompt_tokens).toBeGreaterThan(0);
+      expect(parsed.usage.completion_tokens).toBeGreaterThan(0);
+      expect(parsed.usage.total_tokens).toBe(parsed.usage.prompt_tokens + parsed.usage.completion_tokens);
+    }, 30_000);
+  });
 
-describe.skipIf(!ANTHROPIC_KEY)('live openai→anthropic — streaming chat', () => {
-  it('translates an SSE stream end-to-end', async (t) => {
-    if (await skipIfOAuthBridgeMissing(t)) return;
-    const c = ctx({ isStreaming: true });
-    const openAIRequest = {
-      model: SRC_MODEL,
-      messages: [{ role: 'user', content: 'Count to three. One word per response.' }],
-      max_tokens: 30,
-      stream: true,
-    };
+  describe.skipIf(!mode.credential)(`live openai→anthropic (${mode.name}) — streaming chat`, () => {
+    it('translates an SSE stream end-to-end', async (t) => {
+      if (await skipIfOAuthBridgeMissing(mode, t)) return;
+      const c = ctx({ isStreaming: true });
+      const openAIRequest = {
+        model: SRC_MODEL,
+        messages: [{ role: 'user', content: 'Count to three. One word per response.' }],
+        max_tokens: 30,
+        stream: true,
+      };
 
-    const anthropicBody = translateRequest(c, JSON.stringify(openAIRequest));
-    const { status, headers, body: rawSSE } = await callAnthropic(anthropicBody, true);
-    expect(status).toBe(200);
-    expect(headers['content-type'] ?? '').toContain('text/event-stream');
+      const anthropicBody = translateRequest(c, JSON.stringify(openAIRequest));
+      const { status, headers, body: rawSSE } = await callAnthropic(mode, anthropicBody);
+      expect(status).toBe(200);
+      expect(headers['content-type'] ?? '').toContain('text/event-stream');
 
-    // Feed the entire buffered SSE body through the translator in one shot
-    // (the stream translator handles arbitrary buffering boundaries internally).
-    const streamer = createStreamTranslator(c);
-    let translated = streamer.process(rawSSE);
-    translated += streamer.flush();
+      // Feed the entire buffered SSE body through the translator in one shot
+      // (the stream translator handles arbitrary buffering boundaries internally).
+      const streamer = createStreamTranslator(c);
+      let translated = streamer.process(rawSSE);
+      translated += streamer.flush();
 
-    // Parse the OpenAI-style SSE output: each frame is `data: <json>\n\n` or `data: [DONE]`.
-    const dataLines = translated.split('\n').filter((l) => l.startsWith('data: '));
-    const chunks: Array<Record<string, unknown> | '[DONE]'> = dataLines.map((l) => {
-      const payload = l.slice(6);
-      return payload === '[DONE]' ? '[DONE]' : (JSON.parse(payload) as Record<string, unknown>);
-    });
+      // Parse the OpenAI-style SSE output: each frame is `data: <json>\n\n` or `data: [DONE]`.
+      const dataLines = translated.split('\n').filter((l) => l.startsWith('data: '));
+      const chunks: Array<Record<string, unknown> | '[DONE]'> = dataLines.map((l) => {
+        const payload = l.slice(6);
+        return payload === '[DONE]' ? '[DONE]' : (JSON.parse(payload) as Record<string, unknown>);
+      });
 
-    expect(chunks.length).toBeGreaterThan(3);
-    expect(chunks[chunks.length - 1]).toBe('[DONE]');
+      expect(chunks.length).toBeGreaterThan(3);
+      expect(chunks[chunks.length - 1]).toBe('[DONE]');
 
-    // Find the role-establishing chunk
-    const firstChunk = chunks.find((c) => c !== '[DONE]') as Record<string, unknown>;
-    expect(firstChunk.object).toBe('chat.completion.chunk');
-    expect(firstChunk.model).toBe(SRC_MODEL);
+      // Find the role-establishing chunk
+      const firstChunk = chunks.find((c) => c !== '[DONE]') as Record<string, unknown>;
+      expect(firstChunk.object).toBe('chat.completion.chunk');
+      expect(firstChunk.model).toBe(SRC_MODEL);
 
-    // Concatenate all content deltas — should yield non-empty text.
-    const text = (chunks.filter((c) => c !== '[DONE]') as Array<Record<string, unknown>>)
-      .map((c) => {
-        const choices = c.choices as Array<{ delta?: { content?: string } }> | undefined;
-        return choices?.[0]?.delta?.content;
-      })
-      .filter((t): t is string => typeof t === 'string')
-      .join('');
-    expect(text.length).toBeGreaterThan(0);
+      // Concatenate all content deltas — should yield non-empty text.
+      const text = (chunks.filter((c) => c !== '[DONE]') as Array<Record<string, unknown>>)
+        .map((c) => {
+          const choices = c.choices as Array<{ delta?: { content?: string } }> | undefined;
+          return choices?.[0]?.delta?.content;
+        })
+        .filter((t): t is string => typeof t === 'string')
+        .join('');
+      expect(text.length).toBeGreaterThan(0);
 
-    // Last non-DONE chunk has finish_reason and (if include_usage worked) usage.
-    const lastChunkBeforeDone = (chunks.filter((c) => c !== '[DONE]') as Array<Record<string, unknown>>).pop();
-    expect(lastChunkBeforeDone).toBeDefined();
-    const usage = (lastChunkBeforeDone as { usage?: { prompt_tokens?: number; completion_tokens?: number } }).usage;
-    expect(usage).toBeDefined();
-    expect(usage!.prompt_tokens).toBeGreaterThan(0);
-    expect(usage!.completion_tokens).toBeGreaterThan(0);
-  }, 30_000);
-});
+      // Last non-DONE chunk has finish_reason and (if include_usage worked) usage.
+      const lastChunkBeforeDone = (chunks.filter((c) => c !== '[DONE]') as Array<Record<string, unknown>>).pop();
+      expect(lastChunkBeforeDone).toBeDefined();
+      const usage = (lastChunkBeforeDone as { usage?: { prompt_tokens?: number; completion_tokens?: number } }).usage;
+      expect(usage).toBeDefined();
+      expect(usage!.prompt_tokens).toBeGreaterThan(0);
+      expect(usage!.completion_tokens).toBeGreaterThan(0);
+    }, 30_000);
+  });
 
-/** Tiny 1×1 red PNG as base64 — minimal image payload for vision tests. */
-const TINY_PNG_B64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAIAAAD/gAIDAAABFUlEQVR4nO3OUQkAIABEsetfWiv4Nx4IC7Cd7XvkByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIReeLesrH9s1agAAAABJRU5ErkJggg==';
+  describe.skipIf(!mode.credential)(`live openai→anthropic (${mode.name}) — vision (image)`, () => {
+    it('translates an image request end-to-end', async (t) => {
+      if (await skipIfOAuthBridgeMissing(mode, t)) return;
+      const c = ctx();
+      const openAIRequest = {
+        model: SRC_MODEL,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: COLOR_PROMPT },
+              { type: 'image_url', image_url: { url: `data:image/png;base64,${RED_PNG_B64}` } },
+            ],
+          },
+        ],
+        max_tokens: 20,
+      };
 
-describe.skipIf(!ANTHROPIC_KEY)('live openai→anthropic — vision (image)', () => {
-  it('translates an image request end-to-end', async (t) => {
-    if (await skipIfOAuthBridgeMissing(t)) return;
-    const c = ctx();
-    const openAIRequest = {
-      model: SRC_MODEL,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: 'What color is this single-pixel image? Reply with one word.' },
-            { type: 'image_url', image_url: { url: `data:image/png;base64,${TINY_PNG_B64}` } },
-          ],
-        },
-      ],
-      max_tokens: 20,
-    };
+      const anthropicBody = translateRequest(c, JSON.stringify(openAIRequest));
+      // The translated body must contain the base64 data (image survived translation).
+      expect(anthropicBody).toContain(RED_PNG_B64);
 
-    const anthropicBody = translateRequest(c, JSON.stringify(openAIRequest));
-    // The translated body must contain the base64 data (image survived translation).
-    expect(anthropicBody).toContain(TINY_PNG_B64);
+      const { status, body: anthropicText } = await callAnthropic(mode, anthropicBody);
+      expect(status).toBe(200);
 
-    const { status, body: anthropicText } = await callAnthropic(anthropicBody, false);
-    expect(status).toBe(200);
+      const translated = translateResponse(c, anthropicText);
+      const parsed = JSON.parse(translated) as {
+        object: string;
+        model: string;
+        choices: Array<{
+          message: { role: string; content: string | null };
+          finish_reason: string;
+        }>;
+      };
 
-    const translated = translateResponse(c, anthropicText);
-    const parsed = JSON.parse(translated) as {
-      object: string;
-      model: string;
-      choices: Array<{
-        message: { role: string; content: string | null };
-        finish_reason: string;
-      }>;
-    };
+      expect(parsed.object).toBe('chat.completion');
+      expect(parsed.model).toBe(SRC_MODEL);
+      expect(parsed.choices).toHaveLength(1);
+      expect(parsed.choices[0].message.role).toBe('assistant');
+      expect((parsed.choices[0].message.content ?? '').toLowerCase()).toContain('red');
+    }, 30_000);
+  });
 
-    expect(parsed.object).toBe('chat.completion');
-    expect(parsed.model).toBe(SRC_MODEL);
-    expect(parsed.choices).toHaveLength(1);
-    expect(parsed.choices[0].message.role).toBe('assistant');
-    expect((parsed.choices[0].message.content ?? '').length).toBeGreaterThan(0);
-  }, 30_000);
-});
-
-describe.skipIf(!ANTHROPIC_KEY)('live openai→anthropic — tool use', () => {
-  it('translates a tool-use round trip', async (t) => {
-    if (await skipIfOAuthBridgeMissing(t)) return;
-    const c = ctx();
-    const openAIRequest = {
-      model: SRC_MODEL,
-      messages: [{ role: 'user', content: 'Use the get_weather tool to look up the weather for Tokyo.' }],
-      max_tokens: 200,
-      tools: [
-        {
-          type: 'function',
-          function: {
-            name: 'get_weather',
-            description: 'Get the current weather for a city.',
-            parameters: {
-              type: 'object',
-              properties: { city: { type: 'string', description: 'City name' } },
-              required: ['city'],
+  describe.skipIf(!mode.credential)(`live openai→anthropic (${mode.name}) — tool use`, () => {
+    it('translates a tool-use round trip', async (t) => {
+      if (await skipIfOAuthBridgeMissing(mode, t)) return;
+      const c = ctx();
+      const openAIRequest = {
+        model: SRC_MODEL,
+        messages: [{ role: 'user', content: 'Use the get_weather tool to look up the weather for Tokyo.' }],
+        max_tokens: 200,
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'get_weather',
+              description: 'Get the current weather for a city.',
+              parameters: {
+                type: 'object',
+                properties: { city: { type: 'string', description: 'City name' } },
+                required: ['city'],
+              },
             },
           },
-        },
-      ],
-      tool_choice: 'auto',
-    };
+        ],
+        tool_choice: 'auto',
+      };
 
-    const anthropicBody = translateRequest(c, JSON.stringify(openAIRequest));
-    const { status, body: anthropicText } = await callAnthropic(anthropicBody, false);
-    expect(status).toBe(200);
+      const anthropicBody = translateRequest(c, JSON.stringify(openAIRequest));
+      const { status, body: anthropicText } = await callAnthropic(mode, anthropicBody);
+      expect(status).toBe(200);
 
-    const translated = translateResponse(c, anthropicText);
-    const parsed = JSON.parse(translated) as {
-      object: string;
-      choices: Array<{
-        message: {
-          role: string;
-          content: string | null;
-          tool_calls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }>;
-        };
-        finish_reason: string;
-      }>;
-    };
+      const translated = translateResponse(c, anthropicText);
+      const parsed = JSON.parse(translated) as {
+        object: string;
+        choices: Array<{
+          message: {
+            role: string;
+            content: string | null;
+            tool_calls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }>;
+          };
+          finish_reason: string;
+        }>;
+      };
 
-    expect(parsed.object).toBe('chat.completion');
-    const choice = parsed.choices[0];
-    expect(choice.message.role).toBe('assistant');
-    expect(choice.message.tool_calls).toBeDefined();
-    expect(choice.message.tool_calls!.length).toBeGreaterThan(0);
-    const tc = choice.message.tool_calls![0];
-    expect(tc.type).toBe('function');
-    expect(tc.function.name).toBe('get_weather');
-    expect(tc.id).toBeTruthy();
-    const args = JSON.parse(tc.function.arguments) as { city?: string };
-    expect(args.city).toBeTruthy();
-    expect(choice.finish_reason).toBe('tool_calls');
-  }, 30_000);
-});
+      expect(parsed.object).toBe('chat.completion');
+      const choice = parsed.choices[0];
+      expect(choice.message.role).toBe('assistant');
+      expect(choice.message.tool_calls).toBeDefined();
+      expect(choice.message.tool_calls!.length).toBeGreaterThan(0);
+      const tc = choice.message.tool_calls![0];
+      expect(tc.type).toBe('function');
+      expect(tc.function.name).toBe('get_weather');
+      expect(tc.id).toBeTruthy();
+      const args = JSON.parse(tc.function.arguments) as { city?: string };
+      expect(args.city).toBeTruthy();
+      expect(choice.finish_reason).toBe('tool_calls');
+    }, 30_000);
+  });
+}

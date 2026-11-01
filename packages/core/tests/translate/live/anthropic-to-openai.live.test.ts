@@ -5,6 +5,7 @@ import {
   createStreamTranslator,
 } from '../../../src/translate/index.js';
 import type { TranslationContext } from '../../../src/translate/types.js';
+import { COLOR_PROMPT, RED_PNG_B64 } from './red-image.js';
 
 /**
  * Live Anthropic→OpenAI translation tests via the canonical IR dispatch.
@@ -148,10 +149,6 @@ describe.skipIf(!OPENAI_KEY)('live anthropic→openai — streaming chat', () =>
   }, 30_000);
 });
 
-/** Tiny 1×1 red PNG as base64 — minimal image payload for vision tests. */
-const TINY_PNG_B64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAIAAAD/gAIDAAABFUlEQVR4nO3OUQkAIABEsetfWiv4Nx4IC7Cd7XvkByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIReeLesrH9s1agAAAABJRU5ErkJggg==';
-
 describe.skipIf(!OPENAI_KEY)('live anthropic→openai — vision (image)', () => {
   it('translates an image request end-to-end', async () => {
     const c = ctx();
@@ -162,10 +159,10 @@ describe.skipIf(!OPENAI_KEY)('live anthropic→openai — vision (image)', () =>
         {
           role: 'user',
           content: [
-            { type: 'text', text: 'What color is this single-pixel image? Reply with one word.' },
+            { type: 'text', text: COLOR_PROMPT },
             {
               type: 'image',
-              source: { type: 'base64', media_type: 'image/png', data: TINY_PNG_B64 },
+              source: { type: 'base64', media_type: 'image/png', data: RED_PNG_B64 },
             },
           ],
         },
@@ -174,7 +171,7 @@ describe.skipIf(!OPENAI_KEY)('live anthropic→openai — vision (image)', () =>
 
     const openAIBody = translateRequest(c, JSON.stringify(anthropicRequest));
     // The translated body must contain the base64 data (image survived translation).
-    expect(openAIBody).toContain(TINY_PNG_B64);
+    expect(openAIBody).toContain(RED_PNG_B64);
 
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -199,7 +196,7 @@ describe.skipIf(!OPENAI_KEY)('live anthropic→openai — vision (image)', () =>
     expect(parsed.content.length).toBeGreaterThan(0);
     const text = parsed.content.find((b) => b.type === 'text');
     expect(text).toBeDefined();
-    expect((text!.text ?? '').length).toBeGreaterThan(0);
+    expect((text!.text ?? '').toLowerCase()).toContain('red');
   }, 30_000);
 });
 

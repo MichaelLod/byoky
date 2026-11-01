@@ -5,6 +5,7 @@ import {
   createStreamTranslator,
 } from '../../../src/translate/index.js';
 import type { TranslationContext } from '../../../src/translate/types.js';
+import { COLOR_PROMPT, RED_PNG_B64 } from './red-image.js';
 
 /**
  * Live Cohere v2 tests via the canonical IR dispatch.
@@ -17,6 +18,9 @@ const COHERE_KEY = process.env.COHERE_API_KEY;
 
 const COHERE_DST_MODEL = 'command-a-03-2025';
 const COHERE_URL = 'https://api.cohere.com/v2/chat';
+// Command A often takes tens of seconds for a few tokens (one plain call
+// took 62 s on 2026-11-01).
+const COHERE_TIMEOUT = 90_000;
 
 function ctx(streaming = false): TranslationContext {
   return {
@@ -75,7 +79,7 @@ describe.skipIf(!COHERE_KEY)('live openai→cohere — non-streaming chat', () =
     expect((parsed.choices[0].message.content ?? '').length).toBeGreaterThan(0);
     expect(parsed.usage.prompt_tokens).toBeGreaterThan(0);
     expect(parsed.usage.completion_tokens).toBeGreaterThan(0);
-  }, 30_000);
+  }, COHERE_TIMEOUT);
 });
 
 describe.skipIf(!COHERE_KEY)('live openai→cohere — streaming chat', () => {
@@ -124,12 +128,8 @@ describe.skipIf(!COHERE_KEY)('live openai→cohere — streaming chat', () => {
       .filter((t): t is string => typeof t === 'string')
       .join('');
     expect(text.length).toBeGreaterThan(0);
-  }, 30_000);
+  }, COHERE_TIMEOUT);
 });
-
-/** Tiny 1×1 red PNG as base64 — minimal image payload for vision tests. */
-const TINY_PNG_B64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAIAAAD/gAIDAAABFUlEQVR4nO3OUQkAIABEsetfWiv4Nx4IC7Cd7XvkByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIReeLesrH9s1agAAAABJRU5ErkJggg==';
 
 describe.skipIf(!COHERE_KEY)('live openai→cohere — vision (image)', () => {
   // command-a-03-2025 does not support image inputs (vision: false in our
@@ -143,8 +143,8 @@ describe.skipIf(!COHERE_KEY)('live openai→cohere — vision (image)', () => {
         {
           role: 'user',
           content: [
-            { type: 'text', text: 'What color is this single-pixel image? Reply with one word.' },
-            { type: 'image_url', image_url: { url: `data:image/png;base64,${TINY_PNG_B64}` } },
+            { type: 'text', text: COLOR_PROMPT },
+            { type: 'image_url', image_url: { url: `data:image/png;base64,${RED_PNG_B64}` } },
           ],
         },
       ],
@@ -152,8 +152,8 @@ describe.skipIf(!COHERE_KEY)('live openai→cohere — vision (image)', () => {
     };
 
     const cohereBody = translateRequest(c, JSON.stringify(openaiRequest));
-    expect(cohereBody).toContain(TINY_PNG_B64);
-    expect(cohereBody).toContain('What color');
+    expect(cohereBody).toContain(RED_PNG_B64);
+    expect(cohereBody).toContain(COLOR_PROMPT);
     const parsed = JSON.parse(cohereBody) as Record<string, unknown>;
     expect(parsed.model).toBe(COHERE_DST_MODEL);
   });
@@ -214,5 +214,5 @@ describe.skipIf(!COHERE_KEY)('live openai→cohere — tool use', () => {
     const args = JSON.parse(tc.function.arguments) as { city?: string };
     expect(args.city).toBeTruthy();
     expect(choice.finish_reason).toBe('tool_calls');
-  }, 30_000);
+  }, COHERE_TIMEOUT);
 });

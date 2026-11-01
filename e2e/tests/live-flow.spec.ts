@@ -80,6 +80,12 @@ async function connectFromPage(w: Wallet, providers: string[]) {
   if (!state.connected) throw new Error(`connect failed: ${state.error}`);
 }
 
+// How long to wait for a proxied call to settle: past the test page's own
+// 120 s Byoky timeout, so a slow provider ends as the page's error rather
+// than as a bare wait timeout. (The test's own timeout, 180 s live and 60 s
+// against the fakes, still applies.)
+const CALL_TIMEOUT = 150_000;
+
 async function sendFromPage(w: Wallet, method: 'sendAnthropic' | 'sendOpenAI' | 'sendGemini'): Promise<{ response: unknown; proxyError: { status?: number; code?: string; message?: string } | null }> {
   await w.page.bringToFront();
   await w.page.evaluate((m) => {
@@ -93,7 +99,7 @@ async function sendFromPage(w: Wallet, method: 'sendAnthropic' | 'sendOpenAI' | 
       const s = (window as unknown as { _testState: { response: unknown; proxyError: unknown } })._testState;
       return s.response != null || s.proxyError != null;
     },
-    { timeout: 60_000 },
+    { timeout: CALL_TIMEOUT },
   );
   return w.page.evaluate(() => ({
     response: (window as unknown as { _testState: { response: unknown } })._testState.response,
@@ -202,7 +208,7 @@ test.describe('Byoky end-to-end flow', () => {
         const s = (window as unknown as { _testState: { streamed: unknown; proxyError: unknown } })._testState;
         return s.streamed != null || s.proxyError != null;
       },
-      { timeout: 60_000 },
+      { timeout: CALL_TIMEOUT },
     );
     const state = await walletA.page.evaluate(() => ({
       streamed: (window as unknown as { _testState: { streamed: { text: string; chunks: number; rawLength: number } | null } })._testState.streamed,

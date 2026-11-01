@@ -5,6 +5,7 @@ import {
   createStreamTranslator,
 } from '../../../src/translate/index.js';
 import type { TranslationContext } from '../../../src/translate/types.js';
+import { COLOR_PROMPT, RED_PNG_B64 } from './red-image.js';
 
 /**
  * Live Gemini tests via the canonical IR dispatch.
@@ -215,10 +216,6 @@ describe.skipIf(!GEMINI_KEY)('live anthropic→gemini — tool use', () => {
   }, GEMINI_TIMEOUT);
 });
 
-/** Tiny 1×1 red PNG as base64 — minimal image payload for vision tests. */
-const TINY_PNG_B64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAIAAAD/gAIDAAABFUlEQVR4nO3OUQkAIABEsetfWiv4Nx4IC7Cd7XvkByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIX4Q4gchfhDiByF+EOIHIReeLesrH9s1agAAAABJRU5ErkJggg==';
-
 describe.skipIf(!GEMINI_KEY)('live anthropic→gemini — vision (image)', () => {
   it('translates an image request end-to-end', async () => {
     const c = anthropicToGeminiCtx(false);
@@ -229,10 +226,10 @@ describe.skipIf(!GEMINI_KEY)('live anthropic→gemini — vision (image)', () =>
         {
           role: 'user',
           content: [
-            { type: 'text', text: 'What color is this single-pixel image? Reply with one word.' },
+            { type: 'text', text: COLOR_PROMPT },
             {
               type: 'image',
-              source: { type: 'base64', media_type: 'image/png', data: TINY_PNG_B64 },
+              source: { type: 'base64', media_type: 'image/png', data: RED_PNG_B64 },
             },
           ],
         },
@@ -241,7 +238,7 @@ describe.skipIf(!GEMINI_KEY)('live anthropic→gemini — vision (image)', () =>
 
     const geminiBody = translateRequest(c, JSON.stringify(anthropicRequest));
     // The translated body must contain the base64 data (image survived translation).
-    expect(geminiBody).toContain(TINY_PNG_B64);
+    expect(geminiBody).toContain(RED_PNG_B64);
 
     const url = `${GEMINI_BASE}/v1beta/models/${GEMINI_DST_MODEL}:generateContent`;
     const response = await fetch(url, {
@@ -265,7 +262,7 @@ describe.skipIf(!GEMINI_KEY)('live anthropic→gemini — vision (image)', () =>
     expect(parsed.content.length).toBeGreaterThan(0);
     const text = parsed.content.find((b) => b.type === 'text');
     expect(text).toBeDefined();
-    expect((text!.text ?? '').length).toBeGreaterThan(0);
+    expect((text!.text ?? '').toLowerCase()).toContain('red');
   }, GEMINI_TIMEOUT);
 });
 
