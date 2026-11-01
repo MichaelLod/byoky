@@ -30,7 +30,7 @@ One command to open the wallet, approve a session, and start the HTTP proxy on `
 byoky-bridge connect
 ```
 
-It opens a browser tab on an ephemeral loopback port, runs the Byoky SDK connect flow, and asks the extension to open the proxy. Once you approve in the Byoky popup the CLI prints:
+It opens a browser tab on `http://127.0.0.1:19281`, runs the Byoky SDK connect flow, and asks the extension to open the proxy. The page's port stays the same on every run, so the wallet keeps treating it as the same app, with the same spending cap and routing group. Once you approve in the Byoky popup the CLI prints:
 
 ```
 ✓ Bridge listening on http://127.0.0.1:19280
@@ -55,6 +55,8 @@ Options:
 byoky-bridge connect --port 19280 --providers anthropic
 # comma-separated for multi-provider:
 byoky-bridge connect --providers anthropic,openai
+# serve the approval page on another port (the wallet sees a new app):
+byoky-bridge connect --handshake-port 19291
 ```
 
 ## Bridge token

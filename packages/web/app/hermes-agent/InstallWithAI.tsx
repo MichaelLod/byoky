@@ -24,7 +24,7 @@ Your job — run these commands on my machine and report each step:
 
 3. Start the bridge proxy by connecting my wallet:
      byoky-bridge connect
-   A browser tab opens on http://127.0.0.1:<ephemeral>, I click "Connect wallet", approve the session in the Byoky popup, and the CLI reports "Bridge listening on http://127.0.0.1:19280". After a browser restart, re-run \`byoky-bridge connect\`.
+   A browser tab opens on http://127.0.0.1:19281, I click "Connect wallet", approve the session in the Byoky popup, and the CLI reports "Bridge listening on http://127.0.0.1:19280". After a browser restart, re-run \`byoky-bridge connect\`.
 
 4. Verify the bridge is up and Anthropic is in the provider list. The bridge only answers clients that send its token (a random secret in ~/.byoky-bridge/token), so pass it via substitution:
      curl -H "x-api-key: $(byoky-bridge token)" http://127.0.0.1:19280/health

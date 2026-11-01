@@ -125,7 +125,7 @@ byoky-bridge install`}</Code>
         >
           <Code>{`byoky-bridge connect`}</Code>
           <p>
-            A browser tab opens on <code>http://127.0.0.1:&lt;ephemeral&gt;</code>.
+            A browser tab opens on <code>http://127.0.0.1:19281</code>.
             Click <strong>Connect wallet</strong>, approve the session in the
             Byoky popup, and the tab reports success. The bridge is now
             listening on <code>127.0.0.1:19280</code> and stays up as long as
