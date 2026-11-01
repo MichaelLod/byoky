@@ -13,8 +13,9 @@ import { FloatingActionMenu } from './components/FloatingActionMenu';
 import { Raven } from './components/Raven';
 
 export default function App() {
-  const { currentPage, modal, sessions, credentials, pendingApprovals, loading, init, closeModal } = useWalletStore();
+  const { currentPage, modal, sessions, credentials, pendingApprovals, loading, isUnlocked, init, closeModal } = useWalletStore();
   const justUnlocked = useJustUnlocked(currentPage, loading);
+  useActivityPing(isUnlocked);
 
   useEffect(() => {
     init();
@@ -219,6 +220,36 @@ function PageFailed() {
       </div>
     </div>
   );
+}
+
+// Well under the background's 20-minute idle lock, and few enough messages.
+const ACTIVITY_PING_MS = 30_000;
+
+/**
+ * Tell the background the user is working in the wallet, so the idle
+ * auto-lock doesn't fire mid-task (say, while typing a new key). Only clicks,
+ * taps and keys count; refreshes the background triggers don't.
+ */
+function useActivityPing(unlocked: boolean) {
+  useEffect(() => {
+    if (!unlocked) return;
+    let lastSent = 0;
+    function onActivity() {
+      const now = Date.now();
+      if (now - lastSent < ACTIVITY_PING_MS) return;
+      lastSent = now;
+      Promise.resolve(
+        browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'userActivity' }),
+      ).catch(() => {});
+    }
+    // Capture phase, so controls that stop propagation still count.
+    document.addEventListener('pointerdown', onActivity, true);
+    document.addEventListener('keydown', onActivity, true);
+    return () => {
+      document.removeEventListener('pointerdown', onActivity, true);
+      document.removeEventListener('keydown', onActivity, true);
+    };
+  }, [unlocked]);
 }
 
 /**
