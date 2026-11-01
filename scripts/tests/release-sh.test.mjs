@@ -87,7 +87,7 @@ const wait = process.env.ASC_BUILD_WAIT_MIN
 appendFileSync(process.env.CALLS, \`submit-appstore.mjs \${version} \${platform} wait=\${wait}\\n\`)
 process.exitCode = Number(process.env[\`STUB_ASC_\${platform}_\${wait === '0' ? 'QUICK' : 'WAIT'}\`] ?? 0)
 `)
-  for (const name of real) copyFileSync(join(SCRIPTS, name), join(work, 'scripts', name))
+  for (const name of ['ios-unit-tests.sh', ...real]) copyFileSync(join(SCRIPTS, name), join(work, 'scripts', name))
   write(join(work, 'scripts/ios-signing.sh'), logArgs('ios-signing.sh') + 'exit "${STUB_SIGNING_EXIT:-0}"\n')
   write(join(work, 'scripts/sync-mobile-bundle.sh'), logArgs('sync-mobile-bundle.sh'))
   write(join(work, 'scripts/scan-openclaw-plugin.mjs'), '')
@@ -368,7 +368,8 @@ test('the tests run before anything is bumped, the native ones included', (t) =>
     assert.ok(i > at, `${step} missing or out of order:\n${r.calls}`)
     at = i
   }
-  assert.match(r.calls, /xcodebuild test -project packages\/ios\/Byoky\.xcodeproj -scheme Byoky -only-testing:ByokyTests -destination id=UDID-1 .*CODE_SIGN_IDENTITY=- /)
+  // scripts/ios-unit-tests.sh: boots the simulator before the tests.
+  assert.match(r.calls, /xcrun simctl bootstatus UDID-1 -b\nxcodebuild test -project packages\/ios\/Byoky\.xcodeproj -scheme Byoky -only-testing:ByokyTests -destination id=UDID-1 .*CODE_SIGN_IDENTITY=- /)
   assert.match(r.calls, /xcrun simctl delete UDID-1/)
 
   const skipped = s.run(['1.1.2', '--dry', '--skip-native-tests'])

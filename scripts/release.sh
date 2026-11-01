@@ -106,33 +106,13 @@ check_source_zip() {
   return "$rc"
 }
 
-# The iOS unit tests (ByokyTests) on a simulator of their own, deleted
-# afterwards. Ad-hoc signing, not CODE_SIGNING_ALLOWED=NO: the keychain tests
-# need their entitlements.
+# The iOS unit tests (ByokyTests) on a booted simulator of their own, deleted
+# afterwards (scripts/ios-unit-tests.sh, which CI runs too).
 run_ios_tests() {
-  local pick udid rc=0
   # The Byoky scheme builds the Safari extension, which bundles the WXT build.
   (cd packages/extension && npx wxt build --browser safari) || return 1
   bash packages/ios/Scripts/copy-wxt-output.sh || return 1
-  pick=$(xcrun simctl list runtimes -j | node -e '
-    const runtimes = JSON.parse(require("fs").readFileSync(0)).runtimes
-      .filter((r) => r.platform === "iOS" && r.isAvailable)
-      .sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }))
-    const phone = runtimes[0]?.supportedDeviceTypes?.filter((d) => d.productFamily === "iPhone").pop()
-    if (phone) console.log(runtimes[0].identifier, phone.identifier)
-  ') || return 1
-  if [ -z "$pick" ]; then echo "  No iOS simulator runtime with an iPhone is installed"; return 1; fi
-  udid=$(xcrun simctl create "byoky-release-tests-$$" "${pick#* }" "${pick%% *}") || return 1
-  xcodebuild test \
-    -project packages/ios/Byoky.xcodeproj \
-    -scheme Byoky \
-    -only-testing:ByokyTests \
-    -destination "id=$udid" \
-    -derivedDataPath "$ROOT/build/DerivedData-tests" \
-    CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= \
-    -quiet || rc=$?
-  xcrun simctl delete "$udid" || true
-  return $rc
+  SIM_NAME="byoky-release-tests-$$" bash scripts/ios-unit-tests.sh "$ROOT/build/DerivedData-tests" --quiet
 }
 
 # Publishes the packages of NPM_PACKAGES that npm doesn't have at $1 yet,
