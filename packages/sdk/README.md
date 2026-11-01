@@ -80,6 +80,7 @@ const relay = session.createRelay('wss://your-server.com/ws/relay');
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `timeout` | `number` | `60000` | Connection timeout in ms |
+| `requestTimeout` | `number` | `600000` | How long a proxied request waits for the response headers, in ms; `0` waits forever. A non-streaming response sends its headers only once generation is done, so keep this above your longest generation. |
 
 ### `byoky.connect(request)`
 
@@ -123,6 +124,21 @@ const session = await byoky.tryReconnect();
 | `onDisconnect(cb)` | Subscribe to disconnection events |
 | `onProvidersUpdated(cb)` | Subscribe to provider changes |
 
+`session.providers` has an entry for every provider you requested; one the
+wallet can't serve reads `{ available: false }`.
+
+### Cancelling requests
+
+The `fetch` from `createFetch` takes an `AbortSignal` like the real one:
+aborting before the response headers rejects with the signal's reason (an
+`AbortError` by default), aborting later errors the body, and either way the
+wallet stops the upstream call. Without a signal, a request that gets no
+response headers within `requestTimeout` rejects with a `PROXY_ERROR`.
+
+If Byoky is updated while your page is open, calls fail at once with
+`WALLET_RELOADED` (a proxied call answers status 503 with that code) and
+`onDisconnect` fires. Ask the user to reload the page.
+
 ### Discover available models
 
 Build a model picker that reflects what the user actually has access to —
@@ -141,6 +157,11 @@ Perplexity has no public model-list endpoint, so a hardcoded Sonar list is
 returned. xAI does not document a `/v1/models` endpoint either — calling
 `listModels('xai')` will throw `PROVIDER_UNAVAILABLE`.
 
+When listing fails, the error says who refused: the wallet's own answers keep
+their code (`PROVIDER_UNAVAILABLE` when the wallet has no credential for the
+provider, `WALLET_LOCKED`, `QUOTA_EXCEEDED`, …), while a provider that
+rejects the key gives `INVALID_KEY` and one that rate-limits `RATE_LIMITED`.
+
 ### `ByokyServer` (from `@byoky/sdk/server`)
 
 Server-side relay handler.
@@ -156,6 +177,22 @@ client.createFetch('anthropic');     // Proxied fetch
 client.close();                      // Close connection
 client.onClose(() => { ... });       // Disconnect callback
 ```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `pingInterval` | `30000` | Keepalive ping interval in ms; `0` disables it |
+| `helloTimeout` | `10000` | How long to wait for the browser's `relay:hello`, in ms |
+| `requestTimeout` | `600000` | Fail a request when the browser sends nothing for it for this long, in ms; resets on every chunk; `0` disables it |
+
+`client.createFetch` takes an `AbortSignal`, and aborting it (or cancelling
+the response body) also stops the call in the browser and upstream. Request
+bodies can be strings, bytes, `Blob`s, `FormData`, `URLSearchParams` or
+streams, and the relay carries binary responses such as audio as bytes.
+
+Every relay message is limited to 1 MB. A request whose body would exceed
+that once serialized (binary bodies travel base64-encoded, about a third
+larger) rejects with `PROXY_ERROR` before it is sent; responses of any size
+are split into chunks.
 
 ### Connect Modal
 
