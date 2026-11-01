@@ -37,7 +37,7 @@ object UpstreamPolicy {
     fun requestUrlAllowed(provider: Provider, url: HttpUrl): Boolean {
         if (!provider.requiresCustomBaseUrl) return isRegistryOrigin(provider, url)
         return url.scheme == "https" ||
-            (url.scheme == "http" && provider.id in setOf("ollama", "lm_studio") && url.host in setOf("localhost", "127.0.0.1"))
+            (url.scheme == "http" && provider.id in setOf("ollama", "lm_studio") && CredentialBaseUrl.isLoopbackHost(url.host))
     }
 
     /** May [url] receive the key of a credential of [provider] whose base URL is [credentialBaseUrl]? */
@@ -61,8 +61,13 @@ object UpstreamPolicy {
         return url.scheme == "https" && url.host == base.host && url.port == base.port
     }
 
+    /**
+     * `scheme://host[:port]`, written like [CredentialBaseUrl.originOf]:
+     * HttpUrl gives an IPv6 host without brackets, java.net.URI with them.
+     */
     private fun originOf(url: HttpUrl): String {
         val defaultPort = HttpUrl.defaultPort(url.scheme)
-        return "${url.scheme}://${url.host}" + if (url.port != defaultPort) ":${url.port}" else ""
+        val host = if (':' in url.host) "[${url.host}]" else url.host
+        return "${url.scheme}://$host" + if (url.port != defaultPort) ":${url.port}" else ""
     }
 }

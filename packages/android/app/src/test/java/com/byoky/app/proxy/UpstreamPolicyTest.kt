@@ -72,8 +72,45 @@ class UpstreamPolicyTest {
         assertNull(CredentialBaseUrl.normalize("openai", "https://api.openai.com"))
         assertEquals("https://x.openai.azure.com/sub", CredentialBaseUrl.normalize("azure_openai", " https://X.openai.azure.com:443/sub/ "))
         assertNull(CredentialBaseUrl.normalize("azure_openai", "https://x.openai.azure.com/?q=1"))
-        assertNull(CredentialBaseUrl.normalize("lm_studio", "http://[::1]:1234"))
+        assertEquals("http://[::1]:1234", CredentialBaseUrl.normalize("lm_studio", "http://[::1]:1234/"))
         assertEquals("http://localhost:1234", CredentialBaseUrl.normalize("lm_studio", "http://localhost:1234"))
+    }
+
+    /** IPv6 loopback, as in core and on iOS (R2-04): OkHttp's bare `::1` matches the stored `[::1]`. */
+    @Test
+    fun ipv6LoopbackServerKeysStayOnTheirServer() {
+        val url = "http://[::1]:11434/v1/chat/completions".toHttpUrl()
+        assertEquals("::1", url.host)
+        assertTrue(UpstreamPolicy.requestUrlAllowed(ollama, url))
+        assertEquals(UpstreamPolicy.Target.Allowed(url.toString()), UpstreamPolicy.target(ollama, url, "http://[::1]:11434"))
+        assertEquals(UpstreamPolicy.Target.WrongHost, UpstreamPolicy.target(ollama, url, "http://127.0.0.1:11434"))
+        assertEquals(UpstreamPolicy.Target.WrongHost, UpstreamPolicy.target(ollama, "http://[::1]:9999/v1/x".toHttpUrl(), "http://[::1]:11434"))
+        assertFalse(UpstreamPolicy.requestUrlAllowed(ollama, "http://[::2]:11434/v1/x".toHttpUrl()))
+        assertEquals(UpstreamPolicy.Override.Base("http://[::1]:11434"), UpstreamPolicy.rewriteOverride("ollama", "http://[::1]:11434/"))
+    }
+
+    /** packages/core/tests/vectors/local-server-urls.json, shared with core and iOS. */
+    @Test
+    fun serverUrlsMatchTheSharedVectors() {
+        val cases = SharedVectors.load("local-server-urls.json").getJSONArray("cases")
+        assertTrue(cases.length() > 10)
+        val failures = mutableListOf<String>()
+        for (i in 0 until cases.length()) {
+            val c = cases.getJSONObject(i)
+            val providerId = c.getString("providerId")
+            val baseUrl = c.getString("baseUrl")
+            val allowed = CredentialBaseUrl.normalize(providerId, baseUrl) != null
+            if (allowed != c.getBoolean("allowed")) failures += "$providerId $baseUrl: $allowed"
+            val request = c.optString("request", "")
+            if (request.isNotEmpty()) {
+                val provider = Provider.find(providerId)!!
+                val url = request.toHttpUrl()
+                if (!UpstreamPolicy.requestUrlAllowed(provider, url) ||
+                    UpstreamPolicy.target(provider, url, baseUrl) != UpstreamPolicy.Target.Allowed(url.toString())
+                ) failures += "$providerId $request refused for $baseUrl"
+            }
+        }
+        assertEquals("disagrees with local-server-urls.json", emptyList<String>(), failures)
     }
 
     @Test

@@ -14,6 +14,7 @@ import {
   rewriteToolNamesInJSONBody,
 } from '../src/proxy-utils.js';
 import endpointPolicyVectors from './vectors/endpoint-policy.json';
+import localServerUrlVectors from './vectors/local-server-urls.json';
 
 // ── validateProxyUrl ────────────────────────────────────
 
@@ -81,6 +82,22 @@ describe('validateProxyUrl', () => {
     expect(validateProxyUrl('ollama', 'http://192.168.1.5:11434/v1/chat/completions', 'http://192.168.1.5:11434')).toBe(false);
     expect(validateProxyUrl('lm_studio', 'http://evil.example:1234/v1/chat/completions', 'http://evil.example:1234')).toBe(false);
   });
+});
+
+// Shared with iOS and Android (R2-04): every wallet accepts the same server
+// URLs, IPv6 loopback included, so a backup opens with the same credentials.
+describe('credential server URLs (shared vectors)', () => {
+  const { cases } = localServerUrlVectors as {
+    cases: Array<{ providerId: string; baseUrl: string; allowed: boolean; request?: string }>;
+  };
+
+  it.each(cases.map((c) => [c.providerId, c.baseUrl, c.allowed, c.request] as const))(
+    '%s %s → %s',
+    (providerId, baseUrl, allowed, request) => {
+      expect(resolveProviderBaseUrl(providerId, baseUrl) !== null).toBe(allowed);
+      if (request) expect(validateProxyUrl(providerId, request, baseUrl)).toBe(true);
+    },
+  );
 });
 
 // ── shouldEstimateUsage ─────────────────────────────────

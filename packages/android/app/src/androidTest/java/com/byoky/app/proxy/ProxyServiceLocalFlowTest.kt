@@ -2,6 +2,7 @@ package com.byoky.app.proxy
 
 import android.content.Context
 import android.net.Uri
+import android.security.NetworkSecurityPolicy
 import android.webkit.WebView
 import androidx.webkit.JavaScriptReplyProxy
 import androidx.webkit.WebMessageCompat
@@ -30,7 +31,7 @@ import kotlin.concurrent.thread
 
 /**
  * [ProxyService.forward] end to end against a local fake server (an Ollama
- * credential on http://127.0.0.1, the one cleartext host the app allows):
+ * credential on http://127.0.0.1, a cleartext host the app allows):
  * which headers reach the upstream, binary replies, key decryption per
  * request, and the documented error codes. No network or real keys needed.
  */
@@ -115,6 +116,32 @@ class ProxyServiceLocalFlowTest {
             assertEquals(403, e.status)
         }
         assertTrue(server.requests.isEmpty())
+    }
+
+    /**
+     * A local server on IPv6 loopback is reachable over plain http, as on
+     * iOS and in the extension (R2-04): the network security config allows
+     * cleartext to `::1`, and the credential's `[::1]` server matches the
+     * request. LAN addresses stay HTTPS-only.
+     */
+    @Test
+    fun anIpv6LoopbackServerIsReachable() {
+        val policy = NetworkSecurityPolicy.getInstance()
+        assertTrue("cleartext to ::1", policy.isCleartextTrafficPermitted("::1"))
+        assertTrue(policy.isCleartextTrafficPermitted("127.0.0.1"))
+        assertFalse(policy.isCleartextTrafficPermitted("192.168.1.5"))
+        assertFalse(policy.isCleartextTrafficPermitted("::2"))
+
+        FakeServer(host = "::1").use { v6 ->
+            v6.reply = FakeServer.Reply("application/json", """{"ok":"v6"}""".toByteArray())
+            runBlocking { wallet.addCredential("lm_studio", "v6", "sk-v6-test", baseUrl = v6.base) }
+            val sink = CollectingSink()
+            proxy.forward("https://app.example", "lm_studio", "${v6.base}/v1/chat/completions", "POST",
+                mapOf("content-type" to "application/json"), """{"model":"qwen","messages":[]}""".toByteArray(), sink)
+            assertEquals("""{"ok":"v6"}""", sink.text.toString())
+            assertTrue(sink.done)
+            assertEquals(1, v6.requests.size)
+        }
     }
 
     /**
@@ -232,15 +259,15 @@ class ProxyServiceLocalFlowTest {
         try { context.deleteSharedPreferences(WalletStore.ENCRYPTED_PREFS_FILE) } catch (_: Throwable) {}
     }
 
-    /** One-connection-per-request HTTP/1.1 server on 127.0.0.1. */
-    private class FakeServer : AutoCloseable {
+    /** One-connection-per-request HTTP/1.1 server on [host] (127.0.0.1 unless given). */
+    private class FakeServer(host: String = "127.0.0.1") : AutoCloseable {
         data class Request(val line: String, val headers: Map<String, String>, val body: ByteArray)
         data class Reply(val contentType: String, val body: ByteArray, val status: Int = 200)
 
         @Volatile var reply = Reply("application/json", "{}".toByteArray())
         val requests = CopyOnWriteArrayList<Request>()
-        private val socket = ServerSocket(0, 16, InetAddress.getByName("127.0.0.1"))
-        val base = "http://127.0.0.1:${socket.localPort}"
+        private val socket = ServerSocket(0, 16, InetAddress.getByName(host))
+        val base = "http://${if (':' in host) "[$host]" else host}:${socket.localPort}"
 
         init {
             thread(isDaemon = true) {
