@@ -41,6 +41,12 @@ interface WalletState {
   showRetiredFeaturesNotice: boolean;
   /** The trust state failed its integrity check and was reset (see TrustResetNotice). */
   showTrustResetNotice: boolean;
+  /**
+   * Apps are paused because groups, limits ('settings') or usage totals
+   * ('usage') failed their integrity check, until the user resumes them
+   * (see LimitsHoldNotice).
+   */
+  limitsHold: 'settings' | 'usage' | null;
   currentPage: Page;
   modal: 'add-credential' | null;
   /** Only while the popup first asks the background what state the wallet is in. */
@@ -78,6 +84,8 @@ interface WalletState {
   setAllowance: (allowance: TokenAllowance) => Promise<void>;
   removeAllowance: (origin: string) => Promise<void>;
   resetAppUsage: (origin: string) => Promise<void>;
+  /** Let apps through again after checking limits and usage. */
+  resumeApps: () => Promise<void>;
   createGroup: (input: { name: string; providerId: string; credentialId?: string; model?: string }) => Promise<string | null>;
   updateGroup: (id: string, patch: { name?: string; providerId?: string; credentialId?: string | null; model?: string | null }) => Promise<boolean>;
   deleteGroup: (id: string) => Promise<boolean>;
@@ -123,6 +131,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   appGroups: {},
   showRetiredFeaturesNotice: false,
   showTrustResetNotice: false,
+  limitsHold: null,
   currentPage: 'unlock',
   modal: null,
   loading: true,
@@ -394,6 +403,13 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     await get().refreshData();
   },
 
+  resumeApps: async () => {
+    set({ error: null });
+    const result = await sendInternal('resumeApps');
+    if (result?.error) set({ error: result.error as string });
+    await get().refreshData();
+  },
+
   createGroup: async (input) => {
     set({ error: null });
     const result = await sendInternal('createGroup', input);
@@ -454,6 +470,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       appGroups: {},
       showRetiredFeaturesNotice: false,
       showTrustResetNotice: false,
+      limitsHold: null,
       currentPage: 'setup',
       modal: null,
       error: null,
@@ -503,6 +520,9 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       showTrustResetNotice: get().showTrustResetNotice || trustedResult.trustReset === true,
       tokenAllowances: (allowanceResult.allowances ?? []) as TokenAllowance[],
       tokenUsage: (allowanceResult.usage ?? {}) as Record<string, Record<string, number>>,
+      limitsHold: allowanceResult.limitsHold === 'settings' || allowanceResult.limitsHold === 'usage'
+        ? allowanceResult.limitsHold
+        : null,
       groups: (groupsResult.groups ?? []) as Group[],
       appGroups: (groupsResult.appGroups ?? {}) as AppGroups,
     });
