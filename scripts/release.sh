@@ -13,6 +13,36 @@ for envfile in .env .env.local; do
   fi
 done
 
+# The files a release bumps and commits (steps 1 and 4), and the synced
+# mobile bundles it commits when they changed.
+VERSION_FILES=(
+  package.json
+  packages/core/package.json
+  packages/sdk/package.json
+  packages/extension/package.json
+  packages/bridge/package.json
+  packages/web/package.json
+  packages/openclaw-plugin/package.json
+  packages/create-byoky-app/package.json
+  packages/android/app/build.gradle.kts
+  packages/ios/Byoky/App/Info.plist
+  packages/ios/SafariExtension/Info.plist
+  packages/ios/macOS/Info.plist
+  packages/ios/macOS/SafariExtension-macOS-Info.plist
+)
+MOBILE_BUNDLES=(
+  packages/ios/Byoky/Resources/mobile.js
+  packages/android/app/src/main/assets/mobile.js
+)
+
+NPM_PACKAGES=(
+  packages/core
+  packages/sdk
+  packages/bridge
+  packages/openclaw-plugin
+  packages/create-byoky-app
+)
+
 # Hand-written notes in docs/release-notes/v<version>.txt, when present,
 # replace the store "What's New" generated from conventional-commit prefixes.
 write_store_notes() {
@@ -24,18 +54,176 @@ write_store_notes() {
   fi
 }
 
+# The stores' state as store-status.mjs --json reports it (set STATUS_JSON
+# first): status_field <store id> <field>, e.g. status_field chrome pending.
+status_field() {
+  node -e '
+    const [json, id, field] = process.argv.slice(1)
+    const r = JSON.parse(json).results.find((x) => x.id === id)
+    process.stdout.write(String(r?.[field] ?? ""))
+  ' "$STATUS_JSON" "$1" "$2"
+}
+
+# How AMO's reviewers rebuild the add-on; BUILD-FIREFOX.md in the source zip.
+amo_build_note() {
+  cat <<'EOF'
+# Building the Byoky Firefox add-on from this source
+
+Requirements: Node.js 20 or newer and pnpm 9.15.9 (`corepack enable` picks the
+version up from package.json), on macOS or Linux.
+
+    pnpm install --frozen-lockfile
+    pnpm build:core
+    pnpm build:sdk
+    pnpm --filter @byoky/extension build:firefox
+
+The add-on is then in packages/extension/.output/firefox-mv2, file for file
+the same as the submitted package.
+EOF
+}
+
+# Unzips the AMO source zip into a temporary directory, builds the add-on
+# there as BUILD-FIREFOX.md says and compares the result with the build that
+# gets uploaded. AMO's reviewers must be able to do exactly that.
+check_source_zip() {
+  local zip="$1" dir log="$ROOT/build/source-zip-check.log" rc=0
+  mkdir -p "$ROOT/build"
+  dir=$(mktemp -d)
+  {
+    unzip -q "$zip" -d "$dir" &&
+      (cd "$dir" &&
+        pnpm install --frozen-lockfile --prefer-offline &&
+        pnpm build:core &&
+        pnpm build:sdk &&
+        pnpm --filter @byoky/extension build:firefox) &&
+      diff -rq "$dir/packages/extension/.output/firefox-mv2" "$ROOT/packages/extension/.output/firefox-mv2"
+  } > "$log" 2>&1 || rc=$?
+  rm -rf "$dir"
+  if [ "$rc" -ne 0 ]; then
+    echo "  The source zip doesn't rebuild the uploaded add-on (full log: $log):"
+    tail -15 "$log" | sed 's/^/    /'
+  fi
+  return "$rc"
+}
+
+# The iOS unit tests (ByokyTests) on a simulator of their own, deleted
+# afterwards. Ad-hoc signing, not CODE_SIGNING_ALLOWED=NO: the keychain tests
+# need their entitlements.
+run_ios_tests() {
+  local pick udid rc=0
+  # The Byoky scheme builds the Safari extension, which bundles the WXT build.
+  (cd packages/extension && npx wxt build --browser safari) || return 1
+  bash packages/ios/Scripts/copy-wxt-output.sh || return 1
+  pick=$(xcrun simctl list runtimes -j | node -e '
+    const runtimes = JSON.parse(require("fs").readFileSync(0)).runtimes
+      .filter((r) => r.platform === "iOS" && r.isAvailable)
+      .sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }))
+    const phone = runtimes[0]?.supportedDeviceTypes?.filter((d) => d.productFamily === "iPhone").pop()
+    if (phone) console.log(runtimes[0].identifier, phone.identifier)
+  ') || return 1
+  if [ -z "$pick" ]; then echo "  No iOS simulator runtime with an iPhone is installed"; return 1; fi
+  udid=$(xcrun simctl create "byoky-release-tests-$$" "${pick#* }" "${pick%% *}") || return 1
+  xcodebuild test \
+    -project packages/ios/Byoky.xcodeproj \
+    -scheme Byoky \
+    -only-testing:ByokyTests \
+    -destination "id=$udid" \
+    -derivedDataPath "$ROOT/build/DerivedData-tests" \
+    CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= \
+    -quiet || rc=$?
+  xcrun simctl delete "$udid" || true
+  return $rc
+}
+
+# Publishes the packages of NPM_PACKAGES that npm doesn't have at $1 yet,
+# so a release that stopped half-way through can be finished.
+npm_publish_missing() {
+  local pkg name
+  for pkg in "${NPM_PACKAGES[@]}"; do
+    name=$(node -p "require('./${pkg}/package.json').name")
+    if [ "$(npm view "${name}@$1" version 2>/dev/null || true)" = "$1" ]; then
+      echo "  ${name}@$1 is already on npm"
+    else
+      echo "  Publishing ${name}@$1..."
+      (cd "$pkg" && pnpm publish --access public --no-git-checks) || return 1
+    fi
+  done
+}
+
+# Creates GitHub release v$1 with the dist artifacts unless it exists.
+# --verify-tag: gh would otherwise create a missing tag on main's tip.
+github_release() {
+  local f assets=()
+  if gh release view "v$1" >/dev/null 2>&1; then
+    echo "  GitHub release v$1 already exists"
+    return 0
+  fi
+  for f in dist/byoky-*-v"$1".*; do
+    [ -f "$f" ] && assets+=("$f")
+  done
+  gh release create "v$1" ${assets[@]+"${assets[@]}"} --verify-tag --title "v$1" --notes "$2"
+}
+
+# The release notes for v$1 (native $2, build $3) since the previous tag.
+release_notes() {
+  local prev notes
+  prev=$(git tag --list 'v[0-9]*' --sort=-version:refname | grep -vx "v$1" | head -1 || true)
+  [ -n "$prev" ] || prev=$(git rev-list --max-parents=0 HEAD | head -1)
+  notes=$(node scripts/release-notes.mjs "$prev" "v$1" "$1" "$2" "$3")
+  if [ -f "docs/release-notes/v$1.txt" ]; then
+    notes="$(cat "docs/release-notes/v$1.txt")"$'\n\n'"$notes"
+  fi
+  printf '%s\n' "$notes"
+}
+
+# What happened in each store, for the summary at the end.
+STORE_RESULTS=()
+store_result() { STORE_RESULTS+=("$1: $2"); }
+
+# Uploads an .ipa (ios) or .pkg (macos) to App Store Connect.
+asc_upload() {
+  xcrun altool --upload-app --file "$1" --type "$2" \
+    --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" 2>&1
+}
+
+# Runs submit-appstore.mjs <platform> <version> [minutes to wait for the
+# build], and sets ASC_CODE to its exit code and ASC_RESULT to what that
+# means (codes documented in submit-appstore.mjs).
+appstore_submit() {
+  ASC_CODE=0
+  ASC_BUILD_WAIT_MIN="${3:-${ASC_BUILD_WAIT_MIN:-40}}" \
+    node scripts/submit-appstore.mjs "$2" "$1" "$STORE_NOTES_FILE" 2>&1 || ASC_CODE=$?
+  case "$ASC_CODE" in
+    0) ASC_RESULT="submitted for review (or already in review)" ;;
+    2) ASC_RESULT="PENDING: the build is still processing; submit it with ./scripts/release.sh retry" ;;
+    3) ASC_RESULT="NO BUILD in App Store Connect; ./scripts/release.sh retry uploads it again" ;;
+    4) ASC_RESULT="PENDING: another version is in review; ./scripts/release.sh retry once it's through" ;;
+    *) ASC_RESULT="FAILED (see the log above)" ;;
+  esac
+}
+
 # ============================================================
 # Status check mode
 # ============================================================
 if [ "${1:-}" = "status" ]; then
-  node scripts/store-status.mjs
+  # Exit 3 means a review is pending, which the output already says.
+  node scripts/store-status.mjs || [ $? -eq 3 ]
   exit 0
 fi
 
 # ============================================================
-# Retry mode — re-publish only stores that are behind
+# Retry mode — finish a release: npm packages and the GitHub release that
+# are missing, and the stores that are behind
 # ============================================================
 if [ "${1:-}" = "retry" ]; then
+  ALLOW_PENDING=false
+  for arg in "${@:2}"; do
+    case "$arg" in
+      --allow-pending) ALLOW_PENDING=true ;;
+      *) echo "Usage: ./scripts/release.sh retry [--allow-pending]"; exit 1 ;;
+    esac
+  done
+
   CURRENT=$(node -p "require('./package.json').version")
 
   # Derive native version from Android gradle
@@ -53,60 +241,140 @@ if [ "${1:-}" = "retry" ]; then
   PREV_TAG=$(git tag --list 'v*' --sort=-version:refname | sed -n '2p')
   write_store_notes "$CURRENT" "$PREV_TAG" "$STORE_NOTES_FILE"
 
+  # Where each store stands, from the same check the release runs. A store
+  # with a submission in review is left alone: an upload would replace the
+  # submission and restart its review (--allow-pending uploads anyway).
+  STATUS_JSON=$(node scripts/store-status.mjs --json) || [ $? -eq 3 ] \
+    || { echo "Error: couldn't check the stores (scripts/store-status.mjs)"; exit 1; }
+  skip_pending() {
+    [ "$(status_field "$1" pending)" = true ] && [ "$ALLOW_PENDING" = false ]
+  }
+  pending_note() {
+    echo "v$(status_field "$1" pendingVersion) is $(status_field "$1" pendingState); skipped, an upload would restart that review"
+  }
+
   RETRIED=0
 
-  # Chrome Web Store
+  # npm: a failed `pnpm publish` stops the release after the tag is pushed.
+  # What's missing is published from the tagged commit, rebuilt first.
+  NPM_MISSING=false
+  for pkg in "${NPM_PACKAGES[@]}"; do
+    name=$(node -p "require('./${pkg}/package.json').name")
+    if [ "$(npm view "${name}@${CURRENT}" version 2>/dev/null || true)" != "$CURRENT" ]; then NPM_MISSING=true; fi
+  done
+  if [ "$NPM_MISSING" = false ]; then
+    echo "npm: v${CURRENT} — all published"
+  elif ! git tag --points-at HEAD | grep -qx "v${CURRENT}" || [ -n "$(git status --porcelain --untracked-files=normal)" ]; then
+    echo "npm: packages missing at v${CURRENT}, but this isn't a clean checkout of the tag v${CURRENT}"
+    store_result "npm" "NOT PUBLISHED: run retry again from a clean checkout of v${CURRENT}"
+  else
+    echo "npm: publishing what's missing at v${CURRENT}..."
+    if pnpm build && npm_publish_missing "$CURRENT"; then
+      RETRIED=$((RETRIED + 1))
+      store_result "npm" "published"
+    else
+      store_result "npm" "FAILED (see the log above)"
+    fi
+  fi
+
+  # GitHub release
+  if gh release view "v${CURRENT}" >/dev/null 2>&1; then
+    echo "GitHub release: v${CURRENT} — exists"
+  elif github_release "$CURRENT" "$(release_notes "$CURRENT" "$NATIVE_VERSION" "$VERSION_CODE")"; then
+    RETRIED=$((RETRIED + 1))
+    store_result "GitHub release" "created"
+  else
+    store_result "GitHub release" "FAILED (see the log above)"
+  fi
+
+  # Chrome Web Store: the store zip, without the manifest key (see step 3)
   if [ -n "${CHROME_EXTENSION_ID:-}" ] && [ -n "${CHROME_CLIENT_ID:-}" ]; then
-    CHROME_LIVE=$(node -e "
-      fetch('https://clients2.google.com/service/update2/crx?response=updatecheck&acceptformat=crx3&prodversion=130.0&x=id%3D${CHROME_EXTENSION_ID}%26v%3D0.0.0%26uc')
-        .then(r=>r.text()).then(t=>{const m=t.match(/<updatecheck[^>]+version=\"([^\"]+)\"/);console.log(m?.[1]||'unknown')})
-    " 2>/dev/null)
-    if [ "$CHROME_LIVE" != "$CURRENT" ] && [ -f "dist/byoky-chrome-v${CURRENT}.zip" ]; then
+    CHROME_STORE_ZIP="dist/byoky-chrome-v${CURRENT}-store.zip"
+    CHROME_LIVE=$(status_field chrome version)
+    if [ "$CHROME_LIVE" = "$CURRENT" ]; then
+      echo "Chrome: v${CHROME_LIVE} — up to date"
+    elif skip_pending chrome; then
+      echo "Chrome: $(pending_note chrome)"
+      store_result "Chrome Web Store" "$(pending_note chrome)"
+    elif [ ! -f "$CHROME_STORE_ZIP" ]; then
+      echo "Chrome: ${CHROME_STORE_ZIP} is missing"
+      store_result "Chrome Web Store" "FAILED: ${CHROME_STORE_ZIP} is missing"
+    else
       echo "Chrome: v${CHROME_LIVE} → v${CURRENT}"
-      npx chrome-webstore-upload upload \
-        --source "dist/byoky-chrome-v${CURRENT}.zip" \
+      if npx chrome-webstore-upload upload \
+        --source "$CHROME_STORE_ZIP" \
         --extension-id "$CHROME_EXTENSION_ID" \
         --client-id "$CHROME_CLIENT_ID" \
         --client-secret "$CHROME_CLIENT_SECRET" \
         --refresh-token "$CHROME_REFRESH_TOKEN" \
-        --auto-publish 2>&1 || echo "  WARN: Chrome upload failed"
-      RETRIED=$((RETRIED + 1))
-    else
-      echo "Chrome: v${CHROME_LIVE} — up to date"
+        --auto-publish 2>&1; then
+        RETRIED=$((RETRIED + 1))
+        store_result "Chrome Web Store" "uploaded, publishes after review"
+      else
+        echo "  WARN: Chrome upload failed"
+        store_result "Chrome Web Store" "FAILED (see the log above)"
+      fi
     fi
   fi
 
   # Firefox AMO
   if [ -n "${AMO_API_KEY:-}" ] && [ -n "${AMO_API_SECRET:-}" ]; then
-    AMO_LIVE=$(node -e "
-      const { createHmac } = require('node:crypto');
-      const h = Buffer.from(JSON.stringify({alg:'HS256',typ:'JWT'})).toString('base64url');
-      const now = Math.floor(Date.now()/1000);
-      const p = Buffer.from(JSON.stringify({iss:'${AMO_API_KEY}',jti:Math.random().toString(36),iat:now,exp:now+60})).toString('base64url');
-      const s = createHmac('sha256','${AMO_API_SECRET}').update(h+'.'+p).digest('base64url');
-      fetch('https://addons.mozilla.org/api/v5/addons/addon/byoky%40byoky.com/versions/?page_size=1',{headers:{Authorization:'JWT '+h+'.'+p+'.'+s}})
-        .then(r=>r.json()).then(d=>console.log(d.results?.[0]?.version||'unknown'))
-    " 2>/dev/null)
-    if [ "$AMO_LIVE" != "$CURRENT" ] && [ -d "packages/extension/.output/firefox-mv2" ]; then
+    # The newest listed version, also when it still awaits review.
+    AMO_LIVE=$(status_field firefox version)
+    if [ "$AMO_LIVE" = "$CURRENT" ]; then
+      echo "Firefox: v${AMO_LIVE} $(status_field firefox status) — uploaded"
+    elif skip_pending firefox; then
+      echo "Firefox: $(pending_note firefox)"
+      store_result "Firefox Add-ons" "$(pending_note firefox)"
+    elif [ "$(node -p "require('./packages/extension/.output/firefox-mv2/manifest.json').version" 2>/dev/null)" != "$CURRENT" ]; then
+      echo "Firefox: packages/extension/.output/firefox-mv2 isn't a v${CURRENT} build"
+      store_result "Firefox Add-ons" "FAILED: no v${CURRENT} build in packages/extension/.output/firefox-mv2"
+    elif ! check_source_zip "dist/byoky-source-v${CURRENT}.zip"; then
+      store_result "Firefox Add-ons" "FAILED: dist/byoky-source-v${CURRENT}.zip doesn't rebuild the add-on"
+    else
       echo "Firefox: v${AMO_LIVE} → v${CURRENT}"
-      npx web-ext sign \
+      if npx web-ext sign \
         --source-dir packages/extension/.output/firefox-mv2 \
         --api-key "$AMO_API_KEY" \
         --api-secret "$AMO_API_SECRET" \
         --channel listed \
-        --upload-source-code "dist/byoky-source-v${CURRENT}.zip" 2>&1 || echo "  WARN: Firefox upload failed"
-      RETRIED=$((RETRIED + 1))
-    else
-      echo "Firefox: v${AMO_LIVE} — up to date"
+        --upload-source-code "dist/byoky-source-v${CURRENT}.zip" 2>&1; then
+        RETRIED=$((RETRIED + 1))
+        store_result "Firefox Add-ons" "submitted for review"
+      else
+        echo "  WARN: Firefox upload failed"
+        store_result "Firefox Add-ons" "FAILED (see the log above)"
+      fi
     fi
   fi
 
-  # App Store (iOS)
+  # App Store (iOS + macOS): a quick look first; a build App Store Connect
+  # never got is uploaded again, and one still processing is waited for.
   if [ -n "${ASC_KEY_ID:-}" ] && [ -n "${ASC_ISSUER_ID:-}" ]; then
-    echo "App Store: checking..."
-    node scripts/submit-appstore.mjs "$NATIVE_VERSION" IOS "$STORE_NOTES_FILE" 2>&1 || true
-    node scripts/submit-appstore.mjs "$NATIVE_VERSION" MAC_OS "$STORE_NOTES_FILE" 2>&1 || true
-    RETRIED=$((RETRIED + 1))
+    for platform in IOS MAC_OS; do
+      if [ "$platform" = IOS ]; then
+        label="App Store (iOS)"; file="dist/byoky-ios-v${CURRENT}.ipa"; type=ios
+      else
+        label="App Store (macOS)"; file="dist/byoky-macos-v${CURRENT}.pkg"; type=macos
+      fi
+      echo "${label}: checking..."
+      appstore_submit "$platform" "$NATIVE_VERSION" 0
+      if [ "$ASC_CODE" -eq 3 ] && [ ! -f "$file" ]; then
+        ASC_RESULT="NO BUILD in App Store Connect, and no ${file} to upload"
+      elif [ "$ASC_CODE" -eq 3 ]; then
+        echo "${label}: uploading ${file} again..."
+        if asc_upload "$file" "$type"; then
+          appstore_submit "$platform" "$NATIVE_VERSION"
+        else
+          ASC_CODE=1; ASC_RESULT="upload FAILED (see the log above)"
+        fi
+      elif [ "$ASC_CODE" -eq 2 ]; then
+        appstore_submit "$platform" "$NATIVE_VERSION"
+      fi
+      echo "${label}: ${ASC_RESULT}"
+      store_result "$label" "$ASC_RESULT"
+      if [ "$ASC_CODE" -eq 0 ]; then RETRIED=$((RETRIED + 1)); fi
+    done
   fi
 
   # Google Play
@@ -117,8 +385,13 @@ if [ "${1:-}" = "retry" ]; then
     " 2>/dev/null)
     if [ "$GP_LIVE" != "$NATIVE_VERSION" ]; then
       echo "Google Play: v${GP_LIVE} → v${NATIVE_VERSION}"
-      node scripts/upload-google-play.mjs "dist/byoky-android-v${CURRENT}.aab" production "$STORE_NOTES_FILE" 2>&1 || echo "  WARN: Google Play upload failed"
-      RETRIED=$((RETRIED + 1))
+      if node scripts/upload-google-play.mjs "dist/byoky-android-v${CURRENT}.aab" production "$STORE_NOTES_FILE" 2>&1; then
+        RETRIED=$((RETRIED + 1))
+        store_result "Google Play" "uploaded to the production track"
+      else
+        echo "  WARN: Google Play upload failed"
+        store_result "Google Play" "FAILED (see the log above)"
+      fi
     else
       echo "Google Play: v${GP_LIVE} — up to date"
     fi
@@ -127,12 +400,17 @@ if [ "${1:-}" = "retry" ]; then
   # Discord (skip on retry — already posted)
 
   echo ""
+  for r in ${STORE_RESULTS[@]+"${STORE_RESULTS[@]}"}; do echo "  $r"; done
   if [ "$RETRIED" -eq 0 ]; then
-    echo "All stores up to date."
+    echo "Nothing retried."
   else
     echo "Retried $RETRIED store(s). Run 'pnpm release:status' to verify."
     node scripts/generate-versions.mjs 2>&1 || true
   fi
+  # A failure above leaves its store behind; say so in the exit code too.
+  for r in ${STORE_RESULTS[@]+"${STORE_RESULTS[@]}"}; do
+    case "$r" in *FAILED*|*"NO BUILD"*|*"NOT PUBLISHED"*) exit 1 ;; esac
+  done
   exit 0
 fi
 
@@ -141,6 +419,10 @@ DRY_RUN=false
 SKIP_MOBILE=false
 SKIP_STORE_UPLOADS=false
 ASSUME_YES=false
+ALLOW_PENDING=false
+ALLOW_BRANCH=false
+ALLOW_DIRTY=false
+SKIP_NATIVE_TESTS=false
 NEW_VERSION=""
 
 for arg in "$@"; do
@@ -149,6 +431,10 @@ for arg in "$@"; do
     --skip-mobile) SKIP_MOBILE=true ;;
     --skip-store-uploads) SKIP_STORE_UPLOADS=true ;;
     --yes)     ASSUME_YES=true ;;
+    --allow-pending) ALLOW_PENDING=true ;;
+    --allow-branch) ALLOW_BRANCH=true ;;
+    --allow-dirty) ALLOW_DIRTY=true ;;
+    --skip-native-tests) SKIP_NATIVE_TESTS=true ;;
     *)         NEW_VERSION="$arg" ;;
   esac
 done
@@ -156,13 +442,32 @@ done
 if [ -z "$NEW_VERSION" ]; then
   CURRENT=$(node -p "require('./package.json').version")
   echo "Usage: ./scripts/release.sh <new-version> [--dry] [--skip-mobile] [--skip-store-uploads] [--yes]"
+  echo "                                           [--allow-pending] [--allow-branch] [--allow-dirty]"
+  echo "                                           [--skip-native-tests]"
   echo "       ./scripts/release.sh status"
+  echo "       ./scripts/release.sh retry [--allow-pending]"
   echo ""
-  echo "  --dry                  Print what would happen without executing"
+  echo "  --dry                  Run the checks and the tests and print the plan; nothing"
+  echo "                         is bumped or published, and signing is only checked"
   echo "  --skip-mobile          Skip iOS/macOS/Android builds and uploads"
   echo "  --skip-store-uploads   Build + npm publish + GitHub release, but skip"
   echo "                         Chrome/Firefox/App Store/Play uploads"
   echo "  --yes                  Don't ask before starting (non-interactive runs)"
+  echo "  --allow-pending        Release although a store has a review pending"
+  echo "                         (an upload restarts that review; --yes doesn't imply it)"
+  echo "  --allow-branch         Release from a branch other than main (e.g. a worktree);"
+  echo "                         HEAD must contain origin/main, and the release commit is"
+  echo "                         pushed to main all the same"
+  echo "  --allow-dirty          Release with uncommitted or untracked files: they are"
+  echo "                         built and shipped but NOT committed or tagged"
+  echo "  --skip-native-tests    Skip the Android and iOS unit tests (the JS build,"
+  echo "                         typecheck and tests always run)"
+  echo ""
+  echo "Releases go out from main: fast-forward main to the work, release from the main"
+  echo "checkout. The release commit and tag v<version> are pushed to origin main."
+  echo "retry finishes a release that stopped after the push: it publishes the npm"
+  echo "packages and the GitHub release that are missing and uploads to the stores that"
+  echo "are behind. A run that stopped earlier says how to undo its version bump."
   echo ""
   echo "Current version: $CURRENT"
   exit 1
@@ -217,24 +522,60 @@ else
   SKIP_ANDROID=true
 fi
 
-# Signing is prepared before anything is bumped, so a missing certificate or
-# profile stops the release while the tree is still clean. See ios-signing.sh.
-SIGNING_KEYCHAIN="$HOME/Library/Keychains/byoky-signing.keychain-db"
-if [ "$SKIP_IOS" = false ]; then
-  echo "  Preparing iOS/macOS signing..."
-  if ! bash scripts/ios-signing.sh; then
-    ERRORS+=("iOS/macOS signing isn't ready (see above); fix it or pass --skip-mobile")
-  fi
+# A run that failed between the bump and the commit leaves a bumped tree.
+HEAD_VERSION=$(git show HEAD:package.json | node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(0, "utf8")).version)')
+if [ "$OLD_VERSION" != "$HEAD_VERSION" ]; then
+  ERRORS+=("package.json has ${OLD_VERSION} but the last commit ${HEAD_VERSION}: an earlier run bumped the tree and stopped before committing, so nothing of it was published. Undo the bump (git checkout -- ${VERSION_FILES[*]} ${MOBILE_BUNDLES[*]}) and run again")
 fi
 
-# Check git state
-if ! git diff --quiet HEAD 2>/dev/null; then
-  WARNINGS+=("Working tree has uncommitted changes — they will be included in the release commit")
+# Check git state. Everything is built from the working tree, but only the
+# version files are committed: an uncommitted or untracked change would ship
+# in the npm packages and store builds without being in the tag.
+DIRTY=$(git status --porcelain --untracked-files=normal)
+if [ -n "$DIRTY" ] && [ "$ALLOW_DIRTY" = true ]; then
+  WARNINGS+=("Uncommitted changes (--allow-dirty): they are BUILT AND SHIPPED but NOT committed or tagged")
+elif [ -n "$DIRTY" ]; then
+  ERRORS+=("Uncommitted or untracked files would ship without being in the release commit or tag. Commit or stash them, or pass --allow-dirty:"$'\n'"$(echo "$DIRTY" | sed 's/^/           /')")
 fi
 
+# The release commit and tag go to main, on top of what origin has. A release
+# from another branch left main without the bump, and the next release from
+# main reused that build number, which the stores refuse.
 CURRENT_BRANCH=$(git branch --show-current)
-if [ "$CURRENT_BRANCH" != "main" ]; then
-  WARNINGS+=("On branch '$CURRENT_BRANCH' (expected main)")
+if [ "$CURRENT_BRANCH" != "main" ] && [ "$ALLOW_BRANCH" = true ]; then
+  WARNINGS+=("On '${CURRENT_BRANCH:-a detached HEAD}', not main (--allow-branch): the release commit is pushed to main")
+elif [ "$CURRENT_BRANCH" != "main" ]; then
+  ERRORS+=("On '${CURRENT_BRANCH:-a detached HEAD}', not main. Fast-forward main to it and release from the main checkout, or pass --allow-branch (the release commit then goes to main)")
+fi
+
+if ! git fetch --quiet origin main --tags; then
+  ERRORS+=("Couldn't fetch main and the tags from origin")
+elif ! git merge-base --is-ancestor origin/main HEAD; then
+  ERRORS+=("HEAD doesn't contain origin/main: merge or rebase onto it first")
+fi
+
+if git rev-parse -q --verify "refs/tags/v${NEW_VERSION}" >/dev/null || \
+   [ -n "$(git ls-remote --tags origin "refs/tags/v${NEW_VERSION}" 2>/dev/null)" ]; then
+  ERRORS+=("Tag v${NEW_VERSION} already exists. If a run of v${NEW_VERSION} stopped after tagging, push what origin lacks (git push --atomic origin HEAD:main v${NEW_VERSION}), then finish with ./scripts/release.sh retry")
+fi
+
+LATEST_TAG=$(git tag --list 'v[0-9]*' --sort=-version:refname | head -1)
+if [ -n "$LATEST_TAG" ] && [ "${LATEST_TAG#v}" != "$OLD_VERSION" ] && \
+   [ "$(printf '%s\n%s\n' "${LATEST_TAG#v}" "$OLD_VERSION" | sort -V | tail -1)" = "${LATEST_TAG#v}" ]; then
+  ERRORS+=("${LATEST_TAG} is newer than this tree's ${OLD_VERSION}: HEAD is missing that release's version bump")
+fi
+
+# Without the upload keystore gradle builds an unsigned AAB, which Google Play
+# refuses at the very end of the run.
+if [ "$SKIP_ANDROID" = false ] && [ "$SKIP_STORE_UPLOADS" = false ] && \
+   [ -n "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ] && [ ! -f packages/android/keystore.properties ]; then
+  ERRORS+=("packages/android/keystore.properties is missing: the AAB would be unsigned and Google Play refuses it")
+fi
+
+# The OpenClaw install scan runs on the built plugin before anything is
+# committed (step 2).
+if [ ! -f scripts/scan-openclaw-plugin.mjs ]; then
+  ERRORS+=("scripts/scan-openclaw-plugin.mjs is missing")
 fi
 
 # Store credentials check
@@ -257,9 +598,34 @@ STORES_SKIPPED=()
   && STORES_CONFIGURED+=("Google Play") \
   || STORES_SKIPPED+=("Google Play (GOOGLE_PLAY_SERVICE_ACCOUNT_JSON)")
 
+# No store credentials at all usually means .env / .env.local didn't load
+# (e.g. a worktree): the release would publish to npm and upload nothing.
+if [ ${#STORES_CONFIGURED[@]} -eq 0 ] && [ "$SKIP_STORE_UPLOADS" = false ]; then
+  ERRORS+=("No store credentials (.env / .env.local); pass --skip-store-uploads for an npm + GitHub-only release")
+fi
+
 [ -n "${DISCORD_WEBHOOK_URL:-}" ] \
   && STORES_CONFIGURED+=("Discord") \
   || STORES_SKIPPED+=("Discord (DISCORD_WEBHOOK_URL)")
+
+# Signing is prepared before anything is bumped, so a missing certificate or
+# profile stops the release while the tree is still clean. See ios-signing.sh.
+# A dry run only checks: preparing can create certificates and replace the
+# team's App Store profiles. Nothing is prepared while another check failed.
+SIGNING_KEYCHAIN="$HOME/Library/Keychains/byoky-signing.keychain-db"
+if [ ${#ERRORS[@]} -gt 0 ]; then
+  :
+elif [ "$SKIP_IOS" = false ] && [ "$DRY_RUN" = true ]; then
+  echo "  Checking iOS/macOS signing (read-only)..."
+  if ! bash scripts/ios-signing.sh --check; then
+    WARNINGS+=("iOS/macOS signing isn't ready (see above); a real run prepares it or stops here")
+  fi
+elif [ "$SKIP_IOS" = false ]; then
+  echo "  Preparing iOS/macOS signing..."
+  if ! bash scripts/ios-signing.sh; then
+    ERRORS+=("iOS/macOS signing isn't ready (see above); fix it or pass --skip-mobile")
+  fi
+fi
 
 # Report
 if [ ${#ERRORS[@]} -gt 0 ]; then
@@ -279,7 +645,18 @@ echo ""
 # --- Derive native versions ---
 ANDROID_GRADLE="$ROOT/packages/android/app/build.gradle.kts"
 OLD_VERSION_CODE=$(grep 'versionCode = ' "$ANDROID_GRADLE" | head -1 | sed 's/[^0-9]//g')
-NEW_VERSION_CODE=$((OLD_VERSION_CODE + 1))
+# Build numbers must keep rising in every store, also past a release whose
+# bump never reached this tree.
+TAG_VERSION_CODE=""
+if [ -n "$LATEST_TAG" ]; then
+  TAG_VERSION_CODE=$(git show "${LATEST_TAG}:packages/android/app/build.gradle.kts" 2>/dev/null \
+    | grep 'versionCode = ' | head -1 | sed 's/[^0-9]//g' || true)
+fi
+BASE_VERSION_CODE=$OLD_VERSION_CODE
+if [ -n "$TAG_VERSION_CODE" ] && [ "$TAG_VERSION_CODE" -gt "$BASE_VERSION_CODE" ]; then
+  BASE_VERSION_CODE=$TAG_VERSION_CODE
+fi
+NEW_VERSION_CODE=$((BASE_VERSION_CODE + 1))
 
 OLD_NATIVE_VERSION=$(grep 'versionName = ' "$ANDROID_GRADLE" | head -1 | sed 's/.*"\(.*\)".*/\1/')
 # One version for everything (since 1.1.0). The stores only accept a higher
@@ -288,20 +665,60 @@ NEW_NATIVE_VERSION="$NEW_VERSION"
 if [ "$NEW_NATIVE_VERSION" = "$OLD_NATIVE_VERSION" ] || \
    [ "$(printf '%s\n%s\n' "$OLD_NATIVE_VERSION" "$NEW_NATIVE_VERSION" | sort -V | tail -1)" != "$NEW_NATIVE_VERSION" ]; then
   echo "Error: $NEW_VERSION must be higher than the native apps' current $OLD_NATIVE_VERSION"
+  if [ "$NEW_NATIVE_VERSION" = "$OLD_NATIVE_VERSION" ]; then
+    echo "       If v${NEW_VERSION} was released already but didn't reach every store or npm,"
+    echo "       ./scripts/release.sh retry finishes it."
+  fi
   exit 1
 fi
 
 # --- Check store statuses ---
+# Before anything is bumped: an upload to a store with a submission still in
+# review replaces that submission and restarts its review.
 echo "==> Checking store statuses..."
-STORE_STATUS=$(node scripts/store-status.mjs 2>&1) || true
-echo "$STORE_STATUS"
+STATUS_CODE=0
+node scripts/store-status.mjs || STATUS_CODE=$?
 echo ""
-
-if echo "$STORE_STATUS" | grep -qi "PENDING_REVIEW\|IN_REVIEW\|pending"; then
-  echo "  One or more stores have a pending review."
-  echo "  Uploading now may REPLACE the pending submission and RESET the review timer."
+if [ "$STATUS_CODE" -eq 3 ] && [ "$ALLOW_PENDING" = true ]; then
+  echo "  WARN: a review is pending (above); --allow-pending releases anyway."
   echo ""
+elif [ "$STATUS_CODE" -eq 3 ]; then
+  echo "Error: a review is pending (above). Wait until it's through, or pass --allow-pending."
+  exit 1
+elif [ "$STATUS_CODE" -ne 0 ]; then
+  echo "Error: couldn't check the stores (scripts/store-status.mjs exit $STATUS_CODE)."
+  exit 1
 fi
+
+# --- Verify ---
+# What ships has to build and pass its tests: the JS packages always, the
+# Android and iOS unit tests unless --skip-native-tests.
+echo "==> Verifying (install, build, typecheck, tests)..."
+verify() {
+  echo "  \$ $*"
+  if ! "$@"; then
+    echo "Error: '$*' failed. Nothing was bumped or published."
+    exit 1
+  fi
+}
+verify pnpm install --frozen-lockfile
+verify pnpm build:core
+verify pnpm build:sdk
+verify pnpm --filter @byoky/extension exec wxt prepare
+verify pnpm typecheck
+verify pnpm test
+verify node --test scripts/tests/*.test.mjs
+if [ "$SKIP_NATIVE_TESTS" = true ]; then
+  echo "  WARN: --skip-native-tests: the Android and iOS unit tests didn't run"
+else
+  if [ "$SKIP_ANDROID" = false ]; then
+    verify bash -c 'cd packages/android && ./gradlew :app:testDebugUnitTest'
+  fi
+  if [ "$SKIP_IOS" = false ]; then
+    verify run_ios_tests
+  fi
+fi
+echo ""
 
 # --- Summary ---
 echo "┌──────────────────────────────────────────────────────┐"
@@ -314,7 +731,7 @@ echo "│  Steps:"
 echo "│    1. Bump versions across all packages"
 echo "│    2. Build everything (packages, extensions, mobile)"
 echo "│    3. Create dist artifacts"
-echo "│    4. Git commit + tag v${NEW_VERSION}"
+echo "│    4. Git commit + tag v${NEW_VERSION}, push both to origin main"
 echo "│    5. Publish npm packages"
 echo "│    6. Upload to extension stores"
 [ "$SKIP_IOS" = false ] && echo "│    7. Archive + upload iOS & macOS to App Store"
@@ -324,7 +741,7 @@ echo "└───────────────────────�
 echo ""
 
 if [ "$DRY_RUN" = true ]; then
-  echo "DRY RUN — exiting without changes."
+  echo "DRY RUN — exiting. Nothing was bumped, committed, published or uploaded; signing was only checked."
   exit 0
 fi
 
@@ -342,6 +759,30 @@ step() {
   echo ""
   echo "━━━ Step $STEP: $1 ━━━"
 }
+
+# From here on a failure leaves work behind; say what and how to go on.
+STAGE=bumped
+on_exit() {
+  local code=$?
+  [ "$code" -eq 0 ] && return
+  echo ""
+  case "$STAGE" in
+    bumped)
+      echo "The release stopped after the version bump. Nothing was committed or published."
+      echo "Undo the bump, then run it again:"
+      echo "  git checkout -- ${VERSION_FILES[*]} ${MOBILE_BUNDLES[*]}" ;;
+    committed)
+      echo "The release stopped after committing and tagging v${NEW_VERSION} locally; nothing was pushed or published."
+      echo "Push both, then finish with retry:"
+      echo "  git push --atomic origin HEAD:main v${NEW_VERSION} && ./scripts/release.sh retry" ;;
+    pushed)
+      echo "v${NEW_VERSION} is tagged on origin, but npm, the stores or the GitHub release didn't all get it."
+      echo "Finish with: ./scripts/release.sh retry" ;;
+    released)
+      echo "v${NEW_VERSION} is out; a step after the GitHub release failed (see above)." ;;
+  esac
+}
+trap on_exit EXIT
 
 # ============================================================
 # 1. Bump versions
@@ -396,6 +837,14 @@ step "Build all packages"
 
 echo "  Building npm packages..."
 pnpm build
+
+# OpenClaw refuses to install a plugin its scanner flags, so check the one
+# about to be published before anything is committed.
+echo "  Scanning the OpenClaw plugin..."
+if ! node scripts/scan-openclaw-plugin.mjs; then
+  echo "Error: the OpenClaw install scan failed."
+  exit 1
+fi
 
 echo "  Syncing mobile bundle..."
 bash scripts/sync-mobile-bundle.sh
@@ -481,6 +930,9 @@ fi
 step "Create dist artifacts"
 
 mkdir -p dist
+# zip -r adds to an archive that's already there: an earlier run's hashed
+# chunks would ship next to this build's. Start from nothing.
+rm -f dist/byoky-*-v"${NEW_VERSION}".* dist/byoky-*-v"${NEW_VERSION}"-*
 
 (cd packages/extension/.output/chrome-mv3 && zip -r "$ROOT/dist/byoky-chrome-v${NEW_VERSION}.zip" .)
 (cd packages/extension/.output/firefox-mv2 && zip -r "$ROOT/dist/byoky-firefox-v${NEW_VERSION}.zip" .)
@@ -490,12 +942,14 @@ mkdir -p dist
 # from the manifest. CWS rejects uploads whose manifest key doesn't match the
 # registered extension's key (which CWS derives from the extension ID, not
 # from a user-supplied key field). The keyed zip above stays for sideloaders
-# who want a stable extension ID across dev machines.
+# who want a stable extension ID across dev machines. Retry uploads the same
+# file.
+CHROME_STORE_ZIP="dist/byoky-chrome-v${NEW_VERSION}-store.zip"
 STORE_DIR="$(mktemp -d)/chrome-mv3-store"
 mkdir -p "$STORE_DIR"
 cp -R packages/extension/.output/chrome-mv3/. "$STORE_DIR/"
 node -e "const f='$STORE_DIR/manifest.json',j=JSON.parse(require('fs').readFileSync(f));delete j.key;require('fs').writeFileSync(f,JSON.stringify(j))"
-(cd "$STORE_DIR" && zip -r "$ROOT/dist/byoky-chrome-v${NEW_VERSION}-store.zip" .)
+(cd "$STORE_DIR" && zip -r "$ROOT/$CHROME_STORE_ZIP" .)
 rm -rf "$STORE_DIR"
 
 if [ "$SKIP_ANDROID" = false ]; then
@@ -522,10 +976,25 @@ if [ "$SKIP_IOS" = false ]; then
   fi
 fi
 
-zip -r "dist/byoky-source-v${NEW_VERSION}.zip" \
-  package.json pnpm-lock.yaml pnpm-workspace.yaml README.md \
+# Source for AMO, whose reviewers rebuild the add-on from it: the workspace
+# files the build reads (all three packages extend tsconfig.base.json) and
+# BUILD-FIREFOX.md. The add-on goes to AMO only if the zip rebuilds it.
+SOURCE_ZIP="dist/byoky-source-v${NEW_VERSION}.zip"
+zip -r "$SOURCE_ZIP" \
+  package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json README.md \
   packages/core packages/sdk packages/extension \
-  -x "*/node_modules/*" "*/dist/*" "*/.output/*"
+  -x "*/node_modules/*" "*/dist/*" "*/.output/*" "*/.wxt/*" "*.DS_Store"
+NOTE_DIR=$(mktemp -d)
+amo_build_note > "$NOTE_DIR/BUILD-FIREFOX.md"
+zip -j "$SOURCE_ZIP" "$NOTE_DIR/BUILD-FIREFOX.md"
+rm -rf "$NOTE_DIR"
+echo "  Rebuilding the Firefox add-on from the source zip..."
+if check_source_zip "$SOURCE_ZIP"; then
+  AMO_SOURCE_OK=true
+else
+  AMO_SOURCE_OK=false
+  echo "  WARN: the Firefox add-on won't be uploaded to AMO with source that doesn't rebuild it"
+fi
 
 echo "  Artifacts:"
 ls -lh dist/byoky-*-v${NEW_VERSION}.* 2>/dev/null | awk '{print "    " $NF " (" $5 ")"}'
@@ -535,35 +1004,29 @@ ls -lh dist/byoky-*-v${NEW_VERSION}.* 2>/dev/null | awk '{print "    " $NF " (" 
 # ============================================================
 step "Git commit + tag"
 
-# Stage all version-bumped files.
-git add \
-  package.json \
-  packages/core/package.json \
-  packages/sdk/package.json \
-  packages/extension/package.json \
-  packages/bridge/package.json \
-  packages/web/package.json \
-  packages/openclaw-plugin/package.json \
-  packages/create-byoky-app/package.json \
-  packages/android/app/build.gradle.kts \
-  packages/ios/Byoky/App/Info.plist \
-  packages/ios/SafariExtension/Info.plist \
-  packages/ios/macOS/Info.plist \
-  packages/ios/macOS/SafariExtension-macOS-Info.plist
+# Stage all version-bumped files, and the synced mobile bundles if they changed
+git add "${VERSION_FILES[@]}"
+for f in "${MOBILE_BUNDLES[@]}"; do git add "$f" 2>/dev/null || true; done
 
-# Also stage the synced mobile bundles if they changed
-git add packages/ios/Byoky/Resources/mobile.js 2>/dev/null || true
-git add packages/android/app/src/main/assets/mobile.js 2>/dev/null || true
+# The tree was clean before the bump, so anything still unstaged was changed
+# by the build. It's derived from the tagged sources, but say so.
+LEFT_OVER=$(git status --porcelain --untracked-files=normal | grep -v '^[MADRC] ' || true)
+if [ -n "$LEFT_OVER" ] && [ "$ALLOW_DIRTY" = false ]; then
+  echo "  WARN: the build changed files that the release commit leaves out:"
+  echo "$LEFT_OVER" | sed 's/^/    /'
+fi
 
 git commit -m "Bump to v${NEW_VERSION} (native ${NEW_NATIVE_VERSION}/${NEW_VERSION_CODE})"
 git tag "v${NEW_VERSION}"
+STAGE=committed
 
 echo "  Committed and tagged v${NEW_VERSION}"
 
-# Push commit + tag
-echo "  Pushing to origin..."
-git push origin "$CURRENT_BRANCH"
-git push origin "v${NEW_VERSION}"
+# Push commit + tag to main, together or not at all. HEAD contains
+# origin/main (pre-flight), so this is a fast-forward from any branch.
+echo "  Pushing to origin main..."
+git push --atomic origin HEAD:main "refs/tags/v${NEW_VERSION}"
+STAGE=pushed
 
 # ============================================================
 # 5. Generate release notes
@@ -575,10 +1038,7 @@ if [ -z "$PREV_TAG" ]; then
   PREV_TAG=$(git rev-list --max-parents=0 HEAD | head -1)
 fi
 
-RELEASE_NOTES=$(node scripts/release-notes.mjs "$PREV_TAG" "v${NEW_VERSION}" "$NEW_VERSION" "$NEW_NATIVE_VERSION" "$NEW_VERSION_CODE")
-if [ -f "docs/release-notes/v${NEW_VERSION}.txt" ]; then
-  RELEASE_NOTES="$(cat "docs/release-notes/v${NEW_VERSION}.txt")"$'\n\n'"$RELEASE_NOTES"
-fi
+RELEASE_NOTES=$(release_notes "$NEW_VERSION" "$NEW_NATIVE_VERSION" "$NEW_VERSION_CODE")
 echo "$RELEASE_NOTES"
 
 # Store-formatted notes (plain text, max 500 chars) for App Store + Google Play
@@ -593,18 +1053,7 @@ cat "$STORE_NOTES_FILE" | sed 's/^/    /'
 # ============================================================
 step "Publish to npm"
 
-NPM_PACKAGES=(
-  packages/core
-  packages/sdk
-  packages/bridge
-  packages/openclaw-plugin
-  packages/create-byoky-app
-)
-
-for pkg in "${NPM_PACKAGES[@]}"; do
-  echo "  Publishing $(basename "$pkg")..."
-  (cd "$pkg" && pnpm publish --access public --no-git-checks)
-done
+npm_publish_missing "$NEW_VERSION"
 
 # ============================================================
 # 7. Chrome Web Store
@@ -613,18 +1062,24 @@ step "Upload to extension stores"
 
 if [ "$SKIP_STORE_UPLOADS" = true ]; then
   echo "  Skipping Chrome Web Store (--skip-store-uploads)"
+  store_result "Chrome Web Store" "skipped (--skip-store-uploads)"
 elif [ -n "${CHROME_EXTENSION_ID:-}" ] && [ -n "${CHROME_CLIENT_ID:-}" ]; then
   echo "  Uploading to Chrome Web Store..."
-  npx chrome-webstore-upload upload \
-    --source "dist/byoky-chrome-v${NEW_VERSION}-store.zip" \
+  if npx chrome-webstore-upload upload \
+    --source "$CHROME_STORE_ZIP" \
     --extension-id "$CHROME_EXTENSION_ID" \
     --client-id "$CHROME_CLIENT_ID" \
     --client-secret "$CHROME_CLIENT_SECRET" \
     --refresh-token "$CHROME_REFRESH_TOKEN" \
-    --auto-publish \
-    || echo "  WARN: Chrome upload failed; the other stores still go out (retry with ./scripts/release.sh retry)"
+    --auto-publish; then
+    store_result "Chrome Web Store" "uploaded, publishes after review"
+  else
+    echo "  WARN: Chrome upload failed; the other stores still go out (retry with ./scripts/release.sh retry)"
+    store_result "Chrome Web Store" "FAILED; ./scripts/release.sh retry uploads it again"
+  fi
 else
   echo "  Skipping Chrome Web Store (credentials not configured)"
+  store_result "Chrome Web Store" "skipped (credentials not configured)"
 fi
 
 # ============================================================
@@ -632,17 +1087,26 @@ fi
 # ============================================================
 if [ "$SKIP_STORE_UPLOADS" = true ]; then
   echo "  Skipping Firefox Add-ons (--skip-store-uploads)"
+  store_result "Firefox Add-ons" "skipped (--skip-store-uploads)"
+elif [ "$AMO_SOURCE_OK" = false ] && [ -n "${AMO_API_KEY:-}" ]; then
+  echo "  Skipping Firefox Add-ons: the source zip doesn't rebuild the add-on (step 3)"
+  store_result "Firefox Add-ons" "NOT UPLOADED: the source zip doesn't rebuild the add-on; fix it, then ./scripts/release.sh retry"
 elif [ -n "${AMO_API_KEY:-}" ] && [ -n "${AMO_API_SECRET:-}" ]; then
   echo "  Uploading to Firefox Add-ons..."
-  npx web-ext sign \
+  if npx web-ext sign \
     --source-dir packages/extension/.output/firefox-mv2 \
     --api-key "$AMO_API_KEY" \
     --api-secret "$AMO_API_SECRET" \
     --channel listed \
-    --upload-source-code "dist/byoky-source-v${NEW_VERSION}.zip" \
-    || echo "  WARN: Firefox upload failed; the other stores still go out (retry with ./scripts/release.sh retry)"
+    --upload-source-code "dist/byoky-source-v${NEW_VERSION}.zip"; then
+    store_result "Firefox Add-ons" "submitted for review"
+  else
+    echo "  WARN: Firefox upload failed; the other stores still go out (retry with ./scripts/release.sh retry)"
+    store_result "Firefox Add-ons" "FAILED; ./scripts/release.sh retry uploads it again"
+  fi
 else
   echo "  Skipping Firefox Add-ons (credentials not configured)"
+  store_result "Firefox Add-ons" "skipped (credentials not configured)"
 fi
 
 # ============================================================
@@ -652,50 +1116,35 @@ step "Upload to App Store"
 
 if [ "$SKIP_STORE_UPLOADS" = true ]; then
   echo "  Skipping App Store (--skip-store-uploads)"
+  store_result "App Store (iOS + macOS)" "skipped (--skip-store-uploads)"
 elif [ "$SKIP_IOS" = false ] && [ -n "${ASC_KEY_ID:-}" ] && [ -n "${ASC_ISSUER_ID:-}" ]; then
-  # Upload iOS
-  IPA_FILE="dist/byoky-ios-v${NEW_VERSION}.ipa"
-  if [ -f "$IPA_FILE" ]; then
-    echo "  Uploading iOS to App Store Connect..."
-    xcrun altool --upload-app \
-      --file "$IPA_FILE" \
-      --type ios \
-      --apiKey "$ASC_KEY_ID" \
-      --apiIssuer "$ASC_ISSUER_ID" \
-      2>&1 || echo "  WARN: iOS upload failed (may need manual upload via Transporter)"
-  else
-    echo "  Skipping iOS upload (no IPA found — export may have uploaded directly)"
-  fi
-
-  # Upload macOS
-  MACOS_PKG="dist/byoky-macos-v${NEW_VERSION}.pkg"
-  if [ -f "$MACOS_PKG" ]; then
-    echo "  Uploading macOS to App Store Connect..."
-    xcrun altool --upload-app \
-      --file "$MACOS_PKG" \
-      --type macos \
-      --apiKey "$ASC_KEY_ID" \
-      --apiIssuer "$ASC_ISSUER_ID" \
-      2>&1 || echo "  WARN: macOS upload failed (may need manual upload via Transporter)"
-  else
-    echo "  Skipping macOS upload (no pkg found)"
-  fi
-
-  # Wait for builds to process before submitting
-  echo "  Waiting 30s for builds to process..."
-  sleep 30
-
-  # Submit iOS for review (creates version, sets release notes, selects build, submits)
-  echo "  Submitting iOS for App Store review..."
-  node scripts/submit-appstore.mjs "$NEW_NATIVE_VERSION" IOS "$STORE_NOTES_FILE" \
-    2>&1 || echo "  WARN: iOS auto-submit failed — submit manually in App Store Connect"
-
-  # Submit macOS for review
-  echo "  Submitting macOS for App Store review..."
-  node scripts/submit-appstore.mjs "$NEW_NATIVE_VERSION" MAC_OS "$STORE_NOTES_FILE" \
-    2>&1 || echo "  WARN: macOS auto-submit failed — submit manually in App Store Connect"
+  # Upload each build, then submit it. submit-appstore.mjs waits for the
+  # build to process (minutes) and says whether it got submitted.
+  for platform in IOS MAC_OS; do
+    if [ "$platform" = IOS ]; then
+      label="App Store (iOS)"; file="dist/byoky-ios-v${NEW_VERSION}.ipa"; type=ios
+    else
+      label="App Store (macOS)"; file="dist/byoky-macos-v${NEW_VERSION}.pkg"; type=macos
+    fi
+    if [ ! -f "$file" ]; then
+      echo "  Skipping ${label}: the export produced no ${file}"
+      store_result "$label" "FAILED: no ${file} to upload"
+      continue
+    fi
+    echo "  Uploading ${label}..."
+    if ! asc_upload "$file" "$type"; then
+      echo "  WARN: ${label} upload failed; the other stores still go out (retry with ./scripts/release.sh retry)"
+      store_result "$label" "upload FAILED; ./scripts/release.sh retry uploads it again"
+      continue
+    fi
+    echo "  Submitting ${label} for review..."
+    appstore_submit "$platform" "$NEW_NATIVE_VERSION"
+    store_result "$label" "$ASC_RESULT"
+  done
 else
-  echo "  Skipping App Store uploads (${SKIP_IOS:+mobile builds skipped}${ASC_KEY_ID:+}${ASC_KEY_ID:-credentials not configured})"
+  if [ "$SKIP_IOS" = true ]; then reason="iOS/macOS builds skipped"; else reason="credentials not configured"; fi
+  echo "  Skipping App Store uploads (${reason})"
+  store_result "App Store (iOS + macOS)" "skipped (${reason})"
 fi
 
 # ============================================================
@@ -705,10 +1154,18 @@ step "Upload to Google Play"
 
 if [ "$SKIP_STORE_UPLOADS" = true ]; then
   echo "  Skipping Google Play (--skip-store-uploads)"
+  store_result "Google Play" "skipped (--skip-store-uploads)"
 elif [ "$SKIP_ANDROID" = false ] && [ -n "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ]; then
-  node scripts/upload-google-play.mjs "dist/byoky-android-v${NEW_VERSION}.aab" production "$STORE_NOTES_FILE"
+  if node scripts/upload-google-play.mjs "dist/byoky-android-v${NEW_VERSION}.aab" production "$STORE_NOTES_FILE"; then
+    store_result "Google Play" "uploaded to the production track"
+  else
+    echo "  WARN: Google Play upload failed; the GitHub release still goes out (retry with ./scripts/release.sh retry)"
+    store_result "Google Play" "FAILED; ./scripts/release.sh retry uploads it again"
+  fi
 else
-  echo "  Skipping Google Play (${SKIP_ANDROID:+android build skipped}${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:+}${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-credentials not configured})"
+  if [ "$SKIP_ANDROID" = true ]; then reason="Android build skipped"; else reason="credentials not configured"; fi
+  echo "  Skipping Google Play (${reason})"
+  store_result "Google Play" "skipped (${reason})"
 fi
 
 # ============================================================
@@ -722,10 +1179,8 @@ for f in dist/byoky-*-v${NEW_VERSION}.*; do
   [ -f "$f" ] && RELEASE_ASSETS+=("$f")
 done
 
-gh release create "v${NEW_VERSION}" \
-  "${RELEASE_ASSETS[@]}" \
-  --title "v${NEW_VERSION}" \
-  --notes "$RELEASE_NOTES"
+github_release "$NEW_VERSION" "$RELEASE_NOTES"
+STAGE=released
 
 # ============================================================
 # 12. Discord notification
@@ -781,7 +1236,7 @@ echo "╚═══════════════════════�
 echo ""
 echo "  Version:   v${NEW_VERSION}"
 echo "  Native:    ${NEW_NATIVE_VERSION} (${NEW_VERSION_CODE})"
-echo "  Git:       $(git rev-parse --short HEAD) on ${CURRENT_BRANCH}"
+echo "  Git:       $(git rev-parse --short HEAD), pushed to main"
 echo "  Tag:       v${NEW_VERSION}"
 echo ""
 echo "  npm:"
@@ -791,21 +1246,16 @@ done
 echo "    create-byoky-app@${NEW_VERSION}"
 echo ""
 echo "  Stores:"
+for r in ${STORE_RESULTS[@]+"${STORE_RESULTS[@]}"}; do echo "    $r"; done
 if [ "$SKIP_STORE_UPLOADS" = true ]; then
-  echo "    Chrome / Firefox / App Store / Play: skipped (--skip-store-uploads)"
   echo "    Upload artifacts from dist/ manually when ready."
-else
-  [ -n "${CHROME_EXTENSION_ID:-}" ] && echo "    Chrome Web Store: uploaded + auto-published"
-  [ -n "${AMO_API_KEY:-}" ] && echo "    Firefox AMO: submitted for review"
-  [ "$SKIP_IOS" = false ] && [ -n "${ASC_KEY_ID:-}" ] && echo "    App Store (iOS + macOS): uploaded + submitted for review"
-  [ "$SKIP_ANDROID" = false ] && [ -n "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ] && echo "    Google Play: uploaded to production track"
 fi
 [ -n "${DISCORD_WEBHOOK_URL:-}" ] && echo "    Discord: release announcement posted"
 echo ""
 echo "  GitHub: https://github.com/MichaelLod/byoky/releases/tag/v${NEW_VERSION}"
 echo ""
 echo "  Artifacts:"
-for f in "${RELEASE_ASSETS[@]}"; do
+for f in ${RELEASE_ASSETS[@]+"${RELEASE_ASSETS[@]}"}; do
   SIZE=$(ls -lh "$f" | awk '{print $5}')
   echo "    $(basename "$f") ($SIZE)"
 done
