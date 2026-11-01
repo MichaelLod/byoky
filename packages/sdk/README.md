@@ -159,6 +159,8 @@ client.close();                      // Close connection
 client.onClose(() => { ... });       // Disconnect callback
 ```
 
+A request sent over the relay may be at most 1 MB once serialized (URL, headers and body); a larger one throws `ByokyError` `PROXY_ERROR` ("Request too large for the relay") before it is sent. Inline images count at their base64 size. Responses aren't capped.
+
 ### Connect Modal
 
 The built-in modal connects to the wallet when one is present, and otherwise shows install guidance (store link for the current browser, a hint to use the Byoky app's built-in browser on phones). If the user dismisses it without a wallet, `connect()` rejects with `WALLET_NOT_INSTALLED`; a cancelled approval rejects with `Error('User cancelled')`.
