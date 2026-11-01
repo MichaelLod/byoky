@@ -8,6 +8,7 @@ import { createRelayClient, type RelayConnection } from './relay-client.js';
 import { ConnectModal, type ModalOptions } from './modal/connect-modal.js';
 import { createMockSession, type MockConnectOptions } from './mock.js';
 import { randomId } from './id.js';
+import { walletError } from './wallet-error.js';
 
 // --- Session persistence helpers ---
 
@@ -375,16 +376,12 @@ export class Byoky {
         if (msg.type === 'BYOKY_CONNECT_RESPONSE') {
           resolve(msg.payload as ConnectResponse);
         } else if (msg.type === 'BYOKY_ERROR') {
-          const { code, message, retryAfter } = msg.payload as {
-            code: string;
-            message: string;
+          const { code, message, retryAfter } = (msg.payload ?? {}) as {
+            code?: unknown;
+            message?: unknown;
             retryAfter?: number;
           };
-          reject(new ByokyError(
-            code as ByokyErrorCode,
-            message,
-            retryAfter !== undefined ? { retryAfter } : undefined,
-          ));
+          reject(walletError(code, message, retryAfter !== undefined ? { retryAfter } : undefined));
         }
       };
 
@@ -461,7 +458,7 @@ export class Byoky {
       const requestId = randomId();
       const timeout = setTimeout(() => {
         cleanup();
-        reject(new Error('Usage query timed out'));
+        reject(new ByokyError(ByokyErrorCode.PROXY_ERROR, 'Usage query timed out'));
       }, 5000);
 
       const channel = new MessageChannel();
@@ -474,14 +471,14 @@ export class Byoky {
           if (msg.payload) {
             resolve(msg.payload as SessionUsage);
           } else {
-            reject(new Error('Session not found'));
+            reject(new ByokyError(ByokyErrorCode.NO_SESSION, 'Session not found'));
           }
         } else if (msg.type === 'BYOKY_ERROR') {
           // The content script couldn't reach the wallet (WALLET_RELOADED,
           // EXTENSION_ERROR).
           cleanup();
-          const { code, message } = (msg.payload ?? {}) as { code?: string; message?: string };
-          reject(new ByokyError(code as ByokyErrorCode, message ?? 'Usage query failed'));
+          const { code, message } = (msg.payload ?? {}) as { code?: unknown; message?: unknown };
+          reject(walletError(code, message));
         }
       };
 

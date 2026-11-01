@@ -2,6 +2,7 @@ import { ByokyError, ByokyErrorCode } from '@byoky/core';
 import { base64ToBytes, encodeBody, fetchParts } from './body.js';
 import { resolveMessageTarget } from './detect.js';
 import { randomId } from './id.js';
+import { walletError } from './wallet-error.js';
 
 // Statuses whose Response must have a null body; new Response() throws on
 // a stream body for them.
@@ -126,8 +127,8 @@ export function createProxyFetch(
             } else {
               // The status line already went out, so error the body: a
               // closed stream would pass for a complete response.
-              writer.abort(new ByokyError(
-                (data.error?.code ?? ByokyErrorCode.PROXY_ERROR) as ByokyErrorCode,
+              writer.abort(walletError(
+                data.error?.code ?? ByokyErrorCode.PROXY_ERROR,
                 data.error?.message ?? 'Proxy request failed',
               )).catch(() => {});
             }

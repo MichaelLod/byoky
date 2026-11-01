@@ -129,6 +129,7 @@ describe('ByokyServer', () => {
     });
 
     await expect(responsePromise).rejects.toThrow('Something went wrong');
+    await expect(responsePromise).rejects.toMatchObject({ name: 'ByokyError', code: 'PROXY_ERROR' });
   });
 
   it('responds to pings', async () => {

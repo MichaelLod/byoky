@@ -211,6 +211,21 @@ describe('createProxyFetch', () => {
     });
   });
 
+  it('errors the body with UNKNOWN for a code outside ByokyErrorCode, keeping the code', async () => {
+    const proxyFetch = createProxyFetch('openai', { current: 'byk_session' });
+    const fetchPromise = proxyFetch('https://api.openai.com/v1/chat/completions');
+    await new Promise((r) => setTimeout(r, 10));
+    const requestId = postedMessages[0].data.requestId as string;
+
+    simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_META', requestId, status: 200, statusText: 'OK', headers: {} });
+    simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_ERROR', requestId, status: 502, error: { code: 'INVALID_JSON', message: 'bad upstream JSON' } });
+
+    const response = await fetchPromise;
+    await expect(response.text()).rejects.toMatchObject({
+      name: 'ByokyError', code: 'UNKNOWN', message: 'bad upstream JSON', details: { code: 'INVALID_JSON' },
+    });
+  });
+
   describe('fetch compatibility', () => {
     async function sentRequest() {
       await new Promise((r) => setTimeout(r, 10));

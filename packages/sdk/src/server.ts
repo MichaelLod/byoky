@@ -6,6 +6,7 @@ import type {
   WebSocketLike,
 } from '@byoky/core';
 import { base64ToBytes, encodeBody, fetchParts } from './body.js';
+import { walletError } from './wallet-error.js';
 import {
   ByokyError,
   ByokyErrorCode,
@@ -126,7 +127,7 @@ export class ByokyServer {
           case 'relay:response:error': {
             const pending = pendingRequests.get(msg.requestId);
             if (pending) {
-              pending.error(new Error(msg.error.message));
+              pending.error(walletError(msg.error.code, msg.error.message));
               pendingRequests.delete(msg.requestId);
             }
             break;

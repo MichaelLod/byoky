@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Byoky } from '../src/byoky.js';
-import { ByokyErrorCode } from '@byoky/core';
+import { ByokyError, ByokyErrorCode } from '@byoky/core';
 
 describe('Byoky', () => {
   let postedMessages: Array<{ data: Record<string, unknown>; port?: MessagePort }>;
@@ -109,6 +109,58 @@ describe('Byoky', () => {
     await expect(connectPromise).rejects.toMatchObject({
       code: ByokyErrorCode.USER_REJECTED,
     });
+  });
+
+  it('reports a code outside ByokyErrorCode as UNKNOWN, keeping the code in details', async () => {
+    const connectPromise = new Byoky().connect();
+    await new Promise((r) => setTimeout(r, 10));
+    simulateResponse({
+      type: 'BYOKY_ERROR',
+      requestId: postedMessages[0].data.requestId,
+      payload: { code: 'SOMETHING_NEW', message: 'A newer wallet said no' },
+    });
+
+    const err = await connectPromise.catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ByokyError);
+    expect(err).toMatchObject({ code: ByokyErrorCode.UNKNOWN, message: 'A newer wallet said no', details: { code: 'SOMETHING_NEW' } });
+  });
+
+  it('keeps a known code and its retryAfter', async () => {
+    const connectPromise = new Byoky().connect();
+    await new Promise((r) => setTimeout(r, 10));
+    simulateResponse({
+      type: 'BYOKY_ERROR',
+      requestId: postedMessages[0].data.requestId,
+      payload: { code: 'RATE_LIMITED', message: 'Please wait a moment before trying again.', retryAfter: 42 },
+    });
+
+    await expect(connectPromise).rejects.toMatchObject({ code: ByokyErrorCode.RATE_LIMITED, details: { retryAfter: 42 } });
+  });
+
+  it('getUsage rejects with ByokyErrors, not plain Errors', async () => {
+    const connectPromise = new Byoky().connect();
+    await new Promise((r) => setTimeout(r, 10));
+    simulateResponse({
+      type: 'BYOKY_CONNECT_RESPONSE',
+      requestId: postedMessages[0].data.requestId,
+      payload: { sessionKey: 'byk_usage', proxyUrl: 'extension-proxy', providers: {} },
+    });
+    const session = await connectPromise;
+
+    const missing = session.getUsage();
+    await new Promise((r) => setTimeout(r, 10));
+    const query = postedMessages.find((m) => m.data.type === 'BYOKY_SESSION_USAGE')!;
+    simulateResponse({ type: 'BYOKY_SESSION_USAGE_RESPONSE', requestId: query.data.requestId, payload: null });
+    await expect(missing).rejects.toMatchObject({ name: 'ByokyError', code: ByokyErrorCode.NO_SESSION });
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const silent = session.getUsage().catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(await silent).toMatchObject({ name: 'ByokyError', code: ByokyErrorCode.PROXY_ERROR, message: 'Usage query timed out' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('times out if no response received', async () => {
