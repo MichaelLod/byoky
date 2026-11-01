@@ -72,11 +72,12 @@ import {
   hasSignedRoutingState,
   isEmptyWallet,
   parseAllowance,
-  parseUsageTotals,
   readRoutingState,
   readUsageState,
+  salvageUsage,
   signRoutingState,
   signUsageState,
+  toTokenCount,
   withHold,
   withUsage,
   type RoutingState,
@@ -218,6 +219,10 @@ export default defineBackground(() => {
   // It only decides whether to open the side panel in the page's gesture;
   // handleConnect still reads the verified state before trusting anyone.
   let silentTrustSnapshot = new Map<string, string[]>();
+  // The snapshot as setSilentTrustSnapshot last wrote it to storage.session
+  // (serialized), so an unchanged one isn't written again on every trust
+  // read. Unknown until its first write in this worker's lifetime.
+  let storedSilentTrust: string | undefined;
   // The highest trust-state epoch seen this browser session. A state older
   // than this was put back from a snapshot (see lib/trust-state.ts). Kept
   // in storage.session too, so a worker restart doesn't forget it.
@@ -330,8 +335,8 @@ export default defineBackground(() => {
         const seen = data[EPOCH_SESSION_KEYS[kind]];
         if (typeof seen === 'number') epochHighWater[kind] = Math.max(epochHighWater[kind], seen);
       }
-      const held = parseUsageTotals(data._pendingUsage);
-      if (held) pendingUsage = addUsageTotals(held, pendingUsage);
+      // As far as it parses: one app's bad count costs no other app its usage.
+      pendingUsage = addUsageTotals(salvageUsage(data._pendingUsage).totals, pendingUsage);
     } catch {}
   }
 
@@ -3308,7 +3313,9 @@ export default defineBackground(() => {
   // the log when its state is first signed.
 
   function addUsage(origin: string, providerId: string, tokens: number): Promise<void> {
-    if (tokens <= 0) return Promise.resolve();
+    // NaN or Infinity never gets in: it can't be signed, and it would hold
+    // back every app's usage with it.
+    if (!toTokenCount(tokens)) return Promise.resolve();
     pendingUsage = withUsage(pendingUsage, origin, providerId, tokens);
     persistPendingUsage();
     return commitPendingUsage();
@@ -3403,7 +3410,17 @@ export default defineBackground(() => {
     await addUsage(session.appOrigin, req.providerId, inputTokens + outputTokens);
   }
 
-  /** Rough upper bound for a request: its prompt plus the output it asks for. */
+  // The most output tokens a request's estimate counts (estimateRequestTokens).
+  const MAX_OUTPUT_ESTIMATE = 1_000_000;
+
+  /**
+   * Rough upper bound for a request: its prompt plus the output it asks for.
+   * An output limit counts in whole tokens, at most MAX_OUTPUT_ESTIMATE
+   * (more than any model writes in one reply), and only as a finite number:
+   * max_tokens 1e400 comes out of JSON.parse as Infinity, which would make
+   * the estimate unsignable. Same rule on iOS and Android, whose JSON
+   * parsers refuse 1e400 outright.
+   */
   function estimateRequestTokens(req: ProxyRequest): number {
     if (!req.body || req.bodyEncoding) return 0;
     let maxOutput = 0;
@@ -3411,7 +3428,9 @@ export default defineBackground(() => {
       const body = JSON.parse(req.body) as Record<string, unknown>;
       const config = body.generationConfig as Record<string, unknown> | undefined;
       for (const value of [body.max_tokens, body.max_completion_tokens, body.max_output_tokens, config?.maxOutputTokens]) {
-        if (typeof value === 'number' && value > maxOutput) maxOutput = value;
+        if (typeof value === 'number' && Number.isFinite(value)) {
+          maxOutput = Math.max(maxOutput, Math.min(Math.floor(value), MAX_OUTPUT_ESTIMATE));
+        }
       }
     } catch { /* not JSON: count the prompt only */ }
     return Math.ceil(req.body.length / 4) + maxOutput;
@@ -3663,10 +3682,14 @@ export default defineBackground(() => {
   function setSilentTrustSnapshot(snapshot: Map<string, string[]>) {
     silentTrustSnapshot = snapshot;
     if (!hasSessionStorage) return;
+    const serialized = JSON.stringify([...snapshot]);
+    if (serialized === storedSilentTrust) return;
+    storedSilentTrust = serialized;
     const stored = snapshot.size > 0
       ? browser.storage.session.set({ _silentTrust: [...snapshot] })
       : browser.storage.session.remove('_silentTrust');
-    stored.catch(() => {});
+    // Not written: the next call writes it, changed or not.
+    stored.catch(() => { storedSilentTrust = undefined; });
   }
 
   /** The snapshot setSilentTrustSnapshot kept in storage.session. */

@@ -84,6 +84,60 @@ describe('background: a request cancelled before it went upstream', () => {
   });
 });
 
+describe('background: the estimate a cancelled request is charged', () => {
+  const OTHER = 'https://other.example';
+  const totals = (h: Harness) => h.local.data.usageTotals as Record<string, Record<string, number>> | undefined;
+  const body = (maxTokens: string) => `{"model":"claude-x","max_tokens":${maxTokens},"messages":[{"role":"user","content":"hi"}]}`;
+
+  /** Send `rawBody` from APP, cancel it once it reached the upstream, and wait for its 499 entry. */
+  async function cancelAfterUpstream(h: Harness, rawBody: string) {
+    let hang = true;
+    const hits = abortableFetch(h, async (signal) => {
+      if (!hang) return jsonResponse({ usage: { input_tokens: 10, output_tokens: 10 } });
+      return new Promise<Response>((_, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')));
+      });
+    });
+    const { payload } = await connectApproved(h, APP, { providers: [{ id: 'anthropic', required: true }] });
+    const { port } = h.proxy(APP, chat(payload.sessionKey, { body: rawBody }));
+    await h.until(() => hits() === 1, 5_000, 'the upstream call');
+    port.close();
+    await h.until(() => requestLog(h)[0]?.status === 499, 5_000, 'a 499 entry');
+    hang = false;
+  }
+
+  // R3-01: max_tokens 1e400 parses as Infinity. Charged on cancel, it made
+  // every later usage write throw, so no app's usage was counted any more.
+  it('ignores an output limit that isn\'t a finite number, and every app is still counted', async () => {
+    const h = await startBackground({
+      local: await walletStorage([{ id: 'a1', providerId: 'anthropic', key: 'sk-ant-1' }], {
+        tokenAllowances: [{ origin: OTHER, totalLimit: 100_000 }],
+      }),
+    });
+    await h.unlock();
+    const rawBody = body('1e400');
+    await cancelAfterUpstream(h, rawBody);
+    const prompt = Math.ceil(rawBody.length / 4);
+    await h.until(() => totals(h)?.[APP]?.anthropic === prompt, 5_000, 'the prompt charged');
+
+    const other = await connectApproved(h, OTHER, { providers: [{ id: 'anthropic', required: true }] });
+    expect((await h.proxy(OTHER, chat(other.payload.sessionKey)).result).done).toBe(true);
+    await h.until(() => totals(h)?.[OTHER]?.anthropic === 20, 5_000, 'the other app counted');
+    expect(totals(h)).toEqual({ [APP]: { anthropic: prompt }, [OTHER]: { anthropic: 20 } });
+    expect(h.session!.data._pendingUsage).toEqual({});
+    expect(requestLog(h).find((e) => e.status === 499)).toMatchObject({ inputTokens: prompt, outputTokens: 0 });
+    expect((await h.internal('getAllowances')).limitsHold).toBeNull();
+  });
+
+  it('caps an absurd output limit at a million tokens', async () => {
+    const h = await startBackground({ local: await walletStorage([{ id: 'a1', providerId: 'anthropic', key: 'sk-ant-1' }]) });
+    await h.unlock();
+    const rawBody = body('1e300');
+    await cancelAfterUpstream(h, rawBody);
+    await h.until(() => totals(h)?.[APP]?.anthropic === Math.ceil(rawBody.length / 4) + 1_000_000, 5_000, 'the capped estimate charged');
+  });
+});
+
 // --- Setup-token requests, which go through the bridge ---
 
 const SETUP_TOKEN = [{ id: 'oat', providerId: 'anthropic', key: 'sk-ant-oat01-test', authMethod: 'oauth' as const }];

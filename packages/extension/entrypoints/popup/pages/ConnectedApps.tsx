@@ -45,7 +45,7 @@ export function ConnectedApps() {
     requestLog, tokenAllowances, tokenUsage, setAllowance, removeAllowance, resetAppUsage,
     groups, appGroups, credentials,
     createGroup, updateGroup, deleteGroup, setAppGroup,
-    error, clearError, modal,
+    error, clearError, modal, limitsHold,
   } = useWalletStore();
   const [editingOrigin, setEditingOrigin] = useState<string | null>(null);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
@@ -126,10 +126,85 @@ export function ConnectedApps() {
     setPendingMove(null);
   }
 
-  // Errors from creating or editing a group show in its form, and the add
-  // credential sheet shows its own; the rest (moving an app, deleting a
-  // group) show here.
-  const formOpen = showCreateGroup || editingGroupId !== null || modal !== null;
+  // While apps are paused after an integrity check failed, the user is
+  // asked to check every app's limit and usage before resuming them. Apps
+  // that aren't connected have no card, so those with a limit or usage are
+  // listed on their own.
+  const connectedOrigins = new Set(sessions.map((s) => s.appOrigin));
+  const unconnectedOrigins = limitsHold
+    ? [...new Set([...tokenAllowances.map((a) => a.origin), ...Object.keys(tokenUsage)])]
+      .filter((origin) => !connectedOrigins.has(origin))
+      .sort()
+    : [];
+
+  // An edit closes its form once the background took it; a refused one
+  // leaves the form open with the reason.
+  async function finishAllowanceEdit(edit: Promise<boolean>) {
+    if (await edit) setEditingOrigin(null);
+  }
+
+  /** An app's usage against its limit, and the form that edits both. */
+  function allowanceSection(origin: string, providers: string[]) {
+    const usage = getOriginUsage(origin);
+    const allowance = tokenAllowances.find((a) => a.origin === origin);
+    const isEditing = editingOrigin === origin;
+    const pct = allowance?.totalLimit ? Math.min(100, (usage.total / allowance.totalLimit) * 100) : 0;
+    const isOver = allowance?.totalLimit != null && usage.total >= allowance.totalLimit;
+    return (
+      <>
+        <div className="allowance-section">
+          <div className="allowance-usage-row">
+            <span className="allowance-used">{formatTokens(usage.total)} tokens used</span>
+            {allowance?.totalLimit != null && (
+              <span className={`allowance-limit ${isOver ? 'over' : ''}`}>
+                / {formatTokens(allowance.totalLimit)}
+              </span>
+            )}
+            <button
+              className="text-link allowance-edit-btn"
+              onClick={() => {
+                clearError();
+                setEditingOrigin(isEditing ? null : origin);
+              }}
+            >
+              {allowance ? 'Edit limit' : 'Set limit'}
+            </button>
+          </div>
+          {allowance?.totalLimit != null && (
+            <div className="allowance-bar">
+              <div
+                className={`allowance-bar-fill ${isOver ? 'over' : ''}`}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+          )}
+        </div>
+
+        {isEditing && (
+          <AllowanceForm
+            origin={origin}
+            providers={providers}
+            allowance={allowance}
+            error={error}
+            onSave={(a) => finishAllowanceEdit(setAllowance(a))}
+            onRemove={() => finishAllowanceEdit(removeAllowance(origin))}
+            onResetUsage={usage.total > 0 ? () => finishAllowanceEdit(resetAppUsage(origin)) : undefined}
+            onCancel={() => {
+              clearError();
+              setEditingOrigin(null);
+            }}
+          />
+        )}
+      </>
+    );
+  }
+
+  // Errors from creating or editing a group or a limit show in its form,
+  // and the add credential sheet shows its own; the rest (moving an app,
+  // deleting a group) show here.
+  const allowanceFormOpen = editingOrigin !== null
+    && (connectedOrigins.has(editingOrigin) || unconnectedOrigins.includes(editingOrigin));
+  const formOpen = showCreateGroup || editingGroupId !== null || modal !== null || allowanceFormOpen;
 
   return (
     <div>
@@ -187,6 +262,40 @@ export function ConnectedApps() {
           <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: 0 }}>
             When a site requests access to your wallet, it will appear here.
           </p>
+        </div>
+      )}
+
+      {unconnectedOrigins.length > 0 && (
+        <div className="group-section">
+          <h3 className="section-label">Apps not connected now</h3>
+          <p className="card-subtitle" style={{ marginBottom: '12px' }}>
+            Their limits apply when they connect again.
+          </p>
+          {unconnectedOrigins.map((origin) => {
+            const allowance = tokenAllowances.find((a) => a.origin === origin);
+            const providers = [...new Set([
+              ...Object.keys(allowance?.providerLimits ?? {}),
+              ...Object.keys(tokenUsage[origin] ?? {}),
+            ])];
+            return (
+              <div key={origin} className="card connected-app-card">
+                <div className="card-header" style={{ marginBottom: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                    <div className="app-favicon">
+                      {formatOrigin(origin).charAt(0).toUpperCase()}
+                    </div>
+                    <span className="card-title" title={origin} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {formatOrigin(origin)}
+                    </span>
+                  </div>
+                </div>
+                {allowanceSection(origin, providers)}
+                <div className="connected-meta">
+                  <span>{origin}</span>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -320,12 +429,6 @@ export function ConnectedApps() {
               </div>
             ) : (
               groupSessions.map((session) => {
-                const usage = getOriginUsage(session.appOrigin);
-                const allowance = tokenAllowances.find((a) => a.origin === session.appOrigin);
-                const isEditing = editingOrigin === session.appOrigin;
-                const pct = allowance?.totalLimit ? Math.min(100, (usage.total / allowance.totalLimit) * 100) : 0;
-                const isOver = allowance?.totalLimit != null && usage.total >= allowance.totalLimit;
-
                 return (
                   <div
                     key={session.id}
@@ -406,42 +509,7 @@ export function ConnectedApps() {
                     )}
 
                     {/* Token usage & allowance */}
-                    <div className="allowance-section">
-                      <div className="allowance-usage-row">
-                        <span className="allowance-used">{formatTokens(usage.total)} tokens used</span>
-                        {allowance?.totalLimit != null && (
-                          <span className={`allowance-limit ${isOver ? 'over' : ''}`}>
-                            / {formatTokens(allowance.totalLimit)}
-                          </span>
-                        )}
-                        <button
-                          className="text-link allowance-edit-btn"
-                          onClick={() => setEditingOrigin(isEditing ? null : session.appOrigin)}
-                        >
-                          {allowance ? 'Edit limit' : 'Set limit'}
-                        </button>
-                      </div>
-                      {allowance?.totalLimit != null && (
-                        <div className="allowance-bar">
-                          <div
-                            className={`allowance-bar-fill ${isOver ? 'over' : ''}`}
-                            style={{ width: `${pct}%` }}
-                          />
-                        </div>
-                      )}
-                    </div>
-
-                    {isEditing && (
-                      <AllowanceForm
-                        origin={session.appOrigin}
-                        providers={session.providers.filter((p) => p.available).map((p) => p.providerId)}
-                        allowance={allowance}
-                        onSave={(a) => { setAllowance(a); setEditingOrigin(null); }}
-                        onRemove={() => { removeAllowance(session.appOrigin); setEditingOrigin(null); }}
-                        onResetUsage={usage.total > 0 ? () => { resetAppUsage(session.appOrigin); setEditingOrigin(null); } : undefined}
-                        onCancel={() => setEditingOrigin(null)}
-                      />
-                    )}
+                    {allowanceSection(session.appOrigin, session.providers.filter((p) => p.available).map((p) => p.providerId))}
 
                     <div className="connected-meta">
                       <span>{session.appOrigin}</span>
@@ -660,10 +728,13 @@ function AllowanceForm({
   onRemove,
   onResetUsage,
   onCancel,
+  error,
 }: {
   origin: string;
   providers: string[];
   allowance?: TokenAllowance;
+  /** Why the last edit was refused (the wallet locked, say). */
+  error: string | null;
   onSave: (a: TokenAllowance) => void;
   onRemove: () => void;
   /** Start counting from zero again; absent when nothing has been used. */
@@ -723,6 +794,7 @@ function AllowanceForm({
           ))}
         </div>
       )}
+      {error && <div className="error">{error}</div>}
       <div className="allowance-actions">
         <button className="btn btn-primary btn-sm" onClick={handleSave}>Save</button>
         {allowance && (

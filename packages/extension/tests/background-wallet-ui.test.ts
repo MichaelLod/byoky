@@ -165,6 +165,29 @@ describe('background: showing the wallet for a connect request', () => {
     expect(restarted.chrome.action.openPopup).not.toHaveBeenCalled();
   });
 
+  // R3-04: every trust read wrote the snapshot to storage.session again.
+  it('writes the trusted sites it knows about only when they change', async () => {
+    const h = await chromeWallet();
+    await trustAndDisconnect(h);
+    await h.settle();
+    expect(h.session!.data._silentTrust).toEqual([[APP, ['openai']]]);
+    const set = vi.spyOn(h.session!, 'set');
+    const remove = vi.spyOn(h.session!, 'remove');
+    const snapshotWrites = () => [
+      ...set.mock.calls.filter(([items]) => '_silentTrust' in items),
+      ...remove.mock.calls.filter(([keys]) => [keys].flat().includes('_silentTrust')),
+    ].length;
+    for (let i = 0; i < 3; i++) expect((await h.internal('getTrustedSites')).sites).toHaveLength(1);
+    await h.settle();
+    expect(snapshotWrites()).toBe(0);
+
+    expect(await h.internal('removeTrustedSite', { origin: APP })).toEqual({ success: true });
+    await h.internal('getTrustedSites');
+    await h.settle();
+    expect(snapshotWrites()).toBe(1);
+    expect(h.session!.data).not.toHaveProperty('_silentTrust');
+  });
+
   it('forgets the trusted sites it knows about when the wallet locks', async () => {
     const h = await chromeWallet();
     await trustAndDisconnect(h);
