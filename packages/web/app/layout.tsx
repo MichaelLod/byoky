@@ -85,7 +85,6 @@ export const metadata: Metadata = {
     title: 'Byoky — The MetaMask for API keys',
     description:
       'Keep every AI API key in one wallet. Apps connect to the wallet. Your keys never leave Byoky. No servers, no accounts, fully open source.',
-    url: 'https://byoky.com',
     siteName: 'Byoky',
     type: 'website',
   },
