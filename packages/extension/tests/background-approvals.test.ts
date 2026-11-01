@@ -171,7 +171,12 @@ describe('background: what the popup is told about the wallet', () => {
     for (let i = 0; i < 4; i++) {
       expect(await h.internal('exportVault', { currentPassword: 'wrong', exportPassword: 'x' })).toEqual({ error: 'Incorrect wallet password' });
     }
-    expect((await h.internal('exportVault', { currentPassword: 'wrong', exportPassword: 'x' })).error).toMatch(/Too many attempts/);
+    const fifth = await h.internal('exportVault', { currentPassword: 'wrong', exportPassword: 'x' });
+    expect(fifth.error).toMatch(/Too many attempts/);
+    // The export form's countdown reads lockedUntil (WP-B F052).
+    expect(fifth.lockedUntil).toBeGreaterThan(Date.now());
+    const again = await h.internal('exportVault', { currentPassword: 'wrong', exportPassword: 'x' });
+    expect(again).toEqual({ error: expect.stringMatching(/Too many attempts/), lockedUntil: fifth.lockedUntil });
   });
 
   it('tells other views when the wallet is set up or reset', async () => {

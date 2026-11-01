@@ -1806,12 +1806,14 @@ export default defineBackground(() => {
         if (typeof currentPassword !== 'string' || !currentPassword) {
           return { error: 'Enter your wallet password to export' };
         }
+        // A lockout reply carries lockedUntil, so the export form counts down.
         const exportLockout = passwordLockoutError();
-        if (exportLockout) return { error: exportLockout };
+        if (exportLockout) return { error: exportLockout, lockedUntil: unlockLockedUntil };
         const stored = await browser.storage.local.get('passwordHash');
         if (!stored.passwordHash || !(await verifyPassword(currentPassword, stored.passwordHash as string))) {
           recordPasswordFailure();
-          return { error: passwordLockoutError() ?? 'Incorrect wallet password' };
+          const lockout = passwordLockoutError();
+          return lockout ? { error: lockout, lockedUntil: unlockLockedUntil } : { error: 'Incorrect wallet password' };
         }
         clearPasswordFailures();
         // Stored secrets are read bound to their record (lib/wallet-upgrade.ts).
