@@ -244,7 +244,8 @@ private fun MainScreen(wallet: WalletStore, resumeAppId: String?, onAppShown: (S
                 )
             }
             composable("settings") {
-                SettingsScreen(wallet, onBack = { navController.popBackStack() })
+                // Back to the Wallet tab; a second tap mid-animation can't pop past it.
+                SettingsScreen(wallet, onBack = { navController.popBackStack("wallet", inclusive = false) })
             }
         }
     }
