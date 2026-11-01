@@ -19,7 +19,20 @@ function write(path, text, mode) {
   if (mode) chmodSync(path, mode)
 }
 
-// A repo at `version` with release.sh, pushed to its origin and tagged.
+const plist = (version, build) => `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleShortVersionString</key><string>${version}</string>
+<key>CFBundleVersion</key><string>${build}</string>
+</dict></plist>
+`
+
+// A repo at `version` laid out like byoky (the files release.sh bumps,
+// stub scripts), pushed to its origin and tagged. Tools are shims that log
+// to CALLS: pnpm (STUB_PNPM_FAIL="<args>" fails that call), npx
+// (STUB_NPX_EXIT), npm (`npm view` answers for STUB_NPM_PUBLISHED: "all" or
+// package names), gh (STUB_GH_RELEASE_MISSING=1: no release yet), xcrun,
+// xcodebuild.
 function sandbox({ version = '1.1.1', versionCode = 30, android = false } = {}) {
   const base = mkdtempSync(join(tmpdir(), 'byoky-release-sh-'))
   const work = join(base, 'work')
@@ -36,13 +49,22 @@ function sandbox({ version = '1.1.1', versionCode = 30, android = false } = {}) 
   git('config', 'tag.gpgsign', 'false')
   git('remote', 'add', 'origin', join(base, 'origin.git'))
 
-  write(join(work, 'package.json'), JSON.stringify({ name: 'byoky', version }, null, 2) + '\n')
+  const pkg = (dir, name) => write(join(work, dir, 'package.json'), JSON.stringify({ name, version }, null, 2) + '\n')
+  pkg('.', 'byoky')
+  for (const [dir, name] of [['packages/core', '@byoky/core'], ['packages/sdk', '@byoky/sdk'], ['packages/extension', '@byoky/extension'],
+    ['packages/bridge', '@byoky/bridge'], ['packages/web', '@byoky/web'], ['packages/openclaw-plugin', '@byoky/openclaw-plugin'],
+    ['packages/create-byoky-app', 'create-byoky-app']]) pkg(dir, name)
   write(join(work, 'packages/android/app/build.gradle.kts'),
     `android {\n    defaultConfig {\n        versionCode = ${versionCode}\n        versionName = "${version}"\n    }\n}\n`)
   if (android) write(join(work, 'packages/android/gradlew'), '#!/bin/sh\necho "gradlew $*" >> "$CALLS"\n', 0o755)
-  write(join(work, 'packages/extension/package.json'), '{}\n')
+  for (const f of ['packages/ios/Byoky/App/Info.plist', 'packages/ios/SafariExtension/Info.plist',
+    'packages/ios/macOS/Info.plist', 'packages/ios/macOS/SafariExtension-macOS-Info.plist']) write(join(work, f), plist(version, versionCode))
   write(join(work, 'packages/ios/Scripts/copy-wxt-output.sh'), '#!/bin/sh\necho "copy-wxt-output.sh" >> "$CALLS"\n', 0o755)
-  write(join(work, '.gitignore'), 'dist/\nbuild/\n')
+  for (const out of ['chrome-mv3', 'firefox-mv2', 'safari-mv2']) {
+    write(join(work, 'packages/extension/.output', out, 'manifest.json'), JSON.stringify({ version }) + '\n')
+  }
+  for (const f of ['pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.base.json', 'README.md']) write(join(work, f), '\n')
+  write(join(work, '.gitignore'), 'dist/\nbuild/\n.output/\n')
   mkdirSync(join(work, 'scripts/tests'), { recursive: true })
   copyFileSync(join(SCRIPTS, 'release.sh'), join(work, 'scripts/release.sh'))
   chmodSync(join(work, 'scripts/release.sh'), 0o755)
@@ -50,6 +72,7 @@ function sandbox({ version = '1.1.1', versionCode = 30, android = false } = {}) 
   write(join(work, 'scripts/store-status.mjs'),
     "console.log(process.env.STUB_STATUS_JSON ?? '{\"results\":[]}'); process.exitCode = Number(process.env.STUB_STATUS_CODE ?? 0)\n")
   write(join(work, 'scripts/ios-signing.sh'), logArgs('ios-signing.sh') + 'exit "${STUB_SIGNING_EXIT:-0}"\n')
+  write(join(work, 'scripts/sync-mobile-bundle.sh'), logArgs('sync-mobile-bundle.sh'))
   write(join(work, 'scripts/scan-openclaw-plugin.mjs'), '')
   write(join(work, 'scripts/release-notes.mjs'), "console.log('notes')\n")
   write(join(work, 'scripts/generate-versions.mjs'), '')
@@ -59,8 +82,7 @@ function sandbox({ version = '1.1.1', versionCode = 30, android = false } = {}) 
   git('tag', `v${version}`)
   git('push', '-q', 'origin', 'main', '--tags')
 
-  for (const tool of ['gh', 'xcodebuild']) write(join(bin, tool), logArgs(tool), 0o755)
-  // STUB_PNPM_FAIL="test" makes `pnpm test` fail.
+  write(join(bin, 'xcodebuild'), logArgs('xcodebuild'), 0o755)
   write(join(bin, 'pnpm'), logArgs('pnpm') + '[ "$*" = "${STUB_PNPM_FAIL:-}" ] && exit 1\nexit 0\n', 0o755)
   write(join(bin, 'xcrun'), logArgs('xcrun') + `case "$*" in
   "simctl list runtimes -j") echo '{"runtimes":[{"identifier":"rt.iOS-27-0","platform":"iOS","isAvailable":true,"version":"27.0","supportedDeviceTypes":[{"identifier":"dt.iPhone","productFamily":"iPhone"}]}]}' ;;
@@ -68,6 +90,15 @@ function sandbox({ version = '1.1.1', versionCode = 30, android = false } = {}) 
 esac
 `, 0o755)
   write(join(bin, 'npx'), logArgs('npx') + 'exit "${STUB_NPX_EXIT:-0}"\n', 0o755)
+  write(join(bin, 'npm'), `#!/bin/sh
+if [ "$1" = view ]; then
+  name="\${2%@*}"; ver="\${2##*@}"
+  case " \${STUB_NPM_PUBLISHED:-} " in *" all "*|*" $name "*) echo "$ver" ;; esac
+  exit 0
+fi
+echo "npm $*" >> "$CALLS"
+`, 0o755)
+  write(join(bin, 'gh'), logArgs('gh') + '[ "$1 $2" = "release view" ] && [ -n "${STUB_GH_RELEASE_MISSING:-}" ] && exit 1\nexit 0\n', 0o755)
 
   const run = (args, env = {}) => {
     const res = spawnSync('bash', [join(work, 'scripts/release.sh'), ...args], {
@@ -90,7 +121,8 @@ esac
     rmSync(calls, { force: true })
     return { code: res.status, out: res.stdout + res.stderr, calls: log }
   }
-  return { base, work, git, run, cleanup: () => rmSync(base, { recursive: true, force: true }) }
+  const origin = (...args) => execFileSync('git', ['-C', join(base, 'origin.git'), ...args], { encoding: 'utf8' })
+  return { base, work, git, origin, run, cleanup: () => rmSync(base, { recursive: true, force: true }) }
 }
 
 // --- retry ---
@@ -100,6 +132,8 @@ function released(t) {
   t.after(s.cleanup)
   write(join(s.work, 'dist/byoky-chrome-v1.1.2.zip'), 'keyed')
   write(join(s.work, 'dist/byoky-chrome-v1.1.2-store.zip'), 'store')
+  const run = s.run
+  s.run = (args, env = {}) => run(args, { STUB_NPM_PUBLISHED: 'all', ...env })
   return s
 }
 
@@ -236,7 +270,7 @@ test('uncommitted and untracked files are an error unless --allow-dirty', (t) =>
   assert.match(untracked.out, /ERROR: Uncommitted or untracked files would ship/)
   assert.match(untracked.out, /\?\? packages\//)
 
-  rmSync(join(s.work, 'packages/core'), { recursive: true })
+  rmSync(join(s.work, 'packages/core/src'), { recursive: true })
   writeFileSync(join(s.work, '.gitignore'), 'dist/\nbuild/\nchanged/\n')
   const modified = s.run(['1.1.2', '--dry'])
   assert.equal(modified.code, 1, modified.out)
@@ -278,4 +312,93 @@ test('a failing test stops the release before the bump', (t) => {
   assert.equal(r.code, 1, r.out)
   assert.match(r.out, /Error: 'pnpm test' failed\. Nothing was bumped or published\./)
   assert.match(readFileSync(join(s.work, 'package.json'), 'utf8'), /"version": "1\.1\.1"/)
+})
+
+// --- a whole run, and picking up after a failure ---
+
+const unzipList = (zip) => execFileSync('unzip', ['-l', zip], { encoding: 'utf8' })
+
+test('a release from main bumps, commits, pushes main and the tag together, and reports each store', (t) => {
+  const s = sandbox()
+  t.after(s.cleanup)
+  // A zip left by an earlier, failed run must not keep its old files.
+  mkdirSync(join(s.base, 'stale'))
+  write(join(s.base, 'stale/old-chunk.js'), 'old')
+  mkdirSync(join(s.work, 'dist'))
+  execFileSync('zip', ['-qj', join(s.work, 'dist/byoky-chrome-v1.1.2.zip'), join(s.base, 'stale/old-chunk.js')])
+
+  const r = s.run(['1.1.2', '--yes', '--skip-mobile'], { STUB_GH_RELEASE_MISSING: '1' })
+  assert.equal(r.code, 0, r.out)
+  assert.equal(s.origin('log', '-1', '--format=%s', 'main').trim(), 'Bump to v1.1.2 (native 1.1.2/31)')
+  assert.equal(s.origin('rev-parse', 'v1.1.2^{commit}'), s.origin('rev-parse', 'main'))
+  assert.equal((r.calls.match(/^pnpm publish --access public --no-git-checks$/gm) ?? []).length, 5, r.calls)
+  assert.match(r.calls, /^gh release create v1\.1\.2 .*--verify-tag/m)
+  assert.match(r.out, /Chrome Web Store: uploaded, publishes after review/)
+  assert.match(r.out, /Firefox Add-ons: skipped \(credentials not configured\)/)
+  assert.doesNotMatch(unzipList(join(s.work, 'dist/byoky-chrome-v1.1.2.zip')), /old-chunk\.js/)
+  assert.match(unzipList(join(s.work, 'dist/byoky-source-v1.1.2.zip')), /tsconfig\.base\.json[\s\S]*BUILD-FIREFOX\.md/)
+})
+
+test('--allow-branch pushes the release commit to main', (t) => {
+  const s = sandbox()
+  t.after(s.cleanup)
+  s.git('checkout', '-q', '-b', 'release/1.1.2')
+  const r = s.run(['1.1.2', '--yes', '--skip-mobile', '--allow-branch'])
+  assert.equal(r.code, 0, r.out)
+  assert.equal(s.origin('log', '-1', '--format=%s', 'main').trim(), 'Bump to v1.1.2 (native 1.1.2/31)')
+  assert.throws(() => s.origin('rev-parse', '--verify', 'refs/heads/release/1.1.2'))
+})
+
+test('npm packages already published are skipped', (t) => {
+  const s = sandbox()
+  t.after(s.cleanup)
+  const r = s.run(['1.1.2', '--yes', '--skip-mobile'], { STUB_NPM_PUBLISHED: '@byoky/core @byoky/sdk' })
+  assert.equal(r.code, 0, r.out)
+  assert.match(r.out, /@byoky\/core@1\.1\.2 is already on npm/)
+  assert.equal((r.calls.match(/^pnpm publish /gm) ?? []).length, 3, r.calls)
+})
+
+test('a failure after the bump says how to undo it, and the next run explains the bumped tree', (t) => {
+  const s = sandbox()
+  t.after(s.cleanup)
+  const r = s.run(['1.1.2', '--yes', '--skip-mobile'], { STUB_PNPM_FAIL: 'build' })
+  assert.equal(r.code, 1, r.out)
+  assert.match(r.out, /The release stopped after the version bump\. Nothing was committed or published\./)
+  assert.match(r.out, /git checkout -- package\.json packages\/core\/package\.json /)
+
+  const again = s.run(['1.1.2', '--yes', '--skip-mobile'])
+  assert.equal(again.code, 1, again.out)
+  assert.match(again.out, /package\.json has 1\.1\.2 but the last commit 1\.1\.1: an earlier run bumped the tree and stopped before committing/)
+})
+
+test('a failed npm publish after the push points to retry', (t) => {
+  const s = sandbox()
+  t.after(s.cleanup)
+  const r = s.run(['1.1.2', '--yes', '--skip-mobile'], { STUB_PNPM_FAIL: 'publish --access public --no-git-checks' })
+  assert.equal(r.code, 1, r.out)
+  assert.match(r.out, /v1\.1\.2 is tagged on origin, but npm, the stores or the GitHub release didn't all get it\.\nFinish with: \.\/scripts\/release\.sh retry/)
+})
+
+test('retry publishes missing npm packages from a clean checkout of the tag, and creates a missing GitHub release', (t) => {
+  const s = released(t)
+  const r = s.run(['retry'], { STUB_NPM_PUBLISHED: '@byoky/core', STUB_GH_RELEASE_MISSING: '1' })
+  assert.equal(r.code, 0, r.out)
+  assert.match(r.calls, /^pnpm build$/m)
+  assert.equal((r.calls.match(/^pnpm publish /gm) ?? []).length, 4, r.calls)
+  assert.match(r.calls, /^gh release create v1\.1\.2 .*--verify-tag/m)
+
+  // Not on the tag: nothing is published from a different commit.
+  s.git('commit', '-q', '--allow-empty', '-m', 'after the release')
+  const off = s.run(['retry'], { STUB_NPM_PUBLISHED: '@byoky/core' })
+  assert.equal(off.code, 1, off.out)
+  assert.doesNotMatch(off.calls, /pnpm publish/)
+  assert.match(off.out, /npm: NOT PUBLISHED: run retry again from a clean checkout of v1\.1\.2/)
+})
+
+test('pre-flight wants the Android upload keystore when the AAB goes to Google Play', (t) => {
+  const s = sandbox({ android: true })
+  t.after(s.cleanup)
+  const r = s.run(['1.1.2', '--dry', '--skip-native-tests'], { GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: '/dev/null' })
+  assert.equal(r.code, 1, r.out)
+  assert.match(r.out, /ERROR: packages\/android\/keystore\.properties is missing/)
 })

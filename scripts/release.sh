@@ -13,6 +13,36 @@ for envfile in .env .env.local; do
   fi
 done
 
+# The files a release bumps and commits (steps 1 and 4), and the synced
+# mobile bundles it commits when they changed.
+VERSION_FILES=(
+  package.json
+  packages/core/package.json
+  packages/sdk/package.json
+  packages/extension/package.json
+  packages/bridge/package.json
+  packages/web/package.json
+  packages/openclaw-plugin/package.json
+  packages/create-byoky-app/package.json
+  packages/android/app/build.gradle.kts
+  packages/ios/Byoky/App/Info.plist
+  packages/ios/SafariExtension/Info.plist
+  packages/ios/macOS/Info.plist
+  packages/ios/macOS/SafariExtension-macOS-Info.plist
+)
+MOBILE_BUNDLES=(
+  packages/ios/Byoky/Resources/mobile.js
+  packages/android/app/src/main/assets/mobile.js
+)
+
+NPM_PACKAGES=(
+  packages/core
+  packages/sdk
+  packages/bridge
+  packages/openclaw-plugin
+  packages/create-byoky-app
+)
+
 # Hand-written notes in docs/release-notes/v<version>.txt, when present,
 # replace the store "What's New" generated from conventional-commit prefixes.
 write_store_notes() {
@@ -105,6 +135,47 @@ run_ios_tests() {
   return $rc
 }
 
+# Publishes the packages of NPM_PACKAGES that npm doesn't have at $1 yet,
+# so a release that stopped half-way through can be finished.
+npm_publish_missing() {
+  local pkg name
+  for pkg in "${NPM_PACKAGES[@]}"; do
+    name=$(node -p "require('./${pkg}/package.json').name")
+    if [ "$(npm view "${name}@$1" version 2>/dev/null || true)" = "$1" ]; then
+      echo "  ${name}@$1 is already on npm"
+    else
+      echo "  Publishing ${name}@$1..."
+      (cd "$pkg" && pnpm publish --access public --no-git-checks) || return 1
+    fi
+  done
+}
+
+# Creates GitHub release v$1 with the dist artifacts unless it exists.
+# --verify-tag: gh would otherwise create a missing tag on main's tip.
+github_release() {
+  local f assets=()
+  if gh release view "v$1" >/dev/null 2>&1; then
+    echo "  GitHub release v$1 already exists"
+    return 0
+  fi
+  for f in dist/byoky-*-v"$1".*; do
+    [ -f "$f" ] && assets+=("$f")
+  done
+  gh release create "v$1" ${assets[@]+"${assets[@]}"} --verify-tag --title "v$1" --notes "$2"
+}
+
+# The release notes for v$1 (native $2, build $3) since the previous tag.
+release_notes() {
+  local prev notes
+  prev=$(git tag --list 'v[0-9]*' --sort=-version:refname | grep -vx "v$1" | head -1 || true)
+  [ -n "$prev" ] || prev=$(git rev-list --max-parents=0 HEAD | head -1)
+  notes=$(node scripts/release-notes.mjs "$prev" "v$1" "$1" "$2" "$3")
+  if [ -f "docs/release-notes/v$1.txt" ]; then
+    notes="$(cat "docs/release-notes/v$1.txt")"$'\n\n'"$notes"
+  fi
+  printf '%s\n' "$notes"
+}
+
 # What happened in each store, for the summary at the end.
 STORE_RESULTS=()
 store_result() { STORE_RESULTS+=("$1: $2"); }
@@ -141,7 +212,8 @@ if [ "${1:-}" = "status" ]; then
 fi
 
 # ============================================================
-# Retry mode — re-publish only stores that are behind
+# Retry mode — finish a release: npm packages and the GitHub release that
+# are missing, and the stores that are behind
 # ============================================================
 if [ "${1:-}" = "retry" ]; then
   ALLOW_PENDING=false
@@ -182,6 +254,38 @@ if [ "${1:-}" = "retry" ]; then
   }
 
   RETRIED=0
+
+  # npm: a failed `pnpm publish` stops the release after the tag is pushed.
+  # What's missing is published from the tagged commit, rebuilt first.
+  NPM_MISSING=false
+  for pkg in "${NPM_PACKAGES[@]}"; do
+    name=$(node -p "require('./${pkg}/package.json').name")
+    if [ "$(npm view "${name}@${CURRENT}" version 2>/dev/null || true)" != "$CURRENT" ]; then NPM_MISSING=true; fi
+  done
+  if [ "$NPM_MISSING" = false ]; then
+    echo "npm: v${CURRENT} — all published"
+  elif ! git tag --points-at HEAD | grep -qx "v${CURRENT}" || [ -n "$(git status --porcelain --untracked-files=normal)" ]; then
+    echo "npm: packages missing at v${CURRENT}, but this isn't a clean checkout of the tag v${CURRENT}"
+    store_result "npm" "NOT PUBLISHED: run retry again from a clean checkout of v${CURRENT}"
+  else
+    echo "npm: publishing what's missing at v${CURRENT}..."
+    if pnpm build && npm_publish_missing "$CURRENT"; then
+      RETRIED=$((RETRIED + 1))
+      store_result "npm" "published"
+    else
+      store_result "npm" "FAILED (see the log above)"
+    fi
+  fi
+
+  # GitHub release
+  if gh release view "v${CURRENT}" >/dev/null 2>&1; then
+    echo "GitHub release: v${CURRENT} — exists"
+  elif github_release "$CURRENT" "$(release_notes "$CURRENT" "$NATIVE_VERSION" "$VERSION_CODE")"; then
+    RETRIED=$((RETRIED + 1))
+    store_result "GitHub release" "created"
+  else
+    store_result "GitHub release" "FAILED (see the log above)"
+  fi
 
   # Chrome Web Store: the store zip, without the manifest key (see step 3)
   if [ -n "${CHROME_EXTENSION_ID:-}" ] && [ -n "${CHROME_CLIENT_ID:-}" ]; then
@@ -305,7 +409,7 @@ if [ "${1:-}" = "retry" ]; then
   fi
   # A failure above leaves its store behind; say so in the exit code too.
   for r in ${STORE_RESULTS[@]+"${STORE_RESULTS[@]}"}; do
-    case "$r" in *FAILED*|*"NO BUILD"*) exit 1 ;; esac
+    case "$r" in *FAILED*|*"NO BUILD"*|*"NOT PUBLISHED"*) exit 1 ;; esac
   done
   exit 0
 fi
@@ -361,6 +465,9 @@ if [ -z "$NEW_VERSION" ]; then
   echo ""
   echo "Releases go out from main: fast-forward main to the work, release from the main"
   echo "checkout. The release commit and tag v<version> are pushed to origin main."
+  echo "retry finishes a release that stopped after the push: it publishes the npm"
+  echo "packages and the GitHub release that are missing and uploads to the stores that"
+  echo "are behind. A run that stopped earlier says how to undo its version bump."
   echo ""
   echo "Current version: $CURRENT"
   exit 1
@@ -415,6 +522,12 @@ else
   SKIP_ANDROID=true
 fi
 
+# A run that failed between the bump and the commit leaves a bumped tree.
+HEAD_VERSION=$(git show HEAD:package.json | node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(0, "utf8")).version)')
+if [ "$OLD_VERSION" != "$HEAD_VERSION" ]; then
+  ERRORS+=("package.json has ${OLD_VERSION} but the last commit ${HEAD_VERSION}: an earlier run bumped the tree and stopped before committing, so nothing of it was published. Undo the bump (git checkout -- ${VERSION_FILES[*]} ${MOBILE_BUNDLES[*]}) and run again")
+fi
+
 # Check git state. Everything is built from the working tree, but only the
 # version files are committed: an uncommitted or untracked change would ship
 # in the npm packages and store builds without being in the tag.
@@ -450,6 +563,13 @@ LATEST_TAG=$(git tag --list 'v[0-9]*' --sort=-version:refname | head -1)
 if [ -n "$LATEST_TAG" ] && [ "${LATEST_TAG#v}" != "$OLD_VERSION" ] && \
    [ "$(printf '%s\n%s\n' "${LATEST_TAG#v}" "$OLD_VERSION" | sort -V | tail -1)" = "${LATEST_TAG#v}" ]; then
   ERRORS+=("${LATEST_TAG} is newer than this tree's ${OLD_VERSION}: HEAD is missing that release's version bump")
+fi
+
+# Without the upload keystore gradle builds an unsigned AAB, which Google Play
+# refuses at the very end of the run.
+if [ "$SKIP_ANDROID" = false ] && [ "$SKIP_STORE_UPLOADS" = false ] && \
+   [ -n "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ] && [ ! -f packages/android/keystore.properties ]; then
+  ERRORS+=("packages/android/keystore.properties is missing: the AAB would be unsigned and Google Play refuses it")
 fi
 
 # The OpenClaw install scan runs on the built plugin before anything is
@@ -545,6 +665,10 @@ NEW_NATIVE_VERSION="$NEW_VERSION"
 if [ "$NEW_NATIVE_VERSION" = "$OLD_NATIVE_VERSION" ] || \
    [ "$(printf '%s\n%s\n' "$OLD_NATIVE_VERSION" "$NEW_NATIVE_VERSION" | sort -V | tail -1)" != "$NEW_NATIVE_VERSION" ]; then
   echo "Error: $NEW_VERSION must be higher than the native apps' current $OLD_NATIVE_VERSION"
+  if [ "$NEW_NATIVE_VERSION" = "$OLD_NATIVE_VERSION" ]; then
+    echo "       If v${NEW_VERSION} was released already but didn't reach every store or npm,"
+    echo "       ./scripts/release.sh retry finishes it."
+  fi
   exit 1
 fi
 
@@ -636,6 +760,30 @@ step() {
   echo "━━━ Step $STEP: $1 ━━━"
 }
 
+# From here on a failure leaves work behind; say what and how to go on.
+STAGE=bumped
+on_exit() {
+  local code=$?
+  [ "$code" -eq 0 ] && return
+  echo ""
+  case "$STAGE" in
+    bumped)
+      echo "The release stopped after the version bump. Nothing was committed or published."
+      echo "Undo the bump, then run it again:"
+      echo "  git checkout -- ${VERSION_FILES[*]} ${MOBILE_BUNDLES[*]}" ;;
+    committed)
+      echo "The release stopped after committing and tagging v${NEW_VERSION} locally; nothing was pushed or published."
+      echo "Push both, then finish with retry:"
+      echo "  git push --atomic origin HEAD:main v${NEW_VERSION} && ./scripts/release.sh retry" ;;
+    pushed)
+      echo "v${NEW_VERSION} is tagged on origin, but npm, the stores or the GitHub release didn't all get it."
+      echo "Finish with: ./scripts/release.sh retry" ;;
+    released)
+      echo "v${NEW_VERSION} is out; a step after the GitHub release failed (see above)." ;;
+  esac
+}
+trap on_exit EXIT
+
 # ============================================================
 # 1. Bump versions
 # ============================================================
@@ -694,8 +842,7 @@ pnpm build
 # about to be published before anything is committed.
 echo "  Scanning the OpenClaw plugin..."
 if ! node scripts/scan-openclaw-plugin.mjs; then
-  echo "Error: the OpenClaw install scan failed. Nothing was committed or published;"
-  echo "       undo the version bump (git checkout -- .) before running again."
+  echo "Error: the OpenClaw install scan failed."
   exit 1
 fi
 
@@ -783,6 +930,9 @@ fi
 step "Create dist artifacts"
 
 mkdir -p dist
+# zip -r adds to an archive that's already there: an earlier run's hashed
+# chunks would ship next to this build's. Start from nothing.
+rm -f dist/byoky-*-v"${NEW_VERSION}".* dist/byoky-*-v"${NEW_VERSION}"-*
 
 (cd packages/extension/.output/chrome-mv3 && zip -r "$ROOT/dist/byoky-chrome-v${NEW_VERSION}.zip" .)
 (cd packages/extension/.output/firefox-mv2 && zip -r "$ROOT/dist/byoky-firefox-v${NEW_VERSION}.zip" .)
@@ -830,7 +980,6 @@ fi
 # files the build reads (all three packages extend tsconfig.base.json) and
 # BUILD-FIREFOX.md. The add-on goes to AMO only if the zip rebuilds it.
 SOURCE_ZIP="dist/byoky-source-v${NEW_VERSION}.zip"
-rm -f "$SOURCE_ZIP"
 zip -r "$SOURCE_ZIP" \
   package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json README.md \
   packages/core packages/sdk packages/extension \
@@ -855,25 +1004,9 @@ ls -lh dist/byoky-*-v${NEW_VERSION}.* 2>/dev/null | awk '{print "    " $NF " (" 
 # ============================================================
 step "Git commit + tag"
 
-# Stage all version-bumped files.
-git add \
-  package.json \
-  packages/core/package.json \
-  packages/sdk/package.json \
-  packages/extension/package.json \
-  packages/bridge/package.json \
-  packages/web/package.json \
-  packages/openclaw-plugin/package.json \
-  packages/create-byoky-app/package.json \
-  packages/android/app/build.gradle.kts \
-  packages/ios/Byoky/App/Info.plist \
-  packages/ios/SafariExtension/Info.plist \
-  packages/ios/macOS/Info.plist \
-  packages/ios/macOS/SafariExtension-macOS-Info.plist
-
-# Also stage the synced mobile bundles if they changed
-git add packages/ios/Byoky/Resources/mobile.js 2>/dev/null || true
-git add packages/android/app/src/main/assets/mobile.js 2>/dev/null || true
+# Stage all version-bumped files, and the synced mobile bundles if they changed
+git add "${VERSION_FILES[@]}"
+for f in "${MOBILE_BUNDLES[@]}"; do git add "$f" 2>/dev/null || true; done
 
 # The tree was clean before the bump, so anything still unstaged was changed
 # by the build. It's derived from the tagged sources, but say so.
@@ -885,6 +1018,7 @@ fi
 
 git commit -m "Bump to v${NEW_VERSION} (native ${NEW_NATIVE_VERSION}/${NEW_VERSION_CODE})"
 git tag "v${NEW_VERSION}"
+STAGE=committed
 
 echo "  Committed and tagged v${NEW_VERSION}"
 
@@ -892,6 +1026,7 @@ echo "  Committed and tagged v${NEW_VERSION}"
 # origin/main (pre-flight), so this is a fast-forward from any branch.
 echo "  Pushing to origin main..."
 git push --atomic origin HEAD:main "refs/tags/v${NEW_VERSION}"
+STAGE=pushed
 
 # ============================================================
 # 5. Generate release notes
@@ -903,10 +1038,7 @@ if [ -z "$PREV_TAG" ]; then
   PREV_TAG=$(git rev-list --max-parents=0 HEAD | head -1)
 fi
 
-RELEASE_NOTES=$(node scripts/release-notes.mjs "$PREV_TAG" "v${NEW_VERSION}" "$NEW_VERSION" "$NEW_NATIVE_VERSION" "$NEW_VERSION_CODE")
-if [ -f "docs/release-notes/v${NEW_VERSION}.txt" ]; then
-  RELEASE_NOTES="$(cat "docs/release-notes/v${NEW_VERSION}.txt")"$'\n\n'"$RELEASE_NOTES"
-fi
+RELEASE_NOTES=$(release_notes "$NEW_VERSION" "$NEW_NATIVE_VERSION" "$NEW_VERSION_CODE")
 echo "$RELEASE_NOTES"
 
 # Store-formatted notes (plain text, max 500 chars) for App Store + Google Play
@@ -921,18 +1053,7 @@ cat "$STORE_NOTES_FILE" | sed 's/^/    /'
 # ============================================================
 step "Publish to npm"
 
-NPM_PACKAGES=(
-  packages/core
-  packages/sdk
-  packages/bridge
-  packages/openclaw-plugin
-  packages/create-byoky-app
-)
-
-for pkg in "${NPM_PACKAGES[@]}"; do
-  echo "  Publishing $(basename "$pkg")..."
-  (cd "$pkg" && pnpm publish --access public --no-git-checks)
-done
+npm_publish_missing "$NEW_VERSION"
 
 # ============================================================
 # 7. Chrome Web Store
@@ -1058,10 +1179,8 @@ for f in dist/byoky-*-v${NEW_VERSION}.*; do
   [ -f "$f" ] && RELEASE_ASSETS+=("$f")
 done
 
-gh release create "v${NEW_VERSION}" \
-  "${RELEASE_ASSETS[@]}" \
-  --title "v${NEW_VERSION}" \
-  --notes "$RELEASE_NOTES"
+github_release "$NEW_VERSION" "$RELEASE_NOTES"
+STAGE=released
 
 # ============================================================
 # 12. Discord notification
@@ -1136,7 +1255,7 @@ echo ""
 echo "  GitHub: https://github.com/MichaelLod/byoky/releases/tag/v${NEW_VERSION}"
 echo ""
 echo "  Artifacts:"
-for f in "${RELEASE_ASSETS[@]}"; do
+for f in ${RELEASE_ASSETS[@]+"${RELEASE_ASSETS[@]}"}; do
   SIZE=$(ls -lh "$f" | awk '{print $5}')
   echo "    $(basename "$f") ($SIZE)"
 done
