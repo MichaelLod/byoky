@@ -15,7 +15,9 @@
     "byoky-together",
     "byoky-fireworks",
     "byoky-openrouter",
-    "byoky-azure_openai"
+    "byoky-azure_openai",
+    "byoky-ollama",
+    "byoky-lm_studio"
   ],
   "configSchema": {
     "type": "object",

@@ -34,7 +34,7 @@ curl -H "x-api-key: $(byoky-bridge token)" http://127.0.0.1:19280/health
 
 ## Available Providers
 
-The plugin registers all 13 Byoky providers with OpenClaw:
+The plugin registers all 15 Byoky providers with OpenClaw:
 
 | Provider | OpenClaw ID | Models |
 |----------|-------------|--------|
@@ -50,7 +50,9 @@ The plugin registers all 13 Byoky providers with OpenClaw:
 | Together AI | `byoky-together` | Set model manually |
 | Fireworks AI | `byoky-fireworks` | Set model manually |
 | OpenRouter | `byoky-openrouter` | Set model manually |
-| Azure OpenAI | `byoky-azure_openai` | Set model manually |
+| Azure OpenAI | `byoky-azure_openai` | Set your deployment name as the model |
+| Ollama | `byoky-ollama` | Set model manually |
+| LM Studio | `byoky-lm_studio` | Set model manually |
 
 To connect a different provider:
 

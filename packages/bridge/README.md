@@ -107,7 +107,9 @@ curl http://127.0.0.1:19280/anthropic/v1/messages \
 
 ## Supported Providers
 
-Anthropic, OpenAI, Google Gemini, Mistral, Cohere, xAI, DeepSeek, Perplexity, Groq, Together AI, Fireworks AI, OpenRouter, Azure OpenAI.
+Anthropic, OpenAI, Google Gemini, Mistral, Cohere, xAI, DeepSeek, Perplexity, Groq, Together AI, Fireworks AI, OpenRouter, Azure OpenAI, Ollama, LM Studio.
+
+Azure OpenAI, Ollama and LM Studio run on a host of your own: the bridge forwards their requests and the extension sends them to the base URL stored with your key. For Azure, point the client at `http://127.0.0.1:19280/azure_openai/openai/v1` and use the deployment name as the model.
 
 ## License
 

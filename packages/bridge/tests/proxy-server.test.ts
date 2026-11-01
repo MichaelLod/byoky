@@ -346,6 +346,43 @@ describe('large request bodies', () => {
   });
 });
 
+describe('provider base URLs', () => {
+  let custom: Server;
+  let customPort: number;
+
+  beforeAll(async () => {
+    customPort = await freePort();
+    custom = await startProxyServer({
+      port: customPort,
+      sessionKey: 'session-key',
+      providers: ['azure_openai', 'ollama', 'lm_studio', 'openrouter', 'not_a_provider'],
+      token: TOKEN,
+      sendToExtension: fakeExtension,
+    });
+  });
+
+  afterAll(() => {
+    custom.close();
+  });
+
+  it.each([
+    ['/azure_openai/openai/v1/chat/completions', 'https://YOUR_RESOURCE.openai.azure.com/openai/v1/chat/completions'],
+    ['/ollama/v1/chat/completions', 'http://localhost:11434/v1/chat/completions'],
+    ['/lm_studio/v1/chat/completions', 'http://localhost:1234/v1/chat/completions'],
+    ['/openrouter/v1/chat/completions', 'https://openrouter.ai/api/v1/chat/completions'],
+  ])('forwards %s on the registry base URL', async (path, url) => {
+    const res = await send(customPort, path, { headers: { 'x-api-key': TOKEN }, body: '{}' });
+    expect(res.status).toBe(200);
+    expect((sent[0] as ProxyRequestOut).url).toBe(url);
+  });
+
+  it('refuses a provider the registry does not know', async () => {
+    const res = await send(customPort, '/not_a_provider/v1/x', { headers: { 'x-api-key': TOKEN }, body: '{}' });
+    expect(res.status).toBe(400);
+    expect(sent).toHaveLength(0);
+  });
+});
+
 describe('binary bodies', () => {
   const multipart = Buffer.concat([
     Buffer.from('--b\r\nContent-Disposition: form-data; name="file"; filename="a.mp3"\r\n\r\n'),

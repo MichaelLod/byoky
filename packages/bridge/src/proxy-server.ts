@@ -15,6 +15,7 @@
 
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { PROVIDERS } from '@byoky/core';
 
 export interface ProxyRequestOut {
   type: 'proxy_http';
@@ -385,24 +386,10 @@ export function startProxyServer(config: ProxyConfig): Promise<Server> {
       return;
     }
 
-    // Build the real URL from the provider's base URL
-    const providerUrls: Record<string, string> = {
-      anthropic: 'https://api.anthropic.com',
-      openai: 'https://api.openai.com',
-      gemini: 'https://generativelanguage.googleapis.com',
-      mistral: 'https://api.mistral.ai',
-      cohere: 'https://api.cohere.com',
-      xai: 'https://api.x.ai',
-      deepseek: 'https://api.deepseek.com',
-      perplexity: 'https://api.perplexity.ai',
-      groq: 'https://api.groq.com',
-      together: 'https://api.together.xyz',
-      fireworks: 'https://api.fireworks.ai',
-      openrouter: 'https://openrouter.ai/api',
-      azure_openai: 'https://YOUR_RESOURCE.openai.azure.com',
-    };
-
-    const baseUrl = providerUrls[providerId];
+    // Build the real URL from the provider's registered base URL. For
+    // Azure, Ollama and LM Studio that is a placeholder host; the extension
+    // puts the credential's own host in its place.
+    const baseUrl = Object.hasOwn(PROVIDERS, providerId) ? PROVIDERS[providerId].baseUrl : undefined;
     if (!baseUrl) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: `Unknown provider base URL for "${providerId}"` }));

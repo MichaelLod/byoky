@@ -233,8 +233,11 @@ const PROVIDERS: ByokyProvider[] = [
   { id: 'together', name: 'Together AI', api: 'openai-completions', basePath: '/v1', models: EMPTY_MODELS },
   { id: 'fireworks', name: 'Fireworks AI', api: 'openai-completions', basePath: '/inference/v1', models: EMPTY_MODELS },
   { id: 'openrouter', name: 'OpenRouter', api: 'openai-completions', basePath: '/v1', models: EMPTY_MODELS },
-  // Azure needs the tenant's own host, which the bridge doesn't know yet.
-  { id: 'azure_openai', name: 'Azure OpenAI', api: 'openai-completions', basePath: '', models: EMPTY_MODELS },
+  // Azure, Ollama and LM Studio run on the credential's own host, which the
+  // extension fills in. Azure's v1 API takes the deployment name as model.
+  { id: 'azure_openai', name: 'Azure OpenAI', api: 'openai-completions', basePath: '/openai/v1', models: EMPTY_MODELS },
+  { id: 'ollama', name: 'Ollama', api: 'openai-completions', basePath: '/v1', models: EMPTY_MODELS },
+  { id: 'lm_studio', name: 'LM Studio', api: 'openai-completions', basePath: '/v1', models: EMPTY_MODELS },
 ];
 
 const byokyPlugin = {
