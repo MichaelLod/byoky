@@ -90,17 +90,18 @@ const session = await byoky.connect({
 const client = new Anthropic({
   apiKey: session.sessionKey,
   fetch: session.createFetch('anthropic'),
+  dangerouslyAllowBrowser: true, // safe with Byoky: apiKey is a session token, not a key
 });
 
 // Everything works exactly like normal, including streaming
 const message = await client.messages.create({
-  model: 'claude-sonnet-4-20250514',
+  model: 'claude-sonnet-4-6',
   max_tokens: 1024,
   messages: [{ role: 'user', content: 'Hello!' }],
 });
 ```
 
-> **Two lines changed.** Full API compatibility: streaming, file uploads and vision all work. `session.sessionKey` is a per-app session token, not the user's key. Sessions auto-reconnect if the extension restarts.
+> **Pass Byoky's `fetch` and session key; the rest of your code stays the same.** Full API compatibility: streaming, file uploads and vision all work. `session.sessionKey` is a per-app session token, not the user's key, which is why `dangerouslyAllowBrowser: true` is safe here: the Anthropic and OpenAI SDKs refuse to run in a browser without it, to keep real keys out of page code. Sessions auto-reconnect if the extension restarts.
 
 ### Backend Relay
 
@@ -128,7 +129,7 @@ wss.on('connection', async (ws) => {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 1024,
       messages: [{ role: 'user', content: 'Hello!' }],
     }),
