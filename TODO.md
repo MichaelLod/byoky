@@ -63,21 +63,6 @@ if you extend the cohere adapter.
 
 ---
 
-## Mobile apps — separate codebase, separate cleanup
-
-The iOS and Android apps still list Replicate and HuggingFace in their
-provider arrays:
-
-- `packages/ios/Byoky/Models/Credential.swift` — Provider entries
-- `packages/android/app/src/main/java/com/byoky/app/data/Models.kt` — Provider
-  entries
-
-These are managed through the mobile release scripts, not edited from this
-session. When the next mobile release goes out, remove those entries to keep
-the mobile and extension provider sets consistent.
-
----
-
 ## Popup polish — phase 2.5
 
 ### Surface `actualModel` and `actualProviderId` in the request log UI
