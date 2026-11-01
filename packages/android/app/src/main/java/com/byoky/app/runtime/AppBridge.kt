@@ -18,6 +18,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import okhttp3.Call
 import org.json.JSONObject
@@ -50,6 +51,29 @@ class AppBridge(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     @Volatile private var disposed = false
 
+    /**
+     * Messages from the page, in arrival order. Parsing one can take a while
+     * (an audio upload is tens of MB of JSON), so it happens off the main
+     * thread; a single consumer keeps the order, and each parsed message is
+     * handled back on the main thread.
+     */
+    private val inbox = Channel<Pair<String, JavaScriptReplyProxy>>(Channel.UNLIMITED)
+
+    init {
+        scope.launch(Dispatchers.Default) {
+            for ((raw, reply) in inbox) {
+                val msg = try { JSONObject(raw) } catch (_: Exception) { continue }
+                val type = msg.optString("type")
+                val requestId = msg.optString("requestId", "")
+                // The SDK uses crypto.randomUUID(); anything else is not ours. Ids are
+                // only ever echoed inside JSON over the reply channel, never spliced
+                // into script source, but are validated all the same.
+                if (type != "BYOKY_DISCONNECT" && !REQUEST_ID.matches(requestId)) continue
+                mainHandler.post { if (!disposed) dispatch(type, requestId, msg, reply) }
+            }
+        }
+    }
+
     /** Issued on BYOKY_CONNECT_REQUEST. Main thread only. */
     private var sessionKey: String? = null
 
@@ -79,14 +103,11 @@ class AppBridge(
         if (disposed || !isMainFrame) return
         if (originOf(sourceOrigin) != appOrigin) return
         val raw = message.data ?: return
-        val msg = try { JSONObject(raw) } catch (_: Exception) { return }
-        val type = msg.optString("type")
-        val requestId = msg.optString("requestId", "")
-        // The SDK uses crypto.randomUUID(); anything else is not ours. Ids are
-        // only ever echoed inside JSON over the reply channel, never spliced
-        // into script source, but are validated all the same.
-        if (type != "BYOKY_DISCONNECT" && !REQUEST_ID.matches(requestId)) return
+        inbox.trySend(raw to replyProxy)
+    }
 
+    /** Handle one parsed message. Main thread. */
+    private fun dispatch(type: String, requestId: String, msg: JSONObject, replyProxy: JavaScriptReplyProxy) {
         when (type) {
             "BYOKY_CONNECT_REQUEST" -> handleConnect(requestId, msg, replyProxy)
             "BYOKY_PROXY_REQUEST" -> handleProxy(msg, requestId, replyProxy)
@@ -99,6 +120,7 @@ class AppBridge(
 
     fun dispose() {
         disposed = true
+        inbox.close()
         // Stop upstream transfers now rather than at their next chunk.
         inFlight.values.forEach { it.cancel() }
         scope.cancel()
@@ -213,32 +235,41 @@ class AppBridge(
 
         val bodyText = if (msg.isNull("body")) null else msg.optString("body", "")
         val encoding = msg.optString("bodyEncoding", "")
-        val body: ByteArray? = when (encoding) {
-            "base64" -> try {
-                bodyText?.let { Base64.decode(it, Base64.DEFAULT) }
-            } catch (_: IllegalArgumentException) {
-                deliverProxyError(reply, requestId, "PROXY_ERROR", "Invalid base64 body", 400)
-                return
-            }
-            "formdata" -> {
-                val form = try {
-                    FormDataBody.encode(bodyText ?: "[]")
-                } catch (_: IllegalArgumentException) {
-                    deliverProxyError(reply, requestId, "PROXY_ERROR", "Invalid form data body", 400)
-                    return
-                }
-                // The multipart boundary is ours; drop any content type the app set.
-                headers.keys.filter { it.equals("content-type", ignoreCase = true) }.forEach { headers.remove(it) }
-                headers["content-type"] = form.contentType
-                form.bytes
-            }
-            else -> bodyText?.toByteArray(Charsets.UTF_8)
-        }
         val binaryBody = encoding == "base64" || encoding == "formdata"
 
         val flight = InFlight()
         inFlight[requestId] = flight
         scope.launch {
+            // Decoding a large upload takes long: off the main thread.
+            val body: ByteArray? = when (encoding) {
+                "base64" -> try {
+                    bodyText?.let { Base64.decode(it, Base64.DEFAULT) }
+                } catch (_: IllegalArgumentException) {
+                    inFlight.remove(requestId, flight)
+                    deliverProxyError(reply, requestId, "PROXY_ERROR", "Invalid base64 body", 400)
+                    return@launch
+                }
+                "formdata" -> {
+                    val form = try {
+                        FormDataBody.encode(bodyText ?: "[]")
+                    } catch (_: IllegalArgumentException) {
+                        inFlight.remove(requestId, flight)
+                        deliverProxyError(reply, requestId, "PROXY_ERROR", "Invalid form data body", 400)
+                        return@launch
+                    }
+                    // The multipart boundary is ours; drop any content type the app set.
+                    headers.keys.filter { it.equals("content-type", ignoreCase = true) }.forEach { headers.remove(it) }
+                    headers["content-type"] = form.contentType
+                    form.bytes
+                }
+                else -> bodyText?.toByteArray(Charsets.UTF_8)
+            }
+            // Cancelled while decoding: nothing was sent.
+            if (flight.cancelled || disposed) {
+                inFlight.remove(requestId, flight)
+                return@launch
+            }
+
             val sink = object : ProxyService.ResponseSink {
                 override fun onCall(call: Call) {
                     flight.call = call

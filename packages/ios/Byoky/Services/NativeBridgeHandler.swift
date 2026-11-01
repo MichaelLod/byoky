@@ -283,27 +283,8 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             url = validated
         }
 
-        let body: ProxyBody?
-        do {
-            body = try ProxyBody.decode(body: msg["body"] as? String, encoding: msg["bodyEncoding"] as? String)
-        } catch {
-            deliverProxyError(requestId: requestId, code: "INVALID_BODY", message: "The request body couldn't be decoded")
-            return
-        }
-
-        // Check the allowance and hold this request's expected cost until it
-        // ends, so parallel requests can't all start on what's left.
-        let reservation: TokenReservation
-        switch wallet.reserveTokens(origin: appOrigin, providerId: providerId,
-                                    estimatedTokens: UsageParser.requestEstimate(for: body).total) {
-        case .success(let held):
-            reservation = held
-        case .failure(let exceeded):
-            deliverProxyError(requestId: requestId, code: "QUOTA_EXCEEDED", message: exceeded.reason)
-            return
-        }
-        wallet.noteActivity()
-
+        let rawBody = msg["body"] as? String
+        let bodyEncoding = msg["bodyEncoding"] as? String
         let headers = msg["headers"] as? [String: String] ?? [:]
 
         // Capture wallet state before entering Task
@@ -311,16 +292,49 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
         let allCreds = wallet.credentials
 
         inFlight[requestId] = Task {
+            defer { inFlight[requestId] = nil }
+            // Decoding a large upload takes a while: off the main actor.
+            guard let prepared = await Self.prepareBody(rawBody, encoding: bodyEncoding) else {
+                deliverProxyError(requestId: requestId, code: "INVALID_BODY", message: "The request body couldn't be decoded")
+                return
+            }
+            // Cancelled meanwhile: nothing was sent or reserved.
+            guard !Task.isCancelled else { return }
+
+            // Check the allowance and hold this request's expected cost until
+            // it ends, so parallel requests can't all start on what's left.
+            let reservation: TokenReservation
+            switch wallet.reserveTokens(origin: appOrigin, providerId: providerId, estimatedTokens: prepared.estimate) {
+            case .success(let held):
+                reservation = held
+            case .failure(let exceeded):
+                deliverProxyError(requestId: requestId, code: "QUOTA_EXCEEDED", message: exceeded.reason)
+                return
+            }
+            wallet.noteActivity()
+
             let usedTokens = await route(
                 requestId: requestId, providerId: providerId,
                 url: url, urlString: urlString, method: method,
-                headers: headers, body: body,
+                headers: headers, body: prepared.body,
                 group: group, credentials: allCreds
             )
             wallet.settleReservation(reservation, usedTokens: usedTokens)
             wallet.noteActivity()
-            inFlight[requestId] = nil
         }
+    }
+
+    /// The page's body decoded (base64 and form data included) and its
+    /// estimated cost, or nil when it can't be decoded. Nonisolated and
+    /// async, so it runs off the main actor.
+    nonisolated private static func prepareBody(_ body: String?, encoding: String?) async -> (body: ProxyBody?, estimate: Int)? {
+        let decoded: ProxyBody?
+        do {
+            decoded = try ProxyBody.decode(body: body, encoding: encoding)
+        } catch {
+            return nil
+        }
+        return (decoded, UsageParser.requestEstimate(for: decoded).total)
     }
 
     /// Pick the route (translation, same-family swap or pass-through) and
