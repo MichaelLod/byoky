@@ -68,6 +68,10 @@ targets:
     deploymentTarget: "17.0"
     sources:
       - path: ByokyTests
+      # Test vectors shared with core and Android (endpoint policy,
+      # setup-token shaping); the tests read them from the bundle.
+      - path: ../core/tests/vectors
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.byoky.app.tests

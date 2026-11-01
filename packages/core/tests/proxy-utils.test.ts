@@ -13,6 +13,7 @@ import {
   detectRequestCapabilities,
   rewriteToolNamesInJSONBody,
 } from '../src/proxy-utils.js';
+import endpointPolicyVectors from './vectors/endpoint-policy.json';
 
 // ── validateProxyUrl ────────────────────────────────────
 
@@ -106,62 +107,23 @@ describe('shouldEstimateUsage', () => {
 // ── isAllowedProxyRequest ───────────────────────────────
 
 describe('isAllowedProxyRequest', () => {
-  // The iOS and Android wallets test the same vectors against their copies of this rule.
-  const cases: [string, string, boolean][] = [
-    ['GET', 'https://api.openai.com/v1/models', true],
-    ['GET', 'https://api.openai.com/v1/models/gpt-4o', true],
-    ['GET', 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro', true],
-    ['GET', 'https://openrouter.ai/api/v1/models', true],
-    ['GET', 'http://localhost:11434/api/tags', true],
-    ['GET', 'http://localhost:11434/api/version', true],
-    ['POST', 'https://api.anthropic.com/v1/messages?beta=true', true],
-    ['POST', 'https://api.anthropic.com/v1/messages/count_tokens', true],
-    ['POST', 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent', true],
-    ['POST', 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:streamGenerateContent?alt=sse', true],
-    ['POST', 'https://api.groq.com/openai/v1/chat/completions', true],
-    ['POST', 'https://api.fireworks.ai/inference/v1/chat/completions', true],
-    ['POST', 'https://api.deepseek.com/chat/completions', true],
-    ['POST', 'https://api.openai.com/v1/responses', true],
-    ['POST', 'https://api.openai.com/v1/embeddings', true],
-    ['POST', 'https://api.openai.com/v1/audio/transcriptions', true],
-    ['POST', 'https://api.cohere.com/v2/chat', true],
-    ['POST', 'https://x.openai.azure.com/openai/deployments/gpt4/chat/completions?api-version=2024-10-21', true],
-    ['POST', 'http://localhost:11434/api/chat', true],
-    ['POST', 'http://localhost:11434/api/generate', true],
-    ['POST', 'https://api.anthropic.com/v1/messages/batches', false],
-    ['GET', 'https://api.anthropic.com/v1/messages/batches/b1/results', false],
-    ['GET', 'https://api.openai.com/v1/files', false],
-    ['GET', 'https://api.openai.com/v1/files/f1/content', false],
-    ['POST', 'https://api.openai.com/v1/fine_tuning/jobs', false],
-    ['POST', 'https://api.openai.com/v1/threads/t1/messages', false],
-    ['GET', 'https://api.openai.com/v1/responses/r1', false],
-    ['GET', 'https://api.openai.com/v1/chat/completions', false],
-    ['DELETE', 'https://api.openai.com/v1/models/ft-x', false],
-    ['POST', 'https://api.openai.com/v1/organization/admin_api_keys', false],
-    ['POST', 'https://generativelanguage.googleapis.com/upload/v1beta/files', false],
-    ['POST', 'https://generativelanguage.googleapis.com/v1beta/cachedContents', false],
-    ['POST', 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:tuneModel', false],
-    ['POST', 'https://openrouter.ai/api/v1/keys', false],
-    ['POST', 'https://api.openai.com/v1/foochat', false],
-    ['PUT', 'https://api.anthropic.com/v1/messages', false],
-    ['POST', 'not a url', false],
-    ['POST', 'https://api.openai.com/v1/%74hreads/t1/messages', false],
-    ['GET', 'https://api.openai.com/v1/fil%65s', false],
-    ['POST', 'https://api.openai.com/v1/%E0%A4%A/chat/completions', false],
-    ['POST', 'https://api.openai.com/v1/threads%2Ft1/messages', false],
-    ['POST', 'https://api.openai.com/v1/files%2Fx/chat/completions', false],
-    ['POST', 'https://api.openai.com/v1/x%5Cy/chat/completions', false],
-    // WHATWG URL resolves %2E%2E itself, and fetch sends the resolved path.
-    ['POST', 'https://api.openai.com/v1/%2E%2E/chat/completions', true],
-  ];
-  it.each(cases)('%s %s → %s', (method, url, allowed) => {
-    expect(isAllowedProxyRequest(method, url)).toBe(allowed);
+  // The iOS and Android wallets run the same file against their copies of
+  // this rule; `allowed` is core's answer (an "ios"/"android" key is that
+  // wallet's documented exception).
+  const { cases } = endpointPolicyVectors as {
+    cases: Array<{ method: string; url: string; allowed: boolean }>;
+  };
+
+  it('has the shared vectors', () => {
+    expect(cases.length).toBeGreaterThan(100);
   });
 
-  it('compares path segments case-insensitively', () => {
-    expect(isAllowedProxyRequest('get', 'https://api.openai.com/V1/FILES')).toBe(false);
-    expect(isAllowedProxyRequest('post', 'https://api.openai.com/V1/Chat/Completions')).toBe(true);
-  });
+  it.each(cases.map((c) => [c.method, JSON.stringify(c.url), c.allowed, c.url] as const))(
+    '%s %s → %s',
+    (method, _shown, allowed, url) => {
+      expect(isAllowedProxyRequest(method, url)).toBe(allowed);
+    },
+  );
 });
 
 describe('resolveProviderBaseUrl', () => {

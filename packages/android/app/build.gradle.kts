@@ -78,6 +78,14 @@ android {
         compose = true
         buildConfig = true
     }
+
+    // Test vectors shared with core and iOS (endpoint policy, setup-token
+    // shaping), so the JVM tests read the same file instead of a copy.
+    sourceSets {
+        getByName("test") {
+            resources.srcDir("../../core/tests/vectors")
+        }
+    }
 }
 
 // Sync the @byoky/core mobile bundle into assets before any build that

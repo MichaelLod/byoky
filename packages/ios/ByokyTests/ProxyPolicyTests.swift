@@ -3,106 +3,25 @@ import XCTest
 
 /// What an approved app may send through the in-wallet browser: endpoints,
 /// headers, body encodings, and that a redirect never carries a key away.
-/// The endpoint vectors mirror `isAllowedProxyRequest` in core's
-/// proxy-utils.test.ts; the extension, bridge and Android test the same.
+/// The endpoint vectors are core's tests/vectors/endpoint-policy.json, which
+/// the extension and Android test too.
 final class ProxyPolicyTests: XCTestCase {
 
     // MARK: - Endpoints
 
-    func testEndpointAllowlistMatchesCoreVectors() {
-        let cases: [(String, String, Bool)] = [
-            ("GET", "https://api.openai.com/v1/models", true),
-            ("GET", "https://api.openai.com/v1/models/gpt-4o", true),
-            ("GET", "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro", true),
-            ("GET", "https://openrouter.ai/api/v1/models", true),
-            ("GET", "http://localhost:11434/api/tags", true),
-            ("GET", "http://localhost:11434/api/version", true),
-            ("POST", "https://api.anthropic.com/v1/messages?beta=true", true),
-            ("POST", "https://api.anthropic.com/v1/messages/count_tokens", true),
-            ("POST", "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent", true),
-            ("POST", "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:streamGenerateContent?alt=sse", true),
-            ("POST", "https://api.groq.com/openai/v1/chat/completions", true),
-            ("POST", "https://api.fireworks.ai/inference/v1/chat/completions", true),
-            ("POST", "https://api.deepseek.com/chat/completions", true),
-            ("POST", "https://api.openai.com/v1/responses", true),
-            ("POST", "https://api.openai.com/v1/embeddings", true),
-            ("POST", "https://api.openai.com/v1/audio/transcriptions", true),
-            ("POST", "https://api.cohere.com/v2/chat", true),
-            ("POST", "https://x.openai.azure.com/openai/deployments/gpt4/chat/completions?api-version=2024-10-21", true),
-            ("POST", "http://localhost:11434/api/chat", true),
-            ("POST", "http://localhost:11434/api/generate", true),
-            ("POST", "https://api.anthropic.com/v1/messages/batches", false),
-            ("GET", "https://api.anthropic.com/v1/messages/batches/b1/results", false),
-            ("GET", "https://api.openai.com/v1/files", false),
-            ("GET", "https://api.openai.com/v1/files/f1/content", false),
-            ("POST", "https://api.openai.com/v1/fine_tuning/jobs", false),
-            ("POST", "https://api.openai.com/v1/threads/t1/messages", false),
-            ("GET", "https://api.openai.com/v1/responses/r1", false),
-            ("GET", "https://api.openai.com/v1/chat/completions", false),
-            ("DELETE", "https://api.openai.com/v1/models/ft-x", false),
-            ("POST", "https://api.openai.com/v1/organization/admin_api_keys", false),
-            ("POST", "https://generativelanguage.googleapis.com/upload/v1beta/files", false),
-            ("POST", "https://generativelanguage.googleapis.com/v1beta/cachedContents", false),
-            ("POST", "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:tuneModel", false),
-            ("POST", "https://openrouter.ai/api/v1/keys", false),
-            ("POST", "https://api.openai.com/v1/foochat", false),
-            ("PUT", "https://api.anthropic.com/v1/messages", false),
-            ("POST", "not a url", false),
-            ("POST", "https://api.openai.com/v1/%74hreads/t1/messages", false),
-            ("GET", "https://api.openai.com/v1/fil%65s", false),
-            ("POST", "https://api.openai.com/v1/%E0%A4%A/chat/completions", false),
-            ("POST", "https://api.openai.com/v1/threads%2Ft1/messages", false),
-            ("POST", "https://api.openai.com/v1/files%2Fx/chat/completions", false),
-            ("POST", "https://api.openai.com/v1/x%5Cy/chat/completions", false),
-            // Core answers true: WHATWG resolves %2E%2E before checking, and
-            // fetch sends the resolved path. Foundation doesn't resolve it, so
-            // iOS refuses (see testDotSegmentsAreRefused).
-            ("POST", "https://api.openai.com/v1/%2E%2E/chat/completions", false),
-        ]
-        for (method, url, allowed) in cases {
+    /// packages/core/tests/vectors/endpoint-policy.json, shared with core's
+    /// `isAllowedProxyRequest` and Android. A case's "ios" key is this
+    /// wallet's exception (Foundation keeps dot segments and encodes
+    /// whitespace that WHATWG resolves or strips); its "note" says why.
+    func testEndpointAllowlistMatchesTheSharedVectors() throws {
+        let cases = try XCTUnwrap(try SharedVectors.load("endpoint-policy")["cases"] as? [[String: Any]])
+        XCTAssertGreaterThan(cases.count, 100)
+        for c in cases {
+            let method = try XCTUnwrap(c["method"] as? String)
+            let url = try XCTUnwrap(c["url"] as? String)
+            let allowed = try XCTUnwrap((c["ios"] ?? c["allowed"]) as? Bool)
             XCTAssertEqual(ProxyPolicy.isAllowedRequest(method: method, url: url), allowed, "\(method) \(url)")
         }
-    }
-
-    func testPathSegmentsCompareCaseInsensitively() {
-        XCTAssertFalse(ProxyPolicy.isAllowedRequest(method: "get", url: "https://api.openai.com/V1/FILES"))
-        XCTAssertTrue(ProxyPolicy.isAllowedRequest(method: "post", url: "https://api.openai.com/V1/Chat/Completions"))
-        // Gemini action names after ":" are case-sensitive.
-        XCTAssertFalse(ProxyPolicy.isAllowedRequest(method: "POST", url: "https://generativelanguage.googleapis.com/v1beta/models/g:generatecontent"))
-        XCTAssertFalse(ProxyPolicy.isAllowedRequest(method: "GET", url: "https://generativelanguage.googleapis.com/v1beta/models/g:generateContent"))
-    }
-
-    func testSuffixesMatchWholeSegments() {
-        XCTAssertTrue(ProxyPolicy.isAllowedRequest(method: "POST", url: "https://api.example.com/foo/chat"))
-        XCTAssertFalse(ProxyPolicy.isAllowedRequest(method: "POST", url: "https://api.example.com/foochat"))
-        XCTAssertTrue(ProxyPolicy.isAllowedRequest(method: "POST", url: "https://api.openai.com/v1/chat/completions/"))
-        XCTAssertFalse(ProxyPolicy.isAllowedRequest(method: "POST", url: "https://api.openai.com/v1/chat/completionsx"))
-        // The query never counts.
-        XCTAssertFalse(ProxyPolicy.isAllowedRequest(method: "POST", url: "https://api.openai.com/v1/files?x=/chat/completions"))
-    }
-
-    /// Segments are percent-decoded (servers decode before routing); an
-    /// encoded separator or a bad escape is refused.
-    func testPathIsCheckedPercentDecoded() {
-        XCTAssertFalse(ProxyPolicy.isAllowedRequest(method: "POST", url: "https://api.openai.com/v1/thre%61ds/t1/messages"))
-        XCTAssertFalse(ProxyPolicy.isAllowedRequest(method: "POST", url: "https://api.openai.com/v1/chat%2Fcompletions"))
-        XCTAssertFalse(ProxyPolicy.isAllowedRequest(method: "POST", url: "https://api.openai.com/v1/chat/completions;x"))
-        XCTAssertFalse(ProxyPolicy.isAllowedRequest(method: "POST", url: "https://api.openai.com/v1/chat/completions%zz"))
-        XCTAssertTrue(ProxyPolicy.isAllowedRequest(method: "POST", url: "https://api.openai.com/v1/chat/%63ompletions"))
-        XCTAssertTrue(ProxyPolicy.isAllowedRequest(method: "POST", url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro%3AgenerateContent"))
-        XCTAssertFalse(ProxyPolicy.isAllowedRequest(method: "GET", url: "https://generativelanguage.googleapis.com/v1beta/models/gemini%3AgenerateContent"))
-    }
-
-    /// iOS only, on inputs no SDK sends: Foundation keeps "." and ".."
-    /// (WHATWG and OkHttp resolve them first) and the server would resolve
-    /// them after the check; whitespace and control characters, which WHATWG
-    /// strips, are encoded by Foundation instead. Both are refused.
-    func testDotSegmentsAndWhitespaceAreRefused() {
-        XCTAssertFalse(ProxyPolicy.isAllowedRequest(method: "GET", url: "https://api.openai.com/v1/responses/r1/models/.."))
-        XCTAssertFalse(ProxyPolicy.isAllowedRequest(method: "GET", url: "https://api.openai.com/v1/responses/r1/models/%2E%2E"))
-        XCTAssertFalse(ProxyPolicy.isAllowedRequest(method: "POST", url: "https://api.openai.com/v1/./chat/completions"))
-        XCTAssertFalse(ProxyPolicy.isAllowedRequest(method: "POST", url: "https://api.openai.com/v1/\tfiles/chat/completions"))
-        XCTAssertFalse(ProxyPolicy.isAllowedRequest(method: "POST", url: "https://api.openai.com/v1/chat/completions\n"))
     }
 
     /// Mirrors the `shouldEstimateUsage` vectors in core's proxy-utils.test.ts.
