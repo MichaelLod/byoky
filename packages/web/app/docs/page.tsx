@@ -608,6 +608,12 @@ function SessionApi() {
         <code>tryReconnect()</code>, <code>reconnect()</code>, or <code>connectMock()</code>. It
         provides everything you need to make API calls through the wallet.
       </p>
+      <p>
+        Connecting again on the same <code>Byoky</code> instance replaces the session it returned
+        before. The old session still makes requests, but <code>onDisconnect</code> and{' '}
+        <code>onProvidersUpdated</code> fire only on the new one, so register your callbacks on
+        every session you get.
+      </p>
 
       <h3>session.createFetch(providerId)</h3>
       <p>
