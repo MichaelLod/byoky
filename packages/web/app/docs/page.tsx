@@ -1219,7 +1219,7 @@ function Errors() {
             ['RATE_LIMITED', 'Upstream provider returned 429 (their rate limit, not byoky\'s).', <>Back off and retry. Honour the upstream <code>Retry-After</code> header.</>],
             ['QUOTA_EXCEEDED', 'A spending cap the user set for your app in the wallet ran out (HTTP 429).', 'Do not retry. Surface a "budget exhausted" UI — the user can raise the cap in their wallet.'],
             ['INVALID_KEY', 'Stored credential was rejected by the provider (401).', 'Prompt the user to update the credential in their wallet.'],
-            ['TOKEN_EXPIRED', 'OAuth access token expired and the refresh attempt failed.', <>Call <code>connect()</code> again — the wallet will re-run OAuth.</>],
+            ['TOKEN_EXPIRED', 'Reserved; no wallet sends it. An expired Claude setup token comes back as Anthropic\'s own 401 response.', 'Nothing to handle. On a 401 from the provider, ask the user to replace the credential in their wallet.'],
             ['PROXY_ERROR', 'Generic proxy-layer failure (extension crashed, native message dropped, etc.).', 'Safe to retry once. Surface a generic error if it repeats.'],
             ['RELAY_CONNECTION_FAILED', 'Your backend relay WebSocket could not reach the browser.', 'Check your relay URL and that the user\'s tab is still open; retry with backoff.'],
             ['RELAY_DISCONNECTED', 'Relay peer disconnected mid-request (user closed tab, network drop).', <>Reopen the relay via <code>session.createRelay(url)</code>.</>],
@@ -1287,8 +1287,8 @@ function Limits() {
       <h3>Connection rate limits</h3>
       <p>
         The wallet rate-limits how often a single origin can ask for a session, per the table below.
-        Hitting either limit returns a <code>RATE_LIMITED</code> proxy error during{' '}
-        <code>connect()</code>. These caps reset on a sliding 60-second window.
+        Hitting the limit returns a <code>RATE_LIMITED</code> proxy error during{' '}
+        <code>connect()</code>. The cap resets on a sliding 60-second window.
       </p>
       <table className="docs-table">
         <thead>
@@ -1302,11 +1302,6 @@ function Limits() {
           <tr>
             <td>Connect requests per origin</td>
             <td><code>10</code></td>
-            <td>60 seconds</td>
-          </tr>
-          <tr>
-            <td>OAuth refresh attempts per origin</td>
-            <td><code>3</code></td>
             <td>60 seconds</td>
           </tr>
         </tbody>

@@ -183,7 +183,7 @@ OpenClaw → HTTP → Bridge (localhost) → Native Messaging → Extension → 
 |----------|:-------:|:-----:|--------|
 | Anthropic | ✓ | Setup Token | Available |
 | OpenAI | ✓ | — | Available |
-| Google Gemini | ✓ | Google OAuth | Available |
+| Google Gemini | ✓ | — | Available |
 | Mistral | ✓ | — | Available |
 | Cohere | ✓ | — | Available |
 | xAI (Grok) | ✓ | — | Available |
