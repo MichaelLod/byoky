@@ -52,6 +52,7 @@ import com.byoky.app.ui.components.RavenFrame
 import com.byoky.app.ui.components.RavenGaze
 import com.byoky.app.ui.components.RavenMood
 import com.byoky.app.ui.components.RetiredFeaturesNotice
+import com.byoky.app.ui.components.UnreadableVaultNotice
 import com.byoky.app.ui.components.RetroBottomSheet
 import com.byoky.app.ui.components.RetroDialog
 import com.byoky.app.ui.components.RetroTextField
@@ -78,6 +79,7 @@ fun WalletScreen(
     val credentials by wallet.credentials.collectAsState()
     val requestLogs by wallet.requestLogs.collectAsState()
     val showRetiredNotice by wallet.retiredFeaturesNotice.collectAsState()
+    val showUnreadableVaultNotice by wallet.unreadableVaultNotice.collectAsState()
     var showAddSheet by remember { mutableStateOf(false) }
     var statsCredentialId by remember { mutableStateOf<String?>(null) }
     var renameTarget by remember { mutableStateOf<Credential?>(null) }
@@ -124,6 +126,11 @@ fun WalletScreen(
     ) { padding ->
         if (credentials.isEmpty()) {
             Column(modifier = Modifier.padding(padding)) {
+                UnreadableVaultNotice(
+                    wallet,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    onOpenSettings = onNavigateToSettings,
+                )
                 RetiredFeaturesNotice(
                     wallet,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -140,6 +147,9 @@ fun WalletScreen(
                 contentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 96.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                if (showUnreadableVaultNotice) {
+                    item { UnreadableVaultNotice(wallet, onOpenSettings = onNavigateToSettings) }
+                }
                 if (showRetiredNotice) {
                     item { RetiredFeaturesNotice(wallet, onOpenSettings = onNavigateToSettings) }
                 }
