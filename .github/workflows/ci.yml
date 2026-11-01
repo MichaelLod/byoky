@@ -112,6 +112,12 @@ jobs:
       - name: Plugin dist checks
         run: npx vitest run packages/openclaw-plugin/tests
 
+      # release.sh, the store scripts and ios-signing against throwaway repos
+      # and a stubbed fetch (node:test, not vitest). The cases that run
+      # release.sh past the version bump skip off macOS.
+      - name: Release script tests
+        run: node --test scripts/tests/*.test.mjs
+
   # Every create-byoky-app template, scaffolded by the CLI against this
   # commit's SDK, must install, build and typecheck. Needs the scaffolder's
   # --template flag (non-interactive).
