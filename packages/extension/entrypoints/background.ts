@@ -191,6 +191,18 @@ export default defineBackground(() => {
     persistLockout();
   }
 
+  /**
+   * What a failed password check tells the popup: the lockout message once
+   * locked out, when the lockout ends, and how many tries are left before
+   * the next one.
+   */
+  function passwordFailureDetails(): { error?: string; lockedUntil?: number; attemptsLeft: number } {
+    const error = passwordLockoutError();
+    return error
+      ? { error, lockedUntil: unlockLockedUntil, attemptsLeft: 0 }
+      : { attemptsLeft: Math.max(0, 5 - unlockFailures) };
+  }
+
   function clearPasswordFailures() {
     unlockFailures = 0;
     unlockLockedUntil = 0;
@@ -1427,7 +1439,7 @@ export default defineBackground(() => {
     switch (message.action) {
       case 'unlock': {
         const lockout = passwordLockoutError();
-        if (lockout) return { success: false, error: lockout };
+        if (lockout) return { success: false, error: lockout, lockedUntil: unlockLockedUntil, attemptsLeft: 0 };
         const { password } = message.payload as { password: string };
         const data = await browser.storage.local.get('passwordHash');
         if (!data.passwordHash) return { success: false };
@@ -1448,11 +1460,19 @@ export default defineBackground(() => {
           resetIdleTimer();
           ensureWalletUpgraded().catch(() => {});
           processPendingAfterUnlock();
-        } else {
-          recordPasswordFailure();
+          return { success: true };
         }
-        return { success: valid };
+        // The failure that starts a lockout says so, not only the next try.
+        recordPasswordFailure();
+        return { success: false, ...passwordFailureDetails() };
       }
+
+      // The popup is in use: that is activity too (approved app and bridge
+      // traffic is the rest). Extension pages only, like every action not
+      // in ALLOWED_CONTENT_ACTIONS.
+      case 'userActivity':
+        if (masterPassword) resetIdleTimer();
+        return { success: true };
 
       case 'lock':
         masterPassword = null;
@@ -1572,6 +1592,8 @@ export default defineBackground(() => {
         const { passwordHash: setupHash } = message.payload as { passwordHash: string };
         forgetWalletKeys();
         await browser.storage.local.set({ passwordHash: setupHash, credentials: [] });
+        // Other open views leave their setup screen.
+        browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'sessionChanged' }).catch(() => {});
         return { success: true };
       }
 
@@ -1588,6 +1610,7 @@ export default defineBackground(() => {
         clearPasswordFailures();
         // After any in-flight upgrade write, which then finds the wallet gone.
         await serializedStorage(() => browser.storage.local.clear());
+        browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'sessionChanged' }).catch(() => {});
         return { success: true };
       }
 
@@ -1738,7 +1761,7 @@ export default defineBackground(() => {
         const stored = await browser.storage.local.get('passwordHash');
         if (!stored.passwordHash || !(await verifyPassword(currentPassword, stored.passwordHash as string))) {
           recordPasswordFailure();
-          return { error: 'Incorrect wallet password' };
+          return { error: passwordLockoutError() ?? 'Incorrect wallet password' };
         }
         clearPasswordFailures();
         // Stored secrets are read bound to their record (lib/wallet-upgrade.ts).

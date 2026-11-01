@@ -2,8 +2,11 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import {
   startBackground,
   walletStorage,
+  walletPasswordHash,
   connectApproved,
   approveNext,
+  senderFor,
+  PASSWORD,
   type Harness,
 } from './helpers/background-harness';
 
@@ -145,5 +148,57 @@ describe('background: the popup hears about the approval queue', () => {
     h.connect(APP, OPENAI);
     await h.until(() => h.broadcasts.some((m) => m.action === 'newPendingApproval'), 5_000, 'newPendingApproval while locked');
     expect((await pending(h)).map((p) => p.appOrigin)).toEqual([APP]);
+  });
+});
+
+describe('background: what the popup is told about the wallet', () => {
+  it('says when a wrong password starts a lockout, and how many tries are left', async () => {
+    const h = await startBackground({ local: await walletStorage([]) });
+    expect(await h.unlock('wrong')).toEqual({ success: false, attemptsLeft: 4 });
+    for (let i = 0; i < 3; i++) await h.unlock('wrong');
+    const fifth = await h.unlock('wrong');
+    expect(fifth.success).toBe(false);
+    expect(fifth.error).toMatch(/^Too many attempts. Try again in \d+s$/);
+    expect(fifth.attemptsLeft).toBe(0);
+    expect(fifth.lockedUntil).toBeGreaterThan(Date.now());
+    const locked = await h.unlock(PASSWORD);
+    expect(locked).toMatchObject({ success: false, attemptsLeft: 0, lockedUntil: fifth.lockedUntil });
+  });
+
+  it('reports the lockout on the export re-authentication too', async () => {
+    const h = await startBackground({ local: await walletStorage([]) });
+    await h.unlock();
+    for (let i = 0; i < 4; i++) {
+      expect(await h.internal('exportVault', { currentPassword: 'wrong', exportPassword: 'x' })).toEqual({ error: 'Incorrect wallet password' });
+    }
+    expect((await h.internal('exportVault', { currentPassword: 'wrong', exportPassword: 'x' })).error).toMatch(/Too many attempts/);
+  });
+
+  it('tells other views when the wallet is set up or reset', async () => {
+    const h = await startBackground({ local: {} });
+    expect(await h.internal('setupWallet', { passwordHash: await walletPasswordHash() })).toEqual({ success: true });
+    expect(h.broadcasts.filter((m) => m.action === 'sessionChanged')).toHaveLength(1);
+    expect(await h.internal('resetWallet')).toEqual({ success: true });
+    expect(h.broadcasts.filter((m) => m.action === 'sessionChanged')).toHaveLength(2);
+  });
+
+  it('counts popup activity against the idle lock, for extension pages only', async () => {
+    const h = await startBackground({ local: await walletStorage([]) });
+    await h.unlock();
+    const start = Date.now();
+    const now = vi.spyOn(Date, 'now');
+    const keepalive = () => h.browser.alarms.onAlarm.emit({ name: 'byoky:bridge-keepalive' });
+
+    now.mockReturnValue(start + 19 * 60_000);
+    // A page can't keep the wallet open.
+    expect(await h.internal('userActivity', undefined, senderFor(APP))).toBeUndefined();
+    expect(await h.internal('userActivity')).toEqual({ success: true });
+    now.mockReturnValue(start + 21 * 60_000);
+    keepalive();
+    expect((await h.internal('isUnlocked')).unlocked).toBe(true);
+    // Twenty idle minutes after that activity, it locks.
+    now.mockReturnValue(start + 39 * 60_000 + 1);
+    keepalive();
+    expect((await h.internal('isUnlocked')).unlocked).toBe(false);
   });
 });
