@@ -206,6 +206,60 @@ describe('Byoky', () => {
     expect(sessionStorage.getItem('byoky:session')).not.toBeNull();
   });
 
+  describe('notify port release', () => {
+    async function connectSession(sessionKey: string) {
+      const connectPromise = new Byoky().connect();
+      await new Promise((r) => setTimeout(r, 10));
+      simulateResponse({
+        type: 'BYOKY_CONNECT_RESPONSE',
+        requestId: postedMessages[0].data.requestId,
+        payload: { sessionKey, proxyUrl: 'extension-proxy', providers: { anthropic: { available: true, authMethod: 'api_key' } } },
+      });
+      const session = await connectPromise;
+      await new Promise((r) => setTimeout(r, 10));
+      // What the content script receives on its end of the notify port.
+      const received: unknown[] = [];
+      const notifyPort = postedMessages.find((m) => m.data.type === 'BYOKY_REGISTER_NOTIFY')!.port!;
+      notifyPort.onmessage = (e) => received.push(e.data);
+      return { session, received };
+    }
+
+    const unregister = { type: 'BYOKY_UNREGISTER_NOTIFY' };
+
+    it('unregisters on disconnect()', async () => {
+      const { session, received } = await connectSession('byk_n1');
+      session.disconnect();
+      await new Promise((r) => setTimeout(r, 10));
+      expect(received).toEqual([unregister]);
+    });
+
+    it('unregisters when the wallet revokes the session', async () => {
+      const { received } = await connectSession('byk_n2');
+      simulateNotification({ type: 'BYOKY_SESSION_REVOKED', payload: { sessionKey: 'byk_n2' } });
+      await new Promise((r) => setTimeout(r, 10));
+      expect(received).toEqual([unregister]);
+    });
+
+    it('unregisters when reconnecting fails for good', async () => {
+      const { session, received } = await connectSession('byk_n3');
+      void session.createFetch('anthropic')('https://api.anthropic.com/v1/messages');
+      await new Promise((r) => setTimeout(r, 10));
+      const proxy = postedMessages.find((m) => m.data.type === 'BYOKY_PROXY_REQUEST')!;
+      proxy.port!.postMessage({
+        type: 'BYOKY_PROXY_RESPONSE_ERROR', requestId: proxy.data.requestId, status: 401,
+        error: { code: 'SESSION_EXPIRED', message: 'expired' },
+      });
+      await new Promise((r) => setTimeout(r, 10));
+      const reconnect = postedMessages.filter((m) => m.data.type === 'BYOKY_CONNECT_REQUEST')[1];
+      reconnect.port!.postMessage({
+        type: 'BYOKY_ERROR', requestId: reconnect.data.requestId,
+        payload: { code: 'USER_REJECTED', message: 'no' },
+      });
+      await new Promise((r) => setTimeout(r, 10));
+      expect(received).toEqual([unregister]);
+    });
+  });
+
   it('session.onDisconnect returns an unsubscribe function', async () => {
     const byoky = new Byoky();
     const connectPromise = byoky.connect();

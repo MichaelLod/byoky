@@ -36,6 +36,20 @@ class FakePort {
 
 type ContentListener = (event: { source: unknown; data: unknown; ports: unknown[] }) => void;
 
+/** The content script's end of a MessagePort an SDK registered or replies on. */
+function fakeSdkPort() {
+  const port = {
+    postMessage: vi.fn(),
+    close: vi.fn(),
+    onmessage: null as ((e: { data: unknown }) => void) | null,
+    closeListeners: [] as Array<() => void>,
+    addEventListener(type: string, fn: () => void) { if (type === 'close') port.closeListeners.push(fn); },
+    /** The SDK posts on its end. */
+    fromSdk(data: unknown) { port.onmessage?.({ data }); },
+  };
+  return port;
+}
+
 describe('SDK ↔ content script', () => {
   let contentScript: { main(): void };
   let ports: FakePort[];
@@ -141,6 +155,17 @@ describe('SDK ↔ content script', () => {
       expect(proxyPort.disconnected).toBe(true);
     });
 
+    it('session.disconnect() closes the notify connection, so the worker can sleep', async () => {
+      const session = await connect('byk_notify');
+      await tick();
+      const notify = portsNamed('byoky-notify')[0];
+      expect(notify.disconnected).toBe(false);
+
+      session.disconnect();
+      await tick();
+      expect(notify.disconnected).toBe(true);
+    });
+
     it('passes base64 response chunks through to the app byte-exact', async () => {
       const session = await connect('byk_audio');
       const pending = session.createFetch('anthropic')('https://api.anthropic.com/v1/messages', { method: 'POST', body: '{}' });
@@ -192,7 +217,7 @@ describe('SDK ↔ content script', () => {
     }
 
     function send(listener: ContentListener, data: Record<string, unknown>) {
-      const replyPort = { postMessage: vi.fn() };
+      const replyPort = fakeSdkPort();
       expect(() => listener({ source: window, data, ports: [replyPort] })).not.toThrow();
       return replyPort.postMessage.mock.calls.map(([msg]) => msg);
     }
@@ -220,7 +245,7 @@ describe('SDK ↔ content script', () => {
 
     it('tells registered SDKs when the notify port drops for good', () => {
       const listener = startContentScript();
-      const sdkPort = { postMessage: vi.fn() };
+      const sdkPort = fakeSdkPort();
       listener({ source: window, data: { type: 'BYOKY_REGISTER_NOTIFY' }, ports: [sdkPort] });
 
       orphan('no-id');
@@ -302,7 +327,7 @@ describe('SDK ↔ content script', () => {
     afterEach(() => { vi.useRealTimers(); });
 
     function registerSdk(listener: ContentListener) {
-      const sdkPort = { postMessage: vi.fn() };
+      const sdkPort = fakeSdkPort();
       listener({ source: window, data: { type: 'BYOKY_REGISTER_NOTIFY' }, ports: [sdkPort] });
       return sdkPort;
     }
@@ -347,6 +372,45 @@ describe('SDK ↔ content script', () => {
       registerSdk(listener);
 
       expect(portsNamed('byoky-notify')).toHaveLength(1);
+    });
+
+    it('closes once every SDK in the frame has unregistered, and stays closed', () => {
+      const listener = startContentScript();
+      const first = registerSdk(listener);
+      const second = registerSdk(listener);
+      const notify = portsNamed('byoky-notify')[0];
+
+      first.fromSdk({ type: 'BYOKY_UNREGISTER_NOTIFY' });
+      expect(first.close).toHaveBeenCalled();
+      expect(notify.disconnected).toBe(false);
+
+      second.fromSdk({ type: 'BYOKY_UNREGISTER_NOTIFY' });
+      expect(notify.disconnected).toBe(true);
+      vi.advanceTimersByTime(10 * 60_000);
+      expect(portsNamed('byoky-notify')).toHaveLength(1);
+
+      // Nothing is forwarded to the released ports any more.
+      notify.emit({ type: 'BYOKY_SESSION_REVOKED', payload: { sessionKey: 'byk' } });
+      expect(first.postMessage).not.toHaveBeenCalled();
+      expect(second.postMessage).not.toHaveBeenCalled();
+    });
+
+    it('cancels a pending reopen when the last SDK unregisters', () => {
+      const listener = startContentScript();
+      const sdkPort = registerSdk(listener);
+
+      portsNamed('byoky-notify')[0].drop();
+      sdkPort.fromSdk({ type: 'BYOKY_UNREGISTER_NOTIFY' });
+      vi.advanceTimersByTime(10 * 60_000);
+      expect(portsNamed('byoky-notify')).toHaveLength(1);
+    });
+
+    it('releases a port whose page end closed, where the browser reports it', () => {
+      const listener = startContentScript();
+      const sdkPort = registerSdk(listener);
+
+      for (const fn of sdkPort.closeListeners) fn();
+      expect(portsNamed('byoky-notify')[0].disconnected).toBe(true);
     });
 
     it('stays closed until an SDK in the frame registers', () => {

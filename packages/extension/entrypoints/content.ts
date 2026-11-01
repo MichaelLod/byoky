@@ -183,7 +183,15 @@ export default defineContentScript({
       } else if (data.type === 'BYOKY_REGISTER_NOTIFY') {
         // SDK registers a MessagePort for secure push notifications
         if (replyPort) {
-          notifyPorts.add(replyPort);
+          const sdkPort = replyPort;
+          notifyPorts.add(sdkPort);
+          // The SDK hands the port back when its session ends.
+          sdkPort.onmessage = (e: MessageEvent) => {
+            if (e.data?.type === 'BYOKY_UNREGISTER_NOTIFY') releaseSdkPort(sdkPort);
+          };
+          // Browsers that fire 'close' on MessagePort also report a page
+          // that dropped its end without unregistering.
+          sdkPort.addEventListener('close', () => releaseSdkPort(sdkPort));
           if (!notifyPort && !notifyRetryTimer) connectNotifyPort();
         }
       }
@@ -198,6 +206,22 @@ export default defineContentScript({
     // this frame listens: reopening it in every frame of every tab would keep
     // waking the worker. The background needs no message to register a
     // port; it keys notifications by the port's sender origin.
+    // Once no SDK in this frame listens, the notify connection closes, so
+    // it stops waking the service worker.
+    function releaseSdkPort(port: MessagePort) {
+      if (!notifyPorts.delete(port)) return;
+      port.close();
+      if (notifyPorts.size > 0) return;
+      if (notifyRetryTimer) {
+        clearTimeout(notifyRetryTimer);
+        notifyRetryTimer = null;
+      }
+      // disconnect() doesn't fire this side's onDisconnect, so nothing
+      // schedules a reopen.
+      notifyPort?.disconnect();
+      notifyPort = null;
+    }
+
     function forwardNotification(msg: unknown) {
       // Push to registered SDK notification ports (secure channel)
       for (const port of notifyPorts) {

@@ -207,6 +207,15 @@ export class Byoky {
     // to reload. The saved session is kept for tryReconnect after that.
     const onWalletReloaded = () => {
       fireDisconnect();
+      releaseNotify();
+    };
+
+    // Hands the notify port back. The content script keeps a frame's
+    // notify connection to the background open while any SDK port is
+    // registered, which wakes the service worker every ~30 s; a closed
+    // MessagePort alone never tells it this one is gone.
+    const releaseNotify = () => {
+      try { notifyChannel.port1.postMessage({ type: 'BYOKY_UNREGISTER_NOTIFY' }); } catch {}
       notifyChannel.port1.close();
     };
 
@@ -246,6 +255,7 @@ export class Byoky {
           }
           clearExtSession();
           fireDisconnect();
+          releaseNotify();
           return false;
         } finally {
           reconnectPromise = null;
@@ -290,7 +300,7 @@ export class Byoky {
         ),
       disconnect: () => {
         clearExtSession();
-        notifyChannel.port1.close();
+        releaseNotify();
         this.sendDisconnect(sessionKeyRef.current);
       },
       isConnected: () => this.querySessionStatus(sessionKeyRef.current),
@@ -313,7 +323,7 @@ export class Byoky {
       if (msg?.type === 'BYOKY_SESSION_REVOKED' && msg.payload?.sessionKey === sessionKeyRef.current) {
         clearExtSession();
         fireDisconnect();
-        notifyChannel.port1.close();
+        releaseNotify();
       } else if (msg?.type === 'BYOKY_WALLET_RELOADED') {
         // Sent by the content script itself when it is cut off; it carries
         // no session key because every session in this frame is affected.
