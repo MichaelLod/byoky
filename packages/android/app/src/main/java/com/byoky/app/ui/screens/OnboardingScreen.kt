@@ -1,10 +1,12 @@
 package com.byoky.app.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -38,7 +40,9 @@ private enum class OnboardingStep { WELCOME, PASSWORD }
 
 @Composable
 fun OnboardingScreen(wallet: WalletStore) {
-    var step by remember { mutableStateOf(OnboardingStep.WELCOME) }
+    // The step survives the activity being recreated; the passwords are
+    // deliberately never put in saved state.
+    var step by rememberSaveable { mutableStateOf(OnboardingStep.WELCOME) }
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
@@ -59,6 +63,12 @@ fun OnboardingScreen(wallet: WalletStore) {
             }
             creating = false
         }
+    }
+
+    // System back on the password step returns to the welcome step, like [ Back ].
+    BackHandler(enabled = step == OnboardingStep.PASSWORD && !creating) {
+        step = OnboardingStep.WELCOME
+        error = null
     }
 
     LockScreenFrame(
@@ -187,7 +197,7 @@ fun OnboardingScreen(wallet: WalletStore) {
 
             Spacer(Modifier.height(8.dp))
 
-            BracketAction("Back", onClick = { step = OnboardingStep.WELCOME }, color = Fog)
+            BracketAction("Back", onClick = { step = OnboardingStep.WELCOME; error = null }, color = Fog)
         }
     }
 }
