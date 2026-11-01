@@ -760,9 +760,9 @@ function relocateSystemToFirstUserMessage(
  * This function:
  *  1. Detects "non-Claude-Code" tool names (lowercase or snake_case)
  *  2. Builds a bidirectional mapping (original ↔ PascalCase alias)
- *  3. Rewrites the tools[] array, all past tool_use blocks in messages,
- *     and all tool_result blocks (which reference tool_use_id, not name —
- *     so those don't need rewriting)
+ *  3. Rewrites the tools[] array, a forced tool_choice, and all past
+ *     tool_use blocks in messages (tool_result blocks reference
+ *     tool_use_id, not name — so those don't need rewriting)
  *
  * Returns { body, toolNameMap } where toolNameMap goes from CC-alias → original,
  * so the caller can pass it to `rewriteToolUseInSSEChunk` to translate the
@@ -814,6 +814,13 @@ export function rewriteToolNamesForClaudeCode(
     }
     return t;
   });
+
+  // A forced tool_choice names a tool, so it must use the alias too; with the
+  // original name Anthropic finds no such tool in tools[] and refuses.
+  const toolChoice = parsed.tool_choice as { type?: unknown; name?: unknown } | undefined;
+  if (toolChoice?.type === 'tool' && typeof toolChoice.name === 'string' && forward[toolChoice.name]) {
+    parsed.tool_choice = { ...toolChoice, name: forward[toolChoice.name] };
+  }
 
   // Rewrite tool_use blocks in past assistant messages (so the conversation
   // history stays consistent — Claude needs the names in past tool_use to

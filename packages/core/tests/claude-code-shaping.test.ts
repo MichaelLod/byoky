@@ -257,6 +257,29 @@ describe('rewriteToolNamesForClaudeCode', () => {
     expect(messages[2]).toEqual(history[2]);
   });
 
+  it('renames the tool a forced tool_choice names, so it still matches tools[]', () => {
+    const { body: out } = rewriteToolNamesForClaudeCode(JSON.stringify({
+      tools: [{ name: 'get_weather' }, { name: 'read_file' }],
+      tool_choice: { type: 'tool', name: 'get_weather', disable_parallel_tool_use: true },
+      messages: [],
+    }));
+    expect(parse(out).tool_choice).toEqual({ type: 'tool', name: 'GetWeather', disable_parallel_tool_use: true });
+  });
+
+  it.each([
+    ['auto', { type: 'auto' }],
+    ['any', { type: 'any' }],
+    ['none', { type: 'none' }],
+    ['a tool that is not in tools[]', { type: 'tool', name: 'other_tool' }],
+  ])('leaves tool_choice %s alone', (_label, toolChoice) => {
+    const { body: out } = rewriteToolNamesForClaudeCode(JSON.stringify({
+      tools: [{ name: 'get_weather' }],
+      tool_choice: toolChoice,
+      messages: [],
+    }));
+    expect(parse(out).tool_choice).toEqual(toolChoice);
+  });
+
   it('gives colliding names distinct aliases that map back to each original', () => {
     const { body: out, toolNameMap } = rewriteToolNamesForClaudeCode(JSON.stringify({
       tools: [{ name: 'read_file' }, { name: 'read-file' }, { name: 'ReadFile' }],
