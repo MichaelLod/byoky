@@ -132,8 +132,9 @@ wallet can't serve reads `{ available: false }`.
 The `fetch` from `createFetch` takes an `AbortSignal` like the real one:
 aborting before the response headers rejects with the signal's reason (an
 `AbortError` by default), aborting later errors the body, and either way the
-wallet stops the upstream call. Without a signal, a request that gets no
-response headers within `requestTimeout` rejects with a `PROXY_ERROR`.
+wallet stops the upstream call. With or without a signal, a request that
+gets no response headers within `requestTimeout` is stopped the same way and
+rejects with a `PROXY_ERROR`.
 
 If Byoky is updated while your page is open, calls fail at once with
 `WALLET_RELOADED` (a proxied call answers status 503 with that code) and
@@ -166,18 +167,6 @@ rejects the key gives `INVALID_KEY` and one that rate-limits `RATE_LIMITED`.
 
 Server-side relay handler.
 
-```typescript
-const server = new ByokyServer({ pingInterval: 30000, helloTimeout: 10000 });
-const client = await server.handleConnection(ws);
-
-client.sessionId;                    // Session identifier
-client.providers;                    // Available providers
-client.connected;                    // Connection status
-client.createFetch('anthropic');     // Proxied fetch
-client.close();                      // Close connection
-client.onClose(() => { ... });       // Disconnect callback
-```
-
 | Option | Default | Description |
 |--------|---------|-------------|
 | `pingInterval` | `30000` | Keepalive ping interval in ms; `0` disables it |
@@ -189,10 +178,17 @@ the response body) also stops the call in the browser and upstream. Request
 bodies can be strings, bytes, `Blob`s, `FormData`, `URLSearchParams` or
 streams, and the relay carries binary responses such as audio as bytes.
 
-Every relay message is limited to 1 MB. A request whose body would exceed
-that once serialized (binary bodies travel base64-encoded, about a third
-larger) rejects with `PROXY_ERROR` before it is sent; responses of any size
-are split into chunks.
+```typescript
+const server = new ByokyServer({ pingInterval: 30000, helloTimeout: 10000 });
+const client = await server.handleConnection(ws);
+
+client.sessionId;                    // Session identifier
+client.providers;                    // Available providers
+client.connected;                    // Connection status
+client.createFetch('anthropic');     // Proxied fetch
+client.close();                      // Close connection
+client.onClose(() => { ... });       // Disconnect callback
+```
 
 ### Connect Modal
 
