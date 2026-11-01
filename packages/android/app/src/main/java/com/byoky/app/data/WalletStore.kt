@@ -5,8 +5,6 @@ import android.content.SharedPreferences
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 import com.byoky.app.crypto.CryptoService
 import com.byoky.app.proxy.TranslationEngine
 import kotlinx.coroutines.CoroutineScope
@@ -43,23 +41,15 @@ class WalletStore(context: Context) {
      *  requests (capability fingerprint detection runs through the JS bridge). */
     private val appContext: Context = context.applicationContext
 
-    private val masterKey = MasterKey.Builder(context)
-        .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-        .build()
-
     // Encrypted local store for the password hash, encrypted keys, groups,
     // sessions and logs. The file name predates the local-only design and
-    // must stay as is: renaming it would orphan every existing wallet.
-    private val prefs: SharedPreferences = EncryptedSharedPreferences.create(
-        context,
-        ENCRYPTED_PREFS_FILE,
-        masterKey,
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-    )
+    // must stay as is: renaming it would orphan every existing wallet. A
+    // vault this device can't decrypt (copied over from another phone) is
+    // set aside and the wallet starts fresh (see VaultPrefs).
+    private val prefs: SharedPreferences = VaultPrefs.open(context).prefs
 
     private val plainPrefs: SharedPreferences =
-        context.getSharedPreferences("byoky_state", Context.MODE_PRIVATE)
+        context.getSharedPreferences(VaultPrefs.PLAIN_STATE_FILE, Context.MODE_PRIVATE)
 
     private val _status = MutableStateFlow(WalletStatus.UNINITIALIZED)
     val status: StateFlow<WalletStatus> = _status.asStateFlow()
@@ -109,6 +99,17 @@ class WalletStore(context: Context) {
         clearPending = { plainPrefs.edit().remove(RETIRED_FEATURES_NOTICE_FLAG).apply() },
     )
     val retiredFeaturesNotice: StateFlow<Boolean> = retiredNotice.visible
+
+    /**
+     * The one-time notice after an unreadable vault (from another device) was
+     * set aside: the wallet started fresh and can be restored from a .byoky
+     * backup. Raised by [VaultPrefs]; shown on one launch only.
+     */
+    private val unreadableVaultNoticeState = OneTimeNotice(
+        isPending = { plainPrefs.getBoolean(VaultPrefs.RESET_NOTICE_FLAG, false) },
+        clearPending = { plainPrefs.edit().remove(VaultPrefs.RESET_NOTICE_FLAG).apply() },
+    )
+    val unreadableVaultNotice: StateFlow<Boolean> = unreadableVaultNoticeState.visible
 
     /** Released once the launch cleanup has finished (or given up). */
     private val launchCleanupDone = CountDownLatch(1)
@@ -171,6 +172,7 @@ class WalletStore(context: Context) {
             }
         }
         _status.value = if (prefs.contains("password_hash")) WalletStatus.LOCKED else WalletStatus.UNINITIALIZED
+        unreadableVaultNoticeState.load()
         restoreLockoutState()
         loadInstalledApps()
         _blockedOrigins.value = plainPrefs.getStringSet(BLOCKED_ORIGINS_KEY, emptySet())?.toSet() ?: emptySet()
@@ -1332,9 +1334,15 @@ class WalletStore(context: Context) {
     /** Hide the one-time retired-features notice for good. */
     fun dismissRetiredFeaturesNotice() = retiredNotice.dismiss()
 
+    /** The unreadable-vault notice is on screen: no later launch shows it again. */
+    fun markUnreadableVaultNoticeShown() = unreadableVaultNoticeState.markShown()
+
+    /** Hide the unreadable-vault notice for good. */
+    fun dismissUnreadableVaultNotice() = unreadableVaultNoticeState.dismiss()
+
     companion object {
         /** Name of the EncryptedSharedPreferences file holding local wallet data. */
-        const val ENCRYPTED_PREFS_FILE = "byoky_vault"
+        const val ENCRYPTED_PREFS_FILE = VaultPrefs.FILE
 
         private const val RETIRED_DATA_PURGED_FLAG = "retiredServiceDataPurged_v1"
         private const val RETIRED_FEATURES_NOTICE_FLAG = "retiredFeaturesNoticePending"
