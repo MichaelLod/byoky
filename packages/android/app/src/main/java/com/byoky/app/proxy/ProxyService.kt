@@ -403,7 +403,10 @@ class ProxyService(
     ) {
         val meter = exchange.meter
         val providerId = provider.id
-        val upstreamUrl = allowedTarget(provider, url, credential)
+        // Gemini names the model in the URL (and ignores one in the body), so
+        // a pinned model goes there.
+        val target = modelOverride?.takeIf { providerId == "gemini" }?.let { RoutingResolver.geminiUrl(url, it) } ?: url
+        val upstreamUrl = allowedTarget(provider, target, credential)
         val apiKey = apiKey(credential, provider.name)
 
         val outHeaders = HeaderPolicy.forwardedHeaders(headers)
@@ -730,7 +733,8 @@ class ProxyService(
             // A body core left as it was (not JSON, already the model) keeps its bytes.
             is ModelRewrite.Body -> if (rewrite.body == text) body else rewrite.body.toByteArray(Charsets.UTF_8)
             is ModelRewrite.Refused -> throw ProxyError(rewrite.code, rewrite.message, 400)
-            null -> rewriteModel(body, model)
+            // Gemini's model is in the URL; a body `model` would be ignored.
+            null -> if (providerId == "gemini") body else rewriteModel(body, model)
         }
     }
 

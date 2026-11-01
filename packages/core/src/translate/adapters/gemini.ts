@@ -59,6 +59,8 @@ export const geminiAdapter: FamilyAdapter = {
     return `${b}/v1beta/models/${encodeURIComponent(model)}:${method}${suffix}`;
   },
 
+  rewriteUrlModel,
+
   parseRequest,
   serializeRequest,
   parseResponse,
@@ -66,6 +68,24 @@ export const geminiAdapter: FamilyAdapter = {
   createStreamParser,
   createStreamSerializer,
 };
+
+/**
+ * `url` with the model of a generateContent, streamGenerateContent or
+ * countTokens call (`…/models/{model}:{method}`) replaced by `model`; null
+ * for any other URL (embeddings, model lists, tuned models). Gemini takes
+ * the model from the path alone: a `model` field in the body is ignored
+ * (live 2026-11-01: a call to models/gemini-2.5-flash with body model
+ * gemini-3.5-flash-lite answered as gemini-2.5-flash). String surgery
+ * rather than URL, so the query (?alt=sse) stays byte for byte.
+ */
+function rewriteUrlModel(url: string, model: string): string | null {
+  const end = url.search(/[?#]/);
+  const path = end < 0 ? url : url.slice(0, end);
+  const rest = end < 0 ? '' : url.slice(end);
+  const match = /^(https?:\/\/[^/?#]+(?:\/[^?#]*)?\/models\/)[^/?#:]+(:(?:streamGenerateContent|generateContent|countTokens))$/.exec(path);
+  if (!match) return null;
+  return `${match[1]}${encodeURIComponent(model)}${match[2]}${rest}`;
+}
 
 // ─── Wire shapes ──────────────────────────────────────────────────────────
 

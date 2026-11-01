@@ -409,16 +409,25 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
         // model for the requested provider, rewrite the body before
         // forwarding, even though no translation/swap is needed.
         var forwardedBody = body
-        if let override = routing?.modelOverride, !override.isEmpty, let text = body?.asText {
-            guard let pinned = pinModel(text, to: override, providerId: providerId, url: urlString, requestId: requestId) else {
-                return 0
+        var forwardedURL = url
+        if let override = routing?.modelOverride, !override.isEmpty {
+            // Gemini names the model in the URL (and ignores one in the
+            // body), so the pin goes there. The log keeps the app's URL.
+            if providerId == "gemini", let pinned = RoutingResolver.geminiURL(urlString, pinning: override),
+               let pinnedURL = URL(string: pinned) {
+                forwardedURL = pinnedURL
             }
-            forwardedBody = .text(pinned)
+            if let text = body?.asText {
+                guard let pinned = pinModel(text, to: override, providerId: providerId, url: urlString, requestId: requestId) else {
+                    return 0
+                }
+                forwardedBody = .text(pinned)
+            }
         }
 
         return await proxyDirect(
             requestId: requestId, providerId: providerId,
-            url: url, urlString: urlString, method: method,
+            url: forwardedURL, urlString: urlString, method: method,
             headers: headers, body: forwardedBody, credential: credential
         )
     }
@@ -1097,7 +1106,8 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             deliverProxyError(requestId: requestId, code: code, message: message, status: 400)
             return nil
         case nil:
-            return rewriteModelInJsonBody(text, to: model) ?? text
+            // Gemini's model is in the URL; a body `model` would be ignored.
+            return providerId == "gemini" ? text : (rewriteModelInJsonBody(text, to: model) ?? text)
         }
     }
 

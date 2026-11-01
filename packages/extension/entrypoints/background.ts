@@ -42,6 +42,7 @@ import {
   createStreamTranslator,
   translateErrorResponse,
   rewriteRequestModel,
+  rewriteRequestUrl,
   fitRequestToModel,
   isTextContentType,
   TranslationError,
@@ -963,6 +964,8 @@ export default defineBackground(() => {
         // strongest force) replaces the SDK's choice, and the request is
         // fitted to that model's rules.
         const pinnedModel = translation ? undefined : swap ? swap.dstModel : sessionProvider?.modelOverride;
+        // Gemini names the model in the URL, so the pin goes there.
+        if (pinnedModel) translatedUrl = rewriteRequestUrl({ dstProviderId: effectiveProviderId, dstModel: pinnedModel, url: translatedUrl });
         if (pinnedModel && !msg.bodyEncoding && msg.body) {
           try {
             translatedBody = rewriteRequestModel({ dstProviderId: effectiveProviderId, dstModel: pinnedModel, url: msg.url }, msg.body);
@@ -2644,6 +2647,8 @@ export default defineBackground(() => {
       }
       // A model the group pins in the app's own family, as on the page path.
       const pinnedModel = translation ? undefined : swap ? swap.dstModel : sessionProvider?.modelOverride;
+      // Gemini names the model in the URL, so the pin goes there.
+      if (pinnedModel) translatedUrl = rewriteRequestUrl({ dstProviderId: effectiveProviderId, dstModel: pinnedModel, url: translatedUrl });
       if (pinnedModel && body && !bodyEncoding) {
         try {
           translatedBody = rewriteRequestModel({ dstProviderId: effectiveProviderId, dstModel: pinnedModel, url }, body);

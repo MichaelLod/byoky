@@ -194,4 +194,26 @@ class RoutingResolverTest {
         // A cross-family app is auto-routed; Cohere has no key, so it's served by OpenAI.
         assertEquals("o1", RoutingResolver.canServe("cohere", null, listOf(openai), families)?.id)
     }
+
+    // R4-03: Gemini takes the model from the URL and ignores a body `model`,
+    // so a group's pinned model has to go into the URL.
+    @Test
+    fun geminiUrlNamesThePinnedModel() {
+        val base = "https://generativelanguage.googleapis.com/v1beta/models/"
+        assertEquals(
+            base + "gemini-3.8-flash:generateContent",
+            RoutingResolver.geminiUrl((base + "gemini-2.5-flash:generateContent").toHttpUrl(), "gemini-3.8-flash").toString(),
+        )
+        assertEquals(
+            base + "gemini-3.8-flash:streamGenerateContent?alt=sse",
+            RoutingResolver.geminiUrl((base + "gemini-2.5-flash:streamGenerateContent?alt=sse").toHttpUrl(), "gemini-3.8-flash").toString(),
+        )
+        assertEquals(
+            base + "tuned%20model:countTokens",
+            RoutingResolver.geminiUrl((base + "gemini-2.5-pro:countTokens").toHttpUrl(), "tuned model").toString(),
+        )
+        assertNull(RoutingResolver.geminiUrl((base + "text-embedding-004:embedContent").toHttpUrl(), "gemini-3.8-flash"))
+        assertNull(RoutingResolver.geminiUrl("https://generativelanguage.googleapis.com/v1beta/models".toHttpUrl(), "gemini-3.8-flash"))
+        assertNull(RoutingResolver.geminiUrl((base + ":generateContent").toHttpUrl(), "gemini-3.8-flash"))
+    }
 }

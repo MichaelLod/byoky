@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { rewriteRequestModel } from '../../src/translate/index.js';
+import { rewriteRequestModel, rewriteRequestUrl } from '../../src/translate/index.js';
 
 /**
  * R3-05: a group that pins another model of the app's own family used to
@@ -53,10 +53,17 @@ describe('rewriteRequestModel — what it leaves alone', () => {
     expect(count.temperature).toBe(0.5);
   });
 
+  it('leaves a Gemini body as it is: the model is in the URL (rewriteRequestUrl)', () => {
+    // R4-03: Gemini ignores a body `model` (live 2026-11-01: models/gemini-2.5-flash
+    // with body model gemini-3.5-flash-lite answered as gemini-2.5-flash).
+    const body = JSON.stringify({ contents: [{ parts: [{ text: 'hi' }] }], generationConfig: { temperature: 0.5 } });
+    expect(rewriteRequestModel({
+      dstProviderId: 'gemini', dstModel: 'gemini-3.8-flash',
+      url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
+    }, body)).toBe(body);
+  });
+
   it('only sets the model for families without per-model rules', () => {
-    const body = { contents: [{ parts: [{ text: 'hi' }] }], generationConfig: { temperature: 0.5 } };
-    expect(rewrite('gemini', 'gemini-3.8-flash', body, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent'))
-      .toEqual({ ...body, model: 'gemini-3.8-flash' });
     expect(rewrite('cohere', 'command-a-03-2025', { model: 'command-r', temperature: 0.5, messages: USER }, 'https://api.cohere.com/v2/chat'))
       .toEqual({ model: 'command-a-03-2025', temperature: 0.5, messages: USER });
   });
@@ -73,6 +80,32 @@ describe('rewriteRequestModel — what it leaves alone', () => {
       something_new: { kept: true },
     };
     expect(rewrite('anthropic', 'claude-sonnet-5-5', body)).toEqual({ ...body, model: 'claude-sonnet-5-5' });
+  });
+});
+
+describe('rewriteRequestUrl — Gemini names the model in the URL', () => {
+  const GEMINI = 'https://generativelanguage.googleapis.com/v1beta/models';
+  const pin = (url: string, dstModel = 'gemini-3.8-flash', dstProviderId = 'gemini') => rewriteRequestUrl({ dstProviderId, dstModel, url });
+
+  it('names the pinned model in a generateContent, streaming or countTokens URL', () => {
+    expect(pin(`${GEMINI}/gemini-2.5-flash:generateContent`)).toBe(`${GEMINI}/gemini-3.8-flash:generateContent`);
+    expect(pin(`${GEMINI}/gemini-2.5-flash:streamGenerateContent?alt=sse`)).toBe(`${GEMINI}/gemini-3.8-flash:streamGenerateContent?alt=sse`);
+    expect(pin(`${GEMINI}/gemini-2.5-pro:countTokens`)).toBe(`${GEMINI}/gemini-3.8-flash:countTokens`);
+    expect(pin('https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent'))
+      .toBe('https://generativelanguage.googleapis.com/v1/models/gemini-3.8-flash:generateContent');
+  });
+
+  it('keeps the query as it was and encodes the model like the URL builder', () => {
+    expect(pin(`${GEMINI}/gemini-2.5-flash:streamGenerateContent?alt=sse&x=a%20b`, 'tuned model'))
+      .toBe(`${GEMINI}/tuned%20model:streamGenerateContent?alt=sse&x=a%20b`);
+  });
+
+  it('leaves other Gemini endpoints and other families alone', () => {
+    for (const url of [`${GEMINI}/text-embedding-004:embedContent`, `${GEMINI}`, `${GEMINI}/gemini-2.5-flash`, 'not a url']) {
+      expect(pin(url), url).toBe(url);
+    }
+    expect(pin('https://api.openai.com/v1/chat/completions', 'gpt-5.5', 'openai')).toBe('https://api.openai.com/v1/chat/completions');
+    expect(pin('https://api.anthropic.com/v1/messages', 'claude-opus-5-5', 'anthropic')).toBe('https://api.anthropic.com/v1/messages');
   });
 });
 

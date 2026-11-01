@@ -57,8 +57,9 @@ export function translateRequest(ctx: TranslationContext, body: string): string 
  * OpenAI reasoning models). Every other field stays as the app sent it.
  *
  * A body that already names the model, or isn't a JSON object, is returned
- * as it was. Throws TranslationError when the model can't serve the
- * request at all.
+ * as it was, as is every body for a family that names the model in the URL
+ * (Gemini; see rewriteRequestUrl). Throws TranslationError when the model
+ * can't serve the request at all.
  *
  * `url` is the URL the app called; `dstProviderId` the provider the request
  * goes to (the same family as the app's).
@@ -76,13 +77,28 @@ export function rewriteRequestModel(
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return body;
   const request = parsed as Record<string, unknown>;
   if (request.model === ctx.dstModel) return body;
-  request.model = ctx.dstModel;
   const family = familyOf(ctx.dstProviderId);
   const adapter = family && hasAdapter(family) ? getAdapter(family) : undefined;
+  // The model is in the URL there (rewriteRequestUrl); the body has none.
+  if (adapter?.rewriteUrlModel) return body;
+  request.model = ctx.dstModel;
   if (adapter?.shapeRequestForModel && adapter.matchesChatEndpoint(ctx.url)) {
     adapter.shapeRequestForModel(request, { dstModel: ctx.dstModel, dstProviderId: ctx.dstProviderId });
   }
   return JSON.stringify(request);
+}
+
+/**
+ * The URL a request goes to when a group pins `dstModel` in the app's own
+ * family: for a family that names the model in the URL path (Gemini's
+ * generateContent, streamGenerateContent and countTokens), `url` naming
+ * the pinned model; otherwise `url` as it is (the model is in the body,
+ * see rewriteRequestModel).
+ */
+export function rewriteRequestUrl(ctx: { dstProviderId: ProviderId; dstModel: string; url: string }): string {
+  const family = familyOf(ctx.dstProviderId);
+  const adapter = family && hasAdapter(family) ? getAdapter(family) : undefined;
+  return adapter?.rewriteUrlModel?.(ctx.url, ctx.dstModel) ?? ctx.url;
 }
 
 /**

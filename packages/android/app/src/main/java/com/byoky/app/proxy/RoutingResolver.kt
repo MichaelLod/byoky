@@ -322,6 +322,26 @@ object RoutingResolver {
     }
 
     /**
+     * [url] naming [model] instead of the app's in a Gemini generateContent,
+     * streamGenerateContent or countTokens call (`…/models/{model}:{method}`).
+     * Gemini takes the model from the path and ignores a `model` in the body,
+     * so a group's pinned model goes here. Null for any other URL. Mirrors
+     * core `rewriteRequestUrl`.
+     */
+    fun geminiUrl(url: HttpUrl, model: String): HttpUrl? {
+        val segments = url.pathSegments
+        if (segments.size < 2 || segments[segments.size - 2] != "models") return null
+        val last = segments.last()
+        val colon = last.indexOf(':')
+        if (colon <= 0) return null
+        val method = last.substring(colon + 1)
+        if (method !in GEMINI_MODEL_METHODS) return null
+        return url.newBuilder().setPathSegment(segments.size - 1, "$model:$method").build()
+    }
+
+    private val GEMINI_MODEL_METHODS = setOf("generateContent", "streamGenerateContent", "countTokens")
+
+    /**
      * Whether the app asked for a streaming response. Gemini says so in the
      * URL (`:streamGenerateContent`, usually with `?alt=sse`); everyone else
      * with `"stream": true` in the body.
