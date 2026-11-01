@@ -51,9 +51,13 @@ describe('copy and history details (F128)', () => {
     expect(view.container.textContent).toContain('Requests made through Byoky will appear here.');
   });
 
-  it('says Click, not Tap, in the desktop empty wallet', async () => {
+  // R2-12: the same popup is the iPhone Safari touch sheet, where there is
+  // nothing to click, and the desktop toolbar popup, where there is nothing
+  // to tap.
+  it('names the + button in words that fit mouse and touch', async () => {
     view = await mount(App);
-    expect(view.container.textContent).toContain('Click the + button to add a credential.');
+    expect(view.container.textContent).toContain('Use the + button to add a credential.');
+    expect(view.container.querySelector('.empty-state')?.textContent).not.toMatch(/\b(Click|Tap)\b/i);
   });
 
   it('records an approval so the status-strip raven nods, but not a failed one', async () => {
