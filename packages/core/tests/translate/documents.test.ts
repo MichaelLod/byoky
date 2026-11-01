@@ -163,6 +163,59 @@ describe('images returned by tools', () => {
     expect(JSON.stringify(out.messages[3].content)).toContain(PNG_B64);
   });
 
+  // R2-02: an id the registry doesn't know takes images by default only on
+  // OpenAI and Azure; the other hosts of the dialect answer a 400.
+  const toHost = (dstProviderId: string, dstModel: string) =>
+    JSON.parse(translateRequest({ ...ctx('anthropic', 'openai'), dstProviderId, dstModel }, body)) as {
+      messages: Array<{ role: string; content: unknown }>;
+    };
+
+  it('anthropic → openai-dialect host: the image is sent to an unknown OpenAI or Azure model', () => {
+    for (const [host, model] of [['openai', 'gpt-6-preview'], ['azure_openai', 'my-deployment']]) {
+      const out = toHost(host, model);
+      expect(out.messages.map((m) => m.role), host).toEqual(['user', 'assistant', 'tool', 'user']);
+      expect(JSON.stringify(out.messages[3].content), host).toContain(PNG_B64);
+    }
+  });
+
+  it('anthropic → deepseek (deepseek-chat): the tool text names the image, none is sent', () => {
+    const out = toHost('deepseek', 'deepseek-chat');
+    expect(out.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'tool']);
+    expect(out.messages[2].content).toBe('[image omitted: deepseek-chat does not accept images]');
+    expect(JSON.stringify(out)).not.toContain(PNG_B64);
+  });
+
+  it('anthropic → other openai-dialect hosts: an unknown model gets no image', () => {
+    for (const [host, model] of [
+      ['groq', 'some-new-groq-model'],
+      ['together', 'meta-llama/Llama-3.3-70B-Instruct-Turbo'],
+      ['fireworks', 'accounts/fireworks/models/llama-v3p1-8b-instruct'],
+      ['mistral', 'mistral-large-latest'],
+      ['ollama', 'llama3.1'],
+      ['lm_studio', 'qwen'],
+      ['openrouter', 'deepseek/deepseek-chat'],
+    ]) {
+      const out = toHost(host, model);
+      expect(out.messages.map((m) => m.role), host).toEqual(['user', 'assistant', 'tool']);
+      expect(out.messages[2].content, host).toBe(`[image omitted: ${model} does not accept images]`);
+      expect(JSON.stringify(out), host).not.toContain(PNG_B64);
+    }
+  });
+
+  it('anthropic → openrouter: OpenAI models under their openai/ name use the registry', () => {
+    const out = toHost('openrouter', 'openai/gpt-5.5');
+    expect(out.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'tool', 'user']);
+    expect(JSON.stringify(out.messages[3].content)).toContain(PNG_B64);
+    expect(toHost('openrouter', 'openai/gpt-5.4-nano').messages[2].content).toBe(
+      '[image omitted: openai/gpt-5.4-nano does not accept images]',
+    );
+  });
+
+  it('anthropic → any host: the registry answer wins over the host default', () => {
+    expect(toHost('openai', 'gpt-5.4-nano').messages[2].content).toBe('[image omitted: gpt-5.4-nano does not accept images]');
+    expect(JSON.stringify(toHost('groq', 'gpt-5.5').messages[3].content)).toContain(PNG_B64);
+  });
+
   it('anthropic → gemini: the image goes next to the functionResponse', () => {
     const out = JSON.parse(translateRequest(ctx('anthropic', 'gemini'), body));
     expect(out.contents[2].parts).toEqual([
@@ -204,6 +257,15 @@ describe('documents returned by tools', () => {
       { type: 'text', text: 'Attachments from tool call t1:' },
       { type: 'file', file: { filename: 'contract.pdf', file_data: `data:application/pdf;base64,${PDF_B64}` } },
     ]);
+  });
+
+  it('anthropic → deepseek: a PDF is named in the tool text, no file part is sent (R2-02)', () => {
+    const out = JSON.parse(
+      translateRequest({ ...ctx('anthropic', 'openai'), dstProviderId: 'deepseek', dstModel: 'deepseek-chat' }, toolBody(pdfDoc)),
+    ) as { messages: Array<{ role: string; content: unknown }> };
+    expect(out.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'tool']);
+    expect(out.messages[2].content).toBe('[document omitted: deepseek-chat does not accept files]');
+    expect(JSON.stringify(out)).not.toContain(PDF_B64);
   });
 
   it('anthropic → openai: a document by URL is named in the tool text instead of failing', () => {
