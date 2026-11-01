@@ -917,12 +917,15 @@ export default defineBackground(() => {
           const sseRewriter = translation
             ? buildResponseStreamRewriter(translation, msg.requestId, msg.body, msg.url)
             : undefined;
+          // Cancelled already: nothing sent, nothing charged.
+          if (upstreamAbort.signal.aborted) return;
           await proxyViaBridge(
             port,
             { ...msg, body, url: translatedUrl, providerId: effectiveProviderId },
             realHeaders,
             session,
             msg,
+            upstreamAbort.signal,
             toolNameMap,
             translation
               ? { translation, sseRewriter, originalBody: msg.body }
@@ -936,6 +939,9 @@ export default defineBackground(() => {
         const fetchHeaders = { ...realHeaders };
         if (reconstructed.stripContentType) delete fetchHeaders['content-type'];
 
+        // Cancelled while the key was being decrypted (or earlier): nothing
+        // went upstream, so nothing is charged; finally only releases the hold.
+        if (upstreamAbort.signal.aborted) return;
         // redirect: 'error' — a redirect would carry the injected API key
         // headers to wherever the upstream points.
         fetchSent = true;
@@ -1944,12 +1950,19 @@ export default defineBackground(() => {
     originalBody?: string;
   }
 
+  /**
+   * `signal` aborts when the app cancels (its port closed). Until the
+   * request has gone to the bridge, a cancel just stops it; after that the
+   * bridge is shut down, which ends its upstream call, and the request is
+   * charged as cancelled.
+   */
   async function proxyViaBridge(
     responsePort: Runtime.Port,
     msg: ProxyRequest,
     headers: Record<string, string>,
     session: Session,
     appRequest: ProxyRequest,
+    signal: AbortSignal,
     toolNameMap: Record<string, string> = {},
     translationCtx?: BridgeTranslation,
   ): Promise<void> {
@@ -1961,7 +1974,9 @@ export default defineBackground(() => {
       try { responsePort.postMessage(message); } catch { appConnected = false; }
     };
 
+    // The probe starts a native host and waits up to 2 s for it.
     const available = await checkBridgeAvailable();
+    if (signal.aborted) return;
     if (!available) {
       send({
         type: 'BYOKY_PROXY_RESPONSE_ERROR',
@@ -2004,19 +2019,19 @@ export default defineBackground(() => {
     // allowance reservation lasts as long as the request does.
     await new Promise<void>((resolve) => {
       let finished = false;
-      const finish = () => {
-        if (finished) return;
-        finished = true;
-        try { nativePort.disconnect(); } catch { /* already gone */ }
-        resolve();
-      };
-
       // Closing the native port ends the bridge process and its upstream fetch.
-      responsePort.onDisconnect.addListener(() => {
+      const onAbort = () => {
         appConnected = false;
         if (!finished) appCancelled = true;
         finish();
-      });
+      };
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        signal.removeEventListener('abort', onAbort);
+        try { nativePort.disconnect(); } catch { /* already gone */ }
+        resolve();
+      };
 
       nativePort.onMessage.addListener((raw: unknown) => {
         const response = raw as { type: string; requestId: string; status?: number; headers?: Record<string, string>; chunk?: string; error?: string };
@@ -2116,18 +2131,29 @@ export default defineBackground(() => {
         }
       });
 
+      // The host died. Before the response ended, the app must hear of it:
+      // after the headers its body would otherwise never end.
       nativePort.onDisconnect.addListener(() => {
-        if (!bridgeResponded) {
+        if (!finished) {
           send({
             type: 'BYOKY_PROXY_RESPONSE_ERROR',
             requestId: msg.requestId,
             status: 502,
-            error: { code: 'BRIDGE_ERROR', message: 'Bridge disconnected unexpectedly' },
+            error: {
+              code: 'BRIDGE_ERROR',
+              message: bridgeResponded ? 'Bridge disconnected mid-response' : 'Bridge disconnected unexpectedly',
+            },
           });
         }
         finish();
       });
 
+      // Cancelled while connecting: nothing has gone to the bridge yet.
+      if (signal.aborted) {
+        finish();
+        return;
+      }
+      signal.addEventListener('abort', onAbort, { once: true });
       nativePort.postMessage({
         type: 'proxy',
         requestId: msg.requestId,
