@@ -543,6 +543,29 @@ test('--hold-macos ships everything but the Mac app while macOS 1.1.0 is in revi
   assert.match(r.out, /App Store \(macOS\): HELD \(--hold-macos\): dist\/byoky-macos-v1\.1\.2\.pkg not uploaded/)
 })
 
+test('xcodebuild and Gradle never see the variables .env and .env.local set', MAC_ONLY, (t) => {
+  const s = sandbox({ android: true, real: ['store-status.mjs', 'submit-appstore.mjs'] })
+  t.after(s.cleanup)
+  // xcodebuild keeps its whole environment in DerivedData's build records.
+  write(join(s.work, '.env'), 'BYOKY_PROBE_ENV=from-env\n')
+  write(join(s.work, '.env.local'), 'export BYOKY_PROBE_LOCAL=from-local\n')
+  const probe = (tool) => `echo "env-seen ${tool} [\${BYOKY_PROBE_ENV:-}\${BYOKY_PROBE_LOCAL:-}]" >> "$CALLS"\n`
+  for (const shim of [join(s.base, 'bin/xcodebuild'), join(s.work, 'packages/android/gradlew')]) {
+    const [shebang, ...rest] = readFileSync(shim, 'utf8').split('\n')
+    write(shim, [shebang, probe(shim.endsWith('gradlew') ? 'gradlew' : 'xcodebuild'), ...rest].join('\n'), 0o755)
+  }
+  // The AAB a real bundleRelease leaves behind.
+  write(join(s.work, 'packages/android/gradlew'), readFileSync(join(s.work, 'packages/android/gradlew'), 'utf8') +
+    'case "$*" in *bundleRelease*) mkdir -p app/build/outputs/bundle/release && echo aab > app/build/outputs/bundle/release/app-release.aab ;; esac\n', 0o755)
+  const r = s.run(['1.1.2', '--yes', '--hold-macos', '--allow-dirty'], ASC_ENV, storesWithMacInReview())
+  assert.equal(r.code, 0, r.out)
+  for (const step of [/^gradlew :app:testDebugUnitTest/m, /^xcodebuild test /m, /^gradlew bundleRelease/m,
+    /^xcodebuild archive .*-scheme Byoky /m, /^xcodebuild -exportArchive /m]) assert.match(r.calls, step)
+  const seen = r.calls.split('\n').filter((l) => l.startsWith('env-seen '))
+  assert.ok(seen.length >= 6, r.calls)
+  assert.deepEqual(seen.filter((l) => !l.endsWith(' []')), [])
+})
+
 test('--allow-pending uploads the Mac build, but no write reaches the macOS 1.1.0 in review, and iOS goes to review', MAC_ONLY, (t) => {
   const s = sandbox({ real: ['store-status.mjs', 'submit-appstore.mjs'] })
   t.after(s.cleanup)

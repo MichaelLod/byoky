@@ -5,13 +5,32 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 # --- Load secrets ---
+# SECRET_VARS keeps the names, so build tools can run without them.
+SECRET_VARS=()
 for envfile in .env .env.local; do
   if [ -f "$envfile" ]; then
     set -a
     source "$envfile"
     set +a
+    while IFS= read -r name; do
+      SECRET_VARS+=("$name")
+    done < <(sed -nE 's/^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=.*/\2/p' "$envfile")
   fi
 done
+
+# Runs a build tool without the variables .env/.env.local set. xcodebuild
+# writes its whole environment into DerivedData's build records in plain
+# text, so store credentials and provider keys must never reach it; Gradle
+# doesn't need them either. Arguments are expanded before this runs, so
+# values passed as flags (the ASC key id, the keychain path) still work.
+without_secrets() {
+  local unset_args=()
+  local name
+  for name in ${SECRET_VARS[@]+"${SECRET_VARS[@]}"}; do
+    unset_args+=(-u "$name")
+  done
+  env ${unset_args[@]+"${unset_args[@]}"} "$@"
+}
 
 # The files a release bumps and commits (steps 1 and 4), and the synced
 # mobile bundles it commits when they changed.
@@ -112,7 +131,7 @@ run_ios_tests() {
   # The Byoky scheme builds the Safari extension, which bundles the WXT build.
   (cd packages/extension && npx wxt build --browser safari) || return 1
   bash packages/ios/Scripts/copy-wxt-output.sh || return 1
-  SIM_NAME="byoky-release-tests-$$" bash scripts/ios-unit-tests.sh "$ROOT/build/DerivedData-tests" --quiet
+  SIM_NAME="byoky-release-tests-$$" without_secrets bash scripts/ios-unit-tests.sh "$ROOT/build/DerivedData-tests" --quiet
 }
 
 # Publishes the packages of NPM_PACKAGES that npm doesn't have at $1 yet,
@@ -744,7 +763,7 @@ if [ "$SKIP_NATIVE_TESTS" = true ]; then
   echo "  WARN: --skip-native-tests: the Android and iOS unit tests didn't run"
 else
   if [ "$SKIP_ANDROID" = false ]; then
-    verify bash -c 'cd packages/android && ./gradlew :app:testDebugUnitTest'
+    verify without_secrets bash -c 'cd packages/android && ./gradlew :app:testDebugUnitTest'
   fi
   if [ "$SKIP_IOS" = false ]; then
     verify run_ios_tests
@@ -899,7 +918,7 @@ bash packages/ios/Scripts/copy-wxt-output.sh
 # --- Android ---
 if [ "$SKIP_ANDROID" = false ]; then
   echo "  Building Android AAB..."
-  (cd packages/android && ./gradlew bundleRelease)
+  (cd packages/android && without_secrets ./gradlew bundleRelease)
 fi
 
 # --- iOS ---
@@ -920,7 +939,7 @@ if [ "$SKIP_IOS" = false ]; then
   )
 
   echo "  Archiving iOS app..."
-  xcodebuild archive \
+  without_secrets xcodebuild archive \
     -project "$IOS_DIR/Byoky.xcodeproj" \
     -scheme "Byoky" \
     -configuration Release \
@@ -933,14 +952,14 @@ if [ "$SKIP_IOS" = false ]; then
 
   echo "  Exporting iOS IPA..."
   rm -rf "$BUILD_DIR/ios-export"
-  xcodebuild -exportArchive \
+  without_secrets xcodebuild -exportArchive \
     -archivePath "$BUILD_DIR/Byoky-iOS.xcarchive" \
     -exportOptionsPlist "$IOS_DIR/ExportOptions.plist" \
     -exportPath "$BUILD_DIR/ios-export" \
     -quiet
 
   echo "  Archiving macOS app..."
-  xcodebuild archive \
+  without_secrets xcodebuild archive \
     -project "$IOS_DIR/Byoky.xcodeproj" \
     -scheme "Byoky (macOS)" \
     -configuration Release \
@@ -953,7 +972,7 @@ if [ "$SKIP_IOS" = false ]; then
 
   echo "  Exporting macOS app..."
   rm -rf "$BUILD_DIR/macos-export"
-  xcodebuild -exportArchive \
+  without_secrets xcodebuild -exportArchive \
     -archivePath "$BUILD_DIR/Byoky-macOS.xcarchive" \
     -exportOptionsPlist "$IOS_DIR/ExportOptions-macOS.plist" \
     -exportPath "$BUILD_DIR/macos-export" \
