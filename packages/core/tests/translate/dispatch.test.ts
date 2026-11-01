@@ -422,3 +422,27 @@ describe('cross-family dispatch — streams echo the app\'s model', () => {
     expect(out).toContain('upstream-model');
   });
 });
+
+describe('cross-family dispatch — Cohere reasoning in Anthropic history', () => {
+  it('cohere → anthropic sends a tool_plan turn as tool_use only', () => {
+    const body = JSON.stringify({
+      model: 'command-a-03-2025',
+      messages: [
+        { role: 'user', content: 'Weather in Paris?' },
+        {
+          role: 'assistant',
+          tool_plan: 'I will call get_weather.',
+          tool_calls: [{ id: 't1', type: 'function', function: { name: 'get_weather', arguments: '{"city":"Paris"}' } }],
+        },
+        { role: 'tool', tool_call_id: 't1', content: '{"temp":21}' },
+      ],
+    });
+    const out = JSON.parse(translateRequest(ctx('cohere', 'anthropic'), body)) as {
+      messages: Array<{ role: string; content: Array<{ type: string }> | string }>;
+    };
+    expect(JSON.stringify(out.messages)).not.toContain('"thinking"');
+    expect(out.messages[1].content).toEqual([
+      { type: 'tool_use', id: 't1', name: 'get_weather', input: { city: 'Paris' } },
+    ]);
+  });
+});

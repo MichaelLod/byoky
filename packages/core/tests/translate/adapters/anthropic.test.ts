@@ -293,3 +293,69 @@ describe('anthropicAdapter.parseResponse', () => {
     expect(ir.error.type).toBe('invalid_request_error');
   });
 });
+
+describe('anthropicAdapter.serializeRequest — thinking blocks in history', () => {
+  it('drops unsigned thinking blocks and keeps the rest of the turn', () => {
+    const ir: IRRequest = {
+      system: [],
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'weather?' }] },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', text: 'I will call get_weather.', toolPlanning: true },
+            { type: 'tool_use', id: 't1', name: 'get_weather', input: { city: 'Paris' } },
+          ],
+        },
+      ],
+    };
+    const out = JSON.parse(anthropicAdapter.serializeRequest(ctx(), ir)) as {
+      messages: Array<{ role: string; content: unknown }>;
+    };
+    expect(out.messages[1]).toEqual({
+      role: 'assistant',
+      content: [{ type: 'tool_use', id: 't1', name: 'get_weather', input: { city: 'Paris' } }],
+    });
+  });
+
+  it('leaves out a turn that held only unsigned thinking', () => {
+    const ir: IRRequest = {
+      system: [],
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'one' }] },
+        { role: 'assistant', content: [{ type: 'thinking', text: 'hmm' }] },
+        { role: 'user', content: [{ type: 'text', text: 'two' }] },
+      ],
+    };
+    const out = JSON.parse(anthropicAdapter.serializeRequest(ctx(), ir)) as {
+      messages: Array<{ role: string; content: unknown }>;
+    };
+    expect(out.messages).toEqual([
+      { role: 'user', content: 'one' },
+      { role: 'user', content: 'two' },
+    ]);
+  });
+
+  it('keeps signed thinking blocks', () => {
+    const ir: IRRequest = {
+      system: [],
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'q' }] },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', text: 'reasoning', signature: 'sig' },
+            { type: 'text', text: 'a' },
+          ],
+        },
+      ],
+    };
+    const out = JSON.parse(anthropicAdapter.serializeRequest(ctx(), ir)) as {
+      messages: Array<{ role: string; content: unknown }>;
+    };
+    expect(out.messages[1].content).toEqual([
+      { type: 'thinking', thinking: 'reasoning', signature: 'sig' },
+      { type: 'text', text: 'a' },
+    ]);
+  });
+});

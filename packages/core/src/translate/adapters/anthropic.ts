@@ -343,7 +343,7 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
   const out: AnthropicRequest = {
     model: ctx.dstModel,
     max_tokens: maxTokens,
-    messages: ir.messages.map(serializeMessageToAnthropic),
+    messages: serializeMessagesToAnthropic(ir.messages),
   };
 
   if (systemParts.length > 0) {
@@ -397,12 +397,28 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
   return JSON.stringify(out);
 }
 
-function serializeMessageToAnthropic(msg: IRMessage): AnthropicMessage {
+function serializeMessagesToAnthropic(messages: IRMessage[]): AnthropicMessage[] {
+  const out: AnthropicMessage[] = [];
+  for (const msg of messages) {
+    const wire = serializeMessageToAnthropic(msg);
+    if (wire) out.push(wire);
+  }
+  return out;
+}
+
+/**
+ * Returns null when every block of a non-empty message was dropped (e.g. an
+ * assistant turn holding only another family's unsigned reasoning): sending
+ * it with empty content would be rejected. Anthropic merges the neighbouring
+ * same-role turns that this can leave behind.
+ */
+function serializeMessageToAnthropic(msg: IRMessage): AnthropicMessage | null {
   const blocks: AnthropicContentBlock[] = [];
   for (const b of msg.content) {
     const wire = serializeContentBlockToAnthropic(b);
     if (wire) blocks.push(wire);
   }
+  if (blocks.length === 0 && msg.content.length > 0) return null;
 
   // Collapse single text block to plain string for compactness.
   if (blocks.length === 1 && blocks[0].type === 'text') {
@@ -444,11 +460,12 @@ function serializeContentBlockToAnthropic(
       };
     }
     case 'thinking':
-      return {
-        type: 'thinking',
-        thinking: block.text,
-        ...(block.signature ? { signature: block.signature } : {}),
-      };
+      // Anthropic requires the signature on every thinking block in history.
+      // Other families' reasoning (Cohere tool_plan and thinking content)
+      // has none, so it can't be replayed; drop it like the OpenAI and
+      // Gemini serializers do.
+      if (!block.signature) return null;
+      return { type: 'thinking', thinking: block.text, signature: block.signature };
   }
 }
 
