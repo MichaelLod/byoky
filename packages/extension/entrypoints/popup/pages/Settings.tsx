@@ -5,6 +5,7 @@ import {
   MIN_PASSWORD_LENGTH,
 } from '@byoky/core';
 import { PasswordMeter } from '../components/PasswordMeter';
+import { lockedUntilFrom, lockoutMessage, useLockoutCountdown } from '../hooks/useLockoutCountdown';
 
 async function sendInternal(action: string, payload?: unknown): Promise<Record<string, unknown>> {
   return browser.runtime.sendMessage({
@@ -152,6 +153,14 @@ function ExportModal({ onClose }: { onClose: () => void }) {
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
   const [exporting, setExporting] = useState(false);
+  // Export re-authentication shares the unlock lockout.
+  const { lockedUntil, setLockedUntil } = useWalletStore();
+  const lockoutSeconds = useLockoutCountdown(lockedUntil, () => {
+    setLockedUntil(null);
+    setError('');
+  });
+  const lockedOut = lockoutSeconds > 0;
+  const shownError = lockedOut ? lockoutMessage(lockoutSeconds) : error;
 
   const strength = checkPasswordStrength(exportPassword);
 
@@ -179,7 +188,11 @@ function ExportModal({ onClose }: { onClose: () => void }) {
     setExporting(true);
     try {
       const exportResult = await sendInternal('exportVault', { exportPassword, currentPassword });
-      if (exportResult.error) throw new Error(exportResult.error as string);
+      if (exportResult.error) {
+        const until = lockedUntilFrom(exportResult);
+        if (until) setLockedUntil(until);
+        throw new Error(exportResult.error as string);
+      }
 
       // Download as .byoky file
       const blob = new Blob([exportResult.encryptedVault as string], { type: 'application/octet-stream' });
@@ -208,7 +221,7 @@ function ExportModal({ onClose }: { onClose: () => void }) {
         on this device or another one.
       </p>
 
-      {error && <div className="error">{error}</div>}
+      {shownError && <div className="error">{shownError}</div>}
 
       <form onSubmit={handleExport}>
         <div className="form-group">
@@ -256,7 +269,7 @@ function ExportModal({ onClose }: { onClose: () => void }) {
             type="submit"
             className="btn btn-primary"
             style={{ flex: 1 }}
-            disabled={exporting || !currentPassword || exportPassword.length < MIN_PASSWORD_LENGTH || strength.score < 2}
+            disabled={exporting || lockedOut || !currentPassword || exportPassword.length < MIN_PASSWORD_LENGTH || strength.score < 2}
           >
             {exporting ? 'Exporting...' : 'Export'}
           </button>

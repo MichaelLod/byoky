@@ -11,6 +11,7 @@ import {
   type AppGroups,
   hashPassword,
 } from '@byoky/core';
+import { lockedUntilFrom } from './hooks/useLockoutCountdown';
 
 type Page =
   | 'setup'
@@ -46,6 +47,8 @@ interface WalletState {
   /** A form is waiting on the background (unlock, setup, adding a key); the page stays up. */
   submitting: boolean;
   error: string | null;
+  /** When the password lockout ends (epoch ms), while one is running. */
+  lockedUntil: number | null;
 
   init: () => Promise<void>;
   setup: (password: string) => Promise<void>;
@@ -55,6 +58,8 @@ interface WalletState {
   markTrustResetNoticeSeen: () => Promise<void>;
   unlock: (password: string) => Promise<boolean>;
   lock: () => Promise<void>;
+  /** Record a lockout the background reported (unlock or export re-auth); null ends it. */
+  setLockedUntil: (lockedUntil: number | null) => void;
   syncLockState: () => Promise<boolean>;
   navigate: (page: Page) => void;
   openModal: (modal: 'add-credential') => void;
@@ -118,6 +123,7 @@ export const useWalletStore = create<WalletState>((set, get) => ({
   loading: true,
   submitting: false,
   error: null,
+  lockedUntil: null,
 
   init: async () => {
     const initResult = await sendInternal('isInitialized');
@@ -208,13 +214,21 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     try {
       const unlockResult = await sendInternal('unlock', { password });
       if (unlockResult.success) {
-        set({ isUnlocked: true, currentPage: 'dashboard', submitting: false });
+        set({ isUnlocked: true, currentPage: 'dashboard', submitting: false, lockedUntil: null });
         await get().refreshData();
         return true;
       }
       // During the lockout the background refuses even the right password and
       // says for how long; "Incorrect password" would push toward a reset.
-      set({ error: (unlockResult.error as string | undefined) ?? 'Incorrect password' });
+      // The failure that starts the lockout reports it too, and the last two
+      // tries before it say so.
+      const lockedUntil = lockedUntilFrom(unlockResult);
+      const attemptsLeft = unlockResult.attemptsLeft;
+      let error = (unlockResult.error as string | undefined) ?? 'Incorrect password';
+      if (!lockedUntil && !unlockResult.error && (attemptsLeft === 1 || attemptsLeft === 2)) {
+        error = `Incorrect password. ${attemptsLeft} ${attemptsLeft === 1 ? 'try' : 'tries'} left before a short lockout.`;
+      }
+      set({ error, lockedUntil });
       return false;
     } catch (e) {
       set({ error: (e as Error).message });
@@ -228,6 +242,8 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     await sendInternal('lock');
     set(LOCKED_STATE);
   },
+
+  setLockedUntil: (lockedUntil) => set({ lockedUntil }),
 
   // The background also locks on its own (auto-lock after idle) and only
   // announces it as a session change, so the popup has to ask.
