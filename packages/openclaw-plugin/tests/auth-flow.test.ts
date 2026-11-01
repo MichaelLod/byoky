@@ -151,6 +151,39 @@ describe('login', () => {
   });
 });
 
+describe('what the plugin says about keys', () => {
+  // A Claude setup token goes to the bridge for each request, so only API
+  // keys stay in the wallet.
+  const unqualified = /(?<!API )\bkeys? (never leaves?|stays? in)/i;
+
+  it('claims only that API keys stay in the extension', () => {
+    const texts: string[] = [plugin.description];
+    plugin.register({
+      registerProvider: (p: { auth: Array<{ hint?: string }>; wizard: { setup: { groupHint?: string; choiceHint?: string } } }) => {
+        texts.push(...p.auth.map((a) => a.hint ?? ''), p.wizard.setup.groupHint ?? '', p.wizard.setup.choiceHint ?? '');
+      },
+      registerCommand: () => {},
+    } as never);
+    expect(texts.filter((t) => unqualified.test(t))).toEqual([]);
+    expect(texts.filter((t) => t.includes('API keys stay in the extension')).length).toBeGreaterThan(1);
+  });
+
+  it('mentions the setup token on the login page and in the login notes', async () => {
+    registeredHome();
+    const run = authRuns().byoky(context());
+    await expect.poll(() => opened.length).toBe(1);
+    const html = await pageHtml();
+    await post('/callback', { nonce: html.match(/nonce: "([A-Za-z0-9_-]+)"/)![1], providers: ['anthropic'] });
+    const notes = (await run).notes ?? [];
+
+    for (const text of [html, notes.join('\n')]) {
+      expect(text).not.toMatch(unqualified);
+      expect(text).toContain('API keys stay in your');
+      expect(text).toContain('setup token');
+    }
+  });
+});
+
 describe('login page in the browser', () => {
   type Providers = Record<string, { baseUrl: string }>;
 

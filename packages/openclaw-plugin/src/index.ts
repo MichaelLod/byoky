@@ -255,7 +255,7 @@ const byokyPlugin = {
   id: 'byoky',
   name: 'Byoky Wallet',
   description:
-    'Route LLM API calls through your Byoky browser wallet — keys never leave the extension',
+    'Route LLM API calls through your Byoky browser wallet — API keys stay in the extension',
   configSchema: emptyPluginConfigSchema(),
 
   register(api: OpenClawPluginApi) {
@@ -281,7 +281,7 @@ const byokyPlugin = {
           choiceHint: 'One auth connects every provider you have',
           groupId: 'byoky',
           groupLabel: 'Byoky Wallet',
-          groupHint: 'Keys never leave the extension',
+          groupHint: 'API keys stay in the extension',
           methodId: 'browser',
         },
       },
@@ -300,7 +300,7 @@ const byokyPlugin = {
           {
             id: 'browser',
             label: `${provider.name} (via Byoky)`,
-            hint: 'Route through Byoky wallet — key stays in extension',
+            hint: 'Route through Byoky wallet — API keys stay in the extension',
             kind: 'custom',
             run: (ctx: ProviderAuthContext) =>
               runProviderAuth(ctx, provider),
@@ -313,7 +313,7 @@ const byokyPlugin = {
             choiceHint: 'Route through Byoky wallet',
             groupId: 'byoky',
             groupLabel: 'Byoky Wallet',
-            groupHint: 'Keys never leave the extension',
+            groupHint: 'API keys stay in the extension',
             methodId: 'browser',
           },
         },
@@ -678,7 +678,7 @@ function buildAuthResult(
         .join(', ')}.`,
     );
   }
-  notes.push('Keys stay in your Byoky wallet — the bridge only relays requests.');
+  notes.push('API keys stay in your Byoky wallet; the bridge relays requests to it. A Claude setup token is the exception: Anthropic needs a non-browser client for it, so the bridge makes those calls, holding the token in memory only.');
   notes.push('The bridge must be running for API calls to work.');
   if (defaultModel) notes.push(`Default model set to ${defaultModel}.`);
   notes.push('Run `/byoky` inside OpenClaw anytime to check bridge status.');
@@ -1112,7 +1112,7 @@ function buildAuthPage(requestProviderId: string | null, nonce: string): string 
     </p>
     <p class="security">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-      <span>Keys never leave your wallet. API calls are proxied through the local Byoky Bridge.</span>
+      <span>API keys stay in your wallet; the local Byoky Bridge relays each call to it. A Claude setup token is the exception: the bridge makes those calls, holding the token in memory only.</span>
     </p>
   </div>
   <script src="/auth-sdk.js"></script>
