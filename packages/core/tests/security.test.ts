@@ -3,6 +3,10 @@
  *
  * These tests codify the security properties established during the audit.
  * If any of these fail, a security regression has been introduced.
+ *
+ * They read source text, which a comment or a dead branch can satisfy. The
+ * background's behaviour (lockout, lock, origin binding, allowances,
+ * approvals) is tested by running it: packages/extension/tests/background*.test.ts.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -83,8 +87,9 @@ describe('security invariants', () => {
     });
 
     it('uses deny-by-default for the proxy port origin', () => {
-      // A missing origin must deny rather than fall through.
-      expect(bg).toContain('!portOrigin ||');
+      // A missing origin must deny rather than fall through, and the check
+      // must be the whole condition (not `if (x && (...))`).
+      expect(bg).toMatch(/\bif \(!portOrigin \|\| portOrigin !== session\.appOrigin\) \{/);
       expect(bg).not.toMatch(/portOrigin && portOrigin !== session\.appOrigin/);
     });
 
@@ -172,8 +177,9 @@ describe('security invariants', () => {
     it('has brute-force protection on unlock', () => {
       expect(bg).toContain('unlockFailures');
       expect(bg).toContain('unlockLockedUntil');
-      // Verify actual lockout behavior: 5 failures triggers lock
-      expect(bg).toContain('unlockFailures >= 5');
+      // Verify actual lockout behavior: 5 failures triggers lock (exactly 5,
+      // not 50 or 500)
+      expect(bg).toMatch(/\bunlockFailures >= 5\)/);
       // Verify lockout uses exponential backoff
       expect(bg).toContain('Math.pow(2, exponent)');
     });
@@ -191,7 +197,8 @@ describe('security invariants', () => {
 
     it('clears sessions on wallet lock', () => {
       const lockSection = bg.slice(bg.indexOf("case 'lock'"), bg.indexOf("case 'isUnlocked'"));
-      expect(lockSection).toContain('sessions.clear()');
+      // A statement of its own, not behind a condition.
+      expect(lockSection).toMatch(/^\s*sessions\.clear\(\);$/m);
       expect(lockSection).toContain('authorizedBridgeSessionKey = null');
     });
 
@@ -255,8 +262,10 @@ describe('security invariants', () => {
       const get = bg.slice(bg.indexOf('async function getTrustState'), bg.indexOf('async function updateTrustState'));
       expect(get).toContain('readTrustState(');
       expect(get).toContain('if (!key) return emptyTrustState();');
-      // A refused state is dropped whole (fail closed) and the user told.
-      expect(get).toContain('if (!read.intact) await browser.storage.local.set(await droppedTrustState(key));');
+      // A refused state (forged, or older than one already seen) is dropped
+      // whole (fail closed) and the user told.
+      expect(get).toContain('readTrustState(await browser.storage.local.get(TRUST_STATE_KEYS), key, trustEpochHighWater)');
+      expect(get).toMatch(/if \(!read\.intact\) \{\s*const epoch = nextTrustEpoch\(read\.epoch\);\s*await browser\.storage\.local\.set\(await droppedTrustState\(key, epoch\)\);/);
       const update = bg.slice(bg.indexOf('async function updateTrustState'), bg.indexOf('async function addTrustedSite'));
       expect(update).toContain('signTrustState(');
       expect(update).toContain('read.intact ? { sites: read.sites, revoked: read.revoked } : emptyTrustState()');
@@ -270,7 +279,8 @@ describe('security invariants', () => {
       expect(bg).not.toContain('restoreRevokedOrigins');
       expect(bg).not.toMatch(/revokedOrigins\.(has|add|delete)\(/);
       expect(bg.match(/silentTrustFor\(trust, /g)).toHaveLength(2);
-      expect(bg.match(/const trust = await getTrustState\(\);|getTrustState\(\)\.then\(\(trust\) =>/g)).toHaveLength(2);
+      // (A failed read trusts nothing: emptyTrustState().)
+      expect(bg.match(/const trust = await getTrustState\(\);|getTrustState\(\)(\.catch\(\(\) => emptyTrustState\(\)\))?\.then\(\(trust\) =>/g)).toHaveLength(2);
       // A revocation is recorded before the app is told its session is gone.
       const revoke = bg.slice(bg.indexOf("case 'revokeSession'"), bg.indexOf("case 'checkBridge'"));
       expect(revoke.indexOf('await recordRevocation(s.appOrigin)')).toBeGreaterThan(-1);
@@ -295,9 +305,11 @@ describe('security invariants', () => {
     });
 
     it('checks session expiry in handleBridgeProxyRequest', () => {
-      const bridgeHandler = bg.slice(bg.indexOf('handleBridgeProxyRequest'));
-      expect(bridgeHandler).toContain('expiresAt');
-      expect(bridgeHandler).toContain('Session has expired');
+      const start = bg.indexOf('async function handleBridgeProxyRequest');
+      const bridgeHandler = bg.slice(start, bg.indexOf('\n  }\n', start));
+      expect(bridgeHandler).toContain('session.expiresAt < Date.now()');
+      // A code the bridge turns into a 401 with the reconnect hint.
+      expect(bridgeHandler).toContain("code: 'bridge_session_expired'");
     });
 
     it('checks allowance in handleBridgeProxyRequest', () => {

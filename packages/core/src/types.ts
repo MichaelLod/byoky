@@ -339,6 +339,11 @@ export interface RequestLogEntry {
   actualModel?: string;
   /** The group that routed this request. Absent for default-group requests. */
   groupId?: string;
+  /**
+   * The credential the request was sent with: the destination's when the
+   * group routed it to another provider.
+   */
+  credentialId?: string;
   /** Capabilities the request body used (tools, vision, etc.). For drag-time warnings. */
   usedCapabilities?: CapabilitySet;
 }

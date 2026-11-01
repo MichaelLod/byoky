@@ -1,5 +1,4 @@
 import {
-  type AuthMethod,
   type Credential,
   type Session,
   type SessionProvider,
@@ -43,15 +42,17 @@ import {
   translateRequest,
   translateResponse,
   createStreamTranslator,
+  getAdapter,
+  isIRError,
   TranslationError,
-  resolveCrossFamilyRoute,
-  resolveSameFamilySwapRoute,
-  resolveAutoCrossFamilyRoute,
+  resolveRoute,
   buildNoCredentialMessage,
 } from '@byoky/core';
 import type { Runtime } from 'wxt/browser';
 import { exportVaultFile, importVaultFile } from '../lib/vault-file';
-import { openCredentialSecret, upgradeWallet } from '../lib/wallet-upgrade';
+import { KEYLESS_PROVIDERS, openCredentialSecret, upgradeWallet } from '../lib/wallet-upgrade';
+import { isProviderIdList, parseProviderRequirements } from '../lib/connect-request';
+import { MAX_BINARY_CHUNK_BYTES, bytesToBase64, isTextContentType } from '../lib/binary-body';
 import {
   REVOKED_ORIGINS_KEY,
   TRUST_RESET_NOTICE_KEY,
@@ -68,6 +69,14 @@ declare const chrome: {
   sidePanel?: {
     setPanelBehavior(opts: { openPanelOnActionClick: boolean }): void;
     open(opts: { tabId: number }): Promise<void>;
+  };
+  action?: {
+    /** Chrome 127+. */
+    openPopup?(): Promise<void>;
+  };
+  runtime?: {
+    /** Chrome 116+. */
+    getContexts?(filter: { contextTypes?: string[] }): Promise<Array<{ contextType: string; documentUrl?: string }>>;
   };
 };
 
@@ -129,21 +138,43 @@ export default defineBackground(() => {
     }
   }
 
+  type ConnectMessage = { id: string; payload: ConnectRequest };
   type PendingEntry = {
     approval: PendingApproval;
     originalMessageId: string;
     resolve: (response: unknown) => void;
     tabId?: number;
+    /**
+     * Later connects from the same origin, waiting for this one's outcome.
+     * Once it is approved they run again (and mostly reuse the session);
+     * if it is rejected or times out, so are they.
+     */
+    waiters: Array<{ message: ConnectMessage; sender: Runtime.MessageSender; resolve: (response: unknown) => void }>;
   };
   const _pendingMap = new Map<string, PendingEntry>();
+  // Every change to the queue is broadcast, so an open popup or side panel
+  // never shows (and lets the user approve) a request that is gone.
   const pendingApprovals = {
     get size() { return _pendingMap.size; },
     get(id: string) { return _pendingMap.get(id); },
-    set(id: string, entry: PendingEntry) { _pendingMap.set(id, entry); updateBadge(); },
-    delete(id: string) { const r = _pendingMap.delete(id); updateBadge(); return r; },
+    set(id: string, entry: PendingEntry) { _pendingMap.set(id, entry); updateBadge(); notifyApprovalsChanged(); },
+    delete(id: string) {
+      const r = _pendingMap.delete(id);
+      updateBadge();
+      if (r) notifyApprovalsChanged();
+      return r;
+    },
     values() { return _pendingMap.values(); },
     [Symbol.iterator]() { return _pendingMap[Symbol.iterator](); },
   };
+  // Approved entries, out of the queue while their session is created. A
+  // connect from the same origin meanwhile waits on them rather than
+  // queueing a second prompt (or being told it was rejected).
+  const settlingApprovals = new Set<PendingEntry>();
+
+  function notifyApprovalsChanged() {
+    browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'approvalsChanged' }).catch(() => {});
+  }
   let masterPassword: string | null = null;
   // The wallet MAC key, which signs the trusted-sites list, and the one-time
   // upgrade of a pre-1.1.2 wallet. Both hang off the master password and are
@@ -152,6 +183,14 @@ export default defineBackground(() => {
   let walletUpgradePromise: Promise<CryptoKey | null> | null = null;
   let unlockFailures = 0;
   let unlockLockedUntil = 0;
+  // The origins the trust state last read lets connect without a prompt,
+  // with their allowed providers: for decisions that can't wait for a
+  // verified read (openSidePanelInGesture). Cleared with the wallet key.
+  let silentTrustSnapshot = new Map<string, string[]>();
+  // The highest trust-state epoch seen this browser session. A state older
+  // than this was put back from a snapshot (see lib/trust-state.ts). Kept
+  // in storage.session too, so a worker restart doesn't forget it.
+  let trustEpochHighWater = 0;
 
   // Unlock and re-authentication (before export) share one lockout, so
   // neither is an unthrottled oracle for the master password.
@@ -169,6 +208,18 @@ export default defineBackground(() => {
       unlockLockedUntil = Date.now() + 60_000 * Math.pow(2, exponent);
     }
     persistLockout();
+  }
+
+  /**
+   * What a failed password check tells the popup: the lockout message once
+   * locked out, when the lockout ends, and how many tries are left before
+   * the next one.
+   */
+  function passwordFailureDetails(): { error?: string; lockedUntil?: number; attemptsLeft: number } {
+    const error = passwordLockoutError();
+    return error
+      ? { error, lockedUntil: unlockLockedUntil, attemptsLeft: 0 }
+      : { attemptsLeft: Math.max(0, 5 - unlockFailures) };
   }
 
   function clearPasswordFailures() {
@@ -208,7 +259,8 @@ export default defineBackground(() => {
   async function restoreSession() {
     if (!hasSessionStorage) return;
     try {
-      const data = await browser.storage.session.get(['_mp', '_lastActivity', '_unlockFailures', '_unlockLockedUntil']);
+      const data = await browser.storage.session.get(['_mp', '_lastActivity', '_unlockFailures', '_unlockLockedUntil', '_trustEpoch']);
+      if (typeof data._trustEpoch === 'number') trustEpochHighWater = Math.max(trustEpochHighWater, data._trustEpoch);
       if (typeof data._unlockFailures === 'number') unlockFailures = data._unlockFailures;
       if (typeof data._unlockLockedUntil === 'number') unlockLockedUntil = data._unlockLockedUntil;
       if (data._mp) {
@@ -395,10 +447,12 @@ export default defineBackground(() => {
   // CLI tools (Hermes, Claude Code) can hit :19280 without waiting for the
   // user to re-run `byoky-bridge connect`.
   const sessionRestored = restoreSession();
+  // Read synchronously where awaiting isn't an option (openSidePanelInGesture).
+  let sessionsRestoredDone = false;
   const sessionsRestored = Promise.all([sessionRestored, restoreSessions()])
     // restoreSession drops the password when the wallet idled out while the
     // worker was stopped; the app sessions loaded alongside go with it.
-    .then(() => { if (!masterPassword) sessions.clear(); })
+    .then(() => { if (!masterPassword) sessions.clear(); sessionsRestoredDone = true; })
     .then(() => restoreAuthorizedBridgeSessionKey())
     .then(() => maybeAutoStartBridgeProxy());
 
@@ -530,19 +584,24 @@ export default defineBackground(() => {
       // broadcast to the side-panel's onMessage listener (which can interfere
       // in Chrome MV3 when multiple listeners exist).
       port.onMessage.addListener(async (raw: unknown) => {
-        await sessionsRestored;
         const message = raw as Record<string, unknown>;
         const sender = port.sender as Runtime.MessageSender;
+        // Before any await: Chrome opens the side panel only within the
+        // page's user gesture, which ends at this listener's first await.
+        const panelOpened = message.type === 'BYOKY_CONNECT_REQUEST'
+          ? openSidePanelInGesture(message.payload, sender)
+          : undefined;
+        await sessionsRestored;
         let response: unknown;
 
         if (message.type === 'BYOKY_CONNECT_REQUEST') {
-          response = await handleConnect(message as { id: string; payload: ConnectRequest }, sender);
+          response = await handleConnect(message as { id: string; payload: ConnectRequest }, sender, panelOpened);
         } else if (message.type === 'BYOKY_DISCONNECT') {
           const { sessionKey } = message.payload as { sessionKey: string };
           const session = sessions.get(sessionKey);
           if (session) {
             const disconnectOrigin = resolveOrigin(sender);
-            if (disconnectOrigin === session.appOrigin) {
+            if (disconnectOrigin !== 'unknown' && disconnectOrigin === session.appOrigin) {
               sessions.delete(sessionKey);
               persistSessions();
               if (authorizedBridgeSessionKey === sessionKey) {
@@ -659,7 +718,7 @@ export default defineBackground(() => {
           type: 'BYOKY_PROXY_RESPONSE_ERROR',
           requestId: msg.requestId,
           status: 403,
-          error: { code: 'PROVIDER_UNAVAILABLE', message: 'Origin mismatch — request rejected' },
+          error: { code: 'ORIGIN_MISMATCH', message: 'Origin mismatch — request rejected' },
         });
         return;
       }
@@ -722,6 +781,17 @@ export default defineBackground(() => {
         });
         return;
       }
+      // The key goes out with the headers of effectiveProviderId, so it has
+      // to be that provider's (see resolveSessionProviders).
+      if (credential.providerId !== effectiveProviderId) {
+        send({
+          type: 'BYOKY_PROXY_RESPONSE_ERROR',
+          requestId: msg.requestId,
+          status: 403,
+          error: { code: 'PROVIDER_UNAVAILABLE', message: `The key this app is routed to is not a ${effectiveProviderId} key` },
+        });
+        return;
+      }
 
       // Check the token allowance and hold what this request may use in one
       // step, so a burst of parallel requests can't all pass the check.
@@ -747,15 +817,8 @@ export default defineBackground(() => {
 
         // The URL the SDK sent must match the SOURCE provider's base URL.
         // (After translation we issue against the destination's URL — see
-        // rewriteProxyUrl below.) For providers without a fixed host (Azure,
-        // Ollama, LM Studio), pass the credential's baseUrl — but only when
-        // the credential is the source credential (no translation/swap), so
-        // we don't accidentally validate the source URL against the
-        // destination's tenant/loopback origin.
-        const sourceBaseUrl = (!translation && !swap && credential.providerId === msg.providerId)
-          ? credential.baseUrl
-          : undefined;
-        if (!validateProxyUrl(msg.providerId, msg.url, sourceBaseUrl)) {
+        // rewriteProxyUrl below.)
+        if (!sourceUrlAllowed(msg.providerId, msg.url, !!(translation || swap), credential.baseUrl)) {
           send({
             type: 'BYOKY_PROXY_RESPONSE_ERROR',
             requestId: msg.requestId,
@@ -859,12 +922,15 @@ export default defineBackground(() => {
           const sseRewriter = translation
             ? buildResponseStreamRewriter(translation, msg.requestId, msg.body, msg.url)
             : undefined;
+          // Cancelled already: nothing sent, nothing charged.
+          if (upstreamAbort.signal.aborted) return;
           await proxyViaBridge(
             port,
             { ...msg, body, url: translatedUrl, providerId: effectiveProviderId },
             realHeaders,
             session,
             msg,
+            upstreamAbort.signal,
             toolNameMap,
             translation
               ? { translation, sseRewriter, originalBody: msg.body }
@@ -878,6 +944,9 @@ export default defineBackground(() => {
         const fetchHeaders = { ...realHeaders };
         if (reconstructed.stripContentType) delete fetchHeaders['content-type'];
 
+        // Cancelled while the key was being decrypted (or earlier): nothing
+        // went upstream, so nothing is charged; finally only releases the hold.
+        if (upstreamAbort.signal.aborted) return;
         // redirect: 'error' — a redirect would carry the injected API key
         // headers to wherever the upstream points.
         fetchSent = true;
@@ -914,6 +983,10 @@ export default defineBackground(() => {
           ? buildResponseStreamRewriter(translation, msg.requestId, msg.body, msg.url)
           : undefined;
 
+        // A binary reply (audio, images) goes to the app as base64: decoded
+        // as text, every byte that isn't valid UTF-8 would be lost. Only
+        // text is kept for usage accounting.
+        const binaryResponse = !translation && !isTextContentType(responseContentType);
         const chunks: string[] = [];
         responseChunks = chunks;
         if (response.body) {
@@ -923,6 +996,15 @@ export default defineBackground(() => {
           for (;;) {
             const { done, value } = await reader.read();
             if (done) break;
+            if (binaryResponse) {
+              send({
+                type: 'BYOKY_PROXY_RESPONSE_CHUNK',
+                requestId: msg.requestId,
+                chunk: bytesToBase64(value),
+                chunkEncoding: 'base64',
+              });
+              continue;
+            }
             const text = decoder.decode(value, { stream: true });
             chunks.push(text);
             if (sseRewriter) {
@@ -962,7 +1044,9 @@ export default defineBackground(() => {
           // Non-streaming translation: translate the buffered JSON body
           // and emit it as a single chunk.
           try {
-            const translatedResponse = applyResponseTranslation(translation, msg.body, msg.requestId, chunks.join(''), msg.url);
+            const translatedResponse = responseStatus >= 200 && responseStatus < 300
+              ? applyResponseTranslation(translation, msg.body, msg.requestId, chunks.join(''), msg.url)
+              : translateErrorBody(translation, msg.body, msg.requestId, chunks.join(''), msg.url);
             send({
               type: 'BYOKY_PROXY_RESPONSE_CHUNK',
               requestId: msg.requestId,
@@ -1048,6 +1132,10 @@ export default defineBackground(() => {
 
   function buildSessionResponse(session: Session, requestId: string) {
     const providerMap: ConnectResponse['providers'] = {};
+    // Approved but without a usable key: reported as unavailable.
+    for (const id of session.requestedProviders) {
+      providerMap[id] = { available: false, authMethod: 'api_key' };
+    }
     for (const sp of session.providers) {
       providerMap[sp.providerId] = { available: sp.available, authMethod: sp.authMethod };
     }
@@ -1062,23 +1150,50 @@ export default defineBackground(() => {
     };
   }
 
+  /**
+   * `panelOpened` is the side panel the port listener tried to open inside
+   * the page's gesture (Chrome), if it did; the wallet is shown some other
+   * way when that didn't work.
+   */
   async function handleConnect(
     message: { id: string; payload: ConnectRequest },
     sender: Runtime.MessageSender,
+    panelOpened?: Promise<boolean>,
   ): Promise<unknown> {
     const origin = resolveOrigin(sender);
+    const refuse = (code: string, text: string) => ({
+      type: 'BYOKY_ERROR',
+      requestId: message.id,
+      payload: { code, message: text },
+    });
 
-    // Cheap path: reuse an active session for this origin. Don't gate on
-    // the rate limit — every page load calls connect(), and reusing the
-    // same approval shouldn't burn budget.
+    // A sandboxed frame (or a page without an origin) has nothing to show
+    // the user, bind a session to or trust.
+    if (origin === 'unknown') {
+      return refuse('ORIGIN_UNSUPPORTED', 'Byoky cannot connect from a sandboxed frame or a page without an origin');
+    }
+
+    // Any page can send this. Check it before it is queued for the popup to
+    // render, or signed into the trust state once approved.
+    const raw = message.payload as unknown;
+    const providers = raw && typeof raw === 'object' && !Array.isArray(raw)
+      ? parseProviderRequirements((raw as ConnectRequest).providers)
+      : null;
+    if (!providers) return refuse('INVALID_REQUEST', 'Invalid connect request');
+    const request: ConnectRequest = { providers, reconnectOnly: (raw as ConnectRequest).reconnectOnly === true };
+
+    // Cheap path: reuse an active session for this origin when it covers
+    // what the app asks for now. Don't gate on the rate limit — every page
+    // load calls connect(), and reusing the same approval shouldn't burn
+    // budget. A silent reconnect probe takes the session as it is.
     const existing = findActiveSession(origin);
-    if (existing) {
+    if (existing && (request.reconnectOnly || sessionCovers(existing, providers))) {
       return buildSessionResponse(existing, message.id);
     }
 
     // Silent reconnect probe with no session is also cheap — answer NO_SESSION
     // without consuming the rate-limit budget.
-    if (message.payload.reconnectOnly) {
+    if (request.reconnectOnly) {
       return {
         type: 'BYOKY_ERROR',
         requestId: message.id,
@@ -1102,24 +1217,27 @@ export default defineBackground(() => {
       };
     }
 
-    // If there's already a pending approval for this origin, wait for its result
-    const existingPending = [...pendingApprovals.values()].find(
-      (e) => e.approval.appOrigin === origin,
-    );
-    if (existingPending) {
-      openWalletUI(sender.tab?.id);
-      return waitForSessionOrReject(origin, message.id);
+    // A request from this origin is already waiting for the user (or being
+    // approved right now): wait for its outcome.
+    const inFlight = pendingFor(origin);
+    if (inFlight) {
+      openWalletUI(sender.tab?.id, panelOpened);
+      return new Promise((resolve) => {
+        inFlight.waiters.push({ message: { id: message.id, payload: request }, sender, resolve });
+      });
     }
+
+    // An app with a session that now asks for more providers is asked about
+    // all of them; approving widens its session (createSession).
+    const requested = existing ? withProviders(existing.requestedProviders, providers) : providers;
 
     // Queue for user approval (whether locked or unlocked)
     const approval: PendingApproval = {
       id: crypto.randomUUID(),
       appOrigin: origin,
-      providers: message.payload.providers ?? [],
+      providers: requested,
       timestamp: Date.now(),
     };
-
-    openWalletUI(sender.tab?.id);
 
     return new Promise((resolve) => {
       pendingApprovals.set(approval.id, {
@@ -1127,87 +1245,115 @@ export default defineBackground(() => {
         originalMessageId: message.id,
         resolve,
         tabId: sender.tab?.id,
+        waiters: [],
       });
+
+      // The wallet is shown only for a request that waits for the user, not
+      // for one a trusted site gets approved without a prompt.
+      const askUser = () => {
+        openWalletUI(sender.tab?.id, panelOpened);
+        browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'newPendingApproval' }).catch(() => {});
+      };
 
       // If already unlocked, check trusted sites and either auto-approve or notify for approval
       if (masterPassword) {
-        getTrustState().then((trust) => {
+        getTrustState().catch(() => emptyTrustState()).then((trust) => {
           const entry = pendingApprovals.get(approval.id);
           if (!entry) return;
           const trustedSite = silentTrustFor(trust, origin);
           if (trustedSite) {
             // Scope to the providers the user originally approved for this trusted site
             const scopedProviders = scopeProvidersForTrust(
-              message.payload.providers,
+              requested,
               trustedSite.allowedProviders ?? [],
             );
             if (scopedProviders) {
               pendingApprovals.delete(approval.id);
-              createSession(
-                { ...message, payload: { ...message.payload, providers: scopedProviders } },
-                origin,
-              ).then((response) => entry.resolve(response));
+              void settleApproval(entry, scopedProviders);
               return;
             }
             // Requested providers outside trust scope — fall through to manual approval
           }
-          // Notify popup to show approval UI
-          browser.runtime.sendMessage({
-            type: 'BYOKY_INTERNAL',
-            action: 'newPendingApproval',
-          }).catch(() => {});
+          askUser();
         });
+      } else {
+        // Locked: it waits for the unlock (processPendingAfterUnlock), and an
+        // open popup can already say that a request is waiting.
+        askUser();
       }
-      // If locked, the approval stays queued. When user unlocks, processPendingAfterUnlock() runs.
 
       // Auto-reject after 2 minutes
       setTimeout(() => {
         const entry = pendingApprovals.get(approval.id);
         if (entry) {
           pendingApprovals.delete(approval.id);
-          entry.resolve({
-            type: 'BYOKY_ERROR',
-            requestId: entry.originalMessageId,
-            payload: { code: 'USER_REJECTED', message: 'Connection request timed out' },
-          });
+          rejectPending(entry, 'Connection request timed out');
         }
       }, 120_000);
     });
   }
 
-  function waitForSessionOrReject(origin: string, messageId: string): Promise<unknown> {
-    return new Promise((resolve) => {
-      const interval = setInterval(() => {
-        const session = findActiveSession(origin);
-        if (session) {
-          clearInterval(interval);
-          clearTimeout(timeout);
-          resolve(buildSessionResponse(session, messageId));
-          return;
-        }
-        // If no more pending approvals for this origin and no session, it was rejected
-        const stillPending = [...pendingApprovals.values()].some(
-          (e) => e.approval.appOrigin === origin,
-        );
-        if (!stillPending) {
-          clearInterval(interval);
-          clearTimeout(timeout);
-          resolve({
-            type: 'BYOKY_ERROR',
-            requestId: messageId,
-            payload: { code: 'USER_REJECTED', message: 'Connection request was rejected' },
-          });
-        }
-      }, 300);
-      const timeout = setTimeout(() => {
-        clearInterval(interval);
-        resolve({
-          type: 'BYOKY_ERROR',
-          requestId: messageId,
-          payload: { code: 'USER_REJECTED', message: 'Connection request timed out' },
-        });
-      }, 120_000);
-    });
+  /** Whether `session` already has every provider in `providers` approved. */
+  function sessionCovers(session: Session, providers: ProviderRequirement[]): boolean {
+    return providers.every((p) => session.requestedProviders.includes(p.id));
+  }
+
+  /** `ids` (already approved) plus `providers`, as one provider list. */
+  function withProviders(ids: string[], providers: ProviderRequirement[]): ProviderRequirement[] {
+    const byId = new Map<string, ProviderRequirement>(ids.map((id) => [id, { id, required: false }]));
+    for (const p of providers) byId.set(p.id, p);
+    return [...byId.values()];
+  }
+
+  /** The queued or settling request of `origin`, if any. */
+  function pendingFor(origin: string): PendingEntry | undefined {
+    for (const entry of pendingApprovals.values()) {
+      if (entry.approval.appOrigin === origin) return entry;
+    }
+    for (const entry of settlingApprovals) {
+      if (entry.approval.appOrigin === origin) return entry;
+    }
+    return undefined;
+  }
+
+  /**
+   * Create (or widen) the session for an approved entry, already taken out
+   * of the queue, and answer it and its waiters. `before` runs first, still
+   * counted as settling (approving clears a revocation, trusts the site).
+   * Call it right after the entry leaves the queue, before any await, so no
+   * connect slips in between.
+   */
+  async function settleApproval(
+    entry: PendingEntry,
+    providers: ProviderRequirement[],
+    before?: () => Promise<void>,
+  ): Promise<void> {
+    settlingApprovals.add(entry);
+    let session: Session;
+    try {
+      await before?.();
+      session = await createSession(entry.approval.appOrigin, providers);
+    } catch {
+      settlingApprovals.delete(entry);
+      rejectPending(entry, 'Could not create the session', 'UNKNOWN');
+      return;
+    }
+    settlingApprovals.delete(entry);
+    entry.resolve(buildSessionResponse(session, entry.originalMessageId));
+    // Each waiter runs again: one the session covers reuses it at once, one
+    // asking for more providers is queued for those.
+    for (const w of entry.waiters) {
+      handleConnect(w.message, w.sender).then(w.resolve, () => {
+        w.resolve({ type: 'BYOKY_ERROR', requestId: w.message.id, payload: { code: 'UNKNOWN', message: 'Could not connect' } });
+      });
+    }
+  }
+
+  /** Answer an entry (out of the queue) and its waiters with a refusal. */
+  function rejectPending(entry: PendingEntry, message: string, code = 'USER_REJECTED') {
+    const refusal = (requestId: string) => ({ type: 'BYOKY_ERROR', requestId, payload: { code, message } });
+    entry.resolve(refusal(entry.originalMessageId));
+    for (const w of entry.waiters) w.resolve(refusal(w.message.id));
   }
 
   /**
@@ -1231,150 +1377,104 @@ export default defineBackground(() => {
     return null; // Some requested providers are outside trust scope
   }
 
-  async function resolveAllProviders(): Promise<Array<{
-    id: string;
-    authMethod: AuthMethod;
-    sessionProvider: Session['providers'][number];
-  }>> {
-    const credentials = await getStoredCredentials();
-    const result: Array<{ id: string; authMethod: AuthMethod; sessionProvider: Session['providers'][number] }> = [];
-
-    for (const cred of credentials) {
-      result.push({
-        id: cred.providerId,
-        authMethod: cred.authMethod,
-        sessionProvider: {
-          providerId: cred.providerId,
-          credentialId: cred.id,
-          available: true,
-          authMethod: cred.authMethod,
-        },
-      });
+  /**
+   * The session's providers for `providerIds`, routed by the app's group.
+   * The one routing rule for new and refreshed sessions: core resolveRoute
+   * (cross-family translation, same-family swap, the group's credential pin
+   * and model, a direct key, auto translation), as on iOS and Android.
+   *
+   * The credential must belong to the provider the request is sent to. A
+   * group pin can't point at another provider's key through the popup, so a
+   * mismatch means edited storage; the provider is then unavailable rather
+   * than that key being sent with the other provider's headers.
+   */
+  function resolveSessionProviders(
+    providerIds: string[],
+    credentials: Credential[],
+    group: Group | undefined,
+  ): { providers: SessionProvider[]; providerMap: ConnectResponse['providers'] } {
+    const providers: SessionProvider[] = [];
+    const providerMap: ConnectResponse['providers'] = {};
+    for (const providerId of new Set(providerIds)) {
+      let route = resolveRoute(providerId, group, credentials);
+      const destination = route?.translation?.dstProviderId ?? route?.swap?.dstProviderId ?? providerId;
+      if (route && route.credential.providerId !== destination) route = null;
+      providerMap[providerId] = {
+        available: !!route,
+        authMethod: route?.credential.authMethod ?? 'api_key',
+      };
+      if (!route) continue;
+      const sp: SessionProvider = {
+        providerId,
+        credentialId: route.credential.id,
+        available: true,
+        authMethod: route.credential.authMethod,
+      };
+      if (route.translation) sp.translation = route.translation;
+      else if (route.swap) sp.swap = route.swap;
+      else if (route.modelOverride) sp.modelOverride = route.modelOverride;
+      providers.push(sp);
     }
-    return result;
+    return { providers, providerMap };
   }
 
-  async function createSession(
-    message: { id: string; payload: ConnectRequest },
-    origin: string,
-  ): Promise<unknown> {
-    // Reuse existing active session for this origin
-    const existing = findActiveSession(origin);
-    if (existing) {
-      return buildSessionResponse(existing, message.id);
-    }
-
+  /**
+   * The session for an approved request of `origin`. An app that already
+   * has one (and asked for more providers) gets it widened, keeping its
+   * session key; otherwise a new one is made. No providers means every
+   * provider the wallet holds a key for.
+   */
+  async function createSession(origin: string, providers: ProviderRequirement[]): Promise<Session> {
+    if (origin === 'unknown') throw new Error('No session for an opaque origin');
     const credentials = await getStoredCredentials();
-    const request = message.payload;
-    const sessionKey = `byk_${crypto.randomUUID().replace(/-/g, '')}`;
 
-    const providerMap: ConnectResponse['providers'] = {};
-    const sessionProviders: Session['providers'] = [];
+    // No provider list means every provider the wallet holds a key for,
+    // routed exactly like an explicit list of them.
+    let providerIds = [...new Set(
+      providers.length
+        ? providers.map((p) => p.id)
+        : credentials.map((c) => c.providerId),
+    )];
 
     // Resolve the group this app belongs to (auto-assigns to default if first contact)
     const group = await getGroupForOrigin(origin);
 
-    for (const req of request.providers ?? []) {
-      // If the group is bound to this provider with a specific credential pin,
-      // it overrides everything else for credential selection.
-      const groupPinnedCred =
-        group && group.providerId === req.id && group.credentialId
-          ? credentials.find((c) => c.id === group.credentialId)
-          : undefined;
-
-      // Cross-family routing: the group's bound
-      // provider differs from what the app asked for, both providers are
-      // in known translation families, and a credential resolves for the
-      // destination. Record translation metadata so the proxy handler
-      // knows to translate.
-      const crossRoute = resolveCrossFamilyRoute(group, req.id, credentials);
-
-      // Same-family swap: the group's bound provider differs from what the
-      // app asked for, and both providers are in the SAME family (identical
-      // wire format). No translation needed — just URL rewrite + credential
-      // swap + optional model override. Only consulted when cross-family
-      // routing doesn't apply, so the branches are mutually exclusive.
-      const swapRoute = !crossRoute
-        ? resolveSameFamilySwapRoute(group, req.id, credentials)
-        : undefined;
-
-      const directCred = credentials.find((c) => c.providerId === req.id);
-
-      // Auto cross-family translation: opportunistic fallback when the app
-      // has no group binding AND no direct credential for the requested
-      // provider. Picks any translatable credential the user holds so apps
-      // "just work" against mismatched keys. Group intent always wins — we
-      // only fire this when the app's group binds no provider (the default
-      // group binds none).
-      const autoRoute = !group?.providerId && !directCred
-        ? resolveAutoCrossFamilyRoute(req.id, credentials)
-        : undefined;
-
-      // Group credential pin wins over everything. Cross-family routing and
-      // same-family swap beat own-key direct lookup.
-      const cred = groupPinnedCred ?? crossRoute?.cred ?? swapRoute?.cred ?? directCred ?? autoRoute?.cred;
-      providerMap[req.id] = {
-        available: !!cred,
-        authMethod: cred?.authMethod ?? 'api_key',
-      };
-      if (cred) {
-        const sp: SessionProvider = {
-          providerId: req.id,
-          credentialId: cred.id,
-          available: true,
-          authMethod: cred.authMethod,
-        };
-        if (crossRoute) sp.translation = crossRoute.translation;
-        else if (swapRoute) sp.swap = swapRoute.swap;
-        else if (autoRoute) sp.translation = autoRoute.translation;
-        else if (group && group.providerId === req.id && group.model) {
-          sp.modelOverride = group.model;
-        }
-        sessionProviders.push(sp);
-      }
+    const existing = findActiveSession(origin);
+    if (existing) {
+      providerIds = [...new Set([...existing.requestedProviders, ...providerIds])];
+      if (providerIds.length === existing.requestedProviders.length) return existing;
     }
+    const { providers: sessionProviders, providerMap } = resolveSessionProviders(providerIds, credentials, group);
 
-    if (request.providers?.length === 0 || !request.providers) {
-      // Empty provider list: resolve to all available credentials.
-      // This path is only reached via explicit user approval — trusted
-      // auto-approvals always scope providers before calling createSession.
-      const resolved = await resolveAllProviders();
-      for (const rp of resolved) {
-        providerMap[rp.id] = { available: true, authMethod: rp.authMethod };
-        sessionProviders.push(rp.sessionProvider);
-      }
+    if (existing) {
+      existing.requestedProviders = providerIds;
+      existing.providers = sessionProviders;
+      persistSessions();
+      browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'sessionChanged' }).catch(() => {});
+      // Other frames of the app hold the same session key.
+      notifyProvidersUpdated(existing, providerMap);
+      return existing;
     }
 
     const session: Session = {
       id: crypto.randomUUID(),
-      sessionKey,
+      sessionKey: `byk_${crypto.randomUUID().replace(/-/g, '')}`,
       appOrigin: origin,
       providers: sessionProviders,
       // What the user approved. An "all providers" request is pinned to the
-      // providers it resolved to, so keys added later aren't handed to this
-      // session without a new approval.
-      requestedProviders: request.providers?.length
-        ? request.providers.map(p => p.id)
-        : sessionProviders.map(sp => sp.providerId),
+      // providers the wallet had keys for, so keys added later aren't handed
+      // to this session without a new approval.
+      requestedProviders: providerIds,
       createdAt: Date.now(),
       expiresAt: Date.now() + 24 * 60 * 60 * 1000,
     };
 
-    sessions.set(sessionKey, session);
+    sessions.set(session.sessionKey, session);
     persistSessions();
     // Trusted-site approvals create sessions without the popup's help; an
     // open popup or side panel lists them only if told.
     browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'sessionChanged' }).catch(() => {});
-
-    return {
-      type: 'BYOKY_CONNECT_RESPONSE',
-      requestId: message.id,
-      payload: {
-        sessionKey,
-        proxyUrl: 'extension-proxy',
-        providers: providerMap,
-      } as ConnectResponse,
-    };
+    return session;
   }
 
   async function handleInternal(
@@ -1387,7 +1487,7 @@ export default defineBackground(() => {
     switch (message.action) {
       case 'unlock': {
         const lockout = passwordLockoutError();
-        if (lockout) return { success: false, error: lockout };
+        if (lockout) return { success: false, error: lockout, lockedUntil: unlockLockedUntil, attemptsLeft: 0 };
         const { password } = message.payload as { password: string };
         const data = await browser.storage.local.get('passwordHash');
         if (!data.passwordHash) return { success: false };
@@ -1408,11 +1508,19 @@ export default defineBackground(() => {
           resetIdleTimer();
           ensureWalletUpgraded().catch(() => {});
           processPendingAfterUnlock();
-        } else {
-          recordPasswordFailure();
+          return { success: true };
         }
-        return { success: valid };
+        // The failure that starts a lockout says so, not only the next try.
+        recordPasswordFailure();
+        return { success: false, ...passwordFailureDetails() };
       }
+
+      // The popup is in use: that is activity too (approved app and bridge
+      // traffic is the rest). Extension pages only, like every action not
+      // in ALLOWED_CONTENT_ACTIONS.
+      case 'userActivity':
+        if (masterPassword) resetIdleTimer();
+        return { success: true };
 
       case 'lock':
         masterPassword = null;
@@ -1456,6 +1564,10 @@ export default defineBackground(() => {
           storedBaseUrl = resolved;
         }
         const cleanValue = cValue.replace(/\s+/g, '');
+        // Only a local server may run without a key.
+        if (!cleanValue && !(cAuth === 'api_key' && KEYLESS_PROVIDERS.has(cpId))) {
+          return { error: cAuth === 'api_key' ? 'Enter an API key' : 'Enter a token' };
+        }
         const newCred: Record<string, unknown> = {
           id: crypto.randomUUID(),
           providerId: cpId,
@@ -1465,13 +1577,11 @@ export default defineBackground(() => {
         };
         if (storedBaseUrl) newCred.baseUrl = storedBaseUrl;
         const secretField = cAuth === 'api_key' ? 'encryptedKey' : 'encryptedAccessToken';
-        // Local providers run unauthenticated — empty key is allowed and we skip
-        // the encryption step entirely, storing an empty string as the marker.
         // A key is bound to this record (id, provider, base URL), so it can't
-        // be moved into another one.
-        newCred[secretField] = cleanValue
-          ? await encrypt(cleanValue, masterPassword, credentialAad({ id: newCred.id as string, providerId: cpId, baseUrl: storedBaseUrl }, secretField))
-          : '';
+        // be moved into another one. A local server's empty key is encrypted
+        // and bound too: a record with no secret at all takes no password to
+        // plant (see openCredentialSecret).
+        newCred[secretField] = await encrypt(cleanValue, masterPassword, credentialAad({ id: newCred.id as string, providerId: cpId, baseUrl: storedBaseUrl }, secretField));
         // Credential writes are serialized with the wallet upgrade's.
         await serializedStorage(async () => {
           const data = await browser.storage.local.get('credentials');
@@ -1529,7 +1639,10 @@ export default defineBackground(() => {
         }
         const { passwordHash: setupHash } = message.payload as { passwordHash: string };
         forgetWalletKeys();
+        forgetTrustEpoch();
         await browser.storage.local.set({ passwordHash: setupHash, credentials: [] });
+        // Other open views leave their setup screen.
+        browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'sessionChanged' }).catch(() => {});
         return { success: true };
       }
 
@@ -1544,8 +1657,10 @@ export default defineBackground(() => {
         clearSessionStorage();
         if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
         clearPasswordFailures();
+        forgetTrustEpoch();
         // After any in-flight upgrade write, which then finds the wallet gone.
         await serializedStorage(() => browser.storage.local.clear());
+        browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'sessionChanged' }).catch(() => {});
         return { success: true };
       }
 
@@ -1596,7 +1711,7 @@ export default defineBackground(() => {
         // Reachable from localhost pages via the content script. Only the
         // app that owns the session may bind the bridge to it.
         const bridgeSession = sessions.get(sessionKey);
-        if (!bridgeSession || !sender || resolveOrigin(sender) !== bridgeSession.appOrigin) {
+        if (!bridgeSession || !sender || resolveOrigin(sender) === 'unknown' || resolveOrigin(sender) !== bridgeSession.appOrigin) {
           return { success: false, error: 'Invalid session' };
         }
         // The page picks the port. Only a plain unprivileged TCP port: a
@@ -1624,28 +1739,20 @@ export default defineBackground(() => {
         if (!pending) return { success: false, error: 'Approval not found' };
 
         pendingApprovals.delete(approvalId);
+        await settleApproval(pending, pending.approval.providers, async () => {
+          // Resolve which providers are being approved
+          const approvedProviderIds = [...new Set(pending.approval.providers.length > 0
+            ? pending.approval.providers.map((p) => p.id)
+            : (await getStoredCredentials()).map((c) => c.providerId))];
 
-        // Resolve which providers are being approved
-        const approvedProviderIds = pending.approval.providers.length > 0
-          ? pending.approval.providers.map((p) => p.id)
-          : (await getStoredCredentials()).map((c) => c.providerId);
-
-        // Approving clears a revocation. If the trust state can't be signed
-        // (the wallet upgrade failed), the connection still goes ahead; the
-        // site just asks again next time.
-        await clearRevocation(pending.approval.appOrigin).catch(() => {});
-        if (trust) {
-          await addTrustedSite(pending.approval.appOrigin, approvedProviderIds).catch(() => {});
-        }
-
-        const response = await createSession(
-          {
-            id: pending.originalMessageId,
-            payload: { providers: pending.approval.providers } as ConnectRequest,
-          },
-          pending.approval.appOrigin,
-        );
-        pending.resolve(response);
+          // Approving clears a revocation. If the trust state can't be signed
+          // (the wallet upgrade failed), the connection still goes ahead; the
+          // site just asks again next time.
+          await clearRevocation(pending.approval.appOrigin).catch(() => {});
+          if (trust) {
+            await addTrustedSite(pending.approval.appOrigin, approvedProviderIds).catch(() => {});
+          }
+        });
         return { success: true };
       }
 
@@ -1655,11 +1762,7 @@ export default defineBackground(() => {
         if (!pending) return { success: false, error: 'Approval not found' };
 
         pendingApprovals.delete(approvalId);
-        pending.resolve({
-          type: 'BYOKY_ERROR',
-          requestId: pending.originalMessageId,
-          payload: { code: 'USER_REJECTED', message: 'User rejected the connection request' },
-        });
+        rejectPending(pending, 'User rejected the connection request');
         return { success: true };
       }
 
@@ -1684,7 +1787,10 @@ export default defineBackground(() => {
 
       case 'addTrustedSite': {
         if (!masterPassword) return { error: 'Wallet is locked' };
-        const { origin, allowedProviders } = message.payload as { origin: string; allowedProviders: string[] };
+        const { origin, allowedProviders } = message.payload as { origin: unknown; allowedProviders: unknown };
+        if (typeof origin !== 'string' || origin === 'unknown' || !isProviderIdList(allowedProviders)) {
+          return { error: 'Invalid trusted site' };
+        }
         await addTrustedSite(origin, allowedProviders);
         return { success: true };
       }
@@ -1705,7 +1811,7 @@ export default defineBackground(() => {
         const stored = await browser.storage.local.get('passwordHash');
         if (!stored.passwordHash || !(await verifyPassword(currentPassword, stored.passwordHash as string))) {
           recordPasswordFailure();
-          return { error: 'Incorrect wallet password' };
+          return { error: passwordLockoutError() ?? 'Incorrect wallet password' };
         }
         clearPasswordFailures();
         // Stored secrets are read bound to their record (lib/wallet-upgrade.ts).
@@ -1867,12 +1973,19 @@ export default defineBackground(() => {
     originalBody?: string;
   }
 
+  /**
+   * `signal` aborts when the app cancels (its port closed). Until the
+   * request has gone to the bridge, a cancel just stops it; after that the
+   * bridge is shut down, which ends its upstream call, and the request is
+   * charged as cancelled.
+   */
   async function proxyViaBridge(
     responsePort: Runtime.Port,
     msg: ProxyRequest,
     headers: Record<string, string>,
     session: Session,
     appRequest: ProxyRequest,
+    signal: AbortSignal,
     toolNameMap: Record<string, string> = {},
     translationCtx?: BridgeTranslation,
   ): Promise<void> {
@@ -1884,7 +1997,9 @@ export default defineBackground(() => {
       try { responsePort.postMessage(message); } catch { appConnected = false; }
     };
 
+    // The probe starts a native host and waits up to 2 s for it.
     const available = await checkBridgeAvailable();
+    if (signal.aborted) return;
     if (!available) {
       send({
         type: 'BYOKY_PROXY_RESPONSE_ERROR',
@@ -1927,22 +2042,22 @@ export default defineBackground(() => {
     // allowance reservation lasts as long as the request does.
     await new Promise<void>((resolve) => {
       let finished = false;
+      // Closing the native port ends the bridge process and its upstream fetch.
+      const onAbort = () => {
+        appConnected = false;
+        if (!finished) appCancelled = true;
+        finish();
+      };
       const finish = () => {
         if (finished) return;
         finished = true;
+        signal.removeEventListener('abort', onAbort);
         try { nativePort.disconnect(); } catch { /* already gone */ }
         resolve();
       };
 
-      // Closing the native port ends the bridge process and its upstream fetch.
-      responsePort.onDisconnect.addListener(() => {
-        appConnected = false;
-        if (!finished) appCancelled = true;
-        finish();
-      });
-
       nativePort.onMessage.addListener((raw: unknown) => {
-        const response = raw as { type: string; requestId: string; status?: number; headers?: Record<string, string>; chunk?: string; error?: string };
+        const response = raw as { type: string; requestId: string; status?: number; headers?: Record<string, string>; chunk?: string; chunkEncoding?: string; error?: string };
         if (response.requestId !== msg.requestId) return;
 
         if (response.type === 'proxy_response_meta') {
@@ -1960,6 +2075,13 @@ export default defineBackground(() => {
           });
           logEntry = logRequest(session, appRequest, status);
         } else if (response.type === 'proxy_response_chunk') {
+          // The bridge sends a binary body as base64 (F025): passed on as
+          // such, and not counted as text.
+          const binary = response.chunkEncoding === 'base64';
+          if (binary && !translationCtx) {
+            send({ type: 'BYOKY_PROXY_RESPONSE_CHUNK', requestId: msg.requestId, chunk: response.chunk, chunkEncoding: 'base64' });
+            return;
+          }
           chunks.push(response.chunk ?? '');
           // Translation: route chunks through the SSE rewriter when
           // streaming, otherwise buffer for one-shot translation at done.
@@ -1995,7 +2117,7 @@ export default defineBackground(() => {
               }
             } else {
               try {
-                const translated = applyResponseTranslation(
+                const translated = (status >= 200 && status < 300 ? applyResponseTranslation : translateErrorBody)(
                   translationCtx.translation,
                   translationCtx.originalBody,
                   msg.requestId,
@@ -2039,18 +2161,29 @@ export default defineBackground(() => {
         }
       });
 
+      // The host died. Before the response ended, the app must hear of it:
+      // after the headers its body would otherwise never end.
       nativePort.onDisconnect.addListener(() => {
-        if (!bridgeResponded) {
+        if (!finished) {
           send({
             type: 'BYOKY_PROXY_RESPONSE_ERROR',
             requestId: msg.requestId,
             status: 502,
-            error: { code: 'BRIDGE_ERROR', message: 'Bridge disconnected unexpectedly' },
+            error: {
+              code: 'BRIDGE_ERROR',
+              message: bridgeResponded ? 'Bridge disconnected mid-response' : 'Bridge disconnected unexpectedly',
+            },
           });
         }
         finish();
       });
 
+      // Cancelled while connecting: nothing has gone to the bridge yet.
+      if (signal.aborted) {
+        finish();
+        return;
+      }
+      signal.addEventListener('abort', onAbort, { once: true });
       nativePort.postMessage({
         type: 'proxy',
         requestId: msg.requestId,
@@ -2208,16 +2341,21 @@ export default defineBackground(() => {
     if (typeof msg.requestId !== 'string' || typeof msg.sessionKey !== 'string' ||
         typeof msg.providerId !== 'string' || typeof msg.url !== 'string' ||
         typeof msg.method !== 'string' || typeof msg.headers !== 'object' || !msg.headers ||
-        (msg.body !== undefined && typeof msg.body !== 'string')) {
+        (msg.body !== undefined && typeof msg.body !== 'string') ||
+        (msg.bodyEncoding !== undefined && msg.bodyEncoding !== 'base64')) {
       return;
     }
     const requestId = msg.requestId;
     const sessionKey = msg.sessionKey;
     const providerId = msg.providerId;
-    const url = msg.url;
+    let url = msg.url;
     const method = msg.method;
     const headers = msg.headers as Record<string, string>;
     const body = msg.body as string | undefined;
+    // A body that isn't UTF-8 text (an audio upload) arrives as base64 (F025).
+    const bodyEncoding = msg.bodyEncoding as 'base64' | undefined;
+    // The bridge can take a binary response as base64 chunks.
+    const acceptsBinaryChunks = msg.acceptsBinaryChunks === true;
 
     // CLI traffic via the bridge counts as wallet activity. Without this the
     // 20-min idle auto-lock fires mid-Hermes/Claude-Code session even though
@@ -2234,12 +2372,34 @@ export default defineBackground(() => {
       return;
     }
 
+    // The session ran out (24 h) or is gone: a 401 the bridge tells apart
+    // from a transient failure (it would otherwise answer a retryable 502),
+    // so CLI tools stop and the user reconnects with `byoky-bridge connect`.
     const session = sessions.get(sessionKey);
-    if (!session || !masterPassword) {
+    if (!session || session.expiresAt < Date.now()) {
+      if (session) {
+        sessions.delete(sessionKey);
+        persistSessions();
+      }
+      authorizedBridgeSessionKey = null;
+      authorizedBridgePort = null;
+      persistAuthorizedBridgeSessionKey();
       bridgeProxyPort?.postMessage({
         type: 'proxy_http_error',
         requestId,
-        error: 'Session not found or wallet locked',
+        status: 401,
+        code: 'bridge_session_expired',
+        error: 'Bridge session expired',
+      });
+      return;
+    }
+    if (!masterPassword) {
+      bridgeProxyPort?.postMessage({
+        type: 'proxy_http_error',
+        requestId,
+        status: 423,
+        code: 'WALLET_LOCKED',
+        error: 'Wallet is locked',
       });
       return;
     }
@@ -2250,17 +2410,6 @@ export default defineBackground(() => {
         type: 'proxy_http_error',
         requestId,
         error: 'Provider not available in this session',
-      });
-      return;
-    }
-
-    if (session.expiresAt < Date.now()) {
-      sessions.delete(sessionKey);
-      persistSessions();
-      bridgeProxyPort?.postMessage({
-        type: 'proxy_http_error',
-        requestId,
-        error: 'Session has expired',
       });
       return;
     }
@@ -2306,23 +2455,31 @@ export default defineBackground(() => {
     const translation = sessionProvider?.translation;
     const swap = sessionProvider?.swap;
     const effectiveProviderId = translation?.dstProviderId ?? swap?.dstProviderId ?? providerId;
-
-    // Revalidate for requiresCustomBaseUrl providers now that we have the
-    // credential's baseUrl. Direct path only — translation/swap builds the
-    // destination URL via rewriteProxyUrl below, so the pre-translation URL
-    // is still the source provider's (validated above when non-custom).
-    if (
-      providerCfg?.requiresCustomBaseUrl &&
-      !translation &&
-      !swap &&
-      !validateProxyUrl(providerId, url, credential.baseUrl)
-    ) {
+    // The key goes out with effectiveProviderId's headers (as on the page path).
+    if (credential.providerId !== effectiveProviderId) {
       bridgeProxyPort?.postMessage({
         type: 'proxy_http_error',
         requestId,
-        error: 'Request URL does not match the credential\'s registered base URL',
+        error: `The key this app is routed to is not a ${effectiveProviderId} key`,
       });
       return;
+    }
+
+    // Revalidate for requiresCustomBaseUrl providers now that we have the
+    // credential's baseUrl. Direct, a request to the registry's placeholder
+    // host goes to the credential's host instead; routed, rewriteProxyUrl
+    // below builds the destination URL and this one only names the endpoint.
+    if (providerCfg?.requiresCustomBaseUrl) {
+      const routed = !!(translation || swap);
+      if (!routed) url = rebaseOntoCredential(providerId, url, credential.baseUrl) ?? url;
+      if (!sourceUrlAllowed(providerId, url, routed, credential.baseUrl)) {
+        bridgeProxyPort?.postMessage({
+          type: 'proxy_http_error',
+          requestId,
+          error: 'Request URL does not match the credential\'s registered base URL',
+        });
+        return;
+      }
     }
 
     // Routing rewrites the request onto the destination's chat endpoint, so
@@ -2339,8 +2496,21 @@ export default defineBackground(() => {
       return;
     }
 
-    // The app's request as the log and allowance helpers expect it.
-    const appRequest = { providerId, url, method, body } as ProxyRequest;
+    // Routing rewrites a JSON body; a binary one can't be.
+    if (bodyEncoding && (translation || swap)) {
+      bridgeProxyPort?.postMessage({
+        type: 'proxy_http_error',
+        requestId,
+        status: 400,
+        code: 'ROUTING_UNSUPPORTED',
+        error: `This app is routed to ${effectiveProviderId}, and a binary request body can't be routed to another provider`,
+      });
+      return;
+    }
+
+    // The app's request as the log and allowance helpers expect it (which
+    // leave an encoded body uncounted and unparsed).
+    const appRequest = { providerId, url, method, body, bodyEncoding } as ProxyRequest;
 
     try {
       const apiKey = await decryptCredentialKey(credential);
@@ -2386,7 +2556,7 @@ export default defineBackground(() => {
         if (swap.dstModel && body) {
           translatedBody = rewriteModelInJsonBody(body, swap.dstModel);
         }
-      } else if (sessionProvider?.modelOverride && body) {
+      } else if (sessionProvider?.modelOverride && body && !bodyEncoding) {
         // Direct path, same provider, but the group pins a model. The
         // group's model is the strongest force — override the SDK's choice.
         translatedBody = rewriteModelInJsonBody(body, sessionProvider.modelOverride);
@@ -2410,6 +2580,16 @@ export default defineBackground(() => {
             type: 'proxy_http_error',
             requestId,
             error: 'Cross-family translation is not supported on the bridge OAuth path. Bind this app to an Anthropic credential or remove the OAuth requirement.',
+          });
+          return;
+        }
+        // The setup-token request is rewritten as JSON (tool names, system prompt).
+        if (bodyEncoding) {
+          bridgeProxyPort.postMessage({
+            type: 'proxy_http_error',
+            requestId,
+            status: 400,
+            error: 'A Claude setup token can only be used with a JSON request body',
           });
           return;
         }
@@ -2504,7 +2684,9 @@ export default defineBackground(() => {
         return;
       }
 
-      const bridgeBody = injectStreamUsageOptions(effectiveProviderId, translatedBody);
+      const bridgeBody = bodyEncoding
+        ? reconstructBody(translatedBody, bodyEncoding).body
+        : injectStreamUsageOptions(effectiveProviderId, translatedBody);
       // Check the allowance and hold what this request may use in one step,
       // as on the page path.
       const reservation = await checkAndReserveAllowance(session.appOrigin, providerId, appRequest);
@@ -2550,6 +2732,9 @@ export default defineBackground(() => {
         const sseRewriter = translation && isStreamingResponse
           ? buildResponseStreamRewriter(translation, requestId, body, url)
           : undefined;
+        // A binary reply goes to a bridge that takes it as base64 slices
+        // (as on the page path); an older bridge gets text, as before.
+        const binaryResponse = acceptsBinaryChunks && !translation && !isTextContentType(responseContentType);
 
         if (response.body) {
           const reader = response.body.getReader();
@@ -2557,6 +2742,17 @@ export default defineBackground(() => {
           for (;;) {
             const { done, value } = await reader.read();
             if (done) break;
+            if (binaryResponse) {
+              for (let i = 0; i < value.length; i += MAX_BINARY_CHUNK_BYTES) {
+                bridgeProxyPort?.postMessage({
+                  type: 'proxy_http_response_chunk',
+                  requestId,
+                  chunk: bytesToBase64(value.subarray(i, i + MAX_BINARY_CHUNK_BYTES)),
+                  chunkEncoding: 'base64',
+                });
+              }
+              continue;
+            }
             const text = decoder.decode(value, { stream: true });
             chunks.push(text);
             if (sseRewriter) {
@@ -2590,7 +2786,9 @@ export default defineBackground(() => {
           }
         } else if (translation && !isStreamingResponse) {
           try {
-            const translatedResponse = applyResponseTranslation(translation, body, requestId, chunks.join(''), url);
+            const translatedResponse = responseStatus >= 200 && responseStatus < 300
+              ? applyResponseTranslation(translation, body, requestId, chunks.join(''), url)
+              : translateErrorBody(translation, body, requestId, chunks.join(''), url);
             bridgeProxyPort?.postMessage({
               type: 'proxy_http_response_chunk',
               requestId,
@@ -2630,14 +2828,63 @@ export default defineBackground(() => {
     }
   }
 
-  function openWalletUI(tabId?: number) {
-    // Chrome: open side panel
-    if (typeof chrome !== 'undefined' && chrome.sidePanel && tabId) {
-      chrome.sidePanel.open({ tabId }).catch(() => {});
-      return;
+  /**
+   * Chrome: open the side panel for a connect request, synchronously in the
+   * port listener, where the page's user gesture still counts. Skipped for
+   * a silent reconnect, and for an app whose session already covers the
+   * request (known once the sessions are restored). Resolves to whether
+   * the panel opened; undefined when it wasn't tried.
+   */
+  function openSidePanelInGesture(payload: unknown, sender: Runtime.MessageSender): Promise<boolean> | undefined {
+    const tabId = sender.tab?.id;
+    if (typeof chrome === 'undefined' || !chrome.sidePanel || !tabId) return undefined;
+    const request = payload && typeof payload === 'object' ? payload as ConnectRequest : undefined;
+    if (!request || request.reconnectOnly === true) return undefined;
+    const origin = resolveOrigin(sender);
+    if (origin === 'unknown') return undefined;
+    const providers = parseProviderRequirements(request.providers);
+    if (sessionsRestoredDone) {
+      const existing = findActiveSession(origin);
+      if (existing && providers && sessionCovers(existing, providers)) return undefined;
     }
+    // A trusted site connects without a prompt (as far as the last verified
+    // read knows; handleConnect checks again and shows the wallet if not).
+    const allowed = masterPassword ? silentTrustSnapshot.get(origin) : undefined;
+    if (allowed && providers && scopeProvidersForTrust(providers, allowed)) return undefined;
+    return chrome.sidePanel.open({ tabId }).then(() => true, () => false);
+  }
 
-    // Firefox/Safari fallback: open popup as a window
+  /**
+   * Show the wallet for a request that needs the user. Chrome: the side
+   * panel (opened in the page's gesture if `panelOpened` says so; without
+   * a gesture Chrome refuses it), else the action popup, unless a wallet
+   * view is already open. Firefox and Safari, and Chrome's last resort: the
+   * popup in a window of its own.
+   */
+  function openWalletUI(tabId?: number, panelOpened?: Promise<boolean>) {
+    void (async () => {
+      if (typeof chrome !== 'undefined' && chrome.sidePanel && tabId) {
+        if (await panelOpened) return;
+        if (await chrome.sidePanel.open({ tabId }).then(() => true, () => false)) return;
+        if (await walletViewOpen()) return;
+        if (await chrome.action?.openPopup?.().then(() => true, () => false)) return;
+      }
+      openPopupWindow();
+    })().catch(() => {});
+  }
+
+  /** Whether a popup, side panel or popup window of the wallet is open (Chrome 116+). */
+  async function walletViewOpen(): Promise<boolean> {
+    try {
+      const contexts = await chrome.runtime?.getContexts?.({ contextTypes: ['SIDE_PANEL', 'POPUP', 'TAB'] });
+      const views = [browser.runtime.getURL('/popup.html'), browser.runtime.getURL('/sidepanel.html')];
+      return (contexts ?? []).some((c) => views.some((url) => c.documentUrl?.startsWith(url)));
+    } catch {
+      return false;
+    }
+  }
+
+  function openPopupWindow() {
     const popupUrl = browser.runtime.getURL('/popup.html');
     browser.windows.create({
       url: popupUrl,
@@ -2679,14 +2926,20 @@ export default defineBackground(() => {
     const srcFamily = familyOf(translation.srcProviderId);
     const dstFamily = familyOf(translation.dstProviderId);
     if (!srcFamily || !dstFamily) return null;
-    return {
+    // dstProviderId lets an adapter tell providers of one family apart (the
+    // OpenAI API itself wants max_completion_tokens). The field joins
+    // TranslationContext in core (F037); until then the intersection keeps
+    // this literal type-checked.
+    const ctx: TranslationContext & { dstProviderId?: string } = {
       srcFamily: srcFamily as ModelFamily,
       dstFamily: dstFamily as ModelFamily,
       srcModel: (requestBody ? parseModel(requestBody) : undefined) ?? modelFromUrl(requestUrl),
       dstModel: translation.dstModel,
+      dstProviderId: translation.dstProviderId,
       isStreaming: detectStreamingRequest(requestBody, requestUrl),
       requestId,
     };
+    return ctx;
   }
 
   /** Gemini puts the model in the path: /v1beta/models/{model}:generateContent. */
@@ -2697,6 +2950,46 @@ export default defineBackground(() => {
       return match ? decodeURIComponent(match[1]) : undefined;
     } catch {
       return undefined;
+    }
+  }
+
+  /**
+   * Whether `url`, as the app sent it, fits the provider it asked for.
+   * Unrouted it is where the request goes, so it must be that provider's
+   * host: for one without a fixed host (Azure OpenAI, Ollama, LM Studio),
+   * the credential's own (`credentialBaseUrl`). Routed, the request goes to
+   * the destination's URL and this one only names the endpoint; a provider
+   * without a fixed host then has no host to hold it to, so any URL one of
+   * its credentials could have (https, or http to this machine for a local
+   * server) passes.
+   */
+  function sourceUrlAllowed(providerId: string, url: string, routed: boolean, credentialBaseUrl?: string): boolean {
+    if (!routed) return validateProxyUrl(providerId, url, credentialBaseUrl);
+    if (!PROVIDERS[providerId]?.requiresCustomBaseUrl) return validateProxyUrl(providerId, url);
+    try {
+      return validateProxyUrl(providerId, url, new URL(url).origin);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * The bridge knows only the registry's placeholder host for a provider
+   * without a fixed one (Azure's YOUR_RESOURCE, the local servers' default
+   * ports). A request it sends there goes to the credential's own host,
+   * same path and query. Null when `url` names another host (validated as
+   * it is) or the credential has no usable base URL.
+   */
+  function rebaseOntoCredential(providerId: string, url: string, credentialBaseUrl: string | undefined): string | null {
+    const placeholder = PROVIDERS[providerId]?.baseUrl;
+    const base = resolveProviderBaseUrl(providerId, credentialBaseUrl);
+    if (!placeholder || !base) return null;
+    try {
+      const target = new URL(url);
+      if (target.origin !== new URL(placeholder).origin) return null;
+      return `${base.replace(/\/$/, '')}${target.pathname}${target.search}`;
+    } catch {
+      return null;
     }
   }
 
@@ -2775,6 +3068,29 @@ export default defineBackground(() => {
   }
 
   /**
+   * A translated request's upstream error body, for the app: in the app's
+   * dialect when the destination's error parses as one (so its SDK can
+   * read it), otherwise as it came. An HTML 502 from a CDN or a plain-text
+   * error is passed through rather than failing the response.
+   */
+  function translateErrorBody(
+    translation: SessionTranslation,
+    requestBody: string | undefined,
+    requestId: string,
+    responseBody: string,
+    requestUrl?: string,
+  ): string {
+    const ctx = buildTranslationContext(translation, requestBody, requestId, requestUrl);
+    if (!ctx) return responseBody;
+    try {
+      const ir = getAdapter(ctx.dstFamily).parseResponse(responseBody);
+      return isIRError(ir) ? getAdapter(ctx.srcFamily).serializeResponse(ctx, ir) : responseBody;
+    } catch {
+      return responseBody;
+    }
+  }
+
+  /**
    * Build the SSE stream rewriter that translates upstream chunks (in the
    * destination dialect) back to the source dialect.
    */
@@ -2797,18 +3113,12 @@ export default defineBackground(() => {
     const password = masterPassword;
     if (!password) throw new Error('Wallet is locked');
 
-    // Local providers (Ollama, LM Studio) may be stored with an empty key
-    // when the user didn't set auth on their local server. No ciphertext,
-    // nothing to decrypt.
-    if (credential.authMethod === 'api_key' && !credential.encryptedKey) {
-      return '';
-    }
-
     try {
       // A secret only decrypts for the record it was bound to. Unbound ones
       // predate 1.1.2 and are accepted only until the wallet upgrade has
       // rebound them (lib/wallet-upgrade.ts): after that, a blob moved into
       // another record is refused rather than sent to that record's host.
+      // So is a record with no secret, other than a local server's.
       const { passwordHash } = await browser.storage.local.get('passwordHash');
       const allowUnbound = typeof passwordHash === 'string' && isLegacyPasswordHash(passwordHash);
       if (credential.authMethod === 'api_key') {
@@ -2854,6 +3164,7 @@ export default defineBackground(() => {
       timestamp: Date.now(),
     };
 
+    if (sp) entry.credentialId = sp.credentialId;
     if (translation) {
       entry.actualProviderId = translation.dstProviderId;
       entry.actualModel = translation.dstModel;
@@ -3044,7 +3355,8 @@ export default defineBackground(() => {
     // images, audio, token counting and model lists aren't estimated. Same
     // rule on iOS and Android.
     if (ok && shouldEstimateUsage(upstreamProviderId, req.url, contentType) && (!parsed || !complete)) {
-      if (!inputTokens) inputTokens = Math.ceil((req.body?.length ?? 0) / 4);
+      // An encoded (binary) body's length says nothing about its tokens.
+      if (!inputTokens && !req.bodyEncoding) inputTokens = Math.ceil((req.body?.length ?? 0) / 4);
       if (!outputTokens) outputTokens = Math.ceil(responseText.length / 4);
     }
     if (inputTokens != null || outputTokens != null || model) {
@@ -3099,11 +3411,7 @@ export default defineBackground(() => {
         );
         if (scopedProviders) {
           pendingApprovals.delete(id);
-          const response = await createSession(
-            { id: entry.originalMessageId, payload: { providers: scopedProviders } as ConnectRequest },
-            entry.approval.appOrigin,
-          );
-          entry.resolve(response);
+          await settleApproval(entry, scopedProviders);
         }
       }
     }
@@ -3133,47 +3441,23 @@ export default defineBackground(() => {
     if (sessions.size === 0) return;
     const credentials = await getStoredCredentials();
 
-    for (const [sessionKey, session] of sessions) {
+    for (const session of sessions.values()) {
       const providerIds = session.requestedProviders;
 
       // Re-resolve group binding for this session's origin (may have changed)
       const group = await getGroupForOrigin(session.appOrigin);
 
-      const providerMap: ConnectResponse['providers'] = {};
-      const newSessionProviders: Session['providers'] = [];
-
-      for (const providerId of providerIds) {
-        const groupPinnedCred =
-          group && group.providerId === providerId && group.credentialId
-            ? credentials.find(c => c.id === group.credentialId)
-            : undefined;
-        const crossRoute = resolveCrossFamilyRoute(group, providerId, credentials);
-        const swapRoute = !crossRoute
-          ? resolveSameFamilySwapRoute(group, providerId, credentials)
-          : undefined;
-        const directCred = credentials.find(c => c.providerId === providerId);
-        const autoRoute = !group?.providerId && !directCred
-          ? resolveAutoCrossFamilyRoute(providerId, credentials)
-          : undefined;
-        const cred = groupPinnedCred ?? crossRoute?.cred ?? swapRoute?.cred ?? directCred ?? autoRoute?.cred;
-        providerMap[providerId] = { available: !!cred, authMethod: cred?.authMethod ?? 'api_key' };
-        if (cred) {
-          const sp: SessionProvider = { providerId, credentialId: cred.id, available: true, authMethod: cred.authMethod };
-          if (crossRoute) sp.translation = crossRoute.translation;
-          else if (swapRoute) sp.swap = swapRoute.swap;
-          else if (autoRoute) sp.translation = autoRoute.translation;
-          else if (group && group.providerId === providerId && group.model) {
-            sp.modelOverride = group.model;
-          }
-          newSessionProviders.push(sp);
-        }
-      }
+      const { providers: newSessionProviders, providerMap } = resolveSessionProviders(providerIds, credentials, group);
 
       session.providers = newSessionProviders;
       persistSessions();
 
-      notifyOrigin(session.appOrigin, { type: 'BYOKY_PROVIDERS_UPDATED', payload: { sessionKey, providers: providerMap } });
+      notifyProvidersUpdated(session, providerMap);
     }
+  }
+
+  function notifyProvidersUpdated(session: Session, providerMap: ConnectResponse['providers']) {
+    notifyOrigin(session.appOrigin, { type: 'BYOKY_PROVIDERS_UPDATED', payload: { sessionKey: session.sessionKey, providers: providerMap } });
   }
 
   // --- Wallet keys and the pre-1.1.2 upgrade ---
@@ -3235,6 +3519,7 @@ export default defineBackground(() => {
   function forgetWalletKeys() {
     walletMacKeyPromise = null;
     walletUpgradePromise = null;
+    silentTrustSnapshot = new Map();
   }
 
   // --- Trust state: trusted sites and revoked origins (lib/trust-state.ts) ---
@@ -3249,11 +3534,31 @@ export default defineBackground(() => {
     const key = await walletMacKey();
     if (!key) return emptyTrustState();
     return serializedStorage(async () => {
-      const read = await readTrustState(await browser.storage.local.get(TRUST_STATE_KEYS), key);
-      if (!read.intact) await browser.storage.local.set(await droppedTrustState(key));
+      const read = await readTrustState(await browser.storage.local.get(TRUST_STATE_KEYS), key, trustEpochHighWater);
+      if (!read.intact) {
+        const epoch = nextTrustEpoch(read.epoch);
+        await browser.storage.local.set(await droppedTrustState(key, epoch));
+        noteTrustEpoch(epoch);
+      } else if (read.epoch === 0 && (read.sites.length > 0 || read.revoked.length > 0)) {
+        // Signed before states had an epoch: re-signed with one.
+        await browser.storage.local.set(await signTrustState(read, key, 1));
+        noteTrustEpoch(1);
+      } else {
+        noteTrustEpoch(read.epoch);
+      }
       // Locked while this ran: trust nothing.
-      return masterPassword ? { sites: read.sites, revoked: read.revoked } : emptyTrustState();
+      const state = masterPassword ? { sites: read.sites, revoked: read.revoked } : emptyTrustState();
+      noteSilentTrust(state);
+      return state;
     });
+  }
+
+  function noteSilentTrust(state: TrustState) {
+    const snapshot = new Map<string, string[]>();
+    for (const site of state.sites) {
+      if (silentTrustFor(state, site.origin)) snapshot.set(site.origin, site.allowedProviders ?? []);
+    }
+    silentTrustSnapshot = snapshot;
   }
 
   /** Change the trust state and re-sign it. Throws while locked. */
@@ -3261,20 +3566,43 @@ export default defineBackground(() => {
     const key = await walletMacKey();
     if (!key) throw new Error('Wallet is locked');
     await serializedStorage(async () => {
-      const read = await readTrustState(await browser.storage.local.get(TRUST_STATE_KEYS), key);
+      const read = await readTrustState(await browser.storage.local.get(TRUST_STATE_KEYS), key, trustEpochHighWater);
       // A state that fails verification is dropped and started over, not
       // built on.
       const base = read.intact ? { sites: read.sites, revoked: read.revoked } : emptyTrustState();
       const next = update(base);
       if (read.intact && next === base) return;
+      const epoch = nextTrustEpoch(read.epoch);
       await browser.storage.local.set({
-        ...(await signTrustState(next, key)),
+        ...(await signTrustState(next, key, epoch)),
         ...(read.intact ? {} : { [TRUST_RESET_NOTICE_KEY]: true }),
       });
+      noteTrustEpoch(epoch);
+      if (masterPassword) noteSilentTrust(next);
     });
   }
 
+  function nextTrustEpoch(stored: number): number {
+    return Math.max(stored, trustEpochHighWater) + 1;
+  }
+
+  function noteTrustEpoch(epoch: number) {
+    if (epoch <= trustEpochHighWater) return;
+    trustEpochHighWater = epoch;
+    if (hasSessionStorage) browser.storage.session.set({ _trustEpoch: epoch }).catch(() => {});
+  }
+
+  /** A new or reset wallet starts its trust state over. */
+  function forgetTrustEpoch() {
+    trustEpochHighWater = 0;
+    if (hasSessionStorage) browser.storage.session.remove('_trustEpoch').catch(() => {});
+  }
+
   async function addTrustedSite(origin: string, allowedProviders: string[]) {
+    // Anything else would make the signed state unreadable (parseTrustedSites)
+    // and so wipe every trusted site; an opaque origin would trust every
+    // sandboxed frame on every site.
+    if (origin === 'unknown' || !isProviderIdList(allowedProviders)) throw new Error('Invalid trusted site');
     await updateTrustState((state) => {
       const existing = state.sites.find((s) => s.origin === origin);
       if (!existing) return { ...state, sites: [...state.sites, { origin, trustedAt: Date.now(), allowedProviders }] };
