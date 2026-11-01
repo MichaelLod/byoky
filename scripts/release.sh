@@ -34,6 +34,35 @@ status_field() {
   ' "$STATUS_JSON" "$1" "$2"
 }
 
+# The iOS unit tests (ByokyTests) on a simulator of their own, deleted
+# afterwards. Ad-hoc signing, not CODE_SIGNING_ALLOWED=NO: the keychain tests
+# need their entitlements.
+run_ios_tests() {
+  local pick udid rc=0
+  # The Byoky scheme builds the Safari extension, which bundles the WXT build.
+  (cd packages/extension && npx wxt build --browser safari) || return 1
+  bash packages/ios/Scripts/copy-wxt-output.sh || return 1
+  pick=$(xcrun simctl list runtimes -j | node -e '
+    const runtimes = JSON.parse(require("fs").readFileSync(0)).runtimes
+      .filter((r) => r.platform === "iOS" && r.isAvailable)
+      .sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }))
+    const phone = runtimes[0]?.supportedDeviceTypes?.filter((d) => d.productFamily === "iPhone").pop()
+    if (phone) console.log(runtimes[0].identifier, phone.identifier)
+  ') || return 1
+  if [ -z "$pick" ]; then echo "  No iOS simulator runtime with an iPhone is installed"; return 1; fi
+  udid=$(xcrun simctl create "byoky-release-tests-$$" "${pick#* }" "${pick%% *}") || return 1
+  xcodebuild test \
+    -project packages/ios/Byoky.xcodeproj \
+    -scheme Byoky \
+    -only-testing:ByokyTests \
+    -destination "id=$udid" \
+    -derivedDataPath "$ROOT/build/DerivedData-tests" \
+    CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= \
+    -quiet || rc=$?
+  xcrun simctl delete "$udid" || true
+  return $rc
+}
+
 # What happened in each store, for the summary at the end.
 STORE_RESULTS=()
 store_result() { STORE_RESULTS+=("$1: $2"); }
@@ -242,6 +271,7 @@ ASSUME_YES=false
 ALLOW_PENDING=false
 ALLOW_BRANCH=false
 ALLOW_DIRTY=false
+SKIP_NATIVE_TESTS=false
 NEW_VERSION=""
 
 for arg in "$@"; do
@@ -253,6 +283,7 @@ for arg in "$@"; do
     --allow-pending) ALLOW_PENDING=true ;;
     --allow-branch) ALLOW_BRANCH=true ;;
     --allow-dirty) ALLOW_DIRTY=true ;;
+    --skip-native-tests) SKIP_NATIVE_TESTS=true ;;
     *)         NEW_VERSION="$arg" ;;
   esac
 done
@@ -261,11 +292,12 @@ if [ -z "$NEW_VERSION" ]; then
   CURRENT=$(node -p "require('./package.json').version")
   echo "Usage: ./scripts/release.sh <new-version> [--dry] [--skip-mobile] [--skip-store-uploads] [--yes]"
   echo "                                           [--allow-pending] [--allow-branch] [--allow-dirty]"
+  echo "                                           [--skip-native-tests]"
   echo "       ./scripts/release.sh status"
   echo "       ./scripts/release.sh retry [--allow-pending]"
   echo ""
-  echo "  --dry                  Run the checks and print the plan; changes nothing"
-  echo "                         (signing is only checked, nothing is bumped or published)"
+  echo "  --dry                  Run the checks and the tests and print the plan; nothing"
+  echo "                         is bumped or published, and signing is only checked"
   echo "  --skip-mobile          Skip iOS/macOS/Android builds and uploads"
   echo "  --skip-store-uploads   Build + npm publish + GitHub release, but skip"
   echo "                         Chrome/Firefox/App Store/Play uploads"
@@ -277,6 +309,8 @@ if [ -z "$NEW_VERSION" ]; then
   echo "                         pushed to main all the same"
   echo "  --allow-dirty          Release with uncommitted or untracked files: they are"
   echo "                         built and shipped but NOT committed or tagged"
+  echo "  --skip-native-tests    Skip the Android and iOS unit tests (the JS build,"
+  echo "                         typecheck and tests always run)"
   echo ""
   echo "Releases go out from main: fast-forward main to the work, release from the main"
   echo "checkout. The release commit and tag v<version> are pushed to origin main."
@@ -369,6 +403,12 @@ LATEST_TAG=$(git tag --list 'v[0-9]*' --sort=-version:refname | head -1)
 if [ -n "$LATEST_TAG" ] && [ "${LATEST_TAG#v}" != "$OLD_VERSION" ] && \
    [ "$(printf '%s\n%s\n' "${LATEST_TAG#v}" "$OLD_VERSION" | sort -V | tail -1)" = "${LATEST_TAG#v}" ]; then
   ERRORS+=("${LATEST_TAG} is newer than this tree's ${OLD_VERSION}: HEAD is missing that release's version bump")
+fi
+
+# The OpenClaw install scan runs on the built plugin before anything is
+# committed (step 2).
+if [ ! -f scripts/scan-openclaw-plugin.mjs ]; then
+  ERRORS+=("scripts/scan-openclaw-plugin.mjs is missing")
 fi
 
 # Signing is prepared before anything is bumped, so a missing certificate or
@@ -479,6 +519,36 @@ elif [ "$STATUS_CODE" -ne 0 ]; then
   exit 1
 fi
 
+# --- Verify ---
+# What ships has to build and pass its tests: the JS packages always, the
+# Android and iOS unit tests unless --skip-native-tests.
+echo "==> Verifying (install, build, typecheck, tests)..."
+verify() {
+  echo "  \$ $*"
+  if ! "$@"; then
+    echo "Error: '$*' failed. Nothing was bumped or published."
+    exit 1
+  fi
+}
+verify pnpm install --frozen-lockfile
+verify pnpm build:core
+verify pnpm build:sdk
+verify pnpm --filter @byoky/extension exec wxt prepare
+verify pnpm typecheck
+verify pnpm test
+verify node --test scripts/tests/*.test.mjs
+if [ "$SKIP_NATIVE_TESTS" = true ]; then
+  echo "  WARN: --skip-native-tests: the Android and iOS unit tests didn't run"
+else
+  if [ "$SKIP_ANDROID" = false ]; then
+    verify bash -c 'cd packages/android && ./gradlew :app:testDebugUnitTest'
+  fi
+  if [ "$SKIP_IOS" = false ]; then
+    verify run_ios_tests
+  fi
+fi
+echo ""
+
 # --- Summary ---
 echo "┌──────────────────────────────────────────────────────┐"
 echo "│  Release plan                                        │"
@@ -572,6 +642,15 @@ step "Build all packages"
 
 echo "  Building npm packages..."
 pnpm build
+
+# OpenClaw refuses to install a plugin its scanner flags, so check the one
+# about to be published before anything is committed.
+echo "  Scanning the OpenClaw plugin..."
+if ! node scripts/scan-openclaw-plugin.mjs; then
+  echo "Error: the OpenClaw install scan failed. Nothing was committed or published;"
+  echo "       undo the version bump (git checkout -- .) before running again."
+  exit 1
+fi
 
 echo "  Syncing mobile bundle..."
 bash scripts/sync-mobile-bundle.sh

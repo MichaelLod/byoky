@@ -40,6 +40,8 @@ function sandbox({ version = '1.1.1', versionCode = 30, android = false } = {}) 
   write(join(work, 'packages/android/app/build.gradle.kts'),
     `android {\n    defaultConfig {\n        versionCode = ${versionCode}\n        versionName = "${version}"\n    }\n}\n`)
   if (android) write(join(work, 'packages/android/gradlew'), '#!/bin/sh\necho "gradlew $*" >> "$CALLS"\n', 0o755)
+  write(join(work, 'packages/extension/package.json'), '{}\n')
+  write(join(work, 'packages/ios/Scripts/copy-wxt-output.sh'), '#!/bin/sh\necho "copy-wxt-output.sh" >> "$CALLS"\n', 0o755)
   write(join(work, '.gitignore'), 'dist/\nbuild/\n')
   mkdirSync(join(work, 'scripts/tests'), { recursive: true })
   copyFileSync(join(SCRIPTS, 'release.sh'), join(work, 'scripts/release.sh'))
@@ -57,7 +59,14 @@ function sandbox({ version = '1.1.1', versionCode = 30, android = false } = {}) 
   git('tag', `v${version}`)
   git('push', '-q', 'origin', 'main', '--tags')
 
-  for (const tool of ['pnpm', 'gh', 'xcodebuild', 'xcrun']) write(join(bin, tool), logArgs(tool), 0o755)
+  for (const tool of ['gh', 'xcodebuild']) write(join(bin, tool), logArgs(tool), 0o755)
+  // STUB_PNPM_FAIL="test" makes `pnpm test` fail.
+  write(join(bin, 'pnpm'), logArgs('pnpm') + '[ "$*" = "${STUB_PNPM_FAIL:-}" ] && exit 1\nexit 0\n', 0o755)
+  write(join(bin, 'xcrun'), logArgs('xcrun') + `case "$*" in
+  "simctl list runtimes -j") echo '{"runtimes":[{"identifier":"rt.iOS-27-0","platform":"iOS","isAvailable":true,"version":"27.0","supportedDeviceTypes":[{"identifier":"dt.iPhone","productFamily":"iPhone"}]}]}' ;;
+  "simctl create"*) echo UDID-1 ;;
+esac
+`, 0o755)
   write(join(bin, 'npx'), logArgs('npx') + 'exit "${STUB_NPX_EXIT:-0}"\n', 0o755)
 
   const run = (args, env = {}) => {
@@ -236,4 +245,37 @@ test('uncommitted and untracked files are an error unless --allow-dirty', (t) =>
   const allowed = s.run(['1.1.2', '--dry', '--allow-dirty'])
   assert.equal(allowed.code, 0, allowed.out)
   assert.match(allowed.out, /WARN: Uncommitted changes \(--allow-dirty\): they are BUILT AND SHIPPED but NOT committed/)
+})
+
+// --- verify ---
+
+test('the tests run before anything is bumped, the native ones included', (t) => {
+  const s = sandbox({ android: true })
+  t.after(s.cleanup)
+  const r = s.run(['1.1.2', '--dry'])
+  assert.equal(r.code, 0, r.out)
+  const order = ['pnpm install --frozen-lockfile', 'pnpm build:core', 'pnpm build:sdk', 'pnpm typecheck', 'pnpm test',
+    'gradlew :app:testDebugUnitTest', 'xcrun simctl create byoky-release-tests-']
+  let at = -1
+  for (const step of order) {
+    const i = r.calls.indexOf(step, at + 1)
+    assert.ok(i > at, `${step} missing or out of order:\n${r.calls}`)
+    at = i
+  }
+  assert.match(r.calls, /xcodebuild test -project packages\/ios\/Byoky\.xcodeproj -scheme Byoky -only-testing:ByokyTests -destination id=UDID-1 .*CODE_SIGN_IDENTITY=- /)
+  assert.match(r.calls, /xcrun simctl delete UDID-1/)
+
+  const skipped = s.run(['1.1.2', '--dry', '--skip-native-tests'])
+  assert.equal(skipped.code, 0, skipped.out)
+  assert.doesNotMatch(skipped.calls, /gradlew|xcodebuild test/)
+  assert.match(skipped.out, /WARN: --skip-native-tests/)
+})
+
+test('a failing test stops the release before the bump', (t) => {
+  const s = sandbox()
+  t.after(s.cleanup)
+  const r = s.run(['1.1.2', '--yes'], { STUB_PNPM_FAIL: 'test' })
+  assert.equal(r.code, 1, r.out)
+  assert.match(r.out, /Error: 'pnpm test' failed\. Nothing was bumped or published\./)
+  assert.match(readFileSync(join(s.work, 'package.json'), 'utf8'), /"version": "1\.1\.1"/)
 })
