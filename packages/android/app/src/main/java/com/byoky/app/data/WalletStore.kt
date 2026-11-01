@@ -115,6 +115,9 @@ class WalletStore(context: Context) {
 
     @Volatile private var masterPassword: String? = null
 
+    /** Decrypted keys while unlocked (see [SecretCache]); cleared on lock and reset. */
+    private val secretCache = SecretCache()
+
     /** Guards the request log: concurrent requests append to it from IO threads. */
     private val logLock = Any()
 
@@ -269,6 +272,7 @@ class WalletStore(context: Context) {
         idleWatch?.cancel()
         idleWatch = null
         masterPassword = null
+        secretCache.clear()
         _credentials.value = emptyList()
         _sessions.value = emptyList()
         synchronized(logLock) {
@@ -351,6 +355,7 @@ class WalletStore(context: Context) {
     }
 
     fun removeCredential(credential: Credential) {
+        prefs.getString("key_${credential.id}", null)?.let(secretCache::remove)
         prefs.edit().remove("key_${credential.id}").apply()
         _credentials.value = _credentials.value.filter { it.id != credential.id }
         saveCredentials()
@@ -395,7 +400,10 @@ class WalletStore(context: Context) {
             if (credential.providerId == "ollama" || credential.providerId == "lm_studio") return ""
             throw IllegalStateException("Key not found")
         }
-        return CryptoService.decrypt(encrypted, password)
+        val secret = secretCache.get(encrypted) { CryptoService.decrypt(it, password) }
+        // Locked while decrypting: don't leave the key cached past the lock.
+        if (masterPassword !== password) secretCache.clear()
+        return secret
     }
 
     // MARK: - Backup support
@@ -544,6 +552,7 @@ class WalletStore(context: Context) {
         idleWatch?.cancel()
         idleWatch = null
         masterPassword = null
+        secretCache.clear()
 
         // Load credential IDs from prefs even when locked,
         // so we can delete individual encrypted key entries
