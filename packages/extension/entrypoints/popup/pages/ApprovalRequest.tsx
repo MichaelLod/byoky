@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useWalletStore } from '../store';
-import { PROVIDERS } from '@byoky/core';
+import { PROVIDERS, type PendingApproval } from '@byoky/core';
 import { Raven } from '../components/Raven';
 
 function formatHostname(origin: string): string {
@@ -12,9 +12,7 @@ function formatHostname(origin: string): string {
 }
 
 export function ApprovalRequest() {
-  const { pendingApprovals, credentials, approveConnect, rejectConnect } =
-    useWalletStore();
-  const [trust, setTrust] = useState(false);
+  const { pendingApprovals } = useWalletStore();
 
   if (pendingApprovals.length === 0) {
     return (
@@ -27,7 +25,20 @@ export function ApprovalRequest() {
     );
   }
 
-  const approval = pendingApprovals[0];
+  // Keyed by request, so each one starts with "Trust this site" unticked:
+  // a tick given to one origin must not carry over to the next in the queue.
+  return (
+    <ApprovalCard
+      key={pendingApprovals[0].id}
+      approval={pendingApprovals[0]}
+      queued={pendingApprovals.length - 1}
+    />
+  );
+}
+
+function ApprovalCard({ approval, queued }: { approval: PendingApproval; queued: number }) {
+  const { credentials, approveConnect, rejectConnect } = useWalletStore();
+  const [trust, setTrust] = useState(false);
   const hostname = formatHostname(approval.appOrigin);
 
   // Show which providers the app is requesting
@@ -96,9 +107,9 @@ export function ApprovalRequest() {
 
       <div className="approval-full-origin">{approval.appOrigin}</div>
 
-      {pendingApprovals.length > 1 && (
+      {queued > 0 && (
         <div className="approval-queue">
-          +{pendingApprovals.length - 1} more pending
+          +{queued} more pending
         </div>
       )}
     </div>
