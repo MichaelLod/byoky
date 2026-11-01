@@ -141,8 +141,7 @@ const local = await session.listModels('ollama');
 
 Returned shape: `{ id, providerId, displayName?, contextWindow?, capabilities?, raw }`.
 Perplexity has no public model-list endpoint, so a hardcoded Sonar list is
-returned. xAI does not document a `/v1/models` endpoint either — calling
-`listModels('xai')` will throw `PROVIDER_UNAVAILABLE`.
+returned.
 
 ### `ByokyServer` (from `@byoky/sdk/server`)
 
