@@ -2,23 +2,21 @@ package com.byoky.app.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.byoky.app.data.PasswordStrength
 import com.byoky.app.data.WalletStore
 import com.byoky.app.ui.components.BracketAction
 import com.byoky.app.ui.components.BrandMark
 import com.byoky.app.ui.components.CapsText
 import com.byoky.app.ui.components.Muninn
+import com.byoky.app.ui.components.PasswordMeter
 import com.byoky.app.ui.components.PrimaryButton
 import com.byoky.app.ui.components.RavenMood
 import com.byoky.app.ui.components.RetroTextField
@@ -30,27 +28,13 @@ import com.byoky.app.ui.components.watchedBy
 import com.byoky.app.ui.theme.*
 import kotlinx.coroutines.launch
 
-internal data class PasswordQualityResult(
-    val icon: ImageVector,
-    val message: String,
-    val color: Color,
-    val isAcceptable: Boolean,
-) {
-    companion object {
-        fun evaluate(password: String): PasswordQualityResult {
-            if (password.length < 12) return PasswordQualityResult(Icons.Default.Warning, "Minimum 12 characters", Amber, false)
-            if (password.toSet().size < 4) return PasswordQualityResult(Icons.Default.Warning, "Too many repeated characters", Amber, false)
-            val hasLower = password.any { it.isLowerCase() }
-            val hasUpper = password.any { it.isUpperCase() }
-            val hasDigit = password.any { it.isDigit() }
-            val hasSymbol = password.any { !it.isLetterOrDigit() }
-            val classCount = listOf(hasLower, hasUpper, hasDigit, hasSymbol).count { it }
-            if (classCount < 2) return PasswordQualityResult(Icons.Default.Warning, "Use a mix of letters, numbers, or symbols", Amber, false)
-            if (classCount >= 3 && password.length >= 16) return PasswordQualityResult(Icons.Default.Shield, "Strong password", Signal, true)
-            return PasswordQualityResult(Icons.Default.CheckCircle, "Fair — consider adding more variety", Phosphor, true)
-        }
-    }
-}
+/**
+ * Create Wallet is enabled once the master password passes the rule the
+ * extension's setup and the export dialog apply (core checkPasswordStrength:
+ * 12+ characters and a score of 2 or more) and the confirmation matches.
+ */
+internal fun canCreateWallet(password: String, confirmPassword: String): Boolean =
+    PasswordStrength.isAcceptableForExport(password) && password == confirmPassword
 
 private enum class OnboardingStep { WELCOME, PASSWORD }
 
@@ -147,29 +131,35 @@ fun OnboardingScreen(wallet: WalletStore) {
                 modifier = Modifier.fillMaxWidth(),
             )
 
+            // The meter rates the password above it; the confirm field says
+            // when the two differ, so a disabled Create Wallet always has a reason.
+            if (password.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                PasswordMeter(password, modifier = Modifier.fillMaxWidth())
+            }
+
             Spacer(Modifier.height(14.dp))
 
+            val mismatch = confirmPassword.isNotEmpty() && confirmPassword != password
             RetroTextField(
                 value = confirmPassword,
                 onValueChange = { confirmPassword = it },
                 label = "Confirm password",
                 mono = true,
                 secret = true,
+                isError = mismatch,
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            if (password.isNotEmpty()) {
-                val quality = PasswordQualityResult.evaluate(password)
+            if (mismatch) {
                 Spacer(Modifier.height(8.dp))
-                Row(
+                Text(
+                    "Passwords do not match",
+                    color = Alarm,
+                    fontSize = 12.sp,
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Icon(quality.icon, null, tint = quality.color, modifier = Modifier.size(14.dp))
-                    Text(quality.message, color = quality.color, style = MonoStyle)
-                }
+                )
             }
 
             error?.let {
@@ -179,8 +169,7 @@ fun OnboardingScreen(wallet: WalletStore) {
 
             Spacer(Modifier.height(24.dp))
 
-            val quality = if (password.isNotEmpty()) PasswordQualityResult.evaluate(password) else null
-            val isValid = quality?.isAcceptable == true && password == confirmPassword
+            val isValid = canCreateWallet(password, confirmPassword)
 
             PrimaryButton(
                 if (creating) "Creating wallet…" else "Create Wallet",
