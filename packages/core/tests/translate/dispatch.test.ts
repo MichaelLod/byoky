@@ -535,3 +535,33 @@ describe('cross-family dispatch — Gemini snake_case body', () => {
     });
   });
 });
+
+describe('cross-family dispatch — Gemini function responses without ids', () => {
+  // The Gemini SDK replays the model turn (with the id byoky returned) and
+  // builds the functionResponse from name + response only.
+  const body = JSON.stringify({
+    contents: [
+      { role: 'user', parts: [{ text: 'Weather in Paris?' }] },
+      { role: 'model', parts: [{ functionCall: { id: 'toolu_01', name: 'get_weather', args: { city: 'Paris' } } }] },
+      { role: 'user', parts: [{ functionResponse: { name: 'get_weather', response: { temp: 21 } } }] },
+    ],
+  });
+
+  it('gemini → anthropic pairs the tool_result with the tool_use id', () => {
+    const out = JSON.parse(translateRequest(ctx('gemini', 'anthropic'), body)) as {
+      messages: Array<{ content: Array<{ type: string; id?: string; tool_use_id?: string }> }>;
+    };
+    expect(out.messages[1].content[0]).toMatchObject({ type: 'tool_use', id: 'toolu_01' });
+    expect(out.messages[2].content[0]).toMatchObject({ type: 'tool_result', tool_use_id: 'toolu_01' });
+  });
+
+  it('gemini → openai answers the tool_call id', () => {
+    const out = JSON.parse(translateRequest(ctx('gemini', 'openai'), body)) as {
+      messages: Array<{ role: string; tool_calls?: Array<{ id: string }>; tool_call_id?: string }>;
+    };
+    const assistant = out.messages.find((m) => m.role === 'assistant');
+    const tool = out.messages.find((m) => m.role === 'tool');
+    expect(assistant?.tool_calls?.[0].id).toBe('toolu_01');
+    expect(tool?.tool_call_id).toBe('toolu_01');
+  });
+});

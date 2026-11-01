@@ -571,3 +571,129 @@ describe('geminiAdapter.parseRequest — snake_case bodies (Google REST docs sty
     expect(ir.maxTokens).toBe(100);
   });
 });
+
+describe('geminiAdapter — function call ids', () => {
+  it('pairs an id-less functionResponse with the call of the same name', () => {
+    const ir = geminiAdapter.parseRequest(
+      JSON.stringify({
+        contents: [
+          { role: 'user', parts: [{ text: 'weather?' }] },
+          {
+            role: 'model',
+            parts: [
+              { functionCall: { id: 'toolu_01', name: 'get_time', args: {} } },
+              { functionCall: { id: 'toolu_02', name: 'get_weather', args: { city: 'Paris' } } },
+            ],
+          },
+          {
+            role: 'user',
+            parts: [
+              { functionResponse: { name: 'get_weather', response: { temp: 21 } } },
+              { functionResponse: { name: 'get_time', response: { t: '12:00' } } },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(ir.messages[2].content.map((b) => (b.type === 'tool_result' ? b.toolUseId : null))).toEqual([
+      'toolu_02',
+      'toolu_01',
+    ]);
+  });
+
+  it('gives id-less parallel calls to one function distinct ids and pairs them in order', () => {
+    const ir = geminiAdapter.parseRequest(
+      JSON.stringify({
+        contents: [
+          { role: 'user', parts: [{ text: 'weather in two cities?' }] },
+          {
+            role: 'model',
+            parts: [
+              { functionCall: { name: 'weather.get', args: { city: 'Paris' } } },
+              { functionCall: { name: 'weather.get', args: { city: 'Rome' } } },
+            ],
+          },
+          {
+            role: 'user',
+            parts: [
+              { functionResponse: { name: 'weather.get', response: { temp: 21 } } },
+              { functionResponse: { name: 'weather.get', response: { temp: 25 } } },
+            ],
+          },
+        ],
+      }),
+    );
+    const callIds = ir.messages[1].content.map((b) => (b.type === 'tool_use' ? b.id : null));
+    const resultIds = ir.messages[2].content.map((b) => (b.type === 'tool_result' ? b.toolUseId : null));
+    expect(new Set(callIds).size).toBe(2);
+    for (const id of callIds) expect(id).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(resultIds).toEqual(callIds);
+  });
+
+  it('keeps a functionResponse id that matches its call', () => {
+    const ir = geminiAdapter.parseRequest(
+      JSON.stringify({
+        contents: [
+          { role: 'model', parts: [{ functionCall: { id: 'a', name: 'f' } }, { functionCall: { id: 'b', name: 'f' } }] },
+          { role: 'user', parts: [{ functionResponse: { id: 'b', name: 'f', response: {} } }] },
+        ],
+      }),
+    );
+    expect(ir.messages[1].content[0]).toMatchObject({ type: 'tool_result', toolUseId: 'b' });
+  });
+
+  it('gives id-less upstream calls unique ids in a response', () => {
+    const ir = geminiAdapter.parseResponse(
+      JSON.stringify({
+        responseId: 'resp-42',
+        candidates: [
+          {
+            content: {
+              role: 'model',
+              parts: [
+                { functionCall: { name: 'get_weather', args: { city: 'Paris' } } },
+                { functionCall: { name: 'get_weather', args: { city: 'Rome' } } },
+              ],
+            },
+            finishReason: 'STOP',
+          },
+        ],
+      }),
+    );
+    if ('error' in ir) throw new Error('unexpected error');
+    const ids = ir.content.map((b) => (b.type === 'tool_use' ? b.id : ''));
+    expect(ids[0]).not.toBe(ids[1]);
+    for (const id of ids) {
+      expect(id).toMatch(/^[A-Za-z0-9_-]{1,40}$/);
+      expect(id).not.toBe('get_weather');
+    }
+  });
+
+  it('gives id-less upstream calls unique ids in a stream', () => {
+    const parser = geminiAdapter.createStreamParser();
+    const frame = (parts: unknown[]) =>
+      `data: ${JSON.stringify({ responseId: 'r1', candidates: [{ content: { role: 'model', parts } }] })}\n\n`;
+    const events = parser.process(
+      frame([{ functionCall: { name: 'get_weather', args: { city: 'Paris' } } }]) +
+        frame([{ functionCall: { name: 'get_weather', args: { city: 'Rome' } } }]),
+    );
+    const ids = events.flatMap((e) =>
+      e.type === 'content_block_start' && e.block.type === 'tool_use' ? [e.block.id] : [],
+    );
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).not.toBe(ids[1]);
+    for (const id of ids) expect(id).toMatch(/^[A-Za-z0-9_-]{1,40}$/);
+  });
+
+  it('a call id stays within 40 characters for a long response id', () => {
+    const ir = geminiAdapter.parseResponse(
+      JSON.stringify({
+        responseId: 'x'.repeat(80),
+        candidates: [{ content: { role: 'model', parts: [{ functionCall: { name: 'f', args: {} } }] }, finishReason: 'STOP' }],
+      }),
+    );
+    if ('error' in ir) throw new Error('unexpected error');
+    const block = ir.content[0];
+    expect(block.type === 'tool_use' && block.id.length).toBeLessThanOrEqual(40);
+  });
+});

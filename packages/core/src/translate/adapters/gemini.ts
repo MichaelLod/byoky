@@ -171,10 +171,11 @@ function parseRequest(body: string): IRRequest {
   };
 
   if (Array.isArray(parsed.contents)) {
-    for (const c of parsed.contents) {
-      const msg = parseGeminiContent(c);
+    const pairing: ToolCallPairing = { calls: [] };
+    parsed.contents.forEach((c, i) => {
+      const msg = parseGeminiContent(c, i, pairing);
       if (msg) ir.messages.push(msg);
-    }
+    });
   }
 
   const gc = parsed.generationConfig;
@@ -332,12 +333,46 @@ function parseSystemInstruction(si: GeminiRequest['systemInstruction']): IRReque
   return out;
 }
 
-function parseGeminiContent(c: GeminiContent): IRMessage | null {
+/**
+ * Function calls of the latest model turn, for pairing the next turn's
+ * functionResponse parts with them. Gemini apps build functionResponse from
+ * name + response, usually without the call's id, while the other families
+ * pair a tool result with its call by id only.
+ */
+interface ToolCallPairing {
+  calls: Array<{ id: string; name: string; used: boolean }>;
+}
+
+/**
+ * The tool_use id a functionResponse answers: the call with the same id,
+ * else the first unanswered call with the same name, else the next
+ * unanswered call; the response's own id or name only as a last resort.
+ */
+function pairToolResultId(
+  fr: { id?: string; name: string },
+  pairing: ToolCallPairing,
+): string {
+  const pending = pairing.calls.filter((c) => !c.used);
+  const match =
+    (fr.id ? pending.find((c) => c.id === fr.id) : undefined) ??
+    pending.find((c) => c.name === fr.name) ??
+    pending[0];
+  if (!match) return fr.id ?? fr.name;
+  match.used = true;
+  return match.id;
+}
+
+function parseGeminiContent(
+  c: GeminiContent,
+  contentIndex: number,
+  pairing: ToolCallPairing,
+): IRMessage | null {
   if (!c || !Array.isArray(c.parts)) return null;
   const role: 'user' | 'assistant' = c.role === 'model' ? 'assistant' : 'user';
   const blocks: IRContentBlock[] = [];
+  if (role === 'assistant') pairing.calls = [];
 
-  for (const part of c.parts) {
+  for (const [partIndex, part] of c.parts.entries()) {
     if (!part || typeof part !== 'object') continue;
     if ('text' in part && typeof part.text === 'string') {
       blocks.push({ type: 'text', text: part.text });
@@ -354,9 +389,15 @@ function parseGeminiContent(c: GeminiContent): IRMessage | null {
       blocks.push({ type: 'image', source: { kind: 'url', url: part.fileData.fileUri } });
     } else if ('functionCall' in part && part.functionCall) {
       const fc = part.functionCall;
+      // An id-less call gets a deterministic one (the same history gives the
+      // same ids on every turn). Never the name: two parallel calls to one
+      // function would collide, and names may hold '.' or ':', which tool
+      // ids elsewhere may not.
+      const id = fc.id ?? `fc_${contentIndex}_${partIndex}`;
+      if (role === 'assistant') pairing.calls.push({ id, name: fc.name, used: false });
       blocks.push({
         type: 'tool_use',
-        id: fc.id ?? fc.name,
+        id,
         name: fc.name,
         input: fc.args ?? {},
       });
@@ -364,7 +405,7 @@ function parseGeminiContent(c: GeminiContent): IRMessage | null {
       const fr = part.functionResponse;
       blocks.push({
         type: 'tool_result',
-        toolUseId: fr.id ?? fr.name,
+        toolUseId: pairToolResultId(fr, pairing),
         content: { kind: 'text', text: JSON.stringify(fr.response ?? {}) },
       });
     }
@@ -629,6 +670,7 @@ function parseResponse(body: string): IRResponseOrError {
   const candidate = parsed.candidates?.[0];
   const blocks: IRResponseBlock[] = [];
   let hasToolUse = false;
+  let toolCallIndex = 0;
 
   if (candidate?.content?.parts) {
     for (const part of candidate.content.parts) {
@@ -639,7 +681,7 @@ function parseResponse(body: string): IRResponseOrError {
         hasToolUse = true;
         blocks.push({
           type: 'tool_use',
-          id: part.functionCall.id ?? part.functionCall.name,
+          id: part.functionCall.id ?? upstreamCallId(parsed.responseId, toolCallIndex++),
           name: part.functionCall.name,
           input: part.functionCall.args ?? {},
         });
@@ -662,6 +704,21 @@ function parseResponse(body: string): IRResponseOrError {
       outputTokens: candidateTokens + thoughtsTokens,
     },
   };
+}
+
+let upstreamCallCounter = 0;
+
+/**
+ * Id for a function call Gemini returned without one. The app keys its tool
+ * results by this id, so it must be unique across the conversation: the
+ * response id plus the call's index, or a time-and-counter id when there is
+ * no response id. Fits ^[A-Za-z0-9_-]{1,40}$ (OpenAI caps call ids at 40).
+ */
+function upstreamCallId(responseId: string | undefined, index: number): string {
+  const suffix = `_${index}`;
+  const base = (responseId ?? '').replace(/[^A-Za-z0-9_-]/g, '');
+  if (base) return `call_${base.slice(0, 40 - 5 - suffix.length)}${suffix}`;
+  return `call_${Date.now().toString(36)}_${(upstreamCallCounter++).toString(36)}${suffix}`;
 }
 
 // ─── serializeResponse ───────────────────────────────────────────────────
@@ -786,6 +843,7 @@ function createStreamParser(): IRStreamParser {
     messageId: '',
     model: undefined as string | undefined,
     hasToolUse: false,
+    toolCallCount: 0,
   };
 
   return {
@@ -838,6 +896,7 @@ type GeminiParseState = {
   messageId: string;
   model: string | undefined;
   hasToolUse: boolean;
+  toolCallCount: number;
 };
 
 function processGeminiFrame(
@@ -919,7 +978,11 @@ function processGeminiFrame(
         events.push({
           type: 'content_block_start',
           index: blockIdx,
-          block: { type: 'tool_use', id: fc.id ?? fc.name, name: fc.name },
+          block: {
+            type: 'tool_use',
+            id: fc.id ?? upstreamCallId(state.messageId || data.responseId, state.toolCallCount++),
+            name: fc.name,
+          },
         });
         events.push({
           type: 'tool_input_delta',
