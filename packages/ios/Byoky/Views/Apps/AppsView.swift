@@ -13,6 +13,8 @@ struct AppsView: View {
     @State private var editingAllowanceFor: Session?
     @State private var editingGroup: Group?
     @State private var showCreateGroup = false
+    @State private var deletingGroup: Group?
+    @State private var confirmDisconnectAll = false
 
     private var orderedGroups: [Group] {
         let def = wallet.groups.filter { $0.id == defaultGroupId }
@@ -68,9 +70,7 @@ struct AppsView: View {
                     ToolbarItem(placement: .topBarLeading) {
                         Menu {
                             Button(role: .destructive) {
-                                for session in wallet.sessions {
-                                    try? wallet.revokeSession(session)
-                                }
+                                confirmDisconnectAll = true
                             } label: {
                                 Label("Disconnect all", systemImage: "xmark.circle")
                             }
@@ -99,6 +99,34 @@ struct AppsView: View {
             .sheet(item: $editingGroup) { group in
                 GroupEditorSheet(mode: .edit(group))
                     .environmentObject(wallet)
+            }
+            .alert(
+                deletingGroup.map { "Delete group \"\($0.name)\"?" } ?? "",
+                isPresented: Binding(
+                    get: { deletingGroup != nil },
+                    set: { if !$0 { deletingGroup = nil } }
+                ),
+                presenting: deletingGroup
+            ) { group in
+                Button("Delete", role: .destructive) {
+                    try? wallet.deleteGroup(id: group.id)
+                    deletingGroup = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    deletingGroup = nil
+                }
+            } message: { _ in
+                Text("Apps in this group move back to Default.")
+            }
+            .alert("Disconnect all apps?", isPresented: $confirmDisconnectAll) {
+                Button("Disconnect all", role: .destructive) {
+                    for session in wallet.sessions {
+                        try? wallet.revokeSession(session)
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Every connected app loses access to your keys until you open it again and reconnect.")
             }
         }
     }
@@ -149,6 +177,9 @@ struct AppsView: View {
                             } label: {
                                 Label("Disconnect", systemImage: "xmark.circle")
                             }
+                            // The tab view's lilac tint would win over the
+                            // destructive red.
+                            .tint(Theme.alarm)
                         }
                         .swipeActions(edge: .leading) {
                             Button {
@@ -196,7 +227,7 @@ struct AppsView: View {
                             Label("Edit", systemImage: "pencil")
                         }
                         Button(role: .destructive) {
-                            try? wallet.deleteGroup(id: group.id)
+                            deletingGroup = group
                         } label: {
                             Label("Delete", systemImage: "trash")
                         }
