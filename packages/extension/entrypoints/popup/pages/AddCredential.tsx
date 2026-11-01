@@ -65,22 +65,30 @@ export function AddCredential() {
     }
   }
 
+  const cleanKey = apiKey.replace(/\s+/g, '');
+  const cleanBaseUrl = baseUrl.trim().replace(/\/$/, '');
+  // Local providers run unauthenticated, so their key may be empty.
+  const keyRequired = authMethod === 'oauth' || !isLocalProvider;
+  const canSubmit =
+    label.trim() !== '' &&
+    (!requiresBaseUrl || cleanBaseUrl !== '') &&
+    (!keyRequired || cleanKey !== '');
+
+  // An error is about the last attempt; editing the form makes it stale.
+  function edited<T>(set: (value: T) => void) {
+    return (value: T) => {
+      set(value);
+      if (error) clearError();
+    };
+  }
+
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    if (submitting) return;
-    if (!label.trim()) return;
-
-    const cleanKey = apiKey.replace(/\s+/g, '');
-    const cleanBaseUrl = baseUrl.trim().replace(/\/$/, '');
-
-    if (requiresBaseUrl && !cleanBaseUrl) return;
+    if (submitting || !canSubmit) return;
 
     if (authMethod === 'oauth') {
-      if (!cleanKey) return;
       addSetupToken(providerId, label.trim(), cleanKey);
     } else {
-      // Local providers run unauthenticated — allow an empty key.
-      if (!isLocalProvider && !cleanKey) return;
       addApiKey(providerId, label.trim(), cleanKey, cleanBaseUrl || undefined);
     }
   }
@@ -138,14 +146,14 @@ export function AddCredential() {
               <button
                 type="button"
                 className={`auth-toggle-btn ${authMethod === 'api_key' ? 'active' : ''}`}
-                onClick={() => setAuthMethod('api_key')}
+                onClick={() => edited(setAuthMethod)('api_key')}
               >
                 API Key
               </button>
               <button
                 type="button"
                 className={`auth-toggle-btn ${authMethod === 'oauth' ? 'active' : ''}`}
-                onClick={() => setAuthMethod('oauth')}
+                onClick={() => edited(setAuthMethod)('oauth')}
               >
                 Setup Token
               </button>
@@ -164,8 +172,9 @@ export function AddCredential() {
             id="label"
             type="text"
             value={label}
-            onChange={(e) => setLabel(e.target.value)}
+            onChange={(e) => edited(setLabel)(e.target.value)}
             placeholder='e.g., "Personal" or "Work"'
+            required
           />
         </div>
 
@@ -179,7 +188,8 @@ export function AddCredential() {
                 id="baseUrl"
                 type="text"
                 value={baseUrl}
-                onChange={(e) => setBaseUrl(e.target.value)}
+                onChange={(e) => edited(setBaseUrl)(e.target.value)}
+                required
                 placeholder={
                   LOCAL_PROVIDER_DEFAULT_BASE_URL[providerId] ??
                   (providerId === 'azure_openai'
@@ -222,8 +232,9 @@ export function AddCredential() {
             <textarea
               id="apiKey"
               value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
+              onChange={(e) => edited(setApiKey)(e.target.value)}
               {...SECRET_INPUT_PROPS}
+              required={keyRequired}
               placeholder={
                 providerId === 'anthropic' ? 'sk-ant-api03-...'
                 : providerId === 'openai' ? 'sk-...'
@@ -252,8 +263,9 @@ export function AddCredential() {
             <textarea
               id="apiKey"
               value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
+              onChange={(e) => edited(setApiKey)(e.target.value)}
               {...SECRET_INPUT_PROPS}
+              required
               placeholder="sk-ant-oat01-..."
               rows={3}
             />
@@ -310,7 +322,7 @@ export function AddCredential() {
           >
             Cancel
           </button>
-          <button type="submit" className="btn btn-primary" disabled={submitting}>
+          <button type="submit" className="btn btn-primary" disabled={submitting || !canSubmit}>
             {submitting ? 'Saving...' : 'Save'}
           </button>
         </div>
