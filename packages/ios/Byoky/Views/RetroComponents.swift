@@ -224,6 +224,8 @@ struct ProviderTile: View {
             .frame(width: size, height: size)
             .background(Theme.ink)
             .overlay(Rectangle().strokeBorder(Theme.seamStrong, lineWidth: 1))
+            // Decorative: the provider's name is always shown beside it.
+            .accessibilityHidden(true)
     }
 }
 

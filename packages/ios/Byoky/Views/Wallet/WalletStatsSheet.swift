@@ -6,6 +6,16 @@ enum WalletStatsRange: String, CaseIterable {
     case month = "30d"
     case all = "All"
 
+    /// What VoiceOver reads for the range ("24h" alone is read as letters).
+    var spokenName: String {
+        switch self {
+        case .day: return "Last 24 hours"
+        case .week: return "Last 7 days"
+        case .month: return "Last 30 days"
+        case .all: return "All time"
+        }
+    }
+
     var interval: TimeInterval? {
         switch self {
         case .day: return 86400
@@ -158,6 +168,9 @@ private struct CredentialStatsView: View {
                         .background(range == r ? Theme.violet : Color.clear)
                         .foregroundStyle(range == r ? .white : Theme.fog)
                 }
+                .accessibilityLabel(r.spokenName)
+                .accessibilityAddTraits(range == r ? .isSelected : [])
+                .accessibilityIdentifier("walletStats.range.\(r.rawValue)")
             }
         }
         .background(Theme.void)
@@ -167,8 +180,8 @@ private struct CredentialStatsView: View {
     private var totalsRow: some View {
         HStack(spacing: 12) {
             StatCard(value: "\(logs.count)", label: "Requests")
-            StatCard(value: formatWalletTokens(totalInput), label: "Input")
-            StatCard(value: formatWalletTokens(totalOutput), label: "Output")
+            StatCard(value: formatWalletTokens(totalInput), label: "Input", spoken: "input tokens")
+            StatCard(value: formatWalletTokens(totalOutput), label: "Output", spoken: "output tokens")
         }
     }
 
@@ -198,6 +211,7 @@ private struct CredentialStatsView: View {
 private struct StatCard: View {
     let value: String
     let label: String
+    var spoken: String?
 
     var body: some View {
         VStack(spacing: 4) {
@@ -213,6 +227,8 @@ private struct StatCard: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 14)
         .retroCard()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(value) \(spoken ?? label.lowercased())")
     }
 }
 

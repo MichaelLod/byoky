@@ -60,6 +60,7 @@ struct WalletView: View {
                     } label: {
                         Image(systemName: "gearshape")
                     }
+                    .accessibilityLabel("Settings")
                     .accessibilityIdentifier("wallet.settings")
                 }
             }
@@ -431,11 +432,18 @@ struct CredentialRow: View {
                 SectionLabel("Last 7 days")
 
                 HStack(spacing: 16) {
-                    statColumn(value: "\(usage.requests)", label: "requests")
-                    statColumn(value: formatWalletTokens(usage.inputTokens), label: "input")
-                    statColumn(value: formatWalletTokens(usage.outputTokens), label: "output")
+                    statColumn(value: "\(usage.requests)", label: "requests", spoken: "requests")
+                    statColumn(value: formatWalletTokens(usage.inputTokens), label: "input", spoken: "input tokens")
+                    statColumn(value: formatWalletTokens(usage.outputTokens), label: "output", spoken: "output tokens")
                 }
             }
+            // The whole card opens the stats; for VoiceOver the usage block
+            // is that button, read as one sentence.
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint("Shows usage")
+            .accessibilityAction { onOpenStats() }
+            .accessibilityIdentifier("wallet.credential.usage")
         }
         .padding(14)
         .retroCard()
@@ -443,7 +451,7 @@ struct CredentialRow: View {
         .onTapGesture { onOpenStats() }
     }
 
-    private func statColumn(value: String, label: String) -> some View {
+    private func statColumn(value: String, label: String, spoken: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(value)
                 .font(.mono(17, weight: .medium, relativeTo: .headline))
@@ -455,6 +463,8 @@ struct CredentialRow: View {
                 .foregroundStyle(Theme.dim)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(value) \(spoken)")
     }
 }
 

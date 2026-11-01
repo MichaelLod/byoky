@@ -80,10 +80,13 @@ struct FloatingActionMenu: View {
             }
             .accessibilityIdentifier("fab.menu.addCredential")
 
+            // The Apps tab's symbol. A menu item with square.grid.2x2.fill
+            // is read by its symbol name, "Large Grid", whatever its title
+            // or accessibilityLabel says.
             Button {
                 onAddApp()
             } label: {
-                Label("Add app", systemImage: "square.grid.2x2.fill")
+                Label("Add app", systemImage: "square.grid.2x2")
             }
             .accessibilityIdentifier("fab.menu.addApp")
         } label: {
