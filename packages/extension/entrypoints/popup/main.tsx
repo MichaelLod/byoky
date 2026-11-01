@@ -1,11 +1,16 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import { showsInTab } from './utils/surface';
 import './App.css';
 
-// Opened as a window (the fallback where there is no side panel), the page
-// has a real viewport and keeps the fluid layout of the side panel.
-if (new URLSearchParams(window.location.search).has('window')) {
+// In a tab or a window of its own (the fallback where there is no side
+// panel), the page has a real viewport and keeps the fluid layout of the side
+// panel. Only the toolbar popup needs the fixed size.
+const getViews = browser.extension?.getViews
+  ? (filter: { type: 'popup' | 'tab' }) => browser.extension.getViews(filter)
+  : undefined;
+if (showsInTab(window, getViews)) {
   document.documentElement.classList.remove('popup');
 }
 

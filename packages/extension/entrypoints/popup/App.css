@@ -123,8 +123,8 @@ code {
 /* popup.html shown as a toolbar popup (chrome.action.openPopup, the macOS
    Safari popover) sizes itself to its content. Sized in vh, the content
    depends on that size and the popup collapses to a 25px strip, so it gets
-   a fixed size. The side panel and the popup window (popup.html?window)
-   keep the fluid layout above. */
+   a fixed size. The side panel keeps the fluid layout above, and so does
+   popup.html in a tab or window of its own: main.tsx drops the class there. */
 html.popup body {
   width: 360px;
   min-width: 360px;
