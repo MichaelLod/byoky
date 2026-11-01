@@ -11,26 +11,35 @@ import {
   type CredentialSecretField,
 } from '@byoky/core';
 import { TRUST_RESET_NOTICE_KEY, TRUST_STATE_KEYS, adoptLegacyTrustState, signTrustState } from './trust-state';
+import {
+  ROUTING_STATE_KEYS,
+  USAGE_STATE_KEYS,
+  adoptLegacyRoutingState,
+  signRoutingState,
+  signUsageState,
+} from './routing-state';
 
 /**
  * Storage format since 1.1.2, and the one-time upgrade from earlier ones.
  *
  * Every credential secret is encrypted under the master password with its
  * record bound in as additional authenticated data (credentialAad), and the
- * trust state (trusted sites and revoked origins) carries a MAC
- * (trust-state.ts) keyed from a format-2 password hash. Wallets written
- * before 1.1.2 have neither. upgradeWallet converts one on the first unlock:
+ * trust state (trusted sites and revoked origins), the routing state
+ * (groups, app bindings, allowances) and the usage totals carry MACs
+ * (trust-state.ts, routing-state.ts) keyed from a format-2 password hash.
+ * Wallets written before 1.1.2 have none of that. upgradeWallet converts one
+ * on the first unlock:
  *
  *   1. rebinds every unbound credential secret (a local server's empty key
  *      included), and writes the credentials;
- *   2. writes the format-2 password hash together with the signed trust
- *      state, in one storage write.
+ *   2. writes the format-2 password hash together with the signed trust,
+ *      routing and usage state, in one storage write.
  *
  * The format-1 hash is the marker of a wallet not yet upgraded. Until step 2
  * replaces it, unbound secrets still decrypt (openCredentialSecret), so
  * requests keep working mid-upgrade and an interrupted upgrade simply runs
- * again on the next unlock. After it, unbound secrets are refused and an
- * unsigned list is dropped: neither can be planted to get adopted. Putting
+ * again on the next unlock. After it, unbound secrets are refused and
+ * unsigned state is dropped: neither can be planted to get adopted. Putting
  * the hash back to format 1 takes the user's own format-1 hash, i.e. a copy
  * of storage from before the upgrade, and replaying such a copy is beyond
  * what local storage alone can rule out.
@@ -191,18 +200,22 @@ export async function upgradeWallet(
     if (!wrote) return null;
   }
 
-  // 2. New password hash and the signed trust state, together. Malformed
-  // stored lists are dropped rather than signed (adoptLegacyTrustState),
-  // and the popup told why.
+  // 2. New password hash and the signed trust, routing and usage state,
+  // together. Malformed stored state is dropped rather than signed
+  // (adoptLegacyTrustState, adoptLegacyRoutingState), and the popup told why.
   const newHash = await hashPassword(password);
   const macKey = await deriveWalletMacKey(password, newHash);
   if (!macKey) throw new Error('Could not derive the wallet key');
   const wrote = await exclusive(async () => {
     if (!(await unchanged())) return false;
-    const { state, dropped } = adoptLegacyTrustState(await storage.get(TRUST_STATE_KEYS));
+    const stored = await storage.get([...TRUST_STATE_KEYS, ...ROUTING_STATE_KEYS, ...USAGE_STATE_KEYS, 'requestLog']);
+    const { state, dropped } = adoptLegacyTrustState(stored);
+    const { routing, usage } = adoptLegacyRoutingState(stored);
     await storage.set({
       passwordHash: newHash,
       ...(await signTrustState(state, macKey, 1)),
+      ...(await signRoutingState(routing, macKey, 1)),
+      ...(await signUsageState(usage, macKey, 1)),
       ...(dropped ? { [TRUST_RESET_NOTICE_KEY]: true } : {}),
     });
     return true;

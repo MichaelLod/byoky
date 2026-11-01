@@ -6,14 +6,12 @@ import {
   type SessionSwap,
   type RequestLogEntry,
   type PendingApproval,
-  type TokenAllowance,
   type ConnectRequest,
   type ConnectResponse,
   type ProviderRequirement,
   type ProxyRequest,
   type SerializedFormDataEntry,
   type Group,
-  type AppGroups,
   type ProviderId,
   type TranslationContext,
   type ModelFamily,
@@ -64,6 +62,25 @@ import {
   silentTrustFor,
   type TrustState,
 } from '../lib/trust-state';
+import {
+  ROUTING_STATE_KEYS,
+  USAGE_STATE_KEYS,
+  addUsageTotals,
+  adoptLegacyRoutingState,
+  defaultGroup,
+  hasSignedRoutingState,
+  isEmptyWallet,
+  parseAllowance,
+  parseUsageTotals,
+  readRoutingState,
+  readUsageState,
+  signRoutingState,
+  signUsageState,
+  withHold,
+  withUsage,
+  type RoutingState,
+  type UsageTotals,
+} from '../lib/routing-state';
 
 declare const chrome: {
   sidePanel?: {
@@ -176,9 +193,10 @@ export default defineBackground(() => {
     browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'approvalsChanged' }).catch(() => {});
   }
   let masterPassword: string | null = null;
-  // The wallet MAC key, which signs the trusted-sites list, and the one-time
-  // upgrade of a pre-1.1.2 wallet. Both hang off the master password and are
-  // forgotten with it; see walletMacKey and ensureWalletUpgraded.
+  // The wallet MAC key, which signs the trust, routing and usage state, and
+  // the one-time upgrade of a pre-1.1.2 wallet. Both hang off the master
+  // password and are forgotten with it; see walletMacKey and
+  // ensureWalletUpgraded.
   let walletMacKeyPromise: Promise<CryptoKey | null> | null = null;
   let walletUpgradePromise: Promise<CryptoKey | null> | null = null;
   let unlockFailures = 0;
@@ -191,6 +209,15 @@ export default defineBackground(() => {
   // than this was put back from a snapshot (see lib/trust-state.ts). Kept
   // in storage.session too, so a worker restart doesn't forget it.
   let trustEpochHighWater = 0;
+  // The same for the routing and usage state (lib/routing-state.ts).
+  const epochHighWater = { routing: 0, usage: 0 };
+  type EpochKind = keyof typeof epochHighWater;
+  const EPOCH_SESSION_KEYS: Record<EpochKind, string> = { routing: '_routingEpoch', usage: '_usageEpoch' };
+  // Tokens counted while the wallet key was unavailable (a request that
+  // finished after the wallet locked), until the next signed usage write
+  // takes them in. Allowance checks count them meanwhile. Kept in
+  // storage.session too.
+  let pendingUsage: UsageTotals = {};
 
   // Unlock and re-authentication (before export) share one lockout, so
   // neither is an unthrottled oracle for the master password.
@@ -277,6 +304,20 @@ export default defineBackground(() => {
         lastActivityAt = last;
         scheduleIdleLock();
       }
+    } catch {}
+  }
+
+  /** The routing and usage epochs seen, and usage held while locked, after a worker restart. */
+  async function restoreRoutingSession() {
+    if (!hasSessionStorage) return;
+    try {
+      const data = await browser.storage.session.get(['_pendingUsage', ...Object.values(EPOCH_SESSION_KEYS)]);
+      for (const kind of Object.keys(epochHighWater) as EpochKind[]) {
+        const seen = data[EPOCH_SESSION_KEYS[kind]];
+        if (typeof seen === 'number') epochHighWater[kind] = Math.max(epochHighWater[kind], seen);
+      }
+      const held = parseUsageTotals(data._pendingUsage);
+      if (held) pendingUsage = addUsageTotals(held, pendingUsage);
     } catch {}
   }
 
@@ -446,7 +487,7 @@ export default defineBackground(() => {
   // After the bridge key is restored, kick off the native-host reconnect so
   // CLI tools (Hermes, Claude Code) can hit :19280 without waiting for the
   // user to re-run `byoky-bridge connect`.
-  const sessionRestored = restoreSession();
+  const sessionRestored = Promise.all([restoreSession(), restoreRoutingSession()]).then(() => {});
   // Read synchronously where awaiting isn't an option (openSidePanelInGesture).
   let sessionsRestoredDone = false;
   const sessionsRestored = Promise.all([sessionRestored, restoreSessions()])
@@ -1501,12 +1542,14 @@ export default defineBackground(() => {
         if (valid) {
           masterPassword = password;
           forgetWalletKeys();
-          if (macKey) walletMacKeyPromise = Promise.resolve(macKey);
+          if (macKey) walletMacKey(macKey);
           clearPasswordFailures();
           lastActivityPersistedAt = 0;
           persistSession();
           resetIdleTimer();
           ensureWalletUpgraded().catch(() => {});
+          // Count what finished while the wallet was locked.
+          if (Object.keys(pendingUsage).length > 0) commitPendingUsage().catch(() => {});
           processPendingAfterUnlock();
           return { success: true };
         }
@@ -1618,16 +1661,13 @@ export default defineBackground(() => {
             credentials: rmCreds.filter((c) => c.id !== rmId),
           });
         });
-        // Clear any group pin pointing at the removed credential
-        const groups = await getGroups();
-        let mutated = false;
-        for (let i = 0; i < groups.length; i++) {
-          if (groups[i].credentialId === rmId) {
-            groups[i] = { ...groups[i], credentialId: undefined };
-            mutated = true;
-          }
-        }
-        if (mutated) await setGroups(groups);
+        // Clear any group pin pointing at the removed credential. (Locked,
+        // it stays: a pin to a missing key routes nowhere.)
+        await changeRoutingState((routing) => (
+          routing.groups.some((g) => g.credentialId === rmId)
+            ? { routing: { ...routing, groups: routing.groups.map((g) => (g.credentialId === rmId ? withoutPin(g) : g)) }, result: undefined }
+            : { result: undefined }
+        ));
         refreshSessionProviders();
         return { success: true };
       }
@@ -1639,7 +1679,7 @@ export default defineBackground(() => {
         }
         const { passwordHash: setupHash } = message.payload as { passwordHash: string };
         forgetWalletKeys();
-        forgetTrustEpoch();
+        forgetEpochs();
         await browser.storage.local.set({ passwordHash: setupHash, credentials: [] });
         // Other open views leave their setup screen.
         browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'sessionChanged' }).catch(() => {});
@@ -1657,7 +1697,7 @@ export default defineBackground(() => {
         clearSessionStorage();
         if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
         clearPasswordFailures();
-        forgetTrustEpoch();
+        forgetEpochs();
         // After any in-flight upgrade write, which then finds the wallet gone.
         await serializedStorage(() => browser.storage.local.clear());
         browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'sessionChanged' }).catch(() => {});
@@ -1842,31 +1882,37 @@ export default defineBackground(() => {
         return { success: true, count: result.added.length, skipped: result.skipped, rejected: result.rejected };
       }
 
-      case 'getAllowances':
+      case 'getAllowances': {
         // The usage totals are what allowances are enforced against.
-        return { allowances: await getAllowances(), usage: await getUsageTotals() };
+        // limitsHold: apps are paused until the user resumes them, after a
+        // part of this state failed its integrity check.
+        const state = await readWalletState();
+        if (!state) return { allowances: [], usage: {}, limitsHold: null };
+        return {
+          allowances: state.routing.allowances,
+          usage: addUsageTotals(state.usage, pendingUsage),
+          limitsHold: state.routing.hold ?? null,
+        };
+      }
 
       case 'resetAppUsage': {
         const { origin } = message.payload as { origin: string };
-        await serializedStorage(async () => {
-          const totals = await getUsageTotals();
-          delete totals[origin];
-          await browser.storage.local.set({ usageTotals: totals });
-        });
-        return { success: true };
+        return resetAppUsage(origin);
       }
 
       case 'setAllowance': {
-        const { allowance } = message.payload as { allowance: TokenAllowance };
-        await setAllowance(allowance);
-        return { success: true };
+        const { allowance } = message.payload as { allowance: unknown };
+        return setAllowance(allowance);
       }
 
       case 'removeAllowance': {
         const { origin } = message.payload as { origin: string };
-        await removeAllowance(origin);
-        return { success: true };
+        return removeAllowance(origin);
       }
+
+      case 'resumeApps':
+        // The user checked limits and usage after an integrity reset.
+        return resumeApps();
 
       case 'getRetiredFeaturesNotice': {
         const data = await browser.storage.local.get(RETIRED_FEATURES_NOTICE_KEY);
@@ -1881,8 +1927,11 @@ export default defineBackground(() => {
 
       case 'getGroups': {
         // Ensure a default group exists so the UI never has to synthesize one.
-        await ensureDefaultGroup();
-        return { groups: await getGroups(), appGroups: await getAppGroups() };
+        const routing = await changeRoutingState((current) => {
+          const next = withDefaultGroup(current);
+          return { ...(next !== current ? { routing: next } : {}), result: next };
+        });
+        return routing ? { groups: routing.result.groups, appGroups: routing.result.appGroups } : { groups: [], appGroups: {} };
       }
 
       case 'createGroup': {
@@ -3228,42 +3277,46 @@ export default defineBackground(() => {
     return run;
   }
 
-  // Lifetime tokens per app and provider, which allowances are checked
-  // against. Kept apart from the request log: that holds only the last 500
-  // entries across all apps, so an app could push its own expensive entries
-  // out of the window with cheap requests.
-  type UsageTotals = Record<string, Record<string, number>>;
-
-  async function getUsageTotals(): Promise<UsageTotals> {
-    const data = await browser.storage.local.get(['usageTotals', 'requestLog']);
-    if (data.usageTotals) return data.usageTotals as UsageTotals;
-    // First run with totals: seed them from what the log still holds.
-    const totals: UsageTotals = {};
-    for (const e of (data.requestLog as RequestLogEntry[]) ?? []) {
-      const tokens = (e.inputTokens ?? 0) + (e.outputTokens ?? 0);
-      if (e.status >= 400 || tokens <= 0) continue;
-      const app = (totals[e.appOrigin] ??= {});
-      app[e.providerId] = (app[e.providerId] ?? 0) + tokens;
-    }
-    return totals;
-  }
-
-  // Seed the totals once, before any request can update the log, or the
-  // first request after the upgrade would be counted twice (once from the
-  // log, once by addUsage).
-  serializedStorage(async () => {
-    const data = await browser.storage.local.get('usageTotals');
-    if (!data.usageTotals) await browser.storage.local.set({ usageTotals: await getUsageTotals() });
-  }).catch(() => {});
+  // Lifetime tokens per app and provider (usageTotals), which allowances are
+  // checked against. Kept apart from the request log: that holds only the
+  // last 500 entries across all apps, so an app could push its own expensive
+  // entries out of the window with cheap requests. Signed with the wallet
+  // key (lib/routing-state.ts); a wallet that had none yet seeds them from
+  // the log when its state is first signed.
 
   function addUsage(origin: string, providerId: string, tokens: number): Promise<void> {
     if (tokens <= 0) return Promise.resolve();
-    return serializedStorage(async () => {
-      const totals = await getUsageTotals();
-      const app = (totals[origin] ??= {});
-      app[providerId] = (app[providerId] ?? 0) + tokens;
-      await browser.storage.local.set({ usageTotals: totals });
-    });
+    pendingUsage = withUsage(pendingUsage, origin, providerId, tokens);
+    persistPendingUsage();
+    return commitPendingUsage();
+  }
+
+  /**
+   * Add the tokens counted since the last signed write (pendingUsage) to
+   * the usage totals, in one signed write. Without the wallet key they stay
+   * pending until the next unlock.
+   */
+  async function commitPendingUsage(): Promise<void> {
+    let taken: UsageTotals | undefined;
+    try {
+      await changeWalletState((state) => {
+        if (Object.keys(pendingUsage).length === 0) return { result: undefined };
+        taken = pendingUsage;
+        pendingUsage = {};
+        return { usage: addUsageTotals(state.usage, taken), result: undefined };
+      });
+    } catch (err) {
+      // Not written: they are counted with the next write.
+      if (taken) pendingUsage = addUsageTotals(taken, pendingUsage);
+      throw err;
+    } finally {
+      if (taken) persistPendingUsage();
+    }
+  }
+
+  function persistPendingUsage() {
+    if (!hasSessionStorage) return;
+    browser.storage.session.set({ _pendingUsage: pendingUsage }).catch(() => {});
   }
 
   // Tokens in-flight requests may still use, per app and provider.
@@ -3286,28 +3339,36 @@ export default defineBackground(() => {
 
   /**
    * Check the app's allowance and, if it passes, hold the tokens this
-   * request may use. Everything after the one await runs synchronously, so
-   * concurrent requests see each other's holds.
+   * request may use. The check and the hold run in one storage section,
+   * after the verified read, so concurrent requests see each other's holds
+   * and no usage write lands in between. Nothing passes without the wallet
+   * key, or while apps are paused after an integrity reset: neither the
+   * limits nor the usage are known then.
    */
   async function checkAndReserveAllowance(
     origin: string,
     providerId: string,
     req: ProxyRequest,
   ): Promise<{ allowed: true; release: () => void } | { allowed: false; reason: string }> {
-    const [allowances, allTotals] = await Promise.all([getAllowances(), getUsageTotals()]);
-    const allowance = allowances.find((a) => a.origin === origin);
-    if (allowance) {
-      const totals = allTotals[origin] ?? {};
-      const reserved = reservedTokens.get(origin) ?? new Map<string, number>();
-      const entries = [...Object.entries(totals), ...reserved.entries()].map(([pid, tokens]) => ({
-        providerId: pid as ProviderId,
-        inputTokens: tokens,
-        outputTokens: 0,
-      }));
-      const check = computeAllowanceCheck(allowance, entries, providerId);
-      if (!check.allowed) return { allowed: false, reason: check.reason ?? 'Token allowance exceeded' };
-    }
-    return { allowed: true, release: reserveTokens(origin, providerId, estimateRequestTokens(req)) };
+    const key = await walletMacKey();
+    if (!key) return { allowed: false, reason: noWalletKeyError() };
+    return serializedStorage(async () => {
+      const { routing, usage } = await loadWalletState(key);
+      if (routing.hold) return { allowed: false as const, reason: LIMITS_HOLD_MESSAGE };
+      const allowance = routing.allowances.find((a) => a.origin === origin);
+      if (allowance) {
+        const own = (totals: UsageTotals) => (Object.hasOwn(totals, origin) ? Object.entries(totals[origin]) : []);
+        const reserved = reservedTokens.get(origin) ?? new Map<string, number>();
+        const entries = [...own(usage), ...own(pendingUsage), ...reserved.entries()].map(([pid, tokens]) => ({
+          providerId: pid as ProviderId,
+          inputTokens: tokens,
+          outputTokens: 0,
+        }));
+        const check = computeAllowanceCheck(allowance, entries, providerId);
+        if (!check.allowed) return { allowed: false as const, reason: check.reason ?? 'Token allowance exceeded' };
+      }
+      return { allowed: true as const, release: reserveTokens(origin, providerId, estimateRequestTokens(req)) };
+    });
   }
 
   /** A request the app cancelled before any response: charge its estimate. */
@@ -3493,19 +3554,28 @@ export default defineBackground(() => {
   }
 
   /**
-   * The wallet MAC key, which signs the trusted-sites list. It is derived
-   * from the master password, so it's null while the wallet is locked (and
-   * while a failed upgrade leaves it at format 1): nothing is trusted then.
+   * The wallet MAC key, which signs the trust, routing and usage state. It
+   * is derived from the master password, so it's null while the wallet is
+   * locked (and while a failed upgrade leaves it at format 1): nothing is
+   * trusted then, and no app request passes its allowance check. `known` is
+   * the key the unlock derived already. Routing state that was never signed
+   * is adopted (adoptRoutingState) before the key is handed out.
    */
-  function walletMacKey(): Promise<CryptoKey | null> {
+  function walletMacKey(known?: CryptoKey): Promise<CryptoKey | null> {
     const password = masterPassword;
     if (!password) return Promise.resolve(null);
     if (!walletMacKeyPromise) {
-      const pending = ensureWalletUpgraded()
-        .then(async (upgradedKey) => {
+      const derived = known
+        ? Promise.resolve(known)
+        : ensureWalletUpgraded().then(async (upgradedKey) => {
           if (upgradedKey) return upgradedKey;
           const { passwordHash } = await browser.storage.local.get('passwordHash');
           return typeof passwordHash === 'string' ? deriveWalletMacKey(password, passwordHash) : null;
+        });
+      const pending = derived
+        .then(async (key) => {
+          if (key) await adoptRoutingState(key);
+          return key;
         })
         .catch(() => null);
       walletMacKeyPromise = pending;
@@ -3513,6 +3583,11 @@ export default defineBackground(() => {
       pending.then((key) => { if (!key && walletMacKeyPromise === pending) walletMacKeyPromise = null; });
     }
     return walletMacKeyPromise;
+  }
+
+  /** Why something that needs the wallet key can't be done. */
+  function noWalletKeyError(): string {
+    return masterPassword ? WALLET_UPGRADE_FAILED : 'Wallet is locked';
   }
 
   function forgetWalletKeys() {
@@ -3538,10 +3613,12 @@ export default defineBackground(() => {
         const epoch = nextTrustEpoch(read.epoch);
         await browser.storage.local.set(await droppedTrustState(key, epoch));
         noteTrustEpoch(epoch);
-      } else if (read.epoch === 0 && (read.sites.length > 0 || read.revoked.length > 0)) {
-        // Signed before states had an epoch: re-signed with one.
-        await browser.storage.local.set(await signTrustState(read, key, 1));
-        noteTrustEpoch(1);
+      } else if (read.beforeRouting) {
+        // Signed before states had an epoch, or before the routing state was
+        // signed too: re-signed under the current tag.
+        const epoch = nextTrustEpoch(read.epoch);
+        await browser.storage.local.set(await signTrustState(read, key, epoch));
+        noteTrustEpoch(epoch);
       } else {
         noteTrustEpoch(read.epoch);
       }
@@ -3591,10 +3668,24 @@ export default defineBackground(() => {
     if (hasSessionStorage) browser.storage.session.set({ _trustEpoch: epoch }).catch(() => {});
   }
 
-  /** A new or reset wallet starts its trust state over. */
-  function forgetTrustEpoch() {
+  function nextEpoch(kind: EpochKind, stored: number): number {
+    return Math.max(stored, epochHighWater[kind]) + 1;
+  }
+
+  function noteEpoch(kind: EpochKind, epoch: number) {
+    if (epoch <= epochHighWater[kind]) return;
+    epochHighWater[kind] = epoch;
+    if (hasSessionStorage) browser.storage.session.set({ [EPOCH_SESSION_KEYS[kind]]: epoch }).catch(() => {});
+  }
+
+  /** A new or reset wallet starts its signed state over, usage held while locked included. */
+  function forgetEpochs() {
     trustEpochHighWater = 0;
-    if (hasSessionStorage) browser.storage.session.remove('_trustEpoch').catch(() => {});
+    for (const kind of Object.keys(epochHighWater) as EpochKind[]) epochHighWater[kind] = 0;
+    pendingUsage = {};
+    if (hasSessionStorage) {
+      browser.storage.session.remove(['_trustEpoch', ...Object.values(EPOCH_SESSION_KEYS), '_pendingUsage']).catch(() => {});
+    }
   }
 
   async function addTrustedSite(origin: string, allowedProviders: string[]) {
@@ -3643,103 +3734,178 @@ export default defineBackground(() => {
     ));
   }
 
-  // --- Token allowances ---
+  // --- Routing and usage state: groups, app bindings, allowances, usage (lib/routing-state.ts) ---
 
-  async function getAllowances(): Promise<TokenAllowance[]> {
-    const data = await browser.storage.local.get('tokenAllowances');
-    return (data.tokenAllowances as TokenAllowance[]) ?? [];
+  const LIMITS_HOLD_MESSAGE = 'Apps are paused until you check your spending limits in the Byoky wallet and resume them';
+
+  interface WalletState {
+    routing: RoutingState;
+    usage: UsageTotals;
+    routingEpoch: number;
+    usageEpoch: number;
   }
 
-  async function setAllowance(allowance: TokenAllowance) {
-    const allowances = await getAllowances();
-    const idx = allowances.findIndex((a) => a.origin === allowance.origin);
-    if (idx >= 0) allowances[idx] = allowance;
-    else allowances.push(allowance);
-    await browser.storage.local.set({ tokenAllowances: allowances });
+  /**
+   * The routing and usage state, verified against their MACs. Runs inside
+   * serializedStorage. A part that fails verification is replaced by its
+   * safe state and written back: the default group alone, and apps paused
+   * (limitsHold) until the user checks limits and usage and resumes them.
+   */
+  async function loadWalletState(key: CryptoKey): Promise<WalletState> {
+    const stored = await browser.storage.local.get([...ROUTING_STATE_KEYS, ...USAGE_STATE_KEYS]);
+    const routingRead = await readRoutingState(stored, key, epochHighWater.routing);
+    const usageRead = await readUsageState(stored, key, epochHighWater.usage);
+    const routing = usageRead.intact ? routingRead.state : withHold(routingRead.state, 'usage');
+    let { epoch: routingEpoch } = routingRead;
+    let { epoch: usageEpoch } = usageRead;
+    const write: Record<string, unknown> = {};
+    if (!routingRead.intact || routing !== routingRead.state) {
+      routingEpoch = nextEpoch('routing', routingRead.epoch);
+      Object.assign(write, await signRoutingState(routing, key, routingEpoch));
+    }
+    if (!usageRead.intact) {
+      usageEpoch = nextEpoch('usage', usageRead.epoch);
+      Object.assign(write, await signUsageState(usageRead.totals, key, usageEpoch));
+    }
+    if (Object.keys(write).length > 0) await browser.storage.local.set(write);
+    noteEpoch('routing', routingEpoch);
+    noteEpoch('usage', usageEpoch);
+    // Open sessions follow the reset groups too. Not awaited: it reads this
+    // state again, after this storage section.
+    if (!routingRead.intact) refreshSessionProviders().catch(() => {});
+    return { routing, usage: usageRead.totals, routingEpoch, usageEpoch };
   }
 
-  async function removeAllowance(origin: string) {
-    const allowances = await getAllowances();
-    await browser.storage.local.set({
-      tokenAllowances: allowances.filter((a) => a.origin !== origin),
+  /** The verified routing and usage state, or null without the wallet key. */
+  async function readWalletState(): Promise<WalletState | null> {
+    const key = await walletMacKey();
+    if (!key) return null;
+    return serializedStorage(() => loadWalletState(key));
+  }
+
+  type WalletStateChange<T> = { routing?: RoutingState; usage?: UsageTotals; result: T };
+
+  /**
+   * Change the routing or usage state: `change` gets the verified state and
+   * returns the parts it changed, which are re-signed under the next epoch,
+   * in one write. Null without the wallet key; nothing unsigned is ever
+   * written.
+   */
+  async function changeWalletState<T>(change: (state: WalletState) => WalletStateChange<T>): Promise<{ result: T } | null> {
+    const key = await walletMacKey();
+    if (!key) return null;
+    return serializedStorage(async () => {
+      const state = await loadWalletState(key);
+      const { routing, usage, result } = change(state);
+      if (!routing && !usage) return { result };
+      const routingEpoch = nextEpoch('routing', state.routingEpoch);
+      const usageEpoch = nextEpoch('usage', state.usageEpoch);
+      await browser.storage.local.set({
+        ...(routing ? await signRoutingState(routing, key, routingEpoch) : {}),
+        ...(usage ? await signUsageState(usage, key, usageEpoch) : {}),
+      });
+      if (routing) noteEpoch('routing', routingEpoch);
+      if (usage) noteEpoch('usage', usageEpoch);
+      return { result };
     });
+  }
+
+  /** changeWalletState for the routing state alone. */
+  function changeRoutingState<T>(change: (routing: RoutingState) => { routing?: RoutingState; result: T }): Promise<{ result: T } | null> {
+    return changeWalletState(({ routing }) => change(routing));
+  }
+
+  async function setAllowance(raw: unknown): Promise<{ success?: boolean; error?: string }> {
+    // Only what reads back the same gets signed (parseAllowance).
+    const allowance = parseAllowance(raw);
+    if (!allowance) return { error: 'Invalid allowance' };
+    const changed = await changeRoutingState((routing) => {
+      const exists = routing.allowances.some((a) => a.origin === allowance.origin);
+      const allowances = exists
+        ? routing.allowances.map((a) => (a.origin === allowance.origin ? allowance : a))
+        : [...routing.allowances, allowance];
+      return { routing: { ...routing, allowances }, result: undefined };
+    });
+    return changed ? { success: true } : { error: noWalletKeyError() };
+  }
+
+  async function removeAllowance(origin: string): Promise<{ success?: boolean; error?: string }> {
+    const changed = await changeRoutingState((routing) => (
+      routing.allowances.some((a) => a.origin === origin)
+        ? { routing: { ...routing, allowances: routing.allowances.filter((a) => a.origin !== origin) }, result: undefined }
+        : { result: undefined }
+    ));
+    return changed ? { success: true } : { error: noWalletKeyError() };
+  }
+
+  /** Start counting the app's usage from zero again. */
+  async function resetAppUsage(origin: string): Promise<{ success?: boolean; error?: string }> {
+    const changed = await changeWalletState(({ usage }) => {
+      // Tokens still pending for it go too.
+      if (Object.hasOwn(pendingUsage, origin)) {
+        pendingUsage = Object.fromEntries(Object.entries(pendingUsage).filter(([o]) => o !== origin));
+        persistPendingUsage();
+      }
+      return Object.hasOwn(usage, origin)
+        ? { usage: Object.fromEntries(Object.entries(usage).filter(([o]) => o !== origin)), result: undefined }
+        : { result: undefined };
+    });
+    return changed ? { success: true } : { error: noWalletKeyError() };
+  }
+
+  /** Let apps through again after an integrity reset, once the user checked limits and usage. */
+  async function resumeApps(): Promise<{ success?: boolean; error?: string }> {
+    const changed = await changeRoutingState(({ hold, ...rest }) => ({ ...(hold ? { routing: rest } : {}), result: undefined }));
+    return changed ? { success: true } : { error: noWalletKeyError() };
   }
 
   // --- Groups (alias layer) ---
 
-  async function getGroups(): Promise<Group[]> {
-    const data = await browser.storage.local.get('groups');
-    return (data.groups as Group[]) ?? [];
+  /** `group` without its credential pin. */
+  function withoutPin(group: Group): Group {
+    const { credentialId: _pin, ...rest } = group;
+    return rest;
   }
 
-  async function setGroups(groups: Group[]) {
-    await browser.storage.local.set({ groups });
-  }
-
-  async function getAppGroups(): Promise<AppGroups> {
-    const data = await browser.storage.local.get('appGroups');
-    return (data.appGroups as AppGroups) ?? {};
-  }
-
-  async function setAppGroups(appGroups: AppGroups) {
-    await browser.storage.local.set({ appGroups });
-  }
-
-  // Ensures the default group exists. The default group is a sentinel bucket
-  // for apps with no explicit binding — it carries no routing (empty
-  // providerId), so unbound apps fall through to direct credential lookup
-  // for the provider they actually request.
-  async function ensureDefaultGroup(): Promise<Group> {
-    const groups = await getGroups();
+  // The default group is a sentinel bucket for apps with no explicit
+  // binding — it carries no routing (empty providerId), so unbound apps fall
+  // through to direct credential lookup for the provider they actually
+  // request.
+  /**
+   * `routing` with the default group present and routing-neutral, and
+   * `origin`, if given, bound to a group that exists: the default one when
+   * it had no binding or its group was deleted. The same object when
+   * nothing changed.
+   */
+  function withDefaultGroup(routing: RoutingState, origin?: string): RoutingState {
+    let { groups, appGroups } = routing;
     const existing = groups.find((g) => g.id === DEFAULT_GROUP_ID);
-    if (existing) {
+    if (!existing) {
+      groups = [defaultGroup(), ...groups];
+    } else if (existing.providerId || existing.credentialId) {
       // Migrate stale default groups that were auto-populated with a
       // provider binding (pre-sentinel behavior). The default group must
       // stay routing-neutral; users wire routing by creating real groups
       // and assigning apps to them.
-      if (existing.providerId || existing.credentialId) {
-        existing.providerId = '';
-        existing.credentialId = undefined;
-        await setGroups(groups);
-      }
-      return existing;
+      groups = groups.map((g) => (g === existing ? { ...withoutPin(g), providerId: '' } : g));
     }
-    const def: Group = {
-      id: DEFAULT_GROUP_ID,
-      name: 'Default',
-      providerId: '',
-      createdAt: Date.now(),
-    };
-    groups.unshift(def);
-    await setGroups(groups);
-    return def;
+    if (origin !== undefined && !groups.some((g) => Object.hasOwn(appGroups, origin) && g.id === appGroups[origin])) {
+      appGroups = { ...appGroups, [origin]: DEFAULT_GROUP_ID };
+    }
+    return groups === routing.groups && appGroups === routing.appGroups ? routing : { ...routing, groups, appGroups };
   }
 
   // Returns the group an origin currently belongs to. Auto-assigns to the
   // default group if no binding exists yet (and persists the assignment, so
-  // the next call is a pure lookup).
+  // the next call is a pure lookup). Without the wallet key nothing is
+  // verified, so the app routes as the default group does: nowhere.
   async function getGroupForOrigin(origin: string): Promise<Group | undefined> {
-    const appGroups = await getAppGroups();
-    let groupId = appGroups[origin];
-    const groups = await getGroups();
-
-    // No binding → assign to default
-    if (!groupId) {
-      const def = await ensureDefaultGroup();
-      appGroups[origin] = def.id;
-      await setAppGroups(appGroups);
-      return def;
-    }
-
-    let group = groups.find((g) => g.id === groupId);
-    // Stale binding (group was deleted) → fall back to default
-    if (!group) {
-      const def = await ensureDefaultGroup();
-      appGroups[origin] = def.id;
-      await setAppGroups(appGroups);
-      return def;
-    }
-    return group;
+    const changed = await changeRoutingState((routing) => {
+      const next = withDefaultGroup(routing, origin);
+      const group = next.groups.find((g) => g.id === next.appGroups[origin]);
+      return { ...(next !== routing ? { routing: next } : {}), result: group };
+    });
+    return changed ? changed.result : defaultGroup();
   }
 
   async function createGroup(input: {
@@ -3757,91 +3923,121 @@ export default defineBackground(() => {
       if (!cred) return { error: 'Credential not found' };
       if (cred.providerId !== input.providerId) return { error: 'Credential does not match provider' };
     }
-    const groups = await getGroups();
-    if (groups.some((g) => g.name.toLowerCase() === name.toLowerCase())) {
-      return { error: 'A group with this name already exists' };
-    }
-    const group: Group = {
-      id: crypto.randomUUID(),
-      name,
-      providerId: input.providerId,
-      credentialId: input.credentialId,
-      model: input.model?.trim() || undefined,
-      createdAt: Date.now(),
-    };
-    groups.push(group);
-    await setGroups(groups);
-    return { group };
+    const model = input.model?.trim() || undefined;
+    const changed = await changeRoutingState((routing): { routing?: RoutingState; result: { group?: Group; error?: string } } => {
+      if (routing.groups.some((g) => g.name.toLowerCase() === name.toLowerCase())) {
+        return { result: { error: 'A group with this name already exists' } };
+      }
+      const group: Group = {
+        id: crypto.randomUUID(),
+        name,
+        providerId: input.providerId,
+        ...(input.credentialId ? { credentialId: input.credentialId } : {}),
+        ...(model ? { model } : {}),
+        createdAt: Date.now(),
+      };
+      return { routing: { ...routing, groups: [...routing.groups, group] }, result: { group } };
+    });
+    return changed ? changed.result : { error: noWalletKeyError() };
   }
 
   async function updateGroup(
     id: string,
     patch: { name?: string; providerId?: string; credentialId?: string | null; model?: string | null },
   ): Promise<{ group?: Group; error?: string }> {
-    const groups = await getGroups();
-    const idx = groups.findIndex((g) => g.id === id);
-    if (idx < 0) return { error: 'Group not found' };
-    const current = groups[idx];
+    // Checked against the credentials as they are now, before the change.
+    const creds = patch.credentialId ? await getStoredCredentials() : [];
+    const changed = await changeRoutingState((routing): { routing?: RoutingState; result: { group?: Group; error?: string } } => {
+      const fail = (error: string) => ({ result: { error } });
+      const current = routing.groups.find((g) => g.id === id);
+      if (!current) return fail('Group not found');
 
-    const next: Group = { ...current };
-    if (patch.name !== undefined) {
-      const name = patch.name.trim();
-      if (!name || name.length > 200) return { error: 'Group name must be 1-200 characters' };
-      if (id !== DEFAULT_GROUP_ID && groups.some((g) => g.id !== id && g.name.toLowerCase() === name.toLowerCase())) {
-        return { error: 'A group with this name already exists' };
+      let next: Group = { ...current };
+      if (patch.name !== undefined) {
+        const name = patch.name.trim();
+        if (!name || name.length > 200) return fail('Group name must be 1-200 characters');
+        if (id !== DEFAULT_GROUP_ID && routing.groups.some((g) => g.id !== id && g.name.toLowerCase() === name.toLowerCase())) {
+          return fail('A group with this name already exists');
+        }
+        next.name = name;
       }
-      next.name = name;
-    }
-    if (patch.providerId !== undefined) {
-      if (!PROVIDERS[patch.providerId]) return { error: 'Invalid provider' };
-      next.providerId = patch.providerId;
-      // Provider change invalidates the pin unless explicitly set in this patch
-      if (patch.credentialId === undefined) next.credentialId = undefined;
-    }
-    if (patch.credentialId !== undefined) {
-      if (patch.credentialId === null) {
-        next.credentialId = undefined;
-      } else {
-        const creds = await getStoredCredentials();
-        const cred = creds.find((c) => c.id === patch.credentialId);
-        if (!cred) return { error: 'Credential not found' };
-        if (cred.providerId !== next.providerId) return { error: 'Credential does not match provider' };
-        next.credentialId = patch.credentialId;
+      if (patch.providerId !== undefined) {
+        if (!PROVIDERS[patch.providerId]) return fail('Invalid provider');
+        next.providerId = patch.providerId;
+        // Provider change invalidates the pin unless explicitly set in this patch
+        if (patch.credentialId === undefined) next = withoutPin(next);
       }
-    }
-    if (patch.model !== undefined) {
-      next.model = patch.model === null ? undefined : (patch.model.trim() || undefined);
-    }
-    groups[idx] = next;
-    await setGroups(groups);
-    return { group: next };
+      if (patch.credentialId !== undefined) {
+        if (patch.credentialId === null) {
+          next = withoutPin(next);
+        } else {
+          const cred = creds.find((c) => c.id === patch.credentialId);
+          if (!cred) return fail('Credential not found');
+          if (cred.providerId !== next.providerId) return fail('Credential does not match provider');
+          next.credentialId = patch.credentialId;
+        }
+      }
+      if (patch.model !== undefined) {
+        const model = patch.model === null ? undefined : (patch.model.trim() || undefined);
+        const { model: _old, ...rest } = next;
+        next = model ? { ...rest, model } : rest;
+      }
+      return { routing: { ...routing, groups: routing.groups.map((g) => (g === current ? next : g)) }, result: { group: next } };
+    });
+    return changed ? changed.result : { error: noWalletKeyError() };
   }
 
   async function deleteGroup(id: string): Promise<{ success?: boolean; error?: string }> {
     if (id === DEFAULT_GROUP_ID) return { error: 'Cannot delete the default group' };
-    const groups = await getGroups();
-    if (!groups.some((g) => g.id === id)) return { error: 'Group not found' };
-    await setGroups(groups.filter((g) => g.id !== id));
-    // Reassign any apps that pointed at this group back to the default
-    const appGroups = await getAppGroups();
-    let reassigned = false;
-    for (const origin of Object.keys(appGroups)) {
-      if (appGroups[origin] === id) {
-        appGroups[origin] = DEFAULT_GROUP_ID;
-        reassigned = true;
-      }
-    }
-    if (reassigned) await setAppGroups(appGroups);
-    return { success: true };
+    const changed = await changeRoutingState((routing): { routing?: RoutingState; result: { success?: boolean; error?: string } } => {
+      if (!routing.groups.some((g) => g.id === id)) return { result: { error: 'Group not found' } };
+      // Reassign any apps that pointed at this group back to the default
+      const appGroups = Object.fromEntries(
+        Object.entries(routing.appGroups).map(([origin, groupId]) => [origin, groupId === id ? DEFAULT_GROUP_ID : groupId]),
+      );
+      return { routing: { ...routing, groups: routing.groups.filter((g) => g.id !== id), appGroups }, result: { success: true } };
+    });
+    return changed ? changed.result : { error: noWalletKeyError() };
   }
 
   async function setAppGroup(origin: string, groupId: string): Promise<{ success?: boolean; error?: string }> {
-    const groups = await getGroups();
-    if (!groups.some((g) => g.id === groupId)) return { error: 'Group not found' };
-    const appGroups = await getAppGroups();
-    appGroups[origin] = groupId;
-    await setAppGroups(appGroups);
-    return { success: true };
+    const changed = await changeRoutingState((routing): { routing?: RoutingState; result: { success?: boolean; error?: string } } => {
+      if (!routing.groups.some((g) => g.id === groupId)) return { result: { error: 'Group not found' } };
+      return { routing: { ...routing, appGroups: { ...routing.appGroups, [origin]: groupId } }, result: { success: true } };
+    });
+    return changed ? changed.result : { error: noWalletKeyError() };
+  }
+
+  /**
+   * Sign routing and usage state that was never signed, where it can't have
+   * been planted (lib/routing-state.ts): a wallet whose trust state an
+   * earlier 1.1.2 build signed without it, or a wallet with nothing in it
+   * yet. The trust state is re-signed in the same write, under the tag that
+   * says the routing state is signed, so this happens once. Anywhere else,
+   * unsigned state is left for the first read to refuse.
+   */
+  async function adoptRoutingState(key: CryptoKey): Promise<void> {
+    await serializedStorage(async () => {
+      const stored = await browser.storage.local.get([
+        ...ROUTING_STATE_KEYS, ...USAGE_STATE_KEYS, ...TRUST_STATE_KEYS, 'credentials', 'requestLog',
+      ]);
+      if (hasSignedRoutingState(stored)) return;
+      const trust = await readTrustState(stored, key, trustEpochHighWater);
+      const signedBefore = trust.intact && trust.beforeRouting === true;
+      if (!signedBefore && !isEmptyWallet(stored)) return;
+      const { routing, usage } = adoptLegacyRoutingState(stored);
+      const routingEpoch = nextEpoch('routing', 0);
+      const usageEpoch = nextEpoch('usage', 0);
+      const trustEpoch = nextTrustEpoch(trust.epoch);
+      await browser.storage.local.set({
+        ...(await signRoutingState(routing, key, routingEpoch)),
+        ...(await signUsageState(usage, key, usageEpoch)),
+        ...(signedBefore ? await signTrustState(trust, key, trustEpoch) : {}),
+      });
+      noteEpoch('routing', routingEpoch);
+      noteEpoch('usage', usageEpoch);
+      if (signedBefore) noteTrustEpoch(trustEpoch);
+    });
   }
 
   // Wake the SW every minute to re-spawn the byoky-bridge native host if it

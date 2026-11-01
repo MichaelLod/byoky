@@ -10,6 +10,7 @@ import {
 } from '@byoky/core';
 import { CREDENTIAL_SECRET_FIELDS, openCredentialSecret, upgradeWallet, type WalletStorage } from '../lib/wallet-upgrade';
 import { readTrustState } from '../lib/trust-state';
+import { readRoutingState, readUsageState } from '../lib/routing-state';
 import fixture from './fixtures/wallet-1.1.1.json';
 
 const { PASSWORD } = fixture;
@@ -92,6 +93,43 @@ describe('wallet upgrade from 1.1.1', () => {
     expect(read).toEqual({ sites: fixture.storage.trustedSites, revoked: [], intact: true, epoch: 1 });
     const derived = await deriveWalletMacKey(PASSWORD, hash);
     expect((await readTrustState(storage.data, derived!)).intact).toBe(true);
+  }, 60_000);
+
+  it('signs the 1.1.1 groups, bindings, allowances and usage as they were, with the new hash', async () => {
+    const routing = {
+      groups: [
+        { id: 'default', name: 'Default', providerId: '', createdAt: 1 },
+        // A 1.0 group still carries its gift pin, which nothing reads any more.
+        { id: 'g1', name: 'Pinned', providerId: 'anthropic', credentialId: '11111111-1111-4111-8111-111111111111', model: 'claude-x', createdAt: 2, giftId: 'old' },
+      ],
+      appGroups: { 'https://chat.example.com': 'g1' },
+      tokenAllowances: [{ origin: 'https://chat.example.com', totalLimit: 5000, providerLimits: { anthropic: 4000 } }],
+      usageTotals: { 'https://chat.example.com': { anthropic: 1234 } },
+    };
+    const storage = memoryStorage({ ...fixture.storage, ...routing });
+    const result = await upgradeWallet(storage, PASSWORD);
+    const { giftId: _gift, ...g1 } = routing.groups[1];
+    expect(await readRoutingState(storage.data, result!.macKey)).toEqual({
+      state: { groups: [routing.groups[0], g1], appGroups: routing.appGroups, allowances: routing.tokenAllowances },
+      intact: true,
+      epoch: 1,
+    });
+    expect(await readUsageState(storage.data, result!.macKey)).toEqual({ totals: routing.usageTotals, intact: true, epoch: 1 });
+  }, 60_000);
+
+  it('seeds missing usage totals from the request log when it signs them', async () => {
+    const requestLog = [{ appOrigin: 'https://chat.example.com', providerId: 'anthropic', status: 200, inputTokens: 10, outputTokens: 5 }];
+    const storage = memoryStorage({ ...fixture.storage, requestLog });
+    const result = await upgradeWallet(storage, PASSWORD);
+    expect((await readUsageState(storage.data, result!.macKey)).totals).toEqual({ 'https://chat.example.com': { anthropic: 15 } });
+    expect((await readRoutingState(storage.data, result!.macKey)).state).toEqual({ groups: [], appGroups: {}, allowances: [] });
+  }, 60_000);
+
+  it('pauses apps instead of signing malformed 1.1.1 limits', async () => {
+    const storage = memoryStorage({ ...fixture.storage, tokenAllowances: { origin: 'https://chat.example.com' } });
+    const result = await upgradeWallet(storage, PASSWORD);
+    const read = await readRoutingState(storage.data, result!.macKey);
+    expect(read).toMatchObject({ intact: true, state: { allowances: [], hold: 'settings' } });
   }, 60_000);
 
   it('runs once: an upgraded wallet is left alone', async () => {

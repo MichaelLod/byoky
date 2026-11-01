@@ -1,5 +1,11 @@
 import { vi } from 'vitest';
-import { credentialAad, encrypt, hashPassword, type Credential } from '@byoky/core';
+import { credentialAad, deriveWalletMacKey, encrypt, hashPassword, type Credential } from '@byoky/core';
+import {
+  adoptLegacyRoutingState,
+  hasSignedRoutingState,
+  signRoutingState,
+  signUsageState,
+} from '../../lib/routing-state';
 
 /**
  * Runs entrypoints/background.ts under vitest against a small fake of the
@@ -449,6 +455,14 @@ export function walletPasswordHash(): Promise<string> {
   return passwordHash;
 }
 
+let macKey: Promise<CryptoKey> | undefined;
+
+/** The wallet MAC key under walletPasswordHash(), which signs the wallet's trust, routing and usage state. */
+export function walletKey(): Promise<CryptoKey> {
+  macKey ??= walletPasswordHash().then(async (hash) => (await deriveWalletMacKey(PASSWORD, hash))!);
+  return macKey;
+}
+
 /** A stored credential record, its secret bound to it as the wallet stores it. */
 export async function storedCredential(spec: CredentialSpec): Promise<Credential> {
   const authMethod = spec.authMethod ?? 'api_key';
@@ -465,13 +479,26 @@ export async function storedCredential(spec: CredentialSpec): Promise<Credential
   } as Credential;
 }
 
-/** storage.local for an upgraded (1.1.2) wallet holding `creds`. */
-export async function walletStorage(creds: CredentialSpec[], extra: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
-  return {
+/**
+ * storage.local for an upgraded (1.1.2) wallet holding `creds`. Groups, app
+ * bindings, allowances and usage totals in `extra` are signed at epoch 1, as
+ * the wallet keeps them (lib/routing-state.ts), unless `extra` brings its own
+ * MAC or `unsignedRouting` asks for them as an earlier build left them.
+ */
+export async function walletStorage(
+  creds: CredentialSpec[],
+  extra: Record<string, unknown> = {},
+  { unsignedRouting = false }: { unsignedRouting?: boolean } = {},
+): Promise<Record<string, unknown>> {
+  const wallet = {
     passwordHash: await walletPasswordHash(),
     credentials: await Promise.all(creds.map(storedCredential)),
     ...extra,
   };
+  if (unsignedRouting || hasSignedRoutingState(extra)) return wallet;
+  const { routing, usage } = adoptLegacyRoutingState(extra);
+  const key = await walletKey();
+  return { ...wallet, ...(await signRoutingState(routing, key, 1)), ...(await signUsageState(usage, key, 1)) };
 }
 
 /** A fetch Response with `body` and the given content type. */

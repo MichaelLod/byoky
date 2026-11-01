@@ -28,6 +28,14 @@ import { signMac, verifyMac, type TrustedSite } from '@byoky/core';
  * A wallet that never stored any trust state (both lists absent or empty,
  * no MAC) trusts nothing and needs no MAC.
  *
+ * The MAC input starts with a version tag. Tag 3 also says that the
+ * wallet's routing state is signed (routing-state.ts): a state signed
+ * under tag 1 or 2 (beforeRouting) comes from a 1.1.2 build that didn't
+ * sign it yet, whose unsigned routing state is adopted once, and the
+ * trust state re-signed under tag 3 in the same write. Stripping the
+ * routing MAC later doesn't get it adopted again: that takes a tag-2
+ * state, which only the wallet key can sign.
+ *
  * The MAC alone can't tell a current state from an older one signed under
  * the same key, so whoever can read storage once and write it later could
  * put back a snapshot from before a site was removed or revoked. The epoch
@@ -58,6 +66,11 @@ export interface TrustStateRead extends TrustState {
    * signed before epochs, which the caller re-signs) or when refused.
    */
   epoch: number;
+  /**
+   * Set on an intact state signed under tag 1 or 2, before routing state
+   * was signed: the caller re-signs it (and adopts the routing state).
+   */
+  beforeRouting?: true;
 }
 
 /** A new, empty state: nothing trusted, nothing revoked. */
@@ -100,10 +113,14 @@ export function silentTrustFor(state: TrustState, origin: string): TrustedSite |
   return site?.allowedProviders?.length ? site : undefined;
 }
 
-/** What the MAC covers: the epoch, and every field of every entry of both lists, in order. */
-function macInput(state: TrustState, epoch: number): string {
+/**
+ * What the MAC covers: the version tag, the epoch, and every field of every
+ * entry of both lists, in order. Tag 2 is what 1.1.2 signed before the
+ * routing state was signed too; tag 3 since.
+ */
+function macInput(state: TrustState, epoch: number, tag: 2 | 3 = 3): string {
   return JSON.stringify([
-    'byoky:trust:2',
+    `byoky:trust:${tag}`,
     epoch,
     state.sites.map((s) => [s.origin, s.trustedAt, s.allowedProviders ?? null]),
     state.revoked,
@@ -151,12 +168,17 @@ export async function readTrustState(stored: Record<string, unknown>, key: Crypt
     if (minEpoch > 0) return refused;
     if (mac === undefined && sites.length === 0 && revoked.length === 0) return { sites, revoked, intact: true, epoch: 0 };
     if (typeof mac !== 'string' || !(await verifyMac(key, macInputV1({ sites, revoked }), mac))) return refused;
-    return { sites, revoked, intact: true, epoch: 0 };
+    return { sites, revoked, intact: true, epoch: 0, beforeRouting: true };
   }
   if (typeof epoch !== 'number' || !Number.isSafeInteger(epoch) || epoch < 1) return refused;
-  if (typeof mac !== 'string' || !(await verifyMac(key, macInput({ sites, revoked }, epoch), mac))) return refused;
+  if (typeof mac !== 'string') return refused;
+  let beforeRouting = false;
+  if (!(await verifyMac(key, macInput({ sites, revoked }, epoch), mac))) {
+    if (!(await verifyMac(key, macInput({ sites, revoked }, epoch, 2), mac))) return refused;
+    beforeRouting = true;
+  }
   if (epoch < minEpoch) return refused;
-  return { sites, revoked, intact: true, epoch };
+  return { sites, revoked, intact: true, epoch, ...(beforeRouting ? { beforeRouting: true as const } : {}) };
 }
 
 /**

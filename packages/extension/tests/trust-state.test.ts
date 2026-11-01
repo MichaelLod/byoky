@@ -16,6 +16,7 @@ import {
   type TrustState,
 } from '../lib/trust-state';
 import { upgradeWallet, type WalletStorage } from '../lib/wallet-upgrade';
+import { ROUTING_STATE_KEYS, USAGE_STATE_KEYS } from '../lib/routing-state';
 import fixture from './fixtures/wallet-1.1.1.json';
 
 const SITES: TrustedSite[] = [
@@ -177,8 +178,25 @@ describe('trust state integrity', () => {
       STATE.revoked,
     ]));
     const v1 = { [TRUSTED_SITES_KEY]: STATE.sites, [REVOKED_ORIGINS_KEY]: STATE.revoked, [TRUST_MAC_KEY]: v1Mac };
-    expect(await readTrustState(v1, key)).toEqual({ ...STATE, intact: true, epoch: 0 });
+    expect(await readTrustState(v1, key)).toEqual({ ...STATE, intact: true, epoch: 0, beforeRouting: true });
     expect(await readTrustState(v1, key, 1)).toEqual(REFUSED);
+  });
+});
+
+describe('trust state version tag', () => {
+  it('reads a state signed before routing state was signed (tag 2) as beforeRouting, and signs tag 3', async () => {
+    const v2Mac = await signMac(key, JSON.stringify([
+      'byoky:trust:2',
+      3,
+      STATE.sites.map((s) => [s.origin, s.trustedAt, s.allowedProviders ?? null]),
+      STATE.revoked,
+    ]));
+    const v2 = { [TRUSTED_SITES_KEY]: STATE.sites, [REVOKED_ORIGINS_KEY]: STATE.revoked, [TRUST_EPOCH_KEY]: 3, [TRUST_MAC_KEY]: v2Mac };
+    expect(await readTrustState(v2, key)).toEqual({ ...STATE, intact: true, epoch: 3, beforeRouting: true });
+    expect(await readTrustState(v2, key, 4)).toEqual(REFUSED);
+    expect(await readTrustState(await signTrustState(STATE, key, 3), key)).toEqual({ ...STATE, intact: true, epoch: 3 });
+    // The tag is covered: a tag-2 MAC doesn't pass for other lists.
+    expect(await readTrustState({ ...v2, [REVOKED_ORIGINS_KEY]: [] }, key)).toEqual(REFUSED);
   });
 });
 
@@ -220,7 +238,10 @@ describe('trust state migration', () => {
     const result = await upgradeWallet(storage, fixture.PASSWORD);
 
     const final = writes.at(-1)!;
-    expect(Object.keys(final).sort()).toEqual(['passwordHash', REVOKED_ORIGINS_KEY, TRUST_EPOCH_KEY, TRUST_MAC_KEY, TRUSTED_SITES_KEY]);
+    expect(Object.keys(final).sort()).toEqual([
+      'passwordHash', REVOKED_ORIGINS_KEY, TRUST_EPOCH_KEY, TRUST_MAC_KEY, TRUSTED_SITES_KEY,
+      ...ROUTING_STATE_KEYS, ...USAGE_STATE_KEYS,
+    ].sort());
     const read = await readTrustState(storage.data, result!.macKey);
     expect(read).toEqual({ sites: fixture.storage.trustedSites, revoked: ['https://chat.example.com'], intact: true, epoch: 1 });
     expect(silentlyTrusted(read, 'https://chat.example.com')).toBe(false);
