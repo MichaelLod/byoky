@@ -227,6 +227,68 @@ describe('ByokyServer', () => {
     await expect(reader.read()).rejects.toThrow('timed out');
   });
 
+  describe('malformed messages from the client', () => {
+    async function connectAndRequest() {
+      const clientPromise = server.handleConnection(ws);
+      ws.simulateMessage({ type: 'relay:hello', sessionId: 'sess-1', providers: {} });
+      const client = await clientPromise;
+      const responsePromise = client.createFetch('anthropic')('https://api.anthropic.com/v1/messages');
+      await new Promise((r) => setTimeout(r, 10));
+      const { requestId } = JSON.parse(ws.sentMessages[ws.sentMessages.length - 1]);
+      return { responsePromise, requestId };
+    }
+
+    it('never throws out of onmessage and keeps the request alive on a bad error message', async () => {
+      const { responsePromise, requestId } = await connectAndRequest();
+
+      expect(() => ws.simulateMessage({ type: 'relay:response:error', requestId })).not.toThrow();
+      expect(() => ws.simulateMessage({ type: 'relay:response:error', requestId, error: null })).not.toThrow();
+
+      ws.simulateMessage({ type: 'relay:response:error', requestId, error: { code: 'PROXY_ERROR', message: 'real error' } });
+      await expect(responsePromise).rejects.toThrow('real error');
+    });
+
+    it.each([
+      ['status 99', { status: 99, statusText: 'OK', headers: {} }],
+      ['status 600', { status: 600, statusText: 'OK', headers: {} }],
+      ['a CRLF status text', { status: 200, statusText: 'OK\r\nX-Injected: 1', headers: {} }],
+    ])('rejects the fetch on %s', async (_label, meta) => {
+      const { responsePromise, requestId } = await connectAndRequest();
+
+      expect(() => ws.simulateMessage({ type: 'relay:response:meta', requestId, ...meta })).not.toThrow();
+      await expect(responsePromise).rejects.toMatchObject({ code: 'PROXY_ERROR', message: 'Invalid relay response' });
+    });
+
+    it('skips an invalid header name instead of failing', async () => {
+      const { responsePromise, requestId } = await connectAndRequest();
+
+      expect(() => ws.simulateMessage({
+        type: 'relay:response:meta',
+        requestId,
+        status: 200,
+        statusText: 'OK',
+        headers: { 'bad header': 'x', 'content-type': 'application/json' },
+      })).not.toThrow();
+      ws.simulateMessage({ type: 'relay:response:chunk', requestId, chunk: '{}' });
+      ws.simulateMessage({ type: 'relay:response:done', requestId });
+
+      const response = await responsePromise;
+      expect(response.headers.get('content-type')).toBe('application/json');
+      expect(await response.text()).toBe('{}');
+    });
+
+    it('resolves a 204 with an empty body', async () => {
+      const { responsePromise, requestId } = await connectAndRequest();
+
+      expect(() => ws.simulateMessage({ type: 'relay:response:meta', requestId, status: 204, statusText: 'No Content', headers: {} })).not.toThrow();
+      ws.simulateMessage({ type: 'relay:response:done', requestId });
+
+      const response = await responsePromise;
+      expect(response.status).toBe(204);
+      expect(await response.text()).toBe('');
+    });
+  });
+
   it('rejects pending requests when WebSocket closes', async () => {
     const clientPromise = server.handleConnection(ws);
     ws.simulateMessage({

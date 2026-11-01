@@ -69,8 +69,19 @@ export class ByokyServer {
         ws.close(4000, 'Hello timeout');
       }, this.helloTimeout);
 
+      // The relay endpoint is public, so a client can send anything. Nothing
+      // it sends may throw out of here: with the `ws` library that would be
+      // an uncaught exception and take the whole process down.
       ws.onmessage = (event: { data: unknown }) => {
-        const msg = parseRelayMessage(event.data);
+        try {
+          handleMessage(event.data);
+        } catch {
+          // Drop the message.
+        }
+      };
+
+      function handleMessage(data: unknown) {
+        const msg = parseRelayMessage(data);
         if (!msg) return;
 
         switch (msg.type) {
@@ -115,7 +126,7 @@ export class ByokyServer {
           case 'relay:pong':
             break;
         }
-      };
+      }
 
       ws.onclose = () => {
         cleanup();
@@ -220,13 +231,17 @@ export class ByokyServer {
             const pending = {
               resolveMeta: (meta: { status: number; statusText: string; headers: Record<string, string> }) => {
                 if (metaResolved) return;
+                let response: Response;
+                try {
+                  response = buildResponse(stream, meta);
+                } catch {
+                  pendingRequests.delete(requestId);
+                  pending.error(new ByokyError(ByokyErrorCode.PROXY_ERROR, 'Invalid relay response'));
+                  return;
+                }
                 metaResolved = true;
                 touch();
-                resolveFetch(new Response(stream, {
-                  status: meta.status,
-                  statusText: meta.statusText,
-                  headers: new Headers(meta.headers),
-                }));
+                resolveFetch(response);
               },
               pushChunk: (chunk: string) => {
                 touch();
@@ -271,6 +286,29 @@ export class ByokyServer {
 
     });
   }
+}
+
+// Statuses whose Response must have a null body.
+const NULL_BODY_STATUSES = new Set([204, 205, 304]);
+
+/** Throws on a status or status text Response refuses; skips invalid headers. */
+function buildResponse(
+  body: ReadableStream<Uint8Array>,
+  meta: { status: number; statusText?: string; headers?: Record<string, string> },
+): Response {
+  const headers = new Headers();
+  for (const [name, value] of Object.entries(meta.headers ?? {})) {
+    try {
+      headers.append(name, value);
+    } catch {
+      // Invalid header name or value.
+    }
+  }
+  return new Response(NULL_BODY_STATUSES.has(meta.status) ? null : body, {
+    status: meta.status,
+    statusText: meta.statusText ?? '',
+    headers,
+  });
 }
 
 async function readBody(body: BodyInit): Promise<string | undefined> {

@@ -61,6 +61,27 @@ describe('relay protocol', () => {
       expect(parseRelayMessage({ type: 'relay:response:meta', requestId: '1' })).toBeNull();
     });
 
+    it('rejects relay:response:meta with a malformed status, statusText or headers', () => {
+      const base = { type: 'relay:response:meta', requestId: '1', status: 200, statusText: 'OK', headers: {} };
+      expect(parseRelayMessage(base)).not.toBeNull();
+      expect(parseRelayMessage({ ...base, statusText: undefined, headers: undefined })).not.toBeNull();
+      expect(parseRelayMessage({ ...base, status: 200.5 })).toBeNull();
+      expect(parseRelayMessage({ ...base, status: '200' })).toBeNull();
+      expect(parseRelayMessage({ ...base, statusText: 42 })).toBeNull();
+      expect(parseRelayMessage({ ...base, headers: { a: 1 } })).toBeNull();
+      expect(parseRelayMessage({ ...base, headers: ['a'] })).toBeNull();
+      expect(parseRelayMessage({ ...base, headers: 'a: b' })).toBeNull();
+    });
+
+    it('rejects relay:response:error without a well-formed error', () => {
+      const base = { type: 'relay:response:error', requestId: '1' };
+      expect(parseRelayMessage({ ...base, error: { code: 'PROXY_ERROR', message: 'x' } })).not.toBeNull();
+      expect(parseRelayMessage(base)).toBeNull();
+      expect(parseRelayMessage({ ...base, error: null })).toBeNull();
+      expect(parseRelayMessage({ ...base, error: '' })).toBeNull();
+      expect(parseRelayMessage({ ...base, error: { code: 'PROXY_ERROR' } })).toBeNull();
+    });
+
     it('rejects relay:response:chunk missing chunk', () => {
       expect(parseRelayMessage({ type: 'relay:response:chunk', requestId: '1' })).toBeNull();
     });

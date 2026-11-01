@@ -108,6 +108,16 @@ export type RelayMessage =
  */
 export const MAX_RELAY_MESSAGE_SIZE = 1_048_576; // 1 MB
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object') return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  return isPlainObject(value) && Object.values(value).every((v) => typeof v === 'string');
+}
+
 export function parseRelayMessage(data: unknown): RelayMessage | null {
   try {
     if (typeof data === 'string' && data.length > MAX_RELAY_MESSAGE_SIZE) return null;
@@ -128,7 +138,11 @@ export function parseRelayMessage(data: unknown): RelayMessage | null {
         if (raw.bodyEncoding !== undefined && raw.bodyEncoding !== 'base64' && raw.bodyEncoding !== 'formdata') return null;
         break;
       case 'relay:response:meta':
-        if (typeof raw.requestId !== 'string' || typeof raw.status !== 'number') return null;
+        // The range is left to the server, which builds a Response from it
+        // and fails the request at once when that throws.
+        if (typeof raw.requestId !== 'string' || !Number.isInteger(raw.status)) return null;
+        if (raw.statusText !== undefined && typeof raw.statusText !== 'string') return null;
+        if (raw.headers !== undefined && !isStringRecord(raw.headers)) return null;
         break;
       case 'relay:response:chunk':
         if (typeof raw.requestId !== 'string' || typeof raw.chunk !== 'string') return null;
@@ -140,7 +154,7 @@ export function parseRelayMessage(data: unknown): RelayMessage | null {
         break;
       case 'relay:response:error':
         if (typeof raw.requestId !== 'string') return null;
-        if (raw.error && (typeof raw.error !== 'object' || typeof raw.error.code !== 'string' || typeof raw.error.message !== 'string')) return null;
+        if (!isPlainObject(raw.error) || typeof raw.error.code !== 'string' || typeof raw.error.message !== 'string') return null;
         break;
       case 'relay:ping':
       case 'relay:pong':
