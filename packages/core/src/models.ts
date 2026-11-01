@@ -199,11 +199,9 @@ export const MODELS: ModelEntry[] = [
     displayName: 'GPT-5.4 nano',
     contextWindow: 400_000,
     maxOutput: 128_000,
-    capabilities: {
-      ...FRONTIER,
-      // The nano variant is text-only at the chat-completions surface.
-      vision: false,
-    },
+    // Takes image input on Chat Completions too (OpenAI's model page lists
+    // text and image input; checked live 2026-11-01).
+    capabilities: FRONTIER,
     deprecated: { shutdown: '2027-04-01', replacement: 'gpt-6-luna' },
   },
 

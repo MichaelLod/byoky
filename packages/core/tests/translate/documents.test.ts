@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { translateRequest, getAdapter } from '../../src/translate/index.js';
 import type { TranslationContext } from '../../src/translate/types.js';
-import type { ModelFamily } from '../../src/models.js';
+import { MODELS, getModel, type ModelEntry, type ModelFamily } from '../../src/models.js';
 
 /**
  * Documents (PDFs, text) and images returned inside tool results: kept,
@@ -81,6 +81,18 @@ describe('Anthropic documents', () => {
 });
 
 describe('images returned by tools', () => {
+  // Every OpenAI model in the registry takes images, so a text-only one is
+  // added for these tests.
+  const TEXT_ONLY = 'text-only-test-model';
+  const textOnly: ModelEntry = {
+    ...getModel('gpt-5.4')!,
+    id: TEXT_ONLY,
+    displayName: 'Text-only test model',
+    capabilities: { ...getModel('gpt-5.4')!.capabilities, vision: false },
+  };
+  beforeAll(() => { MODELS.push(textOnly); });
+  afterAll(() => { MODELS.splice(MODELS.indexOf(textOnly), 1); });
+
   const body = JSON.stringify({
     model: 'claude-sonnet-4-6',
     max_tokens: 100,
@@ -147,12 +159,20 @@ describe('images returned by tools', () => {
   });
 
   it('anthropic → openai (text-only registry model): the tool text names the image, none is sent', () => {
-    const out = JSON.parse(translateRequest({ ...ctx('anthropic', 'openai'), dstModel: 'gpt-5.4-nano' }, body)) as {
+    const out = JSON.parse(translateRequest({ ...ctx('anthropic', 'openai'), dstModel: TEXT_ONLY }, body)) as {
       messages: Array<{ role: string; content: unknown }>;
     };
     expect(out.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'tool']);
-    expect(out.messages[2].content).toBe('[image omitted: gpt-5.4-nano does not accept images]');
+    expect(out.messages[2].content).toBe(`[image omitted: ${TEXT_ONLY} does not accept images]`);
     expect(JSON.stringify(out)).not.toContain(PNG_B64);
+  });
+
+  it('anthropic → openai (gpt-5.4-nano): the image is sent', () => {
+    const out = JSON.parse(translateRequest({ ...ctx('anthropic', 'openai'), dstModel: 'gpt-5.4-nano' }, body)) as {
+      messages: Array<{ role: string; content: unknown }>;
+    };
+    expect(out.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'tool', 'user']);
+    expect(JSON.stringify(out.messages[3].content)).toContain(PNG_B64);
   });
 
   it('anthropic → openai (model missing from the registry): the image is sent', () => {
@@ -206,13 +226,13 @@ describe('images returned by tools', () => {
     const out = toHost('openrouter', 'openai/gpt-5.5');
     expect(out.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'tool', 'user']);
     expect(JSON.stringify(out.messages[3].content)).toContain(PNG_B64);
-    expect(toHost('openrouter', 'openai/gpt-5.4-nano').messages[2].content).toBe(
-      '[image omitted: openai/gpt-5.4-nano does not accept images]',
+    expect(toHost('openrouter', `openai/${TEXT_ONLY}`).messages[2].content).toBe(
+      `[image omitted: openai/${TEXT_ONLY} does not accept images]`,
     );
   });
 
   it('anthropic → any host: the registry answer wins over the host default', () => {
-    expect(toHost('openai', 'gpt-5.4-nano').messages[2].content).toBe('[image omitted: gpt-5.4-nano does not accept images]');
+    expect(toHost('openai', TEXT_ONLY).messages[2].content).toBe(`[image omitted: ${TEXT_ONLY} does not accept images]`);
     expect(JSON.stringify(toHost('groq', 'gpt-5.5').messages[3].content)).toContain(PNG_B64);
   });
 

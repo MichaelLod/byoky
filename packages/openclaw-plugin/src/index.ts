@@ -132,7 +132,7 @@ const OPENAI_MODELS: ModelDef[] = [
     id: 'gpt-5.4-nano',
     name: 'GPT-5.4 Nano',
     reasoning: true,
-    input: ['text'],
+    input: ['text', 'image'],
     cost: { input: 0.2, output: 1.25, cacheRead: 0.02, cacheWrite: 0 },
     contextWindow: 400_000,
     maxTokens: 128_000,
