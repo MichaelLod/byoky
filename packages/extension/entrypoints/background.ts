@@ -805,15 +805,8 @@ export default defineBackground(() => {
 
         // The URL the SDK sent must match the SOURCE provider's base URL.
         // (After translation we issue against the destination's URL — see
-        // rewriteProxyUrl below.) For providers without a fixed host (Azure,
-        // Ollama, LM Studio), pass the credential's baseUrl — but only when
-        // the credential is the source credential (no translation/swap), so
-        // we don't accidentally validate the source URL against the
-        // destination's tenant/loopback origin.
-        const sourceBaseUrl = (!translation && !swap && credential.providerId === msg.providerId)
-          ? credential.baseUrl
-          : undefined;
-        if (!validateProxyUrl(msg.providerId, msg.url, sourceBaseUrl)) {
+        // rewriteProxyUrl below.)
+        if (!sourceUrlAllowed(msg.providerId, msg.url, !!(translation || swap), credential.baseUrl)) {
           send({
             type: 'BYOKY_PROXY_RESPONSE_ERROR',
             requestId: msg.requestId,
@@ -2317,7 +2310,7 @@ export default defineBackground(() => {
     const requestId = msg.requestId;
     const sessionKey = msg.sessionKey;
     const providerId = msg.providerId;
-    const url = msg.url;
+    let url = msg.url;
     const method = msg.method;
     const headers = msg.headers as Record<string, string>;
     const body = msg.body as string | undefined;
@@ -2431,21 +2424,20 @@ export default defineBackground(() => {
     }
 
     // Revalidate for requiresCustomBaseUrl providers now that we have the
-    // credential's baseUrl. Direct path only — translation/swap builds the
-    // destination URL via rewriteProxyUrl below, so the pre-translation URL
-    // is still the source provider's (validated above when non-custom).
-    if (
-      providerCfg?.requiresCustomBaseUrl &&
-      !translation &&
-      !swap &&
-      !validateProxyUrl(providerId, url, credential.baseUrl)
-    ) {
-      bridgeProxyPort?.postMessage({
-        type: 'proxy_http_error',
-        requestId,
-        error: 'Request URL does not match the credential\'s registered base URL',
-      });
-      return;
+    // credential's baseUrl. Direct, a request to the registry's placeholder
+    // host goes to the credential's host instead; routed, rewriteProxyUrl
+    // below builds the destination URL and this one only names the endpoint.
+    if (providerCfg?.requiresCustomBaseUrl) {
+      const routed = !!(translation || swap);
+      if (!routed) url = rebaseOntoCredential(providerId, url, credential.baseUrl) ?? url;
+      if (!sourceUrlAllowed(providerId, url, routed, credential.baseUrl)) {
+        bridgeProxyPort?.postMessage({
+          type: 'proxy_http_error',
+          requestId,
+          error: 'Request URL does not match the credential\'s registered base URL',
+        });
+        return;
+      }
     }
 
     // Routing rewrites the request onto the destination's chat endpoint, so
@@ -2847,14 +2839,20 @@ export default defineBackground(() => {
     const srcFamily = familyOf(translation.srcProviderId);
     const dstFamily = familyOf(translation.dstProviderId);
     if (!srcFamily || !dstFamily) return null;
-    return {
+    // dstProviderId lets an adapter tell providers of one family apart (the
+    // OpenAI API itself wants max_completion_tokens). The field joins
+    // TranslationContext in core (F037); until then the intersection keeps
+    // this literal type-checked.
+    const ctx: TranslationContext & { dstProviderId?: string } = {
       srcFamily: srcFamily as ModelFamily,
       dstFamily: dstFamily as ModelFamily,
       srcModel: (requestBody ? parseModel(requestBody) : undefined) ?? modelFromUrl(requestUrl),
       dstModel: translation.dstModel,
+      dstProviderId: translation.dstProviderId,
       isStreaming: detectStreamingRequest(requestBody, requestUrl),
       requestId,
     };
+    return ctx;
   }
 
   /** Gemini puts the model in the path: /v1beta/models/{model}:generateContent. */
@@ -2865,6 +2863,46 @@ export default defineBackground(() => {
       return match ? decodeURIComponent(match[1]) : undefined;
     } catch {
       return undefined;
+    }
+  }
+
+  /**
+   * Whether `url`, as the app sent it, fits the provider it asked for.
+   * Unrouted it is where the request goes, so it must be that provider's
+   * host: for one without a fixed host (Azure OpenAI, Ollama, LM Studio),
+   * the credential's own (`credentialBaseUrl`). Routed, the request goes to
+   * the destination's URL and this one only names the endpoint; a provider
+   * without a fixed host then has no host to hold it to, so any URL one of
+   * its credentials could have (https, or http to this machine for a local
+   * server) passes.
+   */
+  function sourceUrlAllowed(providerId: string, url: string, routed: boolean, credentialBaseUrl?: string): boolean {
+    if (!routed) return validateProxyUrl(providerId, url, credentialBaseUrl);
+    if (!PROVIDERS[providerId]?.requiresCustomBaseUrl) return validateProxyUrl(providerId, url);
+    try {
+      return validateProxyUrl(providerId, url, new URL(url).origin);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * The bridge knows only the registry's placeholder host for a provider
+   * without a fixed one (Azure's YOUR_RESOURCE, the local servers' default
+   * ports). A request it sends there goes to the credential's own host,
+   * same path and query. Null when `url` names another host (validated as
+   * it is) or the credential has no usable base URL.
+   */
+  function rebaseOntoCredential(providerId: string, url: string, credentialBaseUrl: string | undefined): string | null {
+    const placeholder = PROVIDERS[providerId]?.baseUrl;
+    const base = resolveProviderBaseUrl(providerId, credentialBaseUrl);
+    if (!placeholder || !base) return null;
+    try {
+      const target = new URL(url);
+      if (target.origin !== new URL(placeholder).origin) return null;
+      return `${base.replace(/\/$/, '')}${target.pathname}${target.search}`;
+    } catch {
+      return null;
     }
   }
 
@@ -3016,6 +3054,7 @@ export default defineBackground(() => {
       timestamp: Date.now(),
     };
 
+    if (sp) entry.credentialId = sp.credentialId;
     if (translation) {
       entry.actualProviderId = translation.dstProviderId;
       entry.actualModel = translation.dstModel;
