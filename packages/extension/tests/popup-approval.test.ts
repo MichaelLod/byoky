@@ -155,10 +155,12 @@ describe('approval says which key will serve each provider (F092)', () => {
   it('an anthropic-only wallet asked for openai says the Anthropic key is used', async () => {
     bg.state.approvals = [approval('a1', 'https://app.example', [{ id: 'openai' }, { id: 'anthropic' }, { id: 'ollama' }])];
     view = await mount(App);
+    // Ollama is in the OpenAI family since F032, so with no local server key
+    // the auto cross-family fallback serves it too, and the screen says so.
     expect(tags(view.container)).toEqual([
       ['OpenAI', 'Uses your Anthropic key (translated)'],
       ['Anthropic', 'Key ready'],
-      ['Ollama (local)', 'No key'],
+      ['Ollama (local)', 'Uses your Anthropic key (translated)'],
     ]);
   });
 

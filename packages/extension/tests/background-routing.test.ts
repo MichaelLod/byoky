@@ -120,7 +120,24 @@ describe('background: a key is only sent to its own provider', () => {
   });
 
   it('refuses a cross-family group pin to a credential of the wrong provider', async () => {
-    // Translation anthropic -> openai, with the pin on the Groq key.
+    // Translation anthropic -> openai, with the pin on the Groq key. Without
+    // an Anthropic key in the wallet nothing else can serve the app.
+    const h = await startBackground({
+      local: await walletStorage(KEYS.filter((k) => k.providerId !== 'anthropic'), {
+        groups: [group('default', ''), group('g-x', 'openai', { credentialId: 'groq1', model: 'gpt-5.5' })],
+        appGroups: { [APP]: 'g-x' },
+      }),
+    });
+    await h.unlock();
+    const reply = await connectApproved(h, APP, { providers: [{ id: 'anthropic', required: true }] });
+    expect(reply.payload.providers.anthropic.available).toBe(false);
+  });
+
+  it('treats a wrong-provider cross-family pin as stale: the app\'s own key serves it directly', async () => {
+    // Same tampered group, with an Anthropic key in the wallet. Core's
+    // resolver (F010) ignores a pin to another provider's key like a stale
+    // pin, so the request goes to Anthropic with the Anthropic key, never to
+    // OpenAI with the Groq key.
     const h = await startBackground({
       local: await walletStorage(KEYS, {
         groups: [group('default', ''), group('g-x', 'openai', { credentialId: 'groq1', model: 'gpt-5.5' })],
@@ -129,7 +146,23 @@ describe('background: a key is only sent to its own provider', () => {
     });
     await h.unlock();
     const reply = await connectApproved(h, APP, { providers: [{ id: 'anthropic', required: true }] });
-    expect(reply.payload.providers.anthropic.available).toBe(false);
+    const [session] = (await h.internal('getSessions')).sessions;
+    const entry = session.providers.find((p: { providerId: string }) => p.providerId === 'anthropic');
+    expect(entry).toMatchObject({ credentialId: 'a1' });
+    expect(entry.translation).toBeUndefined();
+
+    h.fetch.mockImplementation(async () => jsonResponse({ usage: { input_tokens: 1, output_tokens: 1 } }));
+    const r = await h.proxy(APP, {
+      sessionKey: reply.payload.sessionKey,
+      providerId: 'anthropic',
+      url: 'https://api.anthropic.com/v1/messages',
+      body: JSON.stringify({ model: 'claude-app', max_tokens: 8, messages: [{ role: 'user', content: 'hi' }] }),
+    }).result;
+    expect(r.done).toBe(true);
+    const call = upstream(h);
+    expect(call.url).toBe('https://api.anthropic.com/v1/messages');
+    expect(call.headers['x-api-key']).toBe('sk-ant-REAL');
+    expect(JSON.stringify(call.headers)).not.toContain('gsk-GROQ');
   });
 
   it('refuses a session entry whose credential belongs to another provider', async () => {
