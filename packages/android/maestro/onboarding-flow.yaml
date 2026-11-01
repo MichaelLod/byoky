@@ -1,0 +1,69 @@
+appId: com.byoky.app
+name: onboarding-flow
+tags:
+  - ui
+---
+# Onboarding and unlock regressions. Needs no API keys.
+#
+# Coverage:
+#   1. A password core's checkPasswordStrength calls too weak (the
+#      extension's rule) can't create a wallet.
+#   2. Mismatched passwords are spelled out, and Create Wallet stays off.
+#   3. System back on the password step returns to the welcome step
+#      instead of closing the app.
+#   4. The keyboard's action key creates the wallet, and unlocks it.
+#
+# Run:
+#   cd packages/android/maestro
+#   maestro test onboarding-flow.yaml
+
+- runFlow:
+    file: subflows/reset_and_launch.yaml
+
+- tapOn: "Get Started"
+- assertVisible: "Set Master Password"
+
+# 1. Too weak for core: Create Wallet does nothing.
+- tapOn: "Master password"
+- inputText: "password1234"
+- assertVisible: "Too weak · Avoid sequential patterns"
+- tapOn: "Confirm password"
+- inputText: "password1234"
+- hideKeyboard
+- tapOn: "Create Wallet"
+- assertVisible: "Set Master Password"
+
+# 2. A strong password with a confirmation one character short.
+- tapOn: "Master password"
+- eraseText: 30
+- inputText: "Correct-Horse-42x"
+- tapOn: "Confirm password"
+- eraseText: 30
+- inputText: "Correct-Horse-42"
+- assertVisible: "Passwords do not match"
+- hideKeyboard
+- tapOn: "Create Wallet"
+- assertVisible: "Set Master Password"
+- tapOn: "Confirm password"
+- inputText: "x"
+- assertNotVisible: "Passwords do not match"
+- hideKeyboard
+
+# 3. System back goes to the welcome step; the typed passwords stay.
+- back
+- assertVisible: "Get Started"
+- tapOn: "Get Started"
+- assertVisible: "Set Master Password"
+
+# 4. The keyboard's action key on the confirm field creates the wallet...
+- tapOn: "Confirm password"
+- pressKey: Enter
+- assertVisible: "No credentials yet"
+
+# ...and on the unlock field unlocks it.
+- runFlow:
+    file: subflows/lock_wallet.yaml
+- tapOn: "Master password"
+- inputText: "Correct-Horse-42x"
+- pressKey: Enter
+- assertVisible: "No credentials yet"

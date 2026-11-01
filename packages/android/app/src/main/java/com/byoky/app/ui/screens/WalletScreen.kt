@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -17,7 +19,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -70,6 +81,7 @@ fun WalletScreen(
     var showAddSheet by remember { mutableStateOf(false) }
     var statsCredentialId by remember { mutableStateOf<String?>(null) }
     var renameTarget by remember { mutableStateOf<Credential?>(null) }
+    var endpointTarget by remember { mutableStateOf<Credential?>(null) }
     var removeTarget by remember { mutableStateOf<Credential?>(null) }
     val gaze = rememberRavenGaze()
     // Fixed for this visit to the tab, so the nod plays once and isn't cut short.
@@ -143,6 +155,7 @@ fun WalletScreen(
                         usage = usageByProvider[credential.providerId],
                         onOpenStats = { statsCredentialId = credential.id },
                         onRename = { renameTarget = credential },
+                        onEditEndpoint = { endpointTarget = credential },
                         onDelete = { removeTarget = credential },
                     )
                 }
@@ -160,6 +173,17 @@ fun WalletScreen(
                 onConfirm = { newLabel ->
                     wallet.updateCredentialLabel(target.id, newLabel)
                     renameTarget = null
+                },
+            )
+        }
+
+        endpointTarget?.let { target ->
+            EditEndpointDialog(
+                credential = target,
+                onDismiss = { endpointTarget = null },
+                onSave = { url ->
+                    wallet.updateCredentialEndpoint(target.id, url)
+                    endpointTarget = null
                 },
             )
         }
@@ -284,7 +308,7 @@ private fun RenameCredentialDialog(
             RetroTextField(
                 value = draft,
                 onValueChange = { draft = it },
-                label = null,
+                label = "Credential name",
                 modifier = Modifier.fillMaxWidth(),
             )
         },
@@ -293,6 +317,64 @@ private fun RenameCredentialDialog(
                 "Save",
                 onClick = { onConfirm(draft) },
                 enabled = draft.trim().isNotEmpty() && draft.trim() != initialLabel,
+            )
+        },
+        dismissButton = {
+            DialogButton("Cancel", onClick = onDismiss, color = Fog)
+        },
+    )
+}
+
+/**
+ * Sets the endpoint (Azure OpenAI) or server URL (Ollama, LM Studio) of a
+ * key that is already in the wallet, under the same rules as adding one.
+ */
+@Composable
+private fun EditEndpointDialog(
+    credential: Credential,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    val isAzure = credential.providerId == "azure_openai"
+    var draft by remember { mutableStateOf(credential.baseUrl.orEmpty()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val normalized = CredentialBaseUrl.normalize(credential.providerId, draft)
+
+    RetroDialog(
+        onDismissRequest = onDismiss,
+        title = if (isAzure) "Azure endpoint" else "Server URL",
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(credential.label, color = Bone, style = MonoStyle.copy(fontSize = 13.sp))
+                RetroTextField(
+                    value = draft,
+                    onValueChange = { draft = it; error = null },
+                    label = if (isAzure) "Endpoint URL" else "Server URL",
+                    placeholder = if (isAzure) "https://my-resource.openai.azure.com" else "http://localhost:11434",
+                    mono = true,
+                    isError = draft.isNotBlank() && normalized == null,
+                    supportingText = CredentialBaseUrl.requirementText(credential.providerId),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    if (isAzure) "This key is only ever sent to this endpoint." else "This key is only ever sent to this server.",
+                    fontSize = 13.sp,
+                )
+                error?.let { Text(it, color = Alarm, fontSize = 12.sp) }
+            }
+        },
+        confirmButton = {
+            DialogButton(
+                "Save",
+                onClick = {
+                    try {
+                        onSave(draft)
+                    } catch (e: IllegalArgumentException) {
+                        error = e.message
+                    }
+                },
+                enabled = normalized != null && normalized != credential.baseUrl,
             )
         },
         dismissButton = {
@@ -339,6 +421,7 @@ private fun CredentialCard(
     usage: CredentialUsageStats?,
     onOpenStats: () -> Unit,
     onRename: () -> Unit,
+    onEditEndpoint: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val provider = Provider.find(credential.providerId)
@@ -366,22 +449,25 @@ private fun CredentialCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Spacer(Modifier.height(2.dp))
-                Row {
-                    Text(
-                        provider?.name ?: credential.providerId,
-                        style = MonoStyle,
-                        color = Dim,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    Text(" · ", style = MonoStyle, color = Dim)
-                    CapsText(
-                        if (credential.authMethod == AuthMethod.API_KEY) "API Key" else "OAuth",
-                        style = MonoStyle,
-                        color = if (credential.authMethod == AuthMethod.API_KEY) Fog else Phosphor,
-                        maxLines = 1,
-                    )
+                val providerName = provider?.name ?: credential.providerId
+                // OAuth on Android is always an Anthropic setup token; say so, as the add sheet does.
+                val typeLabel = if (credential.authMethod == AuthMethod.API_KEY) "API Key" else "Setup Token"
+                // One text, so at large font sizes it wraps between words
+                // instead of cutting the provider name down to an ellipsis.
+                Text(
+                    buildAnnotatedString {
+                        append(providerName)
+                        append(" · ")
+                        withStyle(SpanStyle(color = if (credential.authMethod == AuthMethod.API_KEY) Fog else Phosphor)) {
+                            append(typeLabel.uppercase())
+                        }
+                    },
+                    style = MonoStyle,
+                    color = Dim,
+                    modifier = Modifier.semantics { contentDescription = "$providerName, $typeLabel" },
+                )
+                if (provider?.requiresCustomBaseUrl == true) {
+                    CredentialEndpoint(credential, onEdit = onEditEndpoint)
                 }
             }
 
@@ -417,6 +503,41 @@ private fun CredentialCard(
     }
 }
 
+/**
+ * Where a key of Azure OpenAI, Ollama or LM Studio is sent, tap to change it;
+ * or a warning when it has no usable one (such a key is never sent anywhere).
+ */
+@Composable
+private fun CredentialEndpoint(credential: Credential, onEdit: () -> Unit) {
+    val isAzure = credential.providerId == "azure_openai"
+    val endpoint = CredentialBaseUrl.normalize(credential.providerId, credential.baseUrl)
+    val action = if (endpoint == null) {
+        if (isAzure) "Add endpoint" else "Add server URL"
+    } else {
+        if (isAzure) "Edit endpoint" else "Edit server URL"
+    }
+    Row(
+        modifier = Modifier
+            .clickable(onClickLabel = action, onClick = onEdit)
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (endpoint == null) {
+            Icon(Icons.Default.Warning, contentDescription = null, tint = Amber, modifier = Modifier.size(14.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(action, color = Amber, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        } else {
+            Text(
+                endpoint,
+                style = MonoStyle.copy(fontSize = 12.sp),
+                color = Fog,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
 @Composable
 private fun UsageStat(value: String, label: String) {
     Column {
@@ -431,11 +552,28 @@ private fun formatUsageTokens(n: Int): String = when {
     else -> n.toString()
 }
 
+/** [before] + [command] in mono + [after]: a shell command inside helper text. */
+private fun withCommand(before: String, command: String, after: String): AnnotatedString = buildAnnotatedString {
+    append(before)
+    withStyle(SpanStyle(fontFamily = MonoStyle.fontFamily, color = Bone)) { append(command) }
+    append(after)
+}
+
+/**
+ * The label to show after picking the provider [providerName], or null to
+ * keep [currentLabel]. An auto-filled provider name follows the provider; a
+ * label the user typed stays.
+ */
+internal fun autoFilledLabel(currentLabel: String, labelIsAuto: Boolean, providerName: String): String? =
+    if (labelIsAuto || currentLabel.isBlank()) providerName else null
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
     var selectedProvider by remember { mutableStateOf<Provider?>(null) }
     var label by remember { mutableStateOf("") }
+    // True while the label is the provider name filled in for the user.
+    var labelIsAuto by remember { mutableStateOf(true) }
     var apiKey by remember { mutableStateOf("") }
     var baseUrl by remember { mutableStateOf("") }
     var authMethod by remember { mutableStateOf(AuthMethod.API_KEY) }
@@ -456,7 +594,12 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
         else -> ""
     }
 
-    RetroBottomSheet(onDismissRequest = onDismiss) {
+    // Fully expanded only: with a half-height stop the sheet dropped back to
+    // half height whenever the keyboard opened or closed.
+    RetroBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -476,15 +619,23 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
             Spacer(Modifier.height(8.dp))
 
             LazyColumn(
-                modifier = Modifier.heightIn(max = 220.dp),
+                modifier = Modifier
+                    .heightIn(max = 220.dp)
+                    .selectableGroup(),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 items(Provider.all) { provider ->
                     val selected = selectedProvider?.id == provider.id
+                    // A radio choice, so TalkBack announces which provider is picked.
                     Surface(
+                        selected = selected,
+                        modifier = Modifier.semantics { role = Role.RadioButton },
                         onClick = {
                             selectedProvider = provider
-                            if (label.isEmpty()) label = provider.name
+                            autoFilledLabel(label, labelIsAuto, provider.name)?.let {
+                                label = it
+                                labelIsAuto = true
+                            }
                             if (provider.id != "anthropic") authMethod = AuthMethod.API_KEY
                             // A server URL belongs to one provider; never carry it over.
                             baseUrl = when (provider.id) {
@@ -551,38 +702,42 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
                         supportingText = CredentialBaseUrl.requirementText(selectedProvider!!.id),
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        when (selectedProvider?.id) {
-                            "ollama" -> "Where your Ollama server is running. Make sure `ollama serve` is active."
-                            "lm_studio" -> "Where your LM Studio server is running. Start the \"Local Server\" in LM Studio."
-                            else -> "Your key is only ever sent to this endpoint."
-                        },
-                        color = Fog,
-                        fontSize = 12.sp,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    if (isLocalProvider) Row(verticalAlignment = Alignment.Top) {
-                        Icon(
-                            Icons.Default.Warning,
-                            contentDescription = null,
-                            tint = Amber,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(Modifier.width(6.dp))
+                    // The http/https rule is the field's supporting text; Azure's
+                    // endpoint is explained there too.
+                    if (isLocalProvider) {
+                        Spacer(Modifier.height(8.dp))
                         Text(
-                            "Plain http:// only works for a server on this phone (localhost or 127.0.0.1). A server elsewhere on your network needs https://. Requests fail while the server is offline or asleep.",
-                            color = Amber,
+                            if (selectedProvider?.id == "ollama") {
+                                withCommand("Where your Ollama server is running. Make sure ", "ollama serve", " is active.")
+                            } else {
+                                AnnotatedString("Where your LM Studio server is running. Start the \"Local Server\" in LM Studio.")
+                            },
+                            color = Fog,
                             fontSize = 12.sp,
-                            lineHeight = 16.sp,
                         )
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.Top) {
+                            Icon(
+                                Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = Amber,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                "Requests fail while the server is offline or asleep.",
+                                color = Amber,
+                                fontSize = 12.sp,
+                                lineHeight = 16.sp,
+                            )
+                        }
                     }
                     Spacer(Modifier.height(12.dp))
                 }
 
                 RetroTextField(
                     value = label,
-                    onValueChange = { label = it },
+                    onValueChange = { label = it; labelIsAuto = it.isBlank() },
                     label = "Label",
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -606,7 +761,7 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
                 if (authMethod == AuthMethod.OAUTH) {
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "Run `claude setup-token` in your terminal to get a token. Setup tokens use your Claude Pro/Max subscription.",
+                        withCommand("Run ", "claude setup-token", " in your terminal to get a token. Setup tokens use your Claude Pro/Max subscription."),
                         color = Fog,
                         fontSize = 12.sp,
                     )
@@ -618,9 +773,11 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
                         fontSize = 12.sp,
                     )
                 } else {
+                    // The key does leave the phone: in the request to the provider.
+                    val destination = if (needsBaseUrl) "the endpoint above" else selectedProvider!!.name
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "Your key will be encrypted with AES-256-GCM and stored securely. It never leaves this device.",
+                        "Your key is encrypted with AES-256-GCM, stored on this device and only sent to $destination.",
                         color = Fog,
                         fontSize = 12.sp,
                     )

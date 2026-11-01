@@ -1,62 +1,48 @@
 package com.byoky.app.ui.screens
 
-import androidx.compose.foundation.background
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.byoky.app.data.PasswordStrength
 import com.byoky.app.data.WalletStore
 import com.byoky.app.ui.components.BracketAction
 import com.byoky.app.ui.components.BrandMark
 import com.byoky.app.ui.components.CapsText
 import com.byoky.app.ui.components.Muninn
+import com.byoky.app.ui.components.PasswordMeter
 import com.byoky.app.ui.components.PrimaryButton
 import com.byoky.app.ui.components.RavenMood
 import com.byoky.app.ui.components.RetroTextField
 import com.byoky.app.ui.components.StatusLine
-import com.byoky.app.ui.components.dotGrid
 import com.byoky.app.ui.components.rememberRavenGaze
-import com.byoky.app.ui.components.scanlines
-import com.byoky.app.ui.components.watchedBy
 import com.byoky.app.ui.theme.*
 import kotlinx.coroutines.launch
 
-internal data class PasswordQualityResult(
-    val icon: ImageVector,
-    val message: String,
-    val color: Color,
-    val isAcceptable: Boolean,
-) {
-    companion object {
-        fun evaluate(password: String): PasswordQualityResult {
-            if (password.length < 12) return PasswordQualityResult(Icons.Default.Warning, "Minimum 12 characters", Amber, false)
-            if (password.toSet().size < 4) return PasswordQualityResult(Icons.Default.Warning, "Too many repeated characters", Amber, false)
-            val hasLower = password.any { it.isLowerCase() }
-            val hasUpper = password.any { it.isUpperCase() }
-            val hasDigit = password.any { it.isDigit() }
-            val hasSymbol = password.any { !it.isLetterOrDigit() }
-            val classCount = listOf(hasLower, hasUpper, hasDigit, hasSymbol).count { it }
-            if (classCount < 2) return PasswordQualityResult(Icons.Default.Warning, "Use a mix of letters, numbers, or symbols", Amber, false)
-            if (classCount >= 3 && password.length >= 16) return PasswordQualityResult(Icons.Default.Shield, "Strong password", Signal, true)
-            return PasswordQualityResult(Icons.Default.CheckCircle, "Fair — consider adding more variety", Phosphor, true)
-        }
-    }
-}
+/**
+ * Create Wallet is enabled once the master password passes the rule the
+ * extension's setup and the export dialog apply (core checkPasswordStrength:
+ * 12+ characters and a score of 2 or more) and the confirmation matches.
+ */
+internal fun canCreateWallet(password: String, confirmPassword: String): Boolean =
+    PasswordStrength.isAcceptableForExport(password) && password == confirmPassword
 
 private enum class OnboardingStep { WELCOME, PASSWORD }
 
 @Composable
 fun OnboardingScreen(wallet: WalletStore) {
-    var step by remember { mutableStateOf(OnboardingStep.WELCOME) }
+    // The step survives the activity being recreated; the passwords are
+    // deliberately never put in saved state.
+    var step by rememberSaveable { mutableStateOf(OnboardingStep.WELCOME) }
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
@@ -64,23 +50,33 @@ fun OnboardingScreen(wallet: WalletStore) {
     val scope = rememberCoroutineScope()
     val gaze = rememberRavenGaze()
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Void)
-            .dotGrid()
-            .watchedBy(gaze)
-            .scanlines()
-            .systemBarsPadding()
-            .padding(horizontal = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        BrandMark(modifier = Modifier.align(Alignment.Start).padding(top = 16.dp))
+    fun createWallet() {
+        if (creating || !canCreateWallet(password, confirmPassword)) return
+        creating = true
+        error = null
+        scope.launch {
+            // Hashing runs on Dispatchers.Default inside createPassword().
+            try {
+                wallet.createPassword(password)
+            } catch (e: Exception) {
+                error = e.message
+            }
+            creating = false
+        }
+    }
 
-        Spacer(Modifier.weight(1f))
+    // System back on the password step returns to the welcome step, like [ Back ].
+    BackHandler(enabled = step == OnboardingStep.PASSWORD && !creating) {
+        step = OnboardingStep.WELCOME
+        error = null
+    }
 
+    LockScreenFrame(
+        gaze = gaze,
+        header = { BrandMark(modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) },
+    ) { compact ->
         if (step == OnboardingStep.WELCOME) {
-            Muninn(RavenMood.WATCHING, modifier = Modifier.size(220.dp), gaze = gaze)
+            Muninn(RavenMood.WATCHING, modifier = Modifier.size(if (compact) 96.dp else 220.dp), gaze = gaze)
 
             StatusLine("New wallet")
 
@@ -111,7 +107,7 @@ fun OnboardingScreen(wallet: WalletStore) {
 
         } else {
             // Password step
-            Muninn(RavenMood.WATCHING, modifier = Modifier.size(120.dp), gaze = gaze)
+            Muninn(RavenMood.WATCHING, modifier = Modifier.size(if (compact) 72.dp else 120.dp), gaze = gaze)
 
             StatusLine("New wallet")
 
@@ -144,33 +140,35 @@ fun OnboardingScreen(wallet: WalletStore) {
                 mono = true,
                 secret = true,
                 visualTransformation = PasswordVisualTransformation(),
+                // Next moves on to the confirm field.
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                 modifier = Modifier.fillMaxWidth(),
             )
 
+            // The meter rates the password above it; the confirm field says
+            // when the two differ, so a disabled Create Wallet always has a reason.
+            if (password.isNotEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                PasswordMeter(password, modifier = Modifier.fillMaxWidth())
+            }
+
             Spacer(Modifier.height(14.dp))
 
+            val mismatch = confirmPassword.isNotEmpty() && confirmPassword != password
             RetroTextField(
                 value = confirmPassword,
                 onValueChange = { confirmPassword = it },
                 label = "Confirm password",
                 mono = true,
                 secret = true,
+                isError = mismatch,
+                // Part of the field, so it stays above the keyboard with it.
+                supportingText = if (mismatch) "Passwords do not match" else null,
                 visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                keyboardActions = KeyboardActions(onGo = { createWallet() }),
                 modifier = Modifier.fillMaxWidth(),
             )
-
-            if (password.isNotEmpty()) {
-                val quality = PasswordQualityResult.evaluate(password)
-                Spacer(Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Icon(quality.icon, null, tint = quality.color, modifier = Modifier.size(14.dp))
-                    Text(quality.message, color = quality.color, style = MonoStyle)
-                }
-            }
 
             error?.let {
                 Spacer(Modifier.height(8.dp))
@@ -179,26 +177,10 @@ fun OnboardingScreen(wallet: WalletStore) {
 
             Spacer(Modifier.height(24.dp))
 
-            val quality = if (password.isNotEmpty()) PasswordQualityResult.evaluate(password) else null
-            val isValid = quality?.isAcceptable == true && password == confirmPassword
-
             PrimaryButton(
                 if (creating) "Creating wallet…" else "Create Wallet",
-                onClick = {
-                    if (creating) return@PrimaryButton
-                    creating = true
-                    error = null
-                    scope.launch {
-                        // Hashing runs on Dispatchers.Default inside createPassword().
-                        try {
-                            wallet.createPassword(password)
-                        } catch (e: Exception) {
-                            error = e.message
-                        }
-                        creating = false
-                    }
-                },
-                enabled = isValid && !creating,
+                onClick = { createWallet() },
+                enabled = canCreateWallet(password, confirmPassword) && !creating,
                 busy = creating,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -207,19 +189,7 @@ fun OnboardingScreen(wallet: WalletStore) {
 
             Spacer(Modifier.height(8.dp))
 
-            BracketAction("Back", onClick = { step = OnboardingStep.WELCOME }, color = Fog)
-        }
-
-        Spacer(Modifier.weight(1f))
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text("Keys stay on this device", style = MonoStyle.copy(fontSize = 11.sp), color = Dim)
-            Text("AES-256-GCM", style = MonoStyle.copy(fontSize = 11.sp), color = Dim)
+            BracketAction("Back", onClick = { step = OnboardingStep.WELCOME; error = null }, color = Fog)
         }
     }
 }

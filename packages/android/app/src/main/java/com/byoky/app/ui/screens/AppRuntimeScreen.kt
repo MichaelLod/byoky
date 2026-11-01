@@ -1,23 +1,31 @@
 package com.byoky.app.ui.screens
 
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.webkit.RenderProcessGoneDetail
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
@@ -38,6 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -51,6 +60,7 @@ import com.byoky.app.data.InstalledApp
 import com.byoky.app.data.WalletStore
 import com.byoky.app.proxy.ProxyService
 import com.byoky.app.runtime.AppBridge
+import com.byoky.app.ui.components.BracketAction
 import com.byoky.app.ui.components.RetroTopBar
 import com.byoky.app.ui.theme.*
 
@@ -70,6 +80,12 @@ fun AppRuntimeScreen(wallet: WalletStore, appId: String, onClose: () -> Unit) {
     val bridgeSupported = remember { WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER) }
     var webView by remember { mutableStateOf<WebView?>(null) }
     var progress by remember { mutableIntStateOf(0) }
+    // The app's page failed to load (offline, DNS, TLS, server down).
+    var loadFailed by remember { mutableStateOf(false) }
+    val reload: () -> Unit = {
+        loadFailed = false
+        webView?.reload()
+    }
 
     BackHandler {
         val wv = webView
@@ -106,7 +122,7 @@ fun AppRuntimeScreen(wallet: WalletStore, appId: String, onClose: () -> Unit) {
                 },
                 actions = {
                     if (webView != null) {
-                        IconButton(onClick = { webView?.reload() }) {
+                        IconButton(onClick = reload) {
                             Icon(Icons.Default.Refresh, contentDescription = "Reload")
                         }
                     }
@@ -123,13 +139,19 @@ fun AppRuntimeScreen(wallet: WalletStore, appId: String, onClose: () -> Unit) {
                     "Your Android System WebView is too old to run apps inside the wallet. " +
                         "Update Android System WebView from the Play Store and try again."
                 )
-                else -> AppWebView(
-                    wallet = wallet,
-                    app = app,
-                    onCreated = { webView = it },
-                    onProgress = { progress = it },
-                    onRendererGone = onClose,
-                )
+                else -> {
+                    AppWebView(
+                        wallet = wallet,
+                        app = app,
+                        onCreated = { webView = it },
+                        onProgress = { progress = it },
+                        onRendererGone = onClose,
+                        onLoadStarted = { loadFailed = false },
+                        onLoadFailed = { loadFailed = true },
+                    )
+                    // Covers Chromium's white "Webpage not available" page.
+                    if (loadFailed) LoadFailedMessage(host = app.origin.removePrefix("https://"), onRetry = reload)
+                }
             }
             if (progress in 1..99) {
                 LinearProgressIndicator(
@@ -153,6 +175,29 @@ private fun RuntimeMessage(text: String) {
     }
 }
 
+@Composable
+private fun LoadFailedMessage(host: String, onRetry: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Void)
+            .padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(host, style = MonoStyle.copy(fontSize = 15.sp, lineHeight = 20.sp), color = Bone, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Can't reach $host. Check your connection and try again.",
+            color = Fog,
+            fontSize = 14.sp,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(12.dp))
+        BracketAction("Retry", onClick = onRetry)
+    }
+}
+
 @SuppressLint("SetJavaScriptEnabled", "RequiresFeature")
 @Composable
 private fun AppWebView(
@@ -161,6 +206,8 @@ private fun AppWebView(
     onCreated: (WebView) -> Unit,
     onProgress: (Int) -> Unit,
     onRendererGone: () -> Unit,
+    onLoadStarted: () -> Unit,
+    onLoadFailed: () -> Unit,
 ) {
     val context = LocalContext.current
     val origin = app.origin
@@ -169,6 +216,16 @@ private fun AppWebView(
     }
     DisposableEffect(bridge) {
         onDispose { bridge.dispose() }
+    }
+
+    // <input type=file>: Android WebView shows no picker of its own, so the
+    // page's request goes to the system file picker and is answered once.
+    val fileRequest = remember { FileChooserRequest() }
+    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        fileRequest.finish(pickedFiles(result.resultCode, result.data))
+    }
+    DisposableEffect(fileRequest) {
+        onDispose { fileRequest.finish(null) }
     }
 
     val openExternally: (Uri) -> Unit = { uri ->
@@ -187,6 +244,8 @@ private fun AppWebView(
         modifier = Modifier.fillMaxSize(),
         factory = { ctx ->
             WebView(ctx).apply {
+                // Void, not white, until the first page shows (see onPageCommitVisible).
+                setBackgroundColor(Void.toArgb())
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.allowFileAccess = false
@@ -209,10 +268,26 @@ private fun AppWebView(
                     injectOnPageStart = !documentStart,
                     openExternally = openExternally,
                     onRendererGone = onRendererGone,
+                    onLoadStarted = onLoadStarted,
+                    onLoadFailed = onLoadFailed,
                 )
                 webChromeClient = object : WebChromeClient() {
                     override fun onProgressChanged(view: WebView, newProgress: Int) {
                         onProgress(newProgress)
+                    }
+
+                    override fun onShowFileChooser(
+                        webView: WebView,
+                        filePathCallback: ValueCallback<Array<Uri>>,
+                        fileChooserParams: FileChooserParams,
+                    ): Boolean {
+                        fileRequest.start(filePathCallback)
+                        try {
+                            filePicker.launch(fileChooserParams.createIntent())
+                        } catch (_: ActivityNotFoundException) {
+                            fileRequest.finish(null)
+                        }
+                        return true
                     }
                 }
                 loadUrl(app.url)
@@ -226,11 +301,37 @@ private fun AppWebView(
     )
 }
 
+/** The page's pending file request. Every callback is answered exactly once, null when cancelled. */
+private class FileChooserRequest {
+    private var callback: ValueCallback<Array<Uri>>? = null
+
+    fun start(newCallback: ValueCallback<Array<Uri>>) {
+        finish(null)
+        callback = newCallback
+    }
+
+    fun finish(uris: Array<Uri>?) {
+        val pending = callback ?: return
+        callback = null
+        pending.onReceiveValue(uris)
+    }
+}
+
+/** The files the picker returned, one or several, or null when it was cancelled. */
+private fun pickedFiles(resultCode: Int, data: Intent?): Array<Uri>? {
+    if (resultCode != Activity.RESULT_OK) return null
+    WebChromeClient.FileChooserParams.parseResult(resultCode, data)?.let { return it }
+    val clip = data?.clipData ?: return null
+    return Array(clip.itemCount) { clip.getItemAt(it).uri }
+}
+
 private class AppWebViewClient(
     private val appOrigin: String,
     private val injectOnPageStart: Boolean,
     private val openExternally: (Uri) -> Unit,
     private val onRendererGone: () -> Unit,
+    private val onLoadStarted: () -> Unit,
+    private val onLoadFailed: () -> Unit,
 ) : WebViewClient() {
     private var lastBlockedUrl: String? = null
     private var lastBlockedAt = 0L
@@ -246,6 +347,7 @@ private class AppWebViewClient(
 
     override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
         super.onPageStarted(view, url, favicon)
+        onLoadStarted()
         if (leaveIfOffOrigin(view, url)) return
         // Fallback for WebViews without document-start scripts. Racier (page
         // scripts may run first) but the SDK only looks for the wallet when
@@ -282,6 +384,21 @@ private class AppWebViewClient(
         // show a blank page rather than reloading into the same redirect.
         if (view.canGoBack()) view.goBack() else view.loadUrl("about:blank")
         return true
+    }
+
+    override fun onPageCommitVisible(view: WebView, url: String?) {
+        super.onPageCommitVisible(view, url)
+        // Back to the browser default once a page is up: a page that sets no
+        // background of its own expects white behind its text.
+        view.setBackgroundColor(android.graphics.Color.WHITE)
+    }
+
+    override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+        super.onReceivedError(view, request, error)
+        if (!request.isForMainFrame) return
+        // The wallet shows its own message (and Retry) instead of Chromium's error page.
+        view.stopLoading()
+        onLoadFailed()
     }
 
     override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {

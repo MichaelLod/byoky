@@ -391,6 +391,17 @@ class WalletStore(context: Context) {
         saveCredentials()
     }
 
+    /**
+     * Point a credential of a provider without a fixed host (Azure OpenAI,
+     * Ollama, LM Studio) at another server. The URL passes the same check as
+     * when the key was added, and the id stays, so group pins survive.
+     * Throws IllegalArgumentException for an unknown id or an unusable URL.
+     */
+    fun updateCredentialEndpoint(credentialId: String, newBaseUrl: String) {
+        _credentials.update { withCredentialEndpoint(it, credentialId, newBaseUrl) }
+        saveCredentials()
+    }
+
     fun decryptKey(credential: Credential): String {
         val password = masterPassword ?: throw IllegalStateException("Wallet locked")
         val encrypted = prefs.getString("key_${credential.id}", null)
@@ -1377,4 +1388,20 @@ class WalletStore(context: Context) {
             "sessions",
         )
     }
+}
+
+/**
+ * [credentials] with [credentialId]'s server URL set to [input], normalized
+ * by [CredentialBaseUrl]. Throws IllegalArgumentException when there is no
+ * such credential or the URL isn't acceptable for its provider (fixed-host
+ * providers never take one).
+ */
+internal fun withCredentialEndpoint(credentials: List<Credential>, credentialId: String, input: String): List<Credential> {
+    val index = credentials.indexOfFirst { it.id == credentialId }
+    require(index >= 0) { "Credential not found" }
+    val credential = credentials[index]
+    val baseUrl = requireNotNull(CredentialBaseUrl.normalize(credential.providerId, input)) {
+        "A valid server URL is required for this provider"
+    }
+    return credentials.toMutableList().apply { this[index] = credential.copy(baseUrl = baseUrl) }
 }

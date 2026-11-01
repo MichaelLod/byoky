@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -17,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.byoky.app.BuildConfig
@@ -35,7 +37,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
-fun SettingsScreen(wallet: WalletStore) {
+fun SettingsScreen(wallet: WalletStore, onBack: () -> Unit) {
     val context = LocalContext.current
     var showResetWalletConfirm by remember { mutableStateOf(false) }
 
@@ -43,7 +45,17 @@ fun SettingsScreen(wallet: WalletStore) {
         modifier = Modifier
             .background(Void)
             .dotGrid(),
-        topBar = { RetroTopBar(title = "Settings") },
+        topBar = {
+            // Pushed from the Wallet tab, so it gets a way back like any pushed screen.
+            RetroTopBar(
+                title = "Settings",
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+            )
+        },
         containerColor = Color.Transparent,
     ) { padding ->
         Column(
@@ -256,14 +268,22 @@ private fun TranslationDebugCard() {
 
 @Composable
 private fun InfoRow(label: String, value: String) {
+    // The value takes what the label leaves and wraps there, right-aligned,
+    // so the two never run into each other at large font sizes.
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 5.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(label, color = Fog, fontSize = 14.sp)
-        Text(value, color = Bone, style = MonoStyle.copy(fontSize = 13.sp))
+        Text(
+            value,
+            color = Bone,
+            style = MonoStyle.copy(fontSize = 13.sp),
+            textAlign = TextAlign.End,
+            modifier = Modifier.weight(1f),
+        )
     }
 }

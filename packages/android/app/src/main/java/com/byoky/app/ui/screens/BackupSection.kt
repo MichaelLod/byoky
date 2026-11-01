@@ -29,6 +29,7 @@ import com.byoky.app.data.UnlockResult
 import com.byoky.app.data.WalletBackup
 import com.byoky.app.data.WalletStore
 import com.byoky.app.ui.components.DialogButton
+import com.byoky.app.ui.components.PasswordMeter
 import com.byoky.app.ui.components.RetroDialog
 import com.byoky.app.ui.components.RetroTextField
 import com.byoky.app.ui.theme.*
@@ -262,7 +263,6 @@ private fun ExportPasswordDialog(wallet: WalletStore, onDismiss: () -> Unit, onC
     var verifying by remember { mutableStateOf(false) }
     var password by remember { mutableStateOf("") }
     var confirm by remember { mutableStateOf("") }
-    val strength = remember(password) { PasswordStrength.check(password) }
     val strongEnough = PasswordStrength.isAcceptableForExport(password)
     val matches = password == confirm
 
@@ -284,28 +284,7 @@ private fun ExportPasswordDialog(wallet: WalletStore, onDismiss: () -> Unit, onC
                 walletPasswordError?.let { Text(it, color = Alarm, fontSize = 12.sp) }
                 PasswordField(password, { password = it }, "Export password")
                 if (password.isNotEmpty()) {
-                    val color = when (strength.score) {
-                        0, 1 -> Alarm
-                        2 -> Amber
-                        else -> Signal
-                    }
-                    Column {
-                        LinearProgressIndicator(
-                            progress = { (strength.score + 1) / 5f },
-                            modifier = Modifier.fillMaxWidth().height(4.dp),
-                            color = color,
-                            trackColor = Seam,
-                            strokeCap = StrokeCap.Butt,
-                            gapSize = 0.dp,
-                            drawStopIndicator = {},
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            strength.label + (strength.feedback.firstOrNull()?.let { " · $it" } ?: ""),
-                            color = color,
-                            fontSize = 12.sp,
-                        )
-                    }
+                    PasswordMeter(password)
                 }
                 PasswordField(
                     confirm,

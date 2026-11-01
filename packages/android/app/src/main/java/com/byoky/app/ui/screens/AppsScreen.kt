@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -20,6 +21,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
@@ -96,6 +100,11 @@ fun AppsScreen(wallet: WalletStore) {
     var editingGroup by remember { mutableStateOf<Group?>(null) }
     var creatingGroup by remember { mutableStateOf(false) }
     var pendingMove by remember { mutableStateOf<PendingCapabilityMove?>(null) }
+    // Destructive actions wait for a confirmation.
+    var confirmDisconnect by remember { mutableStateOf<Session?>(null) }
+    var confirmDisconnectAll by remember { mutableStateOf(false) }
+    var confirmDeleteGroup by remember { mutableStateOf<Group?>(null) }
+    var menuOpen by remember { mutableStateOf(false) }
 
     val orderedGroups = remember(groups) {
         val def = groups.filter { it.id == DEFAULT_GROUP_ID }
@@ -112,10 +121,20 @@ fun AppsScreen(wallet: WalletStore) {
                 title = "Connected",
                 actions = {
                     if (sessions.size > 1) {
-                        IconButton(onClick = {
-                            sessions.forEach { wallet.revokeSession(it) }
-                        }) {
-                            Icon(Icons.Default.Close, "Disconnect all", tint = Alarm)
+                        Box {
+                            IconButton(onClick = { menuOpen = true }) {
+                                Icon(Icons.Default.MoreVert, "More options")
+                            }
+                            RetroDropdownMenu(
+                                expanded = menuOpen,
+                                onDismissRequest = { menuOpen = false },
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Disconnect all", color = Alarm) },
+                                    onClick = { menuOpen = false; confirmDisconnectAll = true },
+                                    leadingIcon = { Icon(Icons.Default.LinkOff, null, tint = Alarm) },
+                                )
+                            }
                         }
                     }
                 },
@@ -147,9 +166,8 @@ fun AppsScreen(wallet: WalletStore) {
                     onMove = { movingApp = it },
                     onEditAllowance = { editingAllowanceFor = it },
                     onEditGroup = { editingGroup = group },
-                    onDeleteGroup = {
-                        try { wallet.deleteGroup(group.id) } catch (_: Throwable) {}
-                    },
+                    onDeleteGroup = { confirmDeleteGroup = group },
+                    onRevoke = { confirmDisconnect = it },
                 )
             }
 
@@ -243,6 +261,44 @@ fun AppsScreen(wallet: WalletStore) {
         )
     }
 
+    confirmDisconnect?.let { session ->
+        val host = displayHostOf(session.appOrigin)
+        ConfirmDestructiveDialog(
+            title = "Disconnect $host?",
+            body = "It loses access to your keys. Open it again from the Apps tab to reconnect.",
+            confirmLabel = "Disconnect",
+            onConfirm = { wallet.revokeSession(session); confirmDisconnect = null },
+            onDismiss = { confirmDisconnect = null },
+        )
+    }
+
+    if (confirmDisconnectAll) {
+        ConfirmDestructiveDialog(
+            title = "Disconnect ${sessions.size} app${if (sessions.size == 1) "" else "s"}?",
+            body = "They lose access to your keys. Open an app again from the Apps tab to reconnect it.",
+            confirmLabel = "Disconnect all",
+            onConfirm = {
+                sessions.forEach { wallet.revokeSession(it) }
+                confirmDisconnectAll = false
+            },
+            onDismiss = { confirmDisconnectAll = false },
+        )
+    }
+
+    confirmDeleteGroup?.let { group ->
+        // The extension's wording.
+        ConfirmDestructiveDialog(
+            title = "Delete group \"${group.name}\"?",
+            body = "Apps in this group will move back to Default.",
+            confirmLabel = "Delete",
+            onConfirm = {
+                try { wallet.deleteGroup(group.id) } catch (_: Throwable) {}
+                confirmDeleteGroup = null
+            },
+            onDismiss = { confirmDeleteGroup = null },
+        )
+    }
+
     editingAllowanceFor?.let { session ->
         val allowance = allowances.firstOrNull { it.origin == session.appOrigin }
         AllowanceDialog(
@@ -272,6 +328,27 @@ fun AppsScreen(wallet: WalletStore) {
     }
 }
 
+private fun displayHostOf(origin: String): String =
+    try { java.net.URL(origin).host ?: origin } catch (_: Exception) { origin }
+
+/** Asked before disconnecting apps or deleting a group. */
+@Composable
+private fun ConfirmDestructiveDialog(
+    title: String,
+    body: String,
+    confirmLabel: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    RetroDialog(
+        onDismissRequest = onDismiss,
+        title = title,
+        text = { Text(body, fontSize = 13.sp) },
+        confirmButton = { DialogButton(confirmLabel, onClick = onConfirm, color = Alarm) },
+        dismissButton = { DialogButton("Cancel", onClick = onDismiss, color = Fog) },
+    )
+}
+
 /**
  * One group with its assigned apps. Header shows the group name + provider/model
  * pin, body lists the connected apps, footer is empty placeholder when nothing's
@@ -287,6 +364,7 @@ private fun GroupBucket(
     onEditAllowance: (Session) -> Unit,
     onEditGroup: () -> Unit,
     onDeleteGroup: () -> Unit,
+    onRevoke: (Session) -> Unit,
 ) {
     val isDefault = group.id == DEFAULT_GROUP_ID
     val provider = Provider.find(group.providerId)
@@ -403,7 +481,7 @@ private fun GroupBucket(
                         tokensUsed = wallet.tokenUsage(session.appOrigin),
                         onMove = { onMove(session) },
                         onEditAllowance = { onEditAllowance(session) },
-                        onRevoke = { wallet.revokeSession(session) },
+                        onRevoke = { onRevoke(session) },
                     )
                 }
             }
@@ -603,48 +681,53 @@ private fun MoveToGroupSheet(
             Spacer(Modifier.height(16.dp))
             SectionLabel("Move to group")
             Spacer(Modifier.height(8.dp))
-            groups.forEach { group ->
-                val provider = Provider.find(group.providerId)
-                val current = group.id == currentGroupId
-                Surface(
-                    onClick = { onSelect(group.id) },
-                    color = if (current) VioletSoft else Color.Transparent,
-                    shape = RectangleShape,
-                    border = BorderStroke(1.dp, if (current) Violet else Seam),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 3.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+            // A radio choice, so TalkBack announces the app's current group.
+            Column(Modifier.selectableGroup()) {
+                groups.forEach { group ->
+                    val provider = Provider.find(group.providerId)
+                    val current = group.id == currentGroupId
+                    Surface(
+                        selected = current,
+                        onClick = { onSelect(group.id) },
+                        color = if (current) VioletSoft else Color.Transparent,
+                        shape = RectangleShape,
+                        border = BorderStroke(1.dp, if (current) Violet else Seam),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 3.dp)
+                            .semantics { role = Role.RadioButton },
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                group.name,
-                                fontWeight = FontWeight.Medium,
-                                color = Bone,
-                                fontSize = 14.sp,
-                            )
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    if (group.providerId.isEmpty()) "No routing"
-                                    else provider?.name ?: group.providerId,
-                                    color = Fog,
-                                    fontSize = 12.sp,
+                                    group.name,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Bone,
+                                    fontSize = 14.sp,
                                 )
-                                if (!group.model.isNullOrEmpty()) {
-                                    Text(" · ", color = Fog, fontSize = 12.sp)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
-                                        group.model!!,
+                                        if (group.providerId.isEmpty()) "No routing"
+                                        else provider?.name ?: group.providerId,
                                         color = Fog,
-                                        style = MonoStyle,
+                                        fontSize = 12.sp,
                                     )
+                                    if (!group.model.isNullOrEmpty()) {
+                                        Text(" · ", color = Fog, fontSize = 12.sp)
+                                        Text(
+                                            group.model!!,
+                                            color = Fog,
+                                            style = MonoStyle,
+                                        )
+                                    }
                                 }
                             }
-                        }
-                        if (current) {
-                            Icon(Icons.Default.Check, null, tint = Phosphor)
+                            if (current) {
+                                Icon(Icons.Default.Check, null, tint = Phosphor)
+                            }
                         }
                     }
                 }

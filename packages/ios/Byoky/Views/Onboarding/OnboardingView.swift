@@ -121,6 +121,13 @@ struct OnboardingView: View {
                     .retroField(focused: focusedField == .password)
                     .accessibilityIdentifier("onboarding.password")
 
+                // The strength line rates the password above it; the confirm
+                // field says when the two differ, so a disabled Create Wallet
+                // always has a reason.
+                if !password.isEmpty {
+                    PasswordStrengthLine(strength: BackupPasswordStrength.check(password))
+                }
+
                 SectionLabel("Confirm password", color: Theme.fog)
                     .padding(.top, 8)
                 SecureField("Confirm password", text: $confirmPassword)
@@ -131,15 +138,11 @@ struct OnboardingView: View {
                     .retroField(focused: focusedField == .confirm)
                     .accessibilityIdentifier("onboarding.confirmPassword")
 
-                if !password.isEmpty {
-                    let quality = PasswordQuality.evaluate(password)
-                    HStack(spacing: 6) {
-                        Image(systemName: quality.icon)
-                        Text(quality.message)
-                    }
-                    .font(.mono(12, relativeTo: .caption))
-                    .foregroundStyle(quality.color)
-                    .padding(.top, 4)
+                if passwordsDiffer {
+                    Label("Passwords do not match", systemImage: "xmark.circle")
+                        .font(.mono(12, relativeTo: .caption))
+                        .foregroundStyle(Theme.alarm)
+                        .accessibilityIdentifier("onboarding.passwordMismatch")
                 }
 
                 if let error {
@@ -166,8 +169,16 @@ struct OnboardingView: View {
         }
     }
 
+    private var passwordsDiffer: Bool {
+        !confirmPassword.isEmpty && confirmPassword != password
+    }
+
+    /// The extension's master-password rule (core checkPasswordStrength: 12+
+    /// characters, score 2 or more), the same one the export screen applies.
     private var isValid: Bool {
-        password == confirmPassword && PasswordQuality.evaluate(password).isAcceptable
+        password == confirmPassword
+            && password.utf16.count >= BackupPasswordStrength.minLength
+            && BackupPasswordStrength.check(password).isAcceptable
     }
 
     private func createWallet() {
@@ -179,59 +190,23 @@ struct OnboardingView: View {
     }
 }
 
-enum PasswordQuality {
-    case tooShort
-    case weak(String)
-    case fair
-    case strong
+/// Strength label and first hint for a password being chosen, scored like
+/// the extension and the export screen score it.
+private struct PasswordStrengthLine: View {
+    let strength: BackupPasswordStrength
 
-    var icon: String {
-        switch self {
-        case .tooShort, .weak: return "exclamationmark.triangle"
-        case .fair: return "checkmark.circle"
-        case .strong: return "checkmark.shield"
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Label(strength.label, systemImage: strength.isAcceptable ? "checkmark.shield" : "exclamationmark.triangle")
+                .font(.mono(12, relativeTo: .caption))
+                .foregroundStyle(strength.isAcceptable ? Theme.signal : Theme.amber)
+            if let hint = strength.feedback.first {
+                Text(hint)
+                    .font(.caption)
+                    .foregroundStyle(Theme.fog)
+            }
         }
-    }
-
-    var message: String {
-        switch self {
-        case .tooShort: return "Minimum 12 characters"
-        case .weak(let reason): return reason
-        case .fair: return "Fair — consider adding more variety"
-        case .strong: return "Strong password"
-        }
-    }
-
-    var color: Color {
-        switch self {
-        case .tooShort: return Theme.dim
-        case .weak: return Theme.amber
-        case .fair: return Theme.phosphor
-        case .strong: return Theme.signal
-        }
-    }
-
-    var isAcceptable: Bool {
-        switch self {
-        case .tooShort, .weak: return false
-        case .fair, .strong: return true
-        }
-    }
-
-    static func evaluate(_ password: String) -> PasswordQuality {
-        if password.count < 12 { return .tooShort }
-
-        let uniqueChars = Set(password)
-        if uniqueChars.count < 4 { return .weak("Too many repeated characters") }
-
-        let hasLower = password.rangeOfCharacter(from: .lowercaseLetters) != nil
-        let hasUpper = password.rangeOfCharacter(from: .uppercaseLetters) != nil
-        let hasDigit = password.rangeOfCharacter(from: .decimalDigits) != nil
-        let hasSymbol = password.rangeOfCharacter(from: CharacterSet.alphanumerics.inverted) != nil
-        let classCount = [hasLower, hasUpper, hasDigit, hasSymbol].filter { $0 }.count
-
-        if classCount < 2 { return .weak("Use a mix of letters, numbers, or symbols") }
-        if classCount >= 3 && password.count >= 16 { return .strong }
-        return .fair
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("onboarding.passwordStrength")
     }
 }

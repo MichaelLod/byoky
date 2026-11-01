@@ -1,0 +1,105 @@
+appId: com.byoky.app
+name: wallet-flow
+tags:
+  - ui
+---
+# Wallet card and add-key sheet regressions. Needs no API keys: the keys
+# are dummies that are only stored, never sent.
+#
+# Coverage:
+#   1. The auto-filled label follows the provider: picking OpenAI and then
+#      Anthropic saves the key as "Anthropic", not "OpenAI".
+#   2. A setup token shows as "Setup Token" on its card, as in the sheet.
+#   3. A local server's URL shows on its card and can be changed there.
+#   4. Settings has a back arrow.
+#   5. Deleting a routing group asks first.
+#
+# Run:
+#   cd packages/android/maestro
+#   maestro test wallet-flow.yaml
+
+- runFlow:
+    file: subflows/reset_and_launch.yaml
+
+- runFlow:
+    file: subflows/create_wallet.yaml
+    env:
+      PASSWORD: "TestPassword123!long"
+
+# 1 + 2. OpenAI, then Anthropic, as a setup token.
+- tapOn: "Add API Key"
+- tapOn: "OpenAI"
+- tapOn: "Anthropic"
+- tapOn: "Setup Token"
+- tapOn:
+    text: "Setup Token"
+    index: 1
+- inputText: "sk-ant-oat01-maestro-dummy"
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      text: "Save"
+    direction: DOWN
+- tapOn: "Save"
+- extendedWaitUntil:
+    visible: "1 credential"
+    timeout: 30000
+# The card reads "Anthropic · SETUP TOKEN" (described as "Anthropic, Setup Token").
+- assertVisible: "Anthropic, Setup Token"
+- assertNotVisible: ".*OpenAI.*"
+- assertNotVisible: ".*OAuth.*"
+
+# 3. Ollama with its default server URL, then point it at 127.0.0.1.
+- tapOn: "Open add menu"
+- tapOn: "Add credential"
+# The provider list scrolls on its own, low in the sheet.
+- repeat:
+    times: 4
+    commands:
+      - swipe:
+          start: "50%, 85%"
+          end: "50%, 65%"
+          duration: 300
+- tapOn: "Ollama \\(local\\)"
+- scrollUntilVisible:
+    element:
+      text: "Save"
+    direction: DOWN
+- tapOn: "Save"
+- extendedWaitUntil:
+    visible: "2 credentials"
+    timeout: 30000
+- tapOn: "http://localhost:11434"
+- assertVisible: "This key is only ever sent to this server."
+- longPressOn:
+    text: "http://localhost:11434"
+    index: 0
+- tapOn: "Select all"
+- inputText: "http://127.0.0.1:11434"
+- hideKeyboard
+- tapOn: "Save"
+- assertVisible: "http://127.0.0.1:11434"
+- assertNotVisible: "http://localhost:11434"
+
+# 4. Settings is pushed from the Wallet tab and has a back arrow.
+- tapOn: "Settings"
+- assertVisible: "Security"
+- tapOn: "Back"
+- assertVisible: "2 credentials"
+
+# 5. Deleting a routing group asks first.
+- tapOn: "Connected"
+- tapOn: "New group"
+- tapOn: "Group name"
+- inputText: "Coding"
+- hideKeyboard
+- tapOn: "Save"
+- tapOn: "Group menu"
+- tapOn: "Delete"
+- assertVisible: "Delete group \"Coding\"\\?"
+- tapOn: "Cancel"
+- assertVisible: "Coding"
+- tapOn: "Group menu"
+- tapOn: "Delete"
+- tapOn: "Delete"
+- assertNotVisible: "Coding"
