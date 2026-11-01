@@ -9,7 +9,8 @@ import { spawnSync, execFileSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, chmodSync, existsSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { SCRIPTS } from './helpers.mjs'
+import { pathToFileURL } from 'node:url'
+import { SCRIPTS, FAKE_ASC_ENV } from './helpers.mjs'
 
 // A whole run bumps with BSD sed and PlistBuddy, like release.sh on a Mac.
 const MAC_ONLY = { skip: process.platform !== 'darwin' && 'release.sh past the bump needs macOS (BSD sed, PlistBuddy)' }
@@ -35,8 +36,12 @@ const plist = (version, build) => `<?xml version="1.0" encoding="UTF-8"?>
 // to CALLS: pnpm (STUB_PNPM_FAIL="<args>" fails that call), npx
 // (STUB_NPX_EXIT), npm (`npm view` answers for STUB_NPM_PUBLISHED: "all" or
 // package names), gh (STUB_GH_RELEASE_MISSING=1: no release yet), xcrun,
-// xcodebuild.
-function sandbox({ version = '1.1.1', versionCode = 30, android = false } = {}) {
+// xcodebuild (an export leaves an .ipa, or a .pkg for the macOS archive).
+// The submit-appstore.mjs stub exits STUB_ASC_<IOS|MAC_OS>_QUICK for retry's
+// first look (ASC_BUILD_WAIT_MIN=0) and STUB_ASC_<platform>_WAIT otherwise.
+// `real` names scripts copied from scripts/ instead of stubbed; run them
+// with run(args, env, routes) to give them a stubbed fetch (fetch-stub.mjs).
+function sandbox({ version = '1.1.1', versionCode = 30, android = false, real = [] } = {}) {
   const base = mkdtempSync(join(tmpdir(), 'byoky-release-sh-'))
   const work = join(base, 'work')
   const bin = join(base, 'bin')
@@ -72,8 +77,17 @@ function sandbox({ version = '1.1.1', versionCode = 30, android = false } = {}) 
   copyFileSync(join(SCRIPTS, 'release.sh'), join(work, 'scripts/release.sh'))
   chmodSync(join(work, 'scripts/release.sh'), 0o755)
   const logArgs = (name) => `#!/bin/sh\necho "${name} $*" >> "$CALLS"\n`
-  write(join(work, 'scripts/store-status.mjs'),
-    "console.log(process.env.STUB_STATUS_JSON ?? '{\"results\":[]}'); process.exitCode = Number(process.env.STUB_STATUS_CODE ?? 0)\n")
+  write(join(work, 'scripts/store-status.mjs'), `import { appendFileSync } from 'node:fs'
+appendFileSync(process.env.CALLS, ['store-status.mjs', ...process.argv.slice(2)].join(' ') + '\\n')
+console.log(process.env.STUB_STATUS_JSON ?? '{"results":[]}'); process.exitCode = Number(process.env.STUB_STATUS_CODE ?? 0)
+`)
+  write(join(work, 'scripts/submit-appstore.mjs'), `import { appendFileSync } from 'node:fs'
+const [version, platform] = process.argv.slice(2)
+const wait = process.env.ASC_BUILD_WAIT_MIN
+appendFileSync(process.env.CALLS, \`submit-appstore.mjs \${version} \${platform} wait=\${wait}\\n\`)
+process.exitCode = Number(process.env[\`STUB_ASC_\${platform}_\${wait === '0' ? 'QUICK' : 'WAIT'}\`] ?? 0)
+`)
+  for (const name of ['ios-unit-tests.sh', ...real]) copyFileSync(join(SCRIPTS, name), join(work, 'scripts', name))
   write(join(work, 'scripts/ios-signing.sh'), logArgs('ios-signing.sh') + 'exit "${STUB_SIGNING_EXIT:-0}"\n')
   write(join(work, 'scripts/sync-mobile-bundle.sh'), logArgs('sync-mobile-bundle.sh'))
   write(join(work, 'scripts/scan-openclaw-plugin.mjs'), '')
@@ -85,7 +99,17 @@ function sandbox({ version = '1.1.1', versionCode = 30, android = false } = {}) 
   git('tag', `v${version}`)
   git('push', '-q', 'origin', 'main', '--tags')
 
-  write(join(bin, 'xcodebuild'), logArgs('xcodebuild'), 0o755)
+  write(join(bin, 'xcodebuild'), logArgs('xcodebuild') + `prev=; archive=; out=
+for a in "$@"; do
+  [ "$prev" = -archivePath ] && archive="$a"
+  [ "$prev" = -exportPath ] && out="$a"
+  prev="$a"
+done
+case "$*" in *-exportArchive*)
+  mkdir -p "$out"
+  case "$archive" in *macOS*) echo pkg > "$out/Byoky.pkg" ;; *) echo ipa > "$out/Byoky.ipa" ;; esac ;;
+esac
+`, 0o755)
   write(join(bin, 'pnpm'), logArgs('pnpm') + '[ "$*" = "${STUB_PNPM_FAIL:-}" ] && exit 1\nexit 0\n', 0o755)
   write(join(bin, 'xcrun'), logArgs('xcrun') + `case "$*" in
   "simctl list runtimes -j") echo '{"runtimes":[{"identifier":"rt.iOS-27-0","platform":"iOS","isAvailable":true,"version":"27.0","supportedDeviceTypes":[{"identifier":"dt.iPhone","productFamily":"iPhone"}]}]}' ;;
@@ -103,7 +127,17 @@ echo "npm $*" >> "$CALLS"
 `, 0o755)
   write(join(bin, 'gh'), logArgs('gh') + '[ "$1 $2" = "release view" ] && [ -n "${STUB_GH_RELEASE_MISSING:-}" ] && exit 1\nexit 0\n', 0o755)
 
-  const run = (args, env = {}) => {
+  const fetchLog = join(base, 'fetch.log')
+  const run = (args, env = {}, routes) => {
+    const fetchEnv = {}
+    if (routes) {
+      writeFileSync(join(base, 'routes.json'), JSON.stringify(routes))
+      Object.assign(fetchEnv, {
+        NODE_OPTIONS: `--import=${pathToFileURL(join(SCRIPTS, 'tests', 'fetch-stub.mjs')).href}`,
+        FETCH_STUB_ROUTES: join(base, 'routes.json'),
+        FETCH_STUB_LOG: fetchLog,
+      })
+    }
     const res = spawnSync('bash', [join(work, 'scripts/release.sh'), ...args], {
       cwd: work,
       encoding: 'utf8',
@@ -117,12 +151,17 @@ echo "npm $*" >> "$CALLS"
         CHROME_CLIENT_ID: 'client',
         CHROME_CLIENT_SECRET: 'secret',
         CHROME_REFRESH_TOKEN: 'refresh',
+        ...fetchEnv,
         ...env,
       },
     })
     const log = existsSync(calls) ? readFileSync(calls, 'utf8') : ''
+    const fetches = existsSync(fetchLog)
+      ? readFileSync(fetchLog, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l))
+      : []
     rmSync(calls, { force: true })
-    return { code: res.status, out: res.stdout + res.stderr, calls: log }
+    rmSync(fetchLog, { force: true })
+    return { code: res.status, out: res.stdout + res.stderr, calls: log, fetches }
   }
   const origin = (...args) => execFileSync('git', ['-C', join(base, 'origin.git'), ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
   return { base, work, git, origin, run, cleanup: () => rmSync(base, { recursive: true, force: true }) }
@@ -161,6 +200,19 @@ test('retry leaves a Chrome submission in review alone', (t) => {
   assert.match(forced.calls, /chrome-webstore-upload upload --source dist\/byoky-chrome-v1\.1\.2-store\.zip/)
 })
 
+test('retry leaves a store whose review state is unknown alone, and fails the run', (t) => {
+  const s = released(t)
+  const status = { results: [{ id: 'chrome', version: '1.1.1', pending: false, unknown: true, unknownReason: 'fetchStatus: HTTP 500' }] }
+  const r = s.run(['retry'], { STUB_STATUS_JSON: JSON.stringify(status), STUB_STATUS_CODE: '3' })
+  assert.equal(r.code, 1, r.out)
+  assert.doesNotMatch(r.calls, /chrome-webstore-upload/)
+  assert.match(r.out, /Chrome Web Store: NOT UPLOADED: its review state is unknown \(fetchStatus: HTTP 500\)/)
+
+  const forced = s.run(['retry', '--allow-pending'], { STUB_STATUS_JSON: JSON.stringify(status), STUB_STATUS_CODE: '3' })
+  assert.equal(forced.code, 0, forced.out)
+  assert.match(forced.calls, /chrome-webstore-upload upload --source dist\/byoky-chrome-v1\.1\.2-store\.zip/)
+})
+
 test('a failed retry upload is not counted and fails the run', (t) => {
   const s = released(t)
   const r = s.run(['retry'], { STUB_NPX_EXIT: '1' })
@@ -187,6 +239,21 @@ test('--dry only checks signing (ios-signing.sh --check), and a failed check is 
   const real = s.run(['1.1.2'], { STUB_SIGNING_EXIT: '1' })
   assert.equal(real.code, 1, real.out)
   assert.match(real.calls, /^ios-signing\.sh $/m)
+})
+
+// --- store reviews ---
+
+test('a pending review or an unreadable review state (store-status exit 3) stops the release unless --allow-pending', (t) => {
+  const s = sandbox()
+  t.after(s.cleanup)
+  const r = s.run(['1.1.2', '--dry'], { STUB_STATUS_CODE: '3' })
+  assert.equal(r.code, 1, r.out)
+  assert.match(r.out, /Error: a review is pending, or a store's review state couldn't be read \(above\)/)
+  assert.doesNotMatch(r.calls, /pnpm install/)
+
+  const allowed = s.run(['1.1.2', '--dry', '--allow-pending'], { STUB_STATUS_CODE: '3' })
+  assert.equal(allowed.code, 0, allowed.out)
+  assert.match(allowed.out, /WARN: a review is pending, or a store's review state is unknown \(above\); --allow-pending releases anyway/)
 })
 
 // --- branch, origin and tags ---
@@ -291,7 +358,9 @@ test('the tests run before anything is bumped, the native ones included', (t) =>
   t.after(s.cleanup)
   const r = s.run(['1.1.2', '--dry'])
   assert.equal(r.code, 0, r.out)
-  const order = ['pnpm install --frozen-lockfile', 'pnpm build:core', 'pnpm build:sdk', 'pnpm typecheck', 'pnpm test',
+  // The typecheck needs the bridge's dist (the OpenClaw plugin imports its types).
+  const order = ['pnpm install --frozen-lockfile', 'pnpm build:core', 'pnpm build:sdk', 'pnpm --filter @byoky/bridge build',
+    'pnpm --filter @byoky/extension exec wxt prepare', 'pnpm typecheck', 'pnpm test',
     'gradlew :app:testDebugUnitTest', 'xcrun simctl create byoky-release-tests-']
   let at = -1
   for (const step of order) {
@@ -299,7 +368,8 @@ test('the tests run before anything is bumped, the native ones included', (t) =>
     assert.ok(i > at, `${step} missing or out of order:\n${r.calls}`)
     at = i
   }
-  assert.match(r.calls, /xcodebuild test -project packages\/ios\/Byoky\.xcodeproj -scheme Byoky -only-testing:ByokyTests -destination id=UDID-1 .*CODE_SIGN_IDENTITY=- /)
+  // scripts/ios-unit-tests.sh: boots the simulator before the tests.
+  assert.match(r.calls, /xcrun simctl bootstatus UDID-1 -b\nxcodebuild test -project packages\/ios\/Byoky\.xcodeproj -scheme Byoky -only-testing:ByokyTests -destination id=UDID-1 .*CODE_SIGN_IDENTITY=- /)
   assert.match(r.calls, /xcrun simctl delete UDID-1/)
 
   const skipped = s.run(['1.1.2', '--dry', '--skip-native-tests'])
@@ -404,4 +474,135 @@ test('pre-flight wants the Android upload keystore when the AAB goes to Google P
   const r = s.run(['1.1.2', '--dry', '--skip-native-tests'], { GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: '/dev/null' })
   assert.equal(r.code, 1, r.out)
   assert.match(r.out, /ERROR: packages\/android\/keystore\.properties is missing/)
+})
+
+// --- 1.1.2 to every store but the Mac, while macOS 1.1.0 waits for review ---
+
+const ASC_API = 'https://api\\.appstoreconnect\\.apple\\.com/v1'
+const ascVersion = (id, versionString, state) => ({ id, attributes: { versionString, appVersionState: state, appStoreState: state } })
+const touchesMac = (c) => /VMAC|MAC_OS/.test(`${c.url} ${c.body ?? ''}`)
+const ascWrites = (fetches) => fetches.filter((c) => c.method !== 'GET' && c.url.includes('appstoreconnect'))
+
+// The stores as the real store-status.mjs and submit-appstore.mjs see them
+// that day: macOS 1.1.0 waits for review, everything else is live at 1.1.1.
+function storesWithMacInReview({ chromeState } = {}) {
+  return [
+    { url: 'registry\\.npmjs\\.org', body: { version: '1.1.1' } },
+    { url: 'clients2\\.google\\.com', body: '<gupdate><app><updatecheck status="ok" version="1.1.1"/></app></gupdate>' },
+    { method: 'POST', url: 'googleapis\\.com/oauth2/v4/token', body: { access_token: 'token' } },
+    { url: ':fetchStatus', body: chromeState ? { submittedItemRevisionStatus: { state: chromeState, distributionChannels: [{ crxVersion: '1.1.1' }] } } : {} },
+    { url: 'play\\.google\\.com', body: '<html>[[["1.1.1"]]</html>' },
+    { url: `${ASC_API}/apps\\?filter`, body: { data: [{ id: 'APP1' }] } },
+    { url: `${ASC_API}/apps/APP1/appStoreVersions\\?filter\\[platform\\]=IOS`, body: { data: [ascVersion('V111', '1.1.1', 'READY_FOR_DISTRIBUTION')] } },
+    { url: `${ASC_API}/apps/APP1/appStoreVersions\\?filter\\[platform\\]=MAC_OS`, body: { data: [ascVersion('VMAC110', '1.1.0', 'WAITING_FOR_REVIEW')] } },
+    { url: `${ASC_API}/builds\\?`, body: { data: [{ id: 'B1', attributes: { version: '31', processingState: 'VALID' } }] } },
+    { method: 'POST', url: `${ASC_API}/appStoreVersions$`, body: { data: ascVersion('VNEW', '1.1.2', 'PREPARE_FOR_SUBMISSION') } },
+    { url: `${ASC_API}/appStoreVersions/[^/]+/appStoreVersionLocalizations`, body: { data: [{ id: 'LOC1', attributes: { locale: 'en-US' } }] } },
+    { method: 'PATCH', url: `${ASC_API}/appStoreVersionLocalizations/LOC1`, body: { data: {} } },
+    { method: 'PATCH', url: `${ASC_API}/appStoreVersions/[^/]+/relationships/build`, status: 204 },
+    { method: 'POST', url: `${ASC_API}/appStoreVersionSubmissions`, status: 201, body: { data: {} } },
+  ]
+}
+const ASC_ENV = { ...FAKE_ASC_ENV, ASC_BUILD_WAIT_MIN: '0', ASC_BUILD_POLL_SEC: '0' }
+
+function assertIosSubmitted(r) {
+  assert.match(r.calls, /^xcrun altool --upload-app --file dist\/byoky-ios-v1\.1\.2\.ipa --type ios /m)
+  const w = ascWrites(r.fetches)
+  assert.ok(w.some((c) => c.url.endsWith('/v1/appStoreVersions') && /"platform":"IOS"/.test(c.body)), JSON.stringify(w, null, 1))
+  assert.ok(w.some((c) => c.url.endsWith('/v1/appStoreVersionSubmissions')), JSON.stringify(w, null, 1))
+  assert.match(r.out, /App Store \(iOS\): submitted for review/)
+}
+
+test('--hold-macos ships everything but the Mac app while macOS 1.1.0 is in review, and never touches it', MAC_ONLY, (t) => {
+  const s = sandbox({ real: ['store-status.mjs', 'submit-appstore.mjs'] })
+  t.after(s.cleanup)
+  assert.match(s.run([]).out, /--hold-macos {11}Ship everything but the Mac app/)
+  const args = ['1.1.2', '--yes', '--skip-native-tests']
+
+  // Without it, the macOS review stops the release before anything happens.
+  const stopped = s.run(args, ASC_ENV, storesWithMacInReview())
+  assert.equal(stopped.code, 1, stopped.out)
+  assert.match(stopped.out, /App Store \(macOS\) v1\.1\.0 WAITING_FOR_REVIEW/)
+  assert.doesNotMatch(stopped.calls, /pnpm install/)
+
+  // It holds back only the Mac app: a Chrome review still stops the release.
+  const chrome = s.run([...args, '--hold-macos'], ASC_ENV, storesWithMacInReview({ chromeState: 'PENDING_REVIEW' }))
+  assert.equal(chrome.code, 1, chrome.out)
+  assert.match(chrome.out, /App Store \(macOS\) v1\.1\.0 WAITING_FOR_REVIEW {2}\[ignored: not counted\]/)
+  assert.doesNotMatch(chrome.calls, /pnpm install/)
+
+  const r = s.run([...args, '--hold-macos'], ASC_ENV, storesWithMacInReview())
+  assert.equal(r.code, 0, r.out)
+  assert.match(r.calls, /^xcodebuild archive .*-scheme Byoky \(macOS\) /m)
+  assert.ok(existsSync(join(s.work, 'dist/byoky-macos-v1.1.2.pkg')), 'the Mac build is kept for retry')
+  assert.doesNotMatch(r.calls, /altool --upload-app --file dist\/byoky-macos/)
+  assertIosSubmitted(r)
+  assert.deepEqual(ascWrites(r.fetches).filter(touchesMac), [])
+  // submit-appstore.mjs never even looked at macOS (store-status asks with limit=10).
+  assert.ok(!r.fetches.some((c) => c.url.includes('filter[platform]=MAC_OS&limit=50')))
+  assert.match(r.out, /App Store \(macOS\): HELD \(--hold-macos\): dist\/byoky-macos-v1\.1\.2\.pkg not uploaded/)
+})
+
+test('--allow-pending uploads the Mac build, but no write reaches the macOS 1.1.0 in review, and iOS goes to review', MAC_ONLY, (t) => {
+  const s = sandbox({ real: ['store-status.mjs', 'submit-appstore.mjs'] })
+  t.after(s.cleanup)
+  const r = s.run(['1.1.2', '--yes', '--skip-native-tests', '--allow-pending'], ASC_ENV, storesWithMacInReview())
+  assert.equal(r.code, 0, r.out)
+  assert.match(r.calls, /^xcrun altool --upload-app --file dist\/byoky-macos-v1\.1\.2\.pkg --type macos /m)
+  assertIosSubmitted(r)
+  assert.deepEqual(ascWrites(r.fetches).filter(touchesMac), [])
+  assert.match(r.out, /App Store \(macOS\): PENDING: another version is in review/)
+})
+
+// --- retry and App Store builds ---
+
+const RETRY_ASC = { ASC_KEY_ID: 'TESTKEY', ASC_ISSUER_ID: 'test-issuer' }
+
+test('retry waits for a build it uploaded already instead of uploading it again', (t) => {
+  const s = released(t)
+  write(join(s.work, 'dist/byoky-ios-v1.1.2.ipa'), 'ipa')
+  // App Store Connect doesn't list the build yet; macOS 1.1.0 is in review.
+  const env = { ...RETRY_ASC, STUB_ASC_IOS_QUICK: '3', STUB_ASC_MAC_OS_QUICK: '4' }
+
+  const first = s.run(['retry'], env)
+  assert.equal(first.code, 0, first.out)
+  assert.match(first.calls, /^xcrun altool --upload-app --file dist\/byoky-ios-v1\.1\.2\.ipa --type ios /m)
+
+  // Minutes later it still isn't listed: wait for it; a second upload of the
+  // same build number would be refused.
+  const again = s.run(['retry'], env)
+  assert.equal(again.code, 0, again.out)
+  assert.doesNotMatch(again.calls, /altool --upload-app/)
+  assert.match(again.calls, /submit-appstore\.mjs 1\.1\.2 IOS wait=0\nsubmit-appstore\.mjs 1\.1\.2 IOS wait=40\n/)
+  assert.match(again.out, /App Store \(iOS\): submitted for review/)
+
+  // Still nothing after the wait: say so and fail, without uploading again.
+  const lost = s.run(['retry'], { ...env, STUB_ASC_IOS_WAIT: '3' })
+  assert.equal(lost.code, 1, lost.out)
+  assert.doesNotMatch(lost.calls, /altool --upload-app/)
+  assert.match(lost.out, /App Store \(iOS\): NO BUILD in App Store Connect, although dist\/byoky-ios-v1\.1\.2\.ipa was uploaded/)
+
+  // A different file under the same name (a rebuild) is uploaded.
+  write(join(s.work, 'dist/byoky-ios-v1.1.2.ipa'), 'rebuilt ipa')
+  const rebuilt = s.run(['retry'], env)
+  assert.match(rebuilt.calls, /^xcrun altool --upload-app --file dist\/byoky-ios-v1\.1\.2\.ipa /m)
+})
+
+test('retry: a macOS version in review blocks the Mac upload, and --hold-macos leaves macOS out', (t) => {
+  const s = released(t)
+  write(join(s.work, 'dist/byoky-ios-v1.1.2.ipa'), 'ipa')
+  write(join(s.work, 'dist/byoky-macos-v1.1.2.pkg'), 'pkg')
+  const env = { ...RETRY_ASC, STUB_ASC_MAC_OS_QUICK: '4' }
+
+  const blocked = s.run(['retry'], env)
+  assert.equal(blocked.code, 0, blocked.out)
+  assert.match(blocked.calls, /submit-appstore\.mjs 1\.1\.2 MAC_OS wait=0\n/)
+  assert.doesNotMatch(blocked.calls, /altool --upload-app --file dist\/byoky-macos/)
+  assert.match(blocked.out, /App Store \(macOS\): PENDING: another version is in review/)
+
+  const held = s.run(['retry', '--hold-macos'], env)
+  assert.equal(held.code, 0, held.out)
+  assert.doesNotMatch(held.calls, /MAC_OS|byoky-macos/)
+  assert.match(held.out, /App Store \(macOS\): held \(--hold-macos\)/)
+  assert.match(held.calls, /submit-appstore\.mjs 1\.1\.2 IOS wait=0\n/)
 })

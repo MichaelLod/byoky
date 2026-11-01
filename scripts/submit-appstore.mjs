@@ -238,11 +238,17 @@ async function waitForBuild(appId, label) {
 // deprecated): add the version to the open submission and submit it. A
 // rejected submission (UNRESOLVED_ISSUES) is resubmitted rather than
 // replaced, since App Store Connect keeps one open submission per platform.
+const OPEN_SUBMISSION = ['READY_FOR_REVIEW', 'UNRESOLVED_ISSUES']
 async function submitForReview(appId, versionId) {
-  const open = (await api(
+  const open = ((await api(
     `/reviewSubmissions?filter[app]=${appId}&filter[platform]=${platform}` +
-    `&filter[state]=READY_FOR_REVIEW,UNRESOLVED_ISSUES&include=appStoreVersionForReview&limit=10`
-  )).data ?? []
+    `&filter[state]=${OPEN_SUBMISSION.join(',')}&include=appStoreVersionForReview&limit=10`
+  )).data ?? [])
+    // The query filters already; checked again so that the other platform's
+    // submission, or one already with App Review, is never added to or
+    // submitted, whatever the API returns.
+    .filter((s) => (s.attributes?.platform ?? platform) === platform &&
+      OPEN_SUBMISSION.includes(s.attributes?.state ?? OPEN_SUBMISSION[0]))
   const forThisVersion = (s) => s.relationships?.appStoreVersionForReview?.data?.id === versionId
   let submission = open.find(forThisVersion) ?? open[0]
   if (!submission) {

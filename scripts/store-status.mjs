@@ -1,11 +1,17 @@
 #!/usr/bin/env node
 
 // Check store status for all platforms.
-// Usage: node scripts/store-status.mjs [--json]
+// Usage: node scripts/store-status.mjs [--json] [--ignore=<id>[,<id>...]]
 //
 // Exits 3 when a store has a review pending (isPending() decides), so
 // release.sh can stop before an upload replaces that submission and
-// restarts its review. --json prints the results for scripts.
+// restarts its review. A store release.sh uploads to (its credentials are
+// set) whose review state couldn't be read counts the same: its result has
+// `unknown: true` and the reason in `unknownReason`. The check only reads.
+//
+// --json prints the results for scripts. --ignore reports the given stores
+// (result ids, e.g. appstore-macos) as usual but leaves them out of the exit
+// code; release.sh --hold-macos uses it.
 
 import { readFileSync, existsSync, realpathSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
@@ -60,6 +66,18 @@ export function isPending(store, state) {
   return state != null && (PENDING_STATES[store] ?? []).includes(String(state))
 }
 
+// The review state of a store the release uploads to couldn't be read.
+// release.sh treats that like a pending review: it can't rule one out.
+function unknownState(result, reason) {
+  return { ...result, unknown: true, unknownReason: reason, statusDetail: `pending state unknown: ${reason}` }
+}
+
+// Pending reviews and unknown review states hold a release up (exit 3),
+// except in the stores passed to --ignore.
+export function blocking(results, ignore = []) {
+  return results.filter((r) => (r.pending || r.unknown) && !ignore.includes(r.id))
+}
+
 // Newest first, by x.y.z.
 export function compareVersionsDesc(a, b) {
   const pa = String(a).split('.').map(Number)
@@ -90,7 +108,7 @@ async function googleAccessToken() {
 
 async function chromeWebStoreStatus() {
   const { CHROME_EXTENSION_ID, CHROME_CLIENT_ID, CHROME_REFRESH_TOKEN } = process.env
-  const result = { id: 'chrome', platform: 'Chrome', pending: false }
+  let result = { id: 'chrome', platform: 'Chrome', pending: false }
   if (!CHROME_EXTENSION_ID) return { ...result, status: 'not configured' }
 
   try {
@@ -103,12 +121,16 @@ async function chromeWebStoreStatus() {
     result.version = xml.match(/<updatecheck[^>]+version="([^"]+)"/)?.[1]
     result.status = xml.match(/<updatecheck[^>]+status="([^"]+)"/)?.[1] || 'unknown' // 'ok' = live
   } catch (e) {
-    return { ...result, status: 'error', error: e.message }
+    // Only the live version is missing; the review state comes from the API.
+    result = { ...result, status: 'error', error: e.message }
   }
 
   // A submission in review is only visible through the Web Store API (v2).
+  // release.sh uploads whenever CHROME_CLIENT_ID is set.
   if (!CHROME_CLIENT_ID || !CHROME_REFRESH_TOKEN) {
-    return { ...result, statusDetail: 'pending state unknown: no API credentials' }
+    return CHROME_CLIENT_ID
+      ? unknownState(result, 'CHROME_REFRESH_TOKEN missing')
+      : { ...result, statusDetail: 'pending state unknown: no API credentials' }
   }
   try {
     const token = await googleAccessToken()
@@ -129,7 +151,7 @@ async function chromeWebStoreStatus() {
       }
     }
   } catch (e) {
-    result.statusDetail = `pending state unknown: ${e.message}`
+    return unknownState(result, e.message)
   }
   return result
 }
@@ -164,7 +186,7 @@ async function amoStatus() {
       pendingState: isPending('amo', status) ? status : undefined,
     }
   } catch (e) {
-    return { ...result, status: 'error', error: e.message }
+    return unknownState({ ...result, status: 'error', error: e.message }, e.message)
   }
 }
 
@@ -222,7 +244,7 @@ async function appStoreStatus(platform) {
   if (ASC_ISSUER_ID && ASC_KEY_ID && ASC_PRIVATE_KEY) {
     try {
       const { auth, appId } = await appStoreConnect()
-      if (!appId) return { ...result, status: 'not found in ASC' }
+      if (!appId) return unknownState({ ...result, status: 'not found in ASC' }, `no app ${APPLE_BUNDLE_ID} in App Store Connect`)
       const res = await fetch(
         `https://api.appstoreconnect.apple.com/v1/apps/${appId}/appStoreVersions?filter[platform]=${platform}&limit=10`,
         auth
@@ -247,21 +269,26 @@ async function appStoreStatus(platform) {
         pendingState: pending && stateOf(pending),
       }
     } catch (e) {
-      return { ...result, status: 'error', error: e.message }
+      return unknownState({ ...result, status: 'error', error: e.message }, e.message)
     }
   }
 
+  let live
   try {
     const url = platform === 'IOS'
       ? `https://itunes.apple.com/lookup?bundleId=${APPLE_BUNDLE_ID}&country=us`
       : 'https://itunes.apple.com/search?term=byoky&entity=macSoftware&country=us&limit=5'
     const data = await (await fetch(url)).json()
     const app = data.results?.find((r) => r.bundleId === APPLE_BUNDLE_ID)
-    if (!app) return { ...result, status: 'not published', statusDetail: 'pending state unknown: no ASC credentials' }
-    return { ...result, version: app.version, status: 'published', statusDetail: 'live only; pending state unknown without ASC credentials' }
+    live = app
+      ? { ...result, version: app.version, status: 'published', statusDetail: 'live only; pending state unknown without ASC credentials' }
+      : { ...result, status: 'not published', statusDetail: 'pending state unknown: no ASC credentials' }
   } catch (e) {
-    return { ...result, status: 'error', error: e.message }
+    live = { ...result, status: 'error', error: e.message }
   }
+  // release.sh uploads with just ASC_KEY_ID and ASC_ISSUER_ID (altool reads
+  // the key file); reading the review state takes the key itself as well.
+  return ASC_KEY_ID && ASC_ISSUER_ID ? unknownState(live, 'ASC_PRIVATE_KEY missing') : live
 }
 
 const NPM_PACKAGES = [
@@ -307,6 +334,10 @@ function generateAmoJwt() {
 async function main() {
   loadEnv()
   const json = process.argv.includes('--json')
+  const ignore = process.argv
+    .filter((a) => a.startsWith('--ignore='))
+    .flatMap((a) => a.slice('--ignore='.length).split(','))
+    .filter(Boolean)
   const localVersion = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')).version
 
   const results = [
@@ -319,7 +350,9 @@ async function main() {
       googlePlayStatus(),
     ])),
   ]
+  for (const r of results) if (ignore.includes(r.id)) r.ignored = true
   const pending = results.filter((r) => r.pending)
+  const unknown = results.filter((r) => r.unknown)
 
   if (json) {
     console.log(JSON.stringify({ localVersion, results }, null, 2))
@@ -334,12 +367,17 @@ async function main() {
       if (r.error) parts.push(`— ${r.error}`)
       console.log(parts.join('  '))
     }
+    const held = (r) => (r.ignored ? '  [ignored: not counted]' : '')
     if (pending.length) {
       console.log('\nPending review (an upload now would replace the submission and restart its review):')
-      for (const r of pending) console.log(`  ${r.platform} v${r.pendingVersion ?? '?'} ${r.pendingState ?? ''}`)
+      for (const r of pending) console.log(`  ${r.platform} v${r.pendingVersion ?? '?'} ${r.pendingState ?? ''}${held(r)}`)
+    }
+    if (unknown.length) {
+      console.log('\nReview state UNKNOWN, counted as pending (a review may be under way that an upload would restart):')
+      for (const r of unknown) console.log(`  ${r.platform}: ${r.unknownReason}${held(r)}`)
     }
   }
-  if (pending.length) process.exitCode = 3
+  if (blocking(results, ignore).length) process.exitCode = 3
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {

@@ -80,7 +80,8 @@ jobs:
         run: node scripts/gen-backup-fixtures.mjs --check
 
   # The npm packages that CI otherwise never builds: the bridge, the OpenClaw
-  # plugin (which inlines the bridge's dist) and the scaffolder.
+  # plugin (which inlines the bridge's dist) and the scaffolder; and the
+  # typecheck of every package, which needs all of those builds.
   packages:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -101,8 +102,13 @@ jobs:
           pnpm --filter @byoky/openclaw-plugin build
           pnpm --filter create-byoky-app build
 
-      - name: Typecheck create-byoky-app
-        run: pnpm --filter create-byoky-app typecheck
+      # Every package with a typecheck script: core, sdk, extension, bridge,
+      # the OpenClaw plugin and create-byoky-app. The plugin resolves the
+      # bridge's dist types and the extension WXT's generated .wxt types.
+      - name: Typecheck
+        run: |
+          pnpm --filter @byoky/extension exec wxt prepare
+          pnpm typecheck
 
       # OpenClaw's own install-time scanner on the plugin as it would be
       # published; a critical finding makes OpenClaw flag or refuse it.
@@ -241,7 +247,7 @@ jobs:
           if [ -z "$BASE" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
             echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          if git diff --name-only "$BASE" HEAD | grep -qE '^(packages/ios/|packages/core/(src|tests/vectors)/|packages/extension/|\.github/workflows/ci\.yml$)'; then
+          if git diff --name-only "$BASE" HEAD | grep -qE '^(packages/ios/|packages/core/(src|tests/vectors)/|packages/extension/|scripts/ios-unit-tests\.sh$|\.github/workflows/ci\.yml$)'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -275,24 +281,8 @@ jobs:
           brew install xcodegen
           xcodegen generate
 
-      - name: Create a simulator
-        id: sim
-        run: |
-          read -r RUNTIME DEVICE_TYPE < <(xcrun simctl list runtimes -j | jq -r '[.runtimes[] | select(.platform == "iOS" and .isAvailable)] | last | "\(.identifier) \([.supportedDeviceTypes[] | select(.productFamily == "iPhone")] | first | .identifier)"')
-          echo "Runtime $RUNTIME, device $DEVICE_TYPE"
-          echo "udid=$(xcrun simctl create byoky-ci "$DEVICE_TYPE" "$RUNTIME")" >> "$GITHUB_OUTPUT"
-
-      # Ad-hoc signing (not CODE_SIGNING_ALLOWED=NO): the keychain tests need
-      # the entitlements a signed test host carries, or they fail with -34018.
+      # On a simulator of its own, booted before the tests start (a fresh one
+      # failed to launch the test host now and then), with one more run on
+      # that launch failure; deleted afterwards. Same script as release.sh.
       - name: ByokyTests
-        working-directory: packages/ios
-        run: |
-          xcodebuild test \
-            -project Byoky.xcodeproj -scheme Byoky \
-            -only-testing:ByokyTests \
-            -destination "id=${{ steps.sim.outputs.udid }}" \
-            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER=
-
-      - name: Delete the simulator
-        if: always() && steps.sim.outputs.udid != ''
-        run: xcrun simctl delete "${{ steps.sim.outputs.udid }}"
+        run: bash scripts/ios-unit-tests.sh "$RUNNER_TEMP/DerivedData"
