@@ -95,6 +95,10 @@ export class ByokyServer {
           case 'relay:hello':
             handleHello(msg);
             break;
+          case 'relay:providers':
+            // Provider changes after the hello; the session ID stays fixed.
+            if (connected) providers = msg.providers;
+            break;
           case 'relay:response:meta': {
             const pending = pendingRequests.get(msg.requestId);
             if (pending) {

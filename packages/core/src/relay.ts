@@ -74,6 +74,12 @@ export interface RelayResponseError {
   error: { code: string; message: string };
 }
 
+/** Browser → server: the session's providers changed after the hello (a key added or removed). */
+export interface RelayProviders {
+  type: 'relay:providers';
+  providers: Record<string, { available: boolean; authMethod: AuthMethod }>;
+}
+
 /** Server → browser: the backend gave up on a request, so stop it (and its upstream call). */
 export interface RelayCancel {
   type: 'relay:cancel';
@@ -92,6 +98,7 @@ export interface RelayPong {
 
 export type RelayMessage =
   | RelayHello
+  | RelayProviders
   | RelayRequest
   | RelayResponseMeta
   | RelayResponseChunk
@@ -135,6 +142,9 @@ export function parseRelayMessage(data: unknown): RelayMessage | null {
     switch (raw.type) {
       case 'relay:hello':
         if (typeof raw.sessionId !== 'string' || !isProviderMap(raw.providers)) return null;
+        break;
+      case 'relay:providers':
+        if (!isProviderMap(raw.providers)) return null;
         break;
       case 'relay:request':
         if (typeof raw.requestId !== 'string' || typeof raw.providerId !== 'string' ||

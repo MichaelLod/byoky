@@ -1,15 +1,17 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { MAX_RELAY_MESSAGE_SIZE, parseRelayMessage, WS_READY_STATE } from '@byoky/core';
+import { createRelayClient } from '../src/relay-client.js';
+import { ByokyServer } from '../src/server.js';
 
-const upstreamBody = vi.hoisted(() => ({ current: '' as BodyInit, contentType: undefined as string | undefined }));
-const proxyCalls = vi.hoisted(() => [] as Array<{ url: string; init?: RequestInit }>);
+const upstreamBody = { current: '' as BodyInit, contentType: undefined as string | undefined };
+const proxyCalls: Array<{ providerId: string; url: string; init?: RequestInit }> = [];
+const upstreamHang = { current: false };
 
-const upstreamHang = vi.hoisted(() => ({ current: false }));
-
-vi.mock('../src/proxy-fetch.js', () => ({
-  createProxyFetch: () => async (url: string, init?: RequestInit) => {
-    proxyCalls.push({ url, init });
+// Stands in for session.createFetch.
+function getFetch(providerId: string): typeof fetch {
+  return (async (url: string, init?: RequestInit) => {
+    proxyCalls.push({ providerId, url, init });
     if (upstreamHang.current) {
       // Like the real proxy fetch: never answers, rejects on abort.
       return new Promise<Response>((_, reject) => {
@@ -18,11 +20,12 @@ vi.mock('../src/proxy-fetch.js', () => ({
     }
     const headers = upstreamBody.contentType ? { 'content-type': upstreamBody.contentType } : undefined;
     return new Response(upstreamBody.current, { status: 200, headers });
-  },
-}));
+  }) as typeof fetch;
+}
 
-import { createRelayClient } from '../src/relay-client.js';
-import { ByokyServer } from '../src/server.js';
+function makeRelay(providers: Record<string, { available: boolean; authMethod: 'api_key' | 'oauth' }> = {}) {
+  return createRelayClient('ws://localhost:3001/ws/relay', getFetch, () => providers);
+}
 
 class MockWebSocket {
   static last: MockWebSocket;
@@ -50,7 +53,7 @@ describe('createRelayClient', () => {
   });
 
   it('announces its relayId in relay:hello instead of the session key', () => {
-    const relay = createRelayClient('ws://localhost:3001/ws/relay', 'byk_secret_session', {});
+    const relay = makeRelay();
     MockWebSocket.last.open();
 
     const hello = JSON.parse(MockWebSocket.last.sent[0]);
@@ -66,9 +69,7 @@ describe('createRelayClient', () => {
     // in size when JSON-escaped.
     upstreamBody.current = 'a'.repeat(MAX_RELAY_MESSAGE_SIZE / 8 - 1) + '\u{1F600}' + '"\n'.repeat(400_000);
 
-    const relay = createRelayClient('ws://localhost:3001/ws/relay', 'byk_secret_session', {
-      anthropic: { available: true, authMethod: 'api_key' },
-    });
+    const relay = makeRelay({ anthropic: { available: true, authMethod: 'api_key' } });
     const ws = MockWebSocket.last;
     ws.open();
     ws.onmessage?.({
@@ -108,7 +109,7 @@ describe('createRelayClient', () => {
     function relayRequest(extra: Record<string, unknown>) {
       proxyCalls.length = 0;
       upstreamBody.current = '{}';
-      const relay = createRelayClient('ws://localhost:3001/ws/relay', 'byk_secret_session', {});
+      const relay = makeRelay();
       const ws = MockWebSocket.last;
       ws.open();
       ws.onmessage?.({
@@ -156,7 +157,7 @@ describe('createRelayClient', () => {
     function relayAudio(bytes: Uint8Array) {
       upstreamBody.current = bytes as Uint8Array<ArrayBuffer>;
       upstreamBody.contentType = 'audio/mpeg';
-      const relay = createRelayClient('ws://localhost:3001/ws/relay', 'byk_secret_session', {});
+      const relay = makeRelay();
       const ws = MockWebSocket.last;
       ws.open();
       ws.onmessage?.({
@@ -212,7 +213,7 @@ describe('createRelayClient', () => {
   it('aborts the call when the backend sends relay:cancel, and answers nothing more', async () => {
     upstreamHang.current = true;
     proxyCalls.length = 0;
-    const relay = createRelayClient('ws://localhost:3001/ws/relay', 'byk_secret_session', {});
+    const relay = makeRelay();
     const ws = MockWebSocket.last;
     ws.open();
     ws.onmessage?.({
@@ -230,5 +231,34 @@ describe('createRelayClient', () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(ws.sent.filter((m) => m.includes('req-stop'))).toEqual([]);
     relay.close();
+  });
+
+  describe('providers', () => {
+    it('announces the providers the session has when the socket opens', () => {
+      let providers: Record<string, { available: boolean; authMethod: 'api_key' }> = { openai: { available: true, authMethod: 'api_key' } };
+      const relay = createRelayClient('ws://localhost:3001/ws/relay', getFetch, () => providers);
+      providers = { anthropic: { available: true, authMethod: 'api_key' } };
+      MockWebSocket.last.open();
+
+      expect(JSON.parse(MockWebSocket.last.sent[0]).providers).toEqual(providers);
+      relay.close();
+    });
+
+    it('passes later provider changes on as relay:providers until closed', () => {
+      const listeners = new Set<(p: Record<string, { available: boolean; authMethod: 'api_key' | 'oauth' }>) => void>();
+      const relay = createRelayClient('ws://localhost:3001/ws/relay', getFetch, () => ({}), (cb) => {
+        listeners.add(cb);
+        return () => { listeners.delete(cb); };
+      });
+      const ws = MockWebSocket.last;
+      ws.open();
+
+      const updated = { openai: { available: true, authMethod: 'api_key' as const } };
+      for (const cb of listeners) cb(updated);
+      expect(JSON.parse(ws.sent[ws.sent.length - 1])).toEqual({ type: 'relay:providers', providers: updated });
+
+      relay.close();
+      expect(listeners.size).toBe(0);
+    });
   });
 });

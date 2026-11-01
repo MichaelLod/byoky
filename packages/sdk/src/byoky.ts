@@ -262,8 +262,16 @@ export class Byoky {
       },
       listModels: (providerId: string) =>
         fetchModelsList(session.createFetch(providerId), providerId),
+      // The relay calls through session.createFetch, not a fetch bound to
+      // today's key: that one would answer 401 forever once the wallet
+      // locked or restarted, with nothing to trigger a reconnect.
       createRelay: (wsUrl: string) =>
-        createRelayClient(wsUrl, sessionKeyRef.current, session.providers),
+        createRelayClient(
+          wsUrl,
+          (providerId) => session.createFetch(providerId),
+          () => session.providers,
+          (callback) => session.onProvidersUpdated(callback),
+        ),
       disconnect: () => {
         clearExtSession();
         notifyChannel.port1.close();

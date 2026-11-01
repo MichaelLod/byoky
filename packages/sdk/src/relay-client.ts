@@ -11,7 +11,6 @@ import {
   WS_READY_STATE,
 } from '@byoky/core';
 import { bytesToBase64, decodeBody } from './body.js';
-import { createProxyFetch } from './proxy-fetch.js';
 import { randomId } from './id.js';
 
 export interface RelayConnection {
@@ -27,10 +26,21 @@ export interface RelayConnection {
   onClose(callback: (reason?: string) => void): () => void;
 }
 
+type Providers = Record<string, { available: boolean; authMethod: AuthMethod }>;
+
+/**
+ * @param getFetch The session's fetch for a provider. It holds the live
+ *   session key and reconnects on SESSION_EXPIRED, so the relay keeps
+ *   working after the wallet locks and unlocks, or the session is renewed.
+ * @param getProviders The session's providers right now, for the hello.
+ * @param onProvidersUpdated Subscribes to provider changes, which are
+ *   passed on to the server as relay:providers. Returns an unsubscribe.
+ */
 export function createRelayClient(
   wsUrl: string,
-  sessionKey: string,
-  providers: Record<string, { available: boolean; authMethod: AuthMethod }>,
+  getFetch: (providerId: string) => typeof fetch,
+  getProviders: () => Providers,
+  onProvidersUpdated?: (callback: (providers: Providers) => void) => () => void,
 ): RelayConnection {
   // Relay-specific ID announced in relay:hello — the real session key is never
   // exposed to the relay server.
@@ -78,13 +88,17 @@ export function createRelayClient(
     };
   }
 
+  const unsubscribeProviders = onProvidersUpdated?.((providers) => {
+    send({ type: 'relay:providers', providers });
+  });
+
   ws.onopen = () => {
     status = 'connected';
 
     ws.send(JSON.stringify({
       type: 'relay:hello',
       sessionId: relayId,
-      providers,
+      providers: getProviders(),
     }));
 
     // Keepalive ping every 30s
@@ -130,8 +144,7 @@ export function createRelayClient(
     inFlight.set(requestId, controller);
 
     try {
-      const proxyFetch = createProxyFetch(providerId, { current: sessionKey });
-      const response = await proxyFetch(url, {
+      const response = await getFetch(providerId)(url, {
         method,
         headers,
         body: decodeBody(req.body, req.bodyEncoding),
@@ -207,6 +220,7 @@ export function createRelayClient(
     status = 'disconnected';
 
     if (pingInterval) clearInterval(pingInterval);
+    unsubscribeProviders?.();
 
     // Abort all in-flight requests
     for (const controller of inFlight.values()) {

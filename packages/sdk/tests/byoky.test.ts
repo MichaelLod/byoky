@@ -457,6 +457,95 @@ describe('Byoky', () => {
       .rejects.toMatchObject({ code: ByokyErrorCode.PROXY_ERROR, message: expect.stringContaining('timed out') });
   });
 
+  describe('createRelay', () => {
+    class MockWebSocket {
+      static last: MockWebSocket;
+      readyState = 0;
+      sent: string[] = [];
+      onopen: ((e: unknown) => void) | null = null;
+      onmessage: ((e: { data: unknown }) => void) | null = null;
+      onclose: ((e: { code: number; reason: string }) => void) | null = null;
+      onerror: ((e: unknown) => void) | null = null;
+      constructor(public url: string) { MockWebSocket.last = this; }
+      send(data: string) { this.sent.push(data); }
+      close() { this.readyState = 3; }
+      open() { this.readyState = 1; this.onopen?.({}); }
+    }
+
+    beforeEach(() => { vi.stubGlobal('WebSocket', MockWebSocket); });
+    afterEach(() => { vi.unstubAllGlobals(); });
+
+    const tick = () => new Promise((r) => setTimeout(r, 10));
+    const proxyRequests = () => postedMessages.filter((m) => m.data.type === 'BYOKY_PROXY_REQUEST');
+    const connectRequests = () => postedMessages.filter((m) => m.data.type === 'BYOKY_CONNECT_REQUEST');
+
+    function relayRequest(ws: MockWebSocket, requestId: string) {
+      ws.onmessage?.({
+        data: JSON.stringify({
+          type: 'relay:request', requestId, providerId: 'openai',
+          url: 'https://api.openai.com/v1/chat/completions', method: 'POST', headers: {}, body: '{}',
+        }),
+      });
+    }
+
+    function answerOk(entry: { data: Record<string, unknown>; port?: MessagePort }) {
+      entry.port!.postMessage({ type: 'BYOKY_PROXY_RESPONSE_META', requestId: entry.data.requestId, status: 200, statusText: 'OK', headers: {} });
+      entry.port!.postMessage({ type: 'BYOKY_PROXY_RESPONSE_DONE', requestId: entry.data.requestId });
+    }
+
+    it('reconnects on SESSION_EXPIRED and keeps using the live session key', async () => {
+      const connectPromise = new Byoky().connect({ providers: [{ id: 'openai', required: true }] });
+      await tick();
+      simulateResponse({
+        type: 'BYOKY_CONNECT_RESPONSE',
+        requestId: connectRequests()[0].data.requestId,
+        payload: { sessionKey: 'byk_old', proxyUrl: 'extension-proxy', providers: { openai: { available: true, authMethod: 'api_key' } } },
+      });
+      const session = await connectPromise;
+
+      const relay = session.createRelay('ws://localhost:3001/ws/relay');
+      const ws = MockWebSocket.last;
+      ws.open();
+      expect(ws.sent[0]).not.toContain('byk_old');
+
+      // The wallet locked: the old key is dead.
+      relayRequest(ws, 'relay-1');
+      await tick();
+      const first = proxyRequests()[0];
+      expect(first.data.sessionKey).toBe('byk_old');
+      first.port!.postMessage({
+        type: 'BYOKY_PROXY_RESPONSE_ERROR',
+        requestId: first.data.requestId,
+        status: 401,
+        error: { code: 'SESSION_EXPIRED', message: 'Invalid or expired session' },
+      });
+      await tick();
+
+      expect(connectRequests()).toHaveLength(2);
+      const reconnect = connectRequests()[1];
+      reconnect.port!.postMessage({
+        type: 'BYOKY_CONNECT_RESPONSE',
+        requestId: reconnect.data.requestId,
+        payload: { sessionKey: 'byk_new', proxyUrl: 'extension-proxy', providers: { openai: { available: true, authMethod: 'api_key' } } },
+      });
+      await tick();
+
+      const retry = proxyRequests()[1];
+      expect(retry.data.sessionKey).toBe('byk_new');
+      answerOk(retry);
+      await tick();
+      expect(ws.sent.map((m) => JSON.parse(m)).find((m) => m.type === 'relay:response:meta' && m.requestId === 'relay-1'))
+        .toMatchObject({ status: 200 });
+
+      // The next relayed request goes out with the new key straight away.
+      relayRequest(ws, 'relay-2');
+      await tick();
+      expect(proxyRequests()[2].data.sessionKey).toBe('byk_new');
+      expect(connectRequests()).toHaveLength(2);
+      relay.close();
+    });
+  });
+
   describe('createFetch bodies', () => {
     async function connectSession(sessionKey: string) {
       const connectPromise = new Byoky().connect();

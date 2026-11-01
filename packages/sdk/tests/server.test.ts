@@ -272,6 +272,18 @@ describe('ByokyServer', () => {
       expect(vi.getTimerCount()).toBe(0);
     });
 
+    it('takes later provider changes from relay:providers, but not before the hello', async () => {
+      const clientPromise = server.handleConnection(ws);
+      ws.simulateMessage({ type: 'relay:providers', providers: { early: { available: true, authMethod: 'api_key' } } });
+      ws.simulateMessage({ type: 'relay:hello', sessionId: 'first', providers: {} });
+      const client = await clientPromise;
+      expect(client.providers).toEqual({});
+
+      ws.simulateMessage({ type: 'relay:providers', providers: { openai: { available: true, authMethod: 'api_key' } } });
+      expect(client.providers).toEqual({ openai: { available: true, authMethod: 'api_key' } });
+      expect(client.sessionId).toBe('first');
+    });
+
     it('ignores a hello whose providers is not an object map', async () => {
       const server = new ByokyServer({ pingInterval: 0, helloTimeout: 50 });
       const clientPromise = server.handleConnection(ws);

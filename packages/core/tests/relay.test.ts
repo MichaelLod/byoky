@@ -51,6 +51,13 @@ describe('relay protocol', () => {
       expect(parseRelayMessage({ type: 'relay:hello', sessionId: 'a', providers: {} })).not.toBeNull();
     });
 
+    it('parses relay:providers and validates its map', () => {
+      expect(parseRelayMessage({ type: 'relay:providers', providers: { openai: { available: true, authMethod: 'api_key' } } })?.type)
+        .toBe('relay:providers');
+      expect(parseRelayMessage({ type: 'relay:providers', providers: null })).toBeNull();
+      expect(parseRelayMessage({ type: 'relay:providers' })).toBeNull();
+    });
+
     it('rejects relay:request missing required fields', () => {
       expect(parseRelayMessage({ type: 'relay:request', requestId: '1' })).toBeNull();
       expect(parseRelayMessage({ type: 'relay:request', requestId: '1', providerId: 'x' })).toBeNull();
