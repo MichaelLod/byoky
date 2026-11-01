@@ -69,6 +69,14 @@ beforeAll(async () => {
     } else if (url === '/limited') {
       res.writeHead(429, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: 'rate limited', usage: { input_tokens: 10, output_tokens: 5 } }));
+    } else if (url === '/slow-headers') {
+      // A non-streaming reply: headers only once the model has finished.
+      setTimeout(() => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end('{"ok":true}');
+      }, 300);
+    } else if (url === '/no-headers') {
+      // Never answers.
     } else if (url === '/stall-body') {
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       res.write('data: 1\n\n');
@@ -99,6 +107,7 @@ beforeEach(() => {
   host = createHost({
     writeMessage: (m) => messages.push(m as Msg),
     loadToken: () => TOKEN,
+    firstByteTimeoutMs: 600,
     idleTimeoutMs: 200,
   });
 });
@@ -188,6 +197,23 @@ describe('page path (proxy)', () => {
     });
     expect(ofType('proxy_error')).toEqual([{ type: 'proxy_error', requestId: 'r4', error: 'Fetch request failed' }]);
     expect(otherHits).toBe(0);
+  });
+
+  it('waits longer for the headers than between chunks', async () => {
+    await host.handleMessage({
+      type: 'proxy', requestId: 'r6', url: `${base}/slow-headers`, method: 'POST', headers: {}, body: '{}',
+    });
+    expect(ofType('proxy_error')).toHaveLength(0);
+    expect(body()).toBe('{"ok":true}');
+  });
+
+  it('gives up on headers that never come', async () => {
+    const started = Date.now();
+    await host.handleMessage({
+      type: 'proxy', requestId: 'r7', url: `${base}/no-headers`, method: 'POST', headers: {}, body: '{}',
+    });
+    expect(ofType('proxy_error')).toEqual([{ type: 'proxy_error', requestId: 'r7', error: 'Fetch request failed' }]);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(550);
   });
 
   it('aborts a response that stops sending', async () => {

@@ -94,11 +94,17 @@ interface ProxyConfig {
 type PendingResponse = {
   res: ServerResponse;
   timeout: ReturnType<typeof setTimeout>;
+  /** Fails the request and has the upstream call stopped. */
+  onTimeout: () => void;
 };
 
 const MAX_PENDING_REQUESTS = 100;
-// Idle, not total: refreshed on every response chunk so a long stream that
-// is still flowing never gets cut.
+// Until the response headers arrive. A non-streaming reply sends them only
+// once the model has finished, which can take minutes; the OpenAI and
+// Anthropic SDKs wait 10 minutes by default.
+const FIRST_BYTE_TIMEOUT_MS = 600_000;
+// After the headers: idle, not total. Refreshed on every response chunk so
+// a long stream that is still flowing never gets cut.
 const IDLE_TIMEOUT_MS = 120_000;
 const pendingRequests = new Map<string, PendingResponse>();
 
@@ -216,7 +222,8 @@ export function handleProxyResponse(msg: ProxyResponseMessage): void {
     delete headers['set-cookie'];
     delete headers['set-cookie2'];
     pending.res.writeHead(msg.status, headers);
-    pending.timeout.refresh();
+    clearTimeout(pending.timeout);
+    pending.timeout = setTimeout(pending.onTimeout, IDLE_TIMEOUT_MS);
   } else if (msg.type === 'proxy_http_response_chunk') {
     pending.res.write(msg.chunk);
     pending.timeout.refresh();
@@ -432,17 +439,25 @@ export function startProxyServer(config: ProxyConfig): Promise<Server> {
       return;
     }
 
-    const timeout = setTimeout(() => {
+    const onTimeout = () => {
       if (!pendingRequests.delete(requestId)) return;
+      // The client gets an error either way. Stop the upstream call too, or
+      // it runs, and bills, to the end.
+      sendToExtension({ type: 'proxy_http_cancel', requestId });
       if (res.headersSent) {
         res.destroy();
         return;
       }
-      res.writeHead(504, { 'Content-Type': 'application/json' });
+      // SDKs retry a 504 twice by default, and each retry would wait as long.
+      res.writeHead(504, { 'Content-Type': 'application/json', 'x-should-retry': 'false' });
       res.end(JSON.stringify({ error: 'Request timed out' }));
-    }, IDLE_TIMEOUT_MS);
+    };
 
-    pendingRequests.set(requestId, { res, timeout });
+    pendingRequests.set(requestId, {
+      res,
+      timeout: setTimeout(onTimeout, FIRST_BYTE_TIMEOUT_MS),
+      onTimeout,
+    });
 
     // Still pending when the connection closes means the client hung up
     // (Ctrl-C in Claude Code). Have the upstream call stopped rather than

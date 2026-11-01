@@ -103,6 +103,9 @@ export function stripIncompatibleBetas(url: string, headers: Record<string, stri
   return next;
 }
 
+// Until the response headers arrive (a non-streaming reply sends them only
+// once the model has finished), then idle between chunks.
+const FETCH_FIRST_BYTE_TIMEOUT_MS = 600_000;
 const FETCH_IDLE_TIMEOUT_MS = 120_000;
 
 interface FetchOutcome {
@@ -121,7 +124,9 @@ export interface HostOptions {
   loadToken: () => string;
   /** For tests. */
   fetch?: typeof fetch;
-  /** How long a direct fetch may go without receiving anything. */
+  /** How long a fetch may wait for the response headers. */
+  firstByteTimeoutMs?: number;
+  /** How long a fetch may then go without receiving anything. */
   idleTimeoutMs?: number;
 }
 
@@ -134,6 +139,7 @@ export interface Host {
 export function createHost(opts: HostOptions): Host {
   const { writeMessage, loadToken } = opts;
   const fetchImpl = opts.fetch ?? fetch;
+  const firstByteTimeoutMs = opts.firstByteTimeoutMs ?? FETCH_FIRST_BYTE_TIMEOUT_MS;
   const idleTimeoutMs = opts.idleTimeoutMs ?? FETCH_IDLE_TIMEOUT_MS;
 
   // Direct fetches in flight, so a client hang-up can abort the upstream call.
@@ -260,9 +266,11 @@ export function createHost(opts: HostOptions): Host {
       }
     };
 
-    // Idle timeout: refreshed whenever the upstream sends something, so only a
-    // stalled request is aborted, never a long stream that is still flowing.
-    const idleTimeout = setTimeout(() => controller.abort(), idleTimeoutMs);
+    // Waits for the headers first. After that it is an idle timeout,
+    // refreshed whenever the upstream sends something, so only a stalled
+    // request is aborted, never a long stream that is still flowing.
+    const abort = () => controller.abort();
+    let timer = setTimeout(abort, firstByteTimeoutMs);
 
     try {
       const res = await fetchImpl(url, {
@@ -274,7 +282,8 @@ export function createHost(opts: HostOptions): Host {
         // redirect, so never follow one.
         redirect: 'error',
       });
-      idleTimeout.refresh();
+      clearTimeout(timer);
+      timer = setTimeout(abort, idleTimeoutMs);
       outcome.status = res.status;
 
       const resHeaders: Record<string, string> = {};
@@ -294,7 +303,7 @@ export function createHost(opts: HostOptions): Host {
           for (;;) {
             const { done, value } = await reader.read();
             if (done) break;
-            idleTimeout.refresh();
+            timer.refresh();
             const raw = decoder.decode(value, { stream: true });
             seen.push(raw);
             const rewritten = rewriter.process(raw);
@@ -308,7 +317,7 @@ export function createHost(opts: HostOptions): Host {
           for (;;) {
             const { done, value } = await reader.read();
             if (done) break;
-            idleTimeout.refresh();
+            timer.refresh();
             seen.push(decoder.decode(value, { stream: true }));
           }
           seen.push(decoder.decode());
@@ -321,7 +330,7 @@ export function createHost(opts: HostOptions): Host {
     } catch {
       send({ type: errorType, requestId, error: 'Fetch request failed' });
     } finally {
-      clearTimeout(idleTimeout);
+      clearTimeout(timer);
     }
     outcome.responseText = seen.join('');
     return outcome;

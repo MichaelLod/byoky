@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { request, type Server } from 'node:http';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
+import { request, type Server, type IncomingHttpHeaders } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -29,6 +29,7 @@ function freePort(): Promise<number> {
 
 interface Reply {
   status: number;
+  headers: IncomingHttpHeaders;
   body: string;
 }
 
@@ -43,7 +44,11 @@ function send(
       (res) => {
         const chunks: Buffer[] = [];
         res.on('data', (c: Buffer) => chunks.push(c));
-        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString() }));
+        res.on('end', () => resolve({
+          status: res.statusCode ?? 0,
+          headers: res.headers,
+          body: Buffer.concat(chunks).toString(),
+        }));
       },
     );
     req.on('error', reject);
@@ -58,6 +63,8 @@ let sent: ProxyMessageOut[] = [];
 function fakeExtension(msg: ProxyMessageOut): void {
   sent.push(msg);
   if (msg.type !== 'proxy_http') return;
+  // The provider is still thinking: no headers yet.
+  if (msg.url.endsWith('/v1/silent')) return;
   if (msg.url.endsWith('/v1/stream')) {
     // A stream that never finishes on its own.
     handleProxyResponse({
@@ -202,6 +209,60 @@ describe('client hang-up', () => {
     await send(port, '/anthropic/v1/messages', { headers: { 'x-api-key': TOKEN }, body: '{}' });
     await new Promise((r) => setTimeout(r, 50));
     expect(sent.some((m) => m.type === 'proxy_http_cancel')).toBe(false);
+  });
+});
+
+describe('timeouts', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const cancels = () => sent.filter((m) => m.type === 'proxy_http_cancel');
+
+  it('waits 10 minutes for the headers, then answers 504 and cancels once', async () => {
+    let settled = false;
+    const reply = send(port, '/anthropic/v1/silent', { headers: { 'x-api-key': TOKEN }, body: '{}' })
+      .finally(() => { settled = true; });
+    await expect.poll(() => sent.length).toBe(1);
+    const { requestId } = sent[0] as ProxyRequestOut;
+
+    // A non-streaming reply that takes longer than 2 minutes is not cut off.
+    await vi.advanceTimersByTimeAsync(120_000);
+    await new Promise((r) => setImmediate(r));
+    expect(settled).toBe(false);
+    expect(cancels()).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(480_000);
+    const res = await reply;
+    expect(res.status).toBe(504);
+    expect(res.headers['x-should-retry']).toBe('false');
+    expect(cancels()).toEqual([{ type: 'proxy_http_cancel', requestId }]);
+  });
+
+  it('drops a stream that stalls for 2 minutes after its headers and cancels it', async () => {
+    let closed = false;
+    const client = request(
+      { host: '127.0.0.1', port, path: '/anthropic/v1/stream', method: 'POST', headers: { 'x-api-key': TOKEN } },
+      (res) => {
+        res.resume();
+        res.on('close', () => { closed = true; });
+      },
+    );
+    client.on('error', () => {});
+    client.end('{}');
+    await expect.poll(() => sent.length).toBe(1);
+    const { requestId } = sent[0] as ProxyRequestOut;
+
+    await vi.advanceTimersByTimeAsync(119_000);
+    await new Promise((r) => setImmediate(r));
+    expect(closed).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await expect.poll(() => closed).toBe(true);
+    expect(cancels()).toEqual([{ type: 'proxy_http_cancel', requestId }]);
   });
 });
 
