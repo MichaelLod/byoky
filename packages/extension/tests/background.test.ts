@@ -140,6 +140,37 @@ describe('background: proxy boundary', () => {
   });
 });
 
+describe('background: holds and the idle lock', () => {
+  it('releases the allowance hold of a request whose upstream call failed', async () => {
+    const h = await unlockedWallet({ tokenAllowances: [{ origin: APP, totalLimit: 60 }] });
+    const { payload } = await connectApproved(h, APP, { providers: [{ id: 'anthropic', required: true }] });
+    h.fetch.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    expect((await h.proxy(APP, chat(payload.sessionKey)).result).error.error.code).toBe('PROXY_ERROR');
+    h.fetch.mockImplementation(async () => jsonResponse({ usage: { input_tokens: 1, output_tokens: 1 } }));
+    expect((await h.proxy(APP, chat(payload.sessionKey)).result).done).toBe(true);
+  });
+
+  it('a worker restarting after the idle timeout comes back locked, without sessions', async () => {
+    const h = await unlockedWallet();
+    await connectApproved(h, APP, { providers: [{ id: 'anthropic', required: true }] });
+    const session: Record<string, unknown> = { ...h.session!.data, _lastActivity: Date.now() - 21 * 60_000 };
+    expect(session._mp).toBe(PASSWORD);
+    const restarted = await startBackground({ local: h.local.data, session });
+    expect((await restarted.internal('isUnlocked')).unlocked).toBe(false);
+    expect((await restarted.internal('getSessions')).sessions).toEqual([]);
+    expect(restarted.session!.data._mp).toBeUndefined();
+    expect(restarted.broadcasts.some((m) => m.action === 'sessionChanged')).toBe(true);
+  });
+
+  it('a worker restarting within the idle timeout stays unlocked, with its sessions', async () => {
+    const h = await unlockedWallet();
+    await connectApproved(h, APP, { providers: [{ id: 'anthropic', required: true }] });
+    const restarted = await startBackground({ local: h.local.data, session: { ...h.session!.data, _lastActivity: Date.now() - 60_000 } });
+    expect((await restarted.internal('isUnlocked')).unlocked).toBe(true);
+    expect((await restarted.internal('getSessions')).sessions).toHaveLength(1);
+  });
+});
+
 describe('background: password lockout', () => {
   it('locks out after five wrong passwords, also across a worker restart', async () => {
     const local = await walletStorage([]);
@@ -148,6 +179,14 @@ describe('background: password lockout', () => {
     const locked = await h.unlock(PASSWORD);
     expect(locked.success).toBe(false);
     expect(locked.error).toMatch(/Too many attempts/);
+    // The first lockout lasts a minute; each failure after it doubles it.
+    expect(locked.lockedUntil - Date.now()).toBeGreaterThan(55_000);
+    expect(locked.lockedUntil - Date.now()).toBeLessThanOrEqual(60_000);
+    const now = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(now + 61_000);
+    const sixth = await h.unlock('wrong');
+    expect(sixth.lockedUntil - (now + 61_000)).toBe(120_000);
+    vi.restoreAllMocks();
     // A new worker with the same session storage still refuses.
     const restarted = await startBackground({ local, session: h.session!.data });
     expect((await restarted.unlock(PASSWORD)).error).toMatch(/Too many attempts/);
