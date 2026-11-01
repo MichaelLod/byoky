@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, Fragment } from 'react';
-import { Byoky, type ByokySession } from '@byoky/sdk';
+import { Byoky, ByokyErrorCode, type ByokySession } from '@byoky/sdk';
 import { cohereErrorMessage, cohereStreamText } from '../components/chat-providers';
 
 interface Message {
@@ -143,8 +143,10 @@ export function ChatApp() {
       });
       onConnected(s);
     } catch (e) {
-      const err = e as Error;
-      if (err.message === 'User cancelled') return;
+      const err = e as Error & { code?: string };
+      // Closing the connect modal: a plain 'User cancelled', or
+      // WALLET_NOT_INSTALLED after the modal's install guidance.
+      if (err.message === 'User cancelled' || err.code === ByokyErrorCode.WALLET_NOT_INSTALLED) return;
       setError(err.message);
     }
   }

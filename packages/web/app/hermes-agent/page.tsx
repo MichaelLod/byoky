@@ -146,7 +146,7 @@ byoky-bridge install`}</Code>
         <Step
           n={5}
           title="Wire Hermes to the bridge"
-          subtitle="One command patches ~/.hermes/config.yaml so Hermes routes through byoky instead of going direct to api.anthropic.com."
+          subtitle="One command patches ~/.hermes/config.yaml so Hermes routes through Byoky instead of going direct to api.anthropic.com."
         >
           <Code>{`byoky-bridge hermes-setup`}</Code>
           <p>
