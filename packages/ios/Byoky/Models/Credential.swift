@@ -76,7 +76,9 @@ struct Credential: Identifiable, Codable {
             // Setup tokens: Claude-CLI-like headers and Bearer auth. The body
             // is shaped separately (ClaudeCodeShaping).
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-            request.setValue("claude-cli/2.1.76", forHTTPHeaderField: "User-Agent")
+            // A current Claude Code release: Anthropic refuses newer models
+            // (claude-opus-5-5) to older ones with a 400. Core sends the same.
+            request.setValue("claude-cli/2.1.316", forHTTPHeaderField: "User-Agent")
             request.setValue("cli", forHTTPHeaderField: "x-app")
             if request.value(forHTTPHeaderField: "Accept") == nil {
                 request.setValue("application/json", forHTTPHeaderField: "Accept")

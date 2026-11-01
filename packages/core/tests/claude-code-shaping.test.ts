@@ -103,7 +103,7 @@ describe('buildHeaders — context-1m-2025-08-07 is never forwarded to Anthropic
       'content-type': 'application/json',
       'anthropic-beta': ['tools-2024-04-04', ...OAUTH_BETAS].join(','),
       authorization: 'Bearer sk-ant-oat01-T',
-      'user-agent': 'claude-cli/2.1.76',
+      'user-agent': 'claude-cli/2.1.316',
       'x-app': 'cli',
       accept: 'application/json',
       'anthropic-version': '2023-06-01',

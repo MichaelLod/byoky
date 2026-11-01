@@ -82,7 +82,7 @@ final class ClaudeCodeShapingTests: XCTestCase {
         XCTAssertEqual(request.value(forHTTPHeaderField: "anthropic-beta"),
                        "tools-2024-04-04,claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14")
         XCTAssertEqual(request.value(forHTTPHeaderField: "authorization"), "Bearer sk-ant-oat01-T")
-        XCTAssertEqual(request.value(forHTTPHeaderField: "user-agent"), "claude-cli/2.1.76")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "user-agent"), "claude-cli/2.1.316")
         XCTAssertEqual(request.value(forHTTPHeaderField: "x-app"), "cli")
         XCTAssertEqual(request.value(forHTTPHeaderField: "accept"), "application/json")
         XCTAssertEqual(request.value(forHTTPHeaderField: "anthropic-version"), "2023-06-01")
