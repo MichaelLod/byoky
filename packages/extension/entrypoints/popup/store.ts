@@ -150,10 +150,30 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     set({ submitting: true, error: null });
     try {
       const hash = await hashPassword(password);
-      await sendInternal('setupWallet', { passwordHash: hash });
+      const created = await sendInternal('setupWallet', { passwordHash: hash });
+      if (created.error === 'Wallet already initialized') {
+        // Another wallet view finished setup first, with its own password.
+        // Unlocking with this one would only count as a wrong guess.
+        set({
+          isInitialized: true,
+          currentPage: 'unlock',
+          error: 'This wallet was already set up in another window. Unlock it with the password chosen there.',
+        });
+        return;
+      }
+      if (created.error) {
+        set({ error: created.error as string });
+        return;
+      }
       const setupResult = await sendInternal('unlock', { password });
       if (setupResult.success) {
         set({ isInitialized: true, isUnlocked: true, currentPage: 'dashboard' });
+      } else {
+        set({
+          isInitialized: true,
+          currentPage: 'unlock',
+          error: (setupResult.error as string | undefined) ?? 'Your wallet was created but could not be unlocked. Enter your password to unlock it.',
+        });
       }
     } catch (e) {
       set({ error: (e as Error).message });
