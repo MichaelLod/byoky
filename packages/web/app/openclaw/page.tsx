@@ -252,7 +252,7 @@ function FreeCallout() {
           </div>
           <h3>The API keys in your wallet</h3>
           <p>
-            Any of the 13 providers you&apos;ve added to Byoky — Anthropic,
+            Any of the 13 cloud providers you&apos;ve added to Byoky — Anthropic,
             OpenAI, Gemini, xAI and more. OpenClaw calls them through your
             wallet, so the keys never land in a config file on disk.
           </p>

@@ -119,7 +119,7 @@ function Hero() {
           <div className="hero-facts" aria-label="Facts">
             <div className="hero-fact">
               <div className="hero-fact-label">Providers</div>
-              <div className="hero-fact-value">13 supported</div>
+              <div className="hero-fact-value">13 cloud + 2 local</div>
             </div>
             <div className="hero-fact">
               <div className="hero-fact-label">Servers</div>
@@ -256,8 +256,9 @@ function WhyAWallet() {
               </div>
               <h3 className="sbs-title">One wallet, every provider.</h3>
               <p className="sbs-desc">
-                Anthropic, OpenAI, Gemini, Mistral and nine more, plus custom
-                endpoints. Add a key once and use it in every Byoky-enabled app.
+                Anthropic, OpenAI, Gemini, Mistral and nine more, plus local
+                models through Ollama and LM Studio. Add a key once and use it
+                in every Byoky-enabled app.
               </p>
             </div>
           </FadeIn>
