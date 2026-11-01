@@ -749,6 +749,8 @@ class WalletStore(context: Context) {
             actualModel = actualModel,
             groupId = groupId,
             usedCapabilities = usedCapabilities,
+            // The app's live session, as iOS tags it; bridge traffic has none.
+            sessionId = _sessions.value.firstOrNull { it.appOrigin == appOrigin }?.id,
         )
 
         synchronized(logLock) {
@@ -781,6 +783,12 @@ class WalletStore(context: Context) {
     }
 
     fun usageTotal(origin: String): UsageLedger.Usage = ledger.total(origin)
+
+    /** Usage of [appOrigin]'s live session, from the request log; null without one. */
+    fun sessionUsage(appOrigin: String): SessionUsage? {
+        val session = _sessions.value.firstOrNull { it.appOrigin == appOrigin && !it.isExpired } ?: return null
+        return SessionUsage.from(session.id, _requestLogs.value)
+    }
 
     fun usageByProvider(origin: String): Map<String, UsageLedger.Usage> = ledger.byProvider(origin)
 
@@ -1138,6 +1146,7 @@ class WalletStore(context: Context) {
                         actualModel = obj.optString("actualModel", "").takeIf { it.isNotEmpty() },
                         groupId = obj.optString("groupId", "").takeIf { it.isNotEmpty() },
                         usedCapabilities = caps,
+                        sessionId = obj.optString("sessionId", "").takeIf { it.isNotEmpty() },
                     )
                 )
             }
@@ -1164,6 +1173,7 @@ class WalletStore(context: Context) {
                 r.actualProviderId?.let { put("actualProviderId", it) }
                 r.actualModel?.let { put("actualModel", it) }
                 r.groupId?.let { put("groupId", it) }
+                r.sessionId?.let { put("sessionId", it) }
                 r.usedCapabilities?.let { caps ->
                     put("usedCapabilities", JSONObject().apply {
                         put("tools", caps.tools)

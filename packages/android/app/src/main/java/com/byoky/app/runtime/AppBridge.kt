@@ -8,6 +8,7 @@ import android.webkit.WebView
 import androidx.webkit.JavaScriptReplyProxy
 import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebViewCompat
+import com.byoky.app.data.SessionUsage
 import com.byoky.app.data.WalletStore
 import com.byoky.app.proxy.ConnectProviders
 import com.byoky.app.proxy.ProxyService
@@ -308,26 +309,25 @@ class AppBridge(
 
     private fun handleSessionUsage(requestId: String, msg: JSONObject, reply: JavaScriptReplyProxy) {
         val presented = msg.optJSONObject("payload")?.optString("sessionKey", "") ?: ""
-        val payload: Any = if (isSessionLive(presented)) {
-            // The running totals allowances are enforced against, not the capped display log.
-            val total = wallet.usageTotal(appOrigin)
-            val providersJson = JSONObject()
-            for ((id, usage) in wallet.usageByProvider(appOrigin)) {
-                providersJson.put(id, JSONObject()
-                    .put("requests", usage.requests)
-                    .put("inputTokens", usage.inputTokens)
-                    .put("outputTokens", usage.outputTokens))
-            }
-            JSONObject()
-                .put("requests", total.requests)
-                .put("inputTokens", total.inputTokens)
-                .put("outputTokens", total.outputTokens)
-                .put("byProvider", providersJson)
-        } else JSONObject.NULL
+        // This session's usage, as the extension and iOS report it (the SDK
+        // documents getUsage() as "this session only"); allowances keep
+        // using the per-app ledger.
+        val usage = if (isSessionLive(presented)) wallet.sessionUsage(appOrigin) else null
+        val payload: Any = usage?.let { sessionUsageJson(it) } ?: JSONObject.NULL
         deliver(reply, JSONObject()
             .put("type", "BYOKY_SESSION_USAGE_RESPONSE")
             .put("requestId", requestId)
             .put("payload", payload))
+    }
+
+    private fun sessionUsageJson(usage: SessionUsage): JSONObject {
+        fun totals(t: SessionUsage.Totals) = JSONObject()
+            .put("requests", t.requests)
+            .put("inputTokens", t.inputTokens)
+            .put("outputTokens", t.outputTokens)
+        val providers = JSONObject()
+        for ((id, t) in usage.byProvider) providers.put(id, totals(t))
+        return totals(usage.total).put("byProvider", providers)
     }
 
     // ── Delivery ─────────────────────────────────────────────────────────
