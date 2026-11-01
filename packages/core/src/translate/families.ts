@@ -34,7 +34,8 @@ const FAMILY_PROVIDERS: Record<ModelFamily, ReadonlySet<ProviderId>> = {
     // Local OpenAI-compatible servers. They work as routing destinations
     // (the credential's loopback base URL is used, see rewriteProxyUrl), but
     // auto-routing never picks them: there is no model routing could name
-    // for them (see autoRouteModelFor in routing.ts).
+    // for them (see autoRouteModelFor in routing.ts). Nor does it send a
+    // request meant for one to another provider: only a group does that.
     'ollama',
     'lm_studio',
   ]),

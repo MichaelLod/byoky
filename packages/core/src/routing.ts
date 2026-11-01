@@ -26,7 +26,9 @@
  *      pick one (most-recently-used first, then family order) and translate
  *      against that provider's routing model (autoRouteModelFor); providers
  *      without one are skipped. This is opportunistic: group rules above
- *      still win, so explicit user config is never overwritten.
+ *      still win, so explicit user config is never overwritten. Local
+ *      servers (Ollama, LM Studio) take no part on either end: a request
+ *      meant for one is never sent to a cloud key, and none is picked.
  *   5. None of the above — the caller should surface a PROVIDER_UNAVAILABLE
  *      error (status 403) built via buildNoCredentialMessage to give the user
  *      actionable advice.
@@ -51,6 +53,7 @@ import type {
 import { shouldTranslate, sameFamily } from './translate/index.js';
 import { familyOf } from './translate/families.js';
 import { DEFAULT_MODELS, type ModelFamily } from './models.js';
+import { isLocalServerProvider } from './proxy-utils.js';
 
 /**
  * The model routing names when it picks a provider and nothing else names
@@ -199,10 +202,13 @@ export function resolveRoute(
  *     translation coverage first.
  *  3. Tiebreak by createdAt desc (newest credential first).
  *
- * Returns undefined in three cases:
+ * Returns undefined in four cases:
  *  - the user already holds a credential for the requested provider (caller
  *    will have picked that via the direct path and never reach us; this is
  *    defensive)
+ *  - the requested provider is a local server (Ollama, LM Studio): the app
+ *    asked for a model on the user's own machine, so its prompts must not
+ *    silently go to a paid cloud provider. A group can still route it.
  *  - the requested provider itself is outside any known family (translation
  *    needs both ends in a family)
  *  - no credential in the user's wallet is translatable against the request
@@ -215,6 +221,7 @@ export function resolveAutoCrossFamilyRoute(
   if (credentials.some((c) => c.providerId === requestedProviderId)) {
     return undefined;
   }
+  if (isLocalServerProvider(requestedProviderId)) return undefined;
   if (!familyOf(requestedProviderId)) return undefined;
 
   const sorted = [...credentials].sort((a, b) => {

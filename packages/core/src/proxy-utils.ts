@@ -9,6 +9,11 @@ import { PROVIDERS } from './providers.js';
  */
 const LOCAL_HTTP_PROVIDERS = new Set(['ollama', 'lm_studio']);
 
+/** Whether `providerId` is a user-run local server (Ollama, LM Studio). */
+export function isLocalServerProvider(providerId: string): boolean {
+  return LOCAL_HTTP_PROVIDERS.has(providerId);
+}
+
 function isLoopbackHost(hostname: string): boolean {
   // URL.hostname keeps the brackets on IPv6 literals.
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]' || hostname === '::1';

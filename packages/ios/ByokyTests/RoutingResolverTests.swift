@@ -213,6 +213,25 @@ final class RoutingResolverTests: XCTestCase {
         )
     }
 
+    /// A request meant for a local server never goes to a cloud key unless
+    /// a group says so (R2-01).
+    func testARequestForALocalServerIsNeverAutoRoutedToACloudKey() throws {
+        let cloud = [credential("anthropic", "Claude"), credential("gemini", "Gemini"), credential("cohere", "Cohere")]
+        for local in ["ollama", "lm_studio"] {
+            XCTAssertNil(RoutingResolver.resolve(requestedProviderId: local, requestedModel: "llama3.1", group: nil, credentials: cloud), local)
+            XCTAssertNil(RoutingResolver.resolve(requestedProviderId: local, requestedModel: "llama3.1", group: Group.makeDefault(), credentials: cloud), local)
+            XCTAssertNil(RoutingResolver.canServe(providerId: local, group: nil, credentials: cloud), local)
+        }
+        // A group the user set still routes it.
+        let claude = cloud[0]
+        let routed = try XCTUnwrap(RoutingResolver.resolve(
+            requestedProviderId: "ollama", requestedModel: "llama3.1",
+            group: group("anthropic", model: "claude-sonnet-4-6"), credentials: [claude]
+        ))
+        XCTAssertEqual(routed.credential.id, claude.id)
+        XCTAssertEqual(routed.translation?.dstProviderId, "anthropic")
+    }
+
     // MARK: - Connect availability (F101)
 
     func testCanServeFollowsRoutingWithoutAModel() {
