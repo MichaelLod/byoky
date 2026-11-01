@@ -42,6 +42,8 @@ import {
   translateRequest,
   translateResponse,
   createStreamTranslator,
+  getAdapter,
+  isIRError,
   TranslationError,
   resolveRoute,
   buildNoCredentialMessage,
@@ -1019,7 +1021,9 @@ export default defineBackground(() => {
           // Non-streaming translation: translate the buffered JSON body
           // and emit it as a single chunk.
           try {
-            const translatedResponse = applyResponseTranslation(translation, msg.body, msg.requestId, chunks.join(''), msg.url);
+            const translatedResponse = responseStatus >= 200 && responseStatus < 300
+              ? applyResponseTranslation(translation, msg.body, msg.requestId, chunks.join(''), msg.url)
+              : translateErrorBody(translation, msg.body, msg.requestId, chunks.join(''), msg.url);
             send({
               type: 'BYOKY_PROXY_RESPONSE_CHUNK',
               requestId: msg.requestId,
@@ -2080,7 +2084,7 @@ export default defineBackground(() => {
               }
             } else {
               try {
-                const translated = applyResponseTranslation(
+                const translated = (status >= 200 && status < 300 ? applyResponseTranslation : translateErrorBody)(
                   translationCtx.translation,
                   translationCtx.originalBody,
                   msg.requestId,
@@ -2705,7 +2709,9 @@ export default defineBackground(() => {
           }
         } else if (translation && !isStreamingResponse) {
           try {
-            const translatedResponse = applyResponseTranslation(translation, body, requestId, chunks.join(''), url);
+            const translatedResponse = responseStatus >= 200 && responseStatus < 300
+              ? applyResponseTranslation(translation, body, requestId, chunks.join(''), url)
+              : translateErrorBody(translation, body, requestId, chunks.join(''), url);
             bridgeProxyPort?.postMessage({
               type: 'proxy_http_response_chunk',
               requestId,
@@ -2978,6 +2984,29 @@ export default defineBackground(() => {
       throw new TranslationError('TRANSLATION_FAILED', 'Cannot resolve translation families');
     }
     return translateResponse(ctx, responseBody);
+  }
+
+  /**
+   * A translated request's upstream error body, for the app: in the app's
+   * dialect when the destination's error parses as one (so its SDK can
+   * read it), otherwise as it came. An HTML 502 from a CDN or a plain-text
+   * error is passed through rather than failing the response.
+   */
+  function translateErrorBody(
+    translation: SessionTranslation,
+    requestBody: string | undefined,
+    requestId: string,
+    responseBody: string,
+    requestUrl?: string,
+  ): string {
+    const ctx = buildTranslationContext(translation, requestBody, requestId, requestUrl);
+    if (!ctx) return responseBody;
+    try {
+      const ir = getAdapter(ctx.dstFamily).parseResponse(responseBody);
+      return isIRError(ir) ? getAdapter(ctx.srcFamily).serializeResponse(ctx, ir) : responseBody;
+    } catch {
+      return responseBody;
+    }
   }
 
   /**
