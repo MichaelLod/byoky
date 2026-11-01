@@ -88,11 +88,20 @@ function generateJwt() {
   return `${header}.${payload}.${sig}`
 }
 
-const jwt = generateJwt()
-const headers = { Authorization: `Bearer ${jwt}`, 'Content-Type': 'application/json' }
+// A token lives 20 minutes, and waiting for a build can take longer: sign a
+// new one when the current one is 15 minutes old.
+let jwt
+let jwtAt = 0
+function headers() {
+  if (Date.now() - jwtAt > 15 * 60_000) {
+    jwt = generateJwt()
+    jwtAt = Date.now()
+  }
+  return { Authorization: `Bearer ${jwt}`, 'Content-Type': 'application/json' }
+}
 
 async function api(path, opts = {}) {
-  const res = await fetch(`${API}${path}`, { headers, ...opts })
+  const res = await fetch(`${API}${path}`, { headers: headers(), ...opts })
   const text = await res.text()
   const data = text ? JSON.parse(text) : {}
   if (!res.ok) {
