@@ -1,5 +1,4 @@
 import {
-  type AuthMethod,
   type Credential,
   type Session,
   type SessionProvider,
@@ -44,9 +43,7 @@ import {
   translateResponse,
   createStreamTranslator,
   TranslationError,
-  resolveCrossFamilyRoute,
-  resolveSameFamilySwapRoute,
-  resolveAutoCrossFamilyRoute,
+  resolveRoute,
   buildNoCredentialMessage,
 } from '@byoky/core';
 import type { Runtime } from 'wxt/browser';
@@ -722,6 +719,17 @@ export default defineBackground(() => {
         });
         return;
       }
+      // The key goes out with the headers of effectiveProviderId, so it has
+      // to be that provider's (see resolveSessionProviders).
+      if (credential.providerId !== effectiveProviderId) {
+        send({
+          type: 'BYOKY_PROXY_RESPONSE_ERROR',
+          requestId: msg.requestId,
+          status: 403,
+          error: { code: 'PROVIDER_UNAVAILABLE', message: `The key this app is routed to is not a ${effectiveProviderId} key` },
+        });
+        return;
+      }
 
       // Check the token allowance and hold what this request may use in one
       // step, so a burst of parallel requests can't all pass the check.
@@ -1231,27 +1239,45 @@ export default defineBackground(() => {
     return null; // Some requested providers are outside trust scope
   }
 
-  async function resolveAllProviders(): Promise<Array<{
-    id: string;
-    authMethod: AuthMethod;
-    sessionProvider: Session['providers'][number];
-  }>> {
-    const credentials = await getStoredCredentials();
-    const result: Array<{ id: string; authMethod: AuthMethod; sessionProvider: Session['providers'][number] }> = [];
-
-    for (const cred of credentials) {
-      result.push({
-        id: cred.providerId,
-        authMethod: cred.authMethod,
-        sessionProvider: {
-          providerId: cred.providerId,
-          credentialId: cred.id,
-          available: true,
-          authMethod: cred.authMethod,
-        },
-      });
+  /**
+   * The session's providers for `providerIds`, routed by the app's group.
+   * The one routing rule for new and refreshed sessions: core resolveRoute
+   * (cross-family translation, same-family swap, the group's credential pin
+   * and model, a direct key, auto translation), as on iOS and Android.
+   *
+   * The credential must belong to the provider the request is sent to. A
+   * group pin can't point at another provider's key through the popup, so a
+   * mismatch means edited storage; the provider is then unavailable rather
+   * than that key being sent with the other provider's headers.
+   */
+  function resolveSessionProviders(
+    providerIds: string[],
+    credentials: Credential[],
+    group: Group | undefined,
+  ): { providers: SessionProvider[]; providerMap: ConnectResponse['providers'] } {
+    const providers: SessionProvider[] = [];
+    const providerMap: ConnectResponse['providers'] = {};
+    for (const providerId of new Set(providerIds)) {
+      let route = resolveRoute(providerId, group, credentials);
+      const destination = route?.translation?.dstProviderId ?? route?.swap?.dstProviderId ?? providerId;
+      if (route && route.credential.providerId !== destination) route = null;
+      providerMap[providerId] = {
+        available: !!route,
+        authMethod: route?.credential.authMethod ?? 'api_key',
+      };
+      if (!route) continue;
+      const sp: SessionProvider = {
+        providerId,
+        credentialId: route.credential.id,
+        available: true,
+        authMethod: route.credential.authMethod,
+      };
+      if (route.translation) sp.translation = route.translation;
+      else if (route.swap) sp.swap = route.swap;
+      else if (route.modelOverride) sp.modelOverride = route.modelOverride;
+      providers.push(sp);
     }
-    return result;
+    return { providers, providerMap };
   }
 
   async function createSession(
@@ -1268,82 +1294,17 @@ export default defineBackground(() => {
     const request = message.payload;
     const sessionKey = `byk_${crypto.randomUUID().replace(/-/g, '')}`;
 
-    const providerMap: ConnectResponse['providers'] = {};
-    const sessionProviders: Session['providers'] = [];
+    // No provider list means every provider the wallet holds a key for,
+    // routed exactly like an explicit list of them.
+    const providerIds = [...new Set(
+      request.providers?.length
+        ? request.providers.map((p) => p.id)
+        : credentials.map((c) => c.providerId),
+    )];
 
     // Resolve the group this app belongs to (auto-assigns to default if first contact)
     const group = await getGroupForOrigin(origin);
-
-    for (const req of request.providers ?? []) {
-      // If the group is bound to this provider with a specific credential pin,
-      // it overrides everything else for credential selection.
-      const groupPinnedCred =
-        group && group.providerId === req.id && group.credentialId
-          ? credentials.find((c) => c.id === group.credentialId)
-          : undefined;
-
-      // Cross-family routing: the group's bound
-      // provider differs from what the app asked for, both providers are
-      // in known translation families, and a credential resolves for the
-      // destination. Record translation metadata so the proxy handler
-      // knows to translate.
-      const crossRoute = resolveCrossFamilyRoute(group, req.id, credentials);
-
-      // Same-family swap: the group's bound provider differs from what the
-      // app asked for, and both providers are in the SAME family (identical
-      // wire format). No translation needed — just URL rewrite + credential
-      // swap + optional model override. Only consulted when cross-family
-      // routing doesn't apply, so the branches are mutually exclusive.
-      const swapRoute = !crossRoute
-        ? resolveSameFamilySwapRoute(group, req.id, credentials)
-        : undefined;
-
-      const directCred = credentials.find((c) => c.providerId === req.id);
-
-      // Auto cross-family translation: opportunistic fallback when the app
-      // has no group binding AND no direct credential for the requested
-      // provider. Picks any translatable credential the user holds so apps
-      // "just work" against mismatched keys. Group intent always wins — we
-      // only fire this when the app's group binds no provider (the default
-      // group binds none).
-      const autoRoute = !group?.providerId && !directCred
-        ? resolveAutoCrossFamilyRoute(req.id, credentials)
-        : undefined;
-
-      // Group credential pin wins over everything. Cross-family routing and
-      // same-family swap beat own-key direct lookup.
-      const cred = groupPinnedCred ?? crossRoute?.cred ?? swapRoute?.cred ?? directCred ?? autoRoute?.cred;
-      providerMap[req.id] = {
-        available: !!cred,
-        authMethod: cred?.authMethod ?? 'api_key',
-      };
-      if (cred) {
-        const sp: SessionProvider = {
-          providerId: req.id,
-          credentialId: cred.id,
-          available: true,
-          authMethod: cred.authMethod,
-        };
-        if (crossRoute) sp.translation = crossRoute.translation;
-        else if (swapRoute) sp.swap = swapRoute.swap;
-        else if (autoRoute) sp.translation = autoRoute.translation;
-        else if (group && group.providerId === req.id && group.model) {
-          sp.modelOverride = group.model;
-        }
-        sessionProviders.push(sp);
-      }
-    }
-
-    if (request.providers?.length === 0 || !request.providers) {
-      // Empty provider list: resolve to all available credentials.
-      // This path is only reached via explicit user approval — trusted
-      // auto-approvals always scope providers before calling createSession.
-      const resolved = await resolveAllProviders();
-      for (const rp of resolved) {
-        providerMap[rp.id] = { available: true, authMethod: rp.authMethod };
-        sessionProviders.push(rp.sessionProvider);
-      }
-    }
+    const { providers: sessionProviders, providerMap } = resolveSessionProviders(providerIds, credentials, group);
 
     const session: Session = {
       id: crypto.randomUUID(),
@@ -1351,11 +1312,9 @@ export default defineBackground(() => {
       appOrigin: origin,
       providers: sessionProviders,
       // What the user approved. An "all providers" request is pinned to the
-      // providers it resolved to, so keys added later aren't handed to this
-      // session without a new approval.
-      requestedProviders: request.providers?.length
-        ? request.providers.map(p => p.id)
-        : sessionProviders.map(sp => sp.providerId),
+      // providers the wallet had keys for, so keys added later aren't handed
+      // to this session without a new approval.
+      requestedProviders: providerIds,
       createdAt: Date.now(),
       expiresAt: Date.now() + 24 * 60 * 60 * 1000,
     };
@@ -1626,9 +1585,9 @@ export default defineBackground(() => {
         pendingApprovals.delete(approvalId);
 
         // Resolve which providers are being approved
-        const approvedProviderIds = pending.approval.providers.length > 0
+        const approvedProviderIds = [...new Set(pending.approval.providers.length > 0
           ? pending.approval.providers.map((p) => p.id)
-          : (await getStoredCredentials()).map((c) => c.providerId);
+          : (await getStoredCredentials()).map((c) => c.providerId))];
 
         // Approving clears a revocation. If the trust state can't be signed
         // (the wallet upgrade failed), the connection still goes ahead; the
@@ -2306,6 +2265,15 @@ export default defineBackground(() => {
     const translation = sessionProvider?.translation;
     const swap = sessionProvider?.swap;
     const effectiveProviderId = translation?.dstProviderId ?? swap?.dstProviderId ?? providerId;
+    // The key goes out with effectiveProviderId's headers (as on the page path).
+    if (credential.providerId !== effectiveProviderId) {
+      bridgeProxyPort?.postMessage({
+        type: 'proxy_http_error',
+        requestId,
+        error: `The key this app is routed to is not a ${effectiveProviderId} key`,
+      });
+      return;
+    }
 
     // Revalidate for requiresCustomBaseUrl providers now that we have the
     // credential's baseUrl. Direct path only — translation/swap builds the
@@ -3139,35 +3107,7 @@ export default defineBackground(() => {
       // Re-resolve group binding for this session's origin (may have changed)
       const group = await getGroupForOrigin(session.appOrigin);
 
-      const providerMap: ConnectResponse['providers'] = {};
-      const newSessionProviders: Session['providers'] = [];
-
-      for (const providerId of providerIds) {
-        const groupPinnedCred =
-          group && group.providerId === providerId && group.credentialId
-            ? credentials.find(c => c.id === group.credentialId)
-            : undefined;
-        const crossRoute = resolveCrossFamilyRoute(group, providerId, credentials);
-        const swapRoute = !crossRoute
-          ? resolveSameFamilySwapRoute(group, providerId, credentials)
-          : undefined;
-        const directCred = credentials.find(c => c.providerId === providerId);
-        const autoRoute = !group?.providerId && !directCred
-          ? resolveAutoCrossFamilyRoute(providerId, credentials)
-          : undefined;
-        const cred = groupPinnedCred ?? crossRoute?.cred ?? swapRoute?.cred ?? directCred ?? autoRoute?.cred;
-        providerMap[providerId] = { available: !!cred, authMethod: cred?.authMethod ?? 'api_key' };
-        if (cred) {
-          const sp: SessionProvider = { providerId, credentialId: cred.id, available: true, authMethod: cred.authMethod };
-          if (crossRoute) sp.translation = crossRoute.translation;
-          else if (swapRoute) sp.swap = swapRoute.swap;
-          else if (autoRoute) sp.translation = autoRoute.translation;
-          else if (group && group.providerId === providerId && group.model) {
-            sp.modelOverride = group.model;
-          }
-          newSessionProviders.push(sp);
-        }
-      }
+      const { providers: newSessionProviders, providerMap } = resolveSessionProviders(providerIds, credentials, group);
 
       session.providers = newSessionProviders;
       persistSessions();
