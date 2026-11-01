@@ -571,7 +571,7 @@ struct AppWebView: UIViewRepresentable {
             browser.webView = webView
             browser.startURL = startURL
             let browser = browser
-            func publish(_ update: @escaping (AppBrowserState) -> Void) {
+            func publish(_ update: @escaping @MainActor (AppBrowserState) -> Void) {
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated { update(browser) }
                 }
