@@ -5,6 +5,8 @@ import type {
   RelayRequest,
   WebSocketLike,
 } from '@byoky/core';
+import { base64ToBytes, encodeBody, fetchParts } from './body.js';
+import { walletError } from './wallet-error.js';
 import {
   ByokyError,
   ByokyErrorCode,
@@ -21,8 +23,9 @@ export interface ByokyServerOptions {
   helloTimeout?: number;
   /**
    * Fail a relayed request when the browser sends nothing for it for this
-   * long, in ms. Resets on every response chunk, so long streams are fine.
-   * Default: 120000. Set to 0 to disable.
+   * long, in ms. Resets on every response chunk, so long streams are fine,
+   * but a non-streaming response sends nothing until generation is done.
+   * Default: 600000 (10 minutes). Set to 0 to disable.
    */
   requestTimeout?: number;
 }
@@ -44,7 +47,7 @@ export class ByokyServer {
   constructor(options: ByokyServerOptions = {}) {
     this.pingInterval = options.pingInterval ?? 30_000;
     this.helloTimeout = options.helloTimeout ?? 10_000;
-    this.requestTimeout = options.requestTimeout ?? 120_000;
+    this.requestTimeout = options.requestTimeout ?? 600_000;
   }
 
   handleConnection(ws: WebSocketLike): Promise<ByokyClient> {
@@ -53,10 +56,14 @@ export class ByokyServer {
       let sessionId = '';
       let providers: Record<string, { available: boolean; authMethod: AuthMethod }> = {};
       let connected = false;
+      // A connection says hello once. Each hello used to start another ping
+      // interval that cleanup() never cleared, and could rename the session.
+      let helloReceived = false;
+      let closed = false;
       const closeCallbacks = new Set<() => void>();
       const pendingRequests = new Map<string, {
         resolveMeta: (value: { status: number; statusText: string; headers: Record<string, string> }) => void;
-        pushChunk: (chunk: string) => void;
+        pushChunk: (chunk: string, chunkEncoding?: 'base64') => void;
         done: () => void;
         error: (err: Error) => void;
       }>();
@@ -65,17 +72,33 @@ export class ByokyServer {
       let requestCounter = 0;
 
       const helloTimer = setTimeout(() => {
+        closed = true;
         reject(ByokyError.relayConnectionFailed('Timed out waiting for relay:hello'));
         ws.close(4000, 'Hello timeout');
       }, this.helloTimeout);
 
+      // The relay endpoint is public, so a client can send anything. Nothing
+      // it sends may throw out of here: with the `ws` library that would be
+      // an uncaught exception and take the whole process down.
       ws.onmessage = (event: { data: unknown }) => {
-        const msg = parseRelayMessage(event.data);
+        try {
+          handleMessage(event.data);
+        } catch {
+          // Drop the message.
+        }
+      };
+
+      function handleMessage(data: unknown) {
+        const msg = parseRelayMessage(data);
         if (!msg) return;
 
         switch (msg.type) {
           case 'relay:hello':
             handleHello(msg);
+            break;
+          case 'relay:providers':
+            // Provider changes after the hello; the session ID stays fixed.
+            if (connected) providers = msg.providers;
             break;
           case 'relay:response:meta': {
             const pending = pendingRequests.get(msg.requestId);
@@ -90,7 +113,7 @@ export class ByokyServer {
           }
           case 'relay:response:chunk': {
             const pending = pendingRequests.get(msg.requestId);
-            if (pending) pending.pushChunk(msg.chunk);
+            if (pending) pending.pushChunk(msg.chunk, msg.chunkEncoding);
             break;
           }
           case 'relay:response:done': {
@@ -104,7 +127,7 @@ export class ByokyServer {
           case 'relay:response:error': {
             const pending = pendingRequests.get(msg.requestId);
             if (pending) {
-              pending.error(new Error(msg.error.message));
+              pending.error(walletError(msg.error.code, msg.error.message));
               pendingRequests.delete(msg.requestId);
             }
             break;
@@ -115,7 +138,7 @@ export class ByokyServer {
           case 'relay:pong':
             break;
         }
-      };
+      }
 
       ws.onclose = () => {
         cleanup();
@@ -126,6 +149,8 @@ export class ByokyServer {
       };
 
       function handleHello(msg: RelayHello) {
+        if (helloReceived || closed) return;
+        helloReceived = true;
         clearTimeout(helloTimer);
         sessionId = msg.sessionId;
         providers = msg.providers;
@@ -133,6 +158,7 @@ export class ByokyServer {
 
         // Start keepalive pings
         if (self.pingInterval > 0) {
+          clearInterval(pingTimer);
           pingTimer = setInterval(() => {
             sendRelayMessage(ws, { type: 'relay:ping', ts: Date.now() });
           }, self.pingInterval);
@@ -142,10 +168,15 @@ export class ByokyServer {
       }
 
       function cleanup() {
-        if (!connected) return;
-        connected = false;
+        if (closed) return;
+        closed = true;
         clearTimeout(helloTimer);
         if (pingTimer) clearInterval(pingTimer);
+        if (!connected) {
+          reject(ByokyError.relayConnectionFailed('Connection closed before relay:hello'));
+          return;
+        }
+        connected = false;
 
         // Reject all pending requests
         for (const pending of pendingRequests.values()) {
@@ -161,15 +192,13 @@ export class ByokyServer {
         return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
           if (!connected) throw ByokyError.relayDisconnected();
 
-          const url = typeof input === 'string' ? input
-            : input instanceof URL ? input.toString()
-            : (input as Request).url;
-
-          const method = init?.method ?? 'GET';
-          const headers = init?.headers
-            ? Object.fromEntries(new Headers(init.headers).entries())
-            : {};
-          const body = init?.body ? await readBody(init.body) : undefined;
+          const { url, method, headers, signal, body: rawBody } = await fetchParts(input, init);
+          if (signal?.aborted) throw abortReason(signal);
+          const encoded = rawBody ? await encodeBody(rawBody, headers['content-type']) : undefined;
+          if (encoded?.contentType && !headers['content-type']) headers['content-type'] = encoded.contentType;
+          if (signal?.aborted) throw abortReason(signal);
+          // The socket may have closed while the body was read.
+          if (!connected) throw ByokyError.relayDisconnected();
 
           const requestId = `relay-${++requestCounter}-${Date.now()}`;
           const request: RelayRequest = {
@@ -179,7 +208,8 @@ export class ByokyServer {
             url,
             method,
             headers,
-            body,
+            body: encoded?.body,
+            bodyEncoding: encoded?.bodyEncoding,
           };
 
           // The browser drops oversized relay messages without a reply, so
@@ -201,7 +231,33 @@ export class ByokyServer {
 
             const stream = new ReadableStream<Uint8Array>({
               start(c) { controller = c; },
+              // The app cancelled the body: stop the generation as well.
+              cancel() { giveUp(); },
             });
+
+            // Ends the request: it fails before the headers, or its body
+            // errors after them.
+            const settle = (reason: unknown) => {
+              clearTimeout(idleTimer);
+              signal?.removeEventListener('abort', onAbort);
+              try { controller.error(reason); } catch {}
+              if (!metaResolved) {
+                metaResolved = true;
+                rejectFetch(reason);
+              }
+            };
+
+            // The backend gave up on the request (abort, timeout, a broken
+            // response). Forget it and have the browser stop the call, or it
+            // keeps generating and billing.
+            const giveUp = (reason?: unknown) => {
+              if (pendingRequests.get(requestId) !== pending) return;
+              pendingRequests.delete(requestId);
+              sendRelayMessage(ws, { type: 'relay:cancel', requestId });
+              settle(reason);
+            };
+
+            const onAbort = () => giveUp(abortReason(signal!));
 
             // Idle timeout: catches a browser that dropped the request or
             // stalled mid-stream, without cutting off long streams.
@@ -209,8 +265,7 @@ export class ByokyServer {
               if (self.requestTimeout <= 0) return;
               clearTimeout(idleTimer);
               idleTimer = setTimeout(() => {
-                pendingRequests.delete(requestId);
-                pending.error(new ByokyError(
+                giveUp(new ByokyError(
                   ByokyErrorCode.PROXY_ERROR,
                   `Relay request timed out (no response from the browser for ${Math.round(self.requestTimeout / 1000)}s)`,
                 ));
@@ -220,32 +275,37 @@ export class ByokyServer {
             const pending = {
               resolveMeta: (meta: { status: number; statusText: string; headers: Record<string, string> }) => {
                 if (metaResolved) return;
+                let response: Response;
+                try {
+                  response = buildResponse(stream, meta);
+                } catch {
+                  giveUp(new ByokyError(ByokyErrorCode.PROXY_ERROR, 'Invalid relay response'));
+                  return;
+                }
                 metaResolved = true;
                 touch();
-                resolveFetch(new Response(stream, {
-                  status: meta.status,
-                  statusText: meta.statusText,
-                  headers: new Headers(meta.headers),
-                }));
+                resolveFetch(response);
               },
-              pushChunk: (chunk: string) => {
+              pushChunk: (chunk: string, chunkEncoding?: 'base64') => {
+                let bytes: Uint8Array;
+                try {
+                  bytes = chunkEncoding === 'base64' ? base64ToBytes(chunk) : encoder.encode(chunk);
+                } catch {
+                  giveUp(new ByokyError(ByokyErrorCode.PROXY_ERROR, 'Invalid relay response'));
+                  return;
+                }
                 touch();
-                try { controller.enqueue(encoder.encode(chunk)); } catch {}
+                try { controller.enqueue(bytes); } catch {}
               },
               done: () => {
                 clearTimeout(idleTimer);
+                signal?.removeEventListener('abort', onAbort);
                 try { controller.close(); } catch {}
               },
-              error: (err: Error) => {
-                clearTimeout(idleTimer);
-                try { controller.error(err); } catch {}
-                if (!metaResolved) {
-                  metaResolved = true;
-                  rejectFetch(err);
-                }
-              },
+              error: (err: Error) => settle(err),
             };
             pendingRequests.set(requestId, pending);
+            signal?.addEventListener('abort', onAbort);
             touch();
 
             // Send the request to the frontend
@@ -273,13 +333,32 @@ export class ByokyServer {
   }
 }
 
-async function readBody(body: BodyInit): Promise<string | undefined> {
-  if (typeof body === 'string') return body;
-  if (body instanceof ArrayBuffer) return new TextDecoder().decode(body);
-  if (body instanceof Uint8Array) return new TextDecoder().decode(body);
-  if (typeof Blob !== 'undefined' && body instanceof Blob) return body.text();
-  if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) return body.toString();
-  return undefined;
+/** What fetch rejects with on abort: the signal's reason, an AbortError by default. */
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
+}
+
+// Statuses whose Response must have a null body.
+const NULL_BODY_STATUSES = new Set([204, 205, 304]);
+
+/** Throws on a status or status text Response refuses; skips invalid headers. */
+function buildResponse(
+  body: ReadableStream<Uint8Array>,
+  meta: { status: number; statusText?: string; headers?: Record<string, string> },
+): Response {
+  const headers = new Headers();
+  for (const [name, value] of Object.entries(meta.headers ?? {})) {
+    try {
+      headers.append(name, value);
+    } catch {
+      // Invalid header name or value.
+    }
+  }
+  return new Response(NULL_BODY_STATUSES.has(meta.status) ? null : body, {
+    status: meta.status,
+    statusText: meta.statusText ?? '',
+    headers,
+  });
 }
 
 export type { WebSocketLike, RelayMessage, AuthMethod } from '@byoky/core';

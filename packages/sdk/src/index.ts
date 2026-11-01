@@ -4,6 +4,7 @@ export type { MockConnectOptions } from './mock.js';
 export type { ModalOptions } from './modal/connect-modal.js';
 export { isExtensionInstalled, getStoreUrl } from './detect.js';
 export { createProxyFetch } from './proxy-fetch.js';
+export type { ProxyFetchOptions } from './proxy-fetch.js';
 export type { RelayConnection } from './relay-client.js';
 export {
   type ConnectRequest,

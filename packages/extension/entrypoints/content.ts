@@ -7,6 +7,12 @@ const NOTIFY_RETRY_MIN_MS = 1_000;
 const NOTIFY_RETRY_MAX_MS = 60_000;
 const NOTIFY_STABLE_MS = 10_000;
 
+// What the page gets when this script has been cut off from the extension.
+const WALLET_RELOADED = {
+  code: 'WALLET_RELOADED',
+  message: 'Byoky was updated. Reload this page.',
+};
+
 export default defineContentScript({
   matches: ['<all_urls>'],
   runAt: 'document_start',
@@ -60,7 +66,11 @@ export default defineContentScript({
         // Use a port for streaming proxy requests. Closing it cancels the
         // request: the background aborts the upstream fetch.
         const requestId: string = data.requestId;
-        const port = browser.runtime.connect({ name: 'byoky-proxy' });
+        const port = connectToBackground('byoky-proxy');
+        if (!port) {
+          reply({ type: 'BYOKY_PROXY_RESPONSE_ERROR', requestId, status: 503, error: WALLET_RELOADED });
+          return;
+        }
         proxyPorts.set(requestId, port);
 
         // Stops tracking the request. False if the response already finished
@@ -119,7 +129,15 @@ export default defineContentScript({
         // background and isn't also dispatched to the side-panel/popup, which
         // can swallow the response in Chrome MV3 when multiple onMessage
         // listeners exist.
-        const port = browser.runtime.connect({ name: 'byoky-message' });
+        const port = connectToBackground('byoky-message');
+        if (!port) {
+          if (data.type === 'BYOKY_SESSION_STATUS') {
+            reply({ type: 'BYOKY_SESSION_STATUS_RESPONSE', requestId: data.requestId, payload: { connected: false } });
+          } else if (!isDisconnect) {
+            reply({ type: 'BYOKY_ERROR', requestId: data.id || data.requestId, payload: WALLET_RELOADED });
+          }
+          return;
+        }
         let replied = false;
         port.postMessage(data);
         port.onMessage.addListener((msg) => {
@@ -148,21 +166,56 @@ export default defineContentScript({
         if (!ALLOWED_PAGE_ACTIONS.includes(data.action)) {
           return;
         }
-        browser.runtime.sendMessage({
-          type: 'BYOKY_INTERNAL',
-          action: data.action,
-          payload: data.payload,
-        }).then((response) => {
+        if (!extensionAlive()) return;
+        let sent: Promise<unknown>;
+        try {
+          sent = browser.runtime.sendMessage({
+            type: 'BYOKY_INTERNAL',
+            action: data.action,
+            payload: data.payload,
+          });
+        } catch {
+          return;
+        }
+        sent.then((response) => {
           reply({ requestId: data.requestId, payload: response });
         }).catch(() => {});
       } else if (data.type === 'BYOKY_REGISTER_NOTIFY') {
         // SDK registers a MessagePort for secure push notifications
         if (replyPort) {
-          notifyPorts.add(replyPort);
+          const sdkPort = replyPort;
+          notifyPorts.add(sdkPort);
+          // The SDK hands the port back when its session ends.
+          sdkPort.onmessage = (e: MessageEvent) => {
+            if (e.data?.type === 'BYOKY_UNREGISTER_NOTIFY') releaseSdkPort(sdkPort);
+          };
+          // Browsers that fire 'close' on MessagePort also report a page
+          // that dropped its end without unregistering.
+          sdkPort.addEventListener('close', () => releaseSdkPort(sdkPort));
           if (!notifyPort && !notifyRetryTimer) connectNotifyPort();
         }
       }
     });
+
+    // Once no SDK in this frame listens, the notify connection closes, so
+    // it stops waking the service worker.
+    function releaseSdkPort(port: MessagePort) {
+      if (!notifyPorts.delete(port)) return;
+      port.close();
+      if (notifyPorts.size > 0) return;
+      if (notifyRetryTimer) {
+        clearTimeout(notifyRetryTimer);
+        notifyRetryTimer = null;
+      }
+      // disconnect() doesn't fire this side's onDisconnect, so nothing
+      // schedules a reopen.
+      try {
+        notifyPort?.disconnect();
+      } catch {
+        // Already cut off from the extension.
+      }
+      notifyPort = null;
+    }
 
     // Persistent port for receiving notifications (revocations, provider
     // updates) from background. They carry a session key, so the background
@@ -198,13 +251,24 @@ export default defineContentScript({
       }
     }
 
+    // A port to the background, or null once this script is cut off. The
+    // caller then answers the page at once: Chrome doesn't re-inject
+    // content scripts on update, so otherwise every call in an open tab
+    // would hang until the SDK's timeout and end in a generic error.
+    function connectToBackground(name: string): Runtime.Port | null {
+      if (!extensionAlive()) return null;
+      try {
+        return browser.runtime.connect({ name });
+      } catch {
+        return null;
+      }
+    }
+
     function connectNotifyPort() {
       notifyRetryTimer = null;
-      if (!extensionAlive()) return;
-      let port: Runtime.Port;
-      try {
-        port = browser.runtime.connect({ name: 'byoky-notify' });
-      } catch {
+      const port = connectToBackground('byoky-notify');
+      if (!port) {
+        announceWalletReloaded();
         return;
       }
       notifyPort = port;
@@ -212,6 +276,12 @@ export default defineContentScript({
       port.onMessage.addListener(forwardNotification);
       port.onDisconnect.addListener(() => {
         notifyPort = null;
+        // Chrome usually reports the drop while runtime.id is still set, so
+        // a reload mostly shows up only when the reopen fails (above).
+        if (!extensionAlive()) {
+          announceWalletReloaded();
+          return;
+        }
         if (Date.now() - connectedAt >= NOTIFY_STABLE_MS) notifyRetryMs = NOTIFY_RETRY_MIN_MS;
         scheduleNotifyReconnect();
       });
@@ -219,9 +289,21 @@ export default defineContentScript({
 
     function scheduleNotifyReconnect() {
       if (notifyPort || notifyRetryTimer || notifyPorts.size === 0) return;
-      if (!extensionAlive()) return;
+      if (!extensionAlive()) {
+        announceWalletReloaded();
+        return;
+      }
       notifyRetryTimer = setTimeout(connectNotifyPort, notifyRetryMs);
       notifyRetryMs = Math.min(notifyRetryMs * 2, NOTIFY_RETRY_MAX_MS);
+    }
+
+    // Byoky was updated or reloaded, so the sessions of the SDKs in this
+    // frame are gone. Like a proxy request that can't open its port, this
+    // counts a notify port that can't be opened as cut off. Each SDK ends
+    // its session and hands its port back (BYOKY_UNREGISTER_NOTIFY).
+    function announceWalletReloaded() {
+      if (notifyPorts.size === 0) return;
+      forwardNotification({ type: 'BYOKY_WALLET_RELOADED' });
     }
 
     connectNotifyPort();

@@ -1,38 +1,44 @@
-import type { SerializedFormDataEntry } from '@byoky/core';
 import { ByokyError, ByokyErrorCode } from '@byoky/core';
+import { base64ToBytes, encodeBody, fetchParts } from './body.js';
 import { resolveMessageTarget } from './detect.js';
+import { randomId } from './id.js';
+import { walletError } from './wallet-error.js';
 
-interface ReadBodyResult {
-  body: string;
-  bodyEncoding?: 'base64' | 'formdata';
+// Statuses whose Response must have a null body; new Response() throws on
+// a stream body for them.
+const NULL_BODY_STATUSES = new Set([204, 205, 304]);
+
+/** Default for ProxyFetchOptions.timeout: 10 minutes, as in the official OpenAI and Anthropic SDKs. */
+export const DEFAULT_REQUEST_TIMEOUT = 600_000;
+
+export interface ProxyFetchOptions {
+  /**
+   * How long to wait for the response headers, in ms; 0 waits forever. A
+   * non-streaming response sends its headers only once generation is
+   * done, so this has to outlast the longest generation. The caller's
+   * AbortSignal still cancels at any time. Default: DEFAULT_REQUEST_TIMEOUT.
+   */
+  timeout?: number;
 }
 
 export function createProxyFetch(
   providerId: string,
   sessionKeyRef: { current: string },
+  options: ProxyFetchOptions = {},
 ): typeof fetch {
+  const timeoutMs = options.timeout ?? DEFAULT_REQUEST_TIMEOUT;
   return async (
     input: RequestInfo | URL,
     init?: RequestInit,
   ): Promise<Response> => {
-    const url =
-      typeof input === 'string'
-        ? input
-        : input instanceof URL
-          ? input.toString()
-          : input.url;
-
-    const signal = init?.signal ?? undefined;
+    const { url, method, headers, signal, body } = await fetchParts(input, init);
     if (signal?.aborted) throw abortReason(signal);
 
-    const method = init?.method ?? 'GET';
-    const headers = init?.headers
-      ? Object.fromEntries(new Headers(init.headers).entries())
-      : {};
-    const bodyResult = init?.body ? await readBody(init.body, headers['content-type']) : undefined;
+    const bodyResult = body ? await encodeBody(body, headers['content-type']) : undefined;
+    if (bodyResult?.contentType && !headers['content-type']) headers['content-type'] = bodyResult.contentType;
     if (signal?.aborted) throw abortReason(signal);
 
-    const requestId = crypto.randomUUID();
+    const requestId = randomId();
 
     return new Promise<Response>((resolve, reject) => {
       const { readable, writable } = new TransformStream<Uint8Array>();
@@ -40,11 +46,16 @@ export function createProxyFetch(
       const encoder = new TextEncoder();
       let resolved = false;
 
-      const timeout = setTimeout(() => {
-        cleanup();
-        cancel();
-        reject(new Error('Proxy request timed out'));
-      }, 120_000);
+      // A backstop for a wallet that never answers. It used to be a fixed
+      // 120 s, which cut off slow non-streaming generations; the official
+      // SDKs then retried, so one call was sent and billed three times.
+      const timeout = timeoutMs > 0 ? setTimeout(() => {
+        fail(new ByokyError(
+          ByokyErrorCode.PROXY_ERROR,
+          `Proxy request timed out: no response from the wallet within ${Math.round(timeoutMs / 1000)}s. If Byoky was just updated, reload the page.`,
+          { timeout: timeoutMs },
+        ));
+      }, timeoutMs) : undefined;
 
       // Use MessageChannel for secure response delivery — page scripts
       // cannot intercept or spoof messages on a transferred port.
@@ -55,23 +66,38 @@ export function createProxyFetch(
         if (data?.requestId !== requestId) return;
 
         switch (data.type) {
-          case 'BYOKY_PROXY_RESPONSE_META':
-            if (!resolved) {
-              resolved = true;
-              clearTimeout(timeout);
-              resolve(
-                new Response(readable, {
-                  status: data.status,
-                  statusText: data.statusText,
-                  headers: new Headers(data.headers),
-                }),
-              );
+          case 'BYOKY_PROXY_RESPONSE_META': {
+            if (resolved) break;
+            let response: Response;
+            try {
+              response = new Response(NULL_BODY_STATUSES.has(data.status) ? null : readable, {
+                status: data.status,
+                statusText: data.statusText,
+                headers: new Headers(data.headers),
+              });
+            } catch {
+              fail(new ByokyError(ByokyErrorCode.PROXY_ERROR, 'Invalid response from the wallet'));
+              break;
             }
+            resolved = true;
+            clearTimeout(timeout);
+            resolve(response);
             break;
+          }
 
-          case 'BYOKY_PROXY_RESPONSE_CHUNK':
-            writer.write(encoder.encode(data.chunk)).catch(() => {});
+          case 'BYOKY_PROXY_RESPONSE_CHUNK': {
+            // A non-text response (audio, for one) arrives as base64 bytes;
+            // a text decoder would turn every byte that isn't UTF-8 into U+FFFD.
+            let bytes: Uint8Array;
+            try {
+              bytes = data.chunkEncoding === 'base64' ? base64ToBytes(data.chunk) : encoder.encode(data.chunk);
+            } catch {
+              fail(new ByokyError(ByokyErrorCode.PROXY_ERROR, 'Invalid response chunk from the wallet'));
+              break;
+            }
+            writer.write(bytes).catch(() => {});
             break;
+          }
 
           case 'BYOKY_PROXY_RESPONSE_DONE':
             writer.close().catch(() => {});
@@ -93,8 +119,8 @@ export function createProxyFetch(
             } else {
               // The status line already went out, so error the body: a
               // closed stream would pass for a complete response.
-              writer.abort(new ByokyError(
-                (data.error?.code ?? ByokyErrorCode.PROXY_ERROR) as ByokyErrorCode,
+              writer.abort(walletError(
+                data.error?.code ?? ByokyErrorCode.PROXY_ERROR,
                 data.error?.message ?? 'Proxy request failed',
               )).catch(() => {});
             }
@@ -104,9 +130,9 @@ export function createProxyFetch(
         }
       };
 
-      // Like fetch: reject while waiting for headers, error the body after.
-      const onAbort = () => {
-        const reason = abortReason(signal!);
+      // Stops the request, wallet side included. Like fetch: rejects while
+      // waiting for headers, errors the body after.
+      function fail(reason: unknown) {
         cleanup();
         cancel();
         if (resolved) {
@@ -115,7 +141,9 @@ export function createProxyFetch(
           resolved = true;
           reject(reason);
         }
-      };
+      }
+
+      const onAbort = () => fail(abortReason(signal!));
       signal?.addEventListener('abort', onAbort);
 
       function cleanup() {
@@ -158,89 +186,4 @@ export function createProxyFetch(
 /** What fetch rejects with on abort: the signal's reason, an AbortError by default. */
 function abortReason(signal: AbortSignal): unknown {
   return signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
-}
-
-function isTextContentType(contentType?: string): boolean {
-  if (!contentType) return true;
-  const lower = contentType.toLowerCase();
-  return lower.startsWith('text/') ||
-    lower.includes('json') ||
-    lower.includes('xml') ||
-    lower.includes('urlencoded') ||
-    lower.includes('javascript');
-}
-
-function uint8ToBase64(bytes: Uint8Array): string {
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
-}
-
-async function serializeFormData(formData: FormData): Promise<string> {
-  const entries: SerializedFormDataEntry[] = [];
-  for (const [name, value] of formData.entries()) {
-    if (typeof value === 'string') {
-      entries.push({ name, value, type: 'text' });
-    } else {
-      const buffer = await value.arrayBuffer();
-      const base64 = uint8ToBase64(new Uint8Array(buffer));
-      entries.push({
-        name,
-        value: base64,
-        type: 'file',
-        filename: value instanceof File ? value.name : undefined,
-        contentType: value.type || 'application/octet-stream',
-      });
-    }
-  }
-  return JSON.stringify(entries);
-}
-
-async function readBody(body: BodyInit, contentType?: string): Promise<ReadBodyResult | undefined> {
-  if (typeof body === 'string') return { body };
-  if (body instanceof URLSearchParams) return { body: body.toString() };
-
-  if (body instanceof FormData) {
-    return { body: await serializeFormData(body), bodyEncoding: 'formdata' };
-  }
-
-  if (body instanceof ArrayBuffer) {
-    if (isTextContentType(contentType)) {
-      return { body: new TextDecoder().decode(body) };
-    }
-    return { body: uint8ToBase64(new Uint8Array(body)), bodyEncoding: 'base64' };
-  }
-
-  if (body instanceof Blob) {
-    if (isTextContentType(contentType)) {
-      return { body: await body.text() };
-    }
-    const buffer = await body.arrayBuffer();
-    return { body: uint8ToBase64(new Uint8Array(buffer)), bodyEncoding: 'base64' };
-  }
-
-  if (body instanceof ReadableStream) {
-    const reader = body.getReader();
-    const chunks: Uint8Array[] = [];
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-    }
-    const total = chunks.reduce((acc, c) => acc + c.length, 0);
-    const combined = new Uint8Array(total);
-    let offset = 0;
-    for (const chunk of chunks) {
-      combined.set(chunk, offset);
-      offset += chunk.length;
-    }
-    if (isTextContentType(contentType)) {
-      return { body: new TextDecoder().decode(combined) };
-    }
-    return { body: uint8ToBase64(combined), bodyEncoding: 'base64' };
-  }
-
-  return undefined;
 }

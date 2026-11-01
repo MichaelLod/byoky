@@ -14,6 +14,7 @@
 import { ByokyError, ByokyErrorCode } from '@byoky/core';
 import type { ByokySession } from './byoky.js';
 import { fetchModelsList } from './list-models-fetch.js';
+import { randomId } from './id.js';
 
 export interface MockConnectOptions {
   /**
@@ -108,8 +109,16 @@ function makeMockFetch(
 }
 
 export function createMockSession(options: MockConnectOptions = {}): ByokySession {
-  const isProd =
-    typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'production';
+  // Written so bundlers can inline it: they replace process.env.NODE_ENV
+  // with a literal, but leave `typeof process` alone, which made the old
+  // `typeof process !== 'undefined' && ...` false in every browser bundle.
+  // Without a bundler, a page has no `process` and the read throws.
+  let isProd = false;
+  try {
+    isProd = process.env.NODE_ENV === 'production';
+  } catch {
+    // No process: not a production build we can detect.
+  }
   if (isProd) {
     throw new ByokyError(
       ByokyErrorCode.UNKNOWN,
@@ -125,11 +134,7 @@ export function createMockSession(options: MockConnectOptions = {}): ByokySessio
     );
   }
 
-  const sessionKey = `mock-${
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : Math.random().toString(36).slice(2)
-  }`;
+  const sessionKey = `mock-${randomId()}`;
 
   const providers: ByokySession['providers'] = {};
   for (const id of Object.keys(keys)) {

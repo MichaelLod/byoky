@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Byoky } from '../src/byoky.js';
-import { ByokyErrorCode } from '@byoky/core';
+import { ByokyError, ByokyErrorCode } from '@byoky/core';
 
 describe('Byoky', () => {
   let postedMessages: Array<{ data: Record<string, unknown>; port?: MessagePort }>;
@@ -89,6 +89,34 @@ describe('Byoky', () => {
     expect(typeof session.onDisconnect).toBe('function');
   });
 
+  it('lists every requested provider, marking the ones the wallet left out unavailable', async () => {
+    const connectPromise = new Byoky().connect({
+      providers: [{ id: 'anthropic', required: true }, { id: 'openai', required: false }],
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    // The mobile wallets list only the providers they hold a key for.
+    simulateResponse({
+      type: 'BYOKY_CONNECT_RESPONSE',
+      requestId: postedMessages[0].data.requestId,
+      payload: { sessionKey: 'byk_mobile', proxyUrl: 'extension-proxy', providers: { openai: { available: true, authMethod: 'api_key' } } },
+    });
+    const session = await connectPromise;
+    expect(session.providers.anthropic.available).toBe(false);
+    expect(session.providers.openai.available).toBe(true);
+
+    const updates: unknown[] = [];
+    session.onProvidersUpdated((p) => updates.push(p));
+    simulateNotification({
+      type: 'BYOKY_PROVIDERS_UPDATED',
+      payload: { sessionKey: 'byk_mobile', providers: { gemini: { available: true, authMethod: 'api_key' } } },
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(session.providers.anthropic).toEqual({ available: false, authMethod: 'api_key' });
+    expect(session.providers.openai).toEqual({ available: false, authMethod: 'api_key' });
+    expect(session.providers.gemini.available).toBe(true);
+    expect(updates).toEqual([session.providers]);
+  });
+
   it('rejects when user denies connection', async () => {
     const byoky = new Byoky();
 
@@ -109,6 +137,58 @@ describe('Byoky', () => {
     await expect(connectPromise).rejects.toMatchObject({
       code: ByokyErrorCode.USER_REJECTED,
     });
+  });
+
+  it('reports a code outside ByokyErrorCode as UNKNOWN, keeping the code in details', async () => {
+    const connectPromise = new Byoky().connect();
+    await new Promise((r) => setTimeout(r, 10));
+    simulateResponse({
+      type: 'BYOKY_ERROR',
+      requestId: postedMessages[0].data.requestId,
+      payload: { code: 'SOMETHING_NEW', message: 'A newer wallet said no' },
+    });
+
+    const err = await connectPromise.catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ByokyError);
+    expect(err).toMatchObject({ code: ByokyErrorCode.UNKNOWN, message: 'A newer wallet said no', details: { code: 'SOMETHING_NEW' } });
+  });
+
+  it('keeps a known code and its retryAfter', async () => {
+    const connectPromise = new Byoky().connect();
+    await new Promise((r) => setTimeout(r, 10));
+    simulateResponse({
+      type: 'BYOKY_ERROR',
+      requestId: postedMessages[0].data.requestId,
+      payload: { code: 'RATE_LIMITED', message: 'Please wait a moment before trying again.', retryAfter: 42 },
+    });
+
+    await expect(connectPromise).rejects.toMatchObject({ code: ByokyErrorCode.RATE_LIMITED, details: { retryAfter: 42 } });
+  });
+
+  it('getUsage rejects with ByokyErrors, not plain Errors', async () => {
+    const connectPromise = new Byoky().connect();
+    await new Promise((r) => setTimeout(r, 10));
+    simulateResponse({
+      type: 'BYOKY_CONNECT_RESPONSE',
+      requestId: postedMessages[0].data.requestId,
+      payload: { sessionKey: 'byk_usage', proxyUrl: 'extension-proxy', providers: {} },
+    });
+    const session = await connectPromise;
+
+    const missing = session.getUsage();
+    await new Promise((r) => setTimeout(r, 10));
+    const query = postedMessages.find((m) => m.data.type === 'BYOKY_SESSION_USAGE')!;
+    simulateResponse({ type: 'BYOKY_SESSION_USAGE_RESPONSE', requestId: query.data.requestId, payload: null });
+    await expect(missing).rejects.toMatchObject({ name: 'ByokyError', code: ByokyErrorCode.NO_SESSION });
+
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const silent = session.getUsage().catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(await silent).toMatchObject({ name: 'ByokyError', code: ByokyErrorCode.PROXY_ERROR, message: 'Usage query timed out' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('times out if no response received', async () => {
@@ -186,6 +266,78 @@ describe('Byoky', () => {
 
     await new Promise((r) => setTimeout(r, 10));
     expect(callback).toHaveBeenCalledTimes(1);
+  });
+
+  it('session.onDisconnect fires when Byoky was reloaded, keeping the saved session', async () => {
+    const connectPromise = new Byoky().connect();
+    await new Promise((r) => setTimeout(r, 10));
+    simulateResponse({
+      type: 'BYOKY_CONNECT_RESPONSE',
+      requestId: postedMessages[0].data.requestId,
+      payload: { sessionKey: 'byk_reloaded', proxyUrl: 'extension-proxy', providers: {} },
+    });
+    const session = await connectPromise;
+    const callback = vi.fn();
+    session.onDisconnect(callback);
+
+    simulateNotification({ type: 'BYOKY_WALLET_RELOADED' });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(callback).toHaveBeenCalledTimes(1);
+    expect(sessionStorage.getItem('byoky:session')).not.toBeNull();
+  });
+
+  describe('notify port release', () => {
+    async function connectSession(sessionKey: string) {
+      const connectPromise = new Byoky().connect();
+      await new Promise((r) => setTimeout(r, 10));
+      simulateResponse({
+        type: 'BYOKY_CONNECT_RESPONSE',
+        requestId: postedMessages[0].data.requestId,
+        payload: { sessionKey, proxyUrl: 'extension-proxy', providers: { anthropic: { available: true, authMethod: 'api_key' } } },
+      });
+      const session = await connectPromise;
+      await new Promise((r) => setTimeout(r, 10));
+      // What the content script receives on its end of the notify port.
+      const received: unknown[] = [];
+      const notifyPort = postedMessages.find((m) => m.data.type === 'BYOKY_REGISTER_NOTIFY')!.port!;
+      notifyPort.onmessage = (e) => received.push(e.data);
+      return { session, received };
+    }
+
+    const unregister = { type: 'BYOKY_UNREGISTER_NOTIFY' };
+
+    it('unregisters on disconnect()', async () => {
+      const { session, received } = await connectSession('byk_n1');
+      session.disconnect();
+      await new Promise((r) => setTimeout(r, 10));
+      expect(received).toEqual([unregister]);
+    });
+
+    it('unregisters when the wallet revokes the session', async () => {
+      const { received } = await connectSession('byk_n2');
+      simulateNotification({ type: 'BYOKY_SESSION_REVOKED', payload: { sessionKey: 'byk_n2' } });
+      await new Promise((r) => setTimeout(r, 10));
+      expect(received).toEqual([unregister]);
+    });
+
+    it('unregisters when reconnecting fails for good', async () => {
+      const { session, received } = await connectSession('byk_n3');
+      void session.createFetch('anthropic')('https://api.anthropic.com/v1/messages');
+      await new Promise((r) => setTimeout(r, 10));
+      const proxy = postedMessages.find((m) => m.data.type === 'BYOKY_PROXY_REQUEST')!;
+      proxy.port!.postMessage({
+        type: 'BYOKY_PROXY_RESPONSE_ERROR', requestId: proxy.data.requestId, status: 401,
+        error: { code: 'SESSION_EXPIRED', message: 'expired' },
+      });
+      await new Promise((r) => setTimeout(r, 10));
+      const reconnect = postedMessages.filter((m) => m.data.type === 'BYOKY_CONNECT_REQUEST')[1];
+      reconnect.port!.postMessage({
+        type: 'BYOKY_ERROR', requestId: reconnect.data.requestId,
+        payload: { code: 'USER_REJECTED', message: 'no' },
+      });
+      await new Promise((r) => setTimeout(r, 10));
+      expect(received).toEqual([unregister]);
+    });
   });
 
   it('session.onDisconnect returns an unsubscribe function', async () => {
@@ -441,6 +593,182 @@ describe('Byoky', () => {
     const response = await fetchPromise;
     expect(response.status).toBe(401);
     expect(disconnectCb).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes requestTimeout to the session fetch', async () => {
+    const connectPromise = new Byoky({ requestTimeout: 50 }).connect();
+    await new Promise((r) => setTimeout(r, 10));
+    simulateResponse({
+      type: 'BYOKY_CONNECT_RESPONSE',
+      requestId: postedMessages[0].data.requestId,
+      payload: { sessionKey: 'byk_rt', proxyUrl: 'extension-proxy', providers: {} },
+    });
+    const session = await connectPromise;
+
+    await expect(session.createFetch('openai')('https://api.openai.com/v1/models'))
+      .rejects.toMatchObject({ code: ByokyErrorCode.PROXY_ERROR, message: expect.stringContaining('timed out') });
+  });
+
+  describe('createRelay', () => {
+    class MockWebSocket {
+      static last: MockWebSocket;
+      readyState = 0;
+      sent: string[] = [];
+      onopen: ((e: unknown) => void) | null = null;
+      onmessage: ((e: { data: unknown }) => void) | null = null;
+      onclose: ((e: { code: number; reason: string }) => void) | null = null;
+      onerror: ((e: unknown) => void) | null = null;
+      constructor(public url: string) { MockWebSocket.last = this; }
+      send(data: string) { this.sent.push(data); }
+      close() { this.readyState = 3; }
+      open() { this.readyState = 1; this.onopen?.({}); }
+    }
+
+    beforeEach(() => { vi.stubGlobal('WebSocket', MockWebSocket); });
+    afterEach(() => { vi.unstubAllGlobals(); });
+
+    const tick = () => new Promise((r) => setTimeout(r, 10));
+    const proxyRequests = () => postedMessages.filter((m) => m.data.type === 'BYOKY_PROXY_REQUEST');
+    const connectRequests = () => postedMessages.filter((m) => m.data.type === 'BYOKY_CONNECT_REQUEST');
+
+    function relayRequest(ws: MockWebSocket, requestId: string) {
+      ws.onmessage?.({
+        data: JSON.stringify({
+          type: 'relay:request', requestId, providerId: 'openai',
+          url: 'https://api.openai.com/v1/chat/completions', method: 'POST', headers: {}, body: '{}',
+        }),
+      });
+    }
+
+    function answerOk(entry: { data: Record<string, unknown>; port?: MessagePort }) {
+      entry.port!.postMessage({ type: 'BYOKY_PROXY_RESPONSE_META', requestId: entry.data.requestId, status: 200, statusText: 'OK', headers: {} });
+      entry.port!.postMessage({ type: 'BYOKY_PROXY_RESPONSE_DONE', requestId: entry.data.requestId });
+    }
+
+    it('reconnects on SESSION_EXPIRED and keeps using the live session key', async () => {
+      const connectPromise = new Byoky().connect({ providers: [{ id: 'openai', required: true }] });
+      await tick();
+      simulateResponse({
+        type: 'BYOKY_CONNECT_RESPONSE',
+        requestId: connectRequests()[0].data.requestId,
+        payload: { sessionKey: 'byk_old', proxyUrl: 'extension-proxy', providers: { openai: { available: true, authMethod: 'api_key' } } },
+      });
+      const session = await connectPromise;
+
+      const relay = session.createRelay('ws://localhost:3001/ws/relay');
+      const ws = MockWebSocket.last;
+      ws.open();
+      expect(ws.sent[0]).not.toContain('byk_old');
+
+      // The wallet locked: the old key is dead.
+      relayRequest(ws, 'relay-1');
+      await tick();
+      const first = proxyRequests()[0];
+      expect(first.data.sessionKey).toBe('byk_old');
+      first.port!.postMessage({
+        type: 'BYOKY_PROXY_RESPONSE_ERROR',
+        requestId: first.data.requestId,
+        status: 401,
+        error: { code: 'SESSION_EXPIRED', message: 'Invalid or expired session' },
+      });
+      await tick();
+
+      expect(connectRequests()).toHaveLength(2);
+      const reconnect = connectRequests()[1];
+      reconnect.port!.postMessage({
+        type: 'BYOKY_CONNECT_RESPONSE',
+        requestId: reconnect.data.requestId,
+        payload: { sessionKey: 'byk_new', proxyUrl: 'extension-proxy', providers: { openai: { available: true, authMethod: 'api_key' } } },
+      });
+      await tick();
+
+      const retry = proxyRequests()[1];
+      expect(retry.data.sessionKey).toBe('byk_new');
+      answerOk(retry);
+      await tick();
+      expect(ws.sent.map((m) => JSON.parse(m)).find((m) => m.type === 'relay:response:meta' && m.requestId === 'relay-1'))
+        .toMatchObject({ status: 200 });
+
+      // The next relayed request goes out with the new key straight away.
+      relayRequest(ws, 'relay-2');
+      await tick();
+      expect(proxyRequests()[2].data.sessionKey).toBe('byk_new');
+      expect(connectRequests()).toHaveLength(2);
+      relay.close();
+    });
+  });
+
+  describe('createFetch bodies', () => {
+    async function connectSession(sessionKey: string) {
+      const connectPromise = new Byoky().connect();
+      await new Promise((r) => setTimeout(r, 10));
+      simulateResponse({
+        type: 'BYOKY_CONNECT_RESPONSE',
+        requestId: postedMessages[0].data.requestId,
+        payload: {
+          sessionKey,
+          proxyUrl: 'extension-proxy',
+          providers: { openai: { available: true, authMethod: 'api_key' as const } },
+        },
+      });
+      return connectPromise;
+    }
+
+    function proxyRequests() {
+      return postedMessages.filter((m) => m.data.type === 'BYOKY_PROXY_REQUEST');
+    }
+
+    it('sends a binary stream body as exact base64, not lossy text', async () => {
+      const session = await connectSession('byk_stream');
+      const bytes = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0xff, 0xfe, 0x00, 0x80]);
+
+      void session.createFetch('openai')('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { 'content-type': 'audio/wav' },
+        body: new ReadableStream({ start(c) { c.enqueue(bytes.slice(0, 5)); c.enqueue(bytes.slice(5)); c.close(); } }),
+        duplex: 'half',
+      } as RequestInit);
+      await new Promise((r) => setTimeout(r, 10));
+
+      const [req] = proxyRequests();
+      expect(req.data.bodyEncoding).toBe('base64');
+      expect(Array.from(atob(req.data.body as string), (c) => c.charCodeAt(0))).toEqual(Array.from(bytes));
+    });
+
+    it('resends a Request input with its body after reconnecting', async () => {
+      const session = await connectSession('byk_req_old');
+
+      const fetchPromise = session.createFetch('openai')(new Request('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{"model":"gpt-4o"}',
+      }));
+      await new Promise((r) => setTimeout(r, 10));
+
+      const [first] = proxyRequests();
+      expect(first.data).toMatchObject({ method: 'POST', body: '{"model":"gpt-4o"}', sessionKey: 'byk_req_old' });
+      first.port!.postMessage({
+        type: 'BYOKY_PROXY_RESPONSE_ERROR',
+        requestId: first.data.requestId,
+        status: 401,
+        error: { code: 'SESSION_EXPIRED', message: 'Invalid or expired session' },
+      });
+      await new Promise((r) => setTimeout(r, 10));
+
+      const reconnect = postedMessages.filter((m) => m.data.type === 'BYOKY_CONNECT_REQUEST')[1];
+      reconnect.port!.postMessage({
+        type: 'BYOKY_CONNECT_RESPONSE',
+        requestId: reconnect.data.requestId,
+        payload: { sessionKey: 'byk_req_new', proxyUrl: 'extension-proxy', providers: {} },
+      });
+      await new Promise((r) => setTimeout(r, 10));
+
+      const retry = proxyRequests()[1];
+      expect(retry.data).toMatchObject({ method: 'POST', body: '{"model":"gpt-4o"}', sessionKey: 'byk_req_new' });
+      retry.port!.postMessage({ type: 'BYOKY_PROXY_RESPONSE_META', requestId: retry.data.requestId, status: 200, statusText: 'OK', headers: {} });
+      retry.port!.postMessage({ type: 'BYOKY_PROXY_RESPONSE_DONE', requestId: retry.data.requestId });
+      expect((await fetchPromise).status).toBe(200);
+    });
   });
 
   describe('session persistence', () => {

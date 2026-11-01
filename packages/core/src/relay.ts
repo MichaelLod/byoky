@@ -39,6 +39,12 @@ export interface RelayRequest {
   method: string;
   headers: Record<string, string>;
   body?: string;
+  /**
+   * How `body` is encoded, as in the page protocol's BYOKY_PROXY_REQUEST:
+   * 'base64' for raw bytes, 'formdata' for a JSON array of
+   * SerializedFormDataEntry. Absent means `body` is the text itself.
+   */
+  bodyEncoding?: 'base64' | 'formdata';
 }
 
 export interface RelayResponseMeta {
@@ -53,6 +59,8 @@ export interface RelayResponseChunk {
   type: 'relay:response:chunk';
   requestId: string;
   chunk: string;
+  /** 'base64' when `chunk` is base64 of raw bytes (non-text responses); absent means text. */
+  chunkEncoding?: 'base64';
 }
 
 export interface RelayResponseDone {
@@ -64,6 +72,18 @@ export interface RelayResponseError {
   type: 'relay:response:error';
   requestId: string;
   error: { code: string; message: string };
+}
+
+/** Browser → server: the session's providers changed after the hello (a key added or removed). */
+export interface RelayProviders {
+  type: 'relay:providers';
+  providers: Record<string, { available: boolean; authMethod: AuthMethod }>;
+}
+
+/** Server → browser: the backend gave up on a request, so stop it (and its upstream call). */
+export interface RelayCancel {
+  type: 'relay:cancel';
+  requestId: string;
 }
 
 export interface RelayPing {
@@ -78,11 +98,13 @@ export interface RelayPong {
 
 export type RelayMessage =
   | RelayHello
+  | RelayProviders
   | RelayRequest
   | RelayResponseMeta
   | RelayResponseChunk
   | RelayResponseDone
   | RelayResponseError
+  | RelayCancel
   | RelayPing
   | RelayPong;
 
@@ -92,6 +114,21 @@ export type RelayMessage =
  * check before sending or the other side never answers.
  */
 export const MAX_RELAY_MESSAGE_SIZE = 1_048_576; // 1 MB
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== 'object') return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  return isPlainObject(value) && Object.values(value).every((v) => typeof v === 'string');
+}
+
+/** A provider map apps can index and read `.available` from without a TypeError. */
+function isProviderMap(value: unknown): boolean {
+  return isPlainObject(value) && Object.values(value).every(isPlainObject);
+}
 
 export function parseRelayMessage(data: unknown): RelayMessage | null {
   try {
@@ -104,24 +141,35 @@ export function parseRelayMessage(data: unknown): RelayMessage | null {
     // Validate required fields per message type
     switch (raw.type) {
       case 'relay:hello':
-        if (typeof raw.sessionId !== 'string') return null;
+        if (typeof raw.sessionId !== 'string' || !isProviderMap(raw.providers)) return null;
+        break;
+      case 'relay:providers':
+        if (!isProviderMap(raw.providers)) return null;
         break;
       case 'relay:request':
         if (typeof raw.requestId !== 'string' || typeof raw.providerId !== 'string' ||
             typeof raw.url !== 'string' || typeof raw.method !== 'string') return null;
+        if (raw.body !== undefined && typeof raw.body !== 'string') return null;
+        if (raw.bodyEncoding !== undefined && raw.bodyEncoding !== 'base64' && raw.bodyEncoding !== 'formdata') return null;
         break;
       case 'relay:response:meta':
-        if (typeof raw.requestId !== 'string' || typeof raw.status !== 'number') return null;
+        // The range is left to the server, which builds a Response from it
+        // and fails the request at once when that throws.
+        if (typeof raw.requestId !== 'string' || !Number.isInteger(raw.status)) return null;
+        if (raw.statusText !== undefined && typeof raw.statusText !== 'string') return null;
+        if (raw.headers !== undefined && !isStringRecord(raw.headers)) return null;
         break;
       case 'relay:response:chunk':
         if (typeof raw.requestId !== 'string' || typeof raw.chunk !== 'string') return null;
+        if (raw.chunkEncoding !== undefined && raw.chunkEncoding !== 'base64') return null;
         break;
       case 'relay:response:done':
+      case 'relay:cancel':
         if (typeof raw.requestId !== 'string') return null;
         break;
       case 'relay:response:error':
         if (typeof raw.requestId !== 'string') return null;
-        if (raw.error && (typeof raw.error !== 'object' || typeof raw.error.code !== 'string' || typeof raw.error.message !== 'string')) return null;
+        if (!isPlainObject(raw.error) || typeof raw.error.code !== 'string' || typeof raw.error.message !== 'string') return null;
         break;
       case 'relay:ping':
       case 'relay:pong':

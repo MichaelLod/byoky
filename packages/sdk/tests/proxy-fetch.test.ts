@@ -211,6 +211,271 @@ describe('createProxyFetch', () => {
     });
   });
 
+  it('errors the body with UNKNOWN for a code outside ByokyErrorCode, keeping the code', async () => {
+    const proxyFetch = createProxyFetch('openai', { current: 'byk_session' });
+    const fetchPromise = proxyFetch('https://api.openai.com/v1/chat/completions');
+    await new Promise((r) => setTimeout(r, 10));
+    const requestId = postedMessages[0].data.requestId as string;
+
+    simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_META', requestId, status: 200, statusText: 'OK', headers: {} });
+    simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_ERROR', requestId, status: 502, error: { code: 'INVALID_JSON', message: 'bad upstream JSON' } });
+
+    const response = await fetchPromise;
+    await expect(response.text()).rejects.toMatchObject({
+      name: 'ByokyError', code: 'UNKNOWN', message: 'bad upstream JSON', details: { code: 'INVALID_JSON' },
+    });
+  });
+
+  describe('fetch compatibility', () => {
+    async function sentRequest() {
+      await new Promise((r) => setTimeout(r, 10));
+      return postedMessages[0].data;
+    }
+
+    it('reads method, headers and body from a bare Request input', async () => {
+      const proxyFetch = createProxyFetch('mistral', { current: 'byk_session' });
+      void proxyFetch(new Request('https://api.mistral.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-trace': '1' },
+        body: '{"model":"mistral-small"}',
+      }));
+
+      const msg = await sentRequest();
+      expect(msg.method).toBe('POST');
+      expect(msg.headers).toMatchObject({ 'content-type': 'application/json', 'x-trace': '1' });
+      expect(msg.body).toBe('{"model":"mistral-small"}');
+      expect(msg.bodyEncoding).toBeUndefined();
+    });
+
+    it('lets init override a Request input, as fetch does', async () => {
+      const proxyFetch = createProxyFetch('openai', { current: 'byk_session' });
+      void proxyFetch(new Request('https://api.openai.com/v1/chat/completions', { method: 'POST', body: '{"a":1}' }), {
+        body: '{"b":2}',
+        headers: { 'content-type': 'application/json' },
+      });
+
+      const msg = await sentRequest();
+      expect(msg.method).toBe('POST');
+      expect(msg.body).toBe('{"b":2}');
+      expect(msg.headers).toEqual({ 'content-type': 'application/json' });
+    });
+
+    it('honours the signal of a Request input', async () => {
+      const proxyFetch = createProxyFetch('openai', { current: 'byk_session' });
+      const controller = new AbortController();
+      controller.abort();
+      await expect(proxyFetch(new Request('https://api.openai.com/v1/models', { signal: controller.signal })))
+        .rejects.toMatchObject({ name: 'AbortError' });
+    });
+
+    it('sends a Uint8Array JSON body as text', async () => {
+      const proxyFetch = createProxyFetch('openai', { current: 'byk_session' });
+      void proxyFetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: new TextEncoder().encode('{"model":"gpt-4o"}'),
+      });
+
+      const msg = await sentRequest();
+      expect(msg.body).toBe('{"model":"gpt-4o"}');
+      expect(msg.bodyEncoding).toBeUndefined();
+    });
+
+    it('sends a binary DataView body as exact base64', async () => {
+      const bytes = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0xff, 0xfe, 0x00, 0x80]);
+      const proxyFetch = createProxyFetch('openai', { current: 'byk_session' });
+      void proxyFetch('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { 'content-type': 'audio/wav' },
+        body: new DataView(bytes.buffer, 0, bytes.length),
+      });
+
+      const msg = await sentRequest();
+      expect(msg.bodyEncoding).toBe('base64');
+      expect(Array.from(atob(msg.body as string), (c) => c.charCodeAt(0))).toEqual(Array.from(bytes));
+    });
+
+    it('sends text-typed bytes that are not valid UTF-8 as base64 instead of mangling them', async () => {
+      const proxyFetch = createProxyFetch('openai', { current: 'byk_session' });
+      void proxyFetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        body: new Uint8Array([0x7b, 0xff, 0x7d]),
+      });
+
+      const msg = await sentRequest();
+      expect(msg.bodyEncoding).toBe('base64');
+      expect(msg.body).toBe(btoa('\x7b\xff\x7d'));
+    });
+
+    it('sets the content type fetch would for URLSearchParams and typed Blob bodies', async () => {
+      const proxyFetch = createProxyFetch('openai', { current: 'byk_session' });
+      void proxyFetch('https://api.openai.com/v1/a', { method: 'POST', body: new URLSearchParams({ a: '1' }) });
+      void proxyFetch('https://api.openai.com/v1/b', { method: 'POST', body: new Blob(['{}'], { type: 'application/json' }) });
+      void proxyFetch('https://api.openai.com/v1/c', {
+        method: 'POST',
+        headers: { 'content-type': 'text/plain' },
+        body: new URLSearchParams({ a: '1' }),
+      });
+      await new Promise((r) => setTimeout(r, 10));
+
+      const byUrl = (path: string) => postedMessages.find((m) => m.data.url === `https://api.openai.com/v1/${path}`)!.data;
+      const [a, b, c] = ['a', 'b', 'c'].map(byUrl);
+      expect(a).toMatchObject({ body: 'a=1', headers: { 'content-type': 'application/x-www-form-urlencoded;charset=UTF-8' } });
+      expect(b).toMatchObject({ body: '{}', headers: { 'content-type': 'application/json' } });
+      expect(c).toMatchObject({ body: 'a=1', headers: { 'content-type': 'text/plain' } });
+    });
+
+    it('rejects a body type fetch would not take instead of dropping it', async () => {
+      const proxyFetch = createProxyFetch('openai', { current: 'byk_session' });
+      await expect(proxyFetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        body: { model: 'gpt-4o' } as unknown as BodyInit,
+      })).rejects.toMatchObject({ code: 'PROXY_ERROR' });
+      expect(postedMessages).toHaveLength(0);
+    });
+
+    it('resolves a 204 with an empty body', async () => {
+      const proxyFetch = createProxyFetch('openai', { current: 'byk_session' });
+      const fetchPromise = proxyFetch('https://api.openai.com/v1/chat/completions');
+      const msg = await sentRequest();
+
+      simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_META', requestId: msg.requestId, status: 204, statusText: 'No Content', headers: {} });
+      simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_DONE', requestId: msg.requestId });
+
+      const response = await fetchPromise;
+      expect(response.status).toBe(204);
+      expect(response.body).toBeNull();
+    });
+
+    it('rejects instead of hanging when the response cannot be built', async () => {
+      const proxyFetch = createProxyFetch('openai', { current: 'byk_session' });
+      const fetchPromise = proxyFetch('https://api.openai.com/v1/chat/completions');
+      const msg = await sentRequest();
+
+      simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_META', requestId: msg.requestId, status: 99, statusText: 'x', headers: {} });
+
+      await expect(fetchPromise).rejects.toMatchObject({ code: 'PROXY_ERROR' });
+    });
+  });
+
+  describe('binary responses', () => {
+    const allBytes = Uint8Array.from({ length: 256 }, (_, i) => i);
+    // An MP3 frame header: every frame starts with the 0xFF sync byte,
+    // which can never appear in UTF-8.
+    const mp3 = new Uint8Array([0xff, 0xfb, 0x90, 0x64, 0x00, 0x0f, 0xf0, 0x00]);
+    const b64 = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes));
+
+    it.each([
+      ['bytes 0..255', allBytes],
+      ['an MP3 frame header', mp3],
+    ])('passes %s through byte-exact', async (_label, bytes) => {
+      const proxyFetch = createProxyFetch('openai', { current: 'byk_session' });
+      const fetchPromise = proxyFetch('https://api.openai.com/v1/audio/speech', { method: 'POST', body: '{}' });
+      await new Promise((r) => setTimeout(r, 10));
+      const requestId = postedMessages[0].data.requestId as string;
+
+      simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_META', requestId, status: 200, statusText: 'OK', headers: { 'content-type': 'audio/mpeg' } });
+      // Split at an odd offset: each chunk is base64 of its own bytes.
+      simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_CHUNK', requestId, chunk: b64(bytes.slice(0, 5)), chunkEncoding: 'base64' });
+      simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_CHUNK', requestId, chunk: b64(bytes.slice(5)), chunkEncoding: 'base64' });
+      simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_DONE', requestId });
+
+      const response = await fetchPromise;
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
+    });
+
+    it('rejects instead of hanging on a bad chunk before the headers', async () => {
+      const proxyFetch = createProxyFetch('openai', { current: 'byk_session' });
+      const fetchPromise = proxyFetch('https://api.openai.com/v1/audio/speech', { method: 'POST', body: '{}' });
+      await new Promise((r) => setTimeout(r, 10));
+      const requestId = postedMessages[0].data.requestId as string;
+
+      simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_CHUNK', requestId, chunk: '%%%', chunkEncoding: 'base64' });
+
+      await expect(fetchPromise).rejects.toMatchObject({ code: 'PROXY_ERROR' });
+      await new Promise((r) => setTimeout(r, 10));
+      expect(postedMessages.filter((m) => m.data.type === 'BYOKY_PROXY_CANCEL')).toHaveLength(1);
+    });
+
+    it('errors the body on a chunk that is not base64', async () => {
+      const proxyFetch = createProxyFetch('openai', { current: 'byk_session' });
+      const fetchPromise = proxyFetch('https://api.openai.com/v1/audio/speech', { method: 'POST', body: '{}' });
+      await new Promise((r) => setTimeout(r, 10));
+      const requestId = postedMessages[0].data.requestId as string;
+
+      simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_META', requestId, status: 200, statusText: 'OK', headers: { 'content-type': 'audio/mpeg' } });
+      simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_CHUNK', requestId, chunk: '%%%', chunkEncoding: 'base64' });
+
+      const response = await fetchPromise;
+      await expect(response.arrayBuffer()).rejects.toMatchObject({ code: 'PROXY_ERROR' });
+    });
+  });
+
+  describe('header timeout', () => {
+    // Port messages travel on the real event loop; only setTimeout is faked.
+    const settle = async () => { for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r)); };
+
+    beforeEach(() => { vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }); });
+    afterEach(() => { vi.useRealTimers(); });
+
+    function cancels() {
+      return postedMessages.filter((m) => m.data.type === 'BYOKY_PROXY_CANCEL');
+    }
+
+    it.each([
+      ['130 s', 130_000],
+      ['9 minutes', 9 * 60_000],
+    ])('waits for headers that take %s (a slow non-streaming generation)', async (_label, delay) => {
+      const proxyFetch = createProxyFetch('openai', { current: 'byk_session' });
+      let state = 'pending';
+      const fetchPromise = proxyFetch('https://api.openai.com/v1/chat/completions', { method: 'POST', body: '{"model":"o3"}' });
+      fetchPromise.then(() => { state = 'resolved'; }, () => { state = 'rejected'; });
+      await settle();
+      const requestId = postedMessages[0].data.requestId as string;
+
+      await vi.advanceTimersByTimeAsync(delay);
+      expect(state).toBe('pending');
+      expect(cancels()).toHaveLength(0);
+
+      simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_META', requestId, status: 200, statusText: 'OK', headers: {} });
+      simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_CHUNK', requestId, chunk: '{"ok":true}' });
+      simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_DONE', requestId });
+      await settle();
+
+      expect(state).toBe('resolved');
+      expect(await (await fetchPromise).json()).toEqual({ ok: true });
+      // One upstream request: nothing was cancelled, so nothing retries.
+      expect(postedMessages.filter((m) => m.data.type === 'BYOKY_PROXY_REQUEST')).toHaveLength(1);
+    });
+
+    it('gives up after 10 minutes with a ByokyError and cancels the request', async () => {
+      const proxyFetch = createProxyFetch('openai', { current: 'byk_session' });
+      const fetchPromise = proxyFetch('https://api.openai.com/v1/chat/completions');
+      const outcome = fetchPromise.catch((err: unknown) => err);
+      await settle();
+
+      await vi.advanceTimersByTimeAsync(600_000);
+      const err = await outcome;
+      expect(err).toMatchObject({ name: 'ByokyError', code: 'PROXY_ERROR', message: expect.stringContaining('reload the page') });
+      await settle();
+      expect(cancels()).toHaveLength(1);
+    });
+
+    it('takes its timeout from the options, and 0 waits forever', async () => {
+      const short = createProxyFetch('openai', { current: 'byk_session' }, { timeout: 5_000 });
+      const shortOutcome = short('https://api.openai.com/v1/models').catch((err: unknown) => err);
+      const never = createProxyFetch('openai', { current: 'byk_session' }, { timeout: 0 });
+      let neverState = 'pending';
+      never('https://api.openai.com/v1/models').then(() => { neverState = 'settled'; }, () => { neverState = 'settled'; });
+      await settle();
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(await shortOutcome).toMatchObject({ code: 'PROXY_ERROR' });
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      expect(neverState).toBe('pending');
+    });
+  });
+
   describe('abort signal', () => {
     function cancelMessages() {
       return postedMessages.filter((m) => m.data.type === 'BYOKY_PROXY_CANCEL');

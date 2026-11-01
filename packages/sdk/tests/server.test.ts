@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ByokyServer } from '../src/server.js';
 import type { WebSocketLike } from '@byoky/core';
 import { MAX_RELAY_MESSAGE_SIZE, WS_READY_STATE } from '@byoky/core';
@@ -129,6 +129,7 @@ describe('ByokyServer', () => {
     });
 
     await expect(responsePromise).rejects.toThrow('Something went wrong');
+    await expect(responsePromise).rejects.toMatchObject({ name: 'ByokyError', code: 'PROXY_ERROR' });
   });
 
   it('responds to pings', async () => {
@@ -197,6 +198,27 @@ describe('ByokyServer', () => {
     await expect(fetchFn('https://api.anthropic.com/v1/messages')).rejects.toThrow('timed out');
   });
 
+  it('waits 10 minutes by default for a non-streaming response to start', async () => {
+    vi.useFakeTimers();
+    try {
+      const server = new ByokyServer({ pingInterval: 0 });
+      const clientPromise = server.handleConnection(ws);
+      ws.simulateMessage({ type: 'relay:hello', sessionId: 'sess-1', providers: {} });
+      const client = await clientPromise;
+
+      let state = 'pending';
+      client.createFetch('openai')('https://api.openai.com/v1/chat/completions')
+        .then(() => { state = 'resolved'; }, () => { state = 'rejected'; });
+      await vi.advanceTimersByTimeAsync(9 * 60_000);
+      expect(state).toBe('pending');
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(state).toBe('rejected');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps a stream open while chunks arrive and fails it once it stalls', async () => {
     const server = new ByokyServer({ pingInterval: 0, requestTimeout: 80 });
     const clientPromise = server.handleConnection(ws);
@@ -225,6 +247,306 @@ describe('ByokyServer', () => {
     }
 
     await expect(reader.read()).rejects.toThrow('timed out');
+  });
+
+  describe('relay:hello', () => {
+    afterEach(() => { vi.useRealTimers(); });
+
+    it('is accepted once: a second hello neither renames the session nor adds a ping timer', async () => {
+      vi.useFakeTimers();
+      const server = new ByokyServer({ pingInterval: 1000, helloTimeout: 5000 });
+      const clientPromise = server.handleConnection(ws);
+      ws.simulateMessage({ type: 'relay:hello', sessionId: 'first', providers: {} });
+      const client = await clientPromise;
+
+      for (let i = 0; i < 5; i++) {
+        ws.simulateMessage({ type: 'relay:hello', sessionId: `again-${i}`, providers: { x: { available: true, authMethod: 'api_key' } } });
+      }
+      expect(client.sessionId).toBe('first');
+      expect(client.providers).toEqual({});
+
+      const pings = () => ws.sentMessages.filter((m) => m.includes('relay:ping')).length;
+      vi.advanceTimersByTime(1000);
+      expect(pings()).toBe(1);
+
+      ws.close();
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('takes later provider changes from relay:providers, but not before the hello', async () => {
+      const clientPromise = server.handleConnection(ws);
+      ws.simulateMessage({ type: 'relay:providers', providers: { early: { available: true, authMethod: 'api_key' } } });
+      ws.simulateMessage({ type: 'relay:hello', sessionId: 'first', providers: {} });
+      const client = await clientPromise;
+      expect(client.providers).toEqual({});
+
+      ws.simulateMessage({ type: 'relay:providers', providers: { openai: { available: true, authMethod: 'api_key' } } });
+      expect(client.providers).toEqual({ openai: { available: true, authMethod: 'api_key' } });
+      expect(client.sessionId).toBe('first');
+    });
+
+    it('ignores a hello whose providers is not an object map', async () => {
+      const server = new ByokyServer({ pingInterval: 0, helloTimeout: 50 });
+      const clientPromise = server.handleConnection(ws);
+      ws.simulateMessage({ type: 'relay:hello', sessionId: 'x', providers: null });
+      await expect(clientPromise).rejects.toThrow('relay:hello');
+    });
+
+    it('rejects at once and leaves no timer when the socket closes before the hello', async () => {
+      vi.useFakeTimers();
+      const clientPromise = server.handleConnection(ws);
+      ws.close();
+      await expect(clientPromise).rejects.toThrow('closed before relay:hello');
+      ws.simulateMessage({ type: 'relay:hello', sessionId: 'late', providers: {} });
+      expect(vi.getTimerCount()).toBe(0);
+    });
+  });
+
+  describe('request bodies', () => {
+    async function relayedRequest(input: RequestInfo | URL, init?: RequestInit) {
+      const clientPromise = server.handleConnection(ws);
+      ws.simulateMessage({ type: 'relay:hello', sessionId: 'sess-1', providers: {} });
+      const client = await clientPromise;
+      void client.createFetch('openai')(input, init).catch(() => {});
+      await new Promise((r) => setTimeout(r, 10));
+      return JSON.parse(ws.sentMessages[ws.sentMessages.length - 1]);
+    }
+
+    const decode = (b64: string) => Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const wav = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0xff, 0xfe, 0x00, 0x80]);
+
+    it('relays a binary Uint8Array body as exact base64', async () => {
+      const req = await relayedRequest('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: { 'content-type': 'audio/wav' },
+        body: wav,
+      });
+      expect(req.bodyEncoding).toBe('base64');
+      expect(decode(req.body)).toEqual(Array.from(wav));
+    });
+
+    it('relays a FormData body with its file name and type', async () => {
+      const form = new FormData();
+      form.append('model', 'whisper-1');
+      form.append('file', new Blob([wav], { type: 'audio/wav' }), 'speech.wav');
+
+      const req = await relayedRequest('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', body: form });
+      expect(req.bodyEncoding).toBe('formdata');
+      const entries = JSON.parse(req.body);
+      expect(entries[0]).toEqual({ name: 'model', value: 'whisper-1', type: 'text' });
+      expect(entries[1]).toMatchObject({ name: 'file', type: 'file', filename: 'speech.wav', contentType: 'audio/wav' });
+      expect(decode(entries[1].value)).toEqual(Array.from(wav));
+    });
+
+    it('relays a ReadableStream body', async () => {
+      const req = await relayedRequest('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('{"model":"gpt-4o"}')); c.close(); } }),
+        duplex: 'half',
+      } as RequestInit);
+      expect(req.body).toBe('{"model":"gpt-4o"}');
+      expect(req.bodyEncoding).toBeUndefined();
+    });
+
+    it('relays a bare Request input with its method, headers and body', async () => {
+      const req = await relayedRequest(new Request('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{"model":"gpt-4o"}',
+      }));
+      expect(req).toMatchObject({
+        method: 'POST',
+        url: 'https://api.openai.com/v1/chat/completions',
+        headers: { 'content-type': 'application/json' },
+        body: '{"model":"gpt-4o"}',
+      });
+    });
+  });
+
+  describe('binary responses', () => {
+    it('decodes base64 chunks into the exact bytes', async () => {
+      const bytes = Uint8Array.from({ length: 256 }, (_, i) => i);
+      const clientPromise = server.handleConnection(ws);
+      ws.simulateMessage({ type: 'relay:hello', sessionId: 'sess-1', providers: {} });
+      const client = await clientPromise;
+      const responsePromise = client.createFetch('openai')('https://api.openai.com/v1/audio/speech', { method: 'POST', body: '{}' });
+      await new Promise((r) => setTimeout(r, 10));
+      const { requestId } = JSON.parse(ws.sentMessages[ws.sentMessages.length - 1]);
+
+      ws.simulateMessage({ type: 'relay:response:meta', requestId, status: 200, statusText: 'OK', headers: { 'content-type': 'audio/mpeg' } });
+      for (const part of [bytes.slice(0, 100), bytes.slice(100)]) {
+        ws.simulateMessage({ type: 'relay:response:chunk', requestId, chunk: btoa(String.fromCharCode(...part)), chunkEncoding: 'base64' });
+      }
+      ws.simulateMessage({ type: 'relay:response:done', requestId });
+
+      const response = await responsePromise;
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
+    });
+
+    it('fails the request on a chunk that is not base64', async () => {
+      const clientPromise = server.handleConnection(ws);
+      ws.simulateMessage({ type: 'relay:hello', sessionId: 'sess-1', providers: {} });
+      const client = await clientPromise;
+      const responsePromise = client.createFetch('openai')('https://api.openai.com/v1/audio/speech', { method: 'POST', body: '{}' });
+      await new Promise((r) => setTimeout(r, 10));
+      const { requestId } = JSON.parse(ws.sentMessages[ws.sentMessages.length - 1]);
+
+      ws.simulateMessage({ type: 'relay:response:meta', requestId, status: 200, statusText: 'OK', headers: {} });
+      const response = await responsePromise;
+      expect(() => ws.simulateMessage({ type: 'relay:response:chunk', requestId, chunk: '%%%', chunkEncoding: 'base64' })).not.toThrow();
+      await expect(response.arrayBuffer()).rejects.toMatchObject({ code: 'PROXY_ERROR' });
+    });
+  });
+
+  describe('abort', () => {
+    async function connectClient() {
+      const clientPromise = server.handleConnection(ws);
+      ws.simulateMessage({ type: 'relay:hello', sessionId: 'sess-1', providers: {} });
+      return clientPromise;
+    }
+    const sent = () => ws.sentMessages.map((m) => JSON.parse(m));
+    const cancels = () => sent().filter((m) => m.type === 'relay:cancel');
+    const lastRequestId = () => sent().filter((m) => m.type === 'relay:request').pop().requestId;
+
+    it('rejects at once and sends nothing for an already aborted signal', async () => {
+      const client = await connectClient();
+      const controller = new AbortController();
+      controller.abort();
+      await expect(client.createFetch('openai')('https://api.openai.com/v1/models', { signal: controller.signal }))
+        .rejects.toMatchObject({ name: 'AbortError' });
+      expect(sent()).toEqual([]);
+    });
+
+    it('rejects and sends relay:cancel when aborted before the headers', async () => {
+      const client = await connectClient();
+      const controller = new AbortController();
+      const responsePromise = client.createFetch('openai')('https://api.openai.com/v1/chat/completions', { signal: controller.signal });
+      await new Promise((r) => setTimeout(r, 10));
+      const requestId = lastRequestId();
+
+      controller.abort();
+      await expect(responsePromise).rejects.toMatchObject({ name: 'AbortError' });
+      expect(cancels()).toEqual([{ type: 'relay:cancel', requestId }]);
+
+      // A late answer from the browser is ignored.
+      expect(() => ws.simulateMessage({ type: 'relay:response:meta', requestId, status: 200, statusText: 'OK', headers: {} })).not.toThrow();
+    });
+
+    it('errors the body and sends relay:cancel when aborted mid-stream', async () => {
+      const client = await connectClient();
+      const controller = new AbortController();
+      const responsePromise = client.createFetch('openai')('https://api.openai.com/v1/chat/completions', { signal: controller.signal });
+      await new Promise((r) => setTimeout(r, 10));
+      const requestId = lastRequestId();
+      ws.simulateMessage({ type: 'relay:response:meta', requestId, status: 200, statusText: 'OK', headers: {} });
+      ws.simulateMessage({ type: 'relay:response:chunk', requestId, chunk: 'data: 1\n\n' });
+      const response = await responsePromise;
+
+      controller.abort();
+      await expect(response.text()).rejects.toMatchObject({ name: 'AbortError' });
+      expect(cancels()).toEqual([{ type: 'relay:cancel', requestId }]);
+    });
+
+    it('sends relay:cancel when the app cancels the body', async () => {
+      const client = await connectClient();
+      const responsePromise = client.createFetch('openai')('https://api.openai.com/v1/chat/completions');
+      await new Promise((r) => setTimeout(r, 10));
+      const requestId = lastRequestId();
+      ws.simulateMessage({ type: 'relay:response:meta', requestId, status: 200, statusText: 'OK', headers: {} });
+      const response = await responsePromise;
+
+      await response.body!.cancel();
+      expect(cancels()).toEqual([{ type: 'relay:cancel', requestId }]);
+    });
+
+    it('sends nothing for an abort after the response finished', async () => {
+      const client = await connectClient();
+      const controller = new AbortController();
+      const responsePromise = client.createFetch('openai')('https://api.openai.com/v1/models', { signal: controller.signal });
+      await new Promise((r) => setTimeout(r, 10));
+      const requestId = lastRequestId();
+      ws.simulateMessage({ type: 'relay:response:meta', requestId, status: 200, statusText: 'OK', headers: {} });
+      ws.simulateMessage({ type: 'relay:response:chunk', requestId, chunk: '{}' });
+      ws.simulateMessage({ type: 'relay:response:done', requestId });
+      const response = await responsePromise;
+
+      controller.abort();
+      expect(await response.text()).toBe('{}');
+      expect(cancels()).toEqual([]);
+    });
+
+    it('sends relay:cancel when a request times out', async () => {
+      const server = new ByokyServer({ pingInterval: 0, requestTimeout: 30 });
+      const clientPromise = server.handleConnection(ws);
+      ws.simulateMessage({ type: 'relay:hello', sessionId: 'sess-1', providers: {} });
+      const client = await clientPromise;
+
+      await expect(client.createFetch('openai')('https://api.openai.com/v1/models')).rejects.toThrow('timed out');
+      expect(cancels()).toHaveLength(1);
+    });
+  });
+
+  describe('malformed messages from the client', () => {
+    async function connectAndRequest() {
+      const clientPromise = server.handleConnection(ws);
+      ws.simulateMessage({ type: 'relay:hello', sessionId: 'sess-1', providers: {} });
+      const client = await clientPromise;
+      const responsePromise = client.createFetch('anthropic')('https://api.anthropic.com/v1/messages');
+      await new Promise((r) => setTimeout(r, 10));
+      const { requestId } = JSON.parse(ws.sentMessages[ws.sentMessages.length - 1]);
+      return { responsePromise, requestId };
+    }
+
+    it('never throws out of onmessage and keeps the request alive on a bad error message', async () => {
+      const { responsePromise, requestId } = await connectAndRequest();
+
+      expect(() => ws.simulateMessage({ type: 'relay:response:error', requestId })).not.toThrow();
+      expect(() => ws.simulateMessage({ type: 'relay:response:error', requestId, error: null })).not.toThrow();
+
+      ws.simulateMessage({ type: 'relay:response:error', requestId, error: { code: 'PROXY_ERROR', message: 'real error' } });
+      await expect(responsePromise).rejects.toThrow('real error');
+    });
+
+    it.each([
+      ['status 99', { status: 99, statusText: 'OK', headers: {} }],
+      ['status 600', { status: 600, statusText: 'OK', headers: {} }],
+      ['a CRLF status text', { status: 200, statusText: 'OK\r\nX-Injected: 1', headers: {} }],
+    ])('rejects the fetch on %s', async (_label, meta) => {
+      const { responsePromise, requestId } = await connectAndRequest();
+
+      expect(() => ws.simulateMessage({ type: 'relay:response:meta', requestId, ...meta })).not.toThrow();
+      await expect(responsePromise).rejects.toMatchObject({ code: 'PROXY_ERROR', message: 'Invalid relay response' });
+    });
+
+    it('skips an invalid header name instead of failing', async () => {
+      const { responsePromise, requestId } = await connectAndRequest();
+
+      expect(() => ws.simulateMessage({
+        type: 'relay:response:meta',
+        requestId,
+        status: 200,
+        statusText: 'OK',
+        headers: { 'bad header': 'x', 'content-type': 'application/json' },
+      })).not.toThrow();
+      ws.simulateMessage({ type: 'relay:response:chunk', requestId, chunk: '{}' });
+      ws.simulateMessage({ type: 'relay:response:done', requestId });
+
+      const response = await responsePromise;
+      expect(response.headers.get('content-type')).toBe('application/json');
+      expect(await response.text()).toBe('{}');
+    });
+
+    it('resolves a 204 with an empty body', async () => {
+      const { responsePromise, requestId } = await connectAndRequest();
+
+      expect(() => ws.simulateMessage({ type: 'relay:response:meta', requestId, status: 204, statusText: 'No Content', headers: {} })).not.toThrow();
+      ws.simulateMessage({ type: 'relay:response:done', requestId });
+
+      const response = await responsePromise;
+      expect(response.status).toBe(204);
+      expect(await response.text()).toBe('');
+    });
   });
 
   it('rejects pending requests when WebSocket closes', async () => {

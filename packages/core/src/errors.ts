@@ -63,6 +63,7 @@ export class ByokyError extends Error {
     );
   }
 
+  /** @deprecated No wallet sends TOKEN_EXPIRED; kept for compatibility. */
   static tokenExpired(providerId: string) {
     return new ByokyError(
       ByokyErrorCode.TOKEN_EXPIRED,

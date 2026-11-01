@@ -49,3 +49,20 @@ export function createErrorMessage(
 ): ByokyMessage {
   return createMessage('BYOKY_ERROR', { code, message }, requestId);
 }
+
+/**
+ * Whether a body with this Content-Type is text, so it can travel as a
+ * string. Anything else (audio, images, octet-stream) travels base64-encoded:
+ * request bodies with bodyEncoding 'base64', response chunks with
+ * chunkEncoding 'base64'. A missing content type counts as text.
+ */
+export function isTextContentType(contentType?: string | null): boolean {
+  if (!contentType) return true;
+  const lower = contentType.toLowerCase();
+  return lower.startsWith('text/') ||
+    lower.includes('json') ||
+    lower.includes('xml') ||
+    lower.includes('event-stream') ||
+    lower.includes('javascript') ||
+    lower.includes('urlencoded');
+}

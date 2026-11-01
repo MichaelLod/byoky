@@ -205,6 +205,12 @@ export interface ProxyResponseMeta {
 export interface ProxyResponseChunk {
   requestId: string;
   chunk: string;
+  /**
+   * 'base64' when `chunk` carries raw response bytes, base64-encoded. Set for
+   * responses whose content type isn't text (see isTextContentType), such as
+   * audio; absent means `chunk` is UTF-8 text. Each chunk decodes on its own.
+   */
+  chunkEncoding?: 'base64';
 }
 
 export interface ProxyResponseError {
@@ -263,13 +269,47 @@ export enum ByokyErrorCode {
   RATE_LIMITED = 'RATE_LIMITED',
   QUOTA_EXCEEDED = 'QUOTA_EXCEEDED',
   INVALID_KEY = 'INVALID_KEY',
+  /** @deprecated No wallet sends this; kept so existing code that names it still compiles. */
   TOKEN_EXPIRED = 'TOKEN_EXPIRED',
   PROXY_ERROR = 'PROXY_ERROR',
   /** The app called an endpoint outside the inference allowlist (files, batches, admin, …). */
   ENDPOINT_NOT_ALLOWED = 'ENDPOINT_NOT_ALLOWED',
   RELAY_CONNECTION_FAILED = 'RELAY_CONNECTION_FAILED',
   RELAY_DISCONNECTED = 'RELAY_DISCONNECTED',
+  /** The wallet is locked. The request can be retried once the user unlocks it. */
+  WALLET_LOCKED = 'WALLET_LOCKED',
+  /** The request URL doesn't match the provider's registered base URL. */
+  INVALID_URL = 'INVALID_URL',
+  /** The app is routed to another provider, and only chat requests can be routed. */
+  ROUTING_UNSUPPORTED = 'ROUTING_UNSUPPORTED',
+  /** Translating the request or response for the provider the app is routed to failed. */
+  TRANSLATION_FAILED = 'TRANSLATION_FAILED',
+  /** The request can't be translated for the routed provider (a binary body, for one). */
+  TRANSLATION_NOT_SUPPORTED = 'TRANSLATION_NOT_SUPPORTED',
+  /** Rerouting the request to another provider of the same family failed. */
+  SWAP_FAILED = 'SWAP_FAILED',
+  /** The credential needs the Byoky Bridge, and the bridge isn't installed or reachable. */
+  BRIDGE_UNAVAILABLE = 'BRIDGE_UNAVAILABLE',
+  /** The Byoky Bridge failed to start or dropped the request. */
+  BRIDGE_ERROR = 'BRIDGE_ERROR',
+  /** The extension's background went away before it answered. */
+  EXTENSION_ERROR = 'EXTENSION_ERROR',
+  /** The request came from a different origin than the one the session was granted to. */
+  ORIGIN_MISMATCH = 'ORIGIN_MISMATCH',
+  /** The page has an opaque origin (a sandboxed frame, a data: URL), which can't hold a session. */
+  ORIGIN_UNSUPPORTED = 'ORIGIN_UNSUPPORTED',
+  /** The wallet rejected a malformed request. */
+  INVALID_REQUEST = 'INVALID_REQUEST',
+  /** Byoky was updated or reloaded while this page was open. Reload the page to reconnect. */
+  WALLET_RELOADED = 'WALLET_RELOADED',
   UNKNOWN = 'UNKNOWN',
+}
+
+const BYOKY_ERROR_CODES = new Set<string>(Object.values(ByokyErrorCode));
+
+/** Whether `code` is one of the ByokyErrorCode values. */
+export function isByokyErrorCode(code: unknown): code is ByokyErrorCode {
+  return typeof code === 'string' && BYOKY_ERROR_CODES.has(code);
 }
 
 // --- Request log ---

@@ -5,11 +5,13 @@ import type {
 } from '@byoky/core';
 import {
   ByokyError,
+  isTextContentType,
   MAX_RELAY_MESSAGE_SIZE,
   parseRelayMessage,
   WS_READY_STATE,
 } from '@byoky/core';
-import { createProxyFetch } from './proxy-fetch.js';
+import { bytesToBase64, decodeBody } from './body.js';
+import { randomId } from './id.js';
 
 export interface RelayConnection {
   /**
@@ -24,14 +26,25 @@ export interface RelayConnection {
   onClose(callback: (reason?: string) => void): () => void;
 }
 
+type Providers = Record<string, { available: boolean; authMethod: AuthMethod }>;
+
+/**
+ * @param getFetch The session's fetch for a provider. It holds the live
+ *   session key and reconnects on SESSION_EXPIRED, so the relay keeps
+ *   working after the wallet locks and unlocks, or the session is renewed.
+ * @param getProviders The session's providers right now, for the hello.
+ * @param onProvidersUpdated Subscribes to provider changes, which are
+ *   passed on to the server as relay:providers. Returns an unsubscribe.
+ */
 export function createRelayClient(
   wsUrl: string,
-  sessionKey: string,
-  providers: Record<string, { available: boolean; authMethod: AuthMethod }>,
+  getFetch: (providerId: string) => typeof fetch,
+  getProviders: () => Providers,
+  onProvidersUpdated?: (callback: (providers: Providers) => void) => () => void,
 ): RelayConnection {
   // Relay-specific ID announced in relay:hello — the real session key is never
   // exposed to the relay server.
-  const relayId = `relay_${crypto.randomUUID().replace(/-/g, '')}`;
+  const relayId = `relay_${randomId().replace(/-/g, '')}`;
   let status: 'connecting' | 'connected' | 'disconnected' = 'connecting';
   const closeCallbacks = new Set<(reason?: string) => void>();
   const inFlight = new Map<string, AbortController>();
@@ -75,13 +88,17 @@ export function createRelayClient(
     };
   }
 
+  const unsubscribeProviders = onProvidersUpdated?.((providers) => {
+    send({ type: 'relay:providers', providers });
+  });
+
   ws.onopen = () => {
     status = 'connected';
 
     ws.send(JSON.stringify({
       type: 'relay:hello',
       sessionId: relayId,
-      providers,
+      providers: getProviders(),
     }));
 
     // Keepalive ping every 30s
@@ -99,6 +116,10 @@ export function createRelayClient(
     switch (msg.type) {
       case 'relay:request':
         handleRequest(msg);
+        break;
+      case 'relay:cancel':
+        // The backend gave up: abort the call, which stops the upstream one.
+        inFlight.get(msg.requestId)?.abort();
         break;
       case 'relay:ping':
         ws.send(JSON.stringify({ type: 'relay:pong', ts: msg.ts }));
@@ -118,16 +139,15 @@ export function createRelayClient(
   };
 
   async function handleRequest(req: RelayRequest) {
-    const { requestId, providerId, url, method, headers, body } = req;
+    const { requestId, providerId, url, method, headers } = req;
     const controller = new AbortController();
     inFlight.set(requestId, controller);
 
     try {
-      const proxyFetch = createProxyFetch(providerId, { current: sessionKey });
-      const response = await proxyFetch(url, {
+      const response = await getFetch(providerId)(url, {
         method,
         headers,
-        body,
+        body: decodeBody(req.body, req.bodyEncoding),
         signal: controller.signal,
       });
 
@@ -145,24 +165,37 @@ export function createRelayClient(
         headers: responseHeaders,
       });
 
-      // Stream the body
+      // Stream the body. Text goes as text; anything else (audio, images)
+      // as base64, which a text decoder can't corrupt.
       if (response.body) {
         const reader = response.body.getReader();
+        const binary = !isTextContentType(response.headers.get('content-type'));
         const decoder = new TextDecoder();
 
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          if (controller.signal.aborted) break;
+          if (controller.signal.aborted) return;
 
-          for (const chunk of splitChunk(decoder.decode(value, { stream: true }))) {
-            send({ type: 'relay:response:chunk', requestId, chunk });
+          if (binary) {
+            for (let i = 0; i < value.length; i += MAX_BINARY_CHUNK_BYTES) {
+              const chunk = bytesToBase64(value.subarray(i, i + MAX_BINARY_CHUNK_BYTES));
+              send({ type: 'relay:response:chunk', requestId, chunk, chunkEncoding: 'base64' });
+            }
+          } else {
+            for (const chunk of splitChunk(decoder.decode(value, { stream: true }))) {
+              send({ type: 'relay:response:chunk', requestId, chunk });
+            }
           }
         }
+        const tail = binary ? '' : decoder.decode();
+        if (tail) send({ type: 'relay:response:chunk', requestId, chunk: tail });
       }
 
       send({ type: 'relay:response:done', requestId });
     } catch (err) {
+      // Cancelled by the backend, or the relay closed: nobody is waiting.
+      if (controller.signal.aborted) return;
       send({
         type: 'relay:response:error',
         requestId,
@@ -187,6 +220,7 @@ export function createRelayClient(
     status = 'disconnected';
 
     if (pingInterval) clearInterval(pingInterval);
+    unsubscribeProviders?.();
 
     // Abort all in-flight requests
     for (const controller of inFlight.values()) {
@@ -218,6 +252,9 @@ export function createRelayClient(
 // stall the response. JSON escaping can grow a string up to 6x (\u00XX), so
 // pieces of an eighth of the limit always fit, envelope included.
 const MAX_CHUNK_LENGTH = Math.floor(MAX_RELAY_MESSAGE_SIZE / 8);
+// Base64 needs no escaping and each piece must decode on its own, so binary
+// chunks are cut into byte runs whose base64 is MAX_CHUNK_LENGTH long.
+const MAX_BINARY_CHUNK_BYTES = (MAX_CHUNK_LENGTH / 4) * 3;
 
 function splitChunk(text: string): string[] {
   if (text.length <= MAX_CHUNK_LENGTH) return [text];

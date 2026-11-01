@@ -43,6 +43,21 @@ describe('relay protocol', () => {
       expect(parseRelayMessage({ type: 'relay:hello', providers: {} })).toBeNull();
     });
 
+    it('rejects relay:hello whose providers is not a map of objects', () => {
+      expect(parseRelayMessage({ type: 'relay:hello', sessionId: 'a' })).toBeNull();
+      expect(parseRelayMessage({ type: 'relay:hello', sessionId: 'a', providers: null })).toBeNull();
+      expect(parseRelayMessage({ type: 'relay:hello', sessionId: 'a', providers: ['openai'] })).toBeNull();
+      expect(parseRelayMessage({ type: 'relay:hello', sessionId: 'a', providers: { openai: true } })).toBeNull();
+      expect(parseRelayMessage({ type: 'relay:hello', sessionId: 'a', providers: {} })).not.toBeNull();
+    });
+
+    it('parses relay:providers and validates its map', () => {
+      expect(parseRelayMessage({ type: 'relay:providers', providers: { openai: { available: true, authMethod: 'api_key' } } })?.type)
+        .toBe('relay:providers');
+      expect(parseRelayMessage({ type: 'relay:providers', providers: null })).toBeNull();
+      expect(parseRelayMessage({ type: 'relay:providers' })).toBeNull();
+    });
+
     it('rejects relay:request missing required fields', () => {
       expect(parseRelayMessage({ type: 'relay:request', requestId: '1' })).toBeNull();
       expect(parseRelayMessage({ type: 'relay:request', requestId: '1', providerId: 'x' })).toBeNull();
@@ -59,6 +74,27 @@ describe('relay protocol', () => {
 
     it('rejects relay:response:meta missing status', () => {
       expect(parseRelayMessage({ type: 'relay:response:meta', requestId: '1' })).toBeNull();
+    });
+
+    it('rejects relay:response:meta with a malformed status, statusText or headers', () => {
+      const base = { type: 'relay:response:meta', requestId: '1', status: 200, statusText: 'OK', headers: {} };
+      expect(parseRelayMessage(base)).not.toBeNull();
+      expect(parseRelayMessage({ ...base, statusText: undefined, headers: undefined })).not.toBeNull();
+      expect(parseRelayMessage({ ...base, status: 200.5 })).toBeNull();
+      expect(parseRelayMessage({ ...base, status: '200' })).toBeNull();
+      expect(parseRelayMessage({ ...base, statusText: 42 })).toBeNull();
+      expect(parseRelayMessage({ ...base, headers: { a: 1 } })).toBeNull();
+      expect(parseRelayMessage({ ...base, headers: ['a'] })).toBeNull();
+      expect(parseRelayMessage({ ...base, headers: 'a: b' })).toBeNull();
+    });
+
+    it('rejects relay:response:error without a well-formed error', () => {
+      const base = { type: 'relay:response:error', requestId: '1' };
+      expect(parseRelayMessage({ ...base, error: { code: 'PROXY_ERROR', message: 'x' } })).not.toBeNull();
+      expect(parseRelayMessage(base)).toBeNull();
+      expect(parseRelayMessage({ ...base, error: null })).toBeNull();
+      expect(parseRelayMessage({ ...base, error: '' })).toBeNull();
+      expect(parseRelayMessage({ ...base, error: { code: 'PROXY_ERROR' } })).toBeNull();
     });
 
     it('rejects relay:response:chunk missing chunk', () => {
@@ -79,6 +115,24 @@ describe('relay protocol', () => {
 
     it('rejects unknown relay subtypes', () => {
       expect(parseRelayMessage({ type: 'relay:unknown', foo: 'bar' })).toBeNull();
+    });
+
+    it('accepts a relay:request body encoding and rejects unknown ones', () => {
+      const base = { type: 'relay:request', requestId: '1', providerId: 'x', url: 'u', method: 'POST', headers: {} };
+      expect(parseRelayMessage({ ...base, body: 'AAEC', bodyEncoding: 'base64' })).not.toBeNull();
+      expect(parseRelayMessage({ ...base, body: '[]', bodyEncoding: 'formdata' })).not.toBeNull();
+      expect(parseRelayMessage({ ...base, body: 'x', bodyEncoding: 'gzip' })).toBeNull();
+      expect(parseRelayMessage({ ...base, body: { not: 'a string' } })).toBeNull();
+    });
+
+    it('accepts a base64 relay:response:chunk and rejects unknown encodings', () => {
+      expect(parseRelayMessage({ type: 'relay:response:chunk', requestId: '1', chunk: '//8=', chunkEncoding: 'base64' })).not.toBeNull();
+      expect(parseRelayMessage({ type: 'relay:response:chunk', requestId: '1', chunk: 'x', chunkEncoding: 'hex' })).toBeNull();
+    });
+
+    it('parses relay:cancel and requires its requestId', () => {
+      expect(parseRelayMessage({ type: 'relay:cancel', requestId: '1' })?.type).toBe('relay:cancel');
+      expect(parseRelayMessage({ type: 'relay:cancel' })).toBeNull();
     });
 
     it('rejects the retired pairing and vault message types', () => {
