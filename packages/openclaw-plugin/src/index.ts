@@ -1166,13 +1166,22 @@ function buildAuthPage(requestProviderId: string | null, nonce: string): string 
         // Restarts the login's timeout: it counts from this click.
         report('/started', {}).catch(() => {});
         try {
-          if (!window.ByokySDK || !window.ByokySDK.Byoky) {
+          if (!window.ByokySDK || !window.ByokySDK.Byoky || !window.ByokySDK.connectCovering) {
             throw new Error('SDK failed to load');
           }
           const byoky = new window.ByokySDK.Byoky({ timeout: 120000 });
-          const session = await byoky.connect({
+          // An older wallet can hand back this page's session from an earlier
+          // login with other providers; connectCovering then asks it again.
+          const session = await window.ByokySDK.connectCovering(byoky, {
             providers: ${providersJson},
             modal: true,
+          }, {
+            onRetry: (missing) => setStatus(
+              'Your wallet’s earlier session for this page lacks ' +
+                (missing.length > 3 ? missing.length + ' of these providers' : missing.join(', ')) +
+                '. Approve the new request in your wallet…',
+              'waiting',
+            ),
           });
 
           const providers = session.providers || {};

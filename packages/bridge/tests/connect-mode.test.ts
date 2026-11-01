@@ -3,6 +3,8 @@ import { request, type IncomingHttpHeaders } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { runHandshake, DEFAULT_HANDSHAKE_PORT } from '../src/connect-mode.js';
 import { cleanPageMessage } from '../src/loopback-page.js';
+import { FakeWallet, type WalletKind } from './helpers/fake-wallet.js';
+import { openLoginPage } from './helpers/login-page.js';
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -174,6 +176,47 @@ describe('connect handshake', () => {
     await h.post({ nonce: h.nonce });
     await h.done;
   });
+});
+
+describe('connect page in the browser', () => {
+  /** One `byoky-bridge connect --providers <providers>` run, approved in the page. */
+  async function connectRun(wallet: FakeWallet, port: number, providers: string[]) {
+    const opened: string[] = [];
+    const done = runHandshake({ port: 19280, providers, handshakePort: port, openBrowser: (u) => opened.push(u) });
+    await expect.poll(() => opened.length).toBe(1);
+    const page = openLoginPage((await send(port, '/')).body, port, wallet);
+    page.click();
+    try {
+      await done;
+      return page.status();
+    } finally {
+      page.close();
+    }
+  }
+
+  it.each<[WalletKind, number]>([['reuses-any-session', 1], ['widens-session', 0]])(
+    'a run with another provider gets a session with it from a wallet that %s',
+    async (kind, disconnects) => {
+      const port = await freePort();
+      const wallet = new FakeWallet({ kind, keys: ['anthropic', 'openai'] });
+      await connectRun(wallet, port, ['anthropic']);
+      const status = await connectRun(wallet, port, ['openai']);
+
+      expect(wallet.disconnects).toBe(disconnects);
+      expect(wallet.prompts).toHaveLength(2);
+      expect(wallet.session?.requested.sort()).toEqual(['anthropic', 'openai']);
+      expect(wallet.bridgeSessionKey).toBe(wallet.session?.key);
+      expect(status).toMatch(/^Bridge active on port 19280\. Connected 2 provider\(s\)/);
+    },
+  );
+
+  it('reports a wallet that keeps the old session to the CLI', async () => {
+    const port = await freePort();
+    const wallet = new FakeWallet({ kind: 'reuses-any-session', keys: ['anthropic', 'openai'], ignoresDisconnect: true });
+    await connectRun(wallet, port, ['anthropic']);
+    await expect(connectRun(wallet, port, ['openai']))
+      .rejects.toThrow('Your Byoky wallet kept its earlier session for this page, which lacks openai.');
+  }, 10_000);
 });
 
 describe('cleanPageMessage', () => {

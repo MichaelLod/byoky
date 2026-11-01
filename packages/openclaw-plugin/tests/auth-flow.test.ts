@@ -5,6 +5,8 @@ import { platform, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ProviderAuthContext, ProviderAuthResult } from 'openclaw/plugin-sdk/core';
 import { getManifestLocations, registerHostAt } from '../../bridge/src/native-manifest.js';
+import { FakeWallet, type WalletKind } from '../../bridge/tests/helpers/fake-wallet.js';
+import { openLoginPage } from '../../bridge/tests/helpers/login-page.js';
 
 vi.mock('openclaw/plugin-sdk/core', () => ({ emptyPluginConfigSchema: () => ({}) }));
 vi.mock('@byoky/bridge/token', () => ({ loadOrCreateToken: () => 'test-token' }));
@@ -36,14 +38,18 @@ function post(path: string, body: unknown): Promise<number> {
   });
 }
 
-function pageNonce(): Promise<string> {
+function pageHtml(): Promise<string> {
   return new Promise((resolve, reject) => {
     request({ host: '127.0.0.1', port: CALLBACK_PORT, path: '/' }, (res) => {
       let html = '';
       res.on('data', (c: Buffer) => { html += c.toString(); });
-      res.on('end', () => resolve(html.match(/nonce: "([A-Za-z0-9_-]+)"/)![1]));
+      res.on('end', () => resolve(html));
     }).on('error', reject).end();
   });
+}
+
+async function pageNonce(): Promise<string> {
+  return (await pageHtml()).match(/nonce: "([A-Za-z0-9_-]+)"/)![1];
 }
 
 let home: string;
@@ -142,5 +148,46 @@ describe('login', () => {
     expect(existsSync(brave.path)).toBe(true);
     await post('/callback', { nonce: await pageNonce(), providers: ['openai'] });
     await run;
+  });
+});
+
+describe('login page in the browser', () => {
+  type Providers = Record<string, { baseUrl: string }>;
+
+  /** One OpenClaw login, approved in its page. */
+  async function login(providerId: string, wallet: FakeWallet): Promise<Providers> {
+    const before = opened.length;
+    const run = authRuns()[providerId](context());
+    await expect.poll(() => opened.length).toBe(before + 1);
+    const page = openLoginPage(await pageHtml(), CALLBACK_PORT, wallet);
+    page.click();
+    try {
+      const result = await run;
+      return (result.configPatch as { models: { providers: Providers } }).models.providers;
+    } finally {
+      page.close();
+    }
+  }
+
+  it.each<[WalletKind, number]>([['reuses-any-session', 1], ['widens-session', 0]])(
+    'logging in to byoky-openai after byoky-anthropic gets OpenAI from a wallet that %s, and the bridge keeps Anthropic',
+    async (kind, disconnects) => {
+      registeredHome();
+      const wallet = new FakeWallet({ kind, keys: ['anthropic', 'openai'] });
+      expect(Object.keys(await login('byoky-anthropic', wallet))).toEqual(['byoky-anthropic']);
+      expect(Object.keys(await login('byoky-openai', wallet))).toEqual(['byoky-openai']);
+
+      expect(wallet.disconnects).toBe(disconnects);
+      expect(wallet.session?.requested.sort()).toEqual(['anthropic', 'openai']);
+      expect(wallet.bridgeSessionKey).toBe(wallet.session?.key);
+    },
+  );
+
+  it('logging in to every provider after one asks the wallet about all of them', async () => {
+    registeredHome();
+    const wallet = new FakeWallet({ kind: 'reuses-any-session', keys: ['anthropic', 'openai', 'gemini'] });
+    await login('byoky-anthropic', wallet);
+    const providers = await login('byoky', wallet);
+    expect(Object.keys(providers).sort()).toEqual(['byoky-anthropic', 'byoky-gemini', 'byoky-openai']);
   });
 });

@@ -437,13 +437,17 @@ function buildConnectPage(opts: ConnectOptions, nonce: string): string {
         btn.textContent = 'Connecting…';
         setStatus('Opening wallet…');
         try {
-          if (!window.ByokySDK || !window.ByokySDK.Byoky) {
+          if (!window.ByokySDK || !window.ByokySDK.Byoky || !window.ByokySDK.connectCovering) {
             throw new Error('SDK failed to load');
           }
           const byoky = new window.ByokySDK.Byoky({ timeout: 120000 });
-          const session = await byoky.connect({
+          // An older wallet can hand back this page's session from an earlier
+          // run with other providers; connectCovering then asks it again.
+          const session = await window.ByokySDK.connectCovering(byoky, {
             providers: ${providersJson},
             modal: true,
+          }, {
+            onRetry: (missing) => setStatus('Your wallet’s earlier session for this page lacks ' + missing.join(', ') + '. Approve the new request in your wallet…'),
           });
           const providers = session.providers || {};
           const available = Object.entries(providers)

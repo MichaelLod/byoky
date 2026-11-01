@@ -22,6 +22,10 @@
       "types": "./dist/loopback-page.d.ts",
       "import": "./dist/loopback-page.js"
     },
+    "./page-session": {
+      "types": "./dist/page-session.d.ts",
+      "import": "./dist/page-session.js"
+    },
     "./package.json": "./package.json"
   },
   "bin": {
