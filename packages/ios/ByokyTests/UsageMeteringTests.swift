@@ -6,6 +6,21 @@ import XCTest
 /// ledger and reservations for requests in flight.
 final class UsageMeteringTests: XCTestCase {
 
+    // MARK: - Display
+
+    /// One format on every screen (Connected used to show 3,602 as "4K"
+    /// while the wallet showed "3.6K").
+    func testTokenCountsUseOneFormat() {
+        XCTAssertEqual(formatTokenCount(0), "0")
+        XCTAssertEqual(formatTokenCount(950), "950")
+        XCTAssertEqual(formatTokenCount(1_000), "1.0K")
+        XCTAssertEqual(formatTokenCount(3_602), "3.6K")
+        XCTAssertEqual(formatTokenCount(999_949), "999.9K")
+        XCTAssertEqual(formatTokenCount(999_950), "1.0M")
+        XCTAssertEqual(formatTokenCount(999_999), "1.0M")
+        XCTAssertEqual(formatTokenCount(1_260_000), "1.3M")
+    }
+
     // MARK: - Parsing
 
     func testPlainJsonUsage() {

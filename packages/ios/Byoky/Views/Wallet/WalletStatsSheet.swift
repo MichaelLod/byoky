@@ -116,7 +116,7 @@ private struct CredentialStatsView: View {
                             StatRow(
                                 title: row.model,
                                 subtitle: "\(row.requests) request\(row.requests == 1 ? "" : "s")",
-                                trailing: formatWalletTokens(row.total) + " tokens",
+                                trailing: formatTokenCount(row.total) + " tokens",
                                 monospace: true
                             )
                         }
@@ -129,7 +129,7 @@ private struct CredentialStatsView: View {
                             StatRow(
                                 title: hostname(row.origin),
                                 subtitle: "\(row.requests) request\(row.requests == 1 ? "" : "s")",
-                                trailing: formatWalletTokens(row.total) + " tokens",
+                                trailing: formatTokenCount(row.total) + " tokens",
                                 monospace: true
                             )
                         }
@@ -185,8 +185,8 @@ private struct CredentialStatsView: View {
             : AnyLayout(HStackLayout(spacing: 12))
         return layout {
             StatCard(value: "\(logs.count)", label: "Requests")
-            StatCard(value: formatWalletTokens(totalInput), label: "Input", spoken: "input tokens")
-            StatCard(value: formatWalletTokens(totalOutput), label: "Output", spoken: "output tokens")
+            StatCard(value: formatTokenCount(totalInput), label: "Input", spoken: "input tokens")
+            StatCard(value: formatTokenCount(totalOutput), label: "Output", spoken: "output tokens")
         }
     }
 

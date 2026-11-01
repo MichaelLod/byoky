@@ -432,14 +432,14 @@ struct CredentialRow: View {
                 if typeSize.isAccessibilitySize {
                     VStack(alignment: .leading, spacing: 6) {
                         statRow(value: "\(usage.requests)", label: "requests", spoken: "requests")
-                        statRow(value: formatWalletTokens(usage.inputTokens), label: "input", spoken: "input tokens")
-                        statRow(value: formatWalletTokens(usage.outputTokens), label: "output", spoken: "output tokens")
+                        statRow(value: formatTokenCount(usage.inputTokens), label: "input", spoken: "input tokens")
+                        statRow(value: formatTokenCount(usage.outputTokens), label: "output", spoken: "output tokens")
                     }
                 } else {
                     HStack(spacing: 16) {
                         statColumn(value: "\(usage.requests)", label: "requests", spoken: "requests")
-                        statColumn(value: formatWalletTokens(usage.inputTokens), label: "input", spoken: "input tokens")
-                        statColumn(value: formatWalletTokens(usage.outputTokens), label: "output", spoken: "output tokens")
+                        statColumn(value: formatTokenCount(usage.inputTokens), label: "input", spoken: "input tokens")
+                        statColumn(value: formatTokenCount(usage.outputTokens), label: "output", spoken: "output tokens")
                     }
                 }
             }
@@ -483,8 +483,9 @@ struct CredentialRow: View {
         .accessibilityIdentifier("wallet.credential.rename")
     }
 
+    /// Named as in Add Credential and the backup preview.
     private var badge: some View {
-        Text(credential.authMethod == .apiKey ? "API Key" : "OAuth")
+        Text(credential.authMethod == .apiKey ? "API Key" : "Setup Token")
             .uppercaseDisplay()
             .font(.mono(11, relativeTo: .caption2))
             .tracking(0.8)
@@ -527,8 +528,10 @@ struct CredentialRow: View {
     }
 }
 
-func formatWalletTokens(_ n: Int) -> String {
-    if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
+/// A token count as the wallet shows it everywhere: 950, 3.6K, 1.3M (as
+/// in the extension). Counts that would round up to "1000.0K" show as M.
+func formatTokenCount(_ n: Int) -> String {
+    if n >= 999_950 { return String(format: "%.1fM", Double(n) / 1_000_000) }
     if n >= 1_000 { return String(format: "%.1fK", Double(n) / 1_000) }
     return "\(n)"
 }

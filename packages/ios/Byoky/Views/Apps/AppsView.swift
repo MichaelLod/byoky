@@ -316,12 +316,12 @@ private struct AppSessionRow: View {
                     HStack(spacing: 8) {
                         ProgressView(value: min(Double(tokensUsed) / Double(limit), 1.0))
                             .tint(Double(tokensUsed) / Double(limit) >= 0.8 ? Theme.amber : Theme.violet)
-                        Text("\(formatTokens(tokensUsed)) / \(formatTokens(limit))")
+                        Text("\(formatTokenCount(tokensUsed)) / \(formatTokenCount(limit))")
                             .font(.mono(11, relativeTo: .caption2))
                             .foregroundStyle(Theme.fog)
                     }
                 } else {
-                    Text("\(formatTokens(tokensUsed)) tokens used")
+                    Text("\(formatTokenCount(tokensUsed)) tokens used")
                         .font(.mono(11, relativeTo: .caption2))
                         .foregroundStyle(Theme.dim)
                 }
@@ -874,15 +874,4 @@ struct AllowanceFormView: View {
         wallet.setAllowance(parsed)
         dismiss()
     }
-}
-
-// MARK: - Helpers
-
-private func formatTokens(_ count: Int) -> String {
-    if count >= 1_000_000 {
-        return String(format: "%.1fM", Double(count) / 1_000_000)
-    } else if count >= 1_000 {
-        return String(format: "%.0fK", Double(count) / 1_000)
-    }
-    return "\(count)"
 }
