@@ -17,8 +17,8 @@ Byoky is "the MetaMask for API keys": a BYOK ("bring your own key") wallet for A
 
 \`\`\`bash
 npm install @byoky/sdk
-# or scaffold a full project:
-npx create-byoky-app my-app
+# or scaffold a full project (templates: chat, multi-provider, backend-relay):
+npx create-byoky-app my-app --template chat
 \`\`\`
 
 # Quickstart (browser app)
@@ -353,7 +353,10 @@ function Installation() {
 # Choose a template:
 #   1. AI Chat (Next.js)
 #   2. Multi-Provider (Vite)
-#   3. Backend Relay (Express)`}</Code>
+#   3. Backend Relay (Express)
+
+# Or skip the prompts (CI, scripts):
+npx create-byoky-app my-app --template chat   # chat | multi-provider | backend-relay`}</Code>
 
       <h3>User wallets</h3>
       <p>Your users need one of these installed:</p>
@@ -491,11 +494,19 @@ function SdkReference() {
 
 const byoky = new Byoky({
   timeout: 60000, // how long connect() waits for the wallet to answer (ms)
+  requestTimeout: 600000, // how long a proxied request waits for response headers (ms)
 });`}</Code>
 
       <Prop name="timeout" type="number">
         Milliseconds to wait for the wallet to respond to a connect request. Defaults to{' '}
         <code>60000</code>.
+      </Prop>
+      <Prop name="requestTimeout" type="number">
+        Milliseconds a request made with <code>createFetch</code> waits for the response headers
+        before it is stopped (in the wallet and upstream) and rejects with <code>PROXY_ERROR</code>.
+        A non-streaming response sends its headers only once generation is done, so keep this above
+        your longest generation. Defaults to <code>600000</code> (10 minutes); <code>0</code> waits
+        forever.
       </Prop>
 
       <h3>byoky.connect(options)</h3>
@@ -624,6 +635,13 @@ const res = await fetch('https://api.anthropic.com/v1/messages', {
   headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' },
   body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1024, messages: [...] }),
 });`}</Code>
+      <p>
+        It takes an <code>AbortSignal</code> like the real <code>fetch</code>: aborting before the
+        response headers rejects with the signal&apos;s reason, aborting later errors the body, and
+        either way the wallet stops the upstream call. Request bodies can be strings, bytes,{' '}
+        <code>Blob</code>s, <code>FormData</code>, <code>URLSearchParams</code> or streams, and
+        binary responses such as audio arrive byte for byte.
+      </p>
 
       <h3>session.listModels(providerId)</h3>
       <p>
@@ -1188,9 +1206,10 @@ const options = models.map(m => ({
         <code>listModels</code> can throw a <code>ByokyError</code> with one of these codes:
       </p>
       <ul>
-        <li><code>PROVIDER_UNAVAILABLE</code> — the provider id is unknown, or its models endpoint returned 404/405.</li>
-        <li><code>INVALID_KEY</code> — credential rejected by the provider (401/403).</li>
-        <li><code>RATE_LIMITED</code> — upstream returned 429.</li>
+        <li><code>PROVIDER_UNAVAILABLE</code> — the provider id is unknown, the wallet has no credential that can serve it, or its models endpoint returned 404/405.</li>
+        <li><code>INVALID_KEY</code> — the provider itself rejected the credential (401/403).</li>
+        <li><code>RATE_LIMITED</code> — the provider returned 429.</li>
+        <li>The wallet&apos;s own code when the wallet answered rather than the provider, e.g. <code>SESSION_EXPIRED</code>, <code>WALLET_LOCKED</code> or <code>QUOTA_EXCEEDED</code>.</li>
         <li><code>PROXY_ERROR</code> — anything else (transport failure, malformed response).</li>
       </ul>
       <p>
@@ -1253,7 +1272,7 @@ function Errors() {
             ['EXTENSION_ERROR', <>The extension dropped the message, for example because it was updated or reloaded while the page was open. <code>connect()</code> rejects with it.</>, 'Ask the user to reload the page.'],
             ['INVALID_KEY', <>Only from <code>listModels()</code>: the models endpoint answered 401 or 403. Proxied requests never carry it; a provider&apos;s 401 reaches you as the provider sent it.</>, 'Prompt the user to check the credential in their wallet.'],
             ['TOKEN_EXPIRED', 'Reserved; no wallet sends it. An expired Claude setup token comes back as Anthropic\'s own 401 response.', 'Nothing to handle. On a 401 from the provider, ask the user to replace the credential in their wallet.'],
-            ['PROXY_ERROR', 'Generic proxy-layer failure: the provider couldn\'t be reached, the extension crashed, a native message was dropped (HTTP 502).', 'Safe to retry once. Surface a generic error if it repeats.'],
+            ['PROXY_ERROR', <>Generic proxy-layer failure: the provider couldn&apos;t be reached, the extension crashed, a native message was dropped (HTTP 502), or a request got no response headers within <code>requestTimeout</code>.</>, 'Safe to retry once. Surface a generic error if it repeats.'],
             ['RELAY_CONNECTION_FAILED', 'Your backend relay WebSocket could not reach the browser.', 'Check your relay URL and that the user\'s tab is still open; retry with backoff.'],
             ['RELAY_DISCONNECTED', 'Relay peer disconnected mid-request (user closed tab, network drop).', <>Reopen the relay via <code>session.createRelay(url)</code>.</>],
             ['UNKNOWN', 'Anything that doesn\'t map to a specific code (last-resort fallback).', 'Log the original message and surface a generic error. Treat as transient.'],

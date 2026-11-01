@@ -112,7 +112,7 @@ function modelsFor(id: string): string[] {
 // Static list of providers the tool-use tab knows how to call. Filtered at
 // render time to the subset the connected wallet can actually route (direct
 // key or cross-family translation via a group), so the user never sees an
-// option that would 404 on NO_CREDENTIAL.
+// option that would fail with PROVIDER_UNAVAILABLE.
 const dropdownProviders: string[] = ['anthropic', ...Object.keys(openaiCompatible)];
 
 interface Props {
