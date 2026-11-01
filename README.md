@@ -138,7 +138,7 @@ wss.on('connection', async (ws) => {
 
 ### CLI / Local Apps (Bridge)
 
-CLI tools and desktop apps route API calls through the bridge, a localhost HTTP proxy that hands requests to the extension over native messaging. Keys never leave the extension.
+CLI tools and desktop apps route API calls through the bridge, a localhost HTTP proxy that hands requests to the extension over native messaging. API keys never leave the extension. A Claude setup token is the exception: Anthropic needs a non-browser TLS client for it, so the extension hands it to the local bridge process for each request (your user, memory only, never logged).
 
 ```
 CLI app → HTTP → Bridge (localhost) → Native Messaging → Extension → LLM API

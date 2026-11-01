@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { request, type Server } from 'node:http';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
+import { request, type Server, type IncomingHttpHeaders } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -29,13 +29,15 @@ function freePort(): Promise<number> {
 
 interface Reply {
   status: number;
+  headers: IncomingHttpHeaders;
   body: string;
+  raw: Buffer;
 }
 
 function send(
   port: number,
   path: string,
-  opts: { method?: string; headers?: Record<string, string>; body?: string } = {},
+  opts: { method?: string; headers?: Record<string, string>; body?: string | Buffer } = {},
 ): Promise<Reply> {
   return new Promise((resolve, reject) => {
     const req = request(
@@ -43,13 +45,29 @@ function send(
       (res) => {
         const chunks: Buffer[] = [];
         res.on('data', (c: Buffer) => chunks.push(c));
-        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString() }));
+        res.on('end', () => resolve({
+          status: res.statusCode ?? 0,
+          headers: res.headers,
+          body: Buffer.concat(chunks).toString(),
+          raw: Buffer.concat(chunks),
+        }));
       },
     );
     req.on('error', reject);
     req.end(opts.body);
   });
 }
+
+// Every byte value, starting like an MP3 frame (0xff 0xfb is not UTF-8).
+const BINARY = Buffer.concat([Buffer.from([0xff, 0xfb, 0x90, 0x64]), Buffer.from(Array.from({ length: 256 }, (_, i) => i))]);
+
+// What the extension answers for a session it no longer has, old and new.
+const STALE_REPLIES: Record<string, { error: string; status?: number; code?: string }> = {
+  revoked: { error: 'Unauthorized session key' },
+  expired: { error: 'Session has expired' },
+  gone: { error: 'Session not found or wallet locked' },
+  coded: { error: 'Bridge session expired', status: 401, code: 'bridge_session_expired' },
+};
 
 // Stands in for the extension: records what the bridge sends over native
 // messaging and answers each request with a small JSON body.
@@ -58,6 +76,26 @@ let sent: ProxyMessageOut[] = [];
 function fakeExtension(msg: ProxyMessageOut): void {
   sent.push(msg);
   if (msg.type !== 'proxy_http') return;
+  // The provider is still thinking: no headers yet.
+  if (msg.url.endsWith('/v1/silent')) return;
+  if (msg.url.endsWith('/v1/audio/speech')) {
+    handleProxyResponse({
+      type: 'proxy_http_response_meta',
+      requestId: msg.requestId,
+      status: 200,
+      headers: { 'content-type': 'audio/mpeg' },
+    });
+    for (const part of [BINARY.subarray(0, 100), BINARY.subarray(100)]) {
+      handleProxyResponse({
+        type: 'proxy_http_response_chunk',
+        requestId: msg.requestId,
+        chunk: part.toString('base64'),
+        chunkEncoding: 'base64',
+      });
+    }
+    handleProxyResponse({ type: 'proxy_http_response_done', requestId: msg.requestId });
+    return;
+  }
   if (msg.url.endsWith('/v1/stream')) {
     // A stream that never finishes on its own.
     handleProxyResponse({
@@ -67,6 +105,11 @@ function fakeExtension(msg: ProxyMessageOut): void {
       headers: { 'content-type': 'text/event-stream' },
     });
     handleProxyResponse({ type: 'proxy_http_response_chunk', requestId: msg.requestId, chunk: 'data: 1\n\n' });
+    return;
+  }
+  const stale = STALE_REPLIES[msg.url.slice(msg.url.lastIndexOf('/') + 1)];
+  if (stale) {
+    handleProxyResponse({ type: 'proxy_http_error', requestId: msg.requestId, ...stale });
     return;
   }
   if (msg.url.endsWith('/v1/models')) {
@@ -172,6 +215,15 @@ describe('extension replies', () => {
     expect((sent[0] as ProxyRequestOut).reportsDirectFetch).toBe(true);
   });
 
+  it.each(Object.keys(STALE_REPLIES))('turns a dead session (%s) into a 401 with the reconnect hint', async (kind) => {
+    const res = await send(port, `/anthropic/v1/${kind}`, { headers: { 'x-api-key': TOKEN }, body: '{}' });
+    expect(res.status).toBe(401);
+    expect(JSON.parse(res.body)).toMatchObject({
+      code: 'bridge_session_expired',
+      hint: expect.stringContaining('byoky-bridge connect'),
+    });
+  });
+
   it('passes an error status and code through to the client', async () => {
     const res = await send(port, '/anthropic/v1/models', { method: 'GET', headers: { 'x-api-key': TOKEN } });
     expect(res.status).toBe(400);
@@ -202,6 +254,60 @@ describe('client hang-up', () => {
     await send(port, '/anthropic/v1/messages', { headers: { 'x-api-key': TOKEN }, body: '{}' });
     await new Promise((r) => setTimeout(r, 50));
     expect(sent.some((m) => m.type === 'proxy_http_cancel')).toBe(false);
+  });
+});
+
+describe('timeouts', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const cancels = () => sent.filter((m) => m.type === 'proxy_http_cancel');
+
+  it('waits 10 minutes for the headers, then answers 504 and cancels once', async () => {
+    let settled = false;
+    const reply = send(port, '/anthropic/v1/silent', { headers: { 'x-api-key': TOKEN }, body: '{}' })
+      .finally(() => { settled = true; });
+    await expect.poll(() => sent.length).toBe(1);
+    const { requestId } = sent[0] as ProxyRequestOut;
+
+    // A non-streaming reply that takes longer than 2 minutes is not cut off.
+    await vi.advanceTimersByTimeAsync(120_000);
+    await new Promise((r) => setImmediate(r));
+    expect(settled).toBe(false);
+    expect(cancels()).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(480_000);
+    const res = await reply;
+    expect(res.status).toBe(504);
+    expect(res.headers['x-should-retry']).toBe('false');
+    expect(cancels()).toEqual([{ type: 'proxy_http_cancel', requestId }]);
+  });
+
+  it('drops a stream that stalls for 2 minutes after its headers and cancels it', async () => {
+    let closed = false;
+    const client = request(
+      { host: '127.0.0.1', port, path: '/anthropic/v1/stream', method: 'POST', headers: { 'x-api-key': TOKEN } },
+      (res) => {
+        res.resume();
+        res.on('close', () => { closed = true; });
+      },
+    );
+    client.on('error', () => {});
+    client.end('{}');
+    await expect.poll(() => sent.length).toBe(1);
+    const { requestId } = sent[0] as ProxyRequestOut;
+
+    await vi.advanceTimersByTimeAsync(119_000);
+    await new Promise((r) => setImmediate(r));
+    expect(closed).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    await expect.poll(() => closed).toBe(true);
+    expect(cancels()).toEqual([{ type: 'proxy_http_cancel', requestId }]);
   });
 });
 
@@ -259,6 +365,84 @@ describe('large request bodies', () => {
       const last = slice.charCodeAt(slice.length - 1);
       expect(last >= 0xd800 && last <= 0xdbff).toBe(false);
     }
+  });
+});
+
+describe('provider base URLs', () => {
+  let custom: Server;
+  let customPort: number;
+
+  beforeAll(async () => {
+    customPort = await freePort();
+    custom = await startProxyServer({
+      port: customPort,
+      sessionKey: 'session-key',
+      providers: ['azure_openai', 'ollama', 'lm_studio', 'openrouter', 'not_a_provider'],
+      token: TOKEN,
+      sendToExtension: fakeExtension,
+    });
+  });
+
+  afterAll(() => {
+    custom.close();
+  });
+
+  it.each([
+    ['/azure_openai/openai/v1/chat/completions', 'https://YOUR_RESOURCE.openai.azure.com/openai/v1/chat/completions'],
+    ['/ollama/v1/chat/completions', 'http://localhost:11434/v1/chat/completions'],
+    ['/lm_studio/v1/chat/completions', 'http://localhost:1234/v1/chat/completions'],
+    ['/openrouter/v1/chat/completions', 'https://openrouter.ai/api/v1/chat/completions'],
+  ])('forwards %s on the registry base URL', async (path, url) => {
+    const res = await send(customPort, path, { headers: { 'x-api-key': TOKEN }, body: '{}' });
+    expect(res.status).toBe(200);
+    expect((sent[0] as ProxyRequestOut).url).toBe(url);
+  });
+
+  it('refuses a provider the registry does not know', async () => {
+    const res = await send(customPort, '/not_a_provider/v1/x', { headers: { 'x-api-key': TOKEN }, body: '{}' });
+    expect(res.status).toBe(400);
+    expect(sent).toHaveLength(0);
+  });
+});
+
+describe('binary bodies', () => {
+  const multipart = Buffer.concat([
+    Buffer.from('--b\r\nContent-Disposition: form-data; name="file"; filename="a.mp3"\r\n\r\n'),
+    BINARY,
+    Buffer.from('\r\n--b--\r\n'),
+  ]);
+
+  it('sends a body that is not UTF-8 as base64, byte for byte', async () => {
+    await send(port, '/anthropic/v1/messages', {
+      headers: { 'x-api-key': TOKEN, 'content-type': 'multipart/form-data; boundary=b' },
+      body: multipart,
+    });
+    const forwarded = sent[0] as ProxyRequestOut;
+    expect(forwarded.bodyEncoding).toBe('base64');
+    expect(Buffer.from(forwarded.body!, 'base64').equals(multipart)).toBe(true);
+  });
+
+  it('keeps a large binary body base64 across body chunks', async () => {
+    const big = Buffer.concat(Array.from({ length: 5_000 }, () => BINARY));
+    await send(port, '/anthropic/v1/messages', { headers: { 'x-api-key': TOKEN }, body: big });
+    const last = sent[sent.length - 1] as ProxyRequestOut;
+    expect(last).toMatchObject({ bodyChunked: true, bodyEncoding: 'base64' });
+    const joined = (sent.slice(0, -1) as ProxyBodyChunkOut[]).map((c) => c.chunk).join('');
+    expect(Buffer.from(joined, 'base64').equals(big)).toBe(true);
+  });
+
+  it('sends UTF-8 text as it is and says it takes binary replies', async () => {
+    await send(port, '/anthropic/v1/messages', { headers: { 'x-api-key': TOKEN }, body: '{"q":"äöü 🦅"}' });
+    const forwarded = sent[0] as ProxyRequestOut;
+    expect(forwarded.body).toBe('{"q":"äöü 🦅"}');
+    expect(forwarded.bodyEncoding).toBeUndefined();
+    expect(forwarded.acceptsBinaryChunks).toBe(true);
+  });
+
+  it('writes base64 response chunks to the client as bytes', async () => {
+    const res = await send(port, '/anthropic/v1/audio/speech', { headers: { 'x-api-key': TOKEN }, body: '{}' });
+    expect(res.headers['content-type']).toBe('audio/mpeg');
+    expect(res.raw.equals(BINARY)).toBe(true);
   });
 });
 

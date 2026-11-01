@@ -1,6 +1,6 @@
 # @byoky/bridge
 
-Local HTTP proxy that lets CLI tools and desktop apps route LLM API calls through the Byoky browser extension. Keys never leave the extension.
+Local HTTP proxy that lets CLI tools and desktop apps route LLM API calls through the Byoky browser extension. API keys never leave the extension; the one credential the bridge does handle is a Claude setup token (see [How it works](#how-it-works)).
 
 ```
 CLI App → HTTP → Bridge (localhost) → Native Messaging → Extension → LLM API
@@ -13,7 +13,7 @@ npm install -g @byoky/bridge
 byoky-bridge install
 ```
 
-`byoky-bridge install` registers the native messaging host with Chrome, Chromium, Brave, and Firefox on macOS and Linux. Windows isn't supported yet.
+`byoky-bridge install` registers the native messaging host with each of Chrome, Chromium, Brave, Edge, Vivaldi and Firefox that is installed, on macOS and Linux. Start a browser once before installing, and run it again after adding a browser. `byoky-bridge uninstall` removes the registrations again. Windows isn't supported yet.
 
 Only the Chrome Web Store extension (and Firefox's `byoky@byoky.com`) may launch the bridge. For an unpacked build of this repo, add `--dev`; for any other ID, pass it:
 
@@ -30,14 +30,14 @@ One command to open the wallet, approve a session, and start the HTTP proxy on `
 byoky-bridge connect
 ```
 
-It opens a browser tab on an ephemeral loopback port, runs the Byoky SDK connect flow, and asks the extension to open the proxy. Once you approve in the Byoky popup the CLI prints:
+It opens a browser tab on `http://127.0.0.1:19281`, runs the Byoky SDK connect flow, and asks the extension to open the proxy. The page's port stays the same on every run, so the wallet keeps treating it as the same app, with the same spending cap and routing group. Once you approve in the Byoky popup the CLI prints:
 
 ```
 ✓ Bridge listening on http://127.0.0.1:19280
   Providers: anthropic
 ```
 
-The proxy stays up as long as your browser is running — the extension's service worker holds the native-messaging port open. Re-run `byoky-bridge connect` after a browser restart.
+The proxy stays up as long as your browser is running — the extension's service worker holds the native-messaging port open. Re-run `byoky-bridge connect` after a browser restart, whenever the wallet has locked (by hand or after 20 idle minutes), and at least once a day: a session lasts 24 hours. Until then requests get a 401 with `"code":"bridge_session_expired"`.
 
 Point your client at it, with the bridge token as the API key:
 
@@ -55,6 +55,8 @@ Options:
 byoky-bridge connect --port 19280 --providers anthropic
 # comma-separated for multi-provider:
 byoky-bridge connect --providers anthropic,openai
+# serve the approval page on another port (the wallet sees a new app):
+byoky-bridge connect --handshake-port 19291
 ```
 
 ## Bridge token
@@ -69,7 +71,9 @@ To rotate it, run `rm ~/.byoky-bridge/token && byoky-bridge connect`, then updat
 
 The bridge is a native messaging host — Chrome spawns it as a subprocess when the extension needs it. When `byoky-bridge connect` runs, the extension sends a `start-proxy` message telling the bridge to listen on `127.0.0.1:<port>`. Requests hit the proxy, get relayed to the extension over native messaging, and the extension injects the real API key before calling the provider API.
 
-The bridge never sees your API keys, and everything stays on your machine: the proxy only listens on `127.0.0.1` and talks to no Byoky-hosted service. It refuses requests that carry an `Origin` header, so web pages and other browser extensions can't call it; the Byoky extension itself talks to the bridge over native messaging only.
+The bridge never sees your API keys. The exception is a Claude Pro/Max setup token: Anthropic accepts it only from a non-browser TLS client, so for those requests the extension hands the token to the bridge process, which makes the call from Node. The bridge runs as your user, keeps the token in memory for that request only, and never writes it to disk or logs it.
+
+Everything stays on your machine: the proxy only listens on `127.0.0.1` and talks to no Byoky-hosted service. It refuses requests that carry an `Origin` header, so web pages and other browser extensions can't call it; the Byoky extension itself talks to the bridge over native messaging only.
 
 ## Usage from the browser
 
@@ -88,7 +92,7 @@ curl http://127.0.0.1:19280/anthropic/v1/messages \
   -H "x-api-key: $(byoky-bridge token)" \
   -H "anthropic-version: 2023-06-01" \
   -d '{
-    "model": "claude-sonnet-4-20250514",
+    "model": "claude-sonnet-4-6",
     "max_tokens": 1024,
     "messages": [{"role": "user", "content": "Hello!"}]
   }'
@@ -107,7 +111,9 @@ curl http://127.0.0.1:19280/anthropic/v1/messages \
 
 ## Supported Providers
 
-Anthropic, OpenAI, Google Gemini, Mistral, Cohere, xAI, DeepSeek, Perplexity, Groq, Together AI, Fireworks AI, OpenRouter, Azure OpenAI.
+Anthropic, OpenAI, Google Gemini, Mistral, Cohere, xAI, DeepSeek, Perplexity, Groq, Together AI, Fireworks AI, OpenRouter, Azure OpenAI, Ollama, LM Studio.
+
+Azure OpenAI, Ollama and LM Studio run on a host of your own: the bridge forwards their requests and the extension sends them to the base URL stored with your key. For Azure, point the client at `http://127.0.0.1:19280/azure_openai/openai/v1` and use the deployment name as the model.
 
 ## License
 

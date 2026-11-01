@@ -26,7 +26,7 @@ if (command === 'install' || command === 'uninstall' || command === 'status') {
   // Interactive mode: open a loopback page that connects the wallet and
   // tells the extension to start the HTTP proxy on 127.0.0.1:<port>.
   //
-  //   byoky-bridge connect [--port 19280] [--providers anthropic]
+  //   byoky-bridge connect [--port 19280] [--providers anthropic] [--handshake-port 19281]
   //
   // Once the user approves the session, the bridge listens on :<port>
   // and stays up as long as the browser's extension service worker is
@@ -40,9 +40,16 @@ if (command === 'install' || command === 'uninstall' || command === 'status') {
   const port = Number(opt('--port') ?? '19280');
   const providersArg = opt('--providers') ?? 'anthropic';
   const providers = providersArg.split(',').map((s) => s.trim()).filter(Boolean);
+  // The approval page's port. Keep it the same between runs: the wallet
+  // knows the app by it, with its spending cap and routing group.
+  const handshakePort = Number(opt('--handshake-port') ?? '19281');
 
   if (!Number.isInteger(port) || port < 1024 || port > 65535) {
     console.error('Invalid --port. Must be between 1024 and 65535.');
+    process.exit(1);
+  }
+  if (!Number.isInteger(handshakePort) || handshakePort < 1024 || handshakePort > 65535 || handshakePort === port) {
+    console.error('Invalid --handshake-port. Must be between 1024 and 65535 and differ from --port.');
     process.exit(1);
   }
   if (providers.length === 0) {
@@ -52,7 +59,7 @@ if (command === 'install' || command === 'uninstall' || command === 'status') {
 
   const { runConnect } = await import('../dist/connect-mode.js');
   try {
-    const result = await runConnect({ port, providers });
+    const result = await runConnect({ port, providers, handshakePort });
     console.log(`\n✓ Bridge listening on http://127.0.0.1:${result.port}`);
     console.log(`  Providers: ${result.providers.join(', ')}`);
     if (providers.includes('anthropic')) {

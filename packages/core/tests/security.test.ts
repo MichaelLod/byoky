@@ -562,10 +562,9 @@ describe('security invariants', () => {
   describe('openclaw plugin', () => {
     const plugin = readFile('packages/openclaw-plugin/src/index.ts');
 
-    it('uses fixed CORS origin (not echoed)', () => {
-      expect(plugin).toContain("'Access-Control-Allow-Origin', 'http://127.0.0.1'");
-      // Must not echo back the request origin
-      expect(plugin).not.toContain('isLocalhost ? reqOrigin');
+    it('has no CORS headers: only its own page may call the login server', () => {
+      expect(plugin).not.toContain('Access-Control-Allow-Origin');
+      expect(plugin).toContain('isFromPage(req, port)');
     });
 
     it('limits request body size', () => {

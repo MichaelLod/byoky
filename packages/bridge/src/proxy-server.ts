@@ -5,7 +5,9 @@
  * to make LLM API calls through the user's Byoky wallet. The bridge
  * is a dumb relay — it forwards requests to the browser extension via
  * native messaging. The extension injects the real API key and makes
- * the actual API call. Keys NEVER touch the bridge process.
+ * the actual API call, so API keys never touch the bridge process. (A
+ * Claude setup token does: Anthropic needs a non-browser TLS client for
+ * it, so the extension hands it to host-core.ts for the request.)
  *
  * Flow:
  *   Local App → HTTP → Bridge → Native Messaging → Extension → fetch(real API)
@@ -15,6 +17,7 @@
 
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { PROVIDERS } from '@byoky/core';
 
 export interface ProxyRequestOut {
   type: 'proxy_http';
@@ -25,6 +28,8 @@ export interface ProxyRequestOut {
   method: string;
   headers: Record<string, string>;
   body?: string;
+  /** The body is not UTF-8 text (an audio upload, say) and is sent as base64. */
+  bodyEncoding?: 'base64';
   /** The body was sent ahead in `proxy_http_body_chunk` messages. */
   bodyChunked?: true;
   /**
@@ -32,6 +37,8 @@ export interface ProxyRequestOut {
    * the extension can wait for the real status and usage before logging.
    */
   reportsDirectFetch: true;
+  /** A binary response may come back as base64 chunks (`chunkEncoding`). */
+  acceptsBinaryChunks: true;
 }
 
 export interface ProxyBodyChunkOut {
@@ -60,6 +67,8 @@ export interface ProxyResponseChunkIn {
   type: 'proxy_http_response_chunk';
   requestId: string;
   chunk: string;
+  /** `chunk` holds base64 bytes of a binary response, not text. */
+  chunkEncoding?: 'base64';
 }
 
 export interface ProxyResponseDoneIn {
@@ -94,11 +103,17 @@ interface ProxyConfig {
 type PendingResponse = {
   res: ServerResponse;
   timeout: ReturnType<typeof setTimeout>;
+  /** Fails the request and has the upstream call stopped. */
+  onTimeout: () => void;
 };
 
 const MAX_PENDING_REQUESTS = 100;
-// Idle, not total: refreshed on every response chunk so a long stream that
-// is still flowing never gets cut.
+// Until the response headers arrive. A non-streaming reply sends them only
+// once the model has finished, which can take minutes; the OpenAI and
+// Anthropic SDKs wait 10 minutes by default.
+const FIRST_BYTE_TIMEOUT_MS = 600_000;
+// After the headers: idle, not total. Refreshed on every response chunk so
+// a long stream that is still flowing never gets cut.
 const IDLE_TIMEOUT_MS = 120_000;
 const pendingRequests = new Map<string, PendingResponse>();
 
@@ -216,20 +231,25 @@ export function handleProxyResponse(msg: ProxyResponseMessage): void {
     delete headers['set-cookie'];
     delete headers['set-cookie2'];
     pending.res.writeHead(msg.status, headers);
-    pending.timeout.refresh();
+    clearTimeout(pending.timeout);
+    pending.timeout = setTimeout(pending.onTimeout, IDLE_TIMEOUT_MS);
   } else if (msg.type === 'proxy_http_response_chunk') {
-    pending.res.write(msg.chunk);
+    pending.res.write(msg.chunkEncoding === 'base64' ? Buffer.from(msg.chunk, 'base64') : msg.chunk);
     pending.timeout.refresh();
   } else if (msg.type === 'proxy_http_response_done') {
     pending.res.end();
     clearTimeout(pending.timeout);
     pendingRequests.delete(msg.requestId);
   } else if (msg.type === 'proxy_http_error') {
-    // Translate the extension's "Unauthorized session key" into a clearer
-    // 401 — the key is dead and the user needs to reconnect via
-    // `byoky-bridge connect`. `code` lets clients tell it from a bad token.
-    const isStaleSession =
-      typeof msg.error === 'string' && /unauthorized session key/i.test(msg.error);
+    // A dead session (revoked, wallet locked, or past its 24 h) becomes a
+    // clear 401 — the user needs to reconnect via `byoky-bridge connect`,
+    // and a 502 would only make clients retry. `code` lets clients tell it
+    // from a bad token. Newer extensions send the code; older ones only
+    // the message.
+    const isStaleSession = msg.code === 'bridge_session_expired' || (
+      typeof msg.error === 'string' &&
+      /unauthorized session key|session has expired|session not found/i.test(msg.error)
+    );
     if (!pending.res.headersSent) {
       if (isStaleSession) {
         pending.res.writeHead(401, { 'Content-Type': 'application/json' });
@@ -361,7 +381,7 @@ export function startProxyServer(config: ProxyConfig): Promise<Server> {
     // MAX_BODY_SIZE — which a chunked request slips past the Content-Length
     // pre-check above. Left unhandled, that rejection escapes this async
     // listener and takes the whole bridge process down.
-    let body: string;
+    let body: Buffer;
     try {
       body = await readBody(req);
     } catch {
@@ -372,24 +392,10 @@ export function startProxyServer(config: ProxyConfig): Promise<Server> {
       return;
     }
 
-    // Build the real URL from the provider's base URL
-    const providerUrls: Record<string, string> = {
-      anthropic: 'https://api.anthropic.com',
-      openai: 'https://api.openai.com',
-      gemini: 'https://generativelanguage.googleapis.com',
-      mistral: 'https://api.mistral.ai',
-      cohere: 'https://api.cohere.com',
-      xai: 'https://api.x.ai',
-      deepseek: 'https://api.deepseek.com',
-      perplexity: 'https://api.perplexity.ai',
-      groq: 'https://api.groq.com',
-      together: 'https://api.together.xyz',
-      fireworks: 'https://api.fireworks.ai',
-      openrouter: 'https://openrouter.ai/api',
-      azure_openai: 'https://YOUR_RESOURCE.openai.azure.com',
-    };
-
-    const baseUrl = providerUrls[providerId];
+    // Build the real URL from the provider's registered base URL. For
+    // Azure, Ollama and LM Studio that is a placeholder host; the extension
+    // puts the credential's own host in its place.
+    const baseUrl = Object.hasOwn(PROVIDERS, providerId) ? PROVIDERS[providerId].baseUrl : undefined;
     if (!baseUrl) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: `Unknown provider base URL for "${providerId}"` }));
@@ -422,8 +428,9 @@ export function startProxyServer(config: ProxyConfig): Promise<Server> {
       url: realUrl,
       method: req.method || 'GET',
       headers,
-      body: body || undefined,
+      ...encodeBody(body),
       reportsDirectFetch: true,
+      acceptsBinaryChunks: true,
     };
 
     if (pendingRequests.size >= MAX_PENDING_REQUESTS) {
@@ -432,17 +439,25 @@ export function startProxyServer(config: ProxyConfig): Promise<Server> {
       return;
     }
 
-    const timeout = setTimeout(() => {
+    const onTimeout = () => {
       if (!pendingRequests.delete(requestId)) return;
+      // The client gets an error either way. Stop the upstream call too, or
+      // it runs, and bills, to the end.
+      sendToExtension({ type: 'proxy_http_cancel', requestId });
       if (res.headersSent) {
         res.destroy();
         return;
       }
-      res.writeHead(504, { 'Content-Type': 'application/json' });
+      // SDKs retry a 504 twice by default, and each retry would wait as long.
+      res.writeHead(504, { 'Content-Type': 'application/json', 'x-should-retry': 'false' });
       res.end(JSON.stringify({ error: 'Request timed out' }));
-    }, IDLE_TIMEOUT_MS);
+    };
 
-    pendingRequests.set(requestId, { res, timeout });
+    pendingRequests.set(requestId, {
+      res,
+      timeout: setTimeout(onTimeout, FIRST_BYTE_TIMEOUT_MS),
+      onTimeout,
+    });
 
     // Still pending when the connection closes means the client hung up
     // (Ctrl-C in Claude Code). Have the upstream call stopped rather than
@@ -476,9 +491,21 @@ export function startProxyServer(config: ProxyConfig): Promise<Server> {
 const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10 MB
 const MAX_URI_LENGTH = 8192;
 
-function readBody(req: IncomingMessage): Promise<string> {
+/**
+ * A native message carries text only. A body that is not valid UTF-8
+ * (multipart audio, an image) would have every invalid byte turned into
+ * U+FFFD, so it goes as base64 instead.
+ */
+function encodeBody(body: Buffer): Pick<ProxyRequestOut, 'body' | 'bodyEncoding'> {
+  if (body.length === 0) return {};
+  // Decode once, at the end: a multi-byte character can straddle chunks.
+  const text = body.toString('utf-8');
+  if (Buffer.from(text, 'utf-8').equals(body)) return { body: text };
+  return { body: body.toString('base64'), bodyEncoding: 'base64' };
+}
+
+function readBody(req: IncomingMessage): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    // Decode once at the end: a multi-byte character can straddle chunks.
     const chunks: Buffer[] = [];
     let size = 0;
     req.on('data', (chunk: Buffer) => {
@@ -490,7 +517,7 @@ function readBody(req: IncomingMessage): Promise<string> {
       }
       chunks.push(chunk);
     });
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
   });
 }

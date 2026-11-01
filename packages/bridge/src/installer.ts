@@ -2,7 +2,7 @@
  * Installs/uninstalls the native messaging host manifest for each browser.
  *
  * Usage:
- *   byoky-bridge install    — register with Chrome, Chromium, Brave, and Firefox
+ *   byoky-bridge install    — register with Chrome, Chromium, Brave, Edge, Vivaldi and Firefox
  *   byoky-bridge uninstall  — remove registrations
  *   byoky-bridge status     — check if registered
  *
@@ -10,11 +10,19 @@
  * non-bash wrapper, so `install` reports it as unsupported for now.
  */
 
-import { writeFileSync, mkdirSync, unlinkSync, existsSync, chmodSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { homedir, platform } from 'node:os';
 import { execFileSync } from 'node:child_process';
-import { HOST_NAME, buildManifest, type ManifestOptions } from './native-manifest.js';
+import {
+  getRegistrationStatusAt,
+  registerHostAt,
+  unregisterHostAt,
+  type ManifestOptions,
+  type RegisterResult,
+  type RegistrationStatus,
+} from './native-manifest.js';
+
+export type { RegisterResult, RegistrationStatus } from './native-manifest.js';
 
 function getHostPath(): string {
   try {
@@ -24,131 +32,14 @@ function getHostPath(): string {
   }
 }
 
-/**
- * Create a native messaging wrapper script that uses the absolute node path.
- * Chrome/Brave launch native hosts with a minimal PATH that doesn't include
- * nvm/fnm/volta/etc, so `#!/usr/bin/env node` often fails.
- *
- * Instead of inheriting the user's PATH (which risks injection), we construct
- * a minimal PATH from the known node binary directory.
- */
-function createNativeWrapper(hostPath: string, manifestDir: string): string {
-  const nodePath = process.execPath;
-  const wrapperPath = resolve(manifestDir, 'byoky-bridge-host');
-  const nodeDir = dirname(nodePath);
-  const safePath = `${nodeDir}:/usr/local/bin:/usr/bin:/bin`;
-  const script = [
-    '#!/bin/bash',
-    `export PATH='${safePath}'`,
-    `exec '${nodePath.replace(/'/g, "'\\''")}' '${hostPath.replace(/'/g, "'\\''")}' host "$@"`,
-    '',
-  ].join('\n');
-  writeFileSync(wrapperPath, script);
-  chmodSync(wrapperPath, 0o755);
-  return wrapperPath;
-}
-
-interface ManifestLocation {
-  browser: string;
-  path: string;
-  type: 'chrome' | 'firefox';
-}
-
-function getManifestLocations(): ManifestLocation[] {
-  const home = homedir();
-  const os = platform();
-
-  if (os === 'darwin') {
-    return [
-      {
-        browser: 'Chrome',
-        path: `${home}/Library/Application Support/Google/Chrome/NativeMessagingHosts/${HOST_NAME}.json`,
-        type: 'chrome',
-      },
-      {
-        browser: 'Chromium',
-        path: `${home}/Library/Application Support/Chromium/NativeMessagingHosts/${HOST_NAME}.json`,
-        type: 'chrome',
-      },
-      {
-        browser: 'Brave',
-        path: `${home}/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts/${HOST_NAME}.json`,
-        type: 'chrome',
-      },
-      {
-        browser: 'Firefox',
-        path: `${home}/Library/Application Support/Mozilla/NativeMessagingHosts/${HOST_NAME}.json`,
-        type: 'firefox',
-      },
-    ];
-  }
-
-  if (os === 'linux') {
-    return [
-      {
-        browser: 'Chrome',
-        path: `${home}/.config/google-chrome/NativeMessagingHosts/${HOST_NAME}.json`,
-        type: 'chrome',
-      },
-      {
-        browser: 'Chromium',
-        path: `${home}/.config/chromium/NativeMessagingHosts/${HOST_NAME}.json`,
-        type: 'chrome',
-      },
-      {
-        browser: 'Firefox',
-        path: `${home}/.mozilla/native-messaging-hosts/${HOST_NAME}.json`,
-        type: 'firefox',
-      },
-    ];
-  }
-
-  return [];
-}
-
-export interface RegisterResult {
-  browsers: string[];
-  unsupported?: boolean;
-}
-
-export interface RegistrationStatus {
-  registered: string[];
-  missing: string[];
-}
-
 /** Programmatic install — returns registered browser names, no stdout. */
 export function registerHost(opts: ManifestOptions = {}): RegisterResult {
-  const locations = getManifestLocations();
-  if (locations.length === 0) return { browsers: [], unsupported: true };
-
-  const hostPath = getHostPath();
-  const browsers: string[] = [];
-
-  for (const loc of locations) {
-    try {
-      const manifestDir = dirname(loc.path);
-      mkdirSync(manifestDir, { recursive: true });
-      const wrapperPath = createNativeWrapper(hostPath, manifestDir);
-      const manifest = buildManifest(wrapperPath, loc.type, opts);
-      writeFileSync(loc.path, JSON.stringify(manifest, null, 2));
-      browsers.push(loc.browser);
-    } catch {
-      // Browser not installed, skip
-    }
-  }
-
-  return { browsers };
+  return registerHostAt(homedir(), platform(), getHostPath(), opts);
 }
 
-/** Programmatic status check — returns which browsers have the host registered. */
+/** Programmatic status check — returns which installed browsers have the host registered. */
 export function getRegistrationStatus(): RegistrationStatus {
-  const locations = getManifestLocations();
-  const registered: string[] = [];
-  const missing: string[] = [];
-  for (const loc of locations) {
-    (existsSync(loc.path) ? registered : missing).push(loc.browser);
-  }
-  return { registered, missing };
+  return getRegistrationStatusAt(homedir(), platform());
 }
 
 export function install(opts: ManifestOptions = {}): void {
@@ -170,24 +61,15 @@ export function install(opts: ManifestOptions = {}): void {
       console.log('Only the Chrome Web Store extension is allowed. Loaded Byoky unpacked? Re-run with --dev.');
     }
   } else {
-    console.error('No supported browsers found.');
+    console.error('No supported browser found (Chrome, Chromium, Brave, Edge, Vivaldi or Firefox).');
+    console.error('Start your browser once, then run `byoky-bridge install` again.');
   }
 }
 
 export function uninstall(): void {
-  const locations = getManifestLocations();
-
-  for (const loc of locations) {
-    try {
-      if (existsSync(loc.path)) {
-        unlinkSync(loc.path);
-        console.log(`  Removed from ${loc.browser}`);
-      }
-    } catch {
-      // Skip
-    }
+  for (const browser of unregisterHostAt(homedir(), platform())) {
+    console.log(`  Removed from ${browser}`);
   }
-
   console.log('\nByoky Bridge uninstalled.');
 }
 
@@ -198,5 +80,8 @@ export function status(): void {
   }
   for (const browser of missing) {
     console.log(`  \u2717 ${browser}: not registered`);
+  }
+  if (registered.length === 0 && missing.length === 0) {
+    console.log('  No supported browser found.');
   }
 }

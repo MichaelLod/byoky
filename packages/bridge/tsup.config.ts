@@ -4,7 +4,7 @@ export default defineConfig([
   {
     entry: [
       'src/host.ts', 'src/installer.ts', 'src/connect-mode.ts', 'src/hermes-setup.ts',
-      'src/token.ts', 'src/native-manifest.ts',
+      'src/token.ts', 'src/native-manifest.ts', 'src/loopback-page.ts', 'src/page-session.ts',
     ],
     format: ['esm'],
     dts: true,

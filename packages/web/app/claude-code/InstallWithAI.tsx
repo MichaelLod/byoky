@@ -22,7 +22,7 @@ Your job — run these commands on my machine and report each step:
 
 3. Start the bridge proxy by connecting my wallet:
      byoky-bridge connect
-   This opens a browser tab on http://127.0.0.1:<ephemeral>, I click "Connect wallet", approve the session in the Byoky popup, and the CLI reports "Bridge listening on http://127.0.0.1:19280". The bridge stays up as long as my browser is running — after a restart, re-run \`byoky-bridge connect\` to bring it back. If the CLI errors with "SDK failed to load", make sure I'm on @byoky/bridge@0.9.3 or later (\`byoky-bridge --help\` should list a \`connect\` command).
+   This opens a browser tab on http://127.0.0.1:19281, I click "Connect wallet", approve the session in the Byoky popup, and the CLI reports "Bridge listening on http://127.0.0.1:19280". The bridge stays up as long as my browser is running — after a restart, re-run \`byoky-bridge connect\` to bring it back. If the CLI errors with "SDK failed to load", make sure I'm on @byoky/bridge@0.9.3 or later (\`byoky-bridge --help\` should list a \`connect\` command).
 
 4. Point Claude Code at the local Byoky bridge. The bridge exposes Anthropic at /anthropic — every request is rewritten to api.anthropic.com on the other side. The API key must be the bridge token: the bridge rejects requests without it (so other programs on my machine can't use my keys), then strips it and the extension injects the real credential. Use \`ANTHROPIC_API_KEY\` (not AUTH_TOKEN) — that's what Claude Code's first-run wizard checks to skip the OAuth login prompt:
      export ANTHROPIC_BASE_URL=http://127.0.0.1:19280/anthropic

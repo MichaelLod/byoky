@@ -18,6 +18,14 @@
       "types": "./dist/native-manifest.d.ts",
       "import": "./dist/native-manifest.js"
     },
+    "./loopback-page": {
+      "types": "./dist/loopback-page.d.ts",
+      "import": "./dist/loopback-page.js"
+    },
+    "./page-session": {
+      "types": "./dist/page-session.d.ts",
+      "import": "./dist/page-session.js"
+    },
     "./package.json": "./package.json"
   },
   "bin": {
@@ -29,7 +37,8 @@
   ],
   "scripts": {
     "build": "tsup",
-    "dev": "tsup --watch"
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [
     "byoky",

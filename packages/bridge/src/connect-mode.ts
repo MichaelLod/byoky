@@ -3,7 +3,9 @@
  * into starting the HTTP proxy on 127.0.0.1:<port>.
  *
  * Flow:
- *   1. CLI spins up an ephemeral HTTP server on 127.0.0.1.
+ *   1. CLI spins up an HTTP server on 127.0.0.1:19281. The port is fixed:
+ *      the page's origin is the app the wallet knows, so its spending cap
+ *      and routing group carry over from one run to the next.
  *   2. Serves /, /auth-sdk.js, POST /done.
  *   3. Opens the URL in the default browser.
  *   4. The page runs ByokySDK.connect() → user approves in the wallet popup.
@@ -13,7 +15,8 @@
  *      background script, which opens the native-messaging port and tells
  *      the bridge to `server.listen(port)`.
  *   6. Page POSTs /done — CLI resolves, polls /health with the bridge
- *      token, exits.
+ *      token, exits. Only the page itself can do that: /done wants JSON
+ *      from the page's own origin and a nonce that is only in the page.
  *
  * The loopback server only lives for this handshake. The bridge proxy on
  * :19280 is held alive by the extension's service worker afterwards.
@@ -26,10 +29,18 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { platform } from 'node:os';
 import { loadOrCreateToken } from './token.js';
+import { cleanPageMessage, createPageNonce, isFromPage, isPageHost, sameSecret } from './loopback-page.js';
 
 export interface ConnectOptions {
+  /** Port the bridge proxy is asked to listen on. */
   port: number;
   providers: string[];
+  /** Port the approval page is served on; see DEFAULT_HANDSHAKE_PORT. */
+  handshakePort?: number;
+  /** Opens the approval page. Defaults to the system browser. */
+  openBrowser?: (url: string) => void;
+  /** For tests. */
+  handshakeTimeoutMs?: number;
 }
 
 export interface ConnectResult {
@@ -37,35 +48,54 @@ export interface ConnectResult {
   port: number;
 }
 
+/**
+ * The approval page's port. The wallet keys spending caps and routing
+ * groups by the page's origin, so it must not change between runs.
+ */
+export const DEFAULT_HANDSHAKE_PORT = 19281;
+
 const HANDSHAKE_TIMEOUT_MS = 180_000;
 const HEALTH_POLL_TIMEOUT_MS = 15_000;
 const HEALTH_POLL_INTERVAL_MS = 250;
 
 export async function runConnect(opts: ConnectOptions): Promise<ConnectResult> {
-  const handshake = await runHandshake(opts);
+  await runHandshake(opts);
+  // The bridge was asked to listen on opts.port; whatever port the page
+  // might claim is not trusted.
   const providers = await pollHealth(opts.port);
-  return { providers, port: handshake.port };
+  return { providers, port: opts.port };
 }
 
-function runHandshake(opts: ConnectOptions): Promise<ConnectResult> {
+/** Serves the approval page; resolves once the page reports success. */
+export function runHandshake(opts: ConnectOptions): Promise<void> {
+  const handshakePort = opts.handshakePort ?? DEFAULT_HANDSHAKE_PORT;
+  const timeoutMs = opts.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS;
+  const openBrowser = opts.openBrowser ?? openInBrowser;
+  // Only the served page knows this, so only it can finish the handshake.
+  const nonce = createPageNonce();
+
   return new Promise((resolvePromise, rejectPromise) => {
     let resolved = false;
-    let finalize: ((res: ConnectResult) => void) | null = null;
+    let finalize: (() => void) | null = null;
     let fail: ((err: Error) => void) | null = null;
 
     const server: Server = createServer((req, res) => {
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS, GET');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
       res.setHeader('Cache-Control', 'no-store');
 
-      if (req.method === 'OPTIONS') {
-        res.writeHead(204);
+      // A page on another site that rebinds its hostname to 127.0.0.1
+      // would reach this server under its own Host name.
+      if (!isPageHost(req, handshakePort)) {
+        res.writeHead(403);
         res.end();
         return;
       }
 
       if (req.method === 'POST' && req.url === '/done') {
+        if (!isFromPage(req, handshakePort)) {
+          res.writeHead(403);
+          res.end();
+          return;
+        }
         const MAX_BODY = 64_000;
         let body = '';
         let oversized = false;
@@ -82,21 +112,22 @@ function runHandshake(opts: ConnectOptions): Promise<ConnectResult> {
             res.end();
             return;
           }
-          let data: { providers?: unknown; port?: unknown; error?: unknown } = {};
+          let data: { nonce?: unknown; error?: unknown } = {};
           try { data = JSON.parse(body || '{}'); } catch { /* ignore */ }
+          if (typeof data.nonce !== 'string' || !sameSecret(data.nonce, nonce)) {
+            res.writeHead(403);
+            res.end();
+            return;
+          }
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: true }));
           if (resolved) return;
           resolved = true;
           if (typeof data.error === 'string' && data.error) {
-            fail?.(new Error(data.error));
+            fail?.(new Error(cleanPageMessage(data.error) || 'The browser page reported an error'));
             return;
           }
-          const providers = Array.isArray(data.providers)
-            ? (data.providers as unknown[]).filter((v) => typeof v === 'string') as string[]
-            : [];
-          const port = typeof data.port === 'number' ? data.port : opts.port;
-          finalize?.({ providers, port });
+          finalize?.();
         });
         return;
       }
@@ -118,41 +149,46 @@ function runHandshake(opts: ConnectOptions): Promise<ConnectResult> {
 
       if (req.method === 'GET') {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(buildConnectPage(opts));
+        res.end(buildConnectPage(opts, nonce));
         return;
       }
 
-      res.writeHead(404);
+      res.writeHead(req.method === 'POST' ? 404 : 405, { Allow: 'GET, POST' });
       res.end();
     });
 
+    let timer: ReturnType<typeof setTimeout> | undefined;
     // close() waits for every open connection, and the browser keeps the
     // tab's sockets alive, so drop them or the CLI never gets past here.
-    finalize = (r) => {
-      server.close(() => resolvePromise(r));
+    finalize = () => {
+      clearTimeout(timer);
+      server.close(() => resolvePromise());
       server.closeAllConnections();
     };
     fail = (err) => {
+      clearTimeout(timer);
       server.close(() => rejectPromise(err));
       server.closeAllConnections();
     };
 
-    server.listen(0, '127.0.0.1', () => {
-      const addr = server.address();
-      if (typeof addr !== 'object' || !addr) {
-        fail?.(new Error('Failed to bind loopback server'));
-        return;
-      }
-      const url = `http://127.0.0.1:${addr.port}`;
-      process.stderr.write(`Open this URL to approve the Claude Code session in your Byoky wallet:\n  ${url}\n`);
-      openInBrowser(url);
+    server.once('error', (err: NodeJS.ErrnoException) => {
+      resolved = true;
+      clearTimeout(timer);
+      rejectPromise(err.code === 'EADDRINUSE'
+        ? new Error(`Port ${handshakePort} is already in use — another \`byoky-bridge connect\` may be running. Finish or close it and try again.`)
+        : err);
     });
 
-    setTimeout(() => {
-      if (resolved) return;
-      resolved = true;
-      fail?.(new Error(`Timed out after ${Math.round(HANDSHAKE_TIMEOUT_MS / 1000)}s — the browser tab never confirmed the session.`));
-    }, HANDSHAKE_TIMEOUT_MS);
+    server.listen(handshakePort, '127.0.0.1', () => {
+      const url = `http://127.0.0.1:${handshakePort}`;
+      process.stderr.write(`Open this URL to approve the Claude Code session in your Byoky wallet:\n  ${url}\n`);
+      openBrowser(url);
+      timer = setTimeout(() => {
+        if (resolved) return;
+        resolved = true;
+        fail?.(new Error(`Timed out after ${Math.round(timeoutMs / 1000)}s — the browser tab never confirmed the session.`));
+      }, timeoutMs);
+    });
   });
 }
 
@@ -210,11 +246,12 @@ function readAuthSdkBundle(): string {
   return authSdkCache;
 }
 
-function buildConnectPage(opts: ConnectOptions): string {
+function buildConnectPage(opts: ConnectOptions, nonce: string): string {
   const providersJson = JSON.stringify(
     opts.providers.map((id) => ({ id, required: true })),
   );
   const portJson = JSON.stringify(opts.port);
+  const nonceJson = JSON.stringify(nonce);
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -369,7 +406,7 @@ function buildConnectPage(opts: ConnectOptions): string {
           await fetch('/done', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
+            body: JSON.stringify(Object.assign({ nonce: ${nonceJson} }, body)),
           });
         } catch {}
       }
@@ -400,13 +437,17 @@ function buildConnectPage(opts: ConnectOptions): string {
         btn.textContent = 'Connecting…';
         setStatus('Opening wallet…');
         try {
-          if (!window.ByokySDK || !window.ByokySDK.Byoky) {
+          if (!window.ByokySDK || !window.ByokySDK.Byoky || !window.ByokySDK.connectCovering) {
             throw new Error('SDK failed to load');
           }
           const byoky = new window.ByokySDK.Byoky({ timeout: 120000 });
-          const session = await byoky.connect({
+          // An older wallet can hand back this page's session from an earlier
+          // run with other providers; connectCovering then asks it again.
+          const session = await window.ByokySDK.connectCovering(byoky, {
             providers: ${providersJson},
             modal: true,
+          }, {
+            onRetry: (missing) => setStatus('Your wallet’s earlier session for this page lacks ' + missing.join(', ') + '. Approve the new request in your wallet…'),
           });
           const providers = session.providers || {};
           const available = Object.entries(providers)
@@ -424,18 +465,21 @@ function buildConnectPage(opts: ConnectOptions): string {
           const port = bridgeResult.port || ${portJson};
           setStatus('Bridge active on port ' + port + '. Connected ' + available.length + ' provider(s): ' + available.join(', '), 'success');
           btn.style.display = 'none';
-          await reportDone({ providers: available, port: port });
+          await reportDone({});
           setTimeout(() => setStatus('Done — you can close this tab.', 'success'), 1200);
         } catch (err) {
           const msg = (err && err.message) ? err.message : String(err);
           if (msg === 'User cancelled') {
+            // The CLI is still waiting, so this tab can try again.
             setStatus('Cancelled. Click connect to try again.');
+            btn.disabled = false;
+            btn.textContent = 'Try again';
           } else {
-            setStatus('Error: ' + msg, 'error');
+            // The CLI stops on this error; a retry here would reach nobody.
             await reportDone({ error: msg });
+            setStatus('Error: ' + msg + ' — run byoky-bridge connect again in your terminal.', 'error');
+            btn.style.display = 'none';
           }
-          btn.disabled = false;
-          btn.textContent = 'Try again';
         }
       }
       btn.addEventListener('click', run);
