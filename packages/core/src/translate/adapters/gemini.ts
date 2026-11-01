@@ -317,7 +317,6 @@ function normalizeSnakeCase(req: GeminiRequest): void {
         file_data: 'fileData',
         function_call: 'functionCall',
         function_response: 'functionResponse',
-        thought_signature: 'thoughtSignature',
       });
       if (!isJsonObject(part)) continue;
       camelizeKeys(part.inlineData, { mime_type: 'mimeType' });
