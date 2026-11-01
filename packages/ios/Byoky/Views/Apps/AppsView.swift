@@ -502,7 +502,7 @@ private struct MoveToGroupSheet: View {
 /// Create a new routing group, or edit an existing one. The default group can
 /// be edited but not renamed or deleted. The model field is optional — leave
 /// empty to pass through whatever model the app requested; set it to override
-/// (e.g. drag a Claude app here and pin to gpt-4o for cross-family translation).
+/// (e.g. drag a Claude app here and pin to gpt-5.5 for cross-family translation).
 struct GroupEditorSheet: View {
     enum Mode {
         case create
@@ -614,7 +614,7 @@ struct GroupEditorSheet: View {
                 .retroRow()
 
                 Section {
-                    TextField("e.g. claude-sonnet-4-5", text: $model)
+                    TextField("e.g. claude-sonnet-5-5", text: $model)
                         .font(.mono(15))
                         .autocapitalization(.none)
                         .disableAutocorrection(true)

@@ -606,7 +606,7 @@ function GroupForm({
         <label>Default model (optional)</label>
         <input
           type="text"
-          placeholder="e.g. claude-sonnet-4-5"
+          placeholder="e.g. claude-sonnet-5-5"
           value={model}
           onChange={(e) => setModel(e.target.value)}
           maxLength={200}

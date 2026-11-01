@@ -604,10 +604,10 @@ final class TranslationEngine {
             let ctxJson = """
             {"srcFamily":"anthropic","dstFamily":"openai",\
             "srcProviderId":"anthropic","dstProviderId":"openai",\
-            "srcModel":"claude-sonnet-4-5","dstModel":"gpt-4o"}
+            "srcModel":"claude-sonnet-5-5","dstModel":"gpt-5.5"}
             """
             let reqBody = """
-            {"model":"claude-sonnet-4-5","max_tokens":100,\
+            {"model":"claude-sonnet-5-5","max_tokens":100,\
             "messages":[{"role":"user","content":"hi"}]}
             """
 
