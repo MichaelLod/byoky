@@ -82,6 +82,17 @@ jobs:
           fi
           exit $FAIL
 
+      # Trojan Source (CVE-2021-42574): a literal bidi embedding, override or
+      # isolate control makes code display in another order than it is read.
+      # packages/bridge/tests/bidi-controls.test.ts guards packages/ in the
+      # vitest run; this covers the whole repo. -I skips binary files.
+      - name: Check for literal bidi control characters
+        run: |
+          if LC_ALL=C.UTF-8 grep -rnIP '[\x{202A}-\x{202E}\x{2066}-\x{2069}]' . --exclude-dir=node_modules --exclude-dir=.git; then
+            echo "::error::Literal bidi control character found; write it as an escape sequence"
+            exit 1
+          fi
+
       - name: Verify security invariants
         run: |
           echo "Checking security invariants..."
