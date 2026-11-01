@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -26,6 +27,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -78,6 +80,7 @@ fun WalletScreen(
     var showAddSheet by remember { mutableStateOf(false) }
     var statsCredentialId by remember { mutableStateOf<String?>(null) }
     var renameTarget by remember { mutableStateOf<Credential?>(null) }
+    var endpointTarget by remember { mutableStateOf<Credential?>(null) }
     var removeTarget by remember { mutableStateOf<Credential?>(null) }
     val gaze = rememberRavenGaze()
     // Fixed for this visit to the tab, so the nod plays once and isn't cut short.
@@ -151,6 +154,7 @@ fun WalletScreen(
                         usage = usageByProvider[credential.providerId],
                         onOpenStats = { statsCredentialId = credential.id },
                         onRename = { renameTarget = credential },
+                        onEditEndpoint = { endpointTarget = credential },
                         onDelete = { removeTarget = credential },
                     )
                 }
@@ -168,6 +172,17 @@ fun WalletScreen(
                 onConfirm = { newLabel ->
                     wallet.updateCredentialLabel(target.id, newLabel)
                     renameTarget = null
+                },
+            )
+        }
+
+        endpointTarget?.let { target ->
+            EditEndpointDialog(
+                credential = target,
+                onDismiss = { endpointTarget = null },
+                onSave = { url ->
+                    wallet.updateCredentialEndpoint(target.id, url)
+                    endpointTarget = null
                 },
             )
         }
@@ -309,6 +324,64 @@ private fun RenameCredentialDialog(
     )
 }
 
+/**
+ * Sets the endpoint (Azure OpenAI) or server URL (Ollama, LM Studio) of a
+ * key that is already in the wallet, under the same rules as adding one.
+ */
+@Composable
+private fun EditEndpointDialog(
+    credential: Credential,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    val isAzure = credential.providerId == "azure_openai"
+    var draft by remember { mutableStateOf(credential.baseUrl.orEmpty()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val normalized = CredentialBaseUrl.normalize(credential.providerId, draft)
+
+    RetroDialog(
+        onDismissRequest = onDismiss,
+        title = if (isAzure) "Azure endpoint" else "Server URL",
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(credential.label, color = Bone, style = MonoStyle.copy(fontSize = 13.sp))
+                RetroTextField(
+                    value = draft,
+                    onValueChange = { draft = it; error = null },
+                    label = if (isAzure) "Endpoint URL" else "Server URL",
+                    placeholder = if (isAzure) "https://my-resource.openai.azure.com" else "http://localhost:11434",
+                    mono = true,
+                    isError = draft.isNotBlank() && normalized == null,
+                    supportingText = CredentialBaseUrl.requirementText(credential.providerId),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    if (isAzure) "This key is only ever sent to this endpoint." else "This key is only ever sent to this server.",
+                    fontSize = 13.sp,
+                )
+                error?.let { Text(it, color = Alarm, fontSize = 12.sp) }
+            }
+        },
+        confirmButton = {
+            DialogButton(
+                "Save",
+                onClick = {
+                    try {
+                        onSave(draft)
+                    } catch (e: IllegalArgumentException) {
+                        error = e.message
+                    }
+                },
+                enabled = normalized != null && normalized != credential.baseUrl,
+            )
+        },
+        dismissButton = {
+            DialogButton("Cancel", onClick = onDismiss, color = Fog)
+        },
+    )
+}
+
 @Composable
 private fun EmptyWallet(modifier: Modifier, onAdd: () -> Unit) {
     Column(
@@ -347,6 +420,7 @@ private fun CredentialCard(
     usage: CredentialUsageStats?,
     onOpenStats: () -> Unit,
     onRename: () -> Unit,
+    onEditEndpoint: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val provider = Provider.find(credential.providerId)
@@ -392,6 +466,9 @@ private fun CredentialCard(
                         maxLines = 1,
                     )
                 }
+                if (provider?.requiresCustomBaseUrl == true) {
+                    CredentialEndpoint(credential, onEdit = onEditEndpoint)
+                }
             }
 
             IconButton(onClick = onRename, modifier = Modifier.size(40.dp)) {
@@ -421,6 +498,41 @@ private fun CredentialCard(
             UsageStat(
                 value = formatUsageTokens(if (hasUsage) usage!!.outputTokens else 0),
                 label = "output",
+            )
+        }
+    }
+}
+
+/**
+ * Where a key of Azure OpenAI, Ollama or LM Studio is sent, tap to change it;
+ * or a warning when it has no usable one (such a key is never sent anywhere).
+ */
+@Composable
+private fun CredentialEndpoint(credential: Credential, onEdit: () -> Unit) {
+    val isAzure = credential.providerId == "azure_openai"
+    val endpoint = CredentialBaseUrl.normalize(credential.providerId, credential.baseUrl)
+    val action = if (endpoint == null) {
+        if (isAzure) "Add endpoint" else "Add server URL"
+    } else {
+        if (isAzure) "Edit endpoint" else "Edit server URL"
+    }
+    Row(
+        modifier = Modifier
+            .clickable(onClickLabel = action, onClick = onEdit)
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (endpoint == null) {
+            Icon(Icons.Default.Warning, contentDescription = null, tint = Amber, modifier = Modifier.size(14.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(action, color = Amber, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        } else {
+            Text(
+                endpoint,
+                style = MonoStyle.copy(fontSize = 12.sp),
+                color = Fog,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }
