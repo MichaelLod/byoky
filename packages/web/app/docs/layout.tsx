@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Developer Docs — Byoky',
+  title: 'Developer Docs',
   description: 'SDK reference and integration guides for building on Byoky. Users bring their own AI keys through a local wallet.',
   alternates: { canonical: '/docs' },
 };
