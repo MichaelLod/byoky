@@ -27,6 +27,7 @@ import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
@@ -38,10 +39,11 @@ import org.junit.runner.RunWith
 
 /**
  * What screen readers get from RetroTextField. An editable field keeps its
- * typed text as its text and merges its caption. A read-only one is the
- * anchor of an exposed dropdown, as the group editor's Provider and
- * Credential pickers are: a drop-down list whose description holds its
- * caption and its value, before and after the menu has been used.
+ * typed text as its text and merges its caption, and so does a read-only
+ * one. A picker is the anchor of an exposed dropdown, as the group editor's
+ * Provider and Credential pickers are: a drop-down list whose description
+ * holds its caption and its value (its placeholder when empty, never a
+ * secret), before and after the menu has been used.
  */
 @RunWith(AndroidJUnit4::class)
 class RetroTextFieldAccessibilityTest {
@@ -62,7 +64,7 @@ class RetroTextFieldAccessibilityTest {
                     RetroTextField(
                         value = provider,
                         onValueChange = {},
-                        readOnly = true,
+                        picker = true,
                         label = "Provider",
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
                         fieldModifier = Modifier.menuAnchor(),
@@ -141,8 +143,64 @@ class RetroTextFieldAccessibilityTest {
         assertTrue(picker.isFocused)
     }
 
+    @Test
+    fun readOnlyFieldThatIsNotAPickerStaysATextField() {
+        compose.setContent {
+            RetroTextField(value = "https://api.example.com", onValueChange = {}, label = "Endpoint", readOnly = true)
+        }
+        compose.onAllNodes(pickerMatcher).assertCountEquals(0)
+        val field = SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("https://api.example.com"))
+        compose.onNode(field, useUnmergedTree = true)
+            .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.ContentDescription))
+        compose.onNode(field).assert(hasContentDescription("Endpoint"))
+    }
+
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Test
+    fun secretPickerNeverExposesItsValue() {
+        compose.setContent {
+            ExposedDropdownMenuBox(expanded = false, onExpandedChange = {}) {
+                RetroTextField(
+                    value = SECRET,
+                    onValueChange = {},
+                    picker = true,
+                    secret = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    label = "Key",
+                    fieldModifier = Modifier.menuAnchor(),
+                )
+            }
+        }
+        compose.onNode(pickerMatcher).assert(hasContentDescription("Key"))
+        for (unmerged in listOf(false, true)) {
+            compose.onAllNodes(hasText(SECRET, substring = true), useUnmergedTree = unmerged).assertCountEquals(0)
+            compose.onAllNodes(hasContentDescription(SECRET, substring = true), useUnmergedTree = unmerged)
+                .assertCountEquals(0)
+        }
+        val nodes = accessibilityNodes(until = "Key", byDescription = true)
+        assertTrue(nodes.none { SECRET in it.text?.toString().orEmpty() || SECRET in it.contentDescription?.toString().orEmpty() })
+    }
+
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Test
+    fun emptyPickerReadsItsPlaceholder() {
+        compose.setContent {
+            ExposedDropdownMenuBox(expanded = false, onExpandedChange = {}) {
+                RetroTextField(
+                    value = "",
+                    onValueChange = {},
+                    picker = true,
+                    label = "Provider",
+                    placeholder = "Choose a provider",
+                    fieldModifier = Modifier.menuAnchor(),
+                )
+            }
+        }
+        compose.onNode(pickerMatcher).assert(hasContentDescription("Provider, Choose a provider"))
+    }
+
     /** The app window's accessibility nodes, as TalkBack and uiautomator see them. */
-    private fun accessibilityNodes(until: String): List<AccessibilityNodeInfo> {
+    private fun accessibilityNodes(until: String, byDescription: Boolean = false): List<AccessibilityNodeInfo> {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val automation = instrumentation.uiAutomation
         val packageName = instrumentation.targetContext.packageName
@@ -156,10 +214,19 @@ class RetroTextFieldAccessibilityTest {
                     for (i in 0 until node.childCount) node.getChild(i)?.let(::walk)
                 }
                 walk(root)
-                if (nodes.any { it.text?.toString() == until }) return nodes
+                val found = if (byDescription) {
+                    nodes.any { it.contentDescription?.toString() == until }
+                } else {
+                    nodes.any { it.text?.toString() == until }
+                }
+                if (found) return nodes
             }
             Thread.sleep(100)
         }
         throw AssertionError("\"$until\" never showed up in the accessibility tree")
+    }
+
+    private companion object {
+        const val SECRET = "sk-ant-api03-not-a-real-key"
     }
 }

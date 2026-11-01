@@ -862,7 +862,7 @@ private fun GroupEditorDialog(
                     RetroTextField(
                         value = providerName,
                         onValueChange = {},
-                        readOnly = true,
+                        picker = true,
                         label = "Provider",
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = providerExpanded) },
                         fieldModifier = Modifier.menuAnchor(),
@@ -897,7 +897,7 @@ private fun GroupEditorDialog(
                         RetroTextField(
                             value = pinnedLabel,
                             onValueChange = {},
-                            readOnly = true,
+                            picker = true,
                             label = "Credential",
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = credentialExpanded) },
                             fieldModifier = Modifier.menuAnchor(),

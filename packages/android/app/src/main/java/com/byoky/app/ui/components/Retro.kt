@@ -398,9 +398,10 @@ fun Modifier.bottomSeam(color: Color = Seam): Modifier =
  * Text input: void background and a 1px seam-strong border that turns violet
  * with a focus ring. The label sits above the field in mono capitals; tapping
  * it focuses the field. Secrets, keys and URLs pass [mono] for IBM Plex Mono.
- * [fieldModifier] goes on the field itself (an exposed dropdown's menuAnchor),
- * or for a [readOnly] field, which is such a dropdown, on caption and field
- * together: TalkBack reads its label and value and calls it a drop-down list.
+ * [fieldModifier] goes on the field itself, or for a [picker] (an exposed
+ * dropdown's anchor, which passes menuAnchor there) on caption and field
+ * together: TalkBack reads its label and value and calls it a drop-down
+ * list. A picker is read-only; [readOnly] alone leaves a text field.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -414,6 +415,7 @@ fun RetroTextField(
     mono: Boolean = false,
     enabled: Boolean = true,
     readOnly: Boolean = false,
+    picker: Boolean = false,
     isError: Boolean = false,
     singleLine: Boolean = true,
     supportingText: String? = null,
@@ -480,20 +482,29 @@ fun RetroTextField(
             Spacer(Modifier.height(6.dp))
         }
     }
-    // A read-only field is a picker: an exposed dropdown's anchor, which
-    // menuAnchor in [fieldModifier] gives the drop-down list role. Compose
-    // hands TalkBack a role (as android.widget.Spinner here) only for a node
-    // without children, and a text field has them: its caption, and the
-    // magnifier's node whenever it has focus, as it does once the menu has
-    // opened. With either, the picker read as an edit box. So a picker puts
+    // A picker is an exposed dropdown's anchor, which menuAnchor in
+    // [fieldModifier] gives the drop-down list role. Compose hands TalkBack
+    // a role (as android.widget.Spinner here) only for a node without
+    // children, and a text field has them: its caption, and the magnifier's
+    // node whenever it has focus, as it does once the menu has opened. With
+    // either, the picker read as an edit box. So a picker puts
     // [fieldModifier] on the whole column and replaces what's inside with
     // one description of caption and value. TalkBack reads a description
     // instead of the text of anything that isn't editable, and Compose drops
-    // a state description from a text field.
-    val pickerModifier = if (readOnly) {
+    // a state description from a text field. With no value it reads the
+    // placeholder, and a [secret] value is never put there: the field shows
+    // it only through [visualTransformation].
+    val spokenValue = when {
+        value.isEmpty() -> placeholder
+        secret -> null
+        else -> value
+    }
+    val pickerModifier = if (picker) {
         fieldModifier.clearAndSetSemantics {
-            contentDescription = listOfNotNull(label, value, supportingText).joinToString(", ")
-            text = AnnotatedString(value)
+            contentDescription = listOf(label, spokenValue, supportingText)
+                .filterNot { it.isNullOrEmpty() }
+                .joinToString(", ")
+            if (value.isNotEmpty() && !secret) text = AnnotatedString(value)
             // The field inside still takes focus, from a keyboard too.
             this.focused = focused
             requestFocus { focusRequester.requestFocus(); true }
@@ -504,15 +515,15 @@ fun RetroTextField(
     }
 
     Column(modifier.bringIntoViewRequester(bringIntoView).then(pickerModifier)) {
-        if (readOnly) caption()
+        if (picker) caption()
         BasicTextField(
             value = value,
             onValueChange = onValueChange,
-            modifier = (if (readOnly) Modifier else fieldModifier)
+            modifier = (if (picker) Modifier else fieldModifier)
                 .fillMaxWidth()
                 .focusRequester(focusRequester),
             enabled = enabled,
-            readOnly = readOnly,
+            readOnly = readOnly || picker,
             textStyle = textStyle.copy(color = if (enabled) Bone else Dim),
             // Secrets ask the keyboard for a password field: no suggestions,
             // no autocorrect, nothing learned. Otherwise the keyboard showed a
@@ -535,7 +546,7 @@ fun RetroTextField(
                 // was typed. A contentDescription on an editable field can be
                 // read instead of its text.
                 Column {
-                    if (!readOnly) caption()
+                    if (!picker) caption()
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
