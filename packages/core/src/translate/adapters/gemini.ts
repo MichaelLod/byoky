@@ -10,6 +10,7 @@ import type {
   IRStreamEvent,
   IRStopReason,
   IRImageSource,
+  IRDocumentSource,
   IRToolResultContent,
 } from '../ir.js';
 import { isIRError } from '../ir.js';
@@ -30,7 +31,10 @@ import { isIRError } from '../ir.js';
  *  - Function calls in responses are NOT deltaed in streaming: a single
  *    frame contains a complete `functionCall` with fully-formed args.
  *  - No `[DONE]` terminator — HTTP stream end is the signal.
- *  - tools + responseMimeType:'application/json' is a 400 on 2.5 series.
+ *  - tools + responseMimeType:'application/json' is a 400 on the 2.5 series;
+ *    the translation refuses the combination for every model.
+ *  - Gemini 3 validates thought signatures on the function calls of the
+ *    current turn (see THOUGHT_SIGNATURE_SKIP).
  *  - The `STOP` finish reason is used for both normal end and tool-calling
  *    turns; IR distinguishes them by whether the content has tool_use blocks.
  */
@@ -88,14 +92,17 @@ type GeminiPart =
   | { text: string }
   | { inlineData: { mimeType: string; data: string } }
   | { fileData: { mimeType?: string; fileUri: string } }
-  | { functionCall: { id?: string; name: string; args?: unknown } }
+  | { functionCall: { id?: string; name: string; args?: unknown }; thoughtSignature?: string }
   | { functionResponse: { id?: string; name: string; response: unknown } };
 
 interface GeminiToolGroup {
   functionDeclarations: Array<{
     name: string;
     description?: string;
+    /** Gemini's restricted OpenAPI Schema; rejects unknown keywords. */
     parameters?: unknown;
+    /** Standard JSON Schema; mutually exclusive with `parameters`. */
+    parametersJsonSchema?: unknown;
   }>;
 }
 
@@ -107,13 +114,16 @@ interface GeminiGenerationConfig {
   stopSequences?: string[];
   candidateCount?: number;
   responseMimeType?: string;
+  /** Gemini's restricted OpenAPI Schema; rejects unknown keywords. */
   responseSchema?: unknown;
+  /** Standard JSON Schema; the alternative to `responseSchema`. */
+  responseJsonSchema?: unknown;
   thinkingConfig?: { thinkingBudget?: number; includeThoughts?: boolean };
 }
 
 interface GeminiResponse {
   candidates?: GeminiCandidate[];
-  promptFeedback?: { blockReason?: string };
+  promptFeedback?: { blockReason?: string; blockReasonMessage?: string };
   usageMetadata?: {
     promptTokenCount?: number;
     candidatesTokenCount?: number;
@@ -157,6 +167,7 @@ function parseRequest(body: string): IRRequest {
       `Gemini request body is not valid JSON: ${(err as Error).message}`,
     );
   }
+  normalizeSnakeCase(parsed);
 
   const ir: IRRequest = {
     system: parseSystemInstruction(parsed.systemInstruction),
@@ -164,10 +175,11 @@ function parseRequest(body: string): IRRequest {
   };
 
   if (Array.isArray(parsed.contents)) {
-    for (const c of parsed.contents) {
-      const msg = parseGeminiContent(c);
+    const pairing: ToolCallPairing = { calls: [] };
+    parsed.contents.forEach((c, i) => {
+      const msg = parseGeminiContent(c, i, pairing);
       if (msg) ir.messages.push(msg);
-    }
+    });
   }
 
   const gc = parsed.generationConfig;
@@ -180,14 +192,18 @@ function parseRequest(body: string): IRRequest {
       ir.stopSequences = gc.stopSequences.slice();
     }
     if (gc.responseMimeType === 'application/json') {
-      if (gc.responseSchema) {
-        ir.responseFormat = { type: 'json_schema', schema: gc.responseSchema };
+      const schema = gc.responseJsonSchema ?? gc.responseSchema;
+      if (schema) {
+        ir.responseFormat = { type: 'json_schema', schema };
       } else {
         ir.responseFormat = { type: 'json' };
       }
     }
-    if (gc.thinkingConfig && typeof gc.thinkingConfig.thinkingBudget === 'number') {
-      ir.thinking = { enabled: true, budgetTokens: gc.thinkingConfig.thinkingBudget };
+    // thinkingBudget: 0 turns thinking off, -1 asks for dynamic thinking.
+    const budget = gc.thinkingConfig?.thinkingBudget;
+    if (typeof budget === 'number') {
+      if (budget > 0) ir.thinking = { enabled: true, budgetTokens: budget };
+      else if (budget === -1) ir.thinking = { enabled: true };
     }
   }
 
@@ -199,7 +215,7 @@ function parseRequest(body: string): IRRequest {
         flat.push({
           name: fn.name,
           ...(fn.description ? { description: fn.description } : {}),
-          parameters: fn.parameters ?? { type: 'object', properties: {} },
+          parameters: fn.parametersJsonSchema ?? fn.parameters ?? { type: 'object', properties: {} },
         });
       }
     }
@@ -231,6 +247,84 @@ function parseRequest(body: string): IRRequest {
   return ir;
 }
 
+type JsonObject = Record<string, unknown>;
+
+function isJsonObject(v: unknown): v is JsonObject {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+/** Copy each snake_case key present to its camelCase name; camelCase wins. */
+function camelizeKeys(obj: unknown, keys: Record<string, string>): void {
+  if (!isJsonObject(obj)) return;
+  for (const [snake, camel] of Object.entries(keys)) {
+    if (snake in obj && !(camel in obj)) obj[camel] = obj[snake];
+  }
+}
+
+/**
+ * The Gemini REST API takes proto field names in snake_case as well as
+ * camelCase, and Google's curl examples use snake_case (system_instruction,
+ * inline_data/mime_type, generation_config, function_declarations, ...).
+ * Only the known request fields are renamed, level by level, never the
+ * keys inside a schema, args object or function response.
+ */
+function normalizeSnakeCase(req: GeminiRequest): void {
+  const r = req as unknown as JsonObject;
+  if (!isJsonObject(r)) return;
+  camelizeKeys(r, {
+    system_instruction: 'systemInstruction',
+    generation_config: 'generationConfig',
+    tool_config: 'toolConfig',
+    safety_settings: 'safetySettings',
+  });
+  camelizeKeys(r.generationConfig, {
+    max_output_tokens: 'maxOutputTokens',
+    top_p: 'topP',
+    top_k: 'topK',
+    stop_sequences: 'stopSequences',
+    candidate_count: 'candidateCount',
+    response_mime_type: 'responseMimeType',
+    response_schema: 'responseSchema',
+    response_json_schema: 'responseJsonSchema',
+    thinking_config: 'thinkingConfig',
+  });
+  if (isJsonObject(r.generationConfig)) {
+    camelizeKeys(r.generationConfig.thinkingConfig, {
+      thinking_budget: 'thinkingBudget',
+      include_thoughts: 'includeThoughts',
+    });
+  }
+  camelizeKeys(r.toolConfig, { function_calling_config: 'functionCallingConfig' });
+  if (isJsonObject(r.toolConfig)) {
+    camelizeKeys(r.toolConfig.functionCallingConfig, { allowed_function_names: 'allowedFunctionNames' });
+  }
+  if (Array.isArray(r.tools)) {
+    for (const group of r.tools) {
+      camelizeKeys(group, { function_declarations: 'functionDeclarations' });
+      if (isJsonObject(group) && Array.isArray(group.functionDeclarations)) {
+        for (const fn of group.functionDeclarations) {
+          camelizeKeys(fn, { parameters_json_schema: 'parametersJsonSchema' });
+        }
+      }
+    }
+  }
+  const withParts = [...(Array.isArray(r.contents) ? r.contents : []), r.systemInstruction];
+  for (const content of withParts) {
+    if (!isJsonObject(content) || !Array.isArray(content.parts)) continue;
+    for (const part of content.parts) {
+      camelizeKeys(part, {
+        inline_data: 'inlineData',
+        file_data: 'fileData',
+        function_call: 'functionCall',
+        function_response: 'functionResponse',
+      });
+      if (!isJsonObject(part)) continue;
+      camelizeKeys(part.inlineData, { mime_type: 'mimeType' });
+      camelizeKeys(part.fileData, { mime_type: 'mimeType', file_uri: 'fileUri' });
+    }
+  }
+}
+
 function parseSystemInstruction(si: GeminiRequest['systemInstruction']): IRRequest['system'] {
   if (!si || !Array.isArray(si.parts)) return [];
   const out: IRRequest['system'] = [];
@@ -242,31 +336,76 @@ function parseSystemInstruction(si: GeminiRequest['systemInstruction']): IRReque
   return out;
 }
 
-function parseGeminiContent(c: GeminiContent): IRMessage | null {
+/**
+ * Function calls of the latest model turn, for pairing the next turn's
+ * functionResponse parts with them. Gemini apps build functionResponse from
+ * name + response, usually without the call's id, while the other families
+ * pair a tool result with its call by id only.
+ */
+interface ToolCallPairing {
+  calls: Array<{ id: string; name: string; used: boolean }>;
+}
+
+/**
+ * The tool_use id a functionResponse answers: the call with the same id,
+ * else the first unanswered call with the same name, else the next
+ * unanswered call; the response's own id or name only as a last resort.
+ */
+function pairToolResultId(
+  fr: { id?: string; name: string },
+  pairing: ToolCallPairing,
+): string {
+  const pending = pairing.calls.filter((c) => !c.used);
+  const match =
+    (fr.id ? pending.find((c) => c.id === fr.id) : undefined) ??
+    pending.find((c) => c.name === fr.name) ??
+    pending[0];
+  if (!match) return fr.id ?? fr.name;
+  match.used = true;
+  return match.id;
+}
+
+function parseGeminiContent(
+  c: GeminiContent,
+  contentIndex: number,
+  pairing: ToolCallPairing,
+): IRMessage | null {
   if (!c || !Array.isArray(c.parts)) return null;
   const role: 'user' | 'assistant' = c.role === 'model' ? 'assistant' : 'user';
   const blocks: IRContentBlock[] = [];
+  if (role === 'assistant') pairing.calls = [];
 
-  for (const part of c.parts) {
+  for (const [partIndex, part] of c.parts.entries()) {
     if (!part || typeof part !== 'object') continue;
     if ('text' in part && typeof part.text === 'string') {
       blocks.push({ type: 'text', text: part.text });
     } else if ('inlineData' in part && part.inlineData) {
-      blocks.push({
-        type: 'image',
-        source: {
-          kind: 'base64',
-          mediaType: part.inlineData.mimeType,
-          data: part.inlineData.data,
-        },
-      });
+      const { mimeType, data } = part.inlineData;
+      // Images stay images; anything else (PDF, text, audio, ...) is a
+      // document, which destinations take or refuse explicitly.
+      blocks.push(
+        isNonImageType(mimeType)
+          ? { type: 'document', source: { kind: 'base64', mediaType: mimeType, data } }
+          : { type: 'image', source: { kind: 'base64', mediaType: mimeType, data } },
+      );
     } else if ('fileData' in part && part.fileData) {
-      blocks.push({ type: 'image', source: { kind: 'url', url: part.fileData.fileUri } });
+      const { mimeType, fileUri } = part.fileData;
+      blocks.push(
+        isNonImageType(mimeType)
+          ? { type: 'document', source: { kind: 'url', url: fileUri, ...(mimeType ? { mediaType: mimeType } : {}) } }
+          : { type: 'image', source: { kind: 'url', url: fileUri } },
+      );
     } else if ('functionCall' in part && part.functionCall) {
       const fc = part.functionCall;
+      // An id-less call gets a deterministic one (the same history gives the
+      // same ids on every turn). Never the name: two parallel calls to one
+      // function would collide, and names may hold '.' or ':', which tool
+      // ids elsewhere may not.
+      const id = fc.id ?? `fc_${contentIndex}_${partIndex}`;
+      if (role === 'assistant') pairing.calls.push({ id, name: fc.name, used: false });
       blocks.push({
         type: 'tool_use',
-        id: fc.id ?? fc.name,
+        id,
         name: fc.name,
         input: fc.args ?? {},
       });
@@ -274,7 +413,7 @@ function parseGeminiContent(c: GeminiContent): IRMessage | null {
       const fr = part.functionResponse;
       blocks.push({
         type: 'tool_result',
-        toolUseId: fr.id ?? fr.name,
+        toolUseId: pairToolResultId(fr, pairing),
         content: { kind: 'text', text: JSON.stringify(fr.response ?? {}) },
       });
     }
@@ -290,7 +429,7 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
   if (ir.tools && ir.tools.length > 0 && ir.responseFormat) {
     throw new TranslationError(
       'UNSUPPORTED_FEATURE',
-      'Gemini does not support combining tools with JSON response format on the 2.5 series.',
+      'Combining tools with JSON response format is not supported when translating to Gemini.',
     );
   }
 
@@ -314,7 +453,7 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
 
   const contents: GeminiContent[] = [];
   for (const msg of ir.messages) {
-    const c = serializeMessageToGemini(msg, toolUseNames);
+    const c = serializeMessageToGemini(msg, toolUseNames, signsFunctionCalls(ctx.dstModel));
     if (c) contents.push(c);
   }
 
@@ -338,7 +477,10 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
     gc.responseMimeType = 'application/json';
   } else if (ir.responseFormat?.type === 'json_schema') {
     gc.responseMimeType = 'application/json';
-    gc.responseSchema = ir.responseFormat.schema;
+    // The other families speak JSON Schema ($schema, additionalProperties,
+    // exclusiveMinimum, ...). responseSchema is Gemini's restricted OpenAPI
+    // subset and rejects those keywords; responseJsonSchema takes them.
+    gc.responseJsonSchema = toGeminiJsonSchema(ir.responseFormat.schema);
   }
   if (ir.thinking?.enabled) {
     gc.thinkingConfig = {
@@ -352,10 +494,13 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
   if (ir.tools && ir.tools.length > 0) {
     out.tools = [
       {
+        // parametersJsonSchema, not parameters: see responseJsonSchema above.
         functionDeclarations: ir.tools.map((t) => ({
           name: t.name,
           ...(t.description ? { description: t.description } : {}),
-          parameters: t.parameters ?? { type: 'object', properties: {} },
+          ...(isEmptyObjectSchema(t.parameters)
+            ? {}
+            : { parametersJsonSchema: toGeminiJsonSchema(t.parameters) }),
         })),
       },
     ];
@@ -392,14 +537,75 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
   return JSON.stringify(out);
 }
 
+/** Drop the top-level `$schema` dialect marker, which Gemini doesn't need. */
+function toGeminiJsonSchema(schema: unknown): unknown {
+  if (schema === null || typeof schema !== 'object' || Array.isArray(schema)) return schema;
+  const rest: Record<string, unknown> = { ...(schema as Record<string, unknown>) };
+  delete rest.$schema;
+  return rest;
+}
+
+/**
+ * True for a missing schema or an object schema that declares no
+ * parameters. Gemini wants the parameters field left unset for a function
+ * that takes none.
+ */
+function isEmptyObjectSchema(schema: unknown): boolean {
+  if (schema == null) return true;
+  if (typeof schema !== 'object' || Array.isArray(schema)) return false;
+  for (const [key, value] of Object.entries(schema as Record<string, unknown>)) {
+    if (key === '$schema' || key === 'additionalProperties' || key === 'description') continue;
+    if (key === 'type' && value === 'object') continue;
+    if (key === 'properties' && isEmptyRecord(value)) continue;
+    if (key === 'required' && Array.isArray(value) && value.length === 0) continue;
+    return false;
+  }
+  return true;
+}
+
+function isEmptyRecord(value: unknown): boolean {
+  return value !== null && typeof value === 'object' && Object.keys(value).length === 0;
+}
+
+/**
+ * Gemini 3 rejects (400) a request whose current turn has a model function
+ * call without the thought signature Gemini attached to it. Calls that
+ * came from another family have no signature; Google documents this value
+ * for function calls the API did not generate.
+ */
+const THOUGHT_SIGNATURE_SKIP = 'skip_thought_signature_validator';
+
+/** Gemini 1.x and 2.x don't validate thought signatures; later models do. */
+function signsFunctionCalls(model: string): boolean {
+  return !/(?:^|\/)gemini-[12](?:[.-]|$)/i.test(model);
+}
+
 function serializeMessageToGemini(
   msg: IRMessage,
   toolUseNames: Map<string, string>,
+  signFunctionCalls: boolean,
 ): GeminiContent | null {
   const parts: GeminiPart[] = [];
+  let signed = false;
   for (const block of msg.content) {
     const wire = serializeBlockToGemini(block, toolUseNames);
-    if (wire) parts.push(wire);
+    if (!wire) continue;
+    // The signature goes on the first function call of each model step.
+    if (signFunctionCalls && msg.role === 'assistant' && !signed && 'functionCall' in wire) {
+      wire.thoughtSignature = THOUGHT_SIGNATURE_SKIP;
+      signed = true;
+    }
+    parts.push(wire);
+    // functionResponse.response holds JSON only; images and documents a
+    // tool returned travel as parts next to it.
+    if (block.type === 'tool_result' && block.content.kind === 'blocks') {
+      for (const inner of block.content.blocks) {
+        if (inner.type === 'image') parts.push(irImageToGeminiPart(inner.source));
+        else if (inner.type === 'document' && inner.source.kind !== 'text') {
+          parts.push(irDocumentToGeminiPart(inner.source));
+        }
+      }
+    }
   }
   if (parts.length === 0) return null;
   return {
@@ -417,6 +623,8 @@ function serializeBlockToGemini(
       return { text: block.text };
     case 'image':
       return irImageToGeminiPart(block.source);
+    case 'document':
+      return irDocumentToGeminiPart(block.source);
     case 'tool_use':
       return {
         functionCall: {
@@ -448,29 +656,49 @@ function irImageToGeminiPart(source: IRImageSource): GeminiPart {
   return { fileData: { fileUri: source.url } };
 }
 
-/**
- * Gemini's functionResponse.response is expected to be an object. If the IR
- * tool result is text, wrap it as {result: text} unless it already parses as
- * JSON (in which case emit the parsed object so downstream code can inspect it).
- */
-function parseToolResultForGemini(content: IRToolResultContent): unknown {
-  if (content.kind === 'text') {
-    try {
-      return JSON.parse(content.text);
-    } catch {
-      return { result: content.text };
-    }
+/** Gemini reads PDFs and other documents inline or by URI. */
+function irDocumentToGeminiPart(source: IRDocumentSource): GeminiPart {
+  if (source.kind === 'base64') {
+    return { inlineData: { mimeType: source.mediaType, data: source.data } };
   }
-  // Blocks → flatten text blocks into a string and wrap.
+  if (source.kind === 'url') {
+    return { fileData: { ...(source.mediaType ? { mimeType: source.mediaType } : {}), fileUri: source.url } };
+  }
+  return { text: source.text };
+}
+
+function isNonImageType(mimeType: string | undefined): boolean {
+  return typeof mimeType === 'string' && mimeType.length > 0 && !mimeType.startsWith('image/');
+}
+
+/**
+ * Gemini's functionResponse.response is a protobuf Struct, so it must be a
+ * JSON object. Text that parses to an object is passed through as is; any
+ * other parsed value (array, number, boolean, null, string) and text that
+ * isn't JSON is wrapped as {result: value}.
+ */
+function parseToolResultForGemini(content: IRToolResultContent): Record<string, unknown> {
+  if (content.kind === 'text') return toStruct(content.text);
+  // Blocks → flatten the text (and plain-text documents) into a string and
+  // wrap; images and binary documents go next to the functionResponse.
   const text = content.blocks
-    .map((b) => (b.type === 'text' ? b.text : ''))
+    .map((b) => (b.type === 'text' ? b.text : b.type === 'document' && b.source.kind === 'text' ? b.source.text : ''))
     .filter((s) => s.length > 0)
     .join('\n');
+  return toStruct(text);
+}
+
+function toStruct(text: string): Record<string, unknown> {
+  let parsed: unknown;
   try {
-    return JSON.parse(text);
+    parsed = JSON.parse(text);
   } catch {
     return { result: text };
   }
+  if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    return parsed as Record<string, unknown>;
+  }
+  return { result: parsed };
 }
 
 // ─── parseResponse ────────────────────────────────────────────────────────
@@ -499,6 +727,10 @@ function parseResponse(body: string): IRResponseOrError {
   const candidate = parsed.candidates?.[0];
   const blocks: IRResponseBlock[] = [];
   let hasToolUse = false;
+  let toolCallIndex = 0;
+  // A blocked prompt comes back with no candidate, only promptFeedback.
+  const blocked = !candidate ? promptBlockedText(parsed.promptFeedback) : null;
+  if (blocked) blocks.push({ type: 'text', text: blocked });
 
   if (candidate?.content?.parts) {
     for (const part of candidate.content.parts) {
@@ -509,7 +741,7 @@ function parseResponse(body: string): IRResponseOrError {
         hasToolUse = true;
         blocks.push({
           type: 'tool_use',
-          id: part.functionCall.id ?? part.functionCall.name,
+          id: part.functionCall.id ?? upstreamCallId(parsed.responseId, toolCallIndex++),
           name: part.functionCall.name,
           input: part.functionCall.args ?? {},
         });
@@ -525,13 +757,33 @@ function parseResponse(body: string): IRResponseOrError {
     id: parsed.responseId,
     model: parsed.modelVersion,
     content: blocks,
-    stopReason: mapGeminiFinishToIR(candidate?.finishReason, hasToolUse),
+    stopReason: blocked ? 'refusal' : mapGeminiFinishToIR(candidate?.finishReason, hasToolUse),
     stopSequence: null,
     usage: {
       inputTokens,
       outputTokens: candidateTokens + thoughtsTokens,
     },
   };
+}
+
+function promptBlockedText(feedback: GeminiResponse['promptFeedback']): string | null {
+  if (!feedback?.blockReason) return null;
+  return feedback.blockReasonMessage || `Prompt blocked: ${feedback.blockReason}`;
+}
+
+let upstreamCallCounter = 0;
+
+/**
+ * Id for a function call Gemini returned without one. The app keys its tool
+ * results by this id, so it must be unique across the conversation: the
+ * response id plus the call's index, or a time-and-counter id when there is
+ * no response id. Fits ^[A-Za-z0-9_-]{1,40}$ (OpenAI caps call ids at 40).
+ */
+function upstreamCallId(responseId: string | undefined, index: number): string {
+  const suffix = `_${index}`;
+  const base = (responseId ?? '').replace(/[^A-Za-z0-9_-]/g, '');
+  if (base) return `call_${base.slice(0, 40 - 5 - suffix.length)}${suffix}`;
+  return `call_${Date.now().toString(36)}_${(upstreamCallCounter++).toString(36)}${suffix}`;
 }
 
 // ─── serializeResponse ───────────────────────────────────────────────────
@@ -656,6 +908,7 @@ function createStreamParser(): IRStreamParser {
     messageId: '',
     model: undefined as string | undefined,
     hasToolUse: false,
+    toolCallCount: 0,
   };
 
   return {
@@ -708,6 +961,7 @@ type GeminiParseState = {
   messageId: string;
   model: string | undefined;
   hasToolUse: boolean;
+  toolCallCount: number;
 };
 
 function processGeminiFrame(
@@ -759,7 +1013,19 @@ function processGeminiFrame(
   }
 
   const candidate = data.candidates?.[0];
-  if (!candidate) return;
+  if (!candidate) {
+    const blocked = promptBlockedText(data.promptFeedback);
+    if (blocked) {
+      if (!state.textBlockOpen) {
+        state.textBlockIndex = state.nextBlockIndex++;
+        state.textBlockOpen = true;
+        events.push({ type: 'content_block_start', index: state.textBlockIndex, block: { type: 'text' } });
+      }
+      events.push({ type: 'text_delta', index: state.textBlockIndex!, text: blocked });
+      state.pendingFinish = 'refusal';
+    }
+    return;
+  }
 
   if (Array.isArray(candidate.content?.parts)) {
     for (const part of candidate.content.parts) {
@@ -789,7 +1055,11 @@ function processGeminiFrame(
         events.push({
           type: 'content_block_start',
           index: blockIdx,
-          block: { type: 'tool_use', id: fc.id ?? fc.name, name: fc.name },
+          block: {
+            type: 'tool_use',
+            id: fc.id ?? upstreamCallId(state.messageId || data.responseId, state.toolCallCount++),
+            name: fc.name,
+          },
         });
         events.push({
           type: 'tool_input_delta',
@@ -847,7 +1117,9 @@ function createStreamSerializer(ctx: TranslationContext): IRStreamSerializer {
         switch (event.type) {
           case 'message_start':
             if (event.id) state.responseId = event.id;
-            if (event.model) state.model = event.model;
+            // Echo the app's own model, as serializeResponse does; the
+            // upstream model only fills in when the app's is unknown.
+            if (event.model && ctx.srcModel == null) state.model = event.model;
             if (typeof event.usage.inputTokens === 'number') state.inputTokens = event.usage.inputTokens;
             if (typeof event.usage.outputTokens === 'number') state.outputTokens = event.usage.outputTokens;
             break;

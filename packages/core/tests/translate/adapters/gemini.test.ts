@@ -324,3 +324,393 @@ describe('geminiAdapter stream parsing', () => {
     }
   });
 });
+
+describe('geminiAdapter.serializeRequest — functionResponse.response is always an object', () => {
+  function responseFor(content: IRRequest['messages'][number]['content'][number]): unknown {
+    const ir: IRRequest = {
+      system: [],
+      messages: [
+        { role: 'assistant', content: [{ type: 'tool_use', id: 'fc1', name: 'lookup', input: {} }] },
+        { role: 'user', content: [content] },
+      ],
+    };
+    const out = JSON.parse(geminiAdapter.serializeRequest(ctx(), ir)) as {
+      contents: Array<{ parts: Array<{ functionResponse?: { response?: unknown } }> }>;
+    };
+    return out.contents[1].parts[0].functionResponse?.response;
+  }
+  const textResult = (text: string) =>
+    ({ type: 'tool_result', toolUseId: 'fc1', content: { kind: 'text', text } }) as const;
+
+  it.each([
+    ['[1,2,3]', { result: [1, 2, 3] }],
+    ['42', { result: 42 }],
+    ['true', { result: true }],
+    ['null', { result: null }],
+    ['"done"', { result: 'done' }],
+    ['plain text', { result: 'plain text' }],
+  ])('wraps %s', (text, expected) => {
+    expect(responseFor(textResult(text))).toEqual(expected);
+  });
+
+  it('passes a JSON object through unwrapped', () => {
+    expect(responseFor(textResult('{"temp":18}'))).toEqual({ temp: 18 });
+  });
+
+  it('wraps non-object JSON in the blocks form too', () => {
+    expect(
+      responseFor({
+        type: 'tool_result',
+        toolUseId: 'fc1',
+        content: { kind: 'blocks', blocks: [{ type: 'text', text: '[1,2]' }] },
+      }),
+    ).toEqual({ result: [1, 2] });
+  });
+});
+
+describe('geminiAdapter — JSON Schema fields', () => {
+  const claudeCodeSchema = {
+    $schema: 'http://json-schema.org/draft-07/schema#',
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      file_path: { type: 'string' },
+      limit: { type: 'number', exclusiveMinimum: 0 },
+    },
+    required: ['file_path'],
+  };
+
+  it('sends tool schemas as parametersJsonSchema, without the $schema marker', () => {
+    const ir: IRRequest = {
+      system: [],
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'x' }] }],
+      tools: [{ name: 'Read', parameters: claudeCodeSchema }],
+    };
+    const out = JSON.parse(geminiAdapter.serializeRequest(ctx(), ir)) as {
+      tools: Array<{ functionDeclarations: Array<Record<string, unknown>> }>;
+    };
+    const fn = out.tools[0].functionDeclarations[0];
+    expect(fn).not.toHaveProperty('parameters');
+    const { $schema: _omitted, ...expected } = claudeCodeSchema;
+    void _omitted;
+    expect(fn.parametersJsonSchema).toEqual(expected);
+  });
+
+  it('leaves the parameters unset for a tool that takes none', () => {
+    const ir: IRRequest = {
+      system: [],
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'x' }] }],
+      tools: [{ name: 'now', parameters: { type: 'object', properties: {} } }],
+    };
+    const out = JSON.parse(geminiAdapter.serializeRequest(ctx(), ir)) as {
+      tools: Array<{ functionDeclarations: Array<Record<string, unknown>> }>;
+    };
+    expect(out.tools[0].functionDeclarations[0]).toEqual({ name: 'now' });
+  });
+
+  it('sends a json_schema response format as responseJsonSchema', () => {
+    const schema = {
+      type: 'object',
+      additionalProperties: false,
+      properties: { answer: { type: 'string' } },
+      required: ['answer'],
+    };
+    const ir: IRRequest = {
+      system: [],
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'x' }] }],
+      responseFormat: { type: 'json_schema', schema },
+    };
+    const out = JSON.parse(geminiAdapter.serializeRequest(ctx(), ir)) as {
+      generationConfig: Record<string, unknown>;
+    };
+    expect(out.generationConfig.responseMimeType).toBe('application/json');
+    expect(out.generationConfig).not.toHaveProperty('responseSchema');
+    expect(out.generationConfig.responseJsonSchema).toEqual(schema);
+  });
+
+  it('parses parametersJsonSchema and responseJsonSchema back into the IR', () => {
+    const ir = geminiAdapter.parseRequest(
+      JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: 'x' }] }],
+        tools: [{ functionDeclarations: [{ name: 'Read', parametersJsonSchema: claudeCodeSchema }] }],
+        generationConfig: { responseMimeType: 'application/json', responseJsonSchema: { type: 'object' } },
+      }),
+    );
+    expect(ir.tools).toEqual([{ name: 'Read', parameters: claudeCodeSchema }]);
+    expect(ir.responseFormat).toEqual({ type: 'json_schema', schema: { type: 'object' } });
+  });
+
+  it('still parses the OpenAPI parameters and responseSchema fields', () => {
+    const ir = geminiAdapter.parseRequest(
+      JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: 'x' }] }],
+        tools: [{ functionDeclarations: [{ name: 'f', parameters: { type: 'OBJECT' } }] }],
+        generationConfig: { responseMimeType: 'application/json', responseSchema: { type: 'STRING' } },
+      }),
+    );
+    expect(ir.tools?.[0].parameters).toEqual({ type: 'OBJECT' });
+    expect(ir.responseFormat).toEqual({ type: 'json_schema', schema: { type: 'STRING' } });
+  });
+});
+
+describe('geminiAdapter.parseRequest — thinkingBudget', () => {
+  const parse = (thinkingBudget: number) =>
+    geminiAdapter.parseRequest(
+      JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: 'x' }] }],
+        generationConfig: { thinkingConfig: { thinkingBudget } },
+      }),
+    );
+
+  it('0 turns thinking off', () => {
+    expect(parse(0).thinking).toBeUndefined();
+  });
+
+  it('-1 asks for thinking without a budget', () => {
+    expect(parse(-1).thinking).toEqual({ enabled: true });
+  });
+
+  it('a positive budget is kept', () => {
+    expect(parse(4096).thinking).toEqual({ enabled: true, budgetTokens: 4096 });
+  });
+});
+
+describe('geminiAdapter.parseRequest — snake_case bodies (Google REST docs style)', () => {
+  const camel = {
+    systemInstruction: { parts: [{ text: 'You are a cat.' }] },
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          { text: 'What is in this picture?' },
+          { inlineData: { mimeType: 'image/png', data: 'AAAA' } },
+          { fileData: { mimeType: 'image/jpeg', fileUri: 'https://example.com/cat.jpg' } },
+        ],
+      },
+      { role: 'model', parts: [{ functionCall: { name: 'get_weather', args: { city_name: 'Paris' } } }] },
+      { role: 'user', parts: [{ functionResponse: { name: 'get_weather', response: { temp_c: 21 } } }] },
+    ],
+    generationConfig: {
+      maxOutputTokens: 256,
+      temperature: 0.2,
+      topP: 0.9,
+      topK: 20,
+      stopSequences: ['END'],
+      thinkingConfig: { thinkingBudget: 2048 },
+    },
+    tools: [
+      {
+        functionDeclarations: [
+          {
+            name: 'get_weather',
+            parameters: { type: 'object', properties: { city_name: { type: 'string' } } },
+          },
+        ],
+      },
+    ],
+    toolConfig: { functionCallingConfig: { mode: 'ANY', allowedFunctionNames: ['get_weather'] } },
+  };
+  const snake = {
+    system_instruction: { parts: [{ text: 'You are a cat.' }] },
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          { text: 'What is in this picture?' },
+          { inline_data: { mime_type: 'image/png', data: 'AAAA' } },
+          { file_data: { mime_type: 'image/jpeg', file_uri: 'https://example.com/cat.jpg' } },
+        ],
+      },
+      { role: 'model', parts: [{ function_call: { name: 'get_weather', args: { city_name: 'Paris' } } }] },
+      { role: 'user', parts: [{ function_response: { name: 'get_weather', response: { temp_c: 21 } } }] },
+    ],
+    generation_config: {
+      max_output_tokens: 256,
+      temperature: 0.2,
+      top_p: 0.9,
+      top_k: 20,
+      stop_sequences: ['END'],
+      thinking_config: { thinking_budget: 2048 },
+    },
+    tools: [
+      {
+        function_declarations: [
+          {
+            name: 'get_weather',
+            parameters: { type: 'object', properties: { city_name: { type: 'string' } } },
+          },
+        ],
+      },
+    ],
+    tool_config: { function_calling_config: { mode: 'ANY', allowed_function_names: ['get_weather'] } },
+  };
+
+  it('parses a snake_case body into the same IR as its camelCase twin', () => {
+    const fromCamel = geminiAdapter.parseRequest(JSON.stringify(camel));
+    const fromSnake = geminiAdapter.parseRequest(JSON.stringify(snake));
+    expect(fromSnake).toEqual(fromCamel);
+    expect(fromSnake.system).toEqual([{ text: 'You are a cat.' }]);
+    expect(fromSnake.maxTokens).toBe(256);
+    expect(fromSnake.toolChoice).toEqual({ type: 'tool', name: 'get_weather' });
+  });
+
+  it('leaves keys inside schemas, args and responses alone', () => {
+    const ir = geminiAdapter.parseRequest(JSON.stringify(snake));
+    expect(ir.tools?.[0].parameters).toEqual({ type: 'object', properties: { city_name: { type: 'string' } } });
+    expect(ir.messages[1].content[0]).toMatchObject({ type: 'tool_use', input: { city_name: 'Paris' } });
+  });
+
+  it('camelCase wins when a body carries both spellings', () => {
+    const ir = geminiAdapter.parseRequest(
+      JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: 'x' }] }],
+        generationConfig: { maxOutputTokens: 100 },
+        generation_config: { max_output_tokens: 999 },
+      }),
+    );
+    expect(ir.maxTokens).toBe(100);
+  });
+});
+
+describe('geminiAdapter — function call ids', () => {
+  it('pairs an id-less functionResponse with the call of the same name', () => {
+    const ir = geminiAdapter.parseRequest(
+      JSON.stringify({
+        contents: [
+          { role: 'user', parts: [{ text: 'weather?' }] },
+          {
+            role: 'model',
+            parts: [
+              { functionCall: { id: 'toolu_01', name: 'get_time', args: {} } },
+              { functionCall: { id: 'toolu_02', name: 'get_weather', args: { city: 'Paris' } } },
+            ],
+          },
+          {
+            role: 'user',
+            parts: [
+              { functionResponse: { name: 'get_weather', response: { temp: 21 } } },
+              { functionResponse: { name: 'get_time', response: { t: '12:00' } } },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(ir.messages[2].content.map((b) => (b.type === 'tool_result' ? b.toolUseId : null))).toEqual([
+      'toolu_02',
+      'toolu_01',
+    ]);
+  });
+
+  it('gives id-less parallel calls to one function distinct ids and pairs them in order', () => {
+    const ir = geminiAdapter.parseRequest(
+      JSON.stringify({
+        contents: [
+          { role: 'user', parts: [{ text: 'weather in two cities?' }] },
+          {
+            role: 'model',
+            parts: [
+              { functionCall: { name: 'weather.get', args: { city: 'Paris' } } },
+              { functionCall: { name: 'weather.get', args: { city: 'Rome' } } },
+            ],
+          },
+          {
+            role: 'user',
+            parts: [
+              { functionResponse: { name: 'weather.get', response: { temp: 21 } } },
+              { functionResponse: { name: 'weather.get', response: { temp: 25 } } },
+            ],
+          },
+        ],
+      }),
+    );
+    const callIds = ir.messages[1].content.map((b) => (b.type === 'tool_use' ? b.id : null));
+    const resultIds = ir.messages[2].content.map((b) => (b.type === 'tool_result' ? b.toolUseId : null));
+    expect(new Set(callIds).size).toBe(2);
+    for (const id of callIds) expect(id).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(resultIds).toEqual(callIds);
+  });
+
+  it('keeps a functionResponse id that matches its call', () => {
+    const ir = geminiAdapter.parseRequest(
+      JSON.stringify({
+        contents: [
+          { role: 'model', parts: [{ functionCall: { id: 'a', name: 'f' } }, { functionCall: { id: 'b', name: 'f' } }] },
+          { role: 'user', parts: [{ functionResponse: { id: 'b', name: 'f', response: {} } }] },
+        ],
+      }),
+    );
+    expect(ir.messages[1].content[0]).toMatchObject({ type: 'tool_result', toolUseId: 'b' });
+  });
+
+  it('gives id-less upstream calls unique ids in a response', () => {
+    const ir = geminiAdapter.parseResponse(
+      JSON.stringify({
+        responseId: 'resp-42',
+        candidates: [
+          {
+            content: {
+              role: 'model',
+              parts: [
+                { functionCall: { name: 'get_weather', args: { city: 'Paris' } } },
+                { functionCall: { name: 'get_weather', args: { city: 'Rome' } } },
+              ],
+            },
+            finishReason: 'STOP',
+          },
+        ],
+      }),
+    );
+    if ('error' in ir) throw new Error('unexpected error');
+    const ids = ir.content.map((b) => (b.type === 'tool_use' ? b.id : ''));
+    expect(ids[0]).not.toBe(ids[1]);
+    for (const id of ids) {
+      expect(id).toMatch(/^[A-Za-z0-9_-]{1,40}$/);
+      expect(id).not.toBe('get_weather');
+    }
+  });
+
+  it('gives id-less upstream calls unique ids in a stream', () => {
+    const parser = geminiAdapter.createStreamParser();
+    const frame = (parts: unknown[]) =>
+      `data: ${JSON.stringify({ responseId: 'r1', candidates: [{ content: { role: 'model', parts } }] })}\n\n`;
+    const events = parser.process(
+      frame([{ functionCall: { name: 'get_weather', args: { city: 'Paris' } } }]) +
+        frame([{ functionCall: { name: 'get_weather', args: { city: 'Rome' } } }]),
+    );
+    const ids = events.flatMap((e) =>
+      e.type === 'content_block_start' && e.block.type === 'tool_use' ? [e.block.id] : [],
+    );
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).not.toBe(ids[1]);
+    for (const id of ids) expect(id).toMatch(/^[A-Za-z0-9_-]{1,40}$/);
+  });
+
+  it('a call id stays within 40 characters for a long response id', () => {
+    const ir = geminiAdapter.parseResponse(
+      JSON.stringify({
+        responseId: 'x'.repeat(80),
+        candidates: [{ content: { role: 'model', parts: [{ functionCall: { name: 'f', args: {} } }] }, finishReason: 'STOP' }],
+      }),
+    );
+    if ('error' in ir) throw new Error('unexpected error');
+    const block = ir.content[0];
+    expect(block.type === 'tool_use' && block.id.length).toBeLessThanOrEqual(40);
+  });
+});
+
+describe('geminiAdapter — blocked prompts', () => {
+  it('parseResponse reports a blocked prompt as a refusal', () => {
+    const ir = geminiAdapter.parseResponse(JSON.stringify({ promptFeedback: { blockReason: 'SAFETY' } }));
+    expect(ir).toMatchObject({ content: [{ type: 'text', text: 'Prompt blocked: SAFETY' }], stopReason: 'refusal' });
+  });
+
+  it('the stream parser reports a blocked prompt as a refusal', () => {
+    const parser = geminiAdapter.createStreamParser();
+    const events = [
+      ...parser.process('data: {"promptFeedback":{"blockReason":"PROHIBITED_CONTENT"},"responseId":"r1"}\n\n'),
+      ...parser.flush(),
+    ];
+    expect(events.find((e) => e.type === 'text_delta')).toMatchObject({ text: 'Prompt blocked: PROHIBITED_CONTENT' });
+    expect(events.find((e) => e.type === 'message_delta')).toMatchObject({ stopReason: 'refusal' });
+  });
+});

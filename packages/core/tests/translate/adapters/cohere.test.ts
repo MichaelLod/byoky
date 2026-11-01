@@ -365,3 +365,29 @@ describe('cohereAdapter stream parsing', () => {
     }
   });
 });
+
+describe('cohereAdapter.serializeRequest — parameter ranges', () => {
+  const base: IRRequest = { system: [], messages: [{ role: 'user', content: [{ type: 'text', text: 'x' }] }] };
+  const serialize = (extra: Partial<IRRequest>) =>
+    JSON.parse(cohereAdapter.serializeRequest(ctx(), { ...base, ...extra })) as Record<string, unknown>;
+
+  it('clamps p into 0.01–0.99', () => {
+    expect(serialize({ topP: 1 }).p).toBe(0.99);
+    expect(serialize({ topP: 0 }).p).toBe(0.01);
+    expect(serialize({ topP: 0.5 }).p).toBe(0.5);
+  });
+
+  it('sends k as an integer in 0–500', () => {
+    expect(serialize({ topK: 1000 }).k).toBe(500);
+    expect(serialize({ topK: 40.6 }).k).toBe(41);
+  });
+
+  it('sends thinking only with a budget above 0', () => {
+    expect(serialize({ thinking: { enabled: true, budgetTokens: 0 } })).not.toHaveProperty('thinking');
+    expect(serialize({ thinking: { enabled: true } })).not.toHaveProperty('thinking');
+    expect(serialize({ thinking: { enabled: true, budgetTokens: 2048 } }).thinking).toEqual({
+      type: 'enabled',
+      token_budget: 2048,
+    });
+  });
+});

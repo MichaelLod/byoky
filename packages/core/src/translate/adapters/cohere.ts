@@ -10,9 +10,11 @@ import type {
   IRStreamEvent,
   IRStopReason,
   IRImageSource,
+  IRDocumentSource,
   IRToolResultContent,
 } from '../ir.js';
 import { isIRError } from '../ir.js';
+import { getModel } from '../../models.js';
 
 /**
  * Cohere v2 Chat adapter.
@@ -390,8 +392,9 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
     if (text) messages.push({ role: 'system', content: text });
   }
 
+  const acceptsImages = cohereAcceptsImages(ctx.dstModel);
   for (const msg of ir.messages) {
-    for (const wire of serializeMessageToCohere(msg)) {
+    for (const wire of serializeMessageToCohere(msg, ctx.dstModel, acceptsImages)) {
       messages.push(wire);
     }
   }
@@ -403,8 +406,10 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
 
   if (typeof ir.maxTokens === 'number') out.max_tokens = ir.maxTokens;
   if (typeof ir.temperature === 'number') out.temperature = ir.temperature;
-  if (typeof ir.topP === 'number') out.p = ir.topP;
-  if (typeof ir.topK === 'number') out.k = ir.topK;
+  // Cohere documents p as 0.01–0.99 (so the common top_p: 1 is out of
+  // range) and k as an integer 0–500.
+  if (typeof ir.topP === 'number') out.p = Math.min(0.99, Math.max(0.01, ir.topP));
+  if (typeof ir.topK === 'number') out.k = Math.min(500, Math.max(0, Math.round(ir.topK)));
   if (ir.stopSequences && ir.stopSequences.length > 0) out.stop_sequences = ir.stopSequences.slice();
   if (typeof ir.stream === 'boolean') out.stream = ir.stream;
 
@@ -446,26 +451,35 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
     }
   }
 
-  if (ir.thinking?.enabled) {
-    out.thinking = {
-      type: 'enabled',
-      ...(typeof ir.thinking.budgetTokens === 'number'
-        ? { token_budget: ir.thinking.budgetTokens }
-        : {}),
-    };
+  // Cohere's reasoning models think by default, so thinking without a budget
+  // (Gemini's dynamic -1) needs no field; leaving it out also keeps the
+  // parameter away from non-reasoning models such as command-a-03-2025.
+  const budget = ir.thinking?.enabled ? ir.thinking.budgetTokens : undefined;
+  if (typeof budget === 'number' && budget > 0) {
+    out.thinking = { type: 'enabled', token_budget: budget };
   }
 
   return JSON.stringify(out);
 }
 
-function serializeMessageToCohere(msg: IRMessage): CohereMessage[] {
-  if (msg.role === 'user') return serializeUserMessageToCohere(msg);
+function serializeMessageToCohere(msg: IRMessage, model: string, acceptsImages: boolean): CohereMessage[] {
+  if (msg.role === 'user') return serializeUserMessageToCohere(msg, model, acceptsImages);
   return serializeAssistantMessageToCohere(msg);
 }
 
-function serializeUserMessageToCohere(msg: IRMessage): CohereMessage[] {
+/**
+ * Whether the destination model takes image input. Most Cohere chat models
+ * are text-only; the image-capable ones are the vision variants (Command A
+ * Vision, Aya Vision), so an id missing from the registry is judged by name.
+ */
+function cohereAcceptsImages(model: string): boolean {
+  return getModel(model)?.capabilities.vision ?? /vision/i.test(model);
+}
+
+function serializeUserMessageToCohere(msg: IRMessage, model: string, acceptsImages: boolean): CohereMessage[] {
   const out: CohereMessage[] = [];
   const userParts: CohereUserContentPart[] = [];
+  const toolAttachments: CohereUserContentPart[] = [];
 
   for (const block of msg.content) {
     switch (block.type) {
@@ -477,17 +491,44 @@ function serializeUserMessageToCohere(msg: IRMessage): CohereMessage[] {
         if (url) userParts.push({ type: 'image_url', image_url: { url } });
         break;
       }
-      case 'tool_result':
-        out.push({
-          role: 'tool',
-          tool_call_id: block.toolUseId,
-          content: flattenIRToolResultContent(block.content),
-        });
+      case 'document':
+        userParts.push({ type: 'text', text: documentText(block.source) });
         break;
+      case 'tool_result': {
+        // Tool messages take text only. Images a tool returned go into the
+        // user message that follows the tool messages. What the model can't
+        // take (binary documents; images on a text-only model) is named in
+        // the tool text instead of failing the request: the app resends its
+        // tool results with every later turn, so a refusal here would end
+        // the conversation.
+        const images: CohereUserContentPart[] = [];
+        const omitted: string[] = [];
+        if (block.content.kind === 'blocks') {
+          for (const inner of block.content.blocks) {
+            if (inner.type === 'image') {
+              if (acceptsImages) {
+                images.push({ type: 'image_url', image_url: { url: irImageSourceToUrl(inner.source) } });
+              } else {
+                omitted.push(`[image omitted: ${model} does not accept images]`);
+              }
+            } else if (inner.type === 'document' && inner.source.kind !== 'text') {
+              omitted.push('[document omitted: Cohere does not accept PDF or other binary documents]');
+            }
+          }
+        }
+        let text = [flattenIRToolResultContent(block.content), ...omitted].filter((t) => t.length > 0).join('\n');
+        if (images.length > 0) {
+          if (!text) text = TOOL_ATTACHMENTS_NOTE;
+          toolAttachments.push({ type: 'text', text: `Attachments from tool call ${block.toolUseId}:` }, ...images);
+        }
+        out.push({ role: 'tool', tool_call_id: block.toolUseId, content: text });
+        break;
+      }
       default:
         break;
     }
   }
+  userParts.unshift(...toolAttachments);
 
   if (userParts.length > 0) {
     if (userParts.every((p) => p.type === 'text')) {
@@ -542,10 +583,26 @@ function irImageSourceToUrl(source: IRImageSource): string {
   return source.url;
 }
 
+/** Stands in for the text of a tool result that returned only images. */
+const TOOL_ATTACHMENTS_NOTE = '[The tool returned images; they follow in the next user message.]';
+
+/** Cohere chat takes documents as text only. */
+function documentText(source: IRDocumentSource): string {
+  if (source.kind === 'text') return source.text;
+  throw binaryDocumentError();
+}
+
+function binaryDocumentError(): TranslationError {
+  return new TranslationError(
+    'UNSUPPORTED_FEATURE',
+    'Cohere does not accept PDF or other binary documents; only plain-text documents can be translated.',
+  );
+}
+
 function flattenIRToolResultContent(content: IRToolResultContent): string {
   if (content.kind === 'text') return content.text;
   return content.blocks
-    .map((b) => (b.type === 'text' ? b.text : ''))
+    .map((b) => (b.type === 'text' ? b.text : b.type === 'document' && b.source.kind === 'text' ? b.source.text : ''))
     .filter((s) => s.length > 0)
     .join('\n');
 }

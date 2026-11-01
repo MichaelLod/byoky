@@ -32,6 +32,44 @@ describe('openaiAdapter.parseRequest', () => {
     expect(ir.messages[0].role).toBe('user');
   });
 
+  it('lifts role:developer messages into IR system', () => {
+    const ir = openaiAdapter.parseRequest(
+      JSON.stringify({
+        messages: [
+          { role: 'developer', content: 'Only answer in French.' },
+          { role: 'user', content: 'Hello' },
+        ],
+      }),
+    );
+    expect(ir.system).toEqual([{ text: 'Only answer in French.' }]);
+    expect(ir.messages).toEqual([{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }]);
+  });
+
+  it('ignores stop: null and blank stop strings', () => {
+    const parse = (stop: unknown) =>
+      openaiAdapter.parseRequest(JSON.stringify({ messages: [{ role: 'user', content: 'hi' }], stop }));
+    expect(parse(null).stopSequences).toBeUndefined();
+    expect(parse('').stopSequences).toBeUndefined();
+    expect(parse([null, '  ']).stopSequences).toBeUndefined();
+    expect(parse([null, 'x']).stopSequences).toEqual(['x']);
+    expect(parse('END').stopSequences).toEqual(['END']);
+  });
+
+  it('keeps system and developer messages in their original order', () => {
+    const ir = openaiAdapter.parseRequest(
+      JSON.stringify({
+        messages: [
+          { role: 'developer', content: [{ type: 'text', text: 'one' }] },
+          { role: 'system', content: 'two' },
+          { role: 'user', content: 'hi' },
+          { role: 'developer', content: 'three' },
+        ],
+      }),
+    );
+    expect(ir.system).toEqual([{ text: 'one' }, { text: 'two' }, { text: 'three' }]);
+    expect(ir.messages).toHaveLength(1);
+  });
+
   it('maps role:tool messages into tool_result blocks on next user turn', () => {
     const ir = openaiAdapter.parseRequest(
       JSON.stringify({
@@ -261,5 +299,89 @@ describe('openaiAdapter stream parsing', () => {
     if (msgDelta && msgDelta.type === 'message_delta') {
       expect(msgDelta.stopReason).toBe('tool_use');
     }
+  });
+});
+
+describe('openaiAdapter.serializeRequest — reasoning models and max_completion_tokens', () => {
+  const ir: IRRequest = {
+    system: [],
+    messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+    maxTokens: 1024,
+    temperature: 0.3,
+    topP: 0.9,
+  };
+  const serialize = (overrides: Partial<TranslationContext>) =>
+    JSON.parse(openaiAdapter.serializeRequest(ctx(overrides), ir)) as Record<string, unknown>;
+
+  it.each(['gpt-5-mini', 'gpt-5.5-pro', 'gpt-5.5-2026-04-01', 'o3', 'o4-mini'])(
+    '%s gets max_completion_tokens and no sampling overrides',
+    (dstModel) => {
+      for (const dstProviderId of ['openai', undefined]) {
+        const out = serialize({ dstModel, dstProviderId });
+        expect(out.max_completion_tokens).toBe(1024);
+        expect(out).not.toHaveProperty('max_tokens');
+        expect(out).not.toHaveProperty('temperature');
+        expect(out).not.toHaveProperty('top_p');
+      }
+    },
+  );
+
+  it('a non-reasoning model on OpenAI gets max_completion_tokens and keeps sampling', () => {
+    const out = serialize({ dstModel: 'gpt-4.1', dstProviderId: 'openai' });
+    expect(out.max_completion_tokens).toBe(1024);
+    expect(out).not.toHaveProperty('max_tokens');
+    expect(out.temperature).toBe(0.3);
+    expect(out.top_p).toBe(0.9);
+  });
+
+  it('other hosts of the dialect keep max_tokens', () => {
+    const out = serialize({ dstModel: 'llama-3.3-70b-versatile', dstProviderId: 'groq' });
+    expect(out.max_tokens).toBe(1024);
+    expect(out).not.toHaveProperty('max_completion_tokens');
+    expect(out.temperature).toBe(0.3);
+  });
+
+  it('an OpenAI reasoning model behind OpenRouter keeps max_tokens but drops sampling', () => {
+    const out = serialize({ dstModel: 'openai/gpt-5', dstProviderId: 'openrouter' });
+    expect(out.max_tokens).toBe(1024);
+    expect(out).not.toHaveProperty('max_completion_tokens');
+    expect(out).not.toHaveProperty('temperature');
+    expect(out).not.toHaveProperty('top_p');
+  });
+
+  it('an unknown provider with a non-reasoning model keeps max_tokens', () => {
+    const out = serialize({ dstModel: 'gpt-4.1', dstProviderId: undefined });
+    expect(out.max_tokens).toBe(1024);
+    expect(out.temperature).toBe(0.3);
+  });
+});
+
+describe('openaiAdapter — refusals', () => {
+  it('parseResponse surfaces message.refusal as text with stopReason refusal', () => {
+    const ir = openaiAdapter.parseResponse(
+      JSON.stringify({
+        id: 'c1',
+        choices: [{ index: 0, message: { role: 'assistant', content: null, refusal: "I'm sorry, I can't help." }, finish_reason: 'stop' }],
+      }),
+    );
+    expect(ir).toMatchObject({
+      content: [{ type: 'text', text: "I'm sorry, I can't help." }],
+      stopReason: 'refusal',
+    });
+  });
+
+  it('the stream parser surfaces delta.refusal and ends with stopReason refusal', () => {
+    const parser = openaiAdapter.createStreamParser();
+    const events = [
+      ...parser.process(
+        'data: {"id":"c1","choices":[{"index":0,"delta":{"role":"assistant","content":null,"refusal":""}}]}\n\n' +
+          'data: {"id":"c1","choices":[{"index":0,"delta":{"refusal":"I\'m sorry"}}]}\n\n' +
+          'data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n' +
+          'data: [DONE]\n\n',
+      ),
+      ...parser.flush(),
+    ];
+    expect(events.filter((e) => e.type === 'text_delta')).toEqual([{ type: 'text_delta', index: 0, text: "I'm sorry" }]);
+    expect(events.find((e) => e.type === 'message_delta')).toMatchObject({ stopReason: 'refusal' });
   });
 });

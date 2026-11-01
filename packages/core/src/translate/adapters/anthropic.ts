@@ -13,6 +13,7 @@ import type {
   IRStopReason,
   IRToolResultContent,
   IRImageSource,
+  IRDocumentSource,
 } from '../ir.js';
 import { isIRError } from '../ir.js';
 
@@ -66,7 +67,7 @@ interface AnthropicRequest {
   metadata?: { user_id?: string };
   tools?: AnthropicTool[];
   tool_choice?: AnthropicToolChoice;
-  thinking?: { type?: 'enabled'; budget_tokens?: number };
+  thinking?: { type?: 'enabled' | 'adaptive'; budget_tokens?: number };
 }
 
 interface AnthropicSystemBlock {
@@ -82,6 +83,7 @@ interface AnthropicMessage {
 type AnthropicContentBlock =
   | { type: 'text'; text: string }
   | { type: 'image'; source: AnthropicImageSource }
+  | { type: 'document'; source: AnthropicDocumentSource; title?: string }
   | { type: 'tool_use'; id: string; name: string; input: unknown }
   | {
       type: 'tool_result';
@@ -95,6 +97,13 @@ type AnthropicContentBlock =
 type AnthropicImageSource =
   | { type: 'base64'; media_type: string; data: string }
   | { type: 'url'; url: string };
+
+/** PDF as base64 or URL, or plain text. (Content and file sources aren't
+ *  translatable: file ids belong to Anthropic's Files API.) */
+type AnthropicDocumentSource =
+  | { type: 'base64'; media_type: string; data: string }
+  | { type: 'url'; url: string }
+  | { type: 'text'; media_type: 'text/plain'; data: string };
 
 interface AnthropicTool {
   name: string;
@@ -192,6 +201,9 @@ function parseRequest(body: string): IRRequest {
     }
   }
 
+  // Only an explicit thinking request goes into the IR. Adaptive thinking
+  // (Claude Code's default on current models) leaves the depth to the model,
+  // which is what every other family does when no thinking config is sent.
   if (parsed.thinking && parsed.thinking.type === 'enabled') {
     ir.thinking = {
       enabled: true,
@@ -246,6 +258,16 @@ function parseAnthropicContentBlock(
       const irSrc = parseAnthropicImageSource(src);
       return irSrc ? { type: 'image', source: irSrc } : null;
     }
+    case 'document': {
+      const doc = block as { source?: AnthropicDocumentSource; title?: unknown };
+      const irSrc = parseAnthropicDocumentSource(doc.source);
+      if (!irSrc) return null;
+      return {
+        type: 'document',
+        source: irSrc,
+        ...(typeof doc.title === 'string' && doc.title ? { title: doc.title } : {}),
+      };
+    }
     case 'tool_use': {
       const tu = block as Extract<AnthropicContentBlock, { type: 'tool_use' }>;
       return { type: 'tool_use', id: tu.id, name: tu.name, input: tu.input ?? {} };
@@ -286,6 +308,23 @@ function parseAnthropicImageSource(
   }
   if (src.type === 'url' && typeof src.url === 'string') {
     return { kind: 'url', url: src.url };
+  }
+  return null;
+}
+
+function parseAnthropicDocumentSource(
+  src: AnthropicDocumentSource | undefined,
+): IRDocumentSource | null {
+  if (!src || typeof src !== 'object') return null;
+  if (src.type === 'base64' && typeof src.media_type === 'string' && typeof src.data === 'string') {
+    return { kind: 'base64', mediaType: src.media_type, data: src.data };
+  }
+  // Anthropic fetches URL documents as PDFs.
+  if (src.type === 'url' && typeof src.url === 'string') {
+    return { kind: 'url', url: src.url, mediaType: 'application/pdf' };
+  }
+  if (src.type === 'text' && typeof src.data === 'string') {
+    return { kind: 'text', text: src.data };
   }
   return null;
 }
@@ -332,30 +371,60 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
     });
   }
 
+  const rules = claudeRequestRules(ctx.dstModel);
+  // Extended thinking can't be combined with a forced tool choice. The
+  // forced tool is what the app's code relies on; thinking only shapes the
+  // answer, so it gives way.
+  const forcedTool = ir.toolChoice?.type === 'any' || ir.toolChoice?.type === 'tool';
+  const wantsThinking = ir.thinking?.enabled === true && !forcedTool;
+  const requestedBudget = ir.thinking?.budgetTokens;
+
   // Anthropic requires max_tokens. Default to the destination model's max
-  // output, capped at 4096, if the source omitted it.
+  // output, capped at 4096 (plus room for thinking), if the source omitted it.
+  const dst = getModel(ctx.dstModel);
   let maxTokens = ir.maxTokens;
   if (typeof maxTokens !== 'number') {
-    const dst = getModel(ctx.dstModel);
-    maxTokens = Math.min(dst?.maxOutput ?? 4096, 4096);
+    maxTokens = wantsThinking
+      ? Math.min(
+          dst?.maxOutput ?? 32_000,
+          Math.max(MIN_THINKING_BUDGET, requestedBudget ?? DEFAULT_THINKING_BUDGET) + 4096,
+        )
+      : Math.min(dst?.maxOutput ?? 4096, 4096);
   }
+  const thinking = wantsThinking
+    ? anthropicThinking(rules.thinking, requestedBudget, maxTokens)
+    : undefined;
 
   const out: AnthropicRequest = {
     model: ctx.dstModel,
     max_tokens: maxTokens,
-    messages: ir.messages.map(serializeMessageToAnthropic),
+    messages: serializeMessagesToAnthropic(ir.messages),
   };
 
   if (systemParts.length > 0) {
     out.system = systemParts.map((p) => p.text).join('\n\n');
   }
 
-  if (typeof ir.temperature === 'number') {
-    // Anthropic clamps temperature to [0, 1]; OpenAI accepts up to 2.
-    out.temperature = Math.max(0, Math.min(1, ir.temperature));
+  let temperature = ir.temperature;
+  let topP = ir.topP;
+  let topK = ir.topK;
+  if (rules.sampling === 'none') {
+    temperature = topP = topK = undefined;
+  } else {
+    if (thinking) {
+      // With thinking: no temperature or top_k change, top_p only in [0.95, 1].
+      temperature = topK = undefined;
+      if (typeof topP === 'number' && (topP < 0.95 || topP > 1)) topP = undefined;
+    }
+    // Claude 4 models take temperature or top_p, not both.
+    if (typeof temperature === 'number') topP = undefined;
   }
-  if (typeof ir.topP === 'number') out.top_p = ir.topP;
-  if (typeof ir.topK === 'number') out.top_k = ir.topK;
+  if (typeof temperature === 'number') {
+    // Anthropic clamps temperature to [0, 1]; OpenAI accepts up to 2.
+    out.temperature = Math.max(0, Math.min(1, temperature));
+  }
+  if (typeof topP === 'number') out.top_p = topP;
+  if (typeof topK === 'number') out.top_k = topK;
   if (ir.stopSequences && ir.stopSequences.length > 0) out.stop_sequences = ir.stopSequences.slice();
   if (typeof ir.stream === 'boolean') out.stream = ir.stream;
   if (ir.userId) out.metadata = { user_id: ir.userId };
@@ -385,24 +454,88 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
     }
   }
 
-  if (ir.thinking?.enabled) {
-    out.thinking = {
-      type: 'enabled',
-      ...(typeof ir.thinking.budgetTokens === 'number'
-        ? { budget_tokens: ir.thinking.budgetTokens }
-        : {}),
-    };
-  }
+  if (thinking) out.thinking = thinking;
 
   return JSON.stringify(out);
 }
 
-function serializeMessageToAnthropic(msg: IRMessage): AnthropicMessage {
+const MIN_THINKING_BUDGET = 1024;
+const DEFAULT_THINKING_BUDGET = 8192;
+
+type ClaudeSamplingRule = 'none' | 'single';
+/** adaptive: thinking:{type:'adaptive'} only; budget: {type:'enabled',
+ *  budget_tokens} only; either: adaptive, or a budget when one is asked for. */
+type ClaudeThinkingRule = 'adaptive' | 'either' | 'budget';
+
+/**
+ * What a Claude model accepts, read from its id (groups accept any id, so
+ * the registry can't be the only source):
+ *  - Opus 4.7 and later, every 5.x model, Fable and Mythos reject
+ *    temperature/top_p/top_k and budget_tokens; they think adaptively.
+ *  - Claude 4.6 takes temperature or top_p (not both) and either form of
+ *    thinking (budget_tokens is deprecated there).
+ *  - Earlier models take temperature or top_p and a thinking budget.
+ * An id that doesn't parse is treated like a current model on sampling and
+ * gets adaptive thinking.
+ */
+function claudeRequestRules(model: string): { sampling: ClaudeSamplingRule; thinking: ClaudeThinkingRule } {
+  const id = model.toLowerCase();
+  const named = /claude-(opus|sonnet|haiku|fable|mythos)-(\d+)(?:[-.](\d{1,2})(?!\d))?/.exec(id);
+  const legacy = named ? null : /claude-(\d+)(?:[-.](\d)(?!\d))?-(?:opus|sonnet|haiku)/.exec(id);
+  if (named && (named[1] === 'fable' || named[1] === 'mythos')) {
+    return { sampling: 'none', thinking: 'adaptive' };
+  }
+  const version = named ? [named[2], named[3]] : legacy ? [legacy[1], legacy[2]] : null;
+  if (!version) return { sampling: 'single', thinking: 'adaptive' };
+  const major = Number(version[0]);
+  const minor = Number(version[1] ?? 0);
+  if (major > 4 || (major === 4 && minor >= 7)) return { sampling: 'none', thinking: 'adaptive' };
+  if (major === 4 && minor === 6) return { sampling: 'single', thinking: 'either' };
+  return { sampling: 'single', thinking: 'budget' };
+}
+
+/**
+ * Anthropic thinking config for the destination. A budget is at least 1024
+ * tokens and below max_tokens; when max_tokens leaves no room for that,
+ * thinking is left off.
+ */
+function anthropicThinking(
+  rule: ClaudeThinkingRule,
+  requestedBudget: number | undefined,
+  maxTokens: number,
+): AnthropicRequest['thinking'] | undefined {
+  const useBudget = rule === 'budget' || (rule === 'either' && typeof requestedBudget === 'number');
+  if (!useBudget) return { type: 'adaptive' };
+  const budget = Math.min(
+    Math.max(MIN_THINKING_BUDGET, requestedBudget ?? DEFAULT_THINKING_BUDGET),
+    maxTokens - 1,
+  );
+  if (budget < MIN_THINKING_BUDGET) return undefined;
+  return { type: 'enabled', budget_tokens: budget };
+}
+
+function serializeMessagesToAnthropic(messages: IRMessage[]): AnthropicMessage[] {
+  const out: AnthropicMessage[] = [];
+  for (const msg of messages) {
+    const wire = serializeMessageToAnthropic(msg);
+    if (wire) out.push(wire);
+  }
+  return out;
+}
+
+/**
+ * Returns null when every block of a non-empty message was dropped (e.g. an
+ * assistant turn holding only another family's unsigned reasoning): sending
+ * it with empty content would be rejected. Anthropic merges the neighbouring
+ * same-role turns that this can leave behind.
+ */
+function serializeMessageToAnthropic(msg: IRMessage): AnthropicMessage | null {
   const blocks: AnthropicContentBlock[] = [];
   for (const b of msg.content) {
     const wire = serializeContentBlockToAnthropic(b);
     if (wire) blocks.push(wire);
   }
+  if (blocks.length === 0 && msg.content.length > 0) return null;
 
   // Collapse single text block to plain string for compactness.
   if (blocks.length === 1 && blocks[0].type === 'text') {
@@ -422,6 +555,12 @@ function serializeContentBlockToAnthropic(
       return { type: 'text', text: block.text };
     case 'image':
       return { type: 'image', source: irImageSourceToAnthropic(block.source) };
+    case 'document':
+      return {
+        type: 'document',
+        source: irDocumentSourceToAnthropic(block.source),
+        ...(block.title ? { title: block.title } : {}),
+      };
     case 'tool_use':
       return { type: 'tool_use', id: block.id, name: block.name, input: block.input };
     case 'tool_result': {
@@ -444,12 +583,27 @@ function serializeContentBlockToAnthropic(
       };
     }
     case 'thinking':
-      return {
-        type: 'thinking',
-        thinking: block.text,
-        ...(block.signature ? { signature: block.signature } : {}),
-      };
+      // Anthropic requires the signature on every thinking block in history.
+      // Other families' reasoning (Cohere tool_plan and thinking content)
+      // has none, so it can't be replayed; drop it like the OpenAI and
+      // Gemini serializers do.
+      if (!block.signature) return null;
+      return { type: 'thinking', thinking: block.text, signature: block.signature };
   }
+}
+
+/** Anthropic documents are PDFs (base64 or URL) or plain text. */
+function irDocumentSourceToAnthropic(source: IRDocumentSource): AnthropicDocumentSource {
+  if (source.kind === 'text') return { type: 'text', media_type: 'text/plain', data: source.text };
+  const mediaType = source.kind === 'base64' ? source.mediaType : source.mediaType ?? 'application/pdf';
+  if (mediaType !== 'application/pdf') {
+    throw new TranslationError(
+      'UNSUPPORTED_FEATURE',
+      `Anthropic accepts PDF and plain-text documents only, not ${mediaType}.`,
+    );
+  }
+  if (source.kind === 'base64') return { type: 'base64', media_type: mediaType, data: source.data };
+  return { type: 'url', url: source.url };
 }
 
 function irImageSourceToAnthropic(source: IRImageSource): AnthropicImageSource {
@@ -773,6 +927,9 @@ function createStreamSerializer(ctx: TranslationContext): IRStreamSerializer {
   const state = {
     messageId: `msg_${ctx.requestId}`,
     model: ctx.srcModel ?? ctx.dstModel,
+    // The app's own model is echoed back, as serializeResponse does; the
+    // upstream model only fills in when the app's is unknown.
+    modelPinned: ctx.srcModel != null,
     inputTokens: 0,
     outputTokens: 0,
     started: false,
@@ -815,6 +972,7 @@ function handleEvent(
   state: {
     messageId: string;
     model: string;
+    modelPinned: boolean;
     inputTokens: number;
     outputTokens: number;
     started: boolean;
@@ -827,7 +985,7 @@ function handleEvent(
     case 'message_start': {
       state.started = true;
       if (event.id) state.messageId = event.id;
-      if (event.model) state.model = event.model;
+      if (event.model && !state.modelPinned) state.model = event.model;
       if (typeof event.usage.inputTokens === 'number') state.inputTokens = event.usage.inputTokens;
       if (typeof event.usage.outputTokens === 'number') state.outputTokens = event.usage.outputTokens;
       return emitFrame('message_start', {

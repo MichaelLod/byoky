@@ -190,7 +190,7 @@ describe('anthropicAdapter round-trip', () => {
         { role: 'assistant', content: '4' },
       ],
       temperature: 0.5,
-      top_p: 0.9,
+      top_k: 40,
       stop_sequences: ['END'],
     });
     const ir1 = anthropicAdapter.parseRequest(original);
@@ -199,7 +199,7 @@ describe('anthropicAdapter round-trip', () => {
     expect(ir2.system).toEqual(ir1.system);
     expect(ir2.messages).toEqual(ir1.messages);
     expect(ir2.temperature).toBe(ir1.temperature);
-    expect(ir2.topP).toBe(ir1.topP);
+    expect(ir2.topK).toBe(ir1.topK);
     expect(ir2.stopSequences).toEqual(ir1.stopSequences);
     expect(ir2.maxTokens).toBe(ir1.maxTokens);
   });
@@ -291,5 +291,188 @@ describe('anthropicAdapter.parseResponse', () => {
     if (!('error' in ir)) throw new Error('expected error');
     expect(ir.error.message).toBe('bad');
     expect(ir.error.type).toBe('invalid_request_error');
+  });
+});
+
+describe('anthropicAdapter.serializeRequest — thinking blocks in history', () => {
+  it('drops unsigned thinking blocks and keeps the rest of the turn', () => {
+    const ir: IRRequest = {
+      system: [],
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'weather?' }] },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', text: 'I will call get_weather.', toolPlanning: true },
+            { type: 'tool_use', id: 't1', name: 'get_weather', input: { city: 'Paris' } },
+          ],
+        },
+      ],
+    };
+    const out = JSON.parse(anthropicAdapter.serializeRequest(ctx(), ir)) as {
+      messages: Array<{ role: string; content: unknown }>;
+    };
+    expect(out.messages[1]).toEqual({
+      role: 'assistant',
+      content: [{ type: 'tool_use', id: 't1', name: 'get_weather', input: { city: 'Paris' } }],
+    });
+  });
+
+  it('leaves out a turn that held only unsigned thinking', () => {
+    const ir: IRRequest = {
+      system: [],
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'one' }] },
+        { role: 'assistant', content: [{ type: 'thinking', text: 'hmm' }] },
+        { role: 'user', content: [{ type: 'text', text: 'two' }] },
+      ],
+    };
+    const out = JSON.parse(anthropicAdapter.serializeRequest(ctx(), ir)) as {
+      messages: Array<{ role: string; content: unknown }>;
+    };
+    expect(out.messages).toEqual([
+      { role: 'user', content: 'one' },
+      { role: 'user', content: 'two' },
+    ]);
+  });
+
+  it('keeps signed thinking blocks', () => {
+    const ir: IRRequest = {
+      system: [],
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'q' }] },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', text: 'reasoning', signature: 'sig' },
+            { type: 'text', text: 'a' },
+          ],
+        },
+      ],
+    };
+    const out = JSON.parse(anthropicAdapter.serializeRequest(ctx(), ir)) as {
+      messages: Array<{ role: string; content: unknown }>;
+    };
+    expect(out.messages[1].content).toEqual([
+      { type: 'thinking', thinking: 'reasoning', signature: 'sig' },
+      { type: 'text', text: 'a' },
+    ]);
+  });
+});
+
+describe('anthropicAdapter.serializeRequest — sampling parameters per model', () => {
+  const base: IRRequest = {
+    system: [],
+    messages: [{ role: 'user', content: [{ type: 'text', text: 'x' }] }],
+    maxTokens: 1000,
+  };
+  const serialize = (dstModel: string, extra: Partial<IRRequest>) =>
+    JSON.parse(anthropicAdapter.serializeRequest(ctx({ dstModel }), { ...base, ...extra })) as Record<string, unknown>;
+
+  it.each(['claude-sonnet-4-6', 'claude-haiku-4-5-20251001', 'claude-opus-4-1-20250805'])(
+    '%s keeps temperature and drops top_p when both are set',
+    (model) => {
+      const out = serialize(model, { temperature: 0.7, topP: 1, topK: 20 });
+      expect(out.temperature).toBe(0.7);
+      expect(out).not.toHaveProperty('top_p');
+      expect(out.top_k).toBe(20);
+    },
+  );
+
+  it('sends top_p alone when temperature is unset', () => {
+    const out = serialize('claude-sonnet-4-6', { topP: 0.95 });
+    expect(out.top_p).toBe(0.95);
+    expect(out).not.toHaveProperty('temperature');
+  });
+
+  it.each(['claude-opus-4-7', 'claude-opus-4-8', 'claude-sonnet-5', 'claude-opus-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'])(
+    '%s gets no sampling parameters',
+    (model) => {
+      const out = serialize(model, { temperature: 0.2, topP: 0.9, topK: 5 });
+      expect(out).not.toHaveProperty('temperature');
+      expect(out).not.toHaveProperty('top_p');
+      expect(out).not.toHaveProperty('top_k');
+    },
+  );
+});
+
+describe('anthropicAdapter.serializeRequest — thinking', () => {
+  const user: IRRequest['messages'] = [{ role: 'user', content: [{ type: 'text', text: 'x' }] }];
+  const serialize = (dstModel: string, ir: Partial<IRRequest>) =>
+    JSON.parse(
+      anthropicAdapter.serializeRequest(ctx({ dstModel }), { system: [], messages: user, ...ir }),
+    ) as Record<string, unknown>;
+
+  it('a budget model gets a budget of at least 1024 tokens, below max_tokens', () => {
+    const out = serialize('claude-haiku-4-5-20251001', { maxTokens: 4000, thinking: { enabled: true, budgetTokens: 10 } });
+    expect(out.thinking).toEqual({ type: 'enabled', budget_tokens: 1024 });
+    expect(out.max_tokens).toBe(4000);
+  });
+
+  it('raises a defaulted max_tokens above the budget', () => {
+    const out = serialize('claude-haiku-4-5-20251001', { thinking: { enabled: true, budgetTokens: 8192 } });
+    expect(out.thinking).toEqual({ type: 'enabled', budget_tokens: 8192 });
+    expect(out.max_tokens).toBe(8192 + 4096);
+  });
+
+  it('lowers the budget below an explicit max_tokens', () => {
+    const out = serialize('claude-haiku-4-5-20251001', { maxTokens: 4096, thinking: { enabled: true, budgetTokens: 8192 } });
+    expect(out.max_tokens).toBe(4096);
+    expect(out.thinking).toEqual({ type: 'enabled', budget_tokens: 4095 });
+  });
+
+  it('leaves thinking off when max_tokens has no room for the minimum budget', () => {
+    const out = serialize('claude-haiku-4-5-20251001', { maxTokens: 512, thinking: { enabled: true } });
+    expect(out).not.toHaveProperty('thinking');
+  });
+
+  it('a budget model gets a default budget when none is given', () => {
+    const out = serialize('claude-haiku-4-5-20251001', { thinking: { enabled: true } });
+    expect(out.thinking).toEqual({ type: 'enabled', budget_tokens: 8192 });
+  });
+
+  it('Opus 4.7 thinks adaptively and never gets budget_tokens', () => {
+    const out = serialize('claude-opus-4-7', { thinking: { enabled: true, budgetTokens: 8192 } });
+    expect(out.thinking).toEqual({ type: 'adaptive' });
+    expect(out.max_tokens).toBe(8192 + 4096);
+  });
+
+  it('Sonnet 4.6 honours an explicit budget and thinks adaptively without one', () => {
+    expect(serialize('claude-sonnet-4-6', { thinking: { enabled: true, budgetTokens: 2048 } }).thinking).toEqual({
+      type: 'enabled',
+      budget_tokens: 2048,
+    });
+    expect(serialize('claude-sonnet-4-6', { thinking: { enabled: true } }).thinking).toEqual({ type: 'adaptive' });
+  });
+
+  it('drops temperature and top_k with thinking, and keeps top_p only in [0.95, 1]', () => {
+    const out = serialize('claude-sonnet-4-6', {
+      thinking: { enabled: true },
+      temperature: 0.4,
+      topK: 10,
+      topP: 0.97,
+    });
+    expect(out).not.toHaveProperty('temperature');
+    expect(out).not.toHaveProperty('top_k');
+    expect(out.top_p).toBe(0.97);
+    const low = serialize('claude-sonnet-4-6', { thinking: { enabled: true }, topP: 0.5 });
+    expect(low).not.toHaveProperty('top_p');
+  });
+
+  it('leaves thinking off when a tool is forced', () => {
+    const tools = [{ name: 'f', parameters: { type: 'object', properties: {} } }];
+    for (const toolChoice of [{ type: 'any' }, { type: 'tool', name: 'f' }] as const) {
+      const out = serialize('claude-sonnet-4-6', { tools, toolChoice, thinking: { enabled: true }, temperature: 0.2 });
+      expect(out).not.toHaveProperty('thinking');
+      expect(out.tool_choice).toEqual(toolChoice);
+      expect(out.temperature).toBe(0.2);
+    }
+  });
+
+  it('leaves adaptive thinking out of the IR', () => {
+    const ir = anthropicAdapter.parseRequest(
+      JSON.stringify({ model: 'claude-opus-4-7', max_tokens: 100, thinking: { type: 'adaptive' }, messages: [] }),
+    );
+    expect(ir.thinking).toBeUndefined();
   });
 });

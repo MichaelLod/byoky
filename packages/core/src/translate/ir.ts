@@ -63,6 +63,7 @@ export interface IRMessage {
 export type IRContentBlock =
   | IRTextBlock
   | IRImageBlock
+  | IRDocumentBlock
   | IRToolUseBlock
   | IRToolResultBlock
   | IRThinkingBlock;
@@ -81,6 +82,22 @@ export type IRImageSource =
   | { kind: 'base64'; mediaType: string; data: string }
   | { kind: 'url'; url: string };
 
+/**
+ * A document input (e.g. a PDF): Anthropic `document` blocks, Gemini
+ * non-image inlineData/fileData, OpenAI `file` parts. Destinations that
+ * can't take a document raise UNSUPPORTED_FEATURE instead of dropping it.
+ */
+export interface IRDocumentBlock {
+  type: 'document';
+  source: IRDocumentSource;
+  title?: string;
+}
+
+export type IRDocumentSource =
+  | { kind: 'base64'; mediaType: string; data: string }
+  | { kind: 'url'; url: string; mediaType?: string }
+  | { kind: 'text'; text: string };
+
 export interface IRToolUseBlock {
   type: 'tool_use';
   id: string;
@@ -97,8 +114,10 @@ export interface IRToolResultBlock {
 
 /**
  * Tool result content is structured because anthropic supports rich content
- * (text + images) inside tool results. Flat families (openai, cohere, gemini)
- * flatten to a string at serialize time.
+ * (text, images, documents) inside tool results. The other families take
+ * only text there: their serializers keep the text in the tool result and
+ * move images and documents next to it (Gemini) or into a following user
+ * message (openai, cohere).
  */
 export type IRToolResultContent =
   | { kind: 'text'; text: string }

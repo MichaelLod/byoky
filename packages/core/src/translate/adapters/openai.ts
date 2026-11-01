@@ -12,6 +12,7 @@ import type {
   IRStreamEvent,
   IRStopReason,
   IRImageSource,
+  IRDocumentBlock,
   IRToolResultContent,
 } from '../ir.js';
 import { isIRError } from '../ir.js';
@@ -67,7 +68,7 @@ interface OpenAIRequest {
   max_completion_tokens?: number;
   temperature?: number;
   top_p?: number;
-  stop?: string | string[];
+  stop?: string | string[] | null;
   stream?: boolean;
   stream_options?: { include_usage?: boolean };
   user?: string;
@@ -79,6 +80,8 @@ interface OpenAIRequest {
 
 type OpenAIMessage =
   | { role: 'system'; content: OpenAIMessageContent }
+  // OpenAI's name for system instructions on GPT-5 / o-series models.
+  | { role: 'developer'; content: OpenAIMessageContent }
   | { role: 'user'; content: OpenAIMessageContent }
   | { role: 'assistant'; content: OpenAIMessageContent | null; tool_calls?: OpenAIToolCall[] }
   | { role: 'tool'; tool_call_id: string; content: OpenAIMessageContent };
@@ -87,7 +90,8 @@ type OpenAIMessageContent = string | OpenAIContentPart[];
 
 type OpenAIContentPart =
   | { type: 'text'; text: string }
-  | { type: 'image_url'; image_url: { url: string } | string };
+  | { type: 'image_url'; image_url: { url: string } | string }
+  | { type: 'file'; file: { filename?: string; file_data?: string; file_id?: string } };
 
 interface OpenAIToolCall {
   id: string;
@@ -117,7 +121,14 @@ interface OpenAIResponse {
     completion_tokens?: number;
     total_tokens?: number;
   };
-  error?: { message?: string; type?: string; code?: string };
+  // OpenAI and most compatible hosts send an error object; xAI sends the
+  // message as a string with a top-level `code`.
+  error?: { message?: string; type?: string; code?: string | number | null } | string;
+  code?: unknown;
+  // Mistral errors carry a top-level message (string or object) or detail.
+  message?: unknown;
+  detail?: unknown;
+  type?: unknown;
 }
 
 interface OpenAIChoice {
@@ -152,11 +163,12 @@ function parseRequest(body: string): IRRequest {
     messages: [],
   };
 
-  // Split system messages from the conversation; the IR puts system at top level.
+  // Split system and developer messages from the conversation, in their
+  // original order; the IR puts system at top level.
   const conversation: OpenAIMessage[] = [];
   if (Array.isArray(parsed.messages)) {
     for (const m of parsed.messages) {
-      if (m && m.role === 'system') {
+      if (m && (m.role === 'system' || m.role === 'developer')) {
         const text = flattenOpenAIContent(m.content);
         if (text) ir.system.push({ text });
       } else if (m) {
@@ -174,8 +186,12 @@ function parseRequest(body: string): IRRequest {
   }
   if (typeof parsed.temperature === 'number') ir.temperature = parsed.temperature;
   if (typeof parsed.top_p === 'number') ir.topP = parsed.top_p;
-  if (parsed.stop !== undefined) {
-    ir.stopSequences = Array.isArray(parsed.stop) ? parsed.stop : [parsed.stop];
+  if (parsed.stop != null) {
+    // Hand-built bodies send `stop: null` or `""`; neither is a stop sequence,
+    // and the other families reject null or blank entries.
+    const raw: unknown[] = Array.isArray(parsed.stop) ? parsed.stop : [parsed.stop];
+    const stops = raw.filter((s): s is string => typeof s === 'string' && s.trim().length > 0);
+    if (stops.length > 0) ir.stopSequences = stops;
   }
   if (typeof parsed.stream === 'boolean') ir.stream = parsed.stream;
   if (typeof parsed.user === 'string') ir.userId = parsed.user;
@@ -288,9 +304,26 @@ function parseOpenAIUserContent(content: OpenAIMessageContent): IRContentBlock[]
       const url = extractOpenAIImageUrl((part as { image_url: { url: string } | string }).image_url);
       const source = parseImageUrl(url);
       if (source) out.push({ type: 'image', source });
+    } else if (part.type === 'file') {
+      const doc = parseOpenAIFilePart((part as { file?: { filename?: unknown; file_data?: unknown } }).file);
+      if (doc) out.push(doc);
     }
   }
   return out;
+}
+
+/** A file part with inline data (file_id refers to OpenAI's own storage). */
+function parseOpenAIFilePart(
+  file: { filename?: unknown; file_data?: unknown } | undefined,
+): IRDocumentBlock | null {
+  if (!file || typeof file.file_data !== 'string' || !file.file_data) return null;
+  const title = typeof file.filename === 'string' && file.filename ? { title: file.filename } : {};
+  const match = /^data:([^;,]+);base64,(.+)$/.exec(file.file_data);
+  // Chat completions takes PDFs here; bare base64 is one.
+  const source = match
+    ? { kind: 'base64' as const, mediaType: match[1], data: match[2] }
+    : { kind: 'base64' as const, mediaType: 'application/pdf', data: file.file_data };
+  return { type: 'document', source, ...title };
 }
 
 function parseOpenAIAssistantMessage(
@@ -368,19 +401,24 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
 
   // Conversation: each IR message gets translated, possibly splitting into
   // multiple openai messages (tool_result blocks escape into role:'tool').
+  const acceptsImages = openAIAcceptsImages(ctx.dstModel);
   for (const msg of ir.messages) {
-    for (const wire of serializeMessageToOpenAI(msg)) {
+    for (const wire of serializeMessageToOpenAI(msg, ctx.dstModel, acceptsImages)) {
       out.messages!.push(wire);
     }
   }
 
   // Sampling params. OpenAI reasoning models reject max_tokens and
-  // temperature/top_p — fall back to max_completion_tokens and drop
-  // sampling overrides.
-  const dst = getModel(ctx.dstModel);
-  const isReasoningDst = dst?.capabilities.reasoning === true;
+  // temperature/top_p — use max_completion_tokens and drop the sampling
+  // overrides. OpenAI itself takes max_completion_tokens for every model
+  // (max_tokens is deprecated there); the other hosts of this dialect
+  // (DeepSeek, Mistral, OpenRouter, ...) document max_tokens.
+  const isReasoningDst = isOpenAIReasoningModel(ctx.dstModel);
+  const useMaxCompletionTokens =
+    ctx.dstProviderId === 'openai' ||
+    (isReasoningDst && (ctx.dstProviderId == null || ctx.dstProviderId === 'azure_openai'));
   if (typeof ir.maxTokens === 'number') {
-    if (isReasoningDst) out.max_completion_tokens = ir.maxTokens;
+    if (useMaxCompletionTokens) out.max_completion_tokens = ir.maxTokens;
     else out.max_tokens = ir.maxTokens;
   }
   if (typeof ir.temperature === 'number' && !isReasoningDst) {
@@ -445,18 +483,45 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
 }
 
 /**
+ * True for OpenAI reasoning models (o-series, GPT-5 family), which reject
+ * max_tokens and non-default temperature/top_p. Groups accept any model id,
+ * so besides the registry this matches the id itself, also behind
+ * OpenRouter's `openai/` prefix.
+ */
+function isOpenAIReasoningModel(model: string): boolean {
+  const entry = getModel(model);
+  if (entry?.family === 'openai' && entry.capabilities.reasoning) return true;
+  return /^(?:o\d|gpt-5)/i.test(model.replace(/^openai\//i, ''));
+}
+
+/**
  * Translate one IR message into one or more OpenAI messages. tool_result
  * blocks escape the enclosing user message as standalone role:'tool'
  * messages; leftover non-tool blocks stay as a user message.
  */
-function serializeMessageToOpenAI(msg: IRMessage): OpenAIMessage[] {
-  if (msg.role === 'user') return serializeUserMessageToOpenAI(msg);
+function serializeMessageToOpenAI(msg: IRMessage, model: string, acceptsImages: boolean): OpenAIMessage[] {
+  if (msg.role === 'user') return serializeUserMessageToOpenAI(msg, model, acceptsImages);
   return serializeAssistantMessageToOpenAI(msg);
 }
 
-function serializeUserMessageToOpenAI(msg: IRMessage): OpenAIMessage[] {
+/**
+ * Whether the destination model takes image (and so file) input. False only
+ * for a registry entry without vision; the dialect's hosts serve too many
+ * models to judge other ids, so those are assumed to take images.
+ */
+function openAIAcceptsImages(model: string): boolean {
+  return getModel(model)?.capabilities.vision !== false;
+}
+
+function serializeUserMessageToOpenAI(msg: IRMessage, model: string, acceptsImages: boolean): OpenAIMessage[] {
   const out: OpenAIMessage[] = [];
   const userParts: OpenAIContentPart[] = [];
+  // Tool messages take text only. Images and documents a tool returned go
+  // into the user message that follows the tool messages. What the model
+  // can't take is named in the tool text instead of failing the request:
+  // the app resends its tool results with every later turn, so a refusal
+  // here would end the conversation.
+  const toolAttachments: OpenAIContentPart[] = [];
 
   for (const block of msg.content) {
     switch (block.type) {
@@ -468,18 +533,45 @@ function serializeUserMessageToOpenAI(msg: IRMessage): OpenAIMessage[] {
         if (url) userParts.push({ type: 'image_url', image_url: { url } });
         break;
       }
-      case 'tool_result':
-        out.push({
-          role: 'tool',
-          tool_call_id: block.toolUseId,
-          content: flattenIRToolResultContent(block.content),
-        });
+      case 'document':
+        userParts.push(irDocumentToOpenAIPart(block));
         break;
+      case 'tool_result': {
+        const attachments: OpenAIContentPart[] = [];
+        const omitted: string[] = [];
+        if (block.content.kind === 'blocks') {
+          for (const inner of block.content.blocks) {
+            if (inner.type === 'image') {
+              if (acceptsImages) {
+                attachments.push({ type: 'image_url', image_url: { url: irImageSourceToDataUrl(inner.source) } });
+              } else {
+                omitted.push(`[image omitted: ${model} does not accept images]`);
+              }
+            } else if (inner.type === 'document' && inner.source.kind !== 'text') {
+              if (!acceptsImages) {
+                omitted.push(`[document omitted: ${model} does not accept files]`);
+              } else if (inner.source.kind === 'url') {
+                omitted.push('[document omitted: chat completions cannot read a document by URL]');
+              } else {
+                attachments.push(irDocumentToOpenAIPart(inner));
+              }
+            }
+          }
+        }
+        let text = [flattenIRToolResultContent(block.content), ...omitted].filter((t) => t.length > 0).join('\n');
+        if (attachments.length > 0) {
+          if (!text) text = TOOL_ATTACHMENTS_NOTE;
+          toolAttachments.push({ type: 'text', text: `Attachments from tool call ${block.toolUseId}:` }, ...attachments);
+        }
+        out.push({ role: 'tool', tool_call_id: block.toolUseId, content: text });
+        break;
+      }
       // thinking/tool_use inside a user message — drop (invalid for user role)
       default:
         break;
     }
   }
+  userParts.unshift(...toolAttachments);
 
   if (userParts.length > 0) {
     if (userParts.every((p) => p.type === 'text')) {
@@ -523,10 +615,30 @@ function irImageSourceToDataUrl(source: IRImageSource): string {
   return source.url;
 }
 
+/** Stands in for the text of a tool result that returned only attachments. */
+const TOOL_ATTACHMENTS_NOTE = '[The tool returned attachments; they follow in the next user message.]';
+
+/**
+ * A document as a chat-completions content part: inline file data, or text.
+ * Chat completions can't fetch a document by URL.
+ */
+function irDocumentToOpenAIPart(doc: IRDocumentBlock): OpenAIContentPart {
+  const { source } = doc;
+  if (source.kind === 'text') return { type: 'text', text: source.text };
+  if (source.kind === 'url') {
+    throw new TranslationError(
+      'UNSUPPORTED_FEATURE',
+      'OpenAI chat completions cannot read a document by URL; send it inline.',
+    );
+  }
+  const filename = doc.title ?? (source.mediaType === 'application/pdf' ? 'document.pdf' : 'document');
+  return { type: 'file', file: { filename, file_data: `data:${source.mediaType};base64,${source.data}` } };
+}
+
 function flattenIRToolResultContent(content: IRToolResultContent): string {
   if (content.kind === 'text') return content.text;
   return content.blocks
-    .map((b) => (b.type === 'text' ? b.text : ''))
+    .map((b) => (b.type === 'text' ? b.text : b.type === 'document' && b.source.kind === 'text' ? b.source.text : ''))
     .filter((s) => s.length > 0)
     .join('\n');
 }
@@ -544,14 +656,34 @@ function parseResponse(body: string): IRResponseOrError {
     );
   }
 
+  if (typeof parsed.error === 'string') {
+    return {
+      error: {
+        type: 'api_error',
+        message: parsed.error,
+        ...(typeof parsed.code === 'string' && parsed.code ? { code: parsed.code } : {}),
+      },
+    };
+  }
   if (parsed.error) {
     return {
       error: {
         type: parsed.error.type ?? 'api_error',
         message: parsed.error.message ?? 'OpenAI API error',
-        ...(parsed.error.code ? { code: parsed.error.code } : {}),
+        ...(parsed.error.code != null && parsed.error.code !== '' ? { code: String(parsed.error.code) } : {}),
       },
     };
+  }
+  if (!Array.isArray(parsed.choices)) {
+    const detail = parsed.message ?? parsed.detail;
+    if (detail != null) {
+      return {
+        error: {
+          type: typeof parsed.type === 'string' && parsed.type ? parsed.type : 'api_error',
+          message: typeof detail === 'string' ? detail : JSON.stringify(detail),
+        },
+      };
+    }
   }
 
   const choice = parsed.choices?.[0];
@@ -560,6 +692,10 @@ function parseResponse(body: string): IRResponseOrError {
 
   const text = flattenOpenAIContent(message?.content ?? null);
   if (text) blocks.push({ type: 'text', text });
+  // A refusal arrives in message.refusal with content null and finish_reason
+  // 'stop'; surface its text and report it as a refusal, not an empty answer.
+  const refusal = typeof message?.refusal === 'string' && message.refusal.length > 0 ? message.refusal : null;
+  if (refusal && !text) blocks.push({ type: 'text', text: refusal });
 
   if (Array.isArray(message?.tool_calls)) {
     for (const tc of message.tool_calls) {
@@ -578,7 +714,7 @@ function parseResponse(body: string): IRResponseOrError {
     id: parsed.id,
     model: parsed.model,
     content: blocks,
-    stopReason: mapOpenAIFinishToIR(choice?.finish_reason ?? null),
+    stopReason: refusal ? 'refusal' : mapOpenAIFinishToIR(choice?.finish_reason ?? null),
     stopSequence: null,
     usage: {
       inputTokens: parsed.usage?.prompt_tokens ?? 0,
@@ -696,6 +832,7 @@ function createStreamParser(): IRStreamParser {
     textBlockOpen: false,
     toolCalls: new Map<number, ToolCallState>(),
     pendingFinish: null as IRStopReason | null,
+    sawRefusal: false,
     inputTokens: 0,
     outputTokens: 0,
     messageId: '',
@@ -725,7 +862,7 @@ function createStreamParser(): IRStreamParser {
       if (state.started) {
         events.push({
           type: 'message_delta',
-          stopReason: state.pendingFinish ?? 'end_turn',
+          stopReason: finalStopReason(state),
           usage: { inputTokens: state.inputTokens, outputTokens: state.outputTokens },
         });
         events.push({ type: 'message_stop' });
@@ -779,6 +916,8 @@ type OpenAIParseState = {
   textBlockOpen: boolean;
   toolCalls: Map<number, ToolCallState>;
   pendingFinish: IRStopReason | null;
+  /** A refusal streamed in (delta.refusal); finish_reason is still 'stop'. */
+  sawRefusal: boolean;
   inputTokens: number;
   outputTokens: number;
   messageId: string;
@@ -799,7 +938,7 @@ function processOpenAIFrame(
     if (state.started) {
       events.push({
         type: 'message_delta',
-        stopReason: state.pendingFinish ?? 'end_turn',
+        stopReason: finalStopReason(state),
         usage: { inputTokens: state.inputTokens, outputTokens: state.outputTokens },
       });
       events.push({ type: 'message_stop' });
@@ -853,6 +992,10 @@ function processOpenAIFrame(
     if (typeof delta.content === 'string' && delta.content.length > 0) {
       handleTextDelta(state, events, delta.content);
     }
+    if (typeof delta.refusal === 'string' && delta.refusal.length > 0) {
+      handleTextDelta(state, events, delta.refusal);
+      state.sawRefusal = true;
+    }
     if (Array.isArray(delta.tool_calls)) {
       for (const tc of delta.tool_calls) {
         handleToolCallDelta(state, events, tc);
@@ -863,6 +1006,10 @@ function processOpenAIFrame(
   if (choice.finish_reason) {
     state.pendingFinish = mapOpenAIFinishToIR(choice.finish_reason);
   }
+}
+
+function finalStopReason(state: OpenAIParseState): IRStopReason {
+  return state.sawRefusal ? 'refusal' : state.pendingFinish ?? 'end_turn';
 }
 
 function extractOpenAIDataLine(frame: string): string | null {
