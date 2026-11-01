@@ -13,7 +13,7 @@ npm install -g @byoky/bridge
 byoky-bridge install
 ```
 
-`byoky-bridge install` registers the native messaging host with Chrome, Chromium, Brave, and Firefox on macOS and Linux. Windows isn't supported yet.
+`byoky-bridge install` registers the native messaging host with each of Chrome, Chromium, Brave, Edge, Vivaldi and Firefox that is installed, on macOS and Linux. Start a browser once before installing, and run it again after adding a browser. `byoky-bridge uninstall` removes the registrations again. Windows isn't supported yet.
 
 Only the Chrome Web Store extension (and Firefox's `byoky@byoky.com`) may launch the bridge. For an unpacked build of this repo, add `--dev`; for any other ID, pass it:
 

@@ -20,14 +20,15 @@ import {
   type ProviderAuthResult,
 } from 'openclaw/plugin-sdk/core';
 import { createServer } from 'node:http';
-import { writeFileSync, mkdirSync, existsSync, chmodSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir, platform } from 'node:os';
 import { createRequire } from 'node:module';
 // Bundled into dist at build time (see tsup.config.ts), so the plugin and
-// `byoky-bridge install` share one allow-list and one token file.
-import { HOST_NAME, buildManifest } from '@byoky/bridge/native-manifest';
+// `byoky-bridge install` share one allow-list, one set of browser
+// locations and one token file.
+import { getRegistrationStatusAt, registerHostAt } from '@byoky/bridge/native-manifest';
 import { loadOrCreateToken } from '@byoky/bridge/token';
 import {
   cleanPageMessage, createPageNonce, isFromPage, isPageHost, sameSecret,
@@ -329,42 +330,12 @@ const byokyPlugin = {
 
 export default byokyPlugin;
 
-// --- Native messaging host registration (inline, scanner-safe) ---
+// --- Native messaging host registration (scanner-safe) ---
 //
-// Duplicates the minimal subset of @byoky/bridge/installer needed here.
-// We avoid importing the installer so OpenClaw's plugin sandbox doesn't see
-// child_process / os-specific env lookups in the same module as `fetch`
-// (its scanner flags those combinations). The manifest itself comes from
-// @byoky/bridge/native-manifest, which has neither.
-
-interface ManifestLocation {
-  browser: string;
-  path: string;
-  type: 'chrome' | 'firefox';
-}
-
-function getManifestLocations(): ManifestLocation[] {
-  const home = homedir();
-  const os = platform();
-
-  if (os === 'darwin') {
-    return [
-      { browser: 'Chrome', path: `${home}/Library/Application Support/Google/Chrome/NativeMessagingHosts/${HOST_NAME}.json`, type: 'chrome' },
-      { browser: 'Chromium', path: `${home}/Library/Application Support/Chromium/NativeMessagingHosts/${HOST_NAME}.json`, type: 'chrome' },
-      { browser: 'Brave', path: `${home}/Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts/${HOST_NAME}.json`, type: 'chrome' },
-      { browser: 'Firefox', path: `${home}/Library/Application Support/Mozilla/NativeMessagingHosts/${HOST_NAME}.json`, type: 'firefox' },
-    ];
-  }
-  if (os === 'linux') {
-    return [
-      { browser: 'Chrome', path: `${home}/.config/google-chrome/NativeMessagingHosts/${HOST_NAME}.json`, type: 'chrome' },
-      { browser: 'Chromium', path: `${home}/.config/chromium/NativeMessagingHosts/${HOST_NAME}.json`, type: 'chrome' },
-      { browser: 'Firefox', path: `${home}/.mozilla/native-messaging-hosts/${HOST_NAME}.json`, type: 'firefox' },
-    ];
-  }
-  // Windows isn't supported yet: it needs registry keys and a non-bash wrapper.
-  return [];
-}
+// We avoid importing @byoky/bridge/installer so OpenClaw's plugin sandbox
+// doesn't see child_process in the same module as `fetch` (its scanner flags
+// that combination). @byoky/bridge/native-manifest, which does the actual
+// registration, has neither.
 
 function resolveBridgeBin(): string {
   // Prefer @byoky/bridge's shipped bin when the package is installed alongside
@@ -378,52 +349,12 @@ function resolveBridgeBin(): string {
   }
 }
 
-function createNativeWrapper(hostPath: string, manifestDir: string): string {
-  // Minimal bash wrapper. We use process.execPath (the running node binary)
-  // and do NOT inherit the user's PATH — Chrome launches native hosts with a
-  // minimal PATH, and inheriting the user's is a known injection risk.
-  const nodePath = process.execPath;
-  const wrapperPath = resolve(manifestDir, 'byoky-bridge-host');
-  const nodeDir = dirname(nodePath);
-  const safePath = `${nodeDir}:/usr/local/bin:/usr/bin:/bin`;
-  const script = [
-    '#!/bin/bash',
-    `export PATH='${safePath}'`,
-    `exec '${nodePath.replace(/'/g, "'\\''")}' '${hostPath.replace(/'/g, "'\\''")}' host "$@"`,
-    '',
-  ].join('\n');
-  writeFileSync(wrapperPath, script);
-  chmodSync(wrapperPath, 0o755);
-  return wrapperPath;
-}
-
 function getRegistrationStatus(): { registered: string[]; missing: string[] } {
-  const registered: string[] = [];
-  const missing: string[] = [];
-  for (const loc of getManifestLocations()) {
-    (existsSync(loc.path) ? registered : missing).push(loc.browser);
-  }
-  return { registered, missing };
+  return getRegistrationStatusAt(homedir(), platform());
 }
 
 function registerHost(): { browsers: string[]; unsupported?: boolean } {
-  const locations = getManifestLocations();
-  if (locations.length === 0) return { browsers: [], unsupported: true };
-  const bridgeBin = resolveBridgeBin();
-  const browsers: string[] = [];
-  for (const loc of locations) {
-    try {
-      const manifestDir = dirname(loc.path);
-      mkdirSync(manifestDir, { recursive: true });
-      const wrapperPath = createNativeWrapper(bridgeBin, manifestDir);
-      const manifest = buildManifest(wrapperPath, loc.type);
-      writeFileSync(loc.path, JSON.stringify(manifest, null, 2));
-      browsers.push(loc.browser);
-    } catch {
-      // Browser directory unwritable or missing — skip.
-    }
-  }
-  return { browsers };
+  return registerHostAt(homedir(), platform(), resolveBridgeBin());
 }
 
 // --- Bridge health check ---
