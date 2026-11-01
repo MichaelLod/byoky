@@ -122,7 +122,7 @@ interface GeminiGenerationConfig {
 
 interface GeminiResponse {
   candidates?: GeminiCandidate[];
-  promptFeedback?: { blockReason?: string };
+  promptFeedback?: { blockReason?: string; blockReasonMessage?: string };
   usageMetadata?: {
     promptTokenCount?: number;
     candidatesTokenCount?: number;
@@ -695,6 +695,9 @@ function parseResponse(body: string): IRResponseOrError {
   const blocks: IRResponseBlock[] = [];
   let hasToolUse = false;
   let toolCallIndex = 0;
+  // A blocked prompt comes back with no candidate, only promptFeedback.
+  const blocked = !candidate ? promptBlockedText(parsed.promptFeedback) : null;
+  if (blocked) blocks.push({ type: 'text', text: blocked });
 
   if (candidate?.content?.parts) {
     for (const part of candidate.content.parts) {
@@ -721,13 +724,18 @@ function parseResponse(body: string): IRResponseOrError {
     id: parsed.responseId,
     model: parsed.modelVersion,
     content: blocks,
-    stopReason: mapGeminiFinishToIR(candidate?.finishReason, hasToolUse),
+    stopReason: blocked ? 'refusal' : mapGeminiFinishToIR(candidate?.finishReason, hasToolUse),
     stopSequence: null,
     usage: {
       inputTokens,
       outputTokens: candidateTokens + thoughtsTokens,
     },
   };
+}
+
+function promptBlockedText(feedback: GeminiResponse['promptFeedback']): string | null {
+  if (!feedback?.blockReason) return null;
+  return feedback.blockReasonMessage || `Prompt blocked: ${feedback.blockReason}`;
 }
 
 let upstreamCallCounter = 0;
@@ -972,7 +980,19 @@ function processGeminiFrame(
   }
 
   const candidate = data.candidates?.[0];
-  if (!candidate) return;
+  if (!candidate) {
+    const blocked = promptBlockedText(data.promptFeedback);
+    if (blocked) {
+      if (!state.textBlockOpen) {
+        state.textBlockIndex = state.nextBlockIndex++;
+        state.textBlockOpen = true;
+        events.push({ type: 'content_block_start', index: state.textBlockIndex, block: { type: 'text' } });
+      }
+      events.push({ type: 'text_delta', index: state.textBlockIndex!, text: blocked });
+      state.pendingFinish = 'refusal';
+    }
+    return;
+  }
 
   if (Array.isArray(candidate.content?.parts)) {
     for (const part of candidate.content.parts) {

@@ -355,3 +355,33 @@ describe('openaiAdapter.serializeRequest — reasoning models and max_completion
     expect(out.temperature).toBe(0.3);
   });
 });
+
+describe('openaiAdapter — refusals', () => {
+  it('parseResponse surfaces message.refusal as text with stopReason refusal', () => {
+    const ir = openaiAdapter.parseResponse(
+      JSON.stringify({
+        id: 'c1',
+        choices: [{ index: 0, message: { role: 'assistant', content: null, refusal: "I'm sorry, I can't help." }, finish_reason: 'stop' }],
+      }),
+    );
+    expect(ir).toMatchObject({
+      content: [{ type: 'text', text: "I'm sorry, I can't help." }],
+      stopReason: 'refusal',
+    });
+  });
+
+  it('the stream parser surfaces delta.refusal and ends with stopReason refusal', () => {
+    const parser = openaiAdapter.createStreamParser();
+    const events = [
+      ...parser.process(
+        'data: {"id":"c1","choices":[{"index":0,"delta":{"role":"assistant","content":null,"refusal":""}}]}\n\n' +
+          'data: {"id":"c1","choices":[{"index":0,"delta":{"refusal":"I\'m sorry"}}]}\n\n' +
+          'data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n' +
+          'data: [DONE]\n\n',
+      ),
+      ...parser.flush(),
+    ];
+    expect(events.filter((e) => e.type === 'text_delta')).toEqual([{ type: 'text_delta', index: 0, text: "I'm sorry" }]);
+    expect(events.find((e) => e.type === 'message_delta')).toMatchObject({ stopReason: 'refusal' });
+  });
+});

@@ -627,3 +627,36 @@ describe('cross-family dispatch — Gemini 3 thought signatures', () => {
     expect(JSON.stringify(out)).not.toContain('thoughtSignature');
   });
 });
+
+describe('cross-family dispatch — refusals and blocked prompts', () => {
+  it('an OpenAI refusal reaches an Anthropic app as stop_reason refusal with its text', () => {
+    const out = JSON.parse(
+      translateResponse(
+        ctx('anthropic', 'openai'),
+        JSON.stringify({
+          id: 'c1',
+          model: 'gpt-5.5',
+          choices: [{ index: 0, message: { role: 'assistant', content: null, refusal: "I'm sorry." }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 5, completion_tokens: 3 },
+        }),
+      ),
+    );
+    expect(out.stop_reason).toBe('refusal');
+    expect(out.content).toEqual([{ type: 'text', text: "I'm sorry." }]);
+  });
+
+  it('a blocked Gemini prompt reaches an OpenAI app as content_filter', () => {
+    const out = JSON.parse(
+      translateResponse(ctx('openai', 'gemini'), JSON.stringify({ promptFeedback: { blockReason: 'SAFETY' } })),
+    );
+    expect(out.choices[0].finish_reason).toBe('content_filter');
+    expect(out.choices[0].message.content).toBe('Prompt blocked: SAFETY');
+  });
+
+  it('a blocked Gemini prompt in a stream reaches an Anthropic app as a refusal', () => {
+    const t = createStreamTranslator({ ...ctx('anthropic', 'gemini'), isStreaming: true });
+    const out = t.process('data: {"promptFeedback":{"blockReason":"SAFETY"},"responseId":"r1"}\n\n') + t.flush();
+    expect(out).toContain('"stop_reason":"refusal"');
+    expect(out).toContain('Prompt blocked: SAFETY');
+  });
+});

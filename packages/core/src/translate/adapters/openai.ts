@@ -583,6 +583,10 @@ function parseResponse(body: string): IRResponseOrError {
 
   const text = flattenOpenAIContent(message?.content ?? null);
   if (text) blocks.push({ type: 'text', text });
+  // A refusal arrives in message.refusal with content null and finish_reason
+  // 'stop'; surface its text and report it as a refusal, not an empty answer.
+  const refusal = typeof message?.refusal === 'string' && message.refusal.length > 0 ? message.refusal : null;
+  if (refusal && !text) blocks.push({ type: 'text', text: refusal });
 
   if (Array.isArray(message?.tool_calls)) {
     for (const tc of message.tool_calls) {
@@ -601,7 +605,7 @@ function parseResponse(body: string): IRResponseOrError {
     id: parsed.id,
     model: parsed.model,
     content: blocks,
-    stopReason: mapOpenAIFinishToIR(choice?.finish_reason ?? null),
+    stopReason: refusal ? 'refusal' : mapOpenAIFinishToIR(choice?.finish_reason ?? null),
     stopSequence: null,
     usage: {
       inputTokens: parsed.usage?.prompt_tokens ?? 0,
@@ -719,6 +723,7 @@ function createStreamParser(): IRStreamParser {
     textBlockOpen: false,
     toolCalls: new Map<number, ToolCallState>(),
     pendingFinish: null as IRStopReason | null,
+    sawRefusal: false,
     inputTokens: 0,
     outputTokens: 0,
     messageId: '',
@@ -748,7 +753,7 @@ function createStreamParser(): IRStreamParser {
       if (state.started) {
         events.push({
           type: 'message_delta',
-          stopReason: state.pendingFinish ?? 'end_turn',
+          stopReason: finalStopReason(state),
           usage: { inputTokens: state.inputTokens, outputTokens: state.outputTokens },
         });
         events.push({ type: 'message_stop' });
@@ -802,6 +807,8 @@ type OpenAIParseState = {
   textBlockOpen: boolean;
   toolCalls: Map<number, ToolCallState>;
   pendingFinish: IRStopReason | null;
+  /** A refusal streamed in (delta.refusal); finish_reason is still 'stop'. */
+  sawRefusal: boolean;
   inputTokens: number;
   outputTokens: number;
   messageId: string;
@@ -822,7 +829,7 @@ function processOpenAIFrame(
     if (state.started) {
       events.push({
         type: 'message_delta',
-        stopReason: state.pendingFinish ?? 'end_turn',
+        stopReason: finalStopReason(state),
         usage: { inputTokens: state.inputTokens, outputTokens: state.outputTokens },
       });
       events.push({ type: 'message_stop' });
@@ -876,6 +883,10 @@ function processOpenAIFrame(
     if (typeof delta.content === 'string' && delta.content.length > 0) {
       handleTextDelta(state, events, delta.content);
     }
+    if (typeof delta.refusal === 'string' && delta.refusal.length > 0) {
+      handleTextDelta(state, events, delta.refusal);
+      state.sawRefusal = true;
+    }
     if (Array.isArray(delta.tool_calls)) {
       for (const tc of delta.tool_calls) {
         handleToolCallDelta(state, events, tc);
@@ -886,6 +897,10 @@ function processOpenAIFrame(
   if (choice.finish_reason) {
     state.pendingFinish = mapOpenAIFinishToIR(choice.finish_reason);
   }
+}
+
+function finalStopReason(state: OpenAIParseState): IRStopReason {
+  return state.sawRefusal ? 'refusal' : state.pendingFinish ?? 'end_turn';
 }
 
 function extractOpenAIDataLine(frame: string): string | null {

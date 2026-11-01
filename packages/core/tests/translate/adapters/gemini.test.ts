@@ -697,3 +697,20 @@ describe('geminiAdapter — function call ids', () => {
     expect(block.type === 'tool_use' && block.id.length).toBeLessThanOrEqual(40);
   });
 });
+
+describe('geminiAdapter — blocked prompts', () => {
+  it('parseResponse reports a blocked prompt as a refusal', () => {
+    const ir = geminiAdapter.parseResponse(JSON.stringify({ promptFeedback: { blockReason: 'SAFETY' } }));
+    expect(ir).toMatchObject({ content: [{ type: 'text', text: 'Prompt blocked: SAFETY' }], stopReason: 'refusal' });
+  });
+
+  it('the stream parser reports a blocked prompt as a refusal', () => {
+    const parser = geminiAdapter.createStreamParser();
+    const events = [
+      ...parser.process('data: {"promptFeedback":{"blockReason":"PROHIBITED_CONTENT"},"responseId":"r1"}\n\n'),
+      ...parser.flush(),
+    ];
+    expect(events.find((e) => e.type === 'text_delta')).toMatchObject({ text: 'Prompt blocked: PROHIBITED_CONTENT' });
+    expect(events.find((e) => e.type === 'message_delta')).toMatchObject({ stopReason: 'refusal' });
+  });
+});
