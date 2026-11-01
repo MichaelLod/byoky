@@ -586,6 +586,29 @@ ${systemText}
       maxOutput: 128e3,
       capabilities: FRONTIER
     },
+    // GPT-6 (model pages checked 2026-11-01): Astra reasons at low..max and
+    // can't turn reasoning off; Luna at none..max. On Chat Completions, the
+    // only OpenAI API Byoky speaks, Luna calls tools with reasoning off and
+    // Astra not at all ("tool calling requires Responses"; see the OpenAI
+    // adapter's ALWAYS_REASONING), so Astra is marked without tools.
+    {
+      id: "gpt-6-astra",
+      providerId: "openai",
+      family: "openai",
+      displayName: "GPT-6 Astra",
+      contextWindow: 105e4,
+      maxOutput: 128e3,
+      capabilities: { ...FRONTIER, tools: false, toolChoice: false, parallelToolCalls: false }
+    },
+    {
+      id: "gpt-6-luna",
+      providerId: "openai",
+      family: "openai",
+      displayName: "GPT-6 Luna",
+      contextWindow: 105e4,
+      maxOutput: 128e3,
+      capabilities: FRONTIER
+    },
     {
       id: "gpt-5.4",
       providerId: "openai",
@@ -677,6 +700,123 @@ ${systemText}
     return MODELS.filter((m) => m.providerId === providerId);
   }
 
+  // src/translate/errors.ts
+  var ANTHROPIC_TYPE_STATUS = {
+    invalid_request_error: 400,
+    authentication_error: 401,
+    billing_error: 402,
+    permission_error: 403,
+    not_found_error: 404,
+    conflict_error: 409,
+    request_too_large: 413,
+    rate_limit_error: 429,
+    api_error: 500,
+    timeout_error: 504,
+    overloaded_error: 529
+  };
+  var OPENAI_TYPE_STATUS = {
+    invalid_request_error: 400,
+    insufficient_quota: 429,
+    rate_limit_error: 429,
+    server_error: 500,
+    service_unavailable_error: 503
+  };
+  var GEMINI_STATUS_HTTP = {
+    INVALID_ARGUMENT: 400,
+    FAILED_PRECONDITION: 400,
+    OUT_OF_RANGE: 400,
+    UNAUTHENTICATED: 401,
+    PERMISSION_DENIED: 403,
+    NOT_FOUND: 404,
+    ABORTED: 409,
+    ALREADY_EXISTS: 409,
+    RESOURCE_EXHAUSTED: 429,
+    CANCELLED: 499,
+    UNKNOWN: 500,
+    INTERNAL: 500,
+    DATA_LOSS: 500,
+    UNIMPLEMENTED: 501,
+    UNAVAILABLE: 503,
+    DEADLINE_EXCEEDED: 504
+  };
+  var GEMINI_HTTP_STATUS = {
+    400: "INVALID_ARGUMENT",
+    401: "UNAUTHENTICATED",
+    403: "PERMISSION_DENIED",
+    404: "NOT_FOUND",
+    409: "ABORTED",
+    429: "RESOURCE_EXHAUSTED",
+    499: "CANCELLED",
+    500: "INTERNAL",
+    501: "UNIMPLEMENTED",
+    503: "UNAVAILABLE",
+    504: "DEADLINE_EXCEEDED",
+    // Anthropic's "overloaded".
+    529: "UNAVAILABLE"
+  };
+  var own = (table, key) => Object.prototype.hasOwnProperty.call(table, key);
+  function httpErrorStatus(value) {
+    return typeof value === "number" && Number.isInteger(value) && value >= 400 && value <= 599 ? value : void 0;
+  }
+  function errorStatus(error) {
+    const status = httpErrorStatus(error.status);
+    if (status !== void 0) return status;
+    const type = error.type;
+    if (own(ANTHROPIC_TYPE_STATUS, type)) return ANTHROPIC_TYPE_STATUS[type];
+    if (own(OPENAI_TYPE_STATUS, type)) return OPENAI_TYPE_STATUS[type];
+    if (own(GEMINI_STATUS_HTTP, type)) return GEMINI_STATUS_HTTP[type];
+    return void 0;
+  }
+  function anthropicErrorType(error) {
+    const status = errorStatus(error);
+    switch (status) {
+      case void 0:
+        return "api_error";
+      case 400:
+        return "invalid_request_error";
+      case 401:
+        return "authentication_error";
+      case 402:
+        return "billing_error";
+      case 403:
+        return "permission_error";
+      case 404:
+        return "not_found_error";
+      case 409:
+        return "conflict_error";
+      case 413:
+        return "request_too_large";
+      case 429:
+        return "rate_limit_error";
+      case 504:
+        return "timeout_error";
+      // A provider out of capacity (Gemini's UNAVAILABLE, OpenAI's
+      // server_is_overloaded) is what overloaded_error describes.
+      case 503:
+      case 529:
+        return "overloaded_error";
+      default:
+        return status < 500 ? "invalid_request_error" : "api_error";
+    }
+  }
+  function openaiErrorType(error) {
+    const status = errorStatus(error);
+    if (status === void 0) return "server_error";
+    if (status === 429) return "rate_limit_error";
+    if (status === 503 || status === 529) return "service_unavailable_error";
+    return status < 500 ? "invalid_request_error" : "server_error";
+  }
+  function openaiErrorCode(error) {
+    return error.code && !/^\d+$/.test(error.code) ? error.code : null;
+  }
+  function geminiError(error) {
+    const status = errorStatus(error) ?? 500;
+    return {
+      code: status,
+      status: GEMINI_HTTP_STATUS[status] ?? (status < 500 ? "INVALID_ARGUMENT" : "INTERNAL")
+    };
+  }
+
   // src/translate/adapters/anthropic.ts
   var CHAT_ENDPOINT = "/v1/messages";
   var anthropicAdapter = {
@@ -696,6 +836,7 @@ ${systemText}
     parseRequest,
     serializeRequest,
     shapeRequestForModel,
+    recognizesModel,
     parseResponse,
     serializeResponse,
     createStreamParser,
@@ -946,22 +1087,58 @@ ${systemText}
   }
   var MIN_THINKING_BUDGET = 1024;
   var DEFAULT_THINKING_BUDGET = 8192;
-  function claudeRequestRules(model) {
+  var CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+  function parseClaudeId(model) {
     const id = model.toLowerCase();
     const named = /claude-(opus|sonnet|haiku|fable|mythos)-(\d+)(?:[-.](\d{1,2})(?!\d))?/.exec(id);
-    const legacy = named ? null : /claude-(\d+)(?:[-.](\d)(?!\d))?-(?:opus|sonnet|haiku)/.exec(id);
-    const version = named ? [named[2], named[3]] : legacy ? [legacy[1], legacy[2]] : null;
-    if (!version) return { sampling: "single", thinking: "adaptive", forcedToolChoice: true };
-    const major = Number(version[0]);
-    const minor = Number(version[1] ?? 0);
-    const atLeast = (maj, min) => major > maj || major === maj && minor >= min;
-    if (named && (named[1] === "fable" || named[1] === "mythos")) {
-      return { sampling: "none", thinking: "adaptive", forcedToolChoice: !atLeast(5, 1) };
+    if (named) return { line: named[1], major: Number(named[2]), minor: Number(named[3] ?? 0), named: true };
+    const legacy = /claude-(\d+)(?:[-.](\d)(?!\d))?-(opus|sonnet|haiku)/.exec(id);
+    if (legacy) return { line: legacy[3], major: Number(legacy[1]), minor: Number(legacy[2] ?? 0), named: false };
+    return null;
+  }
+  function claudeRequestRules(model) {
+    const claude = parseClaudeId(model);
+    if (!claude) {
+      return {
+        sampling: "single",
+        thinking: "adaptive",
+        forcedToolChoice: true,
+        thinkingOff: null,
+        thinkingOffUpToHigh: false,
+        efforts: null
+      };
     }
-    const forcedToolChoice = !(named && (named[1] === "opus" || named[1] === "sonnet") && atLeast(5, 5));
-    if (atLeast(4, 7)) return { sampling: "none", thinking: "adaptive", forcedToolChoice };
-    if (major === 4 && minor === 6) return { sampling: "single", thinking: "either", forcedToolChoice };
-    return { sampling: "single", thinking: "budget", forcedToolChoice };
+    const { line, major, minor, named } = claude;
+    const atLeast = (maj, min) => major > maj || major === maj && minor >= min;
+    const efforts = atLeast(4, 7) ? CLAUDE_EFFORTS : major === 4 && minor === 6 ? ["low", "medium", "high", "max"] : named && line === "opus" && major === 4 && minor === 5 ? ["low", "medium", "high"] : [];
+    if (named && (line === "fable" || line === "mythos")) {
+      return {
+        sampling: "none",
+        thinking: "adaptive",
+        forcedToolChoice: !atLeast(5, 1),
+        thinkingOff: atLeast(5, 0) ? "never" : "disabled",
+        thinkingOffUpToHigh: false,
+        efforts
+      };
+    }
+    const forcedToolChoice = !(named && (line === "opus" || line === "sonnet") && atLeast(5, 5));
+    let thinkingOff = "disabled";
+    let thinkingOffUpToHigh = false;
+    if (named && atLeast(5, 0)) {
+      if (line === "opus") {
+        thinkingOff = atLeast(5, 5) ? "never" : "disabled";
+        thinkingOffUpToHigh = true;
+      } else if (line === "sonnet" && atLeast(5, 5)) {
+        thinkingOff = "between_tools";
+        thinkingOffUpToHigh = true;
+      } else if (line === "haiku" && atLeast(5, 5)) {
+        thinkingOffUpToHigh = true;
+      }
+    }
+    const off = { forcedToolChoice, thinkingOff, thinkingOffUpToHigh, efforts };
+    if (atLeast(4, 7)) return { sampling: "none", thinking: "adaptive", ...off };
+    if (major === 4 && minor === 6) return { sampling: "single", thinking: "either", ...off };
+    return { sampling: "single", thinking: "budget", ...off };
   }
   function claudeSampling(rules, thinking, requested) {
     if (rules.sampling === "none") return {};
@@ -999,6 +1176,21 @@ ${systemText}
       } else if (thinking.type === "adaptive" && rules.thinking === "budget") {
         delete body.thinking;
       }
+    } else if (isRecord(thinking) && (thinking.type === "disabled" || thinking.type === "between_tools")) {
+      if (rules.thinkingOff === "never") delete body.thinking;
+      else if (rules.thinkingOff && thinking.type !== rules.thinkingOff) body.thinking = { type: rules.thinkingOff };
+    }
+    const outputConfig = body.output_config;
+    if (isRecord(outputConfig) && typeof outputConfig.effort === "string") {
+      const effort = claudeEffort(outputConfig.effort, rules, body.thinking);
+      if (effort === null) {
+        const rest = { ...outputConfig };
+        delete rest.effort;
+        if (Object.keys(rest).length > 0) body.output_config = rest;
+        else delete body.output_config;
+      } else if (effort !== outputConfig.effort) {
+        body.output_config = { ...outputConfig, effort };
+      }
     }
     const thinkingOn = isRecord(body.thinking) && (body.thinking.type === "enabled" || body.thinking.type === "adaptive");
     const requested = {
@@ -1010,6 +1202,21 @@ ${systemText}
     if (requested.temperature !== void 0 && kept.temperature === void 0) delete body.temperature;
     if (requested.topP !== void 0 && kept.topP === void 0) delete body.top_p;
     if (requested.topK !== void 0 && kept.topK === void 0) delete body.top_k;
+  }
+  function claudeEffort(requested, rules, thinking) {
+    let level = CLAUDE_EFFORTS.indexOf(requested);
+    if (level < 0) return requested;
+    const off = isRecord(thinking) && (thinking.type === "disabled" || thinking.type === "between_tools");
+    if (off && rules.thinkingOffUpToHigh) level = Math.min(level, CLAUDE_EFFORTS.indexOf("high"));
+    if (rules.efforts === null) return CLAUDE_EFFORTS[level];
+    if (rules.efforts.length === 0) return null;
+    for (let i = level; i >= 0; i--) {
+      if (rules.efforts.includes(CLAUDE_EFFORTS[i])) return CLAUDE_EFFORTS[i];
+    }
+    return rules.efforts[0];
+  }
+  function recognizesModel(model) {
+    return parseClaudeId(model) !== null;
   }
   function isRecord(value) {
     return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -1177,7 +1384,7 @@ ${text}`;
     if (isIRError(ir)) {
       return JSON.stringify({
         type: "error",
-        error: { type: ir.error.type, message: ir.error.message }
+        error: { type: anthropicErrorType(ir.error), message: ir.error.message }
       });
     }
     const content = [];
@@ -1498,7 +1705,7 @@ ${text}`;
         state.done = true;
         return emitFrame("error", {
           type: "error",
-          error: { type: event.error.type, message: event.error.message }
+          error: { type: anthropicErrorType(event.error), message: event.error.message }
         });
     }
   }
@@ -1982,7 +2189,8 @@ data: ${JSON.stringify(data)}
         error: {
           type: parsed.error.type ?? "api_error",
           message: parsed.error.message ?? "OpenAI API error",
-          ...parsed.error.code != null && parsed.error.code !== "" ? { code: String(parsed.error.code) } : {}
+          ...parsed.error.code != null && parsed.error.code !== "" ? { code: String(parsed.error.code) } : {},
+          ...typeof parsed.status === "number" ? { status: parsed.status } : {}
         }
       };
     }
@@ -2033,8 +2241,8 @@ data: ${JSON.stringify(data)}
       return JSON.stringify({
         error: {
           message: ir.error.message,
-          type: ir.error.type,
-          code: ir.error.code ?? null
+          type: openaiErrorType(ir.error),
+          code: openaiErrorCode(ir.error)
         }
       });
     }
@@ -2403,8 +2611,8 @@ data: ${JSON.stringify(data)}
         const errChunk = {
           error: {
             message: event.error.message,
-            type: event.error.type,
-            code: event.error.code ?? null
+            type: openaiErrorType(event.error),
+            code: openaiErrorCode(event.error)
           }
         };
         return `data: ${JSON.stringify(errChunk)}
@@ -2469,6 +2677,7 @@ data: [DONE]
       const suffix = stream ? "?alt=sse" : "";
       return `${b}/v1beta/models/${encodeURIComponent(model)}:${method}${suffix}`;
     },
+    rewriteUrlModel,
     parseRequest: parseRequest3,
     serializeRequest: serializeRequest3,
     parseResponse: parseResponse3,
@@ -2476,6 +2685,14 @@ data: [DONE]
     createStreamParser: createStreamParser3,
     createStreamSerializer: createStreamSerializer3
   };
+  function rewriteUrlModel(url, model) {
+    const end = url.search(/[?#]/);
+    const path = end < 0 ? url : url.slice(0, end);
+    const rest = end < 0 ? "" : url.slice(end);
+    const match = /^(https?:\/\/[^/?#]+(?:\/[^?#]*)?\/models\/)[^/?#:]+(:(?:streamGenerateContent|generateContent|countTokens))$/.exec(path);
+    if (!match) return null;
+    return `${match[1]}${encodeURIComponent(model)}${match[2]}${rest}`;
+  }
   function parseRequest3(body) {
     let parsed;
     try {
@@ -2897,7 +3114,7 @@ data: [DONE]
         error: {
           type: parsed.error.status ?? "api_error",
           message: parsed.error.message ?? "Gemini API error",
-          ...typeof parsed.error.code === "number" ? { code: String(parsed.error.code) } : {}
+          ...typeof parsed.error.code === "number" ? { code: String(parsed.error.code), status: parsed.error.code } : {}
         }
       };
     }
@@ -2951,13 +3168,8 @@ data: [DONE]
   }
   function serializeResponse3(ctx, ir) {
     if (isIRError(ir)) {
-      return JSON.stringify({
-        error: {
-          code: ir.error.code ? Number(ir.error.code) || 500 : 500,
-          message: ir.error.message,
-          status: ir.error.type
-        }
-      });
+      const { code, status } = geminiError(ir.error);
+      return JSON.stringify({ error: { code, message: ir.error.message, status } });
     }
     const parts = [];
     for (const block of ir.content) {
@@ -3094,7 +3306,8 @@ data: [DONE]
         type: "error",
         error: {
           type: data.error.status ?? "api_error",
-          message: data.error.message ?? "Gemini stream error"
+          message: data.error.message ?? "Gemini stream error",
+          ...typeof data.error.code === "number" ? { status: data.error.code } : {}
         }
       });
       return;
@@ -3291,13 +3504,7 @@ data: [DONE]
               state.done = true;
               break;
             case "error":
-              out += emitFrame2({
-                error: {
-                  code: 500,
-                  message: event.error.message,
-                  status: event.error.type
-                }
-              });
+              out += emitFrame2({ error: { ...geminiError(event.error), message: event.error.message } });
               state.done = true;
               break;
           }
@@ -4188,9 +4395,10 @@ data: [DONE]
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return body;
     const request = parsed;
     if (request.model === ctx.dstModel) return body;
-    request.model = ctx.dstModel;
     const family = familyOf(ctx.dstProviderId);
     const adapter = family && hasAdapter(family) ? getAdapter(family) : void 0;
+    if (adapter?.rewriteUrlModel?.(ctx.url, ctx.dstModel) != null) return body;
+    request.model = ctx.dstModel;
     if (adapter?.shapeRequestForModel && adapter.matchesChatEndpoint(ctx.url)) {
       adapter.shapeRequestForModel(request, { dstModel: ctx.dstModel, dstProviderId: ctx.dstProviderId });
     }
@@ -4202,7 +4410,7 @@ data: [DONE]
     const ir = dst.parseResponse(body);
     return src.serializeResponse(ctx, ir);
   }
-  function translateErrorResponse(ctx, body) {
+  function translateErrorResponse(ctx, body, status) {
     const dst = getAdapter(ctx.dstFamily);
     const src = getAdapter(ctx.srcFamily);
     let ir;
@@ -4212,6 +4420,9 @@ data: [DONE]
       return null;
     }
     if (!isIRError(ir)) return null;
+    if (typeof status === "number" && Number.isInteger(status) && status >= 400 && status <= 599) {
+      ir = { error: { ...ir.error, status } };
+    }
     return src.serializeResponse(ctx, ir);
   }
   function createStreamTranslator(ctx) {
@@ -4582,9 +4793,9 @@ data: [DONE]
       const map = JSON.parse(mapJson);
       return rewriteToolNamesInJSONBody(body, map);
     },
-    translateErrorResponse(ctxJson, body) {
+    translateErrorResponse(ctxJson, body, status) {
       const ctx = JSON.parse(ctxJson);
-      return translateErrorResponse(ctx, body);
+      return translateErrorResponse(ctx, body, typeof status === "number" ? status : void 0);
     },
     autoRouteModelFor(providerId) {
       return autoRouteModelFor(providerId) ?? null;
