@@ -24,6 +24,32 @@ write_store_notes() {
   fi
 }
 
+# What happened in each store, for the summary at the end.
+STORE_RESULTS=()
+store_result() { STORE_RESULTS+=("$1: $2"); }
+
+# Uploads an .ipa (ios) or .pkg (macos) to App Store Connect.
+asc_upload() {
+  xcrun altool --upload-app --file "$1" --type "$2" \
+    --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" 2>&1
+}
+
+# Runs submit-appstore.mjs <platform> <version> [minutes to wait for the
+# build], and sets ASC_CODE to its exit code and ASC_RESULT to what that
+# means (codes documented in submit-appstore.mjs).
+appstore_submit() {
+  ASC_CODE=0
+  ASC_BUILD_WAIT_MIN="${3:-${ASC_BUILD_WAIT_MIN:-40}}" \
+    node scripts/submit-appstore.mjs "$2" "$1" "$STORE_NOTES_FILE" 2>&1 || ASC_CODE=$?
+  case "$ASC_CODE" in
+    0) ASC_RESULT="submitted for review (or already in review)" ;;
+    2) ASC_RESULT="PENDING: the build is still processing; submit it with ./scripts/release.sh retry" ;;
+    3) ASC_RESULT="NO BUILD in App Store Connect; ./scripts/release.sh retry uploads it again" ;;
+    4) ASC_RESULT="PENDING: another version is in review; ./scripts/release.sh retry once it's through" ;;
+    *) ASC_RESULT="FAILED (see the log above)" ;;
+  esac
+}
+
 # ============================================================
 # Status check mode
 # ============================================================
@@ -101,12 +127,33 @@ if [ "${1:-}" = "retry" ]; then
     fi
   fi
 
-  # App Store (iOS)
+  # App Store (iOS + macOS): a quick look first; a build App Store Connect
+  # never got is uploaded again, and one still processing is waited for.
   if [ -n "${ASC_KEY_ID:-}" ] && [ -n "${ASC_ISSUER_ID:-}" ]; then
-    echo "App Store: checking..."
-    node scripts/submit-appstore.mjs "$NATIVE_VERSION" IOS "$STORE_NOTES_FILE" 2>&1 || true
-    node scripts/submit-appstore.mjs "$NATIVE_VERSION" MAC_OS "$STORE_NOTES_FILE" 2>&1 || true
-    RETRIED=$((RETRIED + 1))
+    for platform in IOS MAC_OS; do
+      if [ "$platform" = IOS ]; then
+        label="App Store (iOS)"; file="dist/byoky-ios-v${CURRENT}.ipa"; type=ios
+      else
+        label="App Store (macOS)"; file="dist/byoky-macos-v${CURRENT}.pkg"; type=macos
+      fi
+      echo "${label}: checking..."
+      appstore_submit "$platform" "$NATIVE_VERSION" 0
+      if [ "$ASC_CODE" -eq 3 ] && [ ! -f "$file" ]; then
+        ASC_RESULT="NO BUILD in App Store Connect, and no ${file} to upload"
+      elif [ "$ASC_CODE" -eq 3 ]; then
+        echo "${label}: uploading ${file} again..."
+        if asc_upload "$file" "$type"; then
+          appstore_submit "$platform" "$NATIVE_VERSION"
+        else
+          ASC_CODE=1; ASC_RESULT="upload FAILED (see the log above)"
+        fi
+      elif [ "$ASC_CODE" -eq 2 ]; then
+        appstore_submit "$platform" "$NATIVE_VERSION"
+      fi
+      echo "${label}: ${ASC_RESULT}"
+      store_result "$label" "$ASC_RESULT"
+      if [ "$ASC_CODE" -eq 0 ]; then RETRIED=$((RETRIED + 1)); fi
+    done
   fi
 
   # Google Play
@@ -613,18 +660,24 @@ step "Upload to extension stores"
 
 if [ "$SKIP_STORE_UPLOADS" = true ]; then
   echo "  Skipping Chrome Web Store (--skip-store-uploads)"
+  store_result "Chrome Web Store" "skipped (--skip-store-uploads)"
 elif [ -n "${CHROME_EXTENSION_ID:-}" ] && [ -n "${CHROME_CLIENT_ID:-}" ]; then
   echo "  Uploading to Chrome Web Store..."
-  npx chrome-webstore-upload upload \
+  if npx chrome-webstore-upload upload \
     --source "dist/byoky-chrome-v${NEW_VERSION}-store.zip" \
     --extension-id "$CHROME_EXTENSION_ID" \
     --client-id "$CHROME_CLIENT_ID" \
     --client-secret "$CHROME_CLIENT_SECRET" \
     --refresh-token "$CHROME_REFRESH_TOKEN" \
-    --auto-publish \
-    || echo "  WARN: Chrome upload failed; the other stores still go out (retry with ./scripts/release.sh retry)"
+    --auto-publish; then
+    store_result "Chrome Web Store" "uploaded, publishes after review"
+  else
+    echo "  WARN: Chrome upload failed; the other stores still go out (retry with ./scripts/release.sh retry)"
+    store_result "Chrome Web Store" "FAILED; ./scripts/release.sh retry uploads it again"
+  fi
 else
   echo "  Skipping Chrome Web Store (credentials not configured)"
+  store_result "Chrome Web Store" "skipped (credentials not configured)"
 fi
 
 # ============================================================
@@ -632,17 +685,23 @@ fi
 # ============================================================
 if [ "$SKIP_STORE_UPLOADS" = true ]; then
   echo "  Skipping Firefox Add-ons (--skip-store-uploads)"
+  store_result "Firefox Add-ons" "skipped (--skip-store-uploads)"
 elif [ -n "${AMO_API_KEY:-}" ] && [ -n "${AMO_API_SECRET:-}" ]; then
   echo "  Uploading to Firefox Add-ons..."
-  npx web-ext sign \
+  if npx web-ext sign \
     --source-dir packages/extension/.output/firefox-mv2 \
     --api-key "$AMO_API_KEY" \
     --api-secret "$AMO_API_SECRET" \
     --channel listed \
-    --upload-source-code "dist/byoky-source-v${NEW_VERSION}.zip" \
-    || echo "  WARN: Firefox upload failed; the other stores still go out (retry with ./scripts/release.sh retry)"
+    --upload-source-code "dist/byoky-source-v${NEW_VERSION}.zip"; then
+    store_result "Firefox Add-ons" "submitted for review"
+  else
+    echo "  WARN: Firefox upload failed; the other stores still go out (retry with ./scripts/release.sh retry)"
+    store_result "Firefox Add-ons" "FAILED; ./scripts/release.sh retry uploads it again"
+  fi
 else
   echo "  Skipping Firefox Add-ons (credentials not configured)"
+  store_result "Firefox Add-ons" "skipped (credentials not configured)"
 fi
 
 # ============================================================
@@ -652,50 +711,35 @@ step "Upload to App Store"
 
 if [ "$SKIP_STORE_UPLOADS" = true ]; then
   echo "  Skipping App Store (--skip-store-uploads)"
+  store_result "App Store (iOS + macOS)" "skipped (--skip-store-uploads)"
 elif [ "$SKIP_IOS" = false ] && [ -n "${ASC_KEY_ID:-}" ] && [ -n "${ASC_ISSUER_ID:-}" ]; then
-  # Upload iOS
-  IPA_FILE="dist/byoky-ios-v${NEW_VERSION}.ipa"
-  if [ -f "$IPA_FILE" ]; then
-    echo "  Uploading iOS to App Store Connect..."
-    xcrun altool --upload-app \
-      --file "$IPA_FILE" \
-      --type ios \
-      --apiKey "$ASC_KEY_ID" \
-      --apiIssuer "$ASC_ISSUER_ID" \
-      2>&1 || echo "  WARN: iOS upload failed (may need manual upload via Transporter)"
-  else
-    echo "  Skipping iOS upload (no IPA found — export may have uploaded directly)"
-  fi
-
-  # Upload macOS
-  MACOS_PKG="dist/byoky-macos-v${NEW_VERSION}.pkg"
-  if [ -f "$MACOS_PKG" ]; then
-    echo "  Uploading macOS to App Store Connect..."
-    xcrun altool --upload-app \
-      --file "$MACOS_PKG" \
-      --type macos \
-      --apiKey "$ASC_KEY_ID" \
-      --apiIssuer "$ASC_ISSUER_ID" \
-      2>&1 || echo "  WARN: macOS upload failed (may need manual upload via Transporter)"
-  else
-    echo "  Skipping macOS upload (no pkg found)"
-  fi
-
-  # Wait for builds to process before submitting
-  echo "  Waiting 30s for builds to process..."
-  sleep 30
-
-  # Submit iOS for review (creates version, sets release notes, selects build, submits)
-  echo "  Submitting iOS for App Store review..."
-  node scripts/submit-appstore.mjs "$NEW_NATIVE_VERSION" IOS "$STORE_NOTES_FILE" \
-    2>&1 || echo "  WARN: iOS auto-submit failed — submit manually in App Store Connect"
-
-  # Submit macOS for review
-  echo "  Submitting macOS for App Store review..."
-  node scripts/submit-appstore.mjs "$NEW_NATIVE_VERSION" MAC_OS "$STORE_NOTES_FILE" \
-    2>&1 || echo "  WARN: macOS auto-submit failed — submit manually in App Store Connect"
+  # Upload each build, then submit it. submit-appstore.mjs waits for the
+  # build to process (minutes) and says whether it got submitted.
+  for platform in IOS MAC_OS; do
+    if [ "$platform" = IOS ]; then
+      label="App Store (iOS)"; file="dist/byoky-ios-v${NEW_VERSION}.ipa"; type=ios
+    else
+      label="App Store (macOS)"; file="dist/byoky-macos-v${NEW_VERSION}.pkg"; type=macos
+    fi
+    if [ ! -f "$file" ]; then
+      echo "  Skipping ${label}: the export produced no ${file}"
+      store_result "$label" "FAILED: no ${file} to upload"
+      continue
+    fi
+    echo "  Uploading ${label}..."
+    if ! asc_upload "$file" "$type"; then
+      echo "  WARN: ${label} upload failed; the other stores still go out (retry with ./scripts/release.sh retry)"
+      store_result "$label" "upload FAILED; ./scripts/release.sh retry uploads it again"
+      continue
+    fi
+    echo "  Submitting ${label} for review..."
+    appstore_submit "$platform" "$NEW_NATIVE_VERSION"
+    store_result "$label" "$ASC_RESULT"
+  done
 else
-  echo "  Skipping App Store uploads (${SKIP_IOS:+mobile builds skipped}${ASC_KEY_ID:+}${ASC_KEY_ID:-credentials not configured})"
+  if [ "$SKIP_IOS" = true ]; then reason="iOS/macOS builds skipped"; else reason="credentials not configured"; fi
+  echo "  Skipping App Store uploads (${reason})"
+  store_result "App Store (iOS + macOS)" "skipped (${reason})"
 fi
 
 # ============================================================
@@ -705,10 +749,18 @@ step "Upload to Google Play"
 
 if [ "$SKIP_STORE_UPLOADS" = true ]; then
   echo "  Skipping Google Play (--skip-store-uploads)"
+  store_result "Google Play" "skipped (--skip-store-uploads)"
 elif [ "$SKIP_ANDROID" = false ] && [ -n "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ]; then
-  node scripts/upload-google-play.mjs "dist/byoky-android-v${NEW_VERSION}.aab" production "$STORE_NOTES_FILE"
+  if node scripts/upload-google-play.mjs "dist/byoky-android-v${NEW_VERSION}.aab" production "$STORE_NOTES_FILE"; then
+    store_result "Google Play" "uploaded to the production track"
+  else
+    echo "  WARN: Google Play upload failed; the GitHub release still goes out (retry with ./scripts/release.sh retry)"
+    store_result "Google Play" "FAILED; ./scripts/release.sh retry uploads it again"
+  fi
 else
-  echo "  Skipping Google Play (${SKIP_ANDROID:+android build skipped}${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:+}${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-credentials not configured})"
+  if [ "$SKIP_ANDROID" = true ]; then reason="Android build skipped"; else reason="credentials not configured"; fi
+  echo "  Skipping Google Play (${reason})"
+  store_result "Google Play" "skipped (${reason})"
 fi
 
 # ============================================================
@@ -791,14 +843,9 @@ done
 echo "    create-byoky-app@${NEW_VERSION}"
 echo ""
 echo "  Stores:"
+for r in ${STORE_RESULTS[@]+"${STORE_RESULTS[@]}"}; do echo "    $r"; done
 if [ "$SKIP_STORE_UPLOADS" = true ]; then
-  echo "    Chrome / Firefox / App Store / Play: skipped (--skip-store-uploads)"
   echo "    Upload artifacts from dist/ manually when ready."
-else
-  [ -n "${CHROME_EXTENSION_ID:-}" ] && echo "    Chrome Web Store: uploaded + auto-published"
-  [ -n "${AMO_API_KEY:-}" ] && echo "    Firefox AMO: submitted for review"
-  [ "$SKIP_IOS" = false ] && [ -n "${ASC_KEY_ID:-}" ] && echo "    App Store (iOS + macOS): uploaded + submitted for review"
-  [ "$SKIP_ANDROID" = false ] && [ -n "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ] && echo "    Google Play: uploaded to production track"
 fi
 [ -n "${DISCORD_WEBHOOK_URL:-}" ] && echo "    Discord: release announcement posted"
 echo ""
