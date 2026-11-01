@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useWalletStore } from '../store';
 import { TrustResetNotice } from '../components/TrustResetNotice';
 import {
@@ -48,6 +48,9 @@ export function ConnectedApps() {
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [dragOriginOver, setDragOriginOver] = useState<string | null>(null);
+  // Set while the pointer is down on a card's Group select, so pressing it
+  // doesn't start dragging the card.
+  const pressingGroupSelect = useRef(false);
   const [pendingMove, setPendingMove] = useState<{
     origin: string;
     targetGroupId: string;
@@ -81,7 +84,9 @@ export function ConnectedApps() {
     ...groups.filter((g) => g.id !== DEFAULT_GROUP_ID),
   ];
 
-  async function handleDrop(targetGroupId: string, origin: string) {
+  // Both ways of moving an app end here: dropping its card on a group, and
+  // its Group select (the keyboard, screen reader and touch way).
+  async function requestMove(targetGroupId: string, origin: string) {
     setDragOriginOver(null);
     const currentGroupId = appGroups[origin] ?? DEFAULT_GROUP_ID;
     if (currentGroupId === targetGroupId) return;
@@ -227,7 +232,7 @@ export function ConnectedApps() {
             onDrop={(e) => {
               e.preventDefault();
               const origin = e.dataTransfer.getData(DRAG_MIME);
-              if (origin) handleDrop(group.id, origin);
+              if (origin) requestMove(group.id, origin);
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
@@ -281,7 +286,7 @@ export function ConnectedApps() {
 
             {groupSessions.length === 0 ? (
               <div className="card-subtitle mono" style={{ padding: '8px 4px' }}>
-                {isDropTarget ? 'Drop to assign' : 'Drag an app here to assign it to this group'}
+                {isDropTarget ? 'Drop to assign' : 'Drag an app here, or use Group on an app card'}
               </div>
             ) : (
               groupSessions.map((session) => {
@@ -296,7 +301,14 @@ export function ConnectedApps() {
                     key={session.id}
                     className="card connected-app-card"
                     draggable
+                    onPointerDown={(e) => {
+                      pressingGroupSelect.current = (e.target as Element).closest('select') !== null;
+                    }}
                     onDragStart={(e) => {
+                      if (pressingGroupSelect.current) {
+                        e.preventDefault();
+                        return;
+                      }
                       e.dataTransfer.effectAllowed = 'move';
                       e.dataTransfer.setData(DRAG_MIME, session.appOrigin);
                     }}
@@ -347,6 +359,21 @@ export function ConnectedApps() {
                           );
                         })}
                     </div>
+
+                    {orderedGroups.length > 1 && (
+                      <label className="app-group-field">
+                        <span>Group</span>
+                        <select
+                          aria-label={`Group for ${session.appOrigin}`}
+                          value={group.id}
+                          onChange={(e) => requestMove(e.target.value, session.appOrigin)}
+                        >
+                          {orderedGroups.map((g) => (
+                            <option key={g.id} value={g.id}>{g.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
 
                     {/* Token usage & allowance */}
                     <div className="allowance-section">

@@ -1127,6 +1127,46 @@ code {
   gap: 4px;
 }
 
+.app-group-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.app-group-field span {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.app-group-field select {
+  flex: 1;
+  min-width: 0;
+  min-height: 32px;
+  padding: 4px 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--seam-strong);
+  border-radius: 0;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.app-group-field select:focus {
+  border-color: var(--violet);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.app-group-field select option {
+  background: var(--crypt);
+  color: var(--text);
+}
+
 .connected-meta {
   margin-top: 8px;
   font-family: var(--font-mono);
