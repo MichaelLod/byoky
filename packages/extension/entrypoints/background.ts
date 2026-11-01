@@ -127,21 +127,43 @@ export default defineBackground(() => {
     }
   }
 
+  type ConnectMessage = { id: string; payload: ConnectRequest };
   type PendingEntry = {
     approval: PendingApproval;
     originalMessageId: string;
     resolve: (response: unknown) => void;
     tabId?: number;
+    /**
+     * Later connects from the same origin, waiting for this one's outcome.
+     * Once it is approved they run again (and mostly reuse the session);
+     * if it is rejected or times out, so are they.
+     */
+    waiters: Array<{ message: ConnectMessage; sender: Runtime.MessageSender; resolve: (response: unknown) => void }>;
   };
   const _pendingMap = new Map<string, PendingEntry>();
+  // Every change to the queue is broadcast, so an open popup or side panel
+  // never shows (and lets the user approve) a request that is gone.
   const pendingApprovals = {
     get size() { return _pendingMap.size; },
     get(id: string) { return _pendingMap.get(id); },
-    set(id: string, entry: PendingEntry) { _pendingMap.set(id, entry); updateBadge(); },
-    delete(id: string) { const r = _pendingMap.delete(id); updateBadge(); return r; },
+    set(id: string, entry: PendingEntry) { _pendingMap.set(id, entry); updateBadge(); notifyApprovalsChanged(); },
+    delete(id: string) {
+      const r = _pendingMap.delete(id);
+      updateBadge();
+      if (r) notifyApprovalsChanged();
+      return r;
+    },
     values() { return _pendingMap.values(); },
     [Symbol.iterator]() { return _pendingMap[Symbol.iterator](); },
   };
+  // Approved entries, out of the queue while their session is created. A
+  // connect from the same origin meanwhile waits on them rather than
+  // queueing a second prompt (or being told it was rejected).
+  const settlingApprovals = new Set<PendingEntry>();
+
+  function notifyApprovalsChanged() {
+    browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'approvalsChanged' }).catch(() => {});
+  }
   let masterPassword: string | null = null;
   // The wallet MAC key, which signs the trusted-sites list, and the one-time
   // upgrade of a pre-1.1.2 wallet. Both hang off the master password and are
@@ -1057,6 +1079,10 @@ export default defineBackground(() => {
 
   function buildSessionResponse(session: Session, requestId: string) {
     const providerMap: ConnectResponse['providers'] = {};
+    // Approved but without a usable key: reported as unavailable.
+    for (const id of session.requestedProviders) {
+      providerMap[id] = { available: false, authMethod: 'api_key' };
+    }
     for (const sp of session.providers) {
       providerMap[sp.providerId] = { available: sp.available, authMethod: sp.authMethod };
     }
@@ -1097,11 +1123,12 @@ export default defineBackground(() => {
     if (!providers) return refuse('INVALID_REQUEST', 'Invalid connect request');
     const request: ConnectRequest = { providers, reconnectOnly: (raw as ConnectRequest).reconnectOnly === true };
 
-    // Cheap path: reuse an active session for this origin. Don't gate on
-    // the rate limit — every page load calls connect(), and reusing the
-    // same approval shouldn't burn budget.
+    // Cheap path: reuse an active session for this origin when it covers
+    // what the app asks for now. Don't gate on the rate limit — every page
+    // load calls connect(), and reusing the same approval shouldn't burn
+    // budget. A silent reconnect probe takes the session as it is.
     const existing = findActiveSession(origin);
-    if (existing) {
+    if (existing && (request.reconnectOnly || sessionCovers(existing, providers))) {
       return buildSessionResponse(existing, message.id);
     }
 
@@ -1131,20 +1158,25 @@ export default defineBackground(() => {
       };
     }
 
-    // If there's already a pending approval for this origin, wait for its result
-    const existingPending = [...pendingApprovals.values()].find(
-      (e) => e.approval.appOrigin === origin,
-    );
-    if (existingPending) {
+    // A request from this origin is already waiting for the user (or being
+    // approved right now): wait for its outcome.
+    const inFlight = pendingFor(origin);
+    if (inFlight) {
       openWalletUI(sender.tab?.id);
-      return waitForSessionOrReject(origin, message.id);
+      return new Promise((resolve) => {
+        inFlight.waiters.push({ message: { id: message.id, payload: request }, sender, resolve });
+      });
     }
+
+    // An app with a session that now asks for more providers is asked about
+    // all of them; approving widens its session (createSession).
+    const requested = existing ? withProviders(existing.requestedProviders, providers) : providers;
 
     // Queue for user approval (whether locked or unlocked)
     const approval: PendingApproval = {
       id: crypto.randomUUID(),
       appOrigin: origin,
-      providers,
+      providers: requested,
       timestamp: Date.now(),
     };
 
@@ -1156,6 +1188,7 @@ export default defineBackground(() => {
         originalMessageId: message.id,
         resolve,
         tabId: sender.tab?.id,
+        waiters: [],
       });
 
       // If already unlocked, check trusted sites and either auto-approve or notify for approval
@@ -1167,15 +1200,12 @@ export default defineBackground(() => {
           if (trustedSite) {
             // Scope to the providers the user originally approved for this trusted site
             const scopedProviders = scopeProvidersForTrust(
-              providers,
+              requested,
               trustedSite.allowedProviders ?? [],
             );
             if (scopedProviders) {
               pendingApprovals.delete(approval.id);
-              createSession(
-                { id: message.id, payload: { ...request, providers: scopedProviders } },
-                origin,
-              ).then((response) => entry.resolve(response));
+              void settleApproval(entry, scopedProviders);
               return;
             }
             // Requested providers outside trust scope — fall through to manual approval
@@ -1186,57 +1216,84 @@ export default defineBackground(() => {
             action: 'newPendingApproval',
           }).catch(() => {});
         });
+      } else {
+        // Locked: it waits for the unlock (processPendingAfterUnlock), and an
+        // open popup can already say that a request is waiting.
+        browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'newPendingApproval' }).catch(() => {});
       }
-      // If locked, the approval stays queued. When user unlocks, processPendingAfterUnlock() runs.
 
       // Auto-reject after 2 minutes
       setTimeout(() => {
         const entry = pendingApprovals.get(approval.id);
         if (entry) {
           pendingApprovals.delete(approval.id);
-          entry.resolve({
-            type: 'BYOKY_ERROR',
-            requestId: entry.originalMessageId,
-            payload: { code: 'USER_REJECTED', message: 'Connection request timed out' },
-          });
+          rejectPending(entry, 'Connection request timed out');
         }
       }, 120_000);
     });
   }
 
-  function waitForSessionOrReject(origin: string, messageId: string): Promise<unknown> {
-    return new Promise((resolve) => {
-      const interval = setInterval(() => {
-        const session = findActiveSession(origin);
-        if (session) {
-          clearInterval(interval);
-          clearTimeout(timeout);
-          resolve(buildSessionResponse(session, messageId));
-          return;
-        }
-        // If no more pending approvals for this origin and no session, it was rejected
-        const stillPending = [...pendingApprovals.values()].some(
-          (e) => e.approval.appOrigin === origin,
-        );
-        if (!stillPending) {
-          clearInterval(interval);
-          clearTimeout(timeout);
-          resolve({
-            type: 'BYOKY_ERROR',
-            requestId: messageId,
-            payload: { code: 'USER_REJECTED', message: 'Connection request was rejected' },
-          });
-        }
-      }, 300);
-      const timeout = setTimeout(() => {
-        clearInterval(interval);
-        resolve({
-          type: 'BYOKY_ERROR',
-          requestId: messageId,
-          payload: { code: 'USER_REJECTED', message: 'Connection request timed out' },
-        });
-      }, 120_000);
-    });
+  /** Whether `session` already has every provider in `providers` approved. */
+  function sessionCovers(session: Session, providers: ProviderRequirement[]): boolean {
+    return providers.every((p) => session.requestedProviders.includes(p.id));
+  }
+
+  /** `ids` (already approved) plus `providers`, as one provider list. */
+  function withProviders(ids: string[], providers: ProviderRequirement[]): ProviderRequirement[] {
+    const byId = new Map<string, ProviderRequirement>(ids.map((id) => [id, { id, required: false }]));
+    for (const p of providers) byId.set(p.id, p);
+    return [...byId.values()];
+  }
+
+  /** The queued or settling request of `origin`, if any. */
+  function pendingFor(origin: string): PendingEntry | undefined {
+    for (const entry of pendingApprovals.values()) {
+      if (entry.approval.appOrigin === origin) return entry;
+    }
+    for (const entry of settlingApprovals) {
+      if (entry.approval.appOrigin === origin) return entry;
+    }
+    return undefined;
+  }
+
+  /**
+   * Create (or widen) the session for an approved entry, already taken out
+   * of the queue, and answer it and its waiters. `before` runs first, still
+   * counted as settling (approving clears a revocation, trusts the site).
+   * Call it right after the entry leaves the queue, before any await, so no
+   * connect slips in between.
+   */
+  async function settleApproval(
+    entry: PendingEntry,
+    providers: ProviderRequirement[],
+    before?: () => Promise<void>,
+  ): Promise<void> {
+    settlingApprovals.add(entry);
+    let session: Session;
+    try {
+      await before?.();
+      session = await createSession(entry.approval.appOrigin, providers);
+    } catch {
+      settlingApprovals.delete(entry);
+      rejectPending(entry, 'Could not create the session', 'UNKNOWN');
+      return;
+    }
+    settlingApprovals.delete(entry);
+    entry.resolve(buildSessionResponse(session, entry.originalMessageId));
+    // Each waiter runs again: one the session covers reuses it at once, one
+    // asking for more providers is queued for those.
+    for (const w of entry.waiters) {
+      handleConnect(w.message, w.sender).then(w.resolve, () => {
+        w.resolve({ type: 'BYOKY_ERROR', requestId: w.message.id, payload: { code: 'UNKNOWN', message: 'Could not connect' } });
+      });
+    }
+  }
+
+  /** Answer an entry (out of the queue) and its waiters with a refusal. */
+  function rejectPending(entry: PendingEntry, message: string, code = 'USER_REJECTED') {
+    const refusal = (requestId: string) => ({ type: 'BYOKY_ERROR', requestId, payload: { code, message } });
+    entry.resolve(refusal(entry.originalMessageId));
+    for (const w of entry.waiters) w.resolve(refusal(w.message.id));
   }
 
   /**
@@ -1301,35 +1358,47 @@ export default defineBackground(() => {
     return { providers, providerMap };
   }
 
-  async function createSession(
-    message: { id: string; payload: ConnectRequest },
-    origin: string,
-  ): Promise<unknown> {
-    // Reuse existing active session for this origin
-    const existing = findActiveSession(origin);
-    if (existing) {
-      return buildSessionResponse(existing, message.id);
-    }
-
+  /**
+   * The session for an approved request of `origin`. An app that already
+   * has one (and asked for more providers) gets it widened, keeping its
+   * session key; otherwise a new one is made. No providers means every
+   * provider the wallet holds a key for.
+   */
+  async function createSession(origin: string, providers: ProviderRequirement[]): Promise<Session> {
+    if (origin === 'unknown') throw new Error('No session for an opaque origin');
     const credentials = await getStoredCredentials();
-    const request = message.payload;
-    const sessionKey = `byk_${crypto.randomUUID().replace(/-/g, '')}`;
 
     // No provider list means every provider the wallet holds a key for,
     // routed exactly like an explicit list of them.
-    const providerIds = [...new Set(
-      request.providers?.length
-        ? request.providers.map((p) => p.id)
+    let providerIds = [...new Set(
+      providers.length
+        ? providers.map((p) => p.id)
         : credentials.map((c) => c.providerId),
     )];
 
     // Resolve the group this app belongs to (auto-assigns to default if first contact)
     const group = await getGroupForOrigin(origin);
+
+    const existing = findActiveSession(origin);
+    if (existing) {
+      providerIds = [...new Set([...existing.requestedProviders, ...providerIds])];
+      if (providerIds.length === existing.requestedProviders.length) return existing;
+    }
     const { providers: sessionProviders, providerMap } = resolveSessionProviders(providerIds, credentials, group);
+
+    if (existing) {
+      existing.requestedProviders = providerIds;
+      existing.providers = sessionProviders;
+      persistSessions();
+      browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'sessionChanged' }).catch(() => {});
+      // Other frames of the app hold the same session key.
+      notifyProvidersUpdated(existing, providerMap);
+      return existing;
+    }
 
     const session: Session = {
       id: crypto.randomUUID(),
-      sessionKey,
+      sessionKey: `byk_${crypto.randomUUID().replace(/-/g, '')}`,
       appOrigin: origin,
       providers: sessionProviders,
       // What the user approved. An "all providers" request is pinned to the
@@ -1340,21 +1409,12 @@ export default defineBackground(() => {
       expiresAt: Date.now() + 24 * 60 * 60 * 1000,
     };
 
-    sessions.set(sessionKey, session);
+    sessions.set(session.sessionKey, session);
     persistSessions();
     // Trusted-site approvals create sessions without the popup's help; an
     // open popup or side panel lists them only if told.
     browser.runtime.sendMessage({ type: 'BYOKY_INTERNAL', action: 'sessionChanged' }).catch(() => {});
-
-    return {
-      type: 'BYOKY_CONNECT_RESPONSE',
-      requestId: message.id,
-      payload: {
-        sessionKey,
-        proxyUrl: 'extension-proxy',
-        providers: providerMap,
-      } as ConnectResponse,
-    };
+    return session;
   }
 
   async function handleInternal(
@@ -1606,28 +1666,20 @@ export default defineBackground(() => {
         if (!pending) return { success: false, error: 'Approval not found' };
 
         pendingApprovals.delete(approvalId);
+        await settleApproval(pending, pending.approval.providers, async () => {
+          // Resolve which providers are being approved
+          const approvedProviderIds = [...new Set(pending.approval.providers.length > 0
+            ? pending.approval.providers.map((p) => p.id)
+            : (await getStoredCredentials()).map((c) => c.providerId))];
 
-        // Resolve which providers are being approved
-        const approvedProviderIds = [...new Set(pending.approval.providers.length > 0
-          ? pending.approval.providers.map((p) => p.id)
-          : (await getStoredCredentials()).map((c) => c.providerId))];
-
-        // Approving clears a revocation. If the trust state can't be signed
-        // (the wallet upgrade failed), the connection still goes ahead; the
-        // site just asks again next time.
-        await clearRevocation(pending.approval.appOrigin).catch(() => {});
-        if (trust) {
-          await addTrustedSite(pending.approval.appOrigin, approvedProviderIds).catch(() => {});
-        }
-
-        const response = await createSession(
-          {
-            id: pending.originalMessageId,
-            payload: { providers: pending.approval.providers } as ConnectRequest,
-          },
-          pending.approval.appOrigin,
-        );
-        pending.resolve(response);
+          // Approving clears a revocation. If the trust state can't be signed
+          // (the wallet upgrade failed), the connection still goes ahead; the
+          // site just asks again next time.
+          await clearRevocation(pending.approval.appOrigin).catch(() => {});
+          if (trust) {
+            await addTrustedSite(pending.approval.appOrigin, approvedProviderIds).catch(() => {});
+          }
+        });
         return { success: true };
       }
 
@@ -1637,11 +1689,7 @@ export default defineBackground(() => {
         if (!pending) return { success: false, error: 'Approval not found' };
 
         pendingApprovals.delete(approvalId);
-        pending.resolve({
-          type: 'BYOKY_ERROR',
-          requestId: pending.originalMessageId,
-          payload: { code: 'USER_REJECTED', message: 'User rejected the connection request' },
-        });
+        rejectPending(pending, 'User rejected the connection request');
         return { success: true };
       }
 
@@ -3087,11 +3135,7 @@ export default defineBackground(() => {
         );
         if (scopedProviders) {
           pendingApprovals.delete(id);
-          const response = await createSession(
-            { id: entry.originalMessageId, payload: { providers: scopedProviders } as ConnectRequest },
-            entry.approval.appOrigin,
-          );
-          entry.resolve(response);
+          await settleApproval(entry, scopedProviders);
         }
       }
     }
@@ -3121,7 +3165,7 @@ export default defineBackground(() => {
     if (sessions.size === 0) return;
     const credentials = await getStoredCredentials();
 
-    for (const [sessionKey, session] of sessions) {
+    for (const session of sessions.values()) {
       const providerIds = session.requestedProviders;
 
       // Re-resolve group binding for this session's origin (may have changed)
@@ -3132,8 +3176,12 @@ export default defineBackground(() => {
       session.providers = newSessionProviders;
       persistSessions();
 
-      notifyOrigin(session.appOrigin, { type: 'BYOKY_PROVIDERS_UPDATED', payload: { sessionKey, providers: providerMap } });
+      notifyProvidersUpdated(session, providerMap);
     }
+  }
+
+  function notifyProvidersUpdated(session: Session, providerMap: ConnectResponse['providers']) {
+    notifyOrigin(session.appOrigin, { type: 'BYOKY_PROVIDERS_UPDATED', payload: { sessionKey: session.sessionKey, providers: providerMap } });
   }
 
   // --- Wallet keys and the pre-1.1.2 upgrade ---
