@@ -459,40 +459,12 @@ fun RetroTextField(
     )
 
     Column(modifier.bringIntoViewRequester(bringIntoView)) {
-        if (label != null) {
-            // Screen readers get the label from the field itself (below), so
-            // the visible caption stays out of the accessibility tree.
-            SectionLabel(
-                label,
-                color = if (isError) Alarm else Fog,
-                modifier = Modifier
-                    .clearAndSetSemantics {}
-                    .pointerInput(enabled) {
-                        detectTapGestures { if (enabled) focusRequester.requestFocus() }
-                    },
-            )
-            Spacer(Modifier.height(6.dp))
-        }
         BasicTextField(
             value = value,
             onValueChange = onValueChange,
             modifier = fieldModifier
                 .fillMaxWidth()
-                .heightIn(min = 48.dp)
-                // The text field is its own accessibility node; without this
-                // TalkBack announced every field as an unnamed edit box.
-                .semantics { if (label != null) contentDescription = label }
-                .focusRequester(focusRequester)
-                .drawBehind {
-                    if (focused && !isError) {
-                        val ring = 3.dp.toPx()
-                        drawRect(
-                            FocusRing,
-                            topLeft = Offset(-ring, -ring),
-                            size = Size(size.width + 2 * ring, size.height + 2 * ring),
-                        )
-                    }
-                },
+                .focusRequester(focusRequester),
             enabled = enabled,
             readOnly = readOnly,
             textStyle = textStyle.copy(color = if (enabled) Bone else Dim),
@@ -511,31 +483,68 @@ fun RetroTextField(
             interactionSource = interactionSource,
             cursorBrush = SolidColor(if (isError) Alarm else Phosphor),
             decorationBox = { innerTextField ->
-                OutlinedTextFieldDefaults.DecorationBox(
-                    value = value,
-                    innerTextField = innerTextField,
-                    enabled = enabled,
-                    singleLine = singleLine,
-                    visualTransformation = visualTransformation,
-                    interactionSource = interactionSource,
-                    isError = isError,
-                    placeholder = placeholder?.let { { Text(it, style = textStyle) } },
-                    leadingIcon = leadingIcon,
-                    trailingIcon = trailingIcon,
-                    colors = colors,
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
-                    container = {
-                        OutlinedTextFieldDefaults.Container(
-                            enabled = enabled,
-                            isError = isError,
-                            interactionSource = interactionSource,
-                            colors = colors,
-                            shape = RectangleShape,
-                            focusedBorderThickness = 1.dp,
-                            unfocusedBorderThickness = 1.dp,
+                // The caption is drawn inside the field, as Material's
+                // OutlinedTextField does with its label: the field's node
+                // merges it, so TalkBack names the field and still reads what
+                // was typed. A contentDescription on an editable field can be
+                // read instead of its text.
+                Column {
+                    if (label != null) {
+                        SectionLabel(
+                            label,
+                            color = if (isError) Alarm else Fog,
+                            // Tapping the caption focuses the field and leaves
+                            // the cursor where it was; the tap is consumed
+                            // here, so the field doesn't move the cursor to it.
+                            modifier = Modifier.pointerInput(enabled) {
+                                detectTapGestures { if (enabled) focusRequester.requestFocus() }
+                            },
                         )
-                    },
-                )
+                        Spacer(Modifier.height(6.dp))
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .drawBehind {
+                                if (focused && !isError) {
+                                    val ring = 3.dp.toPx()
+                                    drawRect(
+                                        FocusRing,
+                                        topLeft = Offset(-ring, -ring),
+                                        size = Size(size.width + 2 * ring, size.height + 2 * ring),
+                                    )
+                                }
+                            },
+                        propagateMinConstraints = true,
+                    ) {
+                        OutlinedTextFieldDefaults.DecorationBox(
+                            value = value,
+                            innerTextField = innerTextField,
+                            enabled = enabled,
+                            singleLine = singleLine,
+                            visualTransformation = visualTransformation,
+                            interactionSource = interactionSource,
+                            isError = isError,
+                            placeholder = placeholder?.let { { Text(it, style = textStyle) } },
+                            leadingIcon = leadingIcon,
+                            trailingIcon = trailingIcon,
+                            colors = colors,
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                            container = {
+                                OutlinedTextFieldDefaults.Container(
+                                    enabled = enabled,
+                                    isError = isError,
+                                    interactionSource = interactionSource,
+                                    colors = colors,
+                                    shape = RectangleShape,
+                                    focusedBorderThickness = 1.dp,
+                                    unfocusedBorderThickness = 1.dp,
+                                )
+                            },
+                        )
+                    }
+                }
             },
         )
         if (supportingText != null) {
