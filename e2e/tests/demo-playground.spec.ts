@@ -1,4 +1,4 @@
-import { test, expect, type Wallet } from '../fixtures';
+import { LIVE, test, expect, type Wallet } from '../fixtures';
 import http from 'http';
 
 /**
@@ -117,6 +117,8 @@ async function selectProvider(w: Wallet, selector: string, providerId: string) {
 test.describe.configure({ mode: 'serial' });
 
 test.describe('Interactive demo playground — desktop full matrix', () => {
+  test.skip(!LIVE, 'live only: drives the demo against real models (pnpm test:e2e:live)');
+
   test.beforeAll(async () => {
     try {
       await checkDemoReachable(DEMO_URL);
