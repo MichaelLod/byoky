@@ -147,3 +147,52 @@ describe('background: a key is only sent to its own provider', () => {
     expect(restarted.fetch).not.toHaveBeenCalled();
   });
 });
+
+describe('background: records without a key', () => {
+  // F009: a record with an empty secret decrypted to '' for any provider,
+  // so one planted in storage could point a provider at any host.
+  it('refuses a planted keyless record for a provider that needs a key', async () => {
+    const local = await walletStorage([]);
+    (local.credentials as unknown[]).push({
+      id: 'planted', providerId: 'azure_openai', label: 'x', authMethod: 'api_key', createdAt: 1,
+      baseUrl: 'https://attacker.example', encryptedKey: '',
+    });
+    const h = await startBackground({ local });
+    await h.unlock();
+    const reply = await connectApproved(h, APP, { providers: [{ id: 'azure_openai', required: true }] });
+    const r = await h.proxy(APP, {
+      sessionKey: reply.payload.sessionKey,
+      providerId: 'azure_openai',
+      url: 'https://attacker.example/openai/deployments/d/chat/completions?api-version=2024-10-21',
+      body: JSON.stringify({ messages: [{ role: 'user', content: 'secret prompt' }] }),
+    }).result;
+    expect(r.error.error.code).toBe('PROXY_ERROR');
+    expect(h.fetch).not.toHaveBeenCalled();
+  });
+
+  it('only lets a local server go without a key, and binds its empty key', async () => {
+    const h = await startBackground({ local: await walletStorage([]) });
+    await h.unlock();
+    expect(await h.internal('addCredential', { providerId: 'openai', label: 'o', value: '  ', authMethod: 'api_key' }))
+      .toEqual({ error: 'Enter an API key' });
+    expect(await h.internal('addCredential', { providerId: 'anthropic', label: 'o', value: '', authMethod: 'oauth' }))
+      .toEqual({ error: 'Enter a token' });
+    expect(await h.internal('addCredential', {
+      providerId: 'ollama', label: 'local', value: '', authMethod: 'api_key', baseUrl: 'https://ollama.example',
+    })).toEqual({ success: true });
+    const [ollama] = h.local.data.credentials as Array<{ encryptedKey: string }>;
+    expect(ollama.encryptedKey.startsWith('v2:')).toBe(true);
+
+    // It works, sending no key.
+    const reply = await connectApproved(h, APP, { providers: [{ id: 'ollama', required: true }] });
+    h.fetch.mockImplementation(async () => jsonResponse({ choices: [] }));
+    const r = await h.proxy(APP, {
+      sessionKey: reply.payload.sessionKey,
+      providerId: 'ollama',
+      url: 'https://ollama.example/v1/chat/completions',
+      body: JSON.stringify({ model: 'llama3', messages: [] }),
+    }).result;
+    expect(r.done).toBe(true);
+    expect(upstream(h).url).toBe('https://ollama.example/v1/chat/completions');
+  });
+});

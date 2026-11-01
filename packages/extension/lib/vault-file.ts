@@ -1,3 +1,4 @@
+import { KEYLESS_PROVIDERS } from './wallet-upgrade';
 import {
   encrypt as coreEncrypt,
   decrypt as coreDecrypt,
@@ -40,8 +41,9 @@ import {
  * An imported file is untrusted input. On import:
  *   - more than MAX_VAULT_FILE_CREDENTIALS entries, a structurally malformed
  *     entry, or a key/access token that won't decrypt rejects the whole file;
- *   - an entry for an unknown provider, or for a custom-host provider whose
- *     baseUrl isn't https (or http to loopback, for local providers), is
+ *   - an entry for an unknown provider, for a custom-host provider whose
+ *     baseUrl isn't https (or http to loopback, for local providers), or
+ *     with an empty key for a provider other than a local server, is
  *     skipped;
  *   - `baseUrl` is dropped for fixed-host providers, `createdAt` is capped at
  *     now, and labels are trimmed to MAX_LABEL_LENGTH.
@@ -234,10 +236,11 @@ export async function importVaultFile(
       createdAt: cred.createdAt,
       ...(cred.baseUrl ? { baseUrl: cred.baseUrl } : {}),
     };
-    // Stored secrets are bound to the new record (see credentialAad).
+    // Stored secrets are bound to the new record (see credentialAad), a
+    // local server's empty key too.
     const to = (field: CredentialSecretField) => ({ password: masterPassword, aad: credentialAad(base, field) });
     const primary = to(cred.authMethod === 'api_key' ? 'encryptedKey' : 'encryptedAccessToken');
-    const encryptedSecret = secret ? await cipher.encrypt(secret, primary.password, primary.aad) : '';
+    const encryptedSecret = await cipher.encrypt(secret, primary.password, primary.aad);
     if (cred.authMethod === 'api_key') {
       added.push({ ...base, authMethod: 'api_key', encryptedKey: encryptedSecret });
     } else {
@@ -269,6 +272,8 @@ function parseFileCredential(raw: unknown, now: number): VaultFileCredential | '
 
   const provider = PROVIDERS[c.providerId];
   if (!provider) return 'rejected';
+  // Only a local server's key may be empty; any other keyless entry is useless.
+  if (c.authMethod === 'api_key' && !c.encryptedKey && !KEYLESS_PROVIDERS.has(c.providerId)) return 'rejected';
   let baseUrl: string | undefined;
   if (provider.requiresCustomBaseUrl) {
     const resolved = typeof c.baseUrl === 'string' ? resolveProviderBaseUrl(c.providerId, c.baseUrl) : null;

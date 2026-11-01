@@ -101,7 +101,9 @@ describe('.byoky vault file', () => {
     expect(await decrypt(g.encryptedAccessToken, MASTER_B, bound(gemini, 'encryptedAccessToken'))).toBe('ya29.access');
     expect(await decrypt(g.encryptedRefreshToken, MASTER_B, bound(gemini, 'encryptedRefreshToken'))).toBe('1//refresh');
     expect(g.expiresAt).toBe(1_800_000_000_000);
-    expect(ollama).toMatchObject({ providerId: 'ollama', encryptedKey: '', baseUrl: 'http://localhost:11434' });
+    expect(ollama).toMatchObject({ providerId: 'ollama', baseUrl: 'http://localhost:11434' });
+    // The empty key is stored bound to its record like any other.
+    expect(await decrypt((ollama as { encryptedKey: string }).encryptedKey, MASTER_B, bound(ollama, 'encryptedKey'))).toBe('');
   }, 60_000);
 
   it('merges into an existing wallet: keeps what is there, skips exact duplicates', async () => {
@@ -202,6 +204,9 @@ describe('.byoky vault file', () => {
         { providerId: 'lm_studio', label: 'D', authMethod: 'api_key', createdAt: 1, encryptedKey: '' },
         // Unknown provider: skipped.
         { providerId: 'made-up', label: 'E', authMethod: 'api_key', createdAt: 1, encryptedKey: await enc('sk-e') },
+        // No key, for a provider that needs one: skipped.
+        { providerId: 'openai', label: 'G', authMethod: 'api_key', createdAt: 1, encryptedKey: '' },
+        { providerId: 'mistral', label: 'H', authMethod: 'api_key', createdAt: 1 },
         // Valid custom-host entry.
         { providerId: 'azure_openai', label: 'F', authMethod: 'api_key', createdAt: 1, baseUrl: 'https://myres.openai.azure.com', encryptedKey: await enc('sk-f') },
       ],
@@ -210,8 +215,8 @@ describe('.byoky vault file', () => {
     const before = Date.now();
     const result = await importVaultFile(file, EXPORT_PW, [], MASTER_B, fake);
     if (!result.ok) throw new Error(result.error);
-    expect(result.rejected).toBe(4);
-    expect(result.skipped).toBe(4);
+    expect(result.rejected).toBe(6);
+    expect(result.skipped).toBe(6);
     expect(result.added.map((c) => c.label)).toEqual(['A', 'F']);
 
     const [anthropic, azure] = result.added;
@@ -297,7 +302,7 @@ describe('.byoky files from 1.1.1', () => {
     expect(await decrypt(oauth.encryptedAccessToken, MASTER, bound(result.added[1], 'encryptedAccessToken'))).toBe('sk-ant-oat01-fixture-token');
     expect(await decrypt(oauth.encryptedRefreshToken, MASTER, bound(result.added[1], 'encryptedRefreshToken'))).toBe('fixture-refresh-token');
     expect(await decrypt(azure.encryptedKey, MASTER, bound(result.added[2], 'encryptedKey'))).toBe('azure-fixture-key');
-    expect(ollama.encryptedKey).toBe('');
+    expect(await decrypt(ollama.encryptedKey, MASTER, bound(result.added[3], 'encryptedKey'))).toBe('');
     // Bound to the new record, so not usable under another provider.
     await expect(decrypt(azure.encryptedKey, MASTER, bound({ ...result.added[2], providerId: 'openai' }, 'encryptedKey'))).rejects.toThrow();
   }, 60_000);

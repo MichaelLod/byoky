@@ -21,7 +21,8 @@ import { TRUST_RESET_NOTICE_KEY, TRUST_STATE_KEYS, adoptLegacyTrustState, signTr
  * (trust-state.ts) keyed from a format-2 password hash. Wallets written
  * before 1.1.2 have neither. upgradeWallet converts one on the first unlock:
  *
- *   1. rebinds every unbound credential secret, and writes the credentials;
+ *   1. rebinds every unbound credential secret (a local server's empty key
+ *      included), and writes the credentials;
  *   2. writes the format-2 password hash together with the signed trust
  *      state, in one storage write.
  *
@@ -39,6 +40,22 @@ export const CREDENTIAL_SECRET_FIELDS: readonly CredentialSecretField[] = [
   'encryptedAccessToken',
   'encryptedRefreshToken',
 ];
+
+/**
+ * Providers that may run without a key: user-run local servers. Their empty
+ * key is stored like any other secret, encrypted and bound to its record.
+ */
+export const KEYLESS_PROVIDERS: ReadonlySet<string> = new Set(['ollama', 'lm_studio']);
+
+function isLoopbackUrl(url: string | undefined): boolean {
+  if (!url) return false;
+  try {
+    const host = new URL(url).hostname;
+    return host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1';
+  } catch {
+    return false;
+  }
+}
 
 /** The subset of browser.storage.local the upgrade uses. */
 export interface WalletStorage {
@@ -68,7 +85,12 @@ export interface WalletUpgradeResult {
 /**
  * Decrypt one stored secret, checking it belongs to `credential`. Unbound
  * ciphertext is accepted only with `allowUnbound`, i.e. while the wallet
- * still has its format-1 hash. Keyless local credentials store ''.
+ * still has its format-1 hash.
+ *
+ * A missing secret ('') takes no password to plant, so it is accepted only
+ * as the key of a local server (KEYLESS_PROVIDERS): before the upgrade
+ * binds it, or afterwards for a server on this machine, which is as far as
+ * a planted record could send prompts. Anything else is refused.
  */
 export async function openCredentialSecret(
   credential: Pick<Credential, 'id' | 'providerId' | 'baseUrl'>,
@@ -77,7 +99,11 @@ export async function openCredentialSecret(
   password: string,
   allowUnbound: boolean,
 ): Promise<string> {
-  if (!encrypted) return '';
+  if (!encrypted) {
+    if (field === 'encryptedKey' && KEYLESS_PROVIDERS.has(credential.providerId)
+      && (allowUnbound || isLoopbackUrl(credential.baseUrl))) return '';
+    throw new Error('Credential has no secret');
+  }
   if (isBoundCiphertext(encrypted)) return decrypt(encrypted, password, credentialAad(credential, field));
   if (!allowUnbound) throw new Error('Credential secret is not bound to its record');
   return decrypt(encrypted, password);
@@ -109,6 +135,13 @@ export async function upgradeWallet(
     const record = { id: cred.id, providerId: cred.providerId, baseUrl: typeof cred.baseUrl === 'string' ? cred.baseUrl : undefined };
     for (const field of CREDENTIAL_SECRET_FIELDS) {
       const value = cred[field];
+      // A local server's empty key is bound like any other.
+      if (value === '' && field === 'encryptedKey' && cred.authMethod === 'api_key' && KEYLESS_PROVIDERS.has(record.providerId)) {
+        const entry = rebound.get(record.id) ?? {};
+        entry[field] = { from: '', to: await encrypt('', password, credentialAad(record, field)) };
+        rebound.set(record.id, entry);
+        continue;
+      }
       if (typeof value !== 'string' || !value || isBoundCiphertext(value)) continue;
       let plaintext: string;
       try {

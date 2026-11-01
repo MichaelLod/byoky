@@ -55,7 +55,8 @@ describe('wallet upgrade from 1.1.1', () => {
     const storage = memoryStorage(fixture.storage);
     const result = await upgradeWallet(storage, PASSWORD);
     expect(result).not.toBeNull();
-    expect(result!.rebound).toBe(4);
+    // Three secrets plus the refresh token, and the Ollama record's empty key.
+    expect(result!.rebound).toBe(5);
     expect(result!.unreadable).toBe(0);
 
     // Password hash: format 2, same password.
@@ -118,6 +119,24 @@ describe('wallet upgrade from 1.1.1', () => {
     await expect(secret({ ...azure, encryptedKey: old.encryptedKey }, false)).rejects.toThrow();
     // Untouched records still decrypt.
     expect(await secret(azure, false)).toBe('azure-fixture-key');
+  }, 60_000);
+
+  it('accepts a missing secret only as a local server\'s key', async () => {
+    const storage = memoryStorage(fixture.storage);
+    await upgradeWallet(storage, PASSWORD);
+    const [anthropic, , azure, ollama] = creds(storage) as Array<Extract<Credential, { authMethod: 'api_key' }>>;
+    // The Ollama record's empty key was bound by the upgrade.
+    expect(isBoundCiphertext(ollama.encryptedKey)).toBe(true);
+    expect(await secret(ollama, false)).toBe('');
+    // A record planted without a secret, pointing anywhere, takes no
+    // password; it is refused for any provider but a local server...
+    await expect(secret({ ...azure, id: 'planted', baseUrl: 'https://attacker.example', encryptedKey: '' }, false)).rejects.toThrow('no secret');
+    await expect(secret({ ...anthropic, encryptedKey: '' }, false)).rejects.toThrow('no secret');
+    // ...and for a local server, unless it runs on this machine.
+    await expect(secret({ ...ollama, id: 'planted', baseUrl: 'https://attacker.example', encryptedKey: '' }, false)).rejects.toThrow('no secret');
+    expect(await secret({ ...ollama, id: 'planted', encryptedKey: '' }, false)).toBe('');
+    // Before the upgrade, a 1.1.1 keyless record reads as before.
+    expect(await secret({ ...ollama, baseUrl: 'https://ollama.example', encryptedKey: '' }, true)).toBe('');
   }, 60_000);
 
   it('resumes after an interrupted upgrade', async () => {

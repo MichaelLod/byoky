@@ -48,7 +48,7 @@ import {
 } from '@byoky/core';
 import type { Runtime } from 'wxt/browser';
 import { exportVaultFile, importVaultFile } from '../lib/vault-file';
-import { openCredentialSecret, upgradeWallet } from '../lib/wallet-upgrade';
+import { KEYLESS_PROVIDERS, openCredentialSecret, upgradeWallet } from '../lib/wallet-upgrade';
 import {
   REVOKED_ORIGINS_KEY,
   TRUST_RESET_NOTICE_KEY,
@@ -1415,6 +1415,10 @@ export default defineBackground(() => {
           storedBaseUrl = resolved;
         }
         const cleanValue = cValue.replace(/\s+/g, '');
+        // Only a local server may run without a key.
+        if (!cleanValue && !(cAuth === 'api_key' && KEYLESS_PROVIDERS.has(cpId))) {
+          return { error: cAuth === 'api_key' ? 'Enter an API key' : 'Enter a token' };
+        }
         const newCred: Record<string, unknown> = {
           id: crypto.randomUUID(),
           providerId: cpId,
@@ -1424,13 +1428,11 @@ export default defineBackground(() => {
         };
         if (storedBaseUrl) newCred.baseUrl = storedBaseUrl;
         const secretField = cAuth === 'api_key' ? 'encryptedKey' : 'encryptedAccessToken';
-        // Local providers run unauthenticated — empty key is allowed and we skip
-        // the encryption step entirely, storing an empty string as the marker.
         // A key is bound to this record (id, provider, base URL), so it can't
-        // be moved into another one.
-        newCred[secretField] = cleanValue
-          ? await encrypt(cleanValue, masterPassword, credentialAad({ id: newCred.id as string, providerId: cpId, baseUrl: storedBaseUrl }, secretField))
-          : '';
+        // be moved into another one. A local server's empty key is encrypted
+        // and bound too: a record with no secret at all takes no password to
+        // plant (see openCredentialSecret).
+        newCred[secretField] = await encrypt(cleanValue, masterPassword, credentialAad({ id: newCred.id as string, providerId: cpId, baseUrl: storedBaseUrl }, secretField));
         // Credential writes are serialized with the wallet upgrade's.
         await serializedStorage(async () => {
           const data = await browser.storage.local.get('credentials');
@@ -2765,18 +2767,12 @@ export default defineBackground(() => {
     const password = masterPassword;
     if (!password) throw new Error('Wallet is locked');
 
-    // Local providers (Ollama, LM Studio) may be stored with an empty key
-    // when the user didn't set auth on their local server. No ciphertext,
-    // nothing to decrypt.
-    if (credential.authMethod === 'api_key' && !credential.encryptedKey) {
-      return '';
-    }
-
     try {
       // A secret only decrypts for the record it was bound to. Unbound ones
       // predate 1.1.2 and are accepted only until the wallet upgrade has
       // rebound them (lib/wallet-upgrade.ts): after that, a blob moved into
       // another record is refused rather than sent to that record's host.
+      // So is a record with no secret, other than a local server's.
       const { passwordHash } = await browser.storage.local.get('passwordHash');
       const allowUnbound = typeof passwordHash === 'string' && isLegacyPasswordHash(passwordHash);
       if (credential.authMethod === 'api_key') {
