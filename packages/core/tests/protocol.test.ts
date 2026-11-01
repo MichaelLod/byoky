@@ -5,6 +5,7 @@ import {
   createConnectResponse,
   createErrorMessage,
   isByokyMessage,
+  isTextContentType,
   BYOKY_PROVIDER_KEY,
 } from '../src/protocol.js';
 
@@ -123,5 +124,35 @@ describe('isByokyMessage', () => {
 describe('BYOKY_PROVIDER_KEY', () => {
   it('is defined as __byoky__', () => {
     expect(BYOKY_PROVIDER_KEY).toBe('__byoky__');
+  });
+});
+
+describe('isTextContentType', () => {
+  it('treats text, JSON, XML, SSE, JavaScript and form-urlencoded as text', () => {
+    for (const type of [
+      'text/plain',
+      'text/event-stream',
+      'application/json; charset=utf-8',
+      'application/problem+json',
+      'application/x-ndjson',
+      'application/xml',
+      'application/javascript',
+      'application/x-www-form-urlencoded',
+      'Application/JSON',
+    ]) {
+      expect(isTextContentType(type), type).toBe(true);
+    }
+  });
+
+  it('treats audio, images and octet-stream as binary', () => {
+    for (const type of ['audio/mpeg', 'audio/wav', 'image/png', 'application/octet-stream', 'multipart/form-data; boundary=x']) {
+      expect(isTextContentType(type), type).toBe(false);
+    }
+  });
+
+  it('counts a missing content type as text', () => {
+    expect(isTextContentType(undefined)).toBe(true);
+    expect(isTextContentType(null)).toBe(true);
+    expect(isTextContentType('')).toBe(true);
   });
 });

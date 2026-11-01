@@ -39,6 +39,12 @@ export interface RelayRequest {
   method: string;
   headers: Record<string, string>;
   body?: string;
+  /**
+   * How `body` is encoded, as in the page protocol's BYOKY_PROXY_REQUEST:
+   * 'base64' for raw bytes, 'formdata' for a JSON array of
+   * SerializedFormDataEntry. Absent means `body` is the text itself.
+   */
+  bodyEncoding?: 'base64' | 'formdata';
 }
 
 export interface RelayResponseMeta {
@@ -53,6 +59,8 @@ export interface RelayResponseChunk {
   type: 'relay:response:chunk';
   requestId: string;
   chunk: string;
+  /** 'base64' when `chunk` is base64 of raw bytes (non-text responses); absent means text. */
+  chunkEncoding?: 'base64';
 }
 
 export interface RelayResponseDone {
@@ -64,6 +72,12 @@ export interface RelayResponseError {
   type: 'relay:response:error';
   requestId: string;
   error: { code: string; message: string };
+}
+
+/** Server → browser: the backend gave up on a request, so stop it (and its upstream call). */
+export interface RelayCancel {
+  type: 'relay:cancel';
+  requestId: string;
 }
 
 export interface RelayPing {
@@ -83,6 +97,7 @@ export type RelayMessage =
   | RelayResponseChunk
   | RelayResponseDone
   | RelayResponseError
+  | RelayCancel
   | RelayPing
   | RelayPong;
 
@@ -109,14 +124,18 @@ export function parseRelayMessage(data: unknown): RelayMessage | null {
       case 'relay:request':
         if (typeof raw.requestId !== 'string' || typeof raw.providerId !== 'string' ||
             typeof raw.url !== 'string' || typeof raw.method !== 'string') return null;
+        if (raw.body !== undefined && typeof raw.body !== 'string') return null;
+        if (raw.bodyEncoding !== undefined && raw.bodyEncoding !== 'base64' && raw.bodyEncoding !== 'formdata') return null;
         break;
       case 'relay:response:meta':
         if (typeof raw.requestId !== 'string' || typeof raw.status !== 'number') return null;
         break;
       case 'relay:response:chunk':
         if (typeof raw.requestId !== 'string' || typeof raw.chunk !== 'string') return null;
+        if (raw.chunkEncoding !== undefined && raw.chunkEncoding !== 'base64') return null;
         break;
       case 'relay:response:done':
+      case 'relay:cancel':
         if (typeof raw.requestId !== 'string') return null;
         break;
       case 'relay:response:error':

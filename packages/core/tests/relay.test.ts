@@ -81,6 +81,24 @@ describe('relay protocol', () => {
       expect(parseRelayMessage({ type: 'relay:unknown', foo: 'bar' })).toBeNull();
     });
 
+    it('accepts a relay:request body encoding and rejects unknown ones', () => {
+      const base = { type: 'relay:request', requestId: '1', providerId: 'x', url: 'u', method: 'POST', headers: {} };
+      expect(parseRelayMessage({ ...base, body: 'AAEC', bodyEncoding: 'base64' })).not.toBeNull();
+      expect(parseRelayMessage({ ...base, body: '[]', bodyEncoding: 'formdata' })).not.toBeNull();
+      expect(parseRelayMessage({ ...base, body: 'x', bodyEncoding: 'gzip' })).toBeNull();
+      expect(parseRelayMessage({ ...base, body: { not: 'a string' } })).toBeNull();
+    });
+
+    it('accepts a base64 relay:response:chunk and rejects unknown encodings', () => {
+      expect(parseRelayMessage({ type: 'relay:response:chunk', requestId: '1', chunk: '//8=', chunkEncoding: 'base64' })).not.toBeNull();
+      expect(parseRelayMessage({ type: 'relay:response:chunk', requestId: '1', chunk: 'x', chunkEncoding: 'hex' })).toBeNull();
+    });
+
+    it('parses relay:cancel and requires its requestId', () => {
+      expect(parseRelayMessage({ type: 'relay:cancel', requestId: '1' })?.type).toBe('relay:cancel');
+      expect(parseRelayMessage({ type: 'relay:cancel' })).toBeNull();
+    });
+
     it('rejects the retired pairing and vault message types', () => {
       expect(parseRelayMessage({ type: 'relay:pair:hello', providers: {} })).toBeNull();
       expect(parseRelayMessage({ type: 'relay:pair:ack' })).toBeNull();
