@@ -56,27 +56,27 @@ const credentials = [
 
 const MSG = 'https://api.anthropic.com/v1/messages';
 const CHAT = 'https://api.openai.com/v1/chat/completions';
-const GEM = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+const GEM = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent';
 const recent = [
-  { origin: DEMO, p: 'anthropic', url: MSG, ago: 2, i: 1840, o: 420, m: 'claude-sonnet-4-5' },
-  { origin: LOCAL, p: 'anthropic', url: MSG, ago: 4, i: 1210, o: 296, m: 'claude-sonnet-4-5', translated: true },
-  { origin: DEMO, p: 'openai', url: CHAT, ago: 7, i: 980, o: 214, m: 'gpt-4o-mini' },
-  { origin: DEMO, p: 'anthropic', url: MSG, ago: 11, i: 2650, o: 604, m: 'claude-sonnet-4-5' },
-  { origin: LOCAL, p: 'anthropic', url: MSG, ago: 16, i: 1580, o: 361, m: 'claude-sonnet-4-5', translated: true },
-  { origin: DEMO, p: 'gemini', url: GEM, ago: 23, i: 2210, o: 380, m: 'gemini-2.5-flash' },
-  { origin: DEMO, p: 'anthropic', url: MSG, ago: 31, i: 1980, o: 455, m: 'claude-sonnet-4-5' },
+  { origin: DEMO, p: 'anthropic', url: MSG, ago: 2, i: 1840, o: 420, m: 'claude-sonnet-5-5' },
+  { origin: LOCAL, p: 'anthropic', url: MSG, ago: 4, i: 1210, o: 296, m: 'claude-sonnet-5-5', translated: true },
+  { origin: DEMO, p: 'openai', url: CHAT, ago: 7, i: 980, o: 214, m: 'gpt-5.4-mini' },
+  { origin: DEMO, p: 'anthropic', url: MSG, ago: 11, i: 2650, o: 604, m: 'claude-sonnet-5-5' },
+  { origin: LOCAL, p: 'anthropic', url: MSG, ago: 16, i: 1580, o: 361, m: 'claude-sonnet-5-5', translated: true },
+  { origin: DEMO, p: 'gemini', url: GEM, ago: 23, i: 2210, o: 380, m: 'gemini-3.8-flash' },
+  { origin: DEMO, p: 'anthropic', url: MSG, ago: 31, i: 1980, o: 455, m: 'claude-sonnet-5-5' },
 ];
 const log = [
   ...recent.map((r, n) => ({
     id: `r${n}`, sessionId: r.origin === DEMO ? 's1' : 's2', appOrigin: r.origin, providerId: r.p, url: r.url,
     method: 'POST', status: 200, timestamp: now - r.ago * min, inputTokens: r.i, outputTokens: r.o, model: r.m,
-    ...(r.translated ? { actualProviderId: 'openai', actualModel: 'gpt-4o-mini' } : {}),
+    ...(r.translated ? { actualProviderId: 'openai', actualModel: 'gpt-5.4-mini' } : {}),
   })),
   ...Array.from({ length: 30 }, (_, n) => ({
     id: `x${n}`, sessionId: n % 4 === 1 ? 's2' : 's1', appOrigin: n % 4 === 1 ? LOCAL : DEMO,
     providerId: n % 3 === 2 ? 'openai' : 'anthropic', url: n % 3 === 2 ? CHAT : MSG, method: 'POST', status: 200,
     timestamp: now - (45 + n * 260) * min, inputTokens: 1100 + ((n * 373) % 1900), outputTokens: 240 + ((n * 97) % 420),
-    model: n % 3 === 2 ? 'gpt-4o-mini' : 'claude-sonnet-4-5',
+    model: n % 3 === 2 ? 'gpt-5.4-mini' : 'claude-sonnet-5-5',
   })),
 ];
 
@@ -86,13 +86,13 @@ const sessions = [
     { providerId: 'openai', credentialId: 'c2', available: true, authMethod: 'api_key' },
   ], requestedProviders: ['anthropic', 'openai'], createdAt: now - 42 * min, expiresAt: now + day },
   { id: 's2', sessionKey: 'k2', appOrigin: LOCAL, providers: [
-    { providerId: 'anthropic', credentialId: 'c2', available: true, authMethod: 'api_key', translation: { dstProviderId: 'openai', dstModel: 'gpt-4o-mini' } },
+    { providerId: 'anthropic', credentialId: 'c2', available: true, authMethod: 'api_key', translation: { dstProviderId: 'openai', dstModel: 'gpt-5.4-mini' } },
   ], requestedProviders: ['anthropic'], createdAt: now - 3 * 60 * min, expiresAt: now + day },
 ];
 
 const groups = [
   { id: 'default', name: 'Default', providerId: '', createdAt: now - 30 * day },
-  { id: 'g1', name: 'Fast', providerId: 'openai', credentialId: 'c2', model: 'gpt-4o-mini', createdAt: now - 2 * day },
+  { id: 'g1', name: 'Fast', providerId: 'openai', credentialId: 'c2', model: 'gpt-5.4-mini', createdAt: now - 2 * day },
 ];
 
 const base = {

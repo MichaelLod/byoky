@@ -17,7 +17,7 @@
  *   10-approval-request         a local app asks to connect
  *   11-connected-apps           Connect → Sessions
  *   12-token-cap                per-app token limit set
- *   13-group-form               "+ New group" pinned to OpenAI / gpt-4o-mini
+ *   13-group-form               "+ New group" pinned to OpenAI / gpt-5.4-mini
  *   14-groups-routing           app moved into the GPT group (Claude → GPT)
  *   15-request-history          Connect → History
  *   16-settings                 keys stay local; .byoky export/import
@@ -325,7 +325,7 @@ test('capture extension popup screens for marketing', async () => {
 
     // ── 7. Groups: Claude + GPT, then move the app Claude → GPT ──────────
     await createGroup(popup, { name: 'Claude', providerId: 'anthropic' });
-    await createGroup(popup, { name: 'GPT', providerId: 'openai', model: 'gpt-4o-mini', snapAs: '13-group-form' });
+    await createGroup(popup, { name: 'GPT', providerId: 'openai', model: 'gpt-5.4-mini', snapAs: '13-group-form' });
 
     // Dragging is HTML5 DnD in the popup; assigning through the same internal
     // message the drop handler ends in is deterministic.

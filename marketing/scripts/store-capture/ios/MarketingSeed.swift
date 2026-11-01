@@ -32,7 +32,7 @@ extension WalletStore {
         for s in sessions { _ = try? upsertSession(appOrigin: s.appOrigin, providers: s.providers) }
 
         // Routing: chat.example.com asks for Anthropic, its group sends it to OpenAI.
-        if let openai, let group = try? createGroup(name: "Fast", providerId: "openai", credentialId: openai.id, model: "gpt-4o-mini") {
+        if let openai, let group = try? createGroup(name: "Fast", providerId: "openai", credentialId: openai.id, model: "gpt-5.4-mini") {
             try? setAppGroup(origin: chat, groupId: group.id)
         }
 
@@ -41,25 +41,25 @@ extension WalletStore {
         var rows: [Row] = []
         let anthropicSizes = [(2140, 512), (1870, 430), (3320, 690), (1210, 288), (2650, 604), (1980, 455), (2410, 571), (1630, 377), (2890, 640), (1450, 330), (2230, 498), (3010, 702), (1760, 401), (2570, 589), (1340, 296), (2060, 470), (2780, 615), (1590, 352), (2320, 520), (1910, 433), (2470, 560)]
         for (i, s) in anthropicSizes.enumerated() {
-            rows.append(Row(origin: demo, provider: "anthropic", model: "claude-sonnet-4-5", input: s.0, output: s.1, ago: Double(i) * 410 + 4))
+            rows.append(Row(origin: demo, provider: "anthropic", model: "claude-sonnet-5-5", input: s.0, output: s.1, ago: Double(i) * 410 + 4))
         }
         let openaiSizes = [(1320, 310), (980, 240), (1540, 362), (1110, 255), (1720, 398), (890, 204), (1430, 330), (1260, 287)]
         for (i, s) in openaiSizes.enumerated() {
-            rows.append(Row(origin: demo, provider: "openai", model: "gpt-4o-mini", input: s.0, output: s.1, ago: Double(i) * 620 + 11))
+            rows.append(Row(origin: demo, provider: "openai", model: "gpt-5.4-mini", input: s.0, output: s.1, ago: Double(i) * 620 + 11))
         }
         let routed = [(1840, 420), (1210, 296), (2260, 514), (1580, 361), (1990, 447), (1370, 318)]
         for (i, s) in routed.enumerated() {
-            rows.append(Row(origin: chat, provider: "anthropic", model: "claude-sonnet-4-5", input: s.0, output: s.1, ago: Double(i) * 530 + 7, actual: "openai", actualModel: "gpt-4o-mini"))
+            rows.append(Row(origin: chat, provider: "anthropic", model: "claude-sonnet-5-5", input: s.0, output: s.1, ago: Double(i) * 530 + 7, actual: "openai", actualModel: "gpt-5.4-mini"))
         }
         let geminiSizes = [(2210, 380), (1650, 290), (1980, 341), (1430, 260)]
         for (i, s) in geminiSizes.enumerated() {
-            rows.append(Row(origin: demo, provider: "gemini", model: "gemini-2.5-flash", input: s.0, output: s.1, ago: Double(i) * 900 + 20))
+            rows.append(Row(origin: demo, provider: "gemini", model: "gemini-3.8-flash", input: s.0, output: s.1, ago: Double(i) * 900 + 20))
         }
         rows.sort { $0.ago < $1.ago }
 
         let urls = ["anthropic": "https://api.anthropic.com/v1/messages",
                     "openai": "https://api.openai.com/v1/chat/completions",
-                    "gemini": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"]
+                    "gemini": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"]
         requestLogs = rows.map { r in
             var e = RequestLog(id: UUID().uuidString, appOrigin: r.origin, providerId: r.provider, method: "POST",
                                url: urls[r.provider] ?? "", statusCode: r.status, timestamp: now.addingTimeInterval(-r.ago * minute))
@@ -78,7 +78,7 @@ extension WalletStore {
         }
         // One more through the real logging path, which also saves the log.
         logRequest(appOrigin: demo, providerId: "anthropic", method: "POST", url: urls["anthropic"]!, statusCode: 200,
-                   requestBody: Data(#"{"model":"claude-sonnet-4-5","max_tokens":1024,"messages":[]}"#.utf8),
+                   requestBody: Data(#"{"model":"claude-sonnet-5-5","max_tokens":1024,"messages":[]}"#.utf8),
                    usage: UsageParser.TokenUsage(inputTokens: 1720, outputTokens: 388))
 
         setAllowance(TokenAllowance(origin: demo, totalLimit: 100_000, providerLimits: ["anthropic": 80_000]))

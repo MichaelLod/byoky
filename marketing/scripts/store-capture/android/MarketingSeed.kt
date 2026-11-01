@@ -41,25 +41,25 @@ object MarketingSeed {
         sessions.value.forEach { wallet.upsertSession(it.appOrigin, it.providers) }
 
         // Routing: chat.example.com asks for Anthropic, its group sends it to OpenAI.
-        val group = wallet.createGroup("Fast", "openai", openai.id, "gpt-4o-mini")
+        val group = wallet.createGroup("Fast", "openai", openai.id, "gpt-5.4-mini")
         wallet.setAppGroup(chat, group.id)
 
         data class Row(val origin: String, val provider: String, val model: String, val input: Int, val output: Int, val ago: Long, val actual: String? = null, val actualModel: String? = null)
         val rows = mutableListOf<Row>()
         listOf(2140 to 512, 1870 to 430, 3320 to 690, 1210 to 288, 2650 to 604, 1980 to 455, 2410 to 571, 1630 to 377, 2890 to 640, 1450 to 330,
             2230 to 498, 3010 to 702, 1760 to 401, 2570 to 589, 1340 to 296, 2060 to 470, 2780 to 615, 1590 to 352, 2320 to 520, 1910 to 433, 2470 to 560)
-            .forEachIndexed { i, (a, b) -> rows += Row(demo, "anthropic", "claude-sonnet-4-5", a, b, i * 410L + 4) }
+            .forEachIndexed { i, (a, b) -> rows += Row(demo, "anthropic", "claude-sonnet-5-5", a, b, i * 410L + 4) }
         listOf(1320 to 310, 980 to 240, 1540 to 362, 1110 to 255, 1720 to 398, 890 to 204, 1430 to 330, 1260 to 287)
-            .forEachIndexed { i, (a, b) -> rows += Row(demo, "openai", "gpt-4o-mini", a, b, i * 620L + 11) }
+            .forEachIndexed { i, (a, b) -> rows += Row(demo, "openai", "gpt-5.4-mini", a, b, i * 620L + 11) }
         listOf(1840 to 420, 1210 to 296, 2260 to 514, 1580 to 361, 1990 to 447, 1370 to 318)
-            .forEachIndexed { i, (a, b) -> rows += Row(chat, "anthropic", "claude-sonnet-4-5", a, b, i * 530L + 7, "openai", "gpt-4o-mini") }
+            .forEachIndexed { i, (a, b) -> rows += Row(chat, "anthropic", "claude-sonnet-5-5", a, b, i * 530L + 7, "openai", "gpt-5.4-mini") }
         listOf(2210 to 380, 1650 to 290, 1980 to 341, 1430 to 260)
-            .forEachIndexed { i, (a, b) -> rows += Row(demo, "gemini", "gemini-2.5-flash", a, b, i * 900L + 20) }
+            .forEachIndexed { i, (a, b) -> rows += Row(demo, "gemini", "gemini-3.8-flash", a, b, i * 900L + 20) }
         rows.sortBy { it.ago }
         val urls = mapOf(
             "anthropic" to "https://api.anthropic.com/v1/messages",
             "openai" to "https://api.openai.com/v1/chat/completions",
-            "gemini" to "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+            "gemini" to "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent",
         )
         val logs = field<MutableStateFlow<List<RequestLog>>>(wallet, "_requestLogs")
         logs.value = rows.map {
@@ -76,7 +76,7 @@ object MarketingSeed {
         }
         // One more through the real logging path, which also saves the log.
         wallet.logRequest(demo, "anthropic", "POST", urls.getValue("anthropic"), 200,
-            """{"model":"claude-sonnet-4-5","max_tokens":1024,"messages":[]}""".toByteArray(),
+            """{"model":"claude-sonnet-5-5","max_tokens":1024,"messages":[]}""".toByteArray(),
             UsageLedger.Usage(1, 1720, 388))
 
         wallet.setAllowance(TokenAllowance(demo, totalLimit = 100_000, providerLimits = mapOf("anthropic" to 80_000)))
