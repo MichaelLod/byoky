@@ -174,4 +174,12 @@ dependencies {
     androidTestImplementation("androidx.test:core-ktx:1.6.1")
     androidTestImplementation("androidx.test:rules:1.6.1")
     androidTestImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
+    // Compose UI tests: what a component hands to screen readers.
+    androidTestImplementation(composeBom)
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    // ui-test-junit4 brings Espresso 3.5, and before 3.7 Espresso reflects on
+    // InputManager.getInstance, which API 36 no longer has: every Compose
+    // test failed there before it started.
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
