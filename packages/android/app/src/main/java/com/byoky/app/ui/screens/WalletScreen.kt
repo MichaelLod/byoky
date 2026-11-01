@@ -21,7 +21,11 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -381,7 +385,8 @@ private fun CredentialCard(
                     )
                     Text(" · ", style = MonoStyle, color = Dim)
                     CapsText(
-                        if (credential.authMethod == AuthMethod.API_KEY) "API Key" else "OAuth",
+                        // OAuth on Android is always an Anthropic setup token; say so, as the add sheet does.
+                        if (credential.authMethod == AuthMethod.API_KEY) "API Key" else "Setup Token",
                         style = MonoStyle,
                         color = if (credential.authMethod == AuthMethod.API_KEY) Fog else Phosphor,
                         maxLines = 1,
@@ -433,6 +438,13 @@ private fun formatUsageTokens(n: Int): String = when {
     n >= 1_000_000 -> "%.1fM".format(n / 1_000_000.0)
     n >= 1_000 -> "%dK".format(n / 1_000)
     else -> n.toString()
+}
+
+/** [before] + [command] in mono + [after]: a shell command inside helper text. */
+private fun withCommand(before: String, command: String, after: String): AnnotatedString = buildAnnotatedString {
+    append(before)
+    withStyle(SpanStyle(fontFamily = MonoStyle.fontFamily, color = Bone)) { append(command) }
+    append(after)
 }
 
 /**
@@ -578,31 +590,35 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
                         supportingText = CredentialBaseUrl.requirementText(selectedProvider!!.id),
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        when (selectedProvider?.id) {
-                            "ollama" -> "Where your Ollama server is running. Make sure `ollama serve` is active."
-                            "lm_studio" -> "Where your LM Studio server is running. Start the \"Local Server\" in LM Studio."
-                            else -> "Your key is only ever sent to this endpoint."
-                        },
-                        color = Fog,
-                        fontSize = 12.sp,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    if (isLocalProvider) Row(verticalAlignment = Alignment.Top) {
-                        Icon(
-                            Icons.Default.Warning,
-                            contentDescription = null,
-                            tint = Amber,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(Modifier.width(6.dp))
+                    // The http/https rule is the field's supporting text; Azure's
+                    // endpoint is explained there too.
+                    if (isLocalProvider) {
+                        Spacer(Modifier.height(8.dp))
                         Text(
-                            "Plain http:// only works for a server on this phone (localhost or 127.0.0.1). A server elsewhere on your network needs https://. Requests fail while the server is offline or asleep.",
-                            color = Amber,
+                            if (selectedProvider?.id == "ollama") {
+                                withCommand("Where your Ollama server is running. Make sure ", "ollama serve", " is active.")
+                            } else {
+                                AnnotatedString("Where your LM Studio server is running. Start the \"Local Server\" in LM Studio.")
+                            },
+                            color = Fog,
                             fontSize = 12.sp,
-                            lineHeight = 16.sp,
                         )
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.Top) {
+                            Icon(
+                                Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = Amber,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                "Requests fail while the server is offline or asleep.",
+                                color = Amber,
+                                fontSize = 12.sp,
+                                lineHeight = 16.sp,
+                            )
+                        }
                     }
                     Spacer(Modifier.height(12.dp))
                 }
@@ -633,7 +649,7 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
                 if (authMethod == AuthMethod.OAUTH) {
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "Run `claude setup-token` in your terminal to get a token. Setup tokens use your Claude Pro/Max subscription.",
+                        withCommand("Run ", "claude setup-token", " in your terminal to get a token. Setup tokens use your Claude Pro/Max subscription."),
                         color = Fog,
                         fontSize = 12.sp,
                     )
@@ -645,9 +661,11 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
                         fontSize = 12.sp,
                     )
                 } else {
+                    // The key does leave the phone: in the request to the provider.
+                    val destination = if (needsBaseUrl) "the endpoint above" else selectedProvider!!.name
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "Your key will be encrypted with AES-256-GCM and stored securely. It never leaves this device.",
+                        "Your key is encrypted with AES-256-GCM, stored on this device and only sent to $destination.",
                         color = Fog,
                         fontSize = 12.sp,
                     )
