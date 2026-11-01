@@ -81,6 +81,10 @@ export class Byoky {
   // fall back from `reconnectOnly` to a full connect when the wallet has
   // dropped the session (browser restart / extension reload).
   private lastConnectRequest?: ConnectRequest;
+  // Releases the notify port of the session this instance built last. A
+  // new session replaces that one, so connecting again without disconnect()
+  // doesn't leave its port registered with the content script.
+  private releaseActiveNotify?: () => void;
 
   constructor(options: ByokyOptions = {}) {
     this.timeout = options.timeout ?? 60_000;
@@ -92,6 +96,10 @@ export class Byoky {
    * extension, or the in-app browser of the Byoky mobile apps (which expose
    * the same page protocol). Throws WALLET_NOT_INSTALLED when none is
    * present; with `modal`, shows install guidance instead.
+   *
+   * A session this instance returned before (from connect, tryReconnect or
+   * reconnect) is replaced: it still makes requests, but the wallet's
+   * notifications (onDisconnect, onProvidersUpdated) go to the new one.
    */
   async connect(request: ConnectRequest & {
     /** Show the built-in connect modal. Pass true or ModalOptions. */
@@ -227,6 +235,7 @@ export class Byoky {
     // registered, which wakes the service worker every ~30 s; a closed
     // MessagePort alone never tells it this one is gone.
     const releaseNotify = () => {
+      if (this.releaseActiveNotify === releaseNotify) this.releaseActiveNotify = undefined;
       try { notifyChannel.port1.postMessage({ type: 'BYOKY_UNREGISTER_NOTIFY' }); } catch {}
       notifyChannel.port1.close();
     };
@@ -328,6 +337,13 @@ export class Byoky {
       },
     };
 
+    // This session replaces the one this instance built before (connect()
+    // or tryReconnect() again without disconnect()). That one hands its
+    // notify port back once this one's is registered, so the content
+    // script's notify connection stays open in between.
+    const releaseReplaced = this.releaseActiveNotify;
+    this.releaseActiveNotify = releaseNotify;
+
     // Register a secure notification channel via MessageChannel so
     // revocation events cannot be spoofed by page scripts.
     const notifyChannel = new MessageChannel();
@@ -355,6 +371,7 @@ export class Byoky {
           origin,
           [notifyChannel.port2],
         );
+        releaseReplaced?.();
       });
     }
 

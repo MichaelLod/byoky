@@ -106,10 +106,10 @@ describe('SDK ↔ content script', () => {
       });
     });
 
-    async function connect(sessionKey: string) {
-      const pending = new Byoky().connect();
+    async function connect(sessionKey: string, byoky = new Byoky()) {
+      const pending = byoky.connect();
       await tick();
-      const port = portsNamed('byoky-message')[0];
+      const port = portsNamed('byoky-message').at(-1)!;
       port.emit({
         type: 'BYOKY_CONNECT_RESPONSE',
         requestId: port.posted[0].requestId,
@@ -164,6 +164,19 @@ describe('SDK ↔ content script', () => {
       session.disconnect();
       await tick();
       expect(notify.disconnected).toBe(true);
+    });
+
+    it('connecting again releases the replaced session, so disconnect() still lets the worker sleep', async () => {
+      const byoky = new Byoky();
+      await connect('byk_again', byoky);
+      const session = await connect('byk_again', byoky);
+      await tick();
+      const notifyOpen = () => portsNamed('byoky-notify').some((p) => !p.disconnected);
+      expect(notifyOpen()).toBe(true);
+
+      session.disconnect();
+      await tick();
+      expect(notifyOpen()).toBe(false);
     });
 
     it('passes base64 response chunks through to the app byte-exact', async () => {
