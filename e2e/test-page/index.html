@@ -28,9 +28,12 @@
     // Cheapest viable models per provider so live runs are ~free.
     // gemini-3.5-flash-lite answers in about a second and spends no output
     // tokens on thinking first; Gemini 3.8 Flash takes up to minutes.
+    // GPT-5.4 mini, like every GPT-5, takes max_completion_tokens (max_tokens
+    // is a 400); it answers this prompt with no reasoning tokens spent
+    // (checked 2026-11-01).
     const CHEAP_MODELS = {
       anthropic: 'claude-haiku-4-5-20251001',
-      openai: 'gpt-4o-mini',
+      openai: 'gpt-5.4-mini',
       gemini: 'gemini-3.5-flash-lite',
     };
     const PROMPT = 'Reply with the single word OK.';
@@ -132,7 +135,7 @@
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             model: CHEAP_MODELS.openai,
-            max_tokens: MAX_TOKENS,
+            max_completion_tokens: MAX_TOKENS,
             messages: [{ role: 'user', content: PROMPT }],
           }),
         });

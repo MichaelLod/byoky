@@ -103,7 +103,7 @@ class TranslationLiveSmokeTest {
         val ctxJson = """
             {"srcFamily":"anthropic","dstFamily":"openai",
              "srcProviderId":"anthropic","dstProviderId":"openai",
-             "srcModel":"claude-haiku-4-5-20251001","dstModel":"gpt-4o-mini"}
+             "srcModel":"claude-haiku-4-5-20251001","dstModel":"gpt-5.4-mini"}
         """.trimIndent().replace("\n", "")
 
         val translatedReq = engine.translateRequest(ctxJson, anthropicReqBody)

@@ -57,7 +57,7 @@ let serverPort = 0;
 
 // Exported so a spec (openclaw-flow.spec.ts) can stand up its own fresh
 // wallet without touching the shared fixture state.
-export { launchWallet, loadApiKeys, startServer, bridgeBin };
+export { launchWallet, loadApiKeys, loadSetupToken, startServer, bridgeBin };
 
 function parseEnvFile(filePath: string): Record<string, string> {
   const out: Record<string, string> = {};
@@ -91,6 +91,21 @@ function loadApiKeys(): ApiKeys {
     );
   }
   return { anthropic, openai, gemini };
+}
+
+/**
+ * Live mode: the Claude setup token (from `claude setup-token`) in
+ * .env.local's ANTHROPIC_SETUP_TOKEN, for the OpenClaw flow.
+ * ANTHROPIC_API_KEY stays an API key: the other live specs need one.
+ */
+function loadSetupToken(): string {
+  const token = parseEnvFile(ENV_LOCAL_PATH).ANTHROPIC_SETUP_TOKEN;
+  if (!token?.startsWith('sk-ant-oat01-')) {
+    throw new Error(
+      'Missing ANTHROPIC_SETUP_TOKEN in .env.local — the OpenClaw flow needs a Claude setup token (sk-ant-oat01-..., see .env.local.example)',
+    );
+  }
+  return token;
 }
 
 function startServer(): Promise<number> {

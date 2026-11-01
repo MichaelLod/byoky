@@ -136,13 +136,13 @@ describe('login', () => {
     expect(stops).toContain('Wallet connected');
   });
 
-  it('configures the models of Byoky\'s registry, with its context windows, output limits and image input', async () => {
+  it('configures the models of Byoky\'s registry, with its context windows, output limits, image input and reasoning', async () => {
     registeredHome();
     const run = authRuns().byoky(context());
     await expect.poll(() => opened.length).toBe(1);
     await post('/callback', { nonce: await pageNonce(), providers: ['anthropic', 'openai', 'gemini'], bridgePort: 19280 });
     const result = await run;
-    type Model = { id: string; input: string[]; contextWindow: number; maxTokens: number };
+    type Model = { id: string; input: string[]; contextWindow: number; maxTokens: number; reasoning: boolean };
     const providers = (result.configPatch as { models: { providers: Record<string, { models: Model[] }> } }).models.providers;
 
     for (const providerId of ['anthropic', 'openai', 'gemini'] as const) {
@@ -158,6 +158,8 @@ describe('login', () => {
         const entry = getModel(m.id)!;
         expect(m.contextWindow, m.id).toBe(entry.contextWindow);
         expect(m.input.includes('image'), m.id).toBe(entry.capabilities.vision);
+        // OpenClaw sends thinking only to a model marked reasoning.
+        expect(m.reasoning, m.id).toBe(entry.capabilities.reasoning);
         // Anthropic's are capped by anthropicMaxTokens (default 4096).
         expect(m.maxTokens, m.id).toBe(providerId === 'anthropic' ? 4096 : entry.maxOutput);
       }

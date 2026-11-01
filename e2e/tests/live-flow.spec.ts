@@ -80,6 +80,12 @@ async function connectFromPage(w: Wallet, providers: string[]) {
   if (!state.connected) throw new Error(`connect failed: ${state.error}`);
 }
 
+// How long to wait for a proxied call to settle: past the test page's own
+// 120 s Byoky timeout, so a slow provider ends as the page's error rather
+// than as a bare wait timeout. (The test's own timeout, 180 s live and 60 s
+// against the fakes, still applies.)
+const CALL_TIMEOUT = 150_000;
+
 async function sendFromPage(w: Wallet, method: 'sendAnthropic' | 'sendOpenAI' | 'sendGemini'): Promise<{ response: unknown; proxyError: { status?: number; code?: string; message?: string } | null }> {
   await w.page.bringToFront();
   await w.page.evaluate((m) => {
@@ -93,7 +99,7 @@ async function sendFromPage(w: Wallet, method: 'sendAnthropic' | 'sendOpenAI' | 
       const s = (window as unknown as { _testState: { response: unknown; proxyError: unknown } })._testState;
       return s.response != null || s.proxyError != null;
     },
-    { timeout: 60_000 },
+    { timeout: CALL_TIMEOUT },
   );
   return w.page.evaluate(() => ({
     response: (window as unknown as { _testState: { response: unknown } })._testState.response,
@@ -202,7 +208,7 @@ test.describe('Byoky end-to-end flow', () => {
         const s = (window as unknown as { _testState: { streamed: unknown; proxyError: unknown } })._testState;
         return s.streamed != null || s.proxyError != null;
       },
-      { timeout: 60_000 },
+      { timeout: CALL_TIMEOUT },
     );
     const state = await walletA.page.evaluate(() => ({
       streamed: (window as unknown as { _testState: { streamed: { text: string; chunks: number; rawLength: number } | null } })._testState.streamed,
@@ -266,7 +272,7 @@ test.describe('Byoky end-to-end flow', () => {
     await form.locator('input[type="text"]').first().fill('Cross-family');
     await form.locator('select').first().selectOption('openai');
     // Model text input is the last input inside the form (datalist-backed).
-    await form.locator('input[list]').fill('gpt-4o-mini');
+    await form.locator('input[list]').fill('gpt-5.4-mini');
     await form.locator('button:has-text("Save")').click();
     // Match the group by its name: every app row also lists the group names
     // in its Group select, so a plain has-text matches other sections too.
@@ -291,7 +297,7 @@ test.describe('Byoky end-to-end flow', () => {
     await section.locator('button:has-text("Edit")').click();
     // Inline edit form — reuse the same model input.
     const form = section.locator('input[list]');
-    await form.fill('gpt-4o-mini'); // same value, confirm Save works idempotently
+    await form.fill('gpt-5.4-mini'); // same value, confirm Save works idempotently
     await section.locator('button:has-text("Save")').click();
     // Re-read from store and assert the group still has the expected model.
     const { groups } = await sendInternalFromPopup<{ groups: Array<{ id: string; name: string; model?: string }> }>(
@@ -299,7 +305,7 @@ test.describe('Byoky end-to-end flow', () => {
     );
     const g = groups.find((x) => x.id === groupIdA);
     expect(g).toBeTruthy();
-    expect(g!.model).toBe('gpt-4o-mini');
+    expect(g!.model).toBe('gpt-5.4-mini');
   });
 
   test('wallet A — assign demo origin to cross-family group', async ({ walletA }) => {
@@ -334,7 +340,7 @@ test.describe('Byoky end-to-end flow', () => {
       (e) => e.appOrigin === demoOrigin && e.providerId === 'anthropic' && e.actualProviderId === 'openai',
     );
     expect(translated, 'expected a translated request entry in log').toBeTruthy();
-    expect(translated!.actualModel).toBe('gpt-4o-mini');
+    expect(translated!.actualModel).toBe('gpt-5.4-mini');
     expect(translated!.groupId).toBe(groupIdA);
     expect(translated!.status).toBeLessThan(400);
   });

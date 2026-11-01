@@ -92,8 +92,9 @@ class ProxyServiceLiveFlowTest {
 
         runBlocking { wallet.addCredential("openai", "e2e-openai", key, AuthMethod.API_KEY) }
 
+        // GPT-5 models take max_completion_tokens; max_tokens is a 400.
         val body = """
-            {"model":"gpt-4o-mini","max_tokens":50,
+            {"model":"gpt-5.4-mini","max_completion_tokens":50,
              "messages":[{"role":"user","content":"Reply with the single word: pong"}]}
         """.trimIndent().replace("\n", "")
 

@@ -68,6 +68,16 @@ function modelOf(body: unknown, fallback: string): string {
   return typeof model === 'string' ? model : fallback;
 }
 
+/**
+ * OpenAI's reasoning models: the o-series and every GPT from 5 on. They
+ * answer max_tokens with a 400 and take max_completion_tokens instead.
+ */
+function isOpenAIReasoningModel(model: string): boolean {
+  if (/^o\d/.test(model)) return true;
+  const gpt = /^gpt-(\d+)/.exec(model);
+  return !!gpt && Number(gpt[1]) >= 5;
+}
+
 function wantsStream(body: unknown): boolean {
   return (body as { stream?: unknown } | undefined)?.stream === true;
 }
@@ -113,7 +123,18 @@ async function openai(route: Route, req: SeenRequest, keys: FakeKeys): Promise<v
   if (req.method !== 'POST' || path !== '/v1/chat/completions') {
     return json(route, 404, { error: { message: `fake has no ${req.method} ${path}`, type: 'invalid_request_error' } });
   }
-  const model = modelOf(req.body, 'gpt-4o-mini');
+  const model = modelOf(req.body, 'gpt-5.4-mini');
+  if (isOpenAIReasoningModel(model) && (req.body as { max_tokens?: unknown } | undefined)?.max_tokens !== undefined) {
+    // What api.openai.com answers (gpt-5.4-mini, 2026-11-01).
+    return json(route, 400, {
+      error: {
+        message: "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.",
+        type: 'invalid_request_error',
+        param: 'max_tokens',
+        code: 'unsupported_parameter',
+      },
+    });
+  }
   const id = 'chatcmpl-e2e-fake';
   const created = Math.floor(Date.now() / 1000);
   const usage = { prompt_tokens: USAGE.input, completion_tokens: USAGE.output, total_tokens: USAGE.input + USAGE.output };

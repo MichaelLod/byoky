@@ -68,7 +68,10 @@ const CALLBACK_TIMEOUT_MS = 180_000;
 // --- Model catalogs per provider ---
 //
 // The anthropic, openai and gemini lists follow @byoky/core's model
-// registry (models.ts): the same ids, context windows and output limits.
+// registry (models.ts): the same ids, context windows, output limits and
+// reasoning flags. OpenClaw turns thinking on by default for a model marked
+// reasoning; its Anthropic client then sends a thinking budget (adaptive
+// thinking only to Opus and Sonnet 4.6), which Haiku 4.5 takes.
 // Prices are per million tokens, from the providers' pricing pages
 // (checked 2026-11-01); cacheWrite is the 5-minute write, and 0 where the
 // provider bills cache storage by the hour instead. The first model of a
@@ -137,7 +140,7 @@ const ANTHROPIC_MODELS: ModelDef[] = [
   {
     id: 'claude-haiku-4-5-20251001',
     name: 'Claude Haiku 4.5',
-    reasoning: false,
+    reasoning: true,
     input: ['text', 'image'],
     cost: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
     contextWindow: 200_000,
