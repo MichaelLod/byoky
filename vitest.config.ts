@@ -1,26 +1,49 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
-import { loadEnv } from 'vite';
 
-export default defineConfig(({ mode }) => ({
-  test: {
-    globals: true,
-    env: loadEnv(mode ?? 'test', process.cwd(), ''),
-    include: ['packages/*/tests/**/*.test.ts'],
-    // Live integration tests hit real provider APIs and cost real money.
-    // They opt in via `pnpm test:live` which uses a separate config.
-    exclude: ['**/node_modules/**', '**/dist/**', '**/tests/**/live/**'],
-    // Loads `.env.local` at repo root into process.env so tests that want
-    // config via env can read it without requiring shell exports. Same
-    // loader used by the live test config.
-    setupFiles: ['./vitest.setup.env.ts'],
-    coverage: {
-      provider: 'v8',
-      include: ['packages/core/src/**', 'packages/sdk/src/**'],
-      exclude: ['**/index.ts'],
-    },
-    environmentMatchGlobs: [
-      ['packages/sdk/tests/**', 'jsdom'],
-      ['packages/web/tests/**', 'jsdom'],
+// Tests that need a DOM. Everything else runs in Node; a file can still pick
+// its own with a `// @vitest-environment` docblock.
+const DOM_TESTS = ['packages/sdk/tests/**/*.test.{ts,tsx}', 'packages/web/tests/**/*.test.{ts,tsx}'];
+
+export default defineConfig({
+  resolve: {
+    // Tests run against core's source, so they don't need a fresh core build
+    // and the extension's background harness can import what it imports.
+    alias: [
+      { find: /^@byoky\/core$/, replacement: fileURLToPath(new URL('./packages/core/src/index.ts', import.meta.url)) },
     ],
   },
-}));
+  test: {
+    globals: true,
+    // Live integration tests hit real provider APIs and cost real money.
+    // They opt in via `pnpm test:live`, which uses vitest.config.live.ts.
+    // The default run reads no .env file, so no secret reaches a test.
+    exclude: ['**/node_modules/**', '**/dist/**', '**/tests/**/live/**'],
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'node',
+          environment: 'node',
+          include: ['packages/*/tests/**/*.test.{ts,tsx}'],
+          exclude: DOM_TESTS,
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'jsdom',
+          environment: 'jsdom',
+          include: DOM_TESTS,
+        },
+      },
+    ],
+    coverage: {
+      provider: 'v8',
+      // Every package, so the untested ones show up at 0% instead of hiding.
+      include: ['packages/*/src/**', 'packages/extension/entrypoints/**', 'packages/extension/lib/**'],
+      // Only the pure re-export barrels; other index.ts files hold real code.
+      exclude: ['packages/core/src/index.ts', 'packages/sdk/src/index.ts', '**/*.d.ts'],
+    },
+  },
+});

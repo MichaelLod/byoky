@@ -13,11 +13,12 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     globals: true,
-    include: ['packages/*/tests/**/live/**/*.live.test.ts'],
+    include: ['packages/*/tests/**/live/**/*.live.test.{ts,tsx}'],
     // Long timeout because live API calls can be slow.
     testTimeout: 30_000,
-    // Loads `.env.local` at repo root into process.env so tests can read
-    // OPENAI_API_KEY / ANTHROPIC_API_KEY without requiring shell exports.
+    // Loads `.env.local` and `.env.test.local` at repo root into process.env
+    // so tests can read OPENAI_API_KEY / ANTHROPIC_API_KEY without requiring
+    // shell exports. Only this config does; the default run reads no env file.
     setupFiles: ['./vitest.setup.env.ts'],
   },
 });
