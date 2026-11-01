@@ -5,8 +5,6 @@ import android.content.SharedPreferences
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 import com.byoky.app.crypto.CryptoService
 import com.byoky.app.proxy.TranslationEngine
 import kotlinx.coroutines.CoroutineScope
@@ -43,23 +41,15 @@ class WalletStore(context: Context) {
      *  requests (capability fingerprint detection runs through the JS bridge). */
     private val appContext: Context = context.applicationContext
 
-    private val masterKey = MasterKey.Builder(context)
-        .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-        .build()
-
     // Encrypted local store for the password hash, encrypted keys, groups,
     // sessions and logs. The file name predates the local-only design and
-    // must stay as is: renaming it would orphan every existing wallet.
-    private val prefs: SharedPreferences = EncryptedSharedPreferences.create(
-        context,
-        ENCRYPTED_PREFS_FILE,
-        masterKey,
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-    )
+    // must stay as is: renaming it would orphan every existing wallet. A
+    // vault this device can't decrypt (copied over from another phone) is
+    // set aside and the wallet starts fresh (see VaultPrefs).
+    private val prefs: SharedPreferences = VaultPrefs.open(context).prefs
 
     private val plainPrefs: SharedPreferences =
-        context.getSharedPreferences("byoky_state", Context.MODE_PRIVATE)
+        context.getSharedPreferences(VaultPrefs.PLAIN_STATE_FILE, Context.MODE_PRIVATE)
 
     private val _status = MutableStateFlow(WalletStatus.UNINITIALIZED)
     val status: StateFlow<WalletStatus> = _status.asStateFlow()
@@ -110,10 +100,24 @@ class WalletStore(context: Context) {
     )
     val retiredFeaturesNotice: StateFlow<Boolean> = retiredNotice.visible
 
+    /**
+     * The one-time notice after an unreadable vault (from another device) was
+     * set aside: the wallet started fresh and can be restored from a .byoky
+     * backup. Raised by [VaultPrefs]; shown on one launch only.
+     */
+    private val unreadableVaultNoticeState = OneTimeNotice(
+        isPending = { plainPrefs.getBoolean(VaultPrefs.RESET_NOTICE_FLAG, false) },
+        clearPending = { plainPrefs.edit().remove(VaultPrefs.RESET_NOTICE_FLAG).apply() },
+    )
+    val unreadableVaultNotice: StateFlow<Boolean> = unreadableVaultNoticeState.visible
+
     /** Released once the launch cleanup has finished (or given up). */
     private val launchCleanupDone = CountDownLatch(1)
 
     @Volatile private var masterPassword: String? = null
+
+    /** Decrypted keys while unlocked (see [SecretCache]); cleared on lock and reset. */
+    private val secretCache = SecretCache()
 
     /** Guards the request log: concurrent requests append to it from IO threads. */
     private val logLock = Any()
@@ -168,6 +172,7 @@ class WalletStore(context: Context) {
             }
         }
         _status.value = if (prefs.contains("password_hash")) WalletStatus.LOCKED else WalletStatus.UNINITIALIZED
+        unreadableVaultNoticeState.load()
         restoreLockoutState()
         loadInstalledApps()
         _blockedOrigins.value = plainPrefs.getStringSet(BLOCKED_ORIGINS_KEY, emptySet())?.toSet() ?: emptySet()
@@ -269,6 +274,7 @@ class WalletStore(context: Context) {
         idleWatch?.cancel()
         idleWatch = null
         masterPassword = null
+        secretCache.clear()
         _credentials.value = emptyList()
         _sessions.value = emptyList()
         synchronized(logLock) {
@@ -351,6 +357,7 @@ class WalletStore(context: Context) {
     }
 
     fun removeCredential(credential: Credential) {
+        prefs.getString("key_${credential.id}", null)?.let(secretCache::remove)
         prefs.edit().remove("key_${credential.id}").apply()
         _credentials.value = _credentials.value.filter { it.id != credential.id }
         saveCredentials()
@@ -395,7 +402,10 @@ class WalletStore(context: Context) {
             if (credential.providerId == "ollama" || credential.providerId == "lm_studio") return ""
             throw IllegalStateException("Key not found")
         }
-        return CryptoService.decrypt(encrypted, password)
+        val secret = secretCache.get(encrypted) { CryptoService.decrypt(it, password) }
+        // Locked while decrypting: don't leave the key cached past the lock.
+        if (masterPassword !== password) secretCache.clear()
+        return secret
     }
 
     // MARK: - Backup support
@@ -544,6 +554,7 @@ class WalletStore(context: Context) {
         idleWatch?.cancel()
         idleWatch = null
         masterPassword = null
+        secretCache.clear()
 
         // Load credential IDs from prefs even when locked,
         // so we can delete individual encrypted key entries
@@ -740,6 +751,8 @@ class WalletStore(context: Context) {
             actualModel = actualModel,
             groupId = groupId,
             usedCapabilities = usedCapabilities,
+            // The app's live session, as iOS tags it; bridge traffic has none.
+            sessionId = _sessions.value.firstOrNull { it.appOrigin == appOrigin }?.id,
         )
 
         synchronized(logLock) {
@@ -772,6 +785,12 @@ class WalletStore(context: Context) {
     }
 
     fun usageTotal(origin: String): UsageLedger.Usage = ledger.total(origin)
+
+    /** Usage of [appOrigin]'s live session, from the request log; null without one. */
+    fun sessionUsage(appOrigin: String): SessionUsage? {
+        val session = _sessions.value.firstOrNull { it.appOrigin == appOrigin && !it.isExpired } ?: return null
+        return SessionUsage.from(session.id, _requestLogs.value)
+    }
 
     fun usageByProvider(origin: String): Map<String, UsageLedger.Usage> = ledger.byProvider(origin)
 
@@ -1129,6 +1148,7 @@ class WalletStore(context: Context) {
                         actualModel = obj.optString("actualModel", "").takeIf { it.isNotEmpty() },
                         groupId = obj.optString("groupId", "").takeIf { it.isNotEmpty() },
                         usedCapabilities = caps,
+                        sessionId = obj.optString("sessionId", "").takeIf { it.isNotEmpty() },
                     )
                 )
             }
@@ -1155,6 +1175,7 @@ class WalletStore(context: Context) {
                 r.actualProviderId?.let { put("actualProviderId", it) }
                 r.actualModel?.let { put("actualModel", it) }
                 r.groupId?.let { put("groupId", it) }
+                r.sessionId?.let { put("sessionId", it) }
                 r.usedCapabilities?.let { caps ->
                     put("usedCapabilities", JSONObject().apply {
                         put("tools", caps.tools)
@@ -1313,9 +1334,15 @@ class WalletStore(context: Context) {
     /** Hide the one-time retired-features notice for good. */
     fun dismissRetiredFeaturesNotice() = retiredNotice.dismiss()
 
+    /** The unreadable-vault notice is on screen: no later launch shows it again. */
+    fun markUnreadableVaultNoticeShown() = unreadableVaultNoticeState.markShown()
+
+    /** Hide the unreadable-vault notice for good. */
+    fun dismissUnreadableVaultNotice() = unreadableVaultNoticeState.dismiss()
+
     companion object {
         /** Name of the EncryptedSharedPreferences file holding local wallet data. */
-        const val ENCRYPTED_PREFS_FILE = "byoky_vault"
+        const val ENCRYPTED_PREFS_FILE = VaultPrefs.FILE
 
         private const val RETIRED_DATA_PURGED_FLAG = "retiredServiceDataPurged_v1"
         private const val RETIRED_FEATURES_NOTICE_FLAG = "retiredFeaturesNoticePending"

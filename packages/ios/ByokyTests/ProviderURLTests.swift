@@ -17,7 +17,9 @@ final class ProviderURLTests: XCTestCase {
     func testLocalProvidersAllowLoopbackHttpOnly() {
         XCTAssertNotNil(Provider.customBaseUrl(for: "ollama", credentialBaseUrl: "http://localhost:11434"))
         XCTAssertNotNil(Provider.customBaseUrl(for: "lm_studio", credentialBaseUrl: "http://127.0.0.1:1234"))
-        XCTAssertNotNil(Provider.customBaseUrl(for: "ollama", credentialBaseUrl: "http://[::1]:11434"))
+        // IPv6 loopback isn't accepted, as on Android: a backup opens with
+        // the same credentials on both.
+        XCTAssertNil(Provider.customBaseUrl(for: "ollama", credentialBaseUrl: "http://[::1]:11434"))
         XCTAssertNotNil(Provider.customBaseUrl(for: "ollama", credentialBaseUrl: "https://ollama.lan:11434"))
         XCTAssertNil(Provider.customBaseUrl(for: "ollama", credentialBaseUrl: "http://192.168.1.20:11434"))
         XCTAssertNil(Provider.customBaseUrl(for: "ollama", credentialBaseUrl: "http://user:pw@localhost:11434"))
@@ -34,8 +36,14 @@ final class ProviderURLTests: XCTestCase {
 
     func testAzureIsLockedToItsResource() {
         XCTAssertNotNil(Provider.customBaseUrl(for: "azure_openai", credentialBaseUrl: "https://contoso.openai.azure.com"))
-        XCTAssertNil(Provider.customBaseUrl(for: "azure_openai", credentialBaseUrl: "https://evil.example"))
+        // Any https endpoint, as in core and on Android: Azure AI Foundry
+        // resources live on other hosts.
+        XCTAssertNotNil(Provider.customBaseUrl(for: "azure_openai", credentialBaseUrl: "https://contoso.cognitiveservices.azure.com"))
+        XCTAssertNotNil(Provider.customBaseUrl(for: "azure_openai", credentialBaseUrl: "https://contoso.services.ai.azure.com"))
         XCTAssertNil(Provider.customBaseUrl(for: "azure_openai", credentialBaseUrl: "http://contoso.openai.azure.com"))
+        XCTAssertNil(Provider.customBaseUrl(for: "azure_openai", credentialBaseUrl: "https://u:p@contoso.openai.azure.com"))
+        XCTAssertNil(Provider.customBaseUrl(for: "azure_openai", credentialBaseUrl: "https://contoso.openai.azure.com?x=1"))
+        XCTAssertNil(Provider.customBaseUrl(for: "azure_openai", credentialBaseUrl: "https://contoso.openai.azure.com#x"))
 
         let base = "https://contoso.openai.azure.com"
         XCTAssertNotNil(Provider.validateUrl("https://contoso.openai.azure.com/openai/deployments/x/chat/completions", for: "azure_openai", credentialBaseUrl: base))
@@ -44,7 +52,9 @@ final class ProviderURLTests: XCTestCase {
         // not even to another *.openai.azure.com resource.
         XCTAssertNil(Provider.validateUrl("https://fabrikam.openai.azure.com/openai/deployments/x", for: "azure_openai", credentialBaseUrl: nil))
         XCTAssertNil(Provider.validateUrl("https://evil.example/openai", for: "azure_openai", credentialBaseUrl: nil))
-        XCTAssertNil(Provider.validateUrl("https://fabrikam.openai.azure.com/x", for: "azure_openai", credentialBaseUrl: "https://evil.example"))
+        // The key only ever goes to the credential's own endpoint.
+        XCTAssertNil(Provider.validateUrl("https://fabrikam.openai.azure.com/x", for: "azure_openai", credentialBaseUrl: "https://contoso.services.ai.azure.com"))
+        XCTAssertNotNil(Provider.validateUrl("https://contoso.services.ai.azure.com/openai/v1/chat/completions", for: "azure_openai", credentialBaseUrl: "https://contoso.services.ai.azure.com"))
     }
 
     func testEndpointEntryUsesImportRules() {
@@ -53,7 +63,7 @@ final class ProviderURLTests: XCTestCase {
         XCTAssertEqual(Provider.normalizedEndpoint("https://contoso.openai.azure.com/openai", for: "azure_openai"), "https://contoso.openai.azure.com/openai")
         XCTAssertNil(Provider.normalizedEndpoint("", for: "azure_openai"))
         XCTAssertNil(Provider.normalizedEndpoint("http://contoso.openai.azure.com", for: "azure_openai"))
-        XCTAssertNil(Provider.normalizedEndpoint("https://evil.example", for: "azure_openai"))
+        XCTAssertEqual(Provider.normalizedEndpoint("contoso.cognitiveservices.azure.com", for: "azure_openai"), "https://contoso.cognitiveservices.azure.com")
         XCTAssertNil(Provider.normalizedEndpoint("https://contoso.openai.azure.com?api-version=1", for: "azure_openai"))
 
         XCTAssertEqual(Provider.normalizedEndpoint("http://localhost:11434/", for: "ollama"), "http://localhost:11434")
@@ -64,7 +74,7 @@ final class ProviderURLTests: XCTestCase {
     func testCredentialsWithoutEndpointAreRefused() {
         XCTAssertEqual(Provider.missingEndpointMessage(providerId: "azure_openai", credentialBaseUrl: nil),
                        "Add your Azure endpoint in the wallet")
-        XCTAssertNotNil(Provider.missingEndpointMessage(providerId: "azure_openai", credentialBaseUrl: "https://evil.example"))
+        XCTAssertNotNil(Provider.missingEndpointMessage(providerId: "azure_openai", credentialBaseUrl: "http://contoso.openai.azure.com"))
         XCTAssertNil(Provider.missingEndpointMessage(providerId: "azure_openai", credentialBaseUrl: "https://contoso.openai.azure.com"))
         XCTAssertNotNil(Provider.missingEndpointMessage(providerId: "ollama", credentialBaseUrl: nil))
         XCTAssertNil(Provider.missingEndpointMessage(providerId: "openai", credentialBaseUrl: nil))
@@ -118,6 +128,7 @@ final class ProviderURLTests: XCTestCase {
             dstProviderId: "azure_openai", model: "m", stream: false,
             overrideBaseUrl: Provider.baseUrlOverride(for: "azure_openai", credentialBaseUrl: azureBase)
         )
+        XCTAssertEqual(azure, "https://contoso.openai.azure.com/openai/v1/chat/completions")
         XCTAssertNotNil(azure.flatMap { Provider.validateUrl($0, for: "azure_openai", credentialBaseUrl: azureBase) })
     }
 }

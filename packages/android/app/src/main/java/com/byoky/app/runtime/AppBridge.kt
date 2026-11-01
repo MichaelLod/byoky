@@ -8,14 +8,17 @@ import android.webkit.WebView
 import androidx.webkit.JavaScriptReplyProxy
 import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebViewCompat
-import com.byoky.app.data.AuthMethod
+import com.byoky.app.data.SessionUsage
 import com.byoky.app.data.WalletStore
+import com.byoky.app.proxy.ConnectProviders
 import com.byoky.app.proxy.ProxyService
+import com.byoky.app.proxy.ResponseChunks
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import okhttp3.Call
 import org.json.JSONObject
@@ -48,6 +51,29 @@ class AppBridge(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     @Volatile private var disposed = false
 
+    /**
+     * Messages from the page, in arrival order. Parsing one can take a while
+     * (an audio upload is tens of MB of JSON), so it happens off the main
+     * thread; a single consumer keeps the order, and each parsed message is
+     * handled back on the main thread.
+     */
+    private val inbox = Channel<Pair<String, JavaScriptReplyProxy>>(Channel.UNLIMITED)
+
+    init {
+        scope.launch(Dispatchers.Default) {
+            for ((raw, reply) in inbox) {
+                val msg = try { JSONObject(raw) } catch (_: Exception) { continue }
+                val type = msg.optString("type")
+                val requestId = msg.optString("requestId", "")
+                // The SDK uses crypto.randomUUID(); anything else is not ours. Ids are
+                // only ever echoed inside JSON over the reply channel, never spliced
+                // into script source, but are validated all the same.
+                if (type != "BYOKY_DISCONNECT" && !REQUEST_ID.matches(requestId)) continue
+                mainHandler.post { if (!disposed) dispatch(type, requestId, msg, reply) }
+            }
+        }
+    }
+
     /** Issued on BYOKY_CONNECT_REQUEST. Main thread only. */
     private var sessionKey: String? = null
 
@@ -77,16 +103,13 @@ class AppBridge(
         if (disposed || !isMainFrame) return
         if (originOf(sourceOrigin) != appOrigin) return
         val raw = message.data ?: return
-        val msg = try { JSONObject(raw) } catch (_: Exception) { return }
-        val type = msg.optString("type")
-        val requestId = msg.optString("requestId", "")
-        // The SDK uses crypto.randomUUID(); anything else is not ours. Ids are
-        // only ever echoed inside JSON over the reply channel, never spliced
-        // into script source, but are validated all the same.
-        if (type != "BYOKY_DISCONNECT" && !REQUEST_ID.matches(requestId)) return
+        inbox.trySend(raw to replyProxy)
+    }
 
+    /** Handle one parsed message. Main thread. */
+    private fun dispatch(type: String, requestId: String, msg: JSONObject, replyProxy: JavaScriptReplyProxy) {
         when (type) {
-            "BYOKY_CONNECT_REQUEST" -> handleConnect(requestId, replyProxy)
+            "BYOKY_CONNECT_REQUEST" -> handleConnect(requestId, msg, replyProxy)
             "BYOKY_PROXY_REQUEST" -> handleProxy(msg, requestId, replyProxy)
             "BYOKY_PROXY_CANCEL" -> inFlight[requestId]?.cancel()
             "BYOKY_SESSION_STATUS" -> handleSessionStatus(requestId, msg, replyProxy)
@@ -97,6 +120,7 @@ class AppBridge(
 
     fun dispose() {
         disposed = true
+        inbox.close()
         // Stop upstream transfers now rather than at their next chunk.
         inFlight.values.forEach { it.cancel() }
         scope.cancel()
@@ -104,7 +128,7 @@ class AppBridge(
 
     // ── Connect ──────────────────────────────────────────────────────────
 
-    private fun handleConnect(requestId: String, reply: JavaScriptReplyProxy) {
+    private fun handleConnect(requestId: String, msg: JSONObject, reply: JavaScriptReplyProxy) {
         if (!wallet.isUnlocked) {
             deliverConnectError(reply, requestId, "Wallet is locked")
             return
@@ -117,29 +141,33 @@ class AppBridge(
         }
 
         // The user opened this app from their wallet, so connecting is
-        // implicit (same as the iOS in-wallet browser). Every provider the
-        // wallet holds a key for is offered; routing can still serve other
-        // providers through groups or translation.
-        val credentials = wallet.credentials.value
-        val providers = JSONObject()
-        for (credential in credentials) {
-            if (providers.has(credential.providerId)) continue
-            providers.put(credential.providerId, JSONObject()
-                .put("available", true)
-                .put("authMethod", if (credential.authMethod == AuthMethod.OAUTH) "oauth" else "api_key"))
+        // implicit (same as the iOS in-wallet browser). Each provider the
+        // app asked for is listed, available when routing can serve it
+        // (ConnectProviders); routing asks the translation sandbox, so it is
+        // resolved off the main thread.
+        val requested = ConnectProviders.requestedIds(msg.optJSONObject("payload")?.optJSONArray("providers"))
+        scope.launch {
+            val result = ConnectProviders.build(requested, wallet.credentials.value) { id -> proxy.canServe(appOrigin, id) }
+            val providers = JSONObject()
+            for (entry in result.entries) {
+                providers.put(entry.providerId, JSONObject()
+                    .put("available", entry.available)
+                    .put("authMethod", entry.authMethod))
+            }
+            mainHandler.post {
+                if (disposed || !wallet.isUnlocked) return@post
+                val key = "app_" + UUID.randomUUID().toString().replace("-", "")
+                sessionKey = key
+                wallet.upsertSession(appOrigin, result.sessionProviders)
+                deliver(reply, JSONObject()
+                    .put("type", "BYOKY_CONNECT_RESPONSE")
+                    .put("requestId", requestId)
+                    .put("payload", JSONObject()
+                        .put("sessionKey", key)
+                        .put("providers", providers)
+                        .put("proxyUrl", "")))
+            }
         }
-
-        val key = "app_" + UUID.randomUUID().toString().replace("-", "")
-        sessionKey = key
-        wallet.upsertSession(appOrigin, credentials.map { it.providerId }.distinct())
-
-        deliver(reply, JSONObject()
-            .put("type", "BYOKY_CONNECT_RESPONSE")
-            .put("requestId", requestId)
-            .put("payload", JSONObject()
-                .put("sessionKey", key)
-                .put("providers", providers)
-                .put("proxyUrl", "")))
     }
 
     private fun deliverConnectError(reply: JavaScriptReplyProxy, requestId: String, message: String) {
@@ -207,32 +235,41 @@ class AppBridge(
 
         val bodyText = if (msg.isNull("body")) null else msg.optString("body", "")
         val encoding = msg.optString("bodyEncoding", "")
-        val body: ByteArray? = when (encoding) {
-            "base64" -> try {
-                bodyText?.let { Base64.decode(it, Base64.DEFAULT) }
-            } catch (_: IllegalArgumentException) {
-                deliverProxyError(reply, requestId, "PROXY_ERROR", "Invalid base64 body", 400)
-                return
-            }
-            "formdata" -> {
-                val form = try {
-                    FormDataBody.encode(bodyText ?: "[]")
-                } catch (_: IllegalArgumentException) {
-                    deliverProxyError(reply, requestId, "PROXY_ERROR", "Invalid form data body", 400)
-                    return
-                }
-                // The multipart boundary is ours; drop any content type the app set.
-                headers.keys.filter { it.equals("content-type", ignoreCase = true) }.forEach { headers.remove(it) }
-                headers["content-type"] = form.contentType
-                form.bytes
-            }
-            else -> bodyText?.toByteArray(Charsets.UTF_8)
-        }
         val binaryBody = encoding == "base64" || encoding == "formdata"
 
         val flight = InFlight()
         inFlight[requestId] = flight
         scope.launch {
+            // Decoding a large upload takes long: off the main thread.
+            val body: ByteArray? = when (encoding) {
+                "base64" -> try {
+                    bodyText?.let { Base64.decode(it, Base64.DEFAULT) }
+                } catch (_: IllegalArgumentException) {
+                    inFlight.remove(requestId, flight)
+                    deliverProxyError(reply, requestId, "PROXY_ERROR", "Invalid base64 body", 400)
+                    return@launch
+                }
+                "formdata" -> {
+                    val form = try {
+                        FormDataBody.encode(bodyText ?: "[]")
+                    } catch (_: IllegalArgumentException) {
+                        inFlight.remove(requestId, flight)
+                        deliverProxyError(reply, requestId, "PROXY_ERROR", "Invalid form data body", 400)
+                        return@launch
+                    }
+                    // The multipart boundary is ours; drop any content type the app set.
+                    headers.keys.filter { it.equals("content-type", ignoreCase = true) }.forEach { headers.remove(it) }
+                    headers["content-type"] = form.contentType
+                    form.bytes
+                }
+                else -> bodyText?.toByteArray(Charsets.UTF_8)
+            }
+            // Cancelled while decoding: nothing was sent.
+            if (flight.cancelled || disposed) {
+                inFlight.remove(requestId, flight)
+                return@launch
+            }
+
             val sink = object : ProxyService.ResponseSink {
                 override fun onCall(call: Call) {
                     flight.call = call
@@ -255,6 +292,11 @@ class AppBridge(
                         .put("type", "BYOKY_PROXY_RESPONSE_CHUNK")
                         .put("requestId", requestId)
                         .put("chunk", chunk))
+                }
+
+                override fun onBytes(chunk: ByteArray) {
+                    ensureActive(flight)
+                    deliver(reply, ResponseChunks.binaryChunk(requestId, chunk))
                 }
 
                 override fun onDone() {
@@ -298,26 +340,25 @@ class AppBridge(
 
     private fun handleSessionUsage(requestId: String, msg: JSONObject, reply: JavaScriptReplyProxy) {
         val presented = msg.optJSONObject("payload")?.optString("sessionKey", "") ?: ""
-        val payload: Any = if (isSessionLive(presented)) {
-            // The running totals allowances are enforced against, not the capped display log.
-            val total = wallet.usageTotal(appOrigin)
-            val providersJson = JSONObject()
-            for ((id, usage) in wallet.usageByProvider(appOrigin)) {
-                providersJson.put(id, JSONObject()
-                    .put("requests", usage.requests)
-                    .put("inputTokens", usage.inputTokens)
-                    .put("outputTokens", usage.outputTokens))
-            }
-            JSONObject()
-                .put("requests", total.requests)
-                .put("inputTokens", total.inputTokens)
-                .put("outputTokens", total.outputTokens)
-                .put("byProvider", providersJson)
-        } else JSONObject.NULL
+        // This session's usage, as the extension and iOS report it (the SDK
+        // documents getUsage() as "this session only"); allowances keep
+        // using the per-app ledger.
+        val usage = if (isSessionLive(presented)) wallet.sessionUsage(appOrigin) else null
+        val payload: Any = usage?.let { sessionUsageJson(it) } ?: JSONObject.NULL
         deliver(reply, JSONObject()
             .put("type", "BYOKY_SESSION_USAGE_RESPONSE")
             .put("requestId", requestId)
             .put("payload", payload))
+    }
+
+    private fun sessionUsageJson(usage: SessionUsage): JSONObject {
+        fun totals(t: SessionUsage.Totals) = JSONObject()
+            .put("requests", t.requests)
+            .put("inputTokens", t.inputTokens)
+            .put("outputTokens", t.outputTokens)
+        val providers = JSONObject()
+        for ((id, t) in usage.byProvider) providers.put(id, totals(t))
+        return totals(usage.total).put("byProvider", providers)
     }
 
     // ── Delivery ─────────────────────────────────────────────────────────

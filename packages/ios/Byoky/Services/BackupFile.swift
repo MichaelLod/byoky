@@ -169,6 +169,15 @@ enum BackupFile {
         return text
     }
 
+    /// `contents` without whitespace, line breaks or byte-order marks.
+    static func stripWhitespace(_ contents: String) -> String {
+        var scalars = String.UnicodeScalarView()
+        scalars.append(contentsOf: contents.unicodeScalars.filter {
+            $0 != "\u{FEFF}" && !CharacterSet.whitespacesAndNewlines.contains($0)
+        })
+        return String(scalars)
+    }
+
     /// Decrypt and validate a `.byoky` file. Like the extension it is
     /// all-or-nothing: a malformed credential or a secret that won't decrypt
     /// fails the whole import. Secrets of unusable entries are not decrypted.
@@ -181,12 +190,14 @@ enum BackupFile {
     ) throws -> Contents {
         guard fileContents.utf8.count <= maxFileBytes else { throw BackupError.tooLarge }
 
+        // Editors, mail clients and pastes wrap long lines and may add a BOM;
+        // the extension (atob) and Android ignore that whitespace, so do the
+        // same rather than calling the file corrupted.
+        let encoded = Self.stripWhitespace(fileContents)
+        guard !encoded.isEmpty else { throw BackupError.invalidFormat }
         let json: String
         do {
-            json = try crypto.decrypt(
-                encoded: fileContents.trimmingCharacters(in: .whitespacesAndNewlines),
-                password: password
-            )
+            json = try crypto.decrypt(encoded: encoded, password: password)
         } catch {
             throw BackupError.wrongPasswordOrCorrupted
         }

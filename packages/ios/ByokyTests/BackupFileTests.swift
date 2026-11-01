@@ -52,6 +52,32 @@ final class BackupFileTests: XCTestCase {
         XCTAssertEqual(contents.entries[4].secret, "sk-ant-oat01-FIXTURE-setup-token")
     }
 
+    /// A file that went through an editor or mail client: lines wrapped at 76
+    /// with CRLF, a trailing newline and a byte-order mark. The extension and
+    /// Android open it, so iOS must too.
+    func testOpensALineWrappedFile() throws {
+        let original = BackupFixture.fileContents.trimmingCharacters(in: .whitespacesAndNewlines)
+        var lines: [String] = []
+        var rest = Substring(original)
+        while !rest.isEmpty {
+            lines.append(String(rest.prefix(76)))
+            rest = rest.dropFirst(76)
+        }
+        XCTAssertGreaterThan(lines.count, 1)
+        let wrapped = "\u{FEFF}" + lines.joined(separator: "\r\n") + "\n"
+
+        let contents = try BackupFile.open(wrapped, password: BackupFixture.password)
+        let expected = try BackupFile.open(original, password: BackupFixture.password)
+        XCTAssertEqual(contents.entries, expected.entries)
+        XCTAssertEqual(contents.unsupportedCount, expected.unsupportedCount)
+    }
+
+    func testWhitespaceOnlyFileIsInvalid() {
+        XCTAssertThrowsError(try BackupFile.open(" \r\n\t\u{FEFF}", password: "pw")) { error in
+            XCTAssertEqual(error as? BackupFile.BackupError, .invalidFormat)
+        }
+    }
+
     func testFixtureWithWrongPassword() {
         XCTAssertThrowsError(try BackupFile.open(BackupFixture.fileContents, password: "not-the-password")) { error in
             XCTAssertEqual(error as? BackupFile.BackupError, .wrongPasswordOrCorrupted)
@@ -199,8 +225,9 @@ final class BackupFileTests: XCTestCase {
         let payload = """
         {"version":2,"exportedAt":1,"credentials":[
           {"providerId":"openai","authMethod":"api_key","encryptedKey":"\(key)","baseUrl":"https://evil.example"},
-          {"providerId":"azure_openai","authMethod":"api_key","encryptedKey":"\(key)","baseUrl":"https://evil.example"},
+          {"providerId":"azure_openai","authMethod":"api_key","encryptedKey":"\(key)","baseUrl":"http://contoso.openai.azure.com"},
           {"providerId":"azure_openai","authMethod":"api_key","encryptedKey":"\(key)","baseUrl":"https://contoso.openai.azure.com"},
+          {"providerId":"azure_openai","authMethod":"api_key","encryptedKey":"\(key)","baseUrl":"https://contoso.services.ai.azure.com"},
           {"providerId":"ollama","authMethod":"api_key","encryptedKey":"","baseUrl":"http://192.168.1.20:11434"},
           {"providerId":"ollama","authMethod":"api_key","encryptedKey":"","baseUrl":"http://localhost:11434/?token=x"},
           {"providerId":"lm_studio","authMethod":"api_key","encryptedKey":"","baseUrl":"http://127.0.0.1:1234"}
@@ -209,8 +236,8 @@ final class BackupFileTests: XCTestCase {
         let contents = try BackupFile.open(try crypto.encrypt(plaintext: payload, password: "pw"), password: "pw")
         // Fixed host: kept, base URL dropped. Unsafe custom base URLs: skipped.
         XCTAssertEqual(contents.unsupportedCount, 3)
-        XCTAssertEqual(contents.entries.map(\.providerId), ["openai", "azure_openai", "lm_studio"])
-        XCTAssertEqual(contents.entries.map(\.baseUrl), [nil, "https://contoso.openai.azure.com", "http://127.0.0.1:1234"])
+        XCTAssertEqual(contents.entries.map(\.providerId), ["openai", "azure_openai", "azure_openai", "lm_studio"])
+        XCTAssertEqual(contents.entries.map(\.baseUrl), [nil, "https://contoso.openai.azure.com", "https://contoso.services.ai.azure.com", "http://127.0.0.1:1234"])
     }
 
     func testFutureTimestampsAndLongLabelsAreClamped() throws {

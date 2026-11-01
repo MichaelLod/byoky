@@ -157,6 +157,23 @@ class TranslationEngine private constructor(private val appContext: Context) {
         callStringMethod("translateResponse", listOf(contextJson, body))
 
     /**
+     * A provider's error body (a non-2xx reply to a translated request) in
+     * the app's dialect, via core's `translateErrorResponse`. Null when the
+     * body isn't an error core can parse (an HTML gateway page, say), on any
+     * failure, and when the bundle predates that export: the caller then
+     * passes the body on as sent.
+     */
+    fun translateErrorResponse(contextJson: String, body: String): String? {
+        return try {
+            val expr = "(function(){var b=BYOKY_TRANSLATE;if(typeof b.translateErrorResponse!=='function')return '';" +
+                "var r=b.translateErrorResponse(${jsLiteral(contextJson)}, ${jsLiteral(body)});return r==null?'':String(r);})()"
+            evalSync(expr).ifEmpty { null }
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    /**
      * Open a stateful stream translator. Returns an integer handle that
      * must be passed to [processStreamChunk] / [flushStreamTranslator] and
      * eventually released via either flush (which releases) or
@@ -226,6 +243,22 @@ class TranslationEngine private constructor(private val appContext: Context) {
             evalSync(expr) == "1"
         } catch (_: Throwable) {
             false
+        }
+    }
+
+    /**
+     * The model routing names for [providerId] when nothing else does: the
+     * auto cross-family fallback and a cross-family group saved without a
+     * model (core `autoRouteModelFor`). Null when routing must skip the
+     * provider, and on errors (including a bundle without the export).
+     */
+    fun autoRouteModelFor(providerId: String): String? {
+        return try {
+            val expr = "(function(){var b=BYOKY_TRANSLATE;if(typeof b.autoRouteModelFor!=='function')return '';" +
+                "var m=b.autoRouteModelFor(${jsLiteral(providerId)});return m==null?'':String(m);})()"
+            evalSync(expr).ifEmpty { null }
+        } catch (_: Throwable) {
+            null
         }
     }
 

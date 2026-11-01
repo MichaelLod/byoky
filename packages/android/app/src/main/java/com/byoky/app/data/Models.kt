@@ -101,7 +101,40 @@ data class RequestLog(
      * lacks one of them. Null on log entries from before this field existed.
      */
     val usedCapabilities: CapabilitySet? = null,
+    /**
+     * The app session the request belonged to, so `session.getUsage()` can
+     * report that session alone. Null for traffic without a session (the
+     * bridge) and for entries logged before this field existed.
+     */
+    val sessionId: String? = null,
 )
+
+/**
+ * Usage of one app session, from the request log: what the SDK's
+ * `getUsage()` reports ("this session only", as the extension and iOS do).
+ * Failed requests (status 400 and up) don't count. Allowances are enforced
+ * against [UsageLedger] instead, which spans sessions.
+ */
+data class SessionUsage(val total: Totals, val byProvider: Map<String, Totals>) {
+    data class Totals(val requests: Int = 0, val inputTokens: Long = 0, val outputTokens: Long = 0) {
+        fun plus(input: Int, output: Int) = Totals(requests + 1, inputTokens + input, outputTokens + output)
+    }
+
+    companion object {
+        fun from(sessionId: String, logs: List<RequestLog>): SessionUsage {
+            var total = Totals()
+            val byProvider = linkedMapOf<String, Totals>()
+            for (entry in logs) {
+                if (entry.sessionId != sessionId || entry.statusCode >= 400) continue
+                val input = entry.inputTokens ?: 0
+                val output = entry.outputTokens ?: 0
+                total = total.plus(input, output)
+                byProvider[entry.providerId] = (byProvider[entry.providerId] ?: Totals()).plus(input, output)
+            }
+            return SessionUsage(total, byProvider)
+        }
+    }
+}
 
 /**
  * Capability flags a single request used. Mirrors `CapabilitySet` in

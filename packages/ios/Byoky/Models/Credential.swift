@@ -162,8 +162,11 @@ struct Provider: Identifiable, Hashable {
         providerId == "ollama" || providerId == "lm_studio"
     }
 
+    /// `localhost` and `127.0.0.1`, as on Android, whose network security
+    /// config allows cleartext to those two only. Ollama and LM Studio listen
+    /// on IPv4 loopback by default; `localhost` reaches them either way.
     static func isLoopbackHost(_ host: String) -> Bool {
-        ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host.lowercased())
+        ["localhost", "127.0.0.1"].contains(host.lowercased())
     }
 
     /// https always; plain http only to a loopback host for local providers.
@@ -177,10 +180,13 @@ struct Provider: Identifiable, Hashable {
 
     /// A credential's own base URL, if the provider uses one and it is safe:
     /// only providers without a fixed host (Azure, Ollama, LM Studio) use it;
-    /// it must pass `isAllowedScheme`, carry no user:password, query or
-    /// fragment, and for Azure point at an `*.openai.azure.com` resource.
-    /// Mirrors core's `resolveProviderBaseUrl`, plus the Azure host rule this
-    /// app has always enforced for Azure requests.
+    /// it must pass `isAllowedScheme` and carry no user:password, query or
+    /// fragment. Mirrors core's `resolveProviderBaseUrl` and Android's
+    /// `CredentialBaseUrl`, so a backup opens with the same credentials on
+    /// every platform: any https Azure endpoint counts, including Azure AI
+    /// Foundry hosts (`*.cognitiveservices.azure.com`,
+    /// `*.services.ai.azure.com`). Keys still only ever go to the
+    /// credential's own endpoint (`validateUrl`).
     static func customBaseUrl(for providerId: String, credentialBaseUrl: String?) -> URL? {
         guard let provider = find(providerId), provider.requiresCustomBaseUrl,
               let raw = credentialBaseUrl, !raw.isEmpty,
@@ -190,9 +196,6 @@ struct Provider: Identifiable, Hashable {
               components.query == nil, components.fragment == nil,
               let url = components.url,
               isAllowedScheme(url, for: providerId) else {
-            return nil
-        }
-        if providerId == "azure_openai" && !host.lowercased().hasSuffix(".openai.azure.com") {
             return nil
         }
         return url

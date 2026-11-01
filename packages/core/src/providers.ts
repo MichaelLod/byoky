@@ -84,6 +84,9 @@ export const PROVIDERS: Record<string, ProviderConfig> = {
     // Placeholder — each tenant has its own `<resource>.openai.azure.com`.
     // The real host is stored on the credential row and used at proxy time.
     baseUrl: 'https://YOUR_RESOURCE.openai.azure.com',
+    // The credential holds the resource root; Azure's v1 API serves chat
+    // under /openai/v1 (the model field names the deployment).
+    chatPath: '/openai/v1/chat/completions',
     requiresCustomBaseUrl: true,
   },
   ollama: {

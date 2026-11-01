@@ -195,17 +195,18 @@ class TranslationEngineInstrumentedTest {
 
     @Test
     fun azureRewriteUsesCredentialBaseUrl() {
+        // Azure's v1 API lives under /openai on the resource root.
         val azure = "https://x.openai.azure.com"
         assertEquals(
-            "$azure/v1/chat/completions",
+            "$azure/openai/v1/chat/completions",
             engine.rewriteProxyUrl("azure_openai", "gpt-4o", false, azure),
         )
         assertEquals(
-            "$azure/v1/chat/completions",
+            "$azure/openai/v1/chat/completions",
             engine.rewriteProxyUrl("azure_openai", "gpt-4o", true, "$azure/"),
         )
         assertEquals(
-            "https://x.openai.azure.com:8443/v1/chat/completions",
+            "https://x.openai.azure.com:8443/openai/v1/chat/completions",
             engine.rewriteProxyUrl("azure_openai", "gpt-4o", false, "https://x.openai.azure.com:8443"),
         )
         // Unsafe or missing overrides fail closed.
@@ -221,6 +222,20 @@ class TranslationEngineInstrumentedTest {
         )) {
             assertNull("override '$bad' must be refused", engine.rewriteProxyUrl("azure_openai", "gpt-4o", false, bad))
         }
+    }
+
+    /** Auto-routing models come from core, so desktop and phone pick the same one. */
+    @Test
+    fun autoRouteModelsComeFromCore() {
+        assertEquals("gpt-5.5", engine.autoRouteModelFor("openai"))
+        assertEquals("claude-sonnet-4-6", engine.autoRouteModelFor("anthropic"))
+        assertEquals("openai/gpt-5.5", engine.autoRouteModelFor("openrouter"))
+        for (skipped in listOf("deepseek", "groq", "azure_openai", "ollama", "lm_studio", "not-a-provider")) {
+            assertNull(skipped, engine.autoRouteModelFor(skipped))
+        }
+        // Ollama and LM Studio are openai-family routing destinations.
+        assertTrue(engine.sameFamily("openai", "ollama"))
+        assertTrue(engine.shouldTranslate("anthropic", "lm_studio"))
     }
 
     @Test

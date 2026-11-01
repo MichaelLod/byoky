@@ -18,11 +18,25 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
     /// user put away.
     private var inFlight: [String: Task<Void, Never>] = [:]
     private var lockObserver: AnyCancellable?
+    /// Idle timeout of upstream requests (`URLRequest.timeoutInterval`).
+    private let upstreamTimeout: TimeInterval
 
-    init(wallet: WalletStore, appOrigin: String, upstream: ProxyURLSession = .shared) {
+    /// How long an upstream request may go without data. Non-streaming
+    /// replies send their headers only once generation ends, which for long
+    /// outputs and reasoning models often takes minutes; the provider SDKs
+    /// allow 10.
+    nonisolated static let defaultUpstreamTimeout: TimeInterval = 600
+
+    init(
+        wallet: WalletStore,
+        appOrigin: String,
+        upstream: ProxyURLSession = .shared,
+        upstreamTimeout: TimeInterval = NativeBridgeHandler.defaultUpstreamTimeout
+    ) {
         self.wallet = wallet
         self.appOrigin = appOrigin
         self.upstream = upstream
+        self.upstreamTimeout = upstreamTimeout
         super.init()
         // `status` is only ever set on the main actor.
         lockObserver = wallet.$status.sink { [weak self] status in
@@ -89,7 +103,9 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
         requestId.range(of: #"^[A-Za-z0-9_-]{1,128}$"#, options: .regularExpression) != nil
     }
 
-    private func handleMessage(type: String, body: [String: Any]) {
+    /// Internal (not private) so tests can drive messages in one main-actor
+    /// turn; WebKit calls it through `userContentController`.
+    func handleMessage(type: String, body: [String: Any]) {
         let requestId = body["requestId"] as? String ?? ""
         let payload = body["payload"] as? [String: Any]
 
@@ -102,7 +118,8 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
 
         switch type {
         case "BYOKY_CONNECT_REQUEST":
-            handleConnect(requestId: requestId, reconnectOnly: payload?["reconnectOnly"] as? Bool == true)
+            handleConnect(requestId: requestId, reconnectOnly: payload?["reconnectOnly"] as? Bool == true,
+                          requested: Self.requestedProviderIds(payload?["providers"]))
         case "BYOKY_PROXY_REQUEST":
             handleProxy(body)
         case "BYOKY_PROXY_CANCEL":
@@ -135,7 +152,7 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
 
     // MARK: - Connect
 
-    private func handleConnect(requestId: String, reconnectOnly: Bool) {
+    private func handleConnect(requestId: String, reconnectOnly: Bool, requested: [String]) {
         // Revoked in Connected Apps: no silent reconnect until the user opens
         // the app from the Apps grid again.
         if wallet.isAppAccessRevoked(origin: appOrigin) {
@@ -150,19 +167,18 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             return
         }
 
-        var providers: [String: [String: Any]] = [:]
-        for credential in wallet.credentials {
-            providers[credential.providerId] = [
-                "available": true,
-                "authMethod": credential.authMethod == .apiKey ? "api_key" : "oauth",
-            ]
+        // One entry per provider the app asked for, available when routing
+        // can serve it (as the extension answers).
+        let group = wallet.groupForOrigin(appOrigin)
+        let credentials = wallet.credentials
+        let (providers, sessionProviders) = Self.connectProviders(requested: requested, credentials: credentials) {
+            RoutingResolver.canServe(providerId: $0, group: group, credentials: credentials)
         }
 
         let key = "byk_" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
         sessionKey = key
 
-        let providerIds = Array(Set(wallet.credentials.map(\.providerId)))
-        _ = try? wallet.upsertSession(appOrigin: appOrigin, providers: providerIds)
+        _ = try? wallet.upsertSession(appOrigin: appOrigin, providers: sessionProviders)
 
         deliver(requestId: requestId, message: [
             "type": "BYOKY_CONNECT_RESPONSE",
@@ -173,6 +189,53 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
                 "proxyUrl": "",
             ] as [String: Any],
         ])
+    }
+
+    /// The connect response's `providers` map, as the extension builds it
+    /// (createSession): one entry per requested provider, available when
+    /// `canServe` finds a key for it (direct, group pin, cross-family,
+    /// same-family swap or auto-routing) and `{available: false}` otherwise,
+    /// so `session.providers[id].available` works for every requested id. An
+    /// app that names no providers gets every provider the wallet holds a key
+    /// for, as before. Also returns the providers recorded on the session.
+    nonisolated static func connectProviders(
+        requested: [String],
+        credentials: [Credential],
+        canServe: (String) -> Credential?
+    ) -> (providers: [String: [String: Any]], sessionProviders: [String]) {
+        func authMethod(_ credential: Credential) -> String {
+            credential.authMethod == .apiKey ? "api_key" : "oauth"
+        }
+        var providers: [String: [String: Any]] = [:]
+        var sessionProviders: [String] = []
+        if requested.isEmpty {
+            for credential in credentials where providers[credential.providerId] == nil {
+                providers[credential.providerId] = ["available": true, "authMethod": authMethod(credential)]
+                sessionProviders.append(credential.providerId)
+            }
+            return (providers, sessionProviders)
+        }
+        for id in requested where providers[id] == nil {
+            if let credential = canServe(id) {
+                providers[id] = ["available": true, "authMethod": authMethod(credential)]
+                sessionProviders.append(id)
+            } else {
+                providers[id] = ["available": false, "authMethod": "api_key"]
+            }
+        }
+        return (providers, sessionProviders)
+    }
+
+    /// Provider ids from a connect request's `providers` array: `{id,
+    /// required}` objects (the SDK) or bare strings. Anything else, and ids
+    /// that aren't plausible provider ids, are skipped.
+    nonisolated static func requestedProviderIds(_ value: Any?) -> [String] {
+        guard let entries = value as? [Any] else { return [] }
+        return entries.compactMap { entry -> String? in
+            let id = (entry as? String) ?? ((entry as? [String: Any])?["id"] as? String)
+            guard let id, id.range(of: #"^[a-z0-9_]{1,64}$"#, options: .regularExpression) != nil else { return nil }
+            return id
+        }
     }
 
     // MARK: - Proxy
@@ -220,27 +283,8 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             url = validated
         }
 
-        let body: ProxyBody?
-        do {
-            body = try ProxyBody.decode(body: msg["body"] as? String, encoding: msg["bodyEncoding"] as? String)
-        } catch {
-            deliverProxyError(requestId: requestId, code: "INVALID_BODY", message: "The request body couldn't be decoded")
-            return
-        }
-
-        // Check the allowance and hold this request's expected cost until it
-        // ends, so parallel requests can't all start on what's left.
-        let reservation: TokenReservation
-        switch wallet.reserveTokens(origin: appOrigin, providerId: providerId,
-                                    estimatedTokens: UsageParser.requestEstimate(for: body).total) {
-        case .success(let held):
-            reservation = held
-        case .failure(let exceeded):
-            deliverProxyError(requestId: requestId, code: "QUOTA_EXCEEDED", message: exceeded.reason)
-            return
-        }
-        wallet.noteActivity()
-
+        let rawBody = msg["body"] as? String
+        let bodyEncoding = msg["bodyEncoding"] as? String
         let headers = msg["headers"] as? [String: String] ?? [:]
 
         // Capture wallet state before entering Task
@@ -248,16 +292,49 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
         let allCreds = wallet.credentials
 
         inFlight[requestId] = Task {
+            defer { inFlight[requestId] = nil }
+            // Decoding a large upload takes a while: off the main actor.
+            guard let prepared = await Self.prepareBody(rawBody, encoding: bodyEncoding) else {
+                deliverProxyError(requestId: requestId, code: "INVALID_BODY", message: "The request body couldn't be decoded")
+                return
+            }
+            // Cancelled meanwhile: nothing was sent or reserved.
+            guard !Task.isCancelled else { return }
+
+            // Check the allowance and hold this request's expected cost until
+            // it ends, so parallel requests can't all start on what's left.
+            let reservation: TokenReservation
+            switch wallet.reserveTokens(origin: appOrigin, providerId: providerId, estimatedTokens: prepared.estimate) {
+            case .success(let held):
+                reservation = held
+            case .failure(let exceeded):
+                deliverProxyError(requestId: requestId, code: "QUOTA_EXCEEDED", message: exceeded.reason)
+                return
+            }
+            wallet.noteActivity()
+
             let usedTokens = await route(
                 requestId: requestId, providerId: providerId,
                 url: url, urlString: urlString, method: method,
-                headers: headers, body: body,
+                headers: headers, body: prepared.body,
                 group: group, credentials: allCreds
             )
             wallet.settleReservation(reservation, usedTokens: usedTokens)
             wallet.noteActivity()
-            inFlight[requestId] = nil
         }
+    }
+
+    /// The page's body decoded (base64 and form data included) and its
+    /// estimated cost, or nil when it can't be decoded. Nonisolated and
+    /// async, so it runs off the main actor.
+    nonisolated private static func prepareBody(_ body: String?, encoding: String?) async -> (body: ProxyBody?, estimate: Int)? {
+        let decoded: ProxyBody?
+        do {
+            decoded = try ProxyBody.decode(body: body, encoding: encoding)
+        } catch {
+            return nil
+        }
+        return (decoded, UsageParser.requestEstimate(for: decoded).total)
     }
 
     /// Pick the route (translation, same-family swap or pass-through) and
@@ -320,7 +397,7 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
                 userCredentialProviderIds: uniqueCreds,
                 group: group
             )
-            deliverProxyError(requestId: requestId, code: "NO_CREDENTIAL", message: message)
+            deliverProxyError(requestId: requestId, code: "PROVIDER_UNAVAILABLE", message: message)
             return 0
         }
 
@@ -355,7 +432,7 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             // at the credential's registered host.
             if Provider.find(providerId)?.requiresCustomBaseUrl == true {
                 if let message = Provider.missingEndpointMessage(providerId: providerId, credentialBaseUrl: credential.baseUrl) {
-                    deliverProxyError(requestId: requestId, code: "ENDPOINT_REQUIRED", message: message)
+                    deliverProxyError(requestId: requestId, code: "PROVIDER_UNAVAILABLE", message: message)
                     return 0
                 }
                 if Provider.validateUrl(urlString, for: providerId, credentialBaseUrl: credential.baseUrl) == nil {
@@ -369,7 +446,7 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
 
             var request = URLRequest(url: url)
             request.httpMethod = method
-            request.timeoutInterval = 120
+            request.timeoutInterval = upstreamTimeout
 
             // Setup tokens only work for Claude-Code-shaped requests. Binary
             // and form bodies are forwarded as they are.
@@ -387,10 +464,12 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             applyForwardedHeaders(headers, to: &request, body: outboundBody)
             Credential.applyAuth(to: &request, providerId: providerId, authMethod: credential.authMethod, apiKey: apiKey)
 
+            // Cancelled before anything went out: nothing to charge.
+            try Task.checkCancellation()
             sent = true
             let (bytes, response) = try await upstream.bytes(for: request)
             guard let httpResponse = response as? HTTPURLResponse else {
-                deliverProxyError(requestId: requestId, code: "INVALID_RESPONSE", message: "Invalid response")
+                deliverProxyError(requestId: requestId, code: "PROXY_ERROR", message: Self.invalidResponseMessage)
                 return 0
             }
 
@@ -464,7 +543,7 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             let translatedBody = try engine.translateRequest(contextJson: ctxJson, body: bodyString ?? "")
 
             if let message = Provider.missingEndpointMessage(providerId: translation.dstProviderId, credentialBaseUrl: credential.baseUrl) {
-                deliverProxyError(requestId: requestId, code: "ENDPOINT_REQUIRED", message: message)
+                deliverProxyError(requestId: requestId, code: "PROVIDER_UNAVAILABLE", message: message)
                 return 0
             }
             guard let urlString = engine.rewriteProxyUrl(
@@ -497,7 +576,7 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
 
             var request = URLRequest(url: url)
             request.httpMethod = method
-            request.timeoutInterval = 120
+            request.timeoutInterval = upstreamTimeout
             let injected = injectStreamUsageOptions(providerId: translation.dstProviderId, body: outboundBody) ?? outboundBody
             request.httpBody = injected.data(using: .utf8)
 
@@ -505,10 +584,12 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             applyForwardedHeaders(headers, to: &request, excluding: ["anthropic-version"])
             Credential.applyAuth(to: &request, providerId: translation.dstProviderId, authMethod: credential.authMethod, apiKey: dstApiKey)
 
+            // Cancelled before anything went out: nothing to charge.
+            try Task.checkCancellation()
             sent = true
             let (bytes, response) = try await upstream.bytes(for: request)
             guard let httpResponse = response as? HTTPURLResponse else {
-                deliverProxyError(requestId: requestId, code: "INVALID_RESPONSE", message: "Invalid response")
+                deliverProxyError(requestId: requestId, code: "PROXY_ERROR", message: Self.invalidResponseMessage)
                 return 0
             }
             upstreamResponse = httpResponse
@@ -519,7 +600,26 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             // translated: a destination may answer a stream request with
             // plain JSON, which the stream translator would swallow.
             if !(200..<300).contains(httpResponse.statusCode) {
-                await streamRawBytes(requestId: requestId, bytes: bytes, meter: &meter)
+                // The provider's error, in the app's dialect when core can
+                // translate it (as the extension does); otherwise as sent.
+                var accumulated = Data()
+                var chunk = Data()
+                for try await byte in bytes {
+                    chunk.append(byte)
+                    if chunk.count >= 65_536 {
+                        meter.consume(chunk)
+                        accumulated.append(chunk)
+                        chunk.removeAll(keepingCapacity: true)
+                    }
+                }
+                meter.consume(chunk)
+                accumulated.append(chunk)
+                meter.markComplete()
+                let upstreamBody = String(decoding: accumulated, as: UTF8.self)
+                let translatedError = accumulated.count <= Self.maxTranslatedErrorBytes
+                    ? engine.translateErrorResponse(contextJson: ctxJson, body: upstreamBody)
+                    : nil
+                deliverChunk(requestId, translatedError ?? upstreamBody)
             } else if isEventStream(httpResponse) {
                 // Undo tool renames on the Anthropic stream first, then
                 // translate it back to the app's dialect.
@@ -639,7 +739,7 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
 
         do {
             if let message = Provider.missingEndpointMessage(providerId: swapToProviderId, credentialBaseUrl: credential.baseUrl) {
-                deliverProxyError(requestId: requestId, code: "ENDPOINT_REQUIRED", message: message)
+                deliverProxyError(requestId: requestId, code: "PROVIDER_UNAVAILABLE", message: message)
                 return 0
             }
             guard let rewrittenUrlString = engine.rewriteProxyUrl(
@@ -672,16 +772,18 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
 
             var request = URLRequest(url: url)
             request.httpMethod = method
-            request.timeoutInterval = 120
+            request.timeoutInterval = upstreamTimeout
             request.httpBody = outboundBody?.data
 
             applyForwardedHeaders(headers, to: &request, body: outboundBody, excluding: ["anthropic-version"])
             Credential.applyAuth(to: &request, providerId: swapToProviderId, authMethod: credential.authMethod, apiKey: dstApiKey)
 
+            // Cancelled before anything went out: nothing to charge.
+            try Task.checkCancellation()
             sent = true
             let (bytes, response) = try await upstream.bytes(for: request)
             guard let httpResponse = response as? HTTPURLResponse else {
-                deliverProxyError(requestId: requestId, code: "INVALID_RESPONSE", message: "Invalid response")
+                deliverProxyError(requestId: requestId, code: "PROXY_ERROR", message: Self.invalidResponseMessage)
                 return 0
             }
 
@@ -781,6 +883,10 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
 
     // MARK: - Response streaming helpers
 
+    /// Forward a response as it arrives: META, the body, then DONE once it
+    /// ended cleanly. A connection lost midway ends in an error instead, so
+    /// the app never takes a cut-off stream or half a JSON body for a
+    /// complete reply; a cancelled request gets nothing more.
     private func streamResponse(
         requestId: String,
         httpResponse: HTTPURLResponse,
@@ -789,10 +895,30 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
         meter: inout UsageMeter
     ) async {
         deliverResponseHeaders(requestId: requestId, httpResponse: httpResponse)
-        await streamRawBytes(requestId: requestId, bytes: bytes, rewriter: rewriter, meter: &meter)
+        let failure = await streamRawBytes(
+            requestId: requestId, bytes: bytes,
+            binary: !Self.isTextContentType(contentType(httpResponse)),
+            rewriter: rewriter, meter: &meter
+        )
+        guard !Task.isCancelled else { return }
+        if failure != nil {
+            deliverProxyError(requestId: requestId, code: "PROXY_ERROR", message: Self.connectionLostMessage, status: 502)
+            return
+        }
         deliver(requestId: requestId, message: [
             "type": "BYOKY_PROXY_RESPONSE_DONE", "requestId": requestId,
         ])
+    }
+
+    /// Whether a response body is text the page can take as string chunks
+    /// (core's `isTextContentType`): text/*, JSON, XML, event streams,
+    /// JavaScript and form-encoded data. A missing type counts as text, as
+    /// before. Anything else (audio, images, PDFs…) travels as base64.
+    nonisolated static func isTextContentType(_ contentType: String) -> Bool {
+        let type = contentType.split(separator: ";").first?
+            .trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+        if type.isEmpty || type.hasPrefix("text/") { return true }
+        return ["json", "xml", "event-stream", "javascript", "x-www-form-urlencoded"].contains { type.contains($0) }
     }
 
     private func contentType(_ httpResponse: HTTPURLResponse) -> String {
@@ -808,6 +934,16 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
         deliver(requestId: requestId, message: [
             "type": "BYOKY_PROXY_RESPONSE_CHUNK",
             "requestId": requestId, "chunk": chunk,
+        ])
+    }
+
+    /// Raw bytes of a binary response, base64 encoded (each chunk on its
+    /// own), so nothing is lost to UTF-8 decoding.
+    private func deliverBinaryChunk(_ requestId: String, _ bytes: Data) {
+        guard !bytes.isEmpty else { return }
+        deliver(requestId: requestId, message: [
+            "type": "BYOKY_PROXY_RESPONSE_CHUNK",
+            "requestId": requestId, "chunk": bytes.base64EncodedString(), "chunkEncoding": "base64",
         ])
     }
 
@@ -827,38 +963,54 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
     }
 
     /// Forward the body to the page as it arrives, feeding `meter` the
-    /// upstream bytes on the way.
+    /// upstream bytes on the way. Text goes out as string chunks, a binary
+    /// body (`binary`) as base64 chunks. Whatever arrived is delivered and
+    /// metered either way; returns the error that cut the body off, or nil
+    /// when it ended cleanly.
     private func streamRawBytes(
         requestId: String,
         bytes: URLSession.AsyncBytes,
+        binary: Bool = false,
         rewriter: ClaudeCodeResponseRewriter? = nil,
         meter: inout UsageMeter
-    ) async {
+    ) async -> Error? {
         var buffer = Data()
         // Reads are cut at 4 KB or a newline; the decoder carries a split
         // multi-byte character over to the next read instead of dropping it.
         var decoder = UTF8ChunkDecoder()
-        func emit(_ text: String) {
+        func emit(_ chunk: Data) {
+            if binary {
+                deliverBinaryChunk(requestId, chunk)
+                return
+            }
+            let text = decoder.decode(chunk)
             guard !text.isEmpty else { return }
             deliverChunk(requestId, rewriter?.process(text) ?? text)
         }
+        var failure: Error?
         do {
             for try await byte in bytes {
                 buffer.append(byte)
-                if buffer.count >= 4096 || byte == 0x0A {
+                if buffer.count >= 4096 || (!binary && byte == 0x0A) {
                     meter.consume(buffer)
-                    emit(decoder.decode(buffer))
+                    emit(buffer)
                     buffer.removeAll(keepingCapacity: true)
                 }
             }
             meter.markComplete()
-        } catch {}
-        meter.consume(buffer)
-        emit(decoder.decode(buffer))
-        emit(decoder.finish())
-        if let tail = rewriter?.finish() {
-            deliverChunk(requestId, tail)
+        } catch {
+            failure = error
         }
+        meter.consume(buffer)
+        emit(buffer)
+        if !binary {
+            let tail = decoder.finish()
+            if !tail.isEmpty { deliverChunk(requestId, rewriter?.process(tail) ?? tail) }
+            if let tail = rewriter?.finish() {
+                deliverChunk(requestId, tail)
+            }
+        }
+        return failure
     }
 
     // MARK: - Bridge delivery
@@ -884,20 +1036,37 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
     }
 
     /// A request that threw. Nothing is sent once the request was cancelled
-    /// (page closed, wallet locked).
+    /// (page closed, wallet locked). The text is fixed: an error's own
+    /// description isn't written for the app and may quote the request.
     private func deliverFailure(requestId: String, error: Error) {
         guard !Task.isCancelled else { return }
-        deliverProxyError(requestId: requestId, code: "PROXY_ERROR", message: error.localizedDescription)
+        let message = error is URLError ? Self.unreachableMessage : Self.requestFailedMessage
+        deliverProxyError(requestId: requestId, code: "PROXY_ERROR", message: message)
     }
 
-    private func deliverProxyError(requestId: String, code: String, message: String) {
-        let status: Int = switch code {
+    nonisolated static let unreachableMessage = "Couldn't reach the provider. Check the connection and try again."
+    nonisolated static let requestFailedMessage = "Request failed"
+    nonisolated static let connectionLostMessage = "Upstream connection lost"
+    nonisolated static let invalidResponseMessage = "The provider sent an invalid response"
+
+    /// Largest error body handed to core for translation into the app's
+    /// dialect; a bigger one is passed on as sent.
+    private static let maxTranslatedErrorBytes = 1_048_576
+
+    /// HTTP status of a proxy error, as the extension and Android send it.
+    nonisolated static func status(forErrorCode code: String) -> Int {
+        switch code {
         case "SESSION_EXPIRED": 401
-        case "NO_CREDENTIAL", "INVALID_URL", "ENDPOINT_REQUIRED", ProxyPolicy.endpointNotAllowedCode: 403
+        case "PROVIDER_UNAVAILABLE", "INVALID_URL", ProxyPolicy.endpointNotAllowedCode: 403
         case "INVALID_BODY", "TRANSLATION_NOT_SUPPORTED", "ROUTING_UNSUPPORTED": 400
         case "QUOTA_EXCEEDED": 429
+        case "PROXY_ERROR", "TRANSLATION_FAILED", "SWAP_FAILED": 502
         default: 500
         }
+    }
+
+    private func deliverProxyError(requestId: String, code: String, message: String, status: Int? = nil) {
+        let status = status ?? Self.status(forErrorCode: code)
         deliver(requestId: requestId, message: [
             "type": "BYOKY_PROXY_RESPONSE_ERROR", "requestId": requestId,
             "status": status,
