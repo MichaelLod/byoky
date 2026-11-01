@@ -163,8 +163,11 @@ final class BridgeSecurityTests: XCTestCase {
     func testTheAppWebViewAnswersJavaScriptDialogs() async throws {
         let browser = AppBrowserState()
         let origin = "https://dialogs.example"
+        let page = URL(string: "\(origin)/")!
         let coordinator = AppWebView.Coordinator(allowedOrigin: origin, browser: browser)
-        let webView = AppWebView.makeWebView(url: URL(string: "about:blank")!, allowedOrigin: origin, wallet: WalletStore.shared, coordinator: coordinator)
+        // Started on the page's own address, as the app does: there is no
+        // about:blank document that could commit first and take the script.
+        let webView = AppWebView.makeWebView(url: page, allowedOrigin: origin, wallet: WalletStore.shared, coordinator: coordinator)
         defer { AppWebView.dismantleUIView(webView, coordinator: coordinator) }
         XCTAssertTrue(webView.uiDelegate === coordinator)
         XCTAssertTrue(webView.navigationDelegate === coordinator)
@@ -179,8 +182,10 @@ final class BridgeSecurityTests: XCTestCase {
             case .prompt: reply(true, "Renamed")
             }
         }
-        webView.loadHTMLString("<html><body>dialogs</body></html>", baseURL: URL(string: "\(origin)/")!)
-        try await waitUntil { browser.hasCommittedPage && !webView.isLoading }
+        webView.loadHTMLString("<html><body>dialogs</body></html>", baseURL: page)
+        try await waitUntil { webView.url?.host == page.host && browser.hasCommittedPage && !webView.isLoading }
+        let document = try await webView.evaluateJavaScript("location.origin + ' ' + document.body.textContent") as? String
+        XCTAssertEqual(document, "\(origin) dialogs")
 
         let confirmed = try await webView.evaluateJavaScript("confirm('Delete this chat?')") as? Bool
         XCTAssertEqual(confirmed, true)
@@ -218,14 +223,17 @@ final class BridgeSecurityTests: XCTestCase {
     func testCommittedPagesGetAnOpaqueWhiteCanvas() async throws {
         let browser = AppBrowserState()
         let origin = "https://canvas.example"
+        let page = URL(string: "\(origin)/")!
         let coordinator = AppWebView.Coordinator(allowedOrigin: origin, browser: browser)
-        let webView = AppWebView.makeWebView(url: URL(string: "about:blank")!, allowedOrigin: origin, wallet: WalletStore.shared, coordinator: coordinator)
+        let webView = AppWebView.makeWebView(url: page, allowedOrigin: origin, wallet: WalletStore.shared, coordinator: coordinator)
         defer { AppWebView.dismantleUIView(webView, coordinator: coordinator) }
         XCTAssertFalse(webView.isOpaque)
         XCTAssertEqual(webView.overrideUserInterfaceStyle, .light)
 
-        webView.loadHTMLString("<h2>No background</h2>", baseURL: URL(string: "\(origin)/")!)
-        try await waitUntil { browser.hasCommittedPage }
+        webView.loadHTMLString("<h2>No background</h2>", baseURL: page)
+        try await waitUntil { webView.url?.host == page.host && browser.hasCommittedPage && !webView.isLoading }
+        let document = try await webView.evaluateJavaScript("location.origin + ' ' + document.body.textContent") as? String
+        XCTAssertEqual(document, "\(origin) No background")
         XCTAssertTrue(webView.isOpaque)
         XCTAssertTrue(isWhite(webView.backgroundColor))
         XCTAssertTrue(isWhite(webView.scrollView.backgroundColor))
