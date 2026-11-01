@@ -2658,13 +2658,16 @@ export default defineBackground(() => {
           });
           return;
         }
-      } else if (!translation && body && !bodyEncoding) {
-        // Local tools send request shapes their users can't change, and some
-        // are refused outright by the model they name: OpenClaw sends a
-        // thinking budget, or thinking turned off, to Claude Opus 5.5. Such a
-        // request is fitted to that model's rules, as a pinned model's is; one
-        // that already fits goes out byte for byte.
-        translatedBody = fitRequestToModel({ providerId: effectiveProviderId, url }, body);
+      }
+      // Local tools send request shapes their users can't change, and some
+      // are refused outright by the model they name: OpenClaw sends a
+      // thinking budget, or thinking turned off, to Claude Opus 5.5. Such a
+      // request is fitted to that model's rules whatever the group pins: a
+      // pin naming the model the tool already names leaves the body to this.
+      // A request that already fits, or was fitted to a pinned model above,
+      // goes out byte for byte.
+      if (!translation && translatedBody && !bodyEncoding) {
+        translatedBody = fitRequestToModel({ providerId: effectiveProviderId, url }, translatedBody);
       }
 
       const realHeaders = buildHeaders(effectiveProviderId, headers, apiKey, credential.authMethod);

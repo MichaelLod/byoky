@@ -171,6 +171,20 @@ describe('background: the bridge path fits a pinned model\'s requests too', () =
     expect(JSON.parse(upstream(h).body)).toEqual({ model: 'claude-opus-5-5', max_tokens: 4096, thinking: { type: 'adaptive' }, messages: [] });
   });
 
+  // A pin naming the model the tool already names renames nothing, so the
+  // request still has to be fitted: OpenClaw on its default Opus 5.5 in a
+  // group that pins Opus 5.5 sent its thinking budget unchanged.
+  it('fits a request that already names the pinned model', async () => {
+    const { h, sessionKey } = await appInGroup('anthropic', 'claude-opus-5-5');
+    const bridge = await startBridge(h, sessionKey);
+    const replies = await bridgeExchange(h, bridge, {
+      sessionKey, providerId: 'anthropic', url: ANTHROPIC_URL,
+      body: JSON.stringify({ model: 'claude-opus-5-5', max_tokens: 2048, thinking: { type: 'enabled', budget_tokens: 1024 }, messages: [] }),
+    });
+    expect(replies.at(-1).type).toBe('proxy_http_response_done');
+    expect(JSON.parse(upstream(h).body)).toEqual({ model: 'claude-opus-5-5', max_tokens: 2048, thinking: { type: 'adaptive' }, messages: [] });
+  });
+
   it('names a pinned Gemini model in the URL', async () => {
     const { h, sessionKey } = await appInGroup('gemini', 'gemini-3.8-flash');
     const bridge = await startBridge(h, sessionKey);
