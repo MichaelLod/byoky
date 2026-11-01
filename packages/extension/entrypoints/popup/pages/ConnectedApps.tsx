@@ -45,7 +45,7 @@ export function ConnectedApps() {
     requestLog, tokenAllowances, tokenUsage, setAllowance, removeAllowance, resetAppUsage,
     groups, appGroups, credentials,
     createGroup, updateGroup, deleteGroup, setAppGroup,
-    error, clearError, modal,
+    error, clearError, modal, limitsHold,
   } = useWalletStore();
   const [editingOrigin, setEditingOrigin] = useState<string | null>(null);
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
@@ -126,6 +126,17 @@ export function ConnectedApps() {
     setPendingMove(null);
   }
 
+  // While apps are paused after an integrity check failed, the user is
+  // asked to check every app's limit and usage before resuming them. Apps
+  // that aren't connected have no card, so those with a limit or usage are
+  // listed on their own.
+  const connectedOrigins = new Set(sessions.map((s) => s.appOrigin));
+  const unconnectedOrigins = limitsHold
+    ? [...new Set([...tokenAllowances.map((a) => a.origin), ...Object.keys(tokenUsage)])]
+      .filter((origin) => !connectedOrigins.has(origin))
+      .sort()
+    : [];
+
   // An edit closes its form once the background took it; a refused one
   // leaves the form open with the reason.
   async function finishAllowanceEdit(edit: Promise<boolean>) {
@@ -191,7 +202,8 @@ export function ConnectedApps() {
   // Errors from creating or editing a group or a limit show in its form,
   // and the add credential sheet shows its own; the rest (moving an app,
   // deleting a group) show here.
-  const allowanceFormOpen = editingOrigin !== null && sessions.some((s) => s.appOrigin === editingOrigin);
+  const allowanceFormOpen = editingOrigin !== null
+    && (connectedOrigins.has(editingOrigin) || unconnectedOrigins.includes(editingOrigin));
   const formOpen = showCreateGroup || editingGroupId !== null || modal !== null || allowanceFormOpen;
 
   return (
@@ -250,6 +262,40 @@ export function ConnectedApps() {
           <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: 0 }}>
             When a site requests access to your wallet, it will appear here.
           </p>
+        </div>
+      )}
+
+      {unconnectedOrigins.length > 0 && (
+        <div className="group-section">
+          <h3 className="section-label">Apps not connected now</h3>
+          <p className="card-subtitle" style={{ marginBottom: '12px' }}>
+            Their limits apply when they connect again.
+          </p>
+          {unconnectedOrigins.map((origin) => {
+            const allowance = tokenAllowances.find((a) => a.origin === origin);
+            const providers = [...new Set([
+              ...Object.keys(allowance?.providerLimits ?? {}),
+              ...Object.keys(tokenUsage[origin] ?? {}),
+            ])];
+            return (
+              <div key={origin} className="card connected-app-card">
+                <div className="card-header" style={{ marginBottom: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                    <div className="app-favicon">
+                      {formatOrigin(origin).charAt(0).toUpperCase()}
+                    </div>
+                    <span className="card-title" title={origin} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {formatOrigin(origin)}
+                    </span>
+                  </div>
+                </div>
+                {allowanceSection(origin, providers)}
+                <div className="connected-meta">
+                  <span>{origin}</span>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
