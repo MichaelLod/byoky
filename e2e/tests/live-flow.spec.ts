@@ -272,7 +272,7 @@ test.describe('Byoky end-to-end flow', () => {
     await form.locator('input[type="text"]').first().fill('Cross-family');
     await form.locator('select').first().selectOption('openai');
     // Model text input is the last input inside the form (datalist-backed).
-    await form.locator('input[list]').fill('gpt-4o-mini');
+    await form.locator('input[list]').fill('gpt-5.4-mini');
     await form.locator('button:has-text("Save")').click();
     // Match the group by its name: every app row also lists the group names
     // in its Group select, so a plain has-text matches other sections too.
@@ -297,7 +297,7 @@ test.describe('Byoky end-to-end flow', () => {
     await section.locator('button:has-text("Edit")').click();
     // Inline edit form — reuse the same model input.
     const form = section.locator('input[list]');
-    await form.fill('gpt-4o-mini'); // same value, confirm Save works idempotently
+    await form.fill('gpt-5.4-mini'); // same value, confirm Save works idempotently
     await section.locator('button:has-text("Save")').click();
     // Re-read from store and assert the group still has the expected model.
     const { groups } = await sendInternalFromPopup<{ groups: Array<{ id: string; name: string; model?: string }> }>(
@@ -305,7 +305,7 @@ test.describe('Byoky end-to-end flow', () => {
     );
     const g = groups.find((x) => x.id === groupIdA);
     expect(g).toBeTruthy();
-    expect(g!.model).toBe('gpt-4o-mini');
+    expect(g!.model).toBe('gpt-5.4-mini');
   });
 
   test('wallet A — assign demo origin to cross-family group', async ({ walletA }) => {
@@ -340,7 +340,7 @@ test.describe('Byoky end-to-end flow', () => {
       (e) => e.appOrigin === demoOrigin && e.providerId === 'anthropic' && e.actualProviderId === 'openai',
     );
     expect(translated, 'expected a translated request entry in log').toBeTruthy();
-    expect(translated!.actualModel).toBe('gpt-4o-mini');
+    expect(translated!.actualModel).toBe('gpt-5.4-mini');
     expect(translated!.groupId).toBe(groupIdA);
     expect(translated!.status).toBeLessThan(400);
   });
