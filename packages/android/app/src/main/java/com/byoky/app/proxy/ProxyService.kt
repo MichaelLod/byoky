@@ -733,8 +733,10 @@ class ProxyService(
             // A body core left as it was (not JSON, already the model) keeps its bytes.
             is ModelRewrite.Body -> if (rewrite.body == text) body else rewrite.body.toByteArray(Charsets.UTF_8)
             is ModelRewrite.Refused -> throw ProxyError(rewrite.code, rewrite.message, 400)
-            // Gemini's model is in the URL; a body `model` would be ignored.
-            null -> if (providerId == "gemini") body else rewriteModel(body, model)
+            // A Gemini URL that names the model gets the pin instead (a body
+            // `model` would be ignored); Gemini's OpenAI-compatible endpoint
+            // takes it from the body like everyone else.
+            null -> if (providerId == "gemini" && RoutingResolver.geminiUrl(url, model) != null) body else rewriteModel(body, model)
         }
     }
 

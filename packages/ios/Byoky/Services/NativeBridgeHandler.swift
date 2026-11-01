@@ -1108,8 +1108,11 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             deliverProxyError(requestId: requestId, code: code, message: message, status: 400)
             return nil
         case nil:
-            // Gemini's model is in the URL; a body `model` would be ignored.
-            return providerId == "gemini" ? text : (rewriteModelInJsonBody(text, to: model) ?? text)
+            // A Gemini URL that names the model gets the pin instead (a body
+            // `model` would be ignored); Gemini's OpenAI-compatible endpoint
+            // takes it from the body like everyone else.
+            if providerId == "gemini", RoutingResolver.geminiURL(url, pinning: model) != nil { return text }
+            return rewriteModelInJsonBody(text, to: model) ?? text
         }
     }
 

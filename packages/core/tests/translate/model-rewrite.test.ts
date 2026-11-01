@@ -63,6 +63,14 @@ describe('rewriteRequestModel — what it leaves alone', () => {
     }, body)).toBe(body);
   });
 
+  it('sets the model of a Gemini call whose URL names none (the OpenAI-compatible endpoint)', () => {
+    // Byoky's OpenClaw plugin sends byoky-gemini requests there; the model is
+    // in the body and rewriteRequestUrl leaves the URL alone.
+    expect(rewrite('gemini', 'gemini-3.8-flash', { model: 'gemini-2.5-flash', temperature: 0.5, messages: USER },
+      'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'))
+      .toEqual({ model: 'gemini-3.8-flash', temperature: 0.5, messages: USER });
+  });
+
   it('only sets the model for families without per-model rules', () => {
     expect(rewrite('cohere', 'command-a-03-2025', { model: 'command-r', temperature: 0.5, messages: USER }, 'https://api.cohere.com/v2/chat'))
       .toEqual({ model: 'command-a-03-2025', temperature: 0.5, messages: USER });

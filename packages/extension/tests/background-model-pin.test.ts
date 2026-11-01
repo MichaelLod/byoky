@@ -27,6 +27,7 @@ const KEYS: CredentialSpec[] = [
 ];
 
 const GEMINI = 'https://generativelanguage.googleapis.com/v1beta/models';
+const GEMINI_OPENAI = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
 
 const TOOL = { name: 'get_weather', input_schema: { type: 'object', properties: {} } };
 const OPENAI_TOOL = { type: 'function', function: { name: 'get_weather', parameters: { type: 'object', properties: {} } } };
@@ -129,6 +130,17 @@ describe('background: a group\'s pinned model gets that model\'s request rules',
     expect(upstream(h)).toEqual({ url: `${GEMINI}/gemini-3.8-flash:streamGenerateContent?alt=sse`, body });
   });
 
+  it('names a pinned Gemini model in the body of an OpenAI-compatible call', async () => {
+    const { h, sessionKey } = await appInGroup('gemini', 'gemini-3.8-flash');
+    const r = await h.proxy(APP, {
+      sessionKey, providerId: 'gemini', url: GEMINI_OPENAI,
+      body: JSON.stringify({ model: 'gemini-2.5-flash', messages: [{ role: 'user', content: 'hi' }] }),
+    }).result;
+    expect(r.done).toBe(true);
+    expect(upstream(h).url).toBe(GEMINI_OPENAI);
+    expect(JSON.parse(upstream(h).body)).toEqual({ model: 'gemini-3.8-flash', messages: [{ role: 'user', content: 'hi' }] });
+  });
+
   it('answers a request the pinned model can\'t serve with a clear error, sending nothing', async () => {
     const { h, sessionKey } = await appInGroup('openai', 'gpt-6-astra');
     const r = await h.proxy(APP, {
@@ -194,6 +206,20 @@ describe('background: the bridge path fits a pinned model\'s requests too', () =
     });
     expect(replies.at(-1).type).toBe('proxy_http_response_done');
     expect(upstream(h)).toEqual({ url: `${GEMINI}/gemini-3.8-flash:generateContent`, body });
+  });
+
+  // OpenClaw's byoky-gemini provider calls Gemini's OpenAI-compatible
+  // endpoint, which takes the model from the body.
+  it('names a pinned Gemini model in the body of an OpenAI-compatible call', async () => {
+    const { h, sessionKey } = await appInGroup('gemini', 'gemini-3.8-flash');
+    const bridge = await startBridge(h, sessionKey);
+    const replies = await bridgeExchange(h, bridge, {
+      sessionKey, providerId: 'gemini', url: GEMINI_OPENAI,
+      body: JSON.stringify({ model: 'gemini-2.5-flash', stream: true, messages: [{ role: 'user', content: 'hi' }] }),
+    });
+    expect(replies.at(-1).type).toBe('proxy_http_response_done');
+    expect(upstream(h).url).toBe(GEMINI_OPENAI);
+    expect(JSON.parse(upstream(h).body)).toEqual({ model: 'gemini-3.8-flash', stream: true, messages: [{ role: 'user', content: 'hi' }] });
   });
 
   it('answers a request the pinned model can\'t serve with a clear error', async () => {

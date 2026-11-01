@@ -57,9 +57,9 @@ export function translateRequest(ctx: TranslationContext, body: string): string 
  * OpenAI reasoning models). Every other field stays as the app sent it.
  *
  * A body that already names the model, or isn't a JSON object, is returned
- * as it was, as is every body for a family that names the model in the URL
- * (Gemini; see rewriteRequestUrl). Throws TranslationError when the model
- * can't serve the request at all.
+ * as it was, as is the body of a call whose URL names the model (Gemini's
+ * generateContent; see rewriteRequestUrl). Throws TranslationError when the
+ * model can't serve the request at all.
  *
  * `url` is the URL the app called; `dstProviderId` the provider the request
  * goes to (the same family as the app's).
@@ -79,8 +79,11 @@ export function rewriteRequestModel(
   if (request.model === ctx.dstModel) return body;
   const family = familyOf(ctx.dstProviderId);
   const adapter = family && hasAdapter(family) ? getAdapter(family) : undefined;
-  // The model is in the URL there (rewriteRequestUrl); the body has none.
-  if (adapter?.rewriteUrlModel) return body;
+  // A URL that names the model (Gemini's generateContent and the like) is
+  // where the pin goes (rewriteRequestUrl); the body has none. Other URLs of
+  // such a family name it in the body as usual, e.g. Gemini's
+  // OpenAI-compatible /v1beta/openai/chat/completions.
+  if (adapter?.rewriteUrlModel?.(ctx.url, ctx.dstModel) != null) return body;
   request.model = ctx.dstModel;
   if (adapter?.shapeRequestForModel && adapter.matchesChatEndpoint(ctx.url)) {
     adapter.shapeRequestForModel(request, { dstModel: ctx.dstModel, dstProviderId: ctx.dstProviderId });

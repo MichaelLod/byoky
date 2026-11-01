@@ -215,5 +215,7 @@ class RoutingResolverTest {
         assertNull(RoutingResolver.geminiUrl((base + "text-embedding-004:embedContent").toHttpUrl(), "gemini-3.8-flash"))
         assertNull(RoutingResolver.geminiUrl("https://generativelanguage.googleapis.com/v1beta/models".toHttpUrl(), "gemini-3.8-flash"))
         assertNull(RoutingResolver.geminiUrl((base + ":generateContent").toHttpUrl(), "gemini-3.8-flash"))
+        // The OpenAI-compatible endpoint names the model in the body: the pin goes there.
+        assertNull(RoutingResolver.geminiUrl("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions".toHttpUrl(), "gemini-3.8-flash"))
     }
 }
