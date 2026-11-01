@@ -142,7 +142,10 @@ export class Byoky {
       const response = await this.sendConnectRequest({ reconnectOnly: true });
       saveExtSession(response);
       return this.buildSession(response);
-    } catch {
+    } catch (err) {
+      // Byoky was updated while this page was open: nothing is reachable
+      // until it reloads, and the saved session may still be good then.
+      if (isWalletReloaded(err)) return null;
       // No live session — fall through
     }
 
@@ -194,6 +197,19 @@ export class Byoky {
 
     let reconnectPromise: Promise<boolean> | null = null;
 
+    const fireDisconnect = () => {
+      for (const cb of disconnectCallbacks) cb();
+      disconnectCallbacks.clear();
+    };
+
+    // Byoky was updated or reloaded while this page was open, which cuts
+    // off the content script for good: nothing can be retried, the page has
+    // to reload. The saved session is kept for tryReconnect after that.
+    const onWalletReloaded = () => {
+      fireDisconnect();
+      notifyChannel.port1.close();
+    };
+
     const applyNewResponse = (newResponse: ConnectResponse) => {
       sessionKeyRef.current = newResponse.sessionKey;
       session.sessionKey = newResponse.sessionKey;
@@ -210,6 +226,10 @@ export class Byoky {
           applyNewResponse(newResponse);
           return true;
         } catch (err) {
+          if (isWalletReloaded(err)) {
+            onWalletReloaded();
+            return false;
+          }
           // Silent reconnect failed (NO_SESSION). If the user previously
           // approved this origin in the wallet, a full connect will
           // re-create the session via the trusted-sites auto-approve path
@@ -225,8 +245,7 @@ export class Byoky {
             }
           }
           clearExtSession();
-          for (const cb of disconnectCallbacks) cb();
-          disconnectCallbacks.clear();
+          fireDisconnect();
           return false;
         } finally {
           reconnectPromise = null;
@@ -246,15 +265,12 @@ export class Byoky {
 
           const resp = await proxyFetch(safeInput, safeInit);
 
-          if (resp.status === 401) {
-            try {
-              const body = await resp.clone().json();
-              if (body?.error?.code === 'SESSION_EXPIRED') {
-                if (await attemptReconnect()) {
-                  return proxyFetch(safeInput, safeInit);
-                }
-              }
-            } catch { /* not JSON or parse error — return original response */ }
+          if (resp.status === 401 && await walletErrorCode(resp) === ByokyErrorCode.SESSION_EXPIRED) {
+            if (await attemptReconnect()) {
+              return proxyFetch(safeInput, safeInit);
+            }
+          } else if (resp.status === 503 && await walletErrorCode(resp) === ByokyErrorCode.WALLET_RELOADED) {
+            onWalletReloaded();
           }
 
           return resp;
@@ -296,9 +312,12 @@ export class Byoky {
       const msg = event.data;
       if (msg?.type === 'BYOKY_SESSION_REVOKED' && msg.payload?.sessionKey === sessionKeyRef.current) {
         clearExtSession();
-        for (const cb of disconnectCallbacks) cb();
-        disconnectCallbacks.clear();
+        fireDisconnect();
         notifyChannel.port1.close();
+      } else if (msg?.type === 'BYOKY_WALLET_RELOADED') {
+        // Sent by the content script itself when it is cut off; it carries
+        // no session key because every session in this frame is affected.
+        onWalletReloaded();
       } else if (msg?.type === 'BYOKY_PROVIDERS_UPDATED' && msg.payload?.sessionKey === sessionKeyRef.current) {
         const newProviders = msg.payload.providers as ConnectResponse['providers'];
         session.providers = newProviders;
@@ -330,7 +349,7 @@ export class Byoky {
       const timeoutId = setTimeout(() => {
         cleanup();
         reject(
-          new ByokyError(ByokyErrorCode.UNKNOWN, 'Connection request timed out'),
+          new ByokyError(ByokyErrorCode.UNKNOWN, 'Connection request timed out. If Byoky was just updated, reload the page.'),
         );
       }, this.timeout);
 
@@ -447,6 +466,12 @@ export class Byoky {
           } else {
             reject(new Error('Session not found'));
           }
+        } else if (msg.type === 'BYOKY_ERROR') {
+          // The content script couldn't reach the wallet (WALLET_RELOADED,
+          // EXTENSION_ERROR).
+          cleanup();
+          const { code, message } = (msg.payload ?? {}) as { code?: string; message?: string };
+          reject(new ByokyError(code as ByokyErrorCode, message ?? 'Usage query failed'));
         }
       };
 
@@ -463,5 +488,20 @@ export class Byoky {
         }, origin, [channel.port2]);
       });
     });
+  }
+}
+
+function isWalletReloaded(err: unknown): boolean {
+  return err instanceof ByokyError && err.code === ByokyErrorCode.WALLET_RELOADED;
+}
+
+/** The Byoky error code in a wallet error response's JSON body, if any. */
+async function walletErrorCode(resp: Response): Promise<string | undefined> {
+  try {
+    const body = await resp.clone().json();
+    const code = body?.error?.code;
+    return typeof code === 'string' ? code : undefined;
+  } catch {
+    return undefined; // not JSON
   }
 }

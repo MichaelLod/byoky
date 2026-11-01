@@ -188,6 +188,24 @@ describe('Byoky', () => {
     expect(callback).toHaveBeenCalledTimes(1);
   });
 
+  it('session.onDisconnect fires when Byoky was reloaded, keeping the saved session', async () => {
+    const connectPromise = new Byoky().connect();
+    await new Promise((r) => setTimeout(r, 10));
+    simulateResponse({
+      type: 'BYOKY_CONNECT_RESPONSE',
+      requestId: postedMessages[0].data.requestId,
+      payload: { sessionKey: 'byk_reloaded', proxyUrl: 'extension-proxy', providers: {} },
+    });
+    const session = await connectPromise;
+    const callback = vi.fn();
+    session.onDisconnect(callback);
+
+    simulateNotification({ type: 'BYOKY_WALLET_RELOADED' });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(callback).toHaveBeenCalledTimes(1);
+    expect(sessionStorage.getItem('byoky:session')).not.toBeNull();
+  });
+
   it('session.onDisconnect returns an unsubscribe function', async () => {
     const byoky = new Byoky();
     const connectPromise = byoky.connect();

@@ -7,6 +7,12 @@ const NOTIFY_RETRY_MIN_MS = 1_000;
 const NOTIFY_RETRY_MAX_MS = 60_000;
 const NOTIFY_STABLE_MS = 10_000;
 
+// What the page gets when this script has been cut off from the extension.
+const WALLET_RELOADED = {
+  code: 'WALLET_RELOADED',
+  message: 'Byoky was updated. Reload this page.',
+};
+
 export default defineContentScript({
   matches: ['<all_urls>'],
   runAt: 'document_start',
@@ -60,7 +66,11 @@ export default defineContentScript({
         // Use a port for streaming proxy requests. Closing it cancels the
         // request: the background aborts the upstream fetch.
         const requestId: string = data.requestId;
-        const port = browser.runtime.connect({ name: 'byoky-proxy' });
+        const port = connectToBackground('byoky-proxy');
+        if (!port) {
+          reply({ type: 'BYOKY_PROXY_RESPONSE_ERROR', requestId, status: 503, error: WALLET_RELOADED });
+          return;
+        }
         proxyPorts.set(requestId, port);
 
         // Stops tracking the request. False if the response already finished
@@ -119,7 +129,15 @@ export default defineContentScript({
         // background and isn't also dispatched to the side-panel/popup, which
         // can swallow the response in Chrome MV3 when multiple onMessage
         // listeners exist.
-        const port = browser.runtime.connect({ name: 'byoky-message' });
+        const port = connectToBackground('byoky-message');
+        if (!port) {
+          if (data.type === 'BYOKY_SESSION_STATUS') {
+            reply({ type: 'BYOKY_SESSION_STATUS_RESPONSE', requestId: data.requestId, payload: { connected: false } });
+          } else if (!isDisconnect) {
+            reply({ type: 'BYOKY_ERROR', requestId: data.id || data.requestId, payload: WALLET_RELOADED });
+          }
+          return;
+        }
         let replied = false;
         port.postMessage(data);
         port.onMessage.addListener((msg) => {
@@ -148,11 +166,18 @@ export default defineContentScript({
         if (!ALLOWED_PAGE_ACTIONS.includes(data.action)) {
           return;
         }
-        browser.runtime.sendMessage({
-          type: 'BYOKY_INTERNAL',
-          action: data.action,
-          payload: data.payload,
-        }).then((response) => {
+        if (!extensionAlive()) return;
+        let sent: Promise<unknown>;
+        try {
+          sent = browser.runtime.sendMessage({
+            type: 'BYOKY_INTERNAL',
+            action: data.action,
+            payload: data.payload,
+          });
+        } catch {
+          return;
+        }
+        sent.then((response) => {
           reply({ requestId: data.requestId, payload: response });
         }).catch(() => {});
       } else if (data.type === 'BYOKY_REGISTER_NOTIFY') {
@@ -198,20 +223,33 @@ export default defineContentScript({
       }
     }
 
+    // A port to the background, or null once this script is cut off. The
+    // caller then answers the page at once: Chrome doesn't re-inject
+    // content scripts on update, so otherwise every call in an open tab
+    // would hang until the SDK's timeout and end in a generic error.
+    function connectToBackground(name: string): Runtime.Port | null {
+      if (!extensionAlive()) return null;
+      try {
+        return browser.runtime.connect({ name });
+      } catch {
+        return null;
+      }
+    }
+
     function connectNotifyPort() {
       notifyRetryTimer = null;
-      if (!extensionAlive()) return;
-      let port: Runtime.Port;
-      try {
-        port = browser.runtime.connect({ name: 'byoky-notify' });
-      } catch {
-        return;
-      }
+      const port = connectToBackground('byoky-notify');
+      if (!port) return;
       notifyPort = port;
       const connectedAt = Date.now();
       port.onMessage.addListener(forwardNotification);
       port.onDisconnect.addListener(() => {
         notifyPort = null;
+        if (!extensionAlive()) {
+          // Byoky was updated or reloaded: the SDKs' sessions here are gone.
+          forwardNotification({ type: 'BYOKY_WALLET_RELOADED' });
+          return;
+        }
         if (Date.now() - connectedAt >= NOTIFY_STABLE_MS) notifyRetryMs = NOTIFY_RETRY_MIN_MS;
         scheduleNotifyReconnect();
       });

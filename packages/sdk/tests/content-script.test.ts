@@ -183,6 +183,103 @@ describe('SDK ↔ content script', () => {
     });
   });
 
+  describe('after an extension update (orphaned content script)', () => {
+    // Chrome leaves the old content script running in open tabs, cut off:
+    // runtime.id is gone and runtime.connect() throws.
+    function orphan(how: 'no-id' | 'throws') {
+      if (how === 'no-id') runtime.id = undefined;
+      runtime.connect = () => { throw new Error('Extension context invalidated.'); };
+    }
+
+    function send(listener: ContentListener, data: Record<string, unknown>) {
+      const replyPort = { postMessage: vi.fn() };
+      expect(() => listener({ source: window, data, ports: [replyPort] })).not.toThrow();
+      return replyPort.postMessage.mock.calls.map(([msg]) => msg);
+    }
+
+    it.each(['no-id', 'throws'] as const)('answers every request at once (%s)', (how) => {
+      const listener = startContentScript();
+      orphan(how);
+
+      expect(send(listener, {
+        type: 'BYOKY_PROXY_REQUEST', requestId: 'p1', sessionKey: 'byk', providerId: 'openai', url: 'https://api.openai.com/v1/models', method: 'GET',
+      })).toEqual([{
+        type: 'BYOKY_PROXY_RESPONSE_ERROR', requestId: 'p1', status: 503,
+        error: { code: 'WALLET_RELOADED', message: 'Byoky was updated. Reload this page.' },
+      }]);
+      expect(send(listener, { type: 'BYOKY_CONNECT_REQUEST', id: 'c1', requestId: 'c1', payload: {} })).toEqual([{
+        type: 'BYOKY_ERROR', requestId: 'c1',
+        payload: { code: 'WALLET_RELOADED', message: 'Byoky was updated. Reload this page.' },
+      }]);
+      expect(send(listener, { type: 'BYOKY_SESSION_USAGE', requestId: 'u1', payload: { sessionKey: 'byk' } }))
+        .toMatchObject([{ type: 'BYOKY_ERROR', requestId: 'u1', payload: { code: 'WALLET_RELOADED' } }]);
+      expect(send(listener, { type: 'BYOKY_SESSION_STATUS', requestId: 's1', payload: { sessionKey: 'byk' } }))
+        .toEqual([{ type: 'BYOKY_SESSION_STATUS_RESPONSE', requestId: 's1', payload: { connected: false } }]);
+      expect(send(listener, { type: 'BYOKY_DISCONNECT', id: 'd1', requestId: 'd1', payload: { sessionKey: 'byk' } })).toEqual([]);
+    });
+
+    it('tells registered SDKs when the notify port drops for good', () => {
+      const listener = startContentScript();
+      const sdkPort = { postMessage: vi.fn() };
+      listener({ source: window, data: { type: 'BYOKY_REGISTER_NOTIFY' }, ports: [sdkPort] });
+
+      orphan('no-id');
+      portsNamed('byoky-notify')[0].drop();
+      expect(sdkPort.postMessage).toHaveBeenCalledWith({ type: 'BYOKY_WALLET_RELOADED' });
+    });
+
+    describe('with the SDK', () => {
+      beforeEach(() => {
+        const listener = startContentScript();
+        vi.spyOn(window, 'postMessage').mockImplementation((...args: unknown[]) => {
+          const [data, , transfer] = args as [unknown, string, unknown[] | undefined];
+          setTimeout(() => listener({ source: window, data, ports: transfer ?? [] }), 0);
+        });
+      });
+
+      it('connect() rejects at once with WALLET_RELOADED', async () => {
+        orphan('no-id');
+        const started = Date.now();
+        await expect(new Byoky().connect()).rejects.toMatchObject({
+          code: 'WALLET_RELOADED',
+          message: 'Byoky was updated. Reload this page.',
+        });
+        expect(Date.now() - started).toBeLessThan(1000);
+      });
+
+      it('a call answers 503 WALLET_RELOADED at once and ends the session', async () => {
+        const pending = new Byoky().connect();
+        await tick();
+        const port = portsNamed('byoky-message')[0];
+        port.emit({
+          type: 'BYOKY_CONNECT_RESPONSE',
+          requestId: port.posted[0].requestId,
+          payload: { sessionKey: 'byk_live', proxyUrl: 'extension-proxy', providers: {} },
+        });
+        const session = await pending;
+        const onDisconnect = vi.fn();
+        session.onDisconnect(onDisconnect);
+
+        orphan('throws');
+        const response = await session.createFetch('openai')('https://api.openai.com/v1/models');
+        expect(response.status).toBe(503);
+        expect((await response.json()).error.code).toBe('WALLET_RELOADED');
+        expect(onDisconnect).toHaveBeenCalledTimes(1);
+        // No reconnect attempt: only the original connect went out.
+        expect(portsNamed('byoky-message')).toHaveLength(1);
+        // The saved session is kept for after the reload.
+        expect(sessionStorage.getItem('byoky:session')).not.toBeNull();
+      });
+
+      it('tryReconnect gives up at once and keeps the saved session', async () => {
+        sessionStorage.setItem('byoky:session', JSON.stringify({ sessionKey: 'byk_saved', proxyUrl: 'x', providers: {} }));
+        orphan('no-id');
+        expect(await new Byoky().tryReconnect()).toBeNull();
+        expect(sessionStorage.getItem('byoky:session')).not.toBeNull();
+      });
+    });
+  });
+
   it('forwards a bare disconnect from older SDKs without answering it', () => {
     const listener = startContentScript();
     const dispatch = vi.spyOn(document, 'dispatchEvent');
