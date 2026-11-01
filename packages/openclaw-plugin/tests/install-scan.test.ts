@@ -79,9 +79,29 @@ describe.skipIf(!existsSync(join(DIST, 'index.js')))('packages/openclaw-plugin/d
   });
 });
 
-// The plugin bundles these two bridge modules (tsup noExternal), so they end
-// up in dist/index.js next to the plugin's fetch calls.
-describe.each(['token.ts', 'native-manifest.ts'])('bridge src/%s, bundled into the plugin', (name) => {
+// The plugin bundles every @byoky/bridge/<module> it imports, and what those
+// import in turn (tsup noExternal): into dist/index.js, or dist/auth-sdk.js
+// for the login page, next to fetch calls either way.
+function bundledBridgeModules(): string[] {
+  const found = new Set<string>();
+  const queue = filesUnder(join(PLUGIN_DIR, 'src')).flatMap((f) =>
+    [...readFileSync(f, 'utf8').matchAll(/from\s+'@byoky\/bridge\/([\w-]+)'/g)].map((m) => `${m[1]}.ts`));
+  for (let name = queue.shift(); name; name = queue.shift()) {
+    if (found.has(name)) continue;
+    found.add(name);
+    const source = readFileSync(join(BRIDGE_SRC, name), 'utf8');
+    queue.push(...[...source.matchAll(/from\s+'\.\/([\w-]+)\.js'/g)].map((m) => `${m[1]}.ts`));
+  }
+  return [...found].sort();
+}
+
+const BUNDLED_BRIDGE_MODULES = bundledBridgeModules();
+
+it('finds the bridge modules the plugin bundles', () => {
+  expect(BUNDLED_BRIDGE_MODULES).toEqual(expect.arrayContaining(['loopback-page.ts', 'native-manifest.ts', 'page-session.ts', 'token.ts']));
+});
+
+describe.each(BUNDLED_BRIDGE_MODULES)('bridge src/%s, bundled into the plugin', (name) => {
   const code = withoutComments(readFileSync(join(BRIDGE_SRC, name), 'utf8'));
 
   it('reads no environment variables', () => {

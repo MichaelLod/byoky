@@ -4,6 +4,9 @@ import { Byoky, type ByokySession } from '../src/byoky.js';
 import { ByokyError, ByokyErrorCode } from '@byoky/core';
 
 describe('Byoky', () => {
+  // Count these (or a filter of them) with .length, not toHaveLength: a
+  // failing toHaveLength prints the array, and vitest's formatter overflows
+  // its stack on the MessagePorts in it.
   let postedMessages: Array<{ data: Record<string, unknown>; port?: MessagePort }>;
 
   beforeEach(() => {
@@ -699,7 +702,7 @@ describe('Byoky', () => {
       });
       await tick();
 
-      expect(connectRequests()).toHaveLength(2);
+      expect(connectRequests().length).toBe(2);
       const reconnect = connectRequests()[1];
       reconnect.port!.postMessage({
         type: 'BYOKY_CONNECT_RESPONSE',
@@ -719,7 +722,7 @@ describe('Byoky', () => {
       relayRequest(ws, 'relay-2');
       await tick();
       expect(proxyRequests()[2].data.sessionKey).toBe('byk_new');
-      expect(connectRequests()).toHaveLength(2);
+      expect(connectRequests().length).toBe(2);
       relay.close();
     });
   });
@@ -933,7 +936,7 @@ describe('Byoky', () => {
       const result = await byoky.tryReconnect();
 
       expect(result).toBeNull();
-      expect(postedMessages).toHaveLength(0);
+      expect(postedMessages.length).toBe(0);
     });
 
     it('updates sessionStorage on auto-reconnect', async () => {
@@ -1046,7 +1049,7 @@ describe('Byoky', () => {
       const connectPromise = byoky.connect({ modal: true });
 
       expect(modalCard()!.textContent).toContain('Byoky wallet not found');
-      expect(postedMessages).toHaveLength(0);
+      expect(postedMessages.length).toBe(0);
 
       clickButton('Cancel');
       await expect(connectPromise).rejects.toMatchObject({
@@ -1063,7 +1066,7 @@ describe('Byoky', () => {
 
       clickButton('I\'ve installed it');
       expect(modalCard()!.textContent).toContain('reload this page');
-      expect(postedMessages).toHaveLength(0);
+      expect(postedMessages.length).toBe(0);
 
       (window as Record<string, unknown>).__byoky__ = { isByoky: true };
       clickButton('I\'ve installed it');
