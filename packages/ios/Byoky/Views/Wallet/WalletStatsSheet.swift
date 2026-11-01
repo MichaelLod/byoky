@@ -62,6 +62,7 @@ private struct CredentialStatsView: View {
     @EnvironmentObject var wallet: WalletStore
     let credential: Credential
     @State private var range: WalletStatsRange = .week
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     private var provider: Provider? { Provider.find(credential.providerId) }
 
@@ -177,8 +178,12 @@ private struct CredentialStatsView: View {
         .overlay(Rectangle().strokeBorder(Theme.seamStrong, lineWidth: 1))
     }
 
+    /// Three cards side by side; stacked at accessibility text sizes.
     private var totalsRow: some View {
-        HStack(spacing: 12) {
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 12))
+        return layout {
             StatCard(value: "\(logs.count)", label: "Requests")
             StatCard(value: formatWalletTokens(totalInput), label: "Input", spoken: "input tokens")
             StatCard(value: formatWalletTokens(totalOutput), label: "Output", spoken: "output tokens")

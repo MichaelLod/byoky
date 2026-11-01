@@ -360,6 +360,10 @@ struct CredentialRow: View {
     let onEditEndpoint: () -> Void
     let onRename: () -> Void
 
+    /// At accessibility text sizes the card stacks its parts instead of
+    /// squeezing them side by side (which broke words mid-way).
+    @Environment(\.dynamicTypeSize) private var typeSize
+
     private var needsEndpoint: Bool {
         Provider.find(credential.providerId)?.requiresCustomBaseUrl == true
     }
@@ -370,40 +374,26 @@ struct CredentialRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 14) {
-                ProviderTile(providerId: credential.providerId, size: 40)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(credential.label)
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(Theme.bone)
-                    Text(Provider.find(credential.providerId)?.name ?? credential.providerId)
-                        .font(.mono(12, relativeTo: .caption))
-                        .foregroundStyle(Theme.dim)
+            if typeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        ProviderTile(providerId: credential.providerId, size: 40)
+                        Spacer()
+                        renameButton
+                    }
+                    titles
+                    badge
                 }
-
-                Spacer()
-
-                Button {
-                    onRename()
-                } label: {
-                    Image(systemName: "pencil")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(Theme.dim)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
+            } else {
+                HStack(spacing: 14) {
+                    ProviderTile(providerId: credential.providerId, size: 40)
+                    titles
+                    Spacer()
+                    renameButton
+                        // A 44pt target in the 28pt slot the pencil had.
+                        .padding(-8)
+                    badge
                 }
-                .buttonStyle(.borderless)
-                // A 44pt target in the 28pt slot the pencil had.
-                .padding(-8)
-                .accessibilityLabel("Rename credential")
-                .accessibilityIdentifier("wallet.credential.rename")
-
-                Text(credential.authMethod == .apiKey ? "API Key" : "OAuth")
-                    .uppercaseDisplay()
-                    .font(.mono(11, relativeTo: .caption2))
-                    .tracking(0.8)
-                    .foregroundStyle(credential.authMethod == .apiKey ? Theme.fog : Theme.phosphor)
             }
 
             if needsEndpoint {
@@ -437,10 +427,18 @@ struct CredentialRow: View {
             VStack(alignment: .leading, spacing: 8) {
                 SectionLabel("Last 7 days")
 
-                HStack(spacing: 16) {
-                    statColumn(value: "\(usage.requests)", label: "requests", spoken: "requests")
-                    statColumn(value: formatWalletTokens(usage.inputTokens), label: "input", spoken: "input tokens")
-                    statColumn(value: formatWalletTokens(usage.outputTokens), label: "output", spoken: "output tokens")
+                if typeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 6) {
+                        statRow(value: "\(usage.requests)", label: "requests", spoken: "requests")
+                        statRow(value: formatWalletTokens(usage.inputTokens), label: "input", spoken: "input tokens")
+                        statRow(value: formatWalletTokens(usage.outputTokens), label: "output", spoken: "output tokens")
+                    }
+                } else {
+                    HStack(spacing: 16) {
+                        statColumn(value: "\(usage.requests)", label: "requests", spoken: "requests")
+                        statColumn(value: formatWalletTokens(usage.inputTokens), label: "input", spoken: "input tokens")
+                        statColumn(value: formatWalletTokens(usage.outputTokens), label: "output", spoken: "output tokens")
+                    }
                 }
             }
             // The whole card opens the stats; for VoiceOver the usage block
@@ -455,6 +453,59 @@ struct CredentialRow: View {
         .retroCard()
         .contentShape(Rectangle())
         .onTapGesture { onOpenStats() }
+    }
+
+    private var titles: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(credential.label)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(Theme.bone)
+            Text(Provider.find(credential.providerId)?.name ?? credential.providerId)
+                .font(.mono(12, relativeTo: .caption))
+                .foregroundStyle(Theme.dim)
+        }
+    }
+
+    private var renameButton: some View {
+        Button {
+            onRename()
+        } label: {
+            Image(systemName: "pencil")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Theme.dim)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("Rename credential")
+        .accessibilityIdentifier("wallet.credential.rename")
+    }
+
+    private var badge: some View {
+        Text(credential.authMethod == .apiKey ? "API Key" : "OAuth")
+            .uppercaseDisplay()
+            .font(.mono(11, relativeTo: .caption2))
+            .tracking(0.8)
+            .foregroundStyle(credential.authMethod == .apiKey ? Theme.fog : Theme.phosphor)
+            .lineLimit(1)
+            .fixedSize()
+    }
+
+    /// One usage figure as a label/value row, for accessibility text sizes.
+    private func statRow(value: String, label: String, spoken: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label)
+                .uppercaseDisplay()
+                .font(.mono(10, relativeTo: .caption2))
+                .tracking(1)
+                .foregroundStyle(Theme.dim)
+            Spacer(minLength: 8)
+            Text(value)
+                .font(.mono(17, weight: .medium, relativeTo: .headline))
+                .foregroundStyle(Theme.bone)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(value) \(spoken)")
     }
 
     private func statColumn(value: String, label: String, spoken: String) -> some View {
