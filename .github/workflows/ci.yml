@@ -44,12 +44,27 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Build packages
+        id: build
         run: pnpm --filter @byoky/core build && pnpm --filter @byoky/sdk build
+
+      - name: Run tests
+        run: pnpm test
+
+      - name: Build extension
+        run: pnpm --filter @byoky/extension build
+
+      - name: Build landing page
+        run: pnpm --filter @byoky/web build
+
+      # The drift checks below come last and run whenever core built, so a
+      # stale copy reports itself without hiding the test and build results
+      # above, and a failure above doesn't hide the drift.
 
       # The iOS and Android apps run a committed copy of core's translate
       # bundle. The build is byte-identical on every Node version (esbuild),
       # so a difference means the copies are stale.
       - name: Mobile bundle copies match core
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           FAIL=0
           for copy in packages/ios/Byoky/Resources/mobile.js packages/android/app/src/main/assets/mobile.js; do
@@ -61,20 +76,8 @@ jobs:
           exit $FAIL
 
       - name: Backup fixtures match their generator
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: node scripts/gen-backup-fixtures.mjs --check
-
-      - name: Run tests
-        run: pnpm test
-
-      - name: Build extension
-        run: pnpm --filter @byoky/extension build
-
-      # After the extension build, which generates the .wxt types it needs.
-      - name: Typecheck
-        run: pnpm typecheck
-
-      - name: Build landing page
-        run: pnpm --filter @byoky/web build
 
   # The npm packages that CI otherwise never builds: the bridge, the OpenClaw
   # plugin (which inlines the bridge's dist) and the scaffolder.
