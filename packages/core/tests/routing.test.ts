@@ -502,4 +502,24 @@ describe('local OpenAI-compatible servers (F032)', () => {
     expect(resolveAutoCrossFamilyRoute('anthropic', [ollama, lmStudio])).toBeUndefined();
     expect(resolveRoute('gemini', undefined, [ollama, cred('a', 'anthropic')])!.credential.id).toBe('a');
   });
+
+  it('keep a request meant for them local: auto-routing never sends it to a cloud key', () => {
+    const cloud = [cred('a', 'anthropic'), cred('g', 'gemini'), cred('c', 'cohere')];
+    for (const local of ['ollama', 'lm_studio']) {
+      expect(resolveAutoCrossFamilyRoute(local, cloud)).toBeUndefined();
+      expect(resolveRoute(local, undefined, cloud)).toBeNull();
+      // The default group binds nothing, so it counts as no group.
+      expect(resolveRoute(local, group(''), cloud)).toBeNull();
+    }
+  });
+
+  it('can still be routed elsewhere by a group the user set', () => {
+    const decision = resolveRoute('ollama', group('anthropic'), [cred('a', 'anthropic')]);
+    expect(decision!.credential.id).toBe('a');
+    expect(decision!.translation).toEqual({
+      srcProviderId: 'ollama',
+      dstProviderId: 'anthropic',
+      dstModel: 'claude-sonnet-4-6',
+    });
+  });
 });

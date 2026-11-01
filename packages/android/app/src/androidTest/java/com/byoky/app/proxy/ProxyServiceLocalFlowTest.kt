@@ -2,6 +2,7 @@ package com.byoky.app.proxy
 
 import android.content.Context
 import android.net.Uri
+import android.security.NetworkSecurityPolicy
 import android.webkit.WebView
 import androidx.webkit.JavaScriptReplyProxy
 import androidx.webkit.WebMessageCompat
@@ -30,7 +31,7 @@ import kotlin.concurrent.thread
 
 /**
  * [ProxyService.forward] end to end against a local fake server (an Ollama
- * credential on http://127.0.0.1, the one cleartext host the app allows):
+ * credential on http://127.0.0.1, a cleartext host the app allows):
  * which headers reach the upstream, binary replies, key decryption per
  * request, and the documented error codes. No network or real keys needed.
  */
@@ -118,6 +119,56 @@ class ProxyServiceLocalFlowTest {
     }
 
     /**
+     * A local server on IPv6 loopback is reachable over plain http, as on
+     * iOS and in the extension (R2-04): the network security config allows
+     * cleartext to `::1`, and the credential's `[::1]` server matches the
+     * request. LAN addresses stay HTTPS-only.
+     */
+    @Test
+    fun anIpv6LoopbackServerIsReachable() {
+        val policy = NetworkSecurityPolicy.getInstance()
+        assertTrue("cleartext to ::1", policy.isCleartextTrafficPermitted("::1"))
+        assertTrue(policy.isCleartextTrafficPermitted("127.0.0.1"))
+        assertFalse(policy.isCleartextTrafficPermitted("192.168.1.5"))
+        assertFalse(policy.isCleartextTrafficPermitted("::2"))
+
+        FakeServer(host = "::1").use { v6 ->
+            v6.reply = FakeServer.Reply("application/json", """{"ok":"v6"}""".toByteArray())
+            runBlocking { wallet.addCredential("lm_studio", "v6", "sk-v6-test", baseUrl = v6.base) }
+            val sink = CollectingSink()
+            proxy.forward("https://app.example", "lm_studio", "${v6.base}/v1/chat/completions", "POST",
+                mapOf("content-type" to "application/json"), """{"model":"qwen","messages":[]}""".toByteArray(), sink)
+            assertEquals("""{"ok":"v6"}""", sink.text.toString())
+            assertTrue(sink.done)
+            assertEquals(1, v6.requests.size)
+        }
+    }
+
+    /**
+     * A translated request's error body past the translation limit goes to
+     * the app as it arrives, as sent, instead of first being read whole into
+     * memory (R2-05).
+     */
+    @Test
+    fun anOversizedTranslatedErrorIsPassedOnAsItArrives() {
+        val group = wallet.createGroup("Local", "ollama", model = "llama3.1")
+        wallet.setAppGroup("https://app.example", group.id)
+        val limit = ProxyService.MAX_TRANSLATED_ERROR_CHARS
+        val error = "{\"error\":{\"type\":\"invalid_request_error\",\"message\":\"" +
+            "a".repeat(limit + 100_000) + "é".repeat(1_000) + "\"}}"
+        server.reply = FakeServer.Reply("application/json", error.toByteArray(), status = 400)
+        val sink = CollectingSink()
+        proxy.forward("https://app.example", "anthropic", "https://api.anthropic.com/v1/messages", "POST",
+            mapOf("content-type" to "application/json"),
+            """{"model":"claude-sonnet-4-6","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}""".toByteArray(), sink)
+        assertTrue(server.requests.single().line.startsWith("POST /v1/chat/completions"))
+        assertEquals(error, sink.text.toString())
+        assertTrue("delivered in ${sink.chunks.size} chunk(s)", sink.chunks.size > 1)
+        assertTrue("first chunk ${sink.chunks.first().length}", sink.chunks.first().length <= limit + 8_192)
+        assertTrue(sink.done)
+    }
+
+    /**
      * A 20 MB upload doesn't block the main thread: the bridge hands the
      * message off at once, and a cancel right after still stops it before
      * anything is sent (F107).
@@ -193,11 +244,12 @@ class ProxyServiceLocalFlowTest {
 
     private class CollectingSink : ProxyService.ResponseSink {
         val text = StringBuilder()
+        val chunks = mutableListOf<String>()
         val bytes = ByteArrayOutputStream()
         var done = false
         override fun onCall(call: Call) {}
         override fun onMeta(status: Int, statusText: String, headers: Map<String, String>) {}
-        override fun onChunk(chunk: String) { text.append(chunk) }
+        override fun onChunk(chunk: String) { text.append(chunk); chunks += chunk }
         override fun onBytes(chunk: ByteArray) { bytes.write(chunk) }
         override fun onDone() { done = true }
     }
@@ -207,15 +259,15 @@ class ProxyServiceLocalFlowTest {
         try { context.deleteSharedPreferences(WalletStore.ENCRYPTED_PREFS_FILE) } catch (_: Throwable) {}
     }
 
-    /** One-connection-per-request HTTP/1.1 server on 127.0.0.1. */
-    private class FakeServer : AutoCloseable {
+    /** One-connection-per-request HTTP/1.1 server on [host] (127.0.0.1 unless given). */
+    private class FakeServer(host: String = "127.0.0.1") : AutoCloseable {
         data class Request(val line: String, val headers: Map<String, String>, val body: ByteArray)
         data class Reply(val contentType: String, val body: ByteArray, val status: Int = 200)
 
         @Volatile var reply = Reply("application/json", "{}".toByteArray())
         val requests = CopyOnWriteArrayList<Request>()
-        private val socket = ServerSocket(0, 16, InetAddress.getByName("127.0.0.1"))
-        val base = "http://127.0.0.1:${socket.localPort}"
+        private val socket = ServerSocket(0, 16, InetAddress.getByName(host))
+        val base = "http://${if (':' in host) "[$host]" else host}:${socket.localPort}"
 
         init {
             thread(isDaemon = true) {

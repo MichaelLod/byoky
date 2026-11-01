@@ -433,7 +433,7 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
   }
   if (typeof topP === 'number') out.top_p = topP;
   if (typeof topK === 'number') out.top_k = topK;
-  if (ir.stopSequences && ir.stopSequences.length > 0) out.stop_sequences = ir.stopSequences.slice();
+  if (ir.stopSequences && ir.stopSequences.length > 0) out.stop_sequences = anthropicStopSequences(ir.stopSequences);
   if (typeof ir.stream === 'boolean') out.stream = ir.stream;
   if (ir.userId) out.metadata = { user_id: ir.userId };
 
@@ -641,6 +641,16 @@ function irImageSourceToAnthropic(source: IRImageSource): AnthropicImageSource {
     return { type: 'base64', media_type: source.mediaType, data: source.data };
   }
   return { type: 'url', url: source.url };
+}
+
+/**
+ * Stop sequences Anthropic takes: it refuses blank or whitespace-only ones
+ * (such as "\n", which the other families accept), so those are left out
+ * here rather than when the request is parsed. Undefined when none is left.
+ */
+function anthropicStopSequences(stops: string[]): string[] | undefined {
+  const kept = stops.filter((s) => s.trim().length > 0);
+  return kept.length > 0 ? kept : undefined;
 }
 
 // ─── parseResponse ────────────────────────────────────────────────────────

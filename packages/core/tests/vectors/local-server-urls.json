@@ -1,0 +1,33 @@
+{
+  "about": [
+    "Which server URLs a credential of a provider without a fixed host (Ollama, LM Studio, Azure OpenAI) may carry,",
+    "and that a request to that server then passes. Plain http only to a loopback host (localhost, 127.0.0.1, [::1])",
+    "and only for the local servers; never user:password, a query or a fragment.",
+    "One list for all wallets: packages/core/tests/proxy-utils.test.ts (resolveProviderBaseUrl, validateProxyUrl),",
+    "packages/ios/ByokyTests/ProviderURLTests.swift (Provider.customBaseUrl, validateUrl) and",
+    "packages/android/.../proxy/UpstreamPolicyTest.kt (CredentialBaseUrl.normalize, UpstreamPolicy.target),",
+    "so a backup opens with the same credentials everywhere. \"request\", when present, must be accepted for that",
+    "base URL. Android's network security config allows cleartext to the same three hosts. Add new cases here."
+  ],
+  "cases": [
+    { "providerId": "ollama", "baseUrl": "http://localhost:11434", "allowed": true, "request": "http://localhost:11434/api/chat" },
+    { "providerId": "ollama", "baseUrl": "http://127.0.0.1:11434", "allowed": true, "request": "http://127.0.0.1:11434/v1/chat/completions" },
+    { "providerId": "ollama", "baseUrl": "http://[::1]:11434", "allowed": true, "request": "http://[::1]:11434/api/chat" },
+    { "providerId": "lm_studio", "baseUrl": "http://[::1]:1234", "allowed": true, "request": "http://[::1]:1234/v1/chat/completions" },
+    { "providerId": "lm_studio", "baseUrl": "http://LOCALHOST:1234", "allowed": true, "request": "http://localhost:1234/v1/models" },
+    { "providerId": "ollama", "baseUrl": "https://ollama.lan:11434", "allowed": true, "request": "https://ollama.lan:11434/api/chat" },
+    { "providerId": "ollama", "baseUrl": "http://192.168.1.20:11434", "allowed": false },
+    { "providerId": "ollama", "baseUrl": "http://10.0.2.2:11434", "allowed": false },
+    { "providerId": "ollama", "baseUrl": "http://127.0.0.2:11434", "allowed": false },
+    { "providerId": "ollama", "baseUrl": "http://[::2]:11434", "allowed": false },
+    { "providerId": "ollama", "baseUrl": "http://[fe80::1]:11434", "allowed": false },
+    { "providerId": "ollama", "baseUrl": "http://localhost.evil.example:11434", "allowed": false },
+    { "providerId": "ollama", "baseUrl": "http://user:pw@localhost:11434", "allowed": false },
+    { "providerId": "ollama", "baseUrl": "http://localhost:11434/?x=1", "allowed": false },
+    { "providerId": "ollama", "baseUrl": "http://localhost:11434/#x", "allowed": false },
+    { "providerId": "ollama", "baseUrl": "file:///etc/passwd", "allowed": false },
+    { "providerId": "azure_openai", "baseUrl": "http://localhost:8080", "allowed": false },
+    { "providerId": "azure_openai", "baseUrl": "http://[::1]:8080", "allowed": false },
+    { "providerId": "azure_openai", "baseUrl": "https://contoso.openai.azure.com", "allowed": true, "request": "https://contoso.openai.azure.com/openai/v1/chat/completions" }
+  ]
+}

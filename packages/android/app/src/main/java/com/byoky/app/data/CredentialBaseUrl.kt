@@ -8,15 +8,25 @@ package com.byoky.app.data
  *    value is ignored, so a credential can't redirect traffic elsewhere.
  *  - Providers without a fixed host ([Provider.requiresCustomBaseUrl]: Azure
  *    OpenAI, Ollama, LM Studio) must have one: https, or plain http only to
- *    `localhost` / `127.0.0.1` for the local servers (the only cleartext the
- *    app's network security config allows). No credentials in the URL, no
- *    query or fragment.
+ *    a loopback host ([isLoopbackHost]) for the local servers (the only
+ *    cleartext the app's network security config allows). No credentials in
+ *    the URL, no query or fragment.
  *
  * Pure JVM, unit-tested.
  */
 object CredentialBaseUrl {
     private val LOCAL_HTTP_PROVIDERS = setOf("ollama", "lm_studio")
-    private val LOOPBACK_HOSTS = setOf("localhost", "127.0.0.1")
+
+    /**
+     * `localhost`, `127.0.0.1` and IPv6 `::1`, as core's `isLoopbackHost`
+     * and iOS accept, so a backup opens with the same credentials on every
+     * wallet. `::1` comes bracketed from java.net.URI and bare from OkHttp's
+     * HttpUrl. res/xml/network_security_config.xml allows cleartext to the
+     * same hosts.
+     */
+    fun isLoopbackHost(host: String): Boolean = host.lowercase() in LOOPBACK_HOSTS
+
+    private val LOOPBACK_HOSTS = setOf("localhost", "127.0.0.1", "::1", "[::1]")
 
     fun isRequired(providerId: String): Boolean = Provider.find(providerId)?.requiresCustomBaseUrl == true
 
@@ -35,7 +45,7 @@ object CredentialBaseUrl {
         if (uri.rawUserInfo != null || uri.rawQuery != null || uri.rawFragment != null) return null
         val allowed = when (scheme) {
             "https" -> true
-            "http" -> providerId in LOCAL_HTTP_PROVIDERS && host in LOOPBACK_HOSTS
+            "http" -> providerId in LOCAL_HTTP_PROVIDERS && isLoopbackHost(host)
             else -> false
         }
         if (!allowed) return null
@@ -56,7 +66,7 @@ object CredentialBaseUrl {
     /** User-facing hint for the add-key form. */
     fun requirementText(providerId: String): String =
         if (providerId in LOCAL_HTTP_PROVIDERS) {
-            "Use http:// only for a server on this phone (localhost or 127.0.0.1); anything else needs https://."
+            "Use http:// only for a server on this phone (localhost, 127.0.0.1 or [::1]); anything else needs https://."
         } else {
             "Your resource endpoint, e.g. https://my-resource.openai.azure.com (https only)."
         }

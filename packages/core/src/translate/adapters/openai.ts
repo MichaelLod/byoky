@@ -188,9 +188,11 @@ function parseRequest(body: string): IRRequest {
   if (typeof parsed.top_p === 'number') ir.topP = parsed.top_p;
   if (parsed.stop != null) {
     // Hand-built bodies send `stop: null` or `""`; neither is a stop sequence,
-    // and the other families reject null or blank entries.
+    // and the other families reject null or empty entries. Whitespace-only
+    // ones such as "\n" are kept: only Anthropic refuses those, and its
+    // serializer leaves them out.
     const raw: unknown[] = Array.isArray(parsed.stop) ? parsed.stop : [parsed.stop];
-    const stops = raw.filter((s): s is string => typeof s === 'string' && s.trim().length > 0);
+    const stops = raw.filter((s): s is string => typeof s === 'string' && s.length > 0);
     if (stops.length > 0) ir.stopSequences = stops;
   }
   if (typeof parsed.stream === 'boolean') ir.stream = parsed.stream;
@@ -401,7 +403,7 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
 
   // Conversation: each IR message gets translated, possibly splitting into
   // multiple openai messages (tool_result blocks escape into role:'tool').
-  const acceptsImages = openAIAcceptsImages(ctx.dstModel);
+  const acceptsImages = openAIAcceptsImages(ctx.dstModel, ctx.dstProviderId);
   for (const msg of ir.messages) {
     for (const wire of serializeMessageToOpenAI(msg, ctx.dstModel, acceptsImages)) {
       out.messages!.push(wire);
@@ -505,12 +507,27 @@ function serializeMessageToOpenAI(msg: IRMessage, model: string, acceptsImages: 
 }
 
 /**
- * Whether the destination model takes image (and so file) input. False only
- * for a registry entry without vision; the dialect's hosts serve too many
- * models to judge other ids, so those are assumed to take images.
+ * OpenAI-dialect hosts whose models take image input unless the registry
+ * says otherwise: OpenAI's current chat models are multimodal, and Azure
+ * serves the same models. The other hosts (DeepSeek, Groq, Mistral, the
+ * local servers, ...) serve many text-only models and answer an image part
+ * with a 400, so an id the registry doesn't know is taken as text-only there.
  */
-function openAIAcceptsImages(model: string): boolean {
-  return getModel(model)?.capabilities.vision !== false;
+const VISION_BY_DEFAULT_PROVIDERS: ReadonlySet<string> = new Set(['openai', 'azure_openai']);
+
+/**
+ * Whether the destination model takes image (and so file) input: the
+ * registry's answer when it knows the model, otherwise the destination
+ * host's default (VISION_BY_DEFAULT_PROVIDERS). Without a dstProviderId the
+ * dialect's own host, OpenAI, is assumed. OpenRouter names OpenAI's models
+ * with an `openai/` prefix, so those are looked up without it.
+ */
+function openAIAcceptsImages(model: string, dstProviderId: string | undefined): boolean {
+  const entry =
+    getModel(model) ??
+    (dstProviderId === 'openrouter' && model.startsWith('openai/') ? getModel(model.slice('openai/'.length)) : undefined);
+  if (entry) return entry.capabilities.vision;
+  return VISION_BY_DEFAULT_PROVIDERS.has(dstProviderId ?? 'openai');
 }
 
 function serializeUserMessageToOpenAI(msg: IRMessage, model: string, acceptsImages: boolean): OpenAIMessage[] {

@@ -17,9 +17,11 @@ final class ProviderURLTests: XCTestCase {
     func testLocalProvidersAllowLoopbackHttpOnly() {
         XCTAssertNotNil(Provider.customBaseUrl(for: "ollama", credentialBaseUrl: "http://localhost:11434"))
         XCTAssertNotNil(Provider.customBaseUrl(for: "lm_studio", credentialBaseUrl: "http://127.0.0.1:1234"))
-        // IPv6 loopback isn't accepted, as on Android: a backup opens with
-        // the same credentials on both.
-        XCTAssertNil(Provider.customBaseUrl(for: "ollama", credentialBaseUrl: "http://[::1]:11434"))
+        // IPv6 loopback too, as in core and on Android (R2-04).
+        XCTAssertNotNil(Provider.customBaseUrl(for: "ollama", credentialBaseUrl: "http://[::1]:11434"))
+        XCTAssertNotNil(Provider.validateUrl("http://[::1]:11434/api/chat", for: "ollama", credentialBaseUrl: "http://[::1]:11434"))
+        XCTAssertNil(Provider.validateUrl("http://[::1]:9999/api/chat", for: "ollama", credentialBaseUrl: "http://[::1]:11434"))
+        XCTAssertNil(Provider.validateUrl("http://127.0.0.1:11434/api/chat", for: "ollama", credentialBaseUrl: "http://[::1]:11434"))
         XCTAssertNotNil(Provider.customBaseUrl(for: "ollama", credentialBaseUrl: "https://ollama.lan:11434"))
         XCTAssertNil(Provider.customBaseUrl(for: "ollama", credentialBaseUrl: "http://192.168.1.20:11434"))
         XCTAssertNil(Provider.customBaseUrl(for: "ollama", credentialBaseUrl: "http://user:pw@localhost:11434"))
@@ -32,6 +34,22 @@ final class ProviderURLTests: XCTestCase {
         XCTAssertNil(Provider.validateUrl("http://localhost:9999/api/chat", for: "ollama", credentialBaseUrl: base))
         XCTAssertNil(Provider.validateUrl("http://localhost:11434/api/chat", for: "ollama", credentialBaseUrl: nil))
         XCTAssertNil(Provider.validateUrl("https://localhost:11434/api/chat", for: "ollama", credentialBaseUrl: base))
+    }
+
+    /// packages/core/tests/vectors/local-server-urls.json, shared with
+    /// core's resolveProviderBaseUrl / validateProxyUrl and Android.
+    func testServerUrlsMatchTheSharedVectors() throws {
+        let cases = try XCTUnwrap(try SharedVectors.load("local-server-urls")["cases"] as? [[String: Any]])
+        XCTAssertGreaterThan(cases.count, 10)
+        for c in cases {
+            let providerId = try XCTUnwrap(c["providerId"] as? String)
+            let baseUrl = try XCTUnwrap(c["baseUrl"] as? String)
+            let allowed = try XCTUnwrap(c["allowed"] as? Bool)
+            XCTAssertEqual(Provider.customBaseUrl(for: providerId, credentialBaseUrl: baseUrl) != nil, allowed, "\(providerId) \(baseUrl)")
+            if let request = c["request"] as? String {
+                XCTAssertNotNil(Provider.validateUrl(request, for: providerId, credentialBaseUrl: baseUrl), "\(providerId) \(request)")
+            }
+        }
     }
 
     func testAzureIsLockedToItsResource() {

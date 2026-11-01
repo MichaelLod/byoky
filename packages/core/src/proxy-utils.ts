@@ -9,6 +9,16 @@ import { PROVIDERS } from './providers.js';
  */
 const LOCAL_HTTP_PROVIDERS = new Set(['ollama', 'lm_studio']);
 
+/** Whether `providerId` is a user-run local server (Ollama, LM Studio). */
+export function isLocalServerProvider(providerId: string): boolean {
+  return LOCAL_HTTP_PROVIDERS.has(providerId);
+}
+
+/**
+ * localhost, 127.0.0.1 and IPv6 [::1]. The iOS and Android wallets accept
+ * the same three (tests/vectors/local-server-urls.json), so a credential
+ * made here works on every wallet.
+ */
 function isLoopbackHost(hostname: string): boolean {
   // URL.hostname keeps the brackets on IPv6 literals.
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]' || hostname === '::1';

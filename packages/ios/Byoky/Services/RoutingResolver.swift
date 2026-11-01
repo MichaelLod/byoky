@@ -221,6 +221,11 @@ struct RoutingResolver {
     /// hosts other than OpenAI and OpenRouter, Azure, Ollama, LM Studio) are
     /// skipped. The `srcModel` field of RoutingTranslation is populated from
     /// the inbound request body when available.
+    ///
+    /// A request meant for a local server (Ollama, LM Studio) is never
+    /// auto-routed: the app asked for a model on the user's own machine, so
+    /// its prompts must not silently go to a paid cloud key. A group can
+    /// still route it (core's `resolveAutoCrossFamilyRoute` does the same).
     private static func tryAutoCrossFamily(
         requestedProviderId: String,
         requestedModel: String?,
@@ -233,6 +238,7 @@ struct RoutingResolver {
         if credentials.contains(where: { $0.providerId == requestedProviderId }) {
             return nil
         }
+        if Provider.isLocal(requestedProviderId) { return nil }
 
         // A future createdAt (e.g. from a hand-edited backup) must not let a
         // credential jump the queue: treat it as "now".

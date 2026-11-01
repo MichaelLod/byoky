@@ -162,11 +162,12 @@ struct Provider: Identifiable, Hashable {
         providerId == "ollama" || providerId == "lm_studio"
     }
 
-    /// `localhost` and `127.0.0.1`, as on Android, whose network security
-    /// config allows cleartext to those two only. Ollama and LM Studio listen
-    /// on IPv4 loopback by default; `localhost` reaches them either way.
+    /// `localhost`, `127.0.0.1` and IPv6 `::1`, as core's `isLoopbackHost`
+    /// and Android accept (core's tests/vectors/local-server-urls.json), so a
+    /// credential made in the extension opens on every wallet. Foundation
+    /// may give the IPv6 host with or without its brackets.
     static func isLoopbackHost(_ host: String) -> Bool {
-        ["localhost", "127.0.0.1"].contains(host.lowercased())
+        ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host.lowercased())
     }
 
     /// https always; plain http only to a loopback host for local providers.

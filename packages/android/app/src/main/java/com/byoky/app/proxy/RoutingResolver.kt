@@ -124,6 +124,9 @@ object RoutingResolver {
     /** Stand-in source model for [canServe]; never sent anywhere. */
     private const val ANY_MODEL = "*"
 
+    /** User-run local servers (core `isLocalServerProvider`). */
+    private val LOCAL_SERVER_PROVIDERS = setOf("ollama", "lm_studio")
+
     /**
      * Auto cross-family fallback — mirrors `resolveAutoCrossFamilyRoute` in
      * `packages/core/src/routing.ts`. Picks a translatable credential from
@@ -138,6 +141,11 @@ object RoutingResolver {
      * candidate's provider; providers it names none for (OpenAI-compatible
      * hosts other than OpenAI and OpenRouter, Azure, Ollama, LM Studio) are
      * skipped. `srcModel` is taken from the inbound request body.
+     *
+     * A request meant for a local server (Ollama, LM Studio) is never
+     * auto-routed: the app asked for a model on the user's own machine, so
+     * its prompts must not silently go to a paid cloud key. A group can
+     * still route it (core's `resolveAutoCrossFamilyRoute` does the same).
      */
     private fun tryAutoCrossFamily(
         requestedProviderId: String,
@@ -148,6 +156,7 @@ object RoutingResolver {
         // Defensive: the direct-match branch above would have taken it, but
         // guard for callers invoking this method in isolation.
         if (credentials.any { it.providerId == requestedProviderId }) return null
+        if (requestedProviderId in LOCAL_SERVER_PROVIDERS) return null
         if (requestedModel.isNullOrEmpty()) return null
 
         for (cred in autoCandidateOrder(credentials)) {

@@ -28,3 +28,37 @@ object ResponseChunks {
 
     private val TEXT_MARKERS = listOf("json", "xml", "event-stream", "javascript", "x-www-form-urlencoded")
 }
+
+/**
+ * A translated request's error body (non-2xx). It is held for translation
+ * into the app's dialect only up to [limit] characters: once it grows past
+ * that, what was held and everything after it is passed on as sent, as it
+ * arrives, so a huge or endless error body is never read into memory whole.
+ * Pure, unit-tested.
+ */
+class TranslatedErrorBody(private val limit: Int) {
+    private val held = StringBuilder()
+    private var passingThrough = false
+
+    /** Take the next text of the body; returns what to deliver now (empty while it is held). */
+    fun append(text: String): String {
+        if (passingThrough) return text
+        held.append(text)
+        if (held.length <= limit) return ""
+        passingThrough = true
+        val out = held.toString()
+        held.setLength(0)
+        return out
+    }
+
+    /**
+     * The body ended: the rest to deliver. A body within the limit goes
+     * through [translate], and as sent when that gives null.
+     */
+    fun finish(translate: (String) -> String?): String {
+        if (passingThrough) return ""
+        val body = held.toString()
+        held.setLength(0)
+        return translate(body) ?: body
+    }
+}

@@ -208,8 +208,8 @@ object BackupFile {
      *  - OAuth credentials other than Anthropic setup tokens (refreshable
      *    logins expire and Android has no refresh flow);
      *  - providers without a fixed host whose base URL is missing or unsafe
-     *    (not https, or http to anything but localhost/127.0.0.1 for local
-     *    servers).
+     *    (not https, or http to anything but a loopback host for local
+     *    servers, see [CredentialBaseUrl]).
      * A base URL on a fixed-host provider is dropped, never stored.
      */
     fun sanitize(entry: FileEntry, now: Long = System.currentTimeMillis()): Importable? {

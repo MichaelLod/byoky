@@ -18,7 +18,7 @@ class RoutingResolverTest {
     private val families = object : RoutingResolver.Families {
         private val family = mapOf(
             "anthropic" to "anthropic", "openai" to "openai", "groq" to "openai", "deepseek" to "openai",
-            "ollama" to "openai", "azure_openai" to "openai", "mistral" to "openai", "gemini" to "gemini",
+            "ollama" to "openai", "lm_studio" to "openai", "azure_openai" to "openai", "mistral" to "openai", "gemini" to "gemini",
             "cohere" to "cohere",
         )
         private val autoModels = mapOf("anthropic" to "claude-sonnet-4-6", "openai" to "gpt-5.5", "gemini" to "gemini-2.5-pro")
@@ -161,6 +161,23 @@ class RoutingResolverTest {
         val translated = RoutingResolver.resolve("anthropic", "claude-sonnet-4-6", group, listOf(ollama), families)!!
         assertEquals("ollama", translated.translation?.dstProviderId)
         assertEquals("llama3.1", translated.translation?.dstModel)
+    }
+
+    /** A request meant for a local server never goes to a cloud key unless a group says so (R2-01). */
+    @Test
+    fun aRequestForALocalServerIsNeverAutoRoutedToACloudKey() {
+        val gemini = Credential(id = "gm", providerId = "gemini", label = "gemini", createdAt = 1)
+        val cohere = Credential(id = "co", providerId = "cohere", label = "cohere", createdAt = 1)
+        for (local in listOf("ollama", "lm_studio")) {
+            assertNull(RoutingResolver.resolve(local, "llama3.1", null, listOf(key1, gemini, cohere), families))
+            assertNull(RoutingResolver.resolve(local, "llama3.1", Group.makeDefault(), listOf(key1, gemini, cohere), families))
+            assertNull(RoutingResolver.canServe(local, null, listOf(key1, gemini, cohere), families))
+        }
+        // A group the user set still routes it.
+        val toClaude = Group(id = "g", name = "Claude", providerId = "anthropic", model = "claude-sonnet-4-6")
+        val routed = RoutingResolver.resolve("ollama", "llama3.1", toClaude, listOf(key1), families)!!
+        assertEquals("k1", routed.credential.id)
+        assertEquals("anthropic", routed.translation?.dstProviderId)
     }
 
     // ── Connect availability (F101) ──────────────────────────────────────
