@@ -112,24 +112,33 @@ if [ "${1:-}" = "retry" ]; then
 
   RETRIED=0
 
-  # Chrome Web Store
+  # Chrome Web Store: the store zip, without the manifest key (see step 3)
   if [ -n "${CHROME_EXTENSION_ID:-}" ] && [ -n "${CHROME_CLIENT_ID:-}" ]; then
+    CHROME_STORE_ZIP="dist/byoky-chrome-v${CURRENT}-store.zip"
     CHROME_LIVE=$(status_field chrome version)
     if [ "$CHROME_LIVE" = "$CURRENT" ]; then
       echo "Chrome: v${CHROME_LIVE} — up to date"
     elif skip_pending chrome; then
       echo "Chrome: $(pending_note chrome)"
       store_result "Chrome Web Store" "$(pending_note chrome)"
-    elif [ -f "dist/byoky-chrome-v${CURRENT}.zip" ]; then
+    elif [ ! -f "$CHROME_STORE_ZIP" ]; then
+      echo "Chrome: ${CHROME_STORE_ZIP} is missing"
+      store_result "Chrome Web Store" "FAILED: ${CHROME_STORE_ZIP} is missing"
+    else
       echo "Chrome: v${CHROME_LIVE} → v${CURRENT}"
-      npx chrome-webstore-upload upload \
-        --source "dist/byoky-chrome-v${CURRENT}.zip" \
+      if npx chrome-webstore-upload upload \
+        --source "$CHROME_STORE_ZIP" \
         --extension-id "$CHROME_EXTENSION_ID" \
         --client-id "$CHROME_CLIENT_ID" \
         --client-secret "$CHROME_CLIENT_SECRET" \
         --refresh-token "$CHROME_REFRESH_TOKEN" \
-        --auto-publish 2>&1 || echo "  WARN: Chrome upload failed"
-      RETRIED=$((RETRIED + 1))
+        --auto-publish 2>&1; then
+        RETRIED=$((RETRIED + 1))
+        store_result "Chrome Web Store" "uploaded, publishes after review"
+      else
+        echo "  WARN: Chrome upload failed"
+        store_result "Chrome Web Store" "FAILED (see the log above)"
+      fi
     fi
   fi
 
@@ -144,13 +153,18 @@ if [ "${1:-}" = "retry" ]; then
       store_result "Firefox Add-ons" "$(pending_note firefox)"
     elif [ -d "packages/extension/.output/firefox-mv2" ]; then
       echo "Firefox: v${AMO_LIVE} → v${CURRENT}"
-      npx web-ext sign \
+      if npx web-ext sign \
         --source-dir packages/extension/.output/firefox-mv2 \
         --api-key "$AMO_API_KEY" \
         --api-secret "$AMO_API_SECRET" \
         --channel listed \
-        --upload-source-code "dist/byoky-source-v${CURRENT}.zip" 2>&1 || echo "  WARN: Firefox upload failed"
-      RETRIED=$((RETRIED + 1))
+        --upload-source-code "dist/byoky-source-v${CURRENT}.zip" 2>&1; then
+        RETRIED=$((RETRIED + 1))
+        store_result "Firefox Add-ons" "submitted for review"
+      else
+        echo "  WARN: Firefox upload failed"
+        store_result "Firefox Add-ons" "FAILED (see the log above)"
+      fi
     fi
   fi
 
@@ -191,8 +205,13 @@ if [ "${1:-}" = "retry" ]; then
     " 2>/dev/null)
     if [ "$GP_LIVE" != "$NATIVE_VERSION" ]; then
       echo "Google Play: v${GP_LIVE} → v${NATIVE_VERSION}"
-      node scripts/upload-google-play.mjs "dist/byoky-android-v${CURRENT}.aab" production "$STORE_NOTES_FILE" 2>&1 || echo "  WARN: Google Play upload failed"
-      RETRIED=$((RETRIED + 1))
+      if node scripts/upload-google-play.mjs "dist/byoky-android-v${CURRENT}.aab" production "$STORE_NOTES_FILE" 2>&1; then
+        RETRIED=$((RETRIED + 1))
+        store_result "Google Play" "uploaded to the production track"
+      else
+        echo "  WARN: Google Play upload failed"
+        store_result "Google Play" "FAILED (see the log above)"
+      fi
     else
       echo "Google Play: v${GP_LIVE} — up to date"
     fi
@@ -201,12 +220,17 @@ if [ "${1:-}" = "retry" ]; then
   # Discord (skip on retry — already posted)
 
   echo ""
+  for r in ${STORE_RESULTS[@]+"${STORE_RESULTS[@]}"}; do echo "  $r"; done
   if [ "$RETRIED" -eq 0 ]; then
-    echo "All stores up to date."
+    echo "Nothing retried."
   else
     echo "Retried $RETRIED store(s). Run 'pnpm release:status' to verify."
     node scripts/generate-versions.mjs 2>&1 || true
   fi
+  # A failure above leaves its store behind; say so in the exit code too.
+  for r in ${STORE_RESULTS[@]+"${STORE_RESULTS[@]}"}; do
+    case "$r" in *FAILED*|*"NO BUILD"*) exit 1 ;; esac
+  done
   exit 0
 fi
 
@@ -575,12 +599,14 @@ mkdir -p dist
 # from the manifest. CWS rejects uploads whose manifest key doesn't match the
 # registered extension's key (which CWS derives from the extension ID, not
 # from a user-supplied key field). The keyed zip above stays for sideloaders
-# who want a stable extension ID across dev machines.
+# who want a stable extension ID across dev machines. Retry uploads the same
+# file.
+CHROME_STORE_ZIP="dist/byoky-chrome-v${NEW_VERSION}-store.zip"
 STORE_DIR="$(mktemp -d)/chrome-mv3-store"
 mkdir -p "$STORE_DIR"
 cp -R packages/extension/.output/chrome-mv3/. "$STORE_DIR/"
 node -e "const f='$STORE_DIR/manifest.json',j=JSON.parse(require('fs').readFileSync(f));delete j.key;require('fs').writeFileSync(f,JSON.stringify(j))"
-(cd "$STORE_DIR" && zip -r "$ROOT/dist/byoky-chrome-v${NEW_VERSION}-store.zip" .)
+(cd "$STORE_DIR" && zip -r "$ROOT/$CHROME_STORE_ZIP" .)
 rm -rf "$STORE_DIR"
 
 if [ "$SKIP_ANDROID" = false ]; then
@@ -702,7 +728,7 @@ if [ "$SKIP_STORE_UPLOADS" = true ]; then
 elif [ -n "${CHROME_EXTENSION_ID:-}" ] && [ -n "${CHROME_CLIENT_ID:-}" ]; then
   echo "  Uploading to Chrome Web Store..."
   if npx chrome-webstore-upload upload \
-    --source "dist/byoky-chrome-v${NEW_VERSION}-store.zip" \
+    --source "$CHROME_STORE_ZIP" \
     --extension-id "$CHROME_EXTENSION_ID" \
     --client-id "$CHROME_CLIENT_ID" \
     --client-secret "$CHROME_CLIENT_SECRET" \
