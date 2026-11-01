@@ -50,7 +50,7 @@ const msg = await client.messages.create({
 # Session API
 
 - \`session.createFetch(providerId)\` — drop-in \`fetch\` for any provider SDK's inference calls. Streaming, vision, tool use and multipart uploads to inference endpoints (e.g. audio transcription) work unchanged. Only inference and model-list endpoints are allowed: no Files, Batches, Assistants, fine-tuning or admin APIs (403 \`ENDPOINT_NOT_ALLOWED\`), so send images and PDFs inline in the request.
-- \`session.listModels(providerId)\` — discover models the user's credential can access (live per provider, including local Ollama / LM Studio installs). Returns \`{ id, displayName?, contextWindow?, capabilities?, raw }[]\`. Throws \`PROVIDER_UNAVAILABLE\` for providers without a discovery endpoint (xAI); returns a hardcoded list for Perplexity.
+- \`session.listModels(providerId)\` — discover models the user's credential can access (live per provider, including local Ollama / LM Studio installs). Returns \`{ id, displayName?, contextWindow?, capabilities?, raw }[]\`. Throws \`PROVIDER_UNAVAILABLE\` for an unknown provider or when the provider's models endpoint answers 404/405; returns a hardcoded list for Perplexity.
 - \`session.createRelay(wsUrl)\` — open a WebSocket so a backend server can make LLM calls through this session.
 - \`session.getUsage()\` — returns { requests, inputTokens, outputTokens, byProvider }.
 - \`session.onDisconnect(cb)\` / \`session.onProvidersUpdated(cb)\` — lifecycle callbacks.
@@ -1168,7 +1168,11 @@ const options = models.map(m => ({
           <tr><th>Provider</th><th>Endpoint hit</th><th>Notes</th></tr>
         </thead>
         <tbody>
-          <tr><td><code>openai</code>, <code>groq</code>, <code>deepseek</code>, <code>mistral</code>, <code>fireworks</code>, <code>openrouter</code>, <code>lm_studio</code></td><td><code>/v1/models</code></td><td>OpenAI-compatible <code>{`{data:[...]}`}</code> shape</td></tr>
+          <tr><td><code>openai</code>, <code>mistral</code>, <code>xai</code>, <code>lm_studio</code></td><td><code>/v1/models</code></td><td>OpenAI-compatible <code>{`{data:[...]}`}</code> shape</td></tr>
+          <tr><td><code>openrouter</code></td><td><code>/api/v1/models</code></td><td>OpenAI-compatible shape</td></tr>
+          <tr><td><code>groq</code></td><td><code>/openai/v1/models</code></td><td>OpenAI-compatible shape</td></tr>
+          <tr><td><code>deepseek</code></td><td><code>/models</code></td><td>OpenAI-compatible shape</td></tr>
+          <tr><td><code>fireworks</code></td><td><code>/inference/v1/models</code></td><td>OpenAI-compatible shape</td></tr>
           <tr><td><code>anthropic</code></td><td><code>/v1/models</code></td><td>Includes capabilities (<code>vision</code>, <code>thinking</code>, <code>structured_outputs</code>)</td></tr>
           <tr><td><code>gemini</code></td><td><code>/v1beta/models</code></td><td>Filters out embedding-only models; strips the <code>models/</code> prefix from IDs</td></tr>
           <tr><td><code>cohere</code></td><td><code>/v1/models</code></td><td>Filters to chat-capable models; reads <code>features</code> for capabilities</td></tr>
@@ -1176,7 +1180,6 @@ const options = models.map(m => ({
           <tr><td><code>azure_openai</code></td><td><code>/openai/models?api-version=...</code></td><td>Returns deployments rather than upstream model IDs</td></tr>
           <tr><td><code>ollama</code></td><td><code>/api/tags</code></td><td>Lists what the user has <code>ollama pull</code>&apos;d locally</td></tr>
           <tr><td><code>perplexity</code></td><td>—</td><td>No public endpoint; returns a hardcoded Sonar list</td></tr>
-          <tr><td><code>xai</code></td><td>—</td><td>Endpoint not documented; throws <code>PROVIDER_UNAVAILABLE</code></td></tr>
         </tbody>
       </table>
 
@@ -1185,7 +1188,7 @@ const options = models.map(m => ({
         <code>listModels</code> can throw a <code>ByokyError</code> with one of these codes:
       </p>
       <ul>
-        <li><code>PROVIDER_UNAVAILABLE</code> — the provider has no models endpoint, or returned 404/405.</li>
+        <li><code>PROVIDER_UNAVAILABLE</code> — the provider id is unknown, or its models endpoint returned 404/405.</li>
         <li><code>INVALID_KEY</code> — credential rejected by the provider (401/403).</li>
         <li><code>RATE_LIMITED</code> — upstream returned 429.</li>
         <li><code>PROXY_ERROR</code> — anything else (transport failure, malformed response).</li>

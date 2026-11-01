@@ -321,7 +321,7 @@ export function Chat({ session, initialProvider }: Props) {
   }, [initialProvider]);
 
   // Live model discovery: call session.listModels for the active provider once
-  // it's selected and not already cached. Failures (xAI has no endpoint, key
+  // it's selected and not already cached. Failures (no models endpoint, key
   // rejected, etc.) silently fall back to the hardcoded list above.
   useEffect(() => {
     if (!selectedProvider) return;
