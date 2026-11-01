@@ -1,31 +1,31 @@
 'use client';
 
+// Every provider a Byoky wallet can add (core's provider registry), and no
+// others. The icons come from a pinned @lobehub/icons-static-svg release.
+const ICON_BASE = 'https://unpkg.com/@lobehub/icons-static-svg@1.95.1/icons';
+
 const providers = [
-  { name: 'Claude', icon: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/claude.svg' },
-  { name: 'OpenAI', icon: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/openai.svg' },
-  { name: 'Gemini', icon: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/gemini.svg' },
-  { name: 'Mistral', icon: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/mistral.svg' },
-  { name: 'Grok', icon: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/grok.svg' },
-  { name: 'DeepSeek', icon: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/deepseek.svg' },
-  { name: 'Cohere', icon: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/cohere.svg' },
-  { name: 'Groq', icon: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/groq.svg' },
-  { name: 'Perplexity', icon: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/perplexity.svg' },
-  { name: 'Together AI', icon: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/together.svg' },
-  { name: 'Fireworks', icon: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/fireworks.svg' },
-  { name: 'OpenRouter', icon: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/openrouter.svg' },
-  { name: 'Hugging Face', icon: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/huggingface.svg' },
-  { name: 'Replicate', icon: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/replicate.svg' },
-  { name: 'Azure OpenAI', icon: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/azureai.svg' },
-  { name: 'Ollama', icon: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/ollama.svg' },
-  { name: 'Bedrock', icon: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/bedrock.svg' },
-  { name: 'LM Studio', icon: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/lmstudio.svg' },
-  { name: 'Vertex AI', icon: 'https://unpkg.com/@lobehub/icons-static-svg@latest/icons/vertexai.svg' },
+  { id: 'anthropic', name: 'Claude', icon: 'claude' },
+  { id: 'openai', name: 'OpenAI', icon: 'openai' },
+  { id: 'gemini', name: 'Gemini', icon: 'gemini' },
+  { id: 'mistral', name: 'Mistral', icon: 'mistral' },
+  { id: 'xai', name: 'Grok', icon: 'grok' },
+  { id: 'deepseek', name: 'DeepSeek', icon: 'deepseek' },
+  { id: 'cohere', name: 'Cohere', icon: 'cohere' },
+  { id: 'groq', name: 'Groq', icon: 'groq' },
+  { id: 'perplexity', name: 'Perplexity', icon: 'perplexity' },
+  { id: 'together', name: 'Together AI', icon: 'together' },
+  { id: 'fireworks', name: 'Fireworks', icon: 'fireworks' },
+  { id: 'openrouter', name: 'OpenRouter', icon: 'openrouter' },
+  { id: 'azure_openai', name: 'Azure OpenAI', icon: 'azureai' },
+  { id: 'ollama', name: 'Ollama', icon: 'ollama' },
+  { id: 'lm_studio', name: 'LM Studio', icon: 'lmstudio' },
 ];
 
 function ProviderItem({ name, icon, hidden }: { name: string; icon: string; hidden?: boolean }) {
   return (
     <div className="pm-item" aria-hidden={hidden || undefined}>
-      <img className="pm-icon" src={icon} alt="" width={20} height={20} loading="lazy" />
+      <img className="pm-icon" src={`${ICON_BASE}/${icon}.svg`} alt="" width={20} height={20} loading="lazy" />
       <span>{name}</span>
     </div>
   );
@@ -37,8 +37,8 @@ export function ProviderMarquee() {
       <p className="pm-label">Works with any AI provider</p>
       <div className="pm-wrapper">
         <div className="pm-track">
-          {providers.map((p) => <ProviderItem key={p.name} {...p} />)}
-          {providers.map((p) => <ProviderItem key={`dup-${p.name}`} {...p} hidden />)}
+          {providers.map((p) => <ProviderItem key={p.id} name={p.name} icon={p.icon} />)}
+          {providers.map((p) => <ProviderItem key={`dup-${p.id}`} name={p.name} icon={p.icon} hidden />)}
         </div>
       </div>
 

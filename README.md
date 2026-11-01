@@ -22,7 +22,7 @@
 
 **Byoky** (Bring Your Own Key) is a wallet for your AI credentials: a browser extension plus iOS and Android apps. You add your API keys and setup tokens once, and they're encrypted on your device. Apps connect to the wallet the way dapps connect to MetaMask. They ask for access, you approve, and the wallet makes their LLM calls for them. The app never sees the key.
 
-- **One wallet, every provider.** Anthropic, OpenAI, Gemini, Mistral and nine more, plus custom endpoints. Add a key once and use it in every Byoky-enabled app.
+- **One wallet, every provider.** Anthropic, OpenAI, Gemini, Mistral and nine more, plus local models through Ollama and LM Studio. Add a key once and use it in every Byoky-enabled app.
 - **Apps connect instead of copying keys.** No more pasting `sk-...` into a settings page. Approve an app, see every request it makes, set spending caps, revoke it with one click.
 - **No servers.** No accounts, no cloud sync, no relay. Byoky doesn't run anything that sits between you and your provider. The wallet talks only to the AI providers you add.
 - **Groups.** Bucket connected apps by purpose ("Personal", "Work"), pin each group to a credential, then drag apps between groups to switch which key they use. Live sessions reroute without code changes.
@@ -194,7 +194,8 @@ OpenClaw → HTTP → Bridge (localhost) → Native Messaging → Extension → 
 | Fireworks AI | ✓ | — | Available |
 | OpenRouter | ✓ | — | Available |
 | Azure OpenAI | ✓ | — | Available |
-| *Custom* | ✓ | — | Extensible |
+| Ollama (local) | ✓ | — | Available |
+| LM Studio (local) | ✓ | — | Available |
 
 > **Setup Token**: Use your Claude Pro/Max subscription via `claude setup-token`. API keys use pay-per-use billing from the provider console.
 
