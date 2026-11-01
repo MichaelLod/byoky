@@ -469,10 +469,10 @@ describe('anthropicAdapter.serializeRequest — thinking', () => {
     }
   });
 
-  it('parses adaptive thinking back into the IR', () => {
+  it('leaves adaptive thinking out of the IR', () => {
     const ir = anthropicAdapter.parseRequest(
       JSON.stringify({ model: 'claude-opus-4-7', max_tokens: 100, thinking: { type: 'adaptive' }, messages: [] }),
     );
-    expect(ir.thinking).toEqual({ enabled: true });
+    expect(ir.thinking).toBeUndefined();
   });
 });

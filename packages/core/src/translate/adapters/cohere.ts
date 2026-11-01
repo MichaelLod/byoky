@@ -449,13 +449,12 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
     }
   }
 
-  if (ir.thinking?.enabled) {
-    out.thinking = {
-      type: 'enabled',
-      ...(typeof ir.thinking.budgetTokens === 'number' && ir.thinking.budgetTokens > 0
-        ? { token_budget: ir.thinking.budgetTokens }
-        : {}),
-    };
+  // Cohere's reasoning models think by default, so thinking without a budget
+  // (Gemini's dynamic -1) needs no field; leaving it out also keeps the
+  // parameter away from non-reasoning models such as command-a-03-2025.
+  const budget = ir.thinking?.enabled ? ir.thinking.budgetTokens : undefined;
+  if (typeof budget === 'number' && budget > 0) {
+    out.thinking = { type: 'enabled', token_budget: budget };
   }
 
   return JSON.stringify(out);

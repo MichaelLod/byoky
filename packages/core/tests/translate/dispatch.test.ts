@@ -477,6 +477,53 @@ describe('cross-family dispatch — Gemini thinkingConfig to Anthropic and Coher
     const out = JSON.parse(translateRequest(ctx('gemini', 'cohere'), gemini({ thinkingConfig: { thinkingBudget: 0 } })));
     expect(out).not.toHaveProperty('thinking');
   });
+
+  it('gemini → cohere: budget -1 (dynamic) sends no thinking field', () => {
+    const out = JSON.parse(translateRequest(ctx('gemini', 'cohere'), gemini({ thinkingConfig: { thinkingBudget: -1 } })));
+    expect(out).not.toHaveProperty('thinking');
+  });
+
+  it('gemini → cohere: a positive budget becomes token_budget', () => {
+    const out = JSON.parse(translateRequest(ctx('gemini', 'cohere'), gemini({ thinkingConfig: { thinkingBudget: 4096 } })));
+    expect(out.thinking).toEqual({ type: 'enabled', token_budget: 4096 });
+  });
+});
+
+describe('cross-family dispatch — Anthropic adaptive thinking', () => {
+  // Claude Code's default on current Claude models.
+  const body = JSON.stringify({
+    model: 'claude-opus-4-7',
+    max_tokens: 1000,
+    thinking: { type: 'adaptive' },
+    messages: [{ role: 'user', content: 'Hello.' }],
+  });
+
+  it('anthropic → cohere (command-a-03-2025) sends no thinking field', () => {
+    const out = JSON.parse(translateRequest(ctx('anthropic', 'cohere'), body));
+    expect(out).not.toHaveProperty('thinking');
+  });
+
+  it('anthropic → gemini sends no thinkingConfig', () => {
+    const out = JSON.parse(translateRequest(ctx('anthropic', 'gemini'), body));
+    expect(out.generationConfig ?? {}).not.toHaveProperty('thinkingConfig');
+  });
+
+  it('anthropic → openai sends no reasoning fields', () => {
+    const out = JSON.parse(translateRequest(ctx('anthropic', 'openai'), body));
+    expect(out).not.toHaveProperty('reasoning_effort');
+    expect(out).not.toHaveProperty('thinking');
+  });
+
+  it('an explicit budget still reaches Cohere', () => {
+    const budgeted = JSON.stringify({
+      model: 'claude-sonnet-4-5',
+      max_tokens: 4000,
+      thinking: { type: 'enabled', budget_tokens: 2048 },
+      messages: [{ role: 'user', content: 'Hello.' }],
+    });
+    const out = JSON.parse(translateRequest(ctx('anthropic', 'cohere'), budgeted));
+    expect(out.thinking).toEqual({ type: 'enabled', token_budget: 2048 });
+  });
 });
 
 describe('cross-family dispatch — sampling parameters per destination', () => {

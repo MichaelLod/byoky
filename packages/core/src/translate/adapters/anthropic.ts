@@ -201,7 +201,10 @@ function parseRequest(body: string): IRRequest {
     }
   }
 
-  if (parsed.thinking && (parsed.thinking.type === 'enabled' || parsed.thinking.type === 'adaptive')) {
+  // Only an explicit thinking request goes into the IR. Adaptive thinking
+  // (Claude Code's default on current models) leaves the depth to the model,
+  // which is what every other family does when no thinking config is sent.
+  if (parsed.thinking && parsed.thinking.type === 'enabled') {
     ir.thinking = {
       enabled: true,
       ...(typeof parsed.thinking.budget_tokens === 'number'

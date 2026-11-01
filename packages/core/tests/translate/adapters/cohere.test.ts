@@ -382,8 +382,9 @@ describe('cohereAdapter.serializeRequest — parameter ranges', () => {
     expect(serialize({ topK: 40.6 }).k).toBe(41);
   });
 
-  it('sends token_budget only when it is above 0', () => {
-    expect(serialize({ thinking: { enabled: true, budgetTokens: 0 } }).thinking).toEqual({ type: 'enabled' });
+  it('sends thinking only with a budget above 0', () => {
+    expect(serialize({ thinking: { enabled: true, budgetTokens: 0 } })).not.toHaveProperty('thinking');
+    expect(serialize({ thinking: { enabled: true } })).not.toHaveProperty('thinking');
     expect(serialize({ thinking: { enabled: true, budgetTokens: 2048 } }).thinking).toEqual({
       type: 'enabled',
       token_budget: 2048,
