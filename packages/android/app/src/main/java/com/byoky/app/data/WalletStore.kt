@@ -605,7 +605,9 @@ class WalletStore(context: Context) {
         _groups.value = emptyList()
         _appGroups.value = emptyMap()
         _installedApps.value = emptyList()
+        // Neither one-time notice applies to the fresh wallet the user asked for.
         retiredNotice.dismiss()
+        unreadableVaultNoticeState.dismiss()
         _blockedOrigins.value = emptySet()
         plainPrefs.edit()
             .remove("installed_apps")
