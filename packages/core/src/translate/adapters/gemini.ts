@@ -894,7 +894,9 @@ function createStreamSerializer(ctx: TranslationContext): IRStreamSerializer {
         switch (event.type) {
           case 'message_start':
             if (event.id) state.responseId = event.id;
-            if (event.model) state.model = event.model;
+            // Echo the app's own model, as serializeResponse does; the
+            // upstream model only fills in when the app's is unknown.
+            if (event.model && ctx.srcModel == null) state.model = event.model;
             if (typeof event.usage.inputTokens === 'number') state.inputTokens = event.usage.inputTokens;
             if (typeof event.usage.outputTokens === 'number') state.outputTokens = event.usage.outputTokens;
             break;

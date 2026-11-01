@@ -773,6 +773,9 @@ function createStreamSerializer(ctx: TranslationContext): IRStreamSerializer {
   const state = {
     messageId: `msg_${ctx.requestId}`,
     model: ctx.srcModel ?? ctx.dstModel,
+    // The app's own model is echoed back, as serializeResponse does; the
+    // upstream model only fills in when the app's is unknown.
+    modelPinned: ctx.srcModel != null,
     inputTokens: 0,
     outputTokens: 0,
     started: false,
@@ -815,6 +818,7 @@ function handleEvent(
   state: {
     messageId: string;
     model: string;
+    modelPinned: boolean;
     inputTokens: number;
     outputTokens: number;
     started: boolean;
@@ -827,7 +831,7 @@ function handleEvent(
     case 'message_start': {
       state.started = true;
       if (event.id) state.messageId = event.id;
-      if (event.model) state.model = event.model;
+      if (event.model && !state.modelPinned) state.model = event.model;
       if (typeof event.usage.inputTokens === 'number') state.inputTokens = event.usage.inputTokens;
       if (typeof event.usage.outputTokens === 'number') state.outputTokens = event.usage.outputTokens;
       return emitFrame('message_start', {

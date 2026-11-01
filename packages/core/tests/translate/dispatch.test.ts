@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { translateRequest, translateResponse } from '../../src/translate/index.js';
+import { translateRequest, translateResponse, createStreamTranslator } from '../../src/translate/index.js';
 import type { TranslationContext } from '../../src/translate/types.js';
 import type { ModelFamily } from '../../src/models.js';
 
@@ -375,5 +375,50 @@ describe('cross-family dispatch — JSON Schema reaches Gemini in its JSON Schem
     };
     expect(out.generationConfig.responseJsonSchema).toEqual(schema);
     expect(out.generationConfig).not.toHaveProperty('responseSchema');
+  });
+});
+
+describe('cross-family dispatch — streams echo the app\'s model', () => {
+  // Upstream streams in each destination dialect, all naming the upstream model.
+  const UPSTREAM_STREAMS: Record<ModelFamily, string> = {
+    anthropic:
+      'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_1","model":"upstream-model","usage":{"input_tokens":5,"output_tokens":0}}}\n\n' +
+      'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n' +
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}\n\n' +
+      'event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n' +
+      'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}\n\n' +
+      'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+    openai:
+      'data: {"id":"c1","model":"upstream-model","choices":[{"index":0,"delta":{"role":"assistant","content":"Hi"},"finish_reason":null}]}\n\n' +
+      'data: {"id":"c1","model":"upstream-model","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n' +
+      'data: [DONE]\n\n',
+    gemini:
+      'data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Hi"}]},"finishReason":"STOP","index":0}],"modelVersion":"upstream-model","responseId":"r1"}\n\n',
+    cohere:
+      'data: {"type":"message-start","id":"c1","delta":{"message":{"role":"assistant"}}}\n\n' +
+      'data: {"type":"content-start","index":0,"delta":{"message":{"content":{"type":"text","text":""}}}}\n\n' +
+      'data: {"type":"content-delta","index":0,"delta":{"message":{"content":{"text":"Hi"}}}}\n\n' +
+      'data: {"type":"content-end","index":0}\n\n' +
+      'data: {"type":"message-end","delta":{"finish_reason":"COMPLETE"}}\n\n',
+  };
+
+  // Cohere's stream carries no model field, so it has nothing to echo.
+  for (const src of FAMILIES.filter((f) => f !== 'cohere')) {
+    for (const dst of FAMILIES) {
+      if (src === dst) continue;
+      it(`stream ${dst} → ${src}`, () => {
+        const t = createStreamTranslator({ ...ctx(src, dst), isStreaming: true });
+        const out = t.process(UPSTREAM_STREAMS[dst]) + t.flush();
+        expect(out).toContain('Hi');
+        expect(out).toContain('src-model');
+        expect(out).not.toContain('upstream-model');
+      });
+    }
+  }
+
+  it('falls back to the upstream model when the app\'s model is unknown', () => {
+    const t = createStreamTranslator({ ...ctx('anthropic', 'openai'), srcModel: undefined, isStreaming: true });
+    const out = t.process(UPSTREAM_STREAMS.openai) + t.flush();
+    expect(out).toContain('upstream-model');
   });
 });
