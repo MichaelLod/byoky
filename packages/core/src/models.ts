@@ -174,6 +174,29 @@ export const MODELS: ModelEntry[] = [
     maxOutput: 128_000,
     capabilities: FRONTIER,
   },
+  // GPT-6 (model pages checked 2026-11-01): Astra reasons at low..max and
+  // can't turn reasoning off; Luna at none..max. On Chat Completions, the
+  // only OpenAI API Byoky speaks, Luna calls tools with reasoning off and
+  // Astra not at all ("tool calling requires Responses"; see the OpenAI
+  // adapter's ALWAYS_REASONING), so Astra is marked without tools.
+  {
+    id: 'gpt-6-astra',
+    providerId: 'openai',
+    family: 'openai',
+    displayName: 'GPT-6 Astra',
+    contextWindow: 1_050_000,
+    maxOutput: 128_000,
+    capabilities: { ...FRONTIER, tools: false, toolChoice: false, parallelToolCalls: false },
+  },
+  {
+    id: 'gpt-6-luna',
+    providerId: 'openai',
+    family: 'openai',
+    displayName: 'GPT-6 Luna',
+    contextWindow: 1_050_000,
+    maxOutput: 128_000,
+    capabilities: FRONTIER,
+  },
   {
     id: 'gpt-5.4',
     providerId: 'openai',
