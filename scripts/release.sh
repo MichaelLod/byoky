@@ -24,6 +24,16 @@ write_store_notes() {
   fi
 }
 
+# The stores' state as store-status.mjs --json reports it (set STATUS_JSON
+# first): status_field <store id> <field>, e.g. status_field chrome pending.
+status_field() {
+  node -e '
+    const [json, id, field] = process.argv.slice(1)
+    const r = JSON.parse(json).results.find((x) => x.id === id)
+    process.stdout.write(String(r?.[field] ?? ""))
+  ' "$STATUS_JSON" "$1" "$2"
+}
+
 # What happened in each store, for the summary at the end.
 STORE_RESULTS=()
 store_result() { STORE_RESULTS+=("$1: $2"); }
@@ -54,7 +64,8 @@ appstore_submit() {
 # Status check mode
 # ============================================================
 if [ "${1:-}" = "status" ]; then
-  node scripts/store-status.mjs
+  # Exit 3 means a review is pending, which the output already says.
+  node scripts/store-status.mjs || [ $? -eq 3 ]
   exit 0
 fi
 
@@ -62,6 +73,14 @@ fi
 # Retry mode — re-publish only stores that are behind
 # ============================================================
 if [ "${1:-}" = "retry" ]; then
+  ALLOW_PENDING=false
+  for arg in "${@:2}"; do
+    case "$arg" in
+      --allow-pending) ALLOW_PENDING=true ;;
+      *) echo "Usage: ./scripts/release.sh retry [--allow-pending]"; exit 1 ;;
+    esac
+  done
+
   CURRENT=$(node -p "require('./package.json').version")
 
   # Derive native version from Android gradle
@@ -79,15 +98,29 @@ if [ "${1:-}" = "retry" ]; then
   PREV_TAG=$(git tag --list 'v*' --sort=-version:refname | sed -n '2p')
   write_store_notes "$CURRENT" "$PREV_TAG" "$STORE_NOTES_FILE"
 
+  # Where each store stands, from the same check the release runs. A store
+  # with a submission in review is left alone: an upload would replace the
+  # submission and restart its review (--allow-pending uploads anyway).
+  STATUS_JSON=$(node scripts/store-status.mjs --json) || [ $? -eq 3 ] \
+    || { echo "Error: couldn't check the stores (scripts/store-status.mjs)"; exit 1; }
+  skip_pending() {
+    [ "$(status_field "$1" pending)" = true ] && [ "$ALLOW_PENDING" = false ]
+  }
+  pending_note() {
+    echo "v$(status_field "$1" pendingVersion) is $(status_field "$1" pendingState); skipped, an upload would restart that review"
+  }
+
   RETRIED=0
 
   # Chrome Web Store
   if [ -n "${CHROME_EXTENSION_ID:-}" ] && [ -n "${CHROME_CLIENT_ID:-}" ]; then
-    CHROME_LIVE=$(node -e "
-      fetch('https://clients2.google.com/service/update2/crx?response=updatecheck&acceptformat=crx3&prodversion=130.0&x=id%3D${CHROME_EXTENSION_ID}%26v%3D0.0.0%26uc')
-        .then(r=>r.text()).then(t=>{const m=t.match(/<updatecheck[^>]+version=\"([^\"]+)\"/);console.log(m?.[1]||'unknown')})
-    " 2>/dev/null)
-    if [ "$CHROME_LIVE" != "$CURRENT" ] && [ -f "dist/byoky-chrome-v${CURRENT}.zip" ]; then
+    CHROME_LIVE=$(status_field chrome version)
+    if [ "$CHROME_LIVE" = "$CURRENT" ]; then
+      echo "Chrome: v${CHROME_LIVE} — up to date"
+    elif skip_pending chrome; then
+      echo "Chrome: $(pending_note chrome)"
+      store_result "Chrome Web Store" "$(pending_note chrome)"
+    elif [ -f "dist/byoky-chrome-v${CURRENT}.zip" ]; then
       echo "Chrome: v${CHROME_LIVE} → v${CURRENT}"
       npx chrome-webstore-upload upload \
         --source "dist/byoky-chrome-v${CURRENT}.zip" \
@@ -97,23 +130,19 @@ if [ "${1:-}" = "retry" ]; then
         --refresh-token "$CHROME_REFRESH_TOKEN" \
         --auto-publish 2>&1 || echo "  WARN: Chrome upload failed"
       RETRIED=$((RETRIED + 1))
-    else
-      echo "Chrome: v${CHROME_LIVE} — up to date"
     fi
   fi
 
   # Firefox AMO
   if [ -n "${AMO_API_KEY:-}" ] && [ -n "${AMO_API_SECRET:-}" ]; then
-    AMO_LIVE=$(node -e "
-      const { createHmac } = require('node:crypto');
-      const h = Buffer.from(JSON.stringify({alg:'HS256',typ:'JWT'})).toString('base64url');
-      const now = Math.floor(Date.now()/1000);
-      const p = Buffer.from(JSON.stringify({iss:'${AMO_API_KEY}',jti:Math.random().toString(36),iat:now,exp:now+60})).toString('base64url');
-      const s = createHmac('sha256','${AMO_API_SECRET}').update(h+'.'+p).digest('base64url');
-      fetch('https://addons.mozilla.org/api/v5/addons/addon/byoky%40byoky.com/versions/?page_size=1',{headers:{Authorization:'JWT '+h+'.'+p+'.'+s}})
-        .then(r=>r.json()).then(d=>console.log(d.results?.[0]?.version||'unknown'))
-    " 2>/dev/null)
-    if [ "$AMO_LIVE" != "$CURRENT" ] && [ -d "packages/extension/.output/firefox-mv2" ]; then
+    # The newest listed version, also when it still awaits review.
+    AMO_LIVE=$(status_field firefox version)
+    if [ "$AMO_LIVE" = "$CURRENT" ]; then
+      echo "Firefox: v${AMO_LIVE} $(status_field firefox status) — uploaded"
+    elif skip_pending firefox; then
+      echo "Firefox: $(pending_note firefox)"
+      store_result "Firefox Add-ons" "$(pending_note firefox)"
+    elif [ -d "packages/extension/.output/firefox-mv2" ]; then
       echo "Firefox: v${AMO_LIVE} → v${CURRENT}"
       npx web-ext sign \
         --source-dir packages/extension/.output/firefox-mv2 \
@@ -122,8 +151,6 @@ if [ "${1:-}" = "retry" ]; then
         --channel listed \
         --upload-source-code "dist/byoky-source-v${CURRENT}.zip" 2>&1 || echo "  WARN: Firefox upload failed"
       RETRIED=$((RETRIED + 1))
-    else
-      echo "Firefox: v${AMO_LIVE} — up to date"
     fi
   fi
 
@@ -188,6 +215,7 @@ DRY_RUN=false
 SKIP_MOBILE=false
 SKIP_STORE_UPLOADS=false
 ASSUME_YES=false
+ALLOW_PENDING=false
 NEW_VERSION=""
 
 for arg in "$@"; do
@@ -196,20 +224,24 @@ for arg in "$@"; do
     --skip-mobile) SKIP_MOBILE=true ;;
     --skip-store-uploads) SKIP_STORE_UPLOADS=true ;;
     --yes)     ASSUME_YES=true ;;
+    --allow-pending) ALLOW_PENDING=true ;;
     *)         NEW_VERSION="$arg" ;;
   esac
 done
 
 if [ -z "$NEW_VERSION" ]; then
   CURRENT=$(node -p "require('./package.json').version")
-  echo "Usage: ./scripts/release.sh <new-version> [--dry] [--skip-mobile] [--skip-store-uploads] [--yes]"
+  echo "Usage: ./scripts/release.sh <new-version> [--dry] [--skip-mobile] [--skip-store-uploads] [--yes] [--allow-pending]"
   echo "       ./scripts/release.sh status"
+  echo "       ./scripts/release.sh retry [--allow-pending]"
   echo ""
   echo "  --dry                  Print what would happen without executing"
   echo "  --skip-mobile          Skip iOS/macOS/Android builds and uploads"
   echo "  --skip-store-uploads   Build + npm publish + GitHub release, but skip"
   echo "                         Chrome/Firefox/App Store/Play uploads"
   echo "  --yes                  Don't ask before starting (non-interactive runs)"
+  echo "  --allow-pending        Release although a store has a review pending"
+  echo "                         (an upload restarts that review; --yes doesn't imply it)"
   echo ""
   echo "Current version: $CURRENT"
   exit 1
@@ -339,15 +371,21 @@ if [ "$NEW_NATIVE_VERSION" = "$OLD_NATIVE_VERSION" ] || \
 fi
 
 # --- Check store statuses ---
+# Before anything is bumped: an upload to a store with a submission still in
+# review replaces that submission and restarts its review.
 echo "==> Checking store statuses..."
-STORE_STATUS=$(node scripts/store-status.mjs 2>&1) || true
-echo "$STORE_STATUS"
+STATUS_CODE=0
+node scripts/store-status.mjs || STATUS_CODE=$?
 echo ""
-
-if echo "$STORE_STATUS" | grep -qi "PENDING_REVIEW\|IN_REVIEW\|pending"; then
-  echo "  One or more stores have a pending review."
-  echo "  Uploading now may REPLACE the pending submission and RESET the review timer."
+if [ "$STATUS_CODE" -eq 3 ] && [ "$ALLOW_PENDING" = true ]; then
+  echo "  WARN: a review is pending (above); --allow-pending releases anyway."
   echo ""
+elif [ "$STATUS_CODE" -eq 3 ]; then
+  echo "Error: a review is pending (above). Wait until it's through, or pass --allow-pending."
+  exit 1
+elif [ "$STATUS_CODE" -ne 0 ]; then
+  echo "Error: couldn't check the stores (scripts/store-status.mjs exit $STATUS_CODE)."
+  exit 1
 fi
 
 # --- Summary ---
