@@ -746,7 +746,8 @@ private fun MoveToGroupSheet(
 /**
  * Create or edit a routing group. Default group can be edited but not renamed
  * or deleted. Model is optional — leave empty to pass through whatever model
- * the app requested; set to override (required for cross-family routing).
+ * the app requested; set to override. Cross-family routing without one uses
+ * the provider's routing default, which only some providers have.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -959,7 +960,7 @@ private fun GroupEditorDialog(
                     Text(info, color = Dim, style = MonoStyle.copy(fontSize = 11.sp))
                 } else {
                     Text(
-                        "Leave empty to pass through. Set to override (required for cross-family routing).",
+                        "Leave empty to pass through. Cross-family routing then uses the provider's default model (Anthropic, OpenAI, Gemini, Cohere, OpenRouter); other providers need one set here.",
                         color = Dim,
                         fontSize = 11.sp,
                     )

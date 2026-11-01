@@ -11,6 +11,7 @@ import {
   capabilityLabel,
   getModel,
   modelsForProvider,
+  autoRouteModelFor,
 } from '@byoky/core';
 import { describeOrigin } from '../utils/origin';
 
@@ -526,6 +527,14 @@ function GroupForm({
   // isn't in the registry — that's fine, the field still accepts custom names.
   const selectedModel = model ? getModel(model) : undefined;
   const modelInfo = selectedModel ? buildModelInfo(selectedModel) : undefined;
+  // Without a model, apps routed here from another family get the provider's
+  // routing default (F099); providers without one (most OpenAI-compatible
+  // hosts, Azure, local servers) need a model for that.
+  const routingDefault = providerId ? autoRouteModelFor(providerId) : undefined;
+  const providerName = PROVIDERS[providerId]?.name ?? providerId;
+  const modelHint = routingDefault
+    ? `Leave empty to pass through whatever model the app requested; apps routed here from another provider family get ${routingDefault}. Set one to override.`
+    : `Leave empty to pass through whatever model the app requested. Set one to override, and to route apps from another provider family here: ${providerName || 'this provider'} has no default model.`;
 
   // The background trims the name and refuses an empty one.
   const trimmedName = name.trim();
@@ -612,7 +621,7 @@ function GroupForm({
           ))}
         </datalist>
         <div className="card-subtitle" style={{ marginTop: '4px' }}>
-          {modelInfo ?? 'Leave empty to pass through whatever model the app requested. Set when you want to override — required for cross-family routing.'}
+          {modelInfo ?? modelHint}
         </div>
       </div>
       {error && <div className="error">{error}</div>}

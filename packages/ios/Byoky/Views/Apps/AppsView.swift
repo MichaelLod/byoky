@@ -648,7 +648,7 @@ struct GroupEditorSheet: View {
                         if let info = selectedModelInfo {
                             Text(info).font(.mono(11, relativeTo: .caption))
                         } else {
-                            Text("Leave empty to pass through whatever model the app requested. Set when you want to override — required for cross-family routing (e.g. apps calling Claude routed to gpt-4o).")
+                            Text("Leave empty to pass through whatever model the app requested. Apps routed here from another provider family then get the provider's default model (Anthropic, OpenAI, Gemini, Cohere and OpenRouter have one); other providers need a model set here.")
                         }
                     }
                 }
