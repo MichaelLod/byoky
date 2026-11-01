@@ -300,7 +300,7 @@ const results = await Promise.all(
     label: 'Bridge Proxy',
     filename: 'bridge-proxy.sh',
     description:
-      'CLI and desktop apps route API calls through the local Byoky Bridge. Keys never leave the extension.',
+      'CLI and desktop apps route API calls through the local Byoky Bridge. API keys never leave the extension; a Claude setup token goes to the local bridge, which makes that call from Node.',
     code: `# Install the bridge
 npm install -g @byoky/bridge
 byoky-bridge install
@@ -314,7 +314,8 @@ byoky-bridge install
 # The extension injects the real key and calls the actual API.
 # The response flows back through the same chain.
 #
-# Keys NEVER leave the browser extension.
+# API keys never leave the browser extension. (A Claude setup token
+# is handed to the local bridge, which calls Anthropic from Node.)
 #
 # Every request carries the bridge token as its API key.
 # Example with curl:

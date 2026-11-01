@@ -5,7 +5,9 @@
  * to make LLM API calls through the user's Byoky wallet. The bridge
  * is a dumb relay — it forwards requests to the browser extension via
  * native messaging. The extension injects the real API key and makes
- * the actual API call. Keys NEVER touch the bridge process.
+ * the actual API call, so API keys never touch the bridge process. (A
+ * Claude setup token does: Anthropic needs a non-browser TLS client for
+ * it, so the extension hands it to host-core.ts for the request.)
  *
  * Flow:
  *   Local App → HTTP → Bridge → Native Messaging → Extension → fetch(real API)

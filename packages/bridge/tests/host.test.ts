@@ -264,6 +264,31 @@ describe('direct fetch (proxy_direct_fetch)', () => {
   });
 });
 
+describe('setup tokens', () => {
+  it('never writes the token to stderr or back to the extension', async () => {
+    const setupToken = 'sk-ant-oat01-SECRET-setup-token-value';
+    const written: string[] = [];
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: string | Uint8Array) => {
+      written.push(String(chunk));
+      return true;
+    });
+    try {
+      for (const path of ['/json', '/redirect', '/no-headers']) {
+        await host.handleMessage({
+          type: 'proxy_direct_fetch', requestId: `t${path}`, url: `${base}${path}`, method: 'POST',
+          headers: { authorization: `Bearer ${setupToken}`, 'anthropic-beta': 'oauth-2025-04-20' },
+          body: '{}', providerId: 'anthropic',
+        });
+      }
+    } finally {
+      spy.mockRestore();
+    }
+    expect(ofType('proxy_direct_done')).toHaveLength(3);
+    expect(written.join('')).not.toContain('SECRET');
+    expect(JSON.stringify(messages)).not.toContain('SECRET');
+  });
+});
+
 describe('start-proxy', () => {
   it.each([
     { port: 80, sessionKey: 's', providers: ['anthropic'] },

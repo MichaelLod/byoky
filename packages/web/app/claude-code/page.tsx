@@ -392,8 +392,9 @@ function HowItWorks() {
           native messaging.
         </li>
         <li>
-          The extension injects the real Anthropic credential (your own API
-          key or your OAuth setup token) and makes the call.
+          The extension injects the real Anthropic credential and makes the
+          call. Your API key never leaves the extension; a setup token is
+          handed to the bridge for that request, as below.
         </li>
         <li>
           The streaming response flows back through the same path —
@@ -404,7 +405,9 @@ function HowItWorks() {
       <p>
         For OAuth credentials (Pro/Max setup tokens), the extension routes
         outbound calls through the bridge a second time so the request is
-        made from Node instead of Chrome. That bypasses the TLS fingerprint
+        made from Node instead of Chrome. The bridge then holds the setup
+        token in memory for that request; it runs as your user and never
+        writes the token to disk or logs it. That bypasses the TLS fingerprint
         Anthropic uses to classify Claude Code vs. third-party apps — see{' '}
         <a className="oc-link" href="/blog/anthropic-claude-code-fingerprint">
           the fingerprint post

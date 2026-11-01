@@ -4,10 +4,12 @@
  *
  * Two modes:
  * 1. OAuth token proxy: Fetches Anthropic API from Node.js to bypass TLS
- *    fingerprint detection that blocks browser-originated requests.
+ *    fingerprint detection that blocks browser-originated requests. The
+ *    extension sends the setup token along in the request headers; it is
+ *    held in memory for that request only and never logged.
  * 2. HTTP proxy: Local gateway for any CLI/desktop/server app to make LLM
  *    calls through the user's wallet. The bridge is a dumb relay — the
- *    extension makes the actual API call. Keys never touch the bridge.
+ *    extension makes the actual API call. API keys never touch the bridge.
  */
 
 import type { Server } from 'node:http';

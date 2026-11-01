@@ -1,6 +1,6 @@
 # @byoky/bridge
 
-Local HTTP proxy that lets CLI tools and desktop apps route LLM API calls through the Byoky browser extension. Keys never leave the extension.
+Local HTTP proxy that lets CLI tools and desktop apps route LLM API calls through the Byoky browser extension. API keys never leave the extension; the one credential the bridge does handle is a Claude setup token (see [How it works](#how-it-works)).
 
 ```
 CLI App → HTTP → Bridge (localhost) → Native Messaging → Extension → LLM API
@@ -71,7 +71,9 @@ To rotate it, run `rm ~/.byoky-bridge/token && byoky-bridge connect`, then updat
 
 The bridge is a native messaging host — Chrome spawns it as a subprocess when the extension needs it. When `byoky-bridge connect` runs, the extension sends a `start-proxy` message telling the bridge to listen on `127.0.0.1:<port>`. Requests hit the proxy, get relayed to the extension over native messaging, and the extension injects the real API key before calling the provider API.
 
-The bridge never sees your API keys, and everything stays on your machine: the proxy only listens on `127.0.0.1` and talks to no Byoky-hosted service. It refuses requests that carry an `Origin` header, so web pages and other browser extensions can't call it; the Byoky extension itself talks to the bridge over native messaging only.
+The bridge never sees your API keys. The exception is a Claude Pro/Max setup token: Anthropic accepts it only from a non-browser TLS client, so for those requests the extension hands the token to the bridge process, which makes the call from Node. The bridge runs as your user, keeps the token in memory for that request only, and never writes it to disk or logs it.
+
+Everything stays on your machine: the proxy only listens on `127.0.0.1` and talks to no Byoky-hosted service. It refuses requests that carry an `Origin` header, so web pages and other browser extensions can't call it; the Byoky extension itself talks to the bridge over native messaging only.
 
 ## Usage from the browser
 
@@ -90,7 +92,7 @@ curl http://127.0.0.1:19280/anthropic/v1/messages \
   -H "x-api-key: $(byoky-bridge token)" \
   -H "anthropic-version: 2023-06-01" \
   -d '{
-    "model": "claude-sonnet-4-20250514",
+    "model": "claude-sonnet-4-6",
     "max_tokens": 1024,
     "messages": [{"role": "user", "content": "Hello!"}]
   }'

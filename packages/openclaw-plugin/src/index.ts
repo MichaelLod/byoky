@@ -2,7 +2,9 @@
  * Byoky OpenClaw Provider Plugin
  *
  * Connects OpenClaw to the Byoky browser wallet via the Bridge HTTP proxy.
- * Keys NEVER leave the browser extension — the bridge is a dumb relay.
+ * API keys never leave the browser extension — the bridge is a dumb relay.
+ * (A Claude setup token is handed to the local bridge for each request:
+ * Anthropic needs a non-browser TLS client for it.)
  *
  * Flow:
  * 1. `openclaw models auth login --provider byoky`

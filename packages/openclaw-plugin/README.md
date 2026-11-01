@@ -1,6 +1,6 @@
 # @byoky/openclaw-plugin
 
-[OpenClaw](https://openclaw.ai) provider plugin that routes LLM API calls through your Byoky browser wallet. Keys never leave the extension.
+[OpenClaw](https://openclaw.ai) provider plugin that routes LLM API calls through your Byoky browser wallet. API keys never leave the extension; a Claude setup token is handed to the local bridge for each request, because Anthropic needs a non-browser client for it (see the [bridge README](../bridge/README.md#how-it-works)).
 
 ```
 OpenClaw → HTTP → Bridge (localhost) → Native Messaging → Extension → LLM API
@@ -38,8 +38,8 @@ The plugin registers all 15 Byoky providers with OpenClaw:
 
 | Provider | OpenClaw ID | Models |
 |----------|-------------|--------|
-| Anthropic | `byoky-anthropic` | Claude Opus 4, Sonnet 4, Haiku 4.5 |
-| OpenAI | `byoky-openai` | GPT-4.1, o3, o4-mini, GPT-4.1 Mini |
+| Anthropic | `byoky-anthropic` | Claude Opus 4.7, Sonnet 4.6, Haiku 4.5 |
+| OpenAI | `byoky-openai` | GPT-5.5, GPT-5.4, GPT-5.4 Mini, GPT-5.4 Nano |
 | Google Gemini | `byoky-gemini` | Gemini 2.5 Pro, 2.5 Flash |
 | xAI | `byoky-xai` | Grok 3, Grok 3 Mini |
 | DeepSeek | `byoky-deepseek` | DeepSeek V3, R1 |
