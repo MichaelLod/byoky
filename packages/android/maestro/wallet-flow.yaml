@@ -44,8 +44,8 @@ tags:
 - extendedWaitUntil:
     visible: "1 credential"
     timeout: 30000
-# The card reads "Anthropic · Setup Token".
-- assertVisible: "Anthropic · Setup Token"
+# The card reads "Anthropic · SETUP TOKEN" (described as "Anthropic, Setup Token").
+- assertVisible: "Anthropic, Setup Token"
 - assertNotVisible: ".*OpenAI.*"
 - assertNotVisible: ".*OAuth.*"
 

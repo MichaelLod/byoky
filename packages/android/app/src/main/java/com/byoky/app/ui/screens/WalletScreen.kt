@@ -464,7 +464,7 @@ private fun CredentialCard(
                     },
                     style = MonoStyle,
                     color = Dim,
-                    modifier = Modifier.semantics { contentDescription = "$providerName · $typeLabel" },
+                    modifier = Modifier.semantics { contentDescription = "$providerName, $typeLabel" },
                 )
                 if (provider?.requiresCustomBaseUrl == true) {
                     CredentialEndpoint(credential, onEdit = onEditEndpoint)
