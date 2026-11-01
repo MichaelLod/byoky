@@ -578,25 +578,6 @@ if [ ! -f scripts/scan-openclaw-plugin.mjs ]; then
   ERRORS+=("scripts/scan-openclaw-plugin.mjs is missing")
 fi
 
-# Signing is prepared before anything is bumped, so a missing certificate or
-# profile stops the release while the tree is still clean. See ios-signing.sh.
-# A dry run only checks: preparing can create certificates and replace the
-# team's App Store profiles. Nothing is prepared while another check failed.
-SIGNING_KEYCHAIN="$HOME/Library/Keychains/byoky-signing.keychain-db"
-if [ ${#ERRORS[@]} -gt 0 ]; then
-  :
-elif [ "$SKIP_IOS" = false ] && [ "$DRY_RUN" = true ]; then
-  echo "  Checking iOS/macOS signing (read-only)..."
-  if ! bash scripts/ios-signing.sh --check; then
-    WARNINGS+=("iOS/macOS signing isn't ready (see above); a real run prepares it or stops here")
-  fi
-elif [ "$SKIP_IOS" = false ]; then
-  echo "  Preparing iOS/macOS signing..."
-  if ! bash scripts/ios-signing.sh; then
-    ERRORS+=("iOS/macOS signing isn't ready (see above); fix it or pass --skip-mobile")
-  fi
-fi
-
 # Store credentials check
 STORES_CONFIGURED=()
 STORES_SKIPPED=()
@@ -626,6 +607,25 @@ fi
 [ -n "${DISCORD_WEBHOOK_URL:-}" ] \
   && STORES_CONFIGURED+=("Discord") \
   || STORES_SKIPPED+=("Discord (DISCORD_WEBHOOK_URL)")
+
+# Signing is prepared before anything is bumped, so a missing certificate or
+# profile stops the release while the tree is still clean. See ios-signing.sh.
+# A dry run only checks: preparing can create certificates and replace the
+# team's App Store profiles. Nothing is prepared while another check failed.
+SIGNING_KEYCHAIN="$HOME/Library/Keychains/byoky-signing.keychain-db"
+if [ ${#ERRORS[@]} -gt 0 ]; then
+  :
+elif [ "$SKIP_IOS" = false ] && [ "$DRY_RUN" = true ]; then
+  echo "  Checking iOS/macOS signing (read-only)..."
+  if ! bash scripts/ios-signing.sh --check; then
+    WARNINGS+=("iOS/macOS signing isn't ready (see above); a real run prepares it or stops here")
+  fi
+elif [ "$SKIP_IOS" = false ]; then
+  echo "  Preparing iOS/macOS signing..."
+  if ! bash scripts/ios-signing.sh; then
+    ERRORS+=("iOS/macOS signing isn't ready (see above); fix it or pass --skip-mobile")
+  fi
+fi
 
 # Report
 if [ ${#ERRORS[@]} -gt 0 ]; then
