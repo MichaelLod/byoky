@@ -4,8 +4,9 @@ import type { TranslationContext } from '../../src/translate/types.js';
 import type { ModelFamily } from '../../src/models.js';
 
 /**
- * Documents (PDFs, text) and images returned inside tool results: kept or
- * refused explicitly, never silently dropped.
+ * Documents (PDFs, text) and images returned inside tool results: kept,
+ * refused explicitly, or (inside a tool result, which the app resends every
+ * turn) named in the tool text. Never silently dropped.
  */
 
 const DST_MODEL: Record<ModelFamily, string> = {
@@ -112,8 +113,50 @@ describe('images returned by tools', () => {
     ]);
   });
 
-  it('anthropic → cohere: the image follows in a user message', () => {
-    const out = JSON.parse(translateRequest(ctx('anthropic', 'cohere'), body)) as {
+  it('anthropic → cohere (vision model): the image follows in a user message', () => {
+    const out = JSON.parse(
+      translateRequest({ ...ctx('anthropic', 'cohere'), dstModel: 'command-a-vision-07-2025' }, body),
+    ) as { messages: Array<{ role: string; content: unknown }> };
+    expect(out.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'tool', 'user']);
+    expect(JSON.stringify(out.messages[3].content)).toContain(PNG_B64);
+  });
+
+  it('anthropic → cohere (command-a-03-2025, text-only): the tool text names the image, none is sent', () => {
+    const withText = body.replace(
+      '"content":[{"type":"image"',
+      '"content":[{"type":"text","text":"Saved."},{"type":"image"',
+    );
+    const out = JSON.parse(translateRequest(ctx('anthropic', 'cohere'), withText)) as {
+      messages: Array<{ role: string; content: unknown }>;
+    };
+    expect(out.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'tool']);
+    expect(out.messages[2]).toEqual({
+      role: 'tool',
+      tool_call_id: 't1',
+      content: 'Saved.\n[image omitted: command-a-03-2025 does not accept images]',
+    });
+    expect(JSON.stringify(out)).not.toContain(PNG_B64);
+  });
+
+  it('anthropic → cohere: a Cohere id missing from the registry is judged by name', () => {
+    const out = JSON.parse(
+      translateRequest({ ...ctx('anthropic', 'cohere'), dstModel: 'command-r-plus-08-2024' }, body),
+    ) as { messages: Array<{ role: string; content: unknown }> };
+    expect(out.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'tool']);
+    expect(out.messages[2].content).toBe('[image omitted: command-r-plus-08-2024 does not accept images]');
+  });
+
+  it('anthropic → openai (text-only registry model): the tool text names the image, none is sent', () => {
+    const out = JSON.parse(translateRequest({ ...ctx('anthropic', 'openai'), dstModel: 'gpt-5.4-nano' }, body)) as {
+      messages: Array<{ role: string; content: unknown }>;
+    };
+    expect(out.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'tool']);
+    expect(out.messages[2].content).toBe('[image omitted: gpt-5.4-nano does not accept images]');
+    expect(JSON.stringify(out)).not.toContain(PNG_B64);
+  });
+
+  it('anthropic → openai (model missing from the registry): the image is sent', () => {
+    const out = JSON.parse(translateRequest({ ...ctx('anthropic', 'openai'), dstModel: 'some-host-model' }, body)) as {
       messages: Array<{ role: string; content: unknown }>;
     };
     expect(out.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'tool', 'user']);
@@ -137,6 +180,54 @@ describe('images returned by tools', () => {
       messages: Array<{ role: string; content: unknown }>;
     };
     expect(out.messages[2]).toEqual({ role: 'tool', tool_call_id: 't1', content: 'Saved.' });
+  });
+});
+
+describe('documents returned by tools', () => {
+  const toolBody = (doc: unknown) =>
+    JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 100,
+      messages: [
+        { role: 'user', content: 'Read the contract.' },
+        { role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'read', input: {} }] },
+        { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: [doc] }] },
+      ],
+    });
+
+  it('anthropic → openai: a PDF follows in a user message as a file part', () => {
+    const out = JSON.parse(translateRequest(ctx('anthropic', 'openai'), toolBody(pdfDoc))) as {
+      messages: Array<{ role: string; content: unknown }>;
+    };
+    expect(out.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'tool', 'user']);
+    expect(out.messages[3].content).toEqual([
+      { type: 'text', text: 'Attachments from tool call t1:' },
+      { type: 'file', file: { filename: 'contract.pdf', file_data: `data:application/pdf;base64,${PDF_B64}` } },
+    ]);
+  });
+
+  it('anthropic → openai: a document by URL is named in the tool text instead of failing', () => {
+    const out = JSON.parse(translateRequest(ctx('anthropic', 'openai'), toolBody(urlDoc))) as {
+      messages: Array<{ role: string; content: unknown }>;
+    };
+    expect(out.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'tool']);
+    expect(out.messages[2].content).toMatch(/document omitted: .*by URL/);
+  });
+
+  it('anthropic → cohere: a PDF is named in the tool text instead of failing', () => {
+    const out = JSON.parse(translateRequest(ctx('anthropic', 'cohere'), toolBody(pdfDoc))) as {
+      messages: Array<{ role: string; content: unknown }>;
+    };
+    expect(out.messages.map((m) => m.role)).toEqual(['user', 'assistant', 'tool']);
+    expect(out.messages[2].content).toMatch(/document omitted: Cohere does not accept PDF/);
+    expect(JSON.stringify(out)).not.toContain(PDF_B64);
+  });
+
+  it('anthropic → cohere: a text document stays in the tool text', () => {
+    const out = JSON.parse(translateRequest(ctx('anthropic', 'cohere'), toolBody(textDoc))) as {
+      messages: Array<{ role: string; content: unknown }>;
+    };
+    expect(out.messages[2].content).toBe('Plain notes.');
   });
 });
 

@@ -401,8 +401,9 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
 
   // Conversation: each IR message gets translated, possibly splitting into
   // multiple openai messages (tool_result blocks escape into role:'tool').
+  const acceptsImages = openAIAcceptsImages(ctx.dstModel);
   for (const msg of ir.messages) {
-    for (const wire of serializeMessageToOpenAI(msg)) {
+    for (const wire of serializeMessageToOpenAI(msg, ctx.dstModel, acceptsImages)) {
       out.messages!.push(wire);
     }
   }
@@ -498,16 +499,28 @@ function isOpenAIReasoningModel(model: string): boolean {
  * blocks escape the enclosing user message as standalone role:'tool'
  * messages; leftover non-tool blocks stay as a user message.
  */
-function serializeMessageToOpenAI(msg: IRMessage): OpenAIMessage[] {
-  if (msg.role === 'user') return serializeUserMessageToOpenAI(msg);
+function serializeMessageToOpenAI(msg: IRMessage, model: string, acceptsImages: boolean): OpenAIMessage[] {
+  if (msg.role === 'user') return serializeUserMessageToOpenAI(msg, model, acceptsImages);
   return serializeAssistantMessageToOpenAI(msg);
 }
 
-function serializeUserMessageToOpenAI(msg: IRMessage): OpenAIMessage[] {
+/**
+ * Whether the destination model takes image (and so file) input. False only
+ * for a registry entry without vision; the dialect's hosts serve too many
+ * models to judge other ids, so those are assumed to take images.
+ */
+function openAIAcceptsImages(model: string): boolean {
+  return getModel(model)?.capabilities.vision !== false;
+}
+
+function serializeUserMessageToOpenAI(msg: IRMessage, model: string, acceptsImages: boolean): OpenAIMessage[] {
   const out: OpenAIMessage[] = [];
   const userParts: OpenAIContentPart[] = [];
   // Tool messages take text only. Images and documents a tool returned go
-  // into the user message that follows the tool messages.
+  // into the user message that follows the tool messages. What the model
+  // can't take is named in the tool text instead of failing the request:
+  // the app resends its tool results with every later turn, so a refusal
+  // here would end the conversation.
   const toolAttachments: OpenAIContentPart[] = [];
 
   for (const block of msg.content) {
@@ -525,16 +538,27 @@ function serializeUserMessageToOpenAI(msg: IRMessage): OpenAIMessage[] {
         break;
       case 'tool_result': {
         const attachments: OpenAIContentPart[] = [];
+        const omitted: string[] = [];
         if (block.content.kind === 'blocks') {
           for (const inner of block.content.blocks) {
             if (inner.type === 'image') {
-              attachments.push({ type: 'image_url', image_url: { url: irImageSourceToDataUrl(inner.source) } });
+              if (acceptsImages) {
+                attachments.push({ type: 'image_url', image_url: { url: irImageSourceToDataUrl(inner.source) } });
+              } else {
+                omitted.push(`[image omitted: ${model} does not accept images]`);
+              }
             } else if (inner.type === 'document' && inner.source.kind !== 'text') {
-              attachments.push(irDocumentToOpenAIPart(inner));
+              if (!acceptsImages) {
+                omitted.push(`[document omitted: ${model} does not accept files]`);
+              } else if (inner.source.kind === 'url') {
+                omitted.push('[document omitted: chat completions cannot read a document by URL]');
+              } else {
+                attachments.push(irDocumentToOpenAIPart(inner));
+              }
             }
           }
         }
-        let text = flattenIRToolResultContent(block.content);
+        let text = [flattenIRToolResultContent(block.content), ...omitted].filter((t) => t.length > 0).join('\n');
         if (attachments.length > 0) {
           if (!text) text = TOOL_ATTACHMENTS_NOTE;
           toolAttachments.push({ type: 'text', text: `Attachments from tool call ${block.toolUseId}:` }, ...attachments);

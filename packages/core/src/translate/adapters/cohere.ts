@@ -14,6 +14,7 @@ import type {
   IRToolResultContent,
 } from '../ir.js';
 import { isIRError } from '../ir.js';
+import { getModel } from '../../models.js';
 
 /**
  * Cohere v2 Chat adapter.
@@ -391,8 +392,9 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
     if (text) messages.push({ role: 'system', content: text });
   }
 
+  const acceptsImages = cohereAcceptsImages(ctx.dstModel);
   for (const msg of ir.messages) {
-    for (const wire of serializeMessageToCohere(msg)) {
+    for (const wire of serializeMessageToCohere(msg, ctx.dstModel, acceptsImages)) {
       messages.push(wire);
     }
   }
@@ -460,12 +462,21 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
   return JSON.stringify(out);
 }
 
-function serializeMessageToCohere(msg: IRMessage): CohereMessage[] {
-  if (msg.role === 'user') return serializeUserMessageToCohere(msg);
+function serializeMessageToCohere(msg: IRMessage, model: string, acceptsImages: boolean): CohereMessage[] {
+  if (msg.role === 'user') return serializeUserMessageToCohere(msg, model, acceptsImages);
   return serializeAssistantMessageToCohere(msg);
 }
 
-function serializeUserMessageToCohere(msg: IRMessage): CohereMessage[] {
+/**
+ * Whether the destination model takes image input. Most Cohere chat models
+ * are text-only; the image-capable ones are the vision variants (Command A
+ * Vision, Aya Vision), so an id missing from the registry is judged by name.
+ */
+function cohereAcceptsImages(model: string): boolean {
+  return getModel(model)?.capabilities.vision ?? /vision/i.test(model);
+}
+
+function serializeUserMessageToCohere(msg: IRMessage, model: string, acceptsImages: boolean): CohereMessage[] {
   const out: CohereMessage[] = [];
   const userParts: CohereUserContentPart[] = [];
   const toolAttachments: CohereUserContentPart[] = [];
@@ -485,18 +496,27 @@ function serializeUserMessageToCohere(msg: IRMessage): CohereMessage[] {
         break;
       case 'tool_result': {
         // Tool messages take text only. Images a tool returned go into the
-        // user message that follows the tool messages.
+        // user message that follows the tool messages. What the model can't
+        // take (binary documents; images on a text-only model) is named in
+        // the tool text instead of failing the request: the app resends its
+        // tool results with every later turn, so a refusal here would end
+        // the conversation.
         const images: CohereUserContentPart[] = [];
+        const omitted: string[] = [];
         if (block.content.kind === 'blocks') {
           for (const inner of block.content.blocks) {
             if (inner.type === 'image') {
-              images.push({ type: 'image_url', image_url: { url: irImageSourceToUrl(inner.source) } });
+              if (acceptsImages) {
+                images.push({ type: 'image_url', image_url: { url: irImageSourceToUrl(inner.source) } });
+              } else {
+                omitted.push(`[image omitted: ${model} does not accept images]`);
+              }
             } else if (inner.type === 'document' && inner.source.kind !== 'text') {
-              throw binaryDocumentError();
+              omitted.push('[document omitted: Cohere does not accept PDF or other binary documents]');
             }
           }
         }
-        let text = flattenIRToolResultContent(block.content);
+        let text = [flattenIRToolResultContent(block.content), ...omitted].filter((t) => t.length > 0).join('\n');
         if (images.length > 0) {
           if (!text) text = TOOL_ATTACHMENTS_NOTE;
           toolAttachments.push({ type: 'text', text: `Attachments from tool call ${block.toolUseId}:` }, ...images);
