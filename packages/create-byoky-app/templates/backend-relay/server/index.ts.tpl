@@ -91,7 +91,7 @@ app.post('/api/generate', async (req, res) => {
         'anthropic-version': '2023-06-01',
       };
       body = JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 256,
         messages: [{ role: 'user', content: prompt }],
       });
@@ -102,16 +102,19 @@ app.post('/api/generate', async (req, res) => {
         'Authorization': 'Bearer byoky',
       };
       body = JSON.stringify({
-        model: 'gpt-4o-mini',
-        max_tokens: 256,
+        model: 'gpt-5.4-mini',
+        // GPT-5 models reject max_tokens; max_completion_tokens works on every chat model.
+        max_completion_tokens: 256,
         messages: [{ role: 'user', content: prompt }],
       });
     } else {
-      url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+      url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
       headers = { 'Content-Type': 'application/json' };
       body = JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { maxOutputTokens: 256 },
+        // Gemini 2.5 Flash thinks before it answers and its thinking counts
+        // against maxOutputTokens, so a small cap can leave the reply empty.
+        generationConfig: { maxOutputTokens: 1024 },
       });
     }
 

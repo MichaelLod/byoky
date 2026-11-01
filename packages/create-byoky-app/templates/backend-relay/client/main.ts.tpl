@@ -34,8 +34,13 @@ function renderConnect(): void {
     errorEl.innerHTML = '';
 
     try {
+      // The server handles all three and calls the first one available.
       session = await byoky.connect({
-        providers: [{ id: 'anthropic', required: false }],
+        providers: [
+          { id: 'anthropic', required: false },
+          { id: 'openai', required: false },
+          { id: 'gemini', required: false },
+        ],
         modal: true,
       });
 

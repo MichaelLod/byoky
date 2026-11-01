@@ -8,27 +8,29 @@ Scaffold a new app powered by [Byoky](https://byoky.com). Choose a template, get
 npx create-byoky-app
 ```
 
-Or with a project name:
+The CLI asks for a project name and a template, then generates the project and prints next steps.
+
+Pass both to skip the prompts (for scripts and CI):
 
 ```bash
-npx create-byoky-app my-ai-app
+npx create-byoky-app my-ai-app --template chat
 ```
 
-The CLI prompts you to pick a template, then generates the project and prints next steps.
+Templates: `chat`, `multi-provider`, `backend-relay`. Run `npx create-byoky-app --help` for all options.
 
 ## Templates
 
 ### AI Chat (Next.js)
 
-Multi-provider streaming chat app. Uses the Anthropic SDK with Byoky's proxied fetch.
+Streaming chat built on the Anthropic SDK with Byoky's proxied fetch.
 
 - Next.js 15 + React
 - Streaming responses via `client.messages.stream()`
-- Provider selection, usage stats, connected status
+- Connection status and disconnect
 
 ### Multi-Provider (Vite)
 
-Minimal setup showing how to connect multiple providers with fallback.
+Minimal setup showing how to connect several providers at once.
 
 - Vite + vanilla TypeScript
 - Requests Anthropic, OpenAI, and Gemini (all optional)
@@ -41,12 +43,13 @@ Server-side LLM calls through the user's wallet. The server never sees API keys.
 - Express + Vite (dual server)
 - `ByokyServer` handles WebSocket relay
 - `/api/generate` endpoint for proxied LLM requests
-- Supports Anthropic, OpenAI, and Gemini
+- Requests Anthropic, OpenAI, and Gemini (all optional); the server calls the first one available
 
 ## What You Get
 
 ```
 my-ai-app/
+  .gitignore
   package.json
   tsconfig.json
   src/
