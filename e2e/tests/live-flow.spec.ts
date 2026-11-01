@@ -268,7 +268,9 @@ test.describe('Byoky end-to-end flow', () => {
     // Model text input is the last input inside the form (datalist-backed).
     await form.locator('input[list]').fill('gpt-4o-mini');
     await form.locator('button:has-text("Save")').click();
-    await expect(walletA.popup.locator('.group-section:has-text("Cross-family")')).toBeVisible({ timeout: 5_000 });
+    // Match the group by its name: every app row also lists the group names
+    // in its Group select, so a plain has-text matches other sections too.
+    await expect(walletA.popup.locator('.group-section:has(.group-name:text-is("Cross-family"))')).toBeVisible({ timeout: 5_000 });
 
     // Pull the group id from the store — we need it to assign the demo app.
     const groupsResult = await sendInternalFromPopup<{ groups: Array<{ id: string; name: string }> }>(
@@ -285,7 +287,7 @@ test.describe('Byoky end-to-end flow', () => {
     // reflects the new value.
     await walletA.popup.bringToFront();
     await walletA.popup.click('button[title="Connect"]');
-    const section = walletA.popup.locator('.group-section:has-text("Cross-family")');
+    const section = walletA.popup.locator('.group-section:has(.group-name:text-is("Cross-family"))');
     await section.locator('button:has-text("Edit")').click();
     // Inline edit form — reuse the same model input.
     const form = section.locator('input[list]');
