@@ -101,7 +101,7 @@ const message = await client.messages.create({
 });
 ```
 
-> **Pass Byoky's `fetch` and session key; the rest of your code stays the same.** Full API compatibility: streaming, file uploads and vision all work. `session.sessionKey` is a per-app session token, not the user's key, which is why `dangerouslyAllowBrowser: true` is safe here: the Anthropic and OpenAI SDKs refuse to run in a browser without it, to keep real keys out of page code. Sessions auto-reconnect if the extension restarts.
+> **Pass Byoky's `fetch` and session key; the rest of your code stays the same.** Streaming, vision, tool use and multipart uploads to inference endpoints all work; apps can call inference and model-list endpoints only (no Files, Batches or Assistants APIs), so images and PDFs go inline in the request. `session.sessionKey` is a per-app session token, not the user's key, which is why `dangerouslyAllowBrowser: true` is safe here: the Anthropic and OpenAI SDKs refuse to run in a browser without it, to keep real keys out of page code. Sessions auto-reconnect if the extension restarts.
 
 ### Backend Relay
 
