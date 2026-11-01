@@ -41,6 +41,7 @@ import {
   translateResponse,
   createStreamTranslator,
   translateErrorResponse,
+  rewriteRequestModel,
   isTextContentType,
   TranslationError,
   resolveRoute,
@@ -950,13 +951,24 @@ export default defineBackground(() => {
             return;
           }
           translatedUrl = rewritten;
-          if (swap.dstModel && !msg.bodyEncoding && msg.body) {
-            translatedBody = rewriteModelInJsonBody(msg.body, swap.dstModel);
+        }
+        // A model the group pins in the app's own family (a same-family swap,
+        // or the direct path with a model override: the group's model is the
+        // strongest force) replaces the SDK's choice, and the request is
+        // fitted to that model's rules.
+        const pinnedModel = translation ? undefined : swap ? swap.dstModel : sessionProvider?.modelOverride;
+        if (pinnedModel && !msg.bodyEncoding && msg.body) {
+          try {
+            translatedBody = rewriteRequestModel({ dstProviderId: effectiveProviderId, dstModel: pinnedModel, url: msg.url }, msg.body);
+          } catch (err) {
+            send({
+              type: 'BYOKY_PROXY_RESPONSE_ERROR',
+              requestId: msg.requestId,
+              status: 400,
+              error: { code: err instanceof TranslationError ? err.code : 'ROUTING_UNSUPPORTED', message: err instanceof Error ? err.message : `This app's model can't serve the request` },
+            });
+            return;
           }
-        } else if (sessionProvider?.modelOverride && !msg.bodyEncoding && msg.body) {
-          // Direct path, same provider, but the group pins a model. The
-          // group's model is the strongest force — override the SDK's choice.
-          translatedBody = rewriteModelInJsonBody(msg.body, sessionProvider.modelOverride);
         }
 
         const realHeaders = buildHeaders(effectiveProviderId, msg.headers, apiKey, credential.authMethod);
@@ -2623,13 +2635,22 @@ export default defineBackground(() => {
           return;
         }
         translatedUrl = rewritten;
-        if (swap.dstModel && body) {
-          translatedBody = rewriteModelInJsonBody(body, swap.dstModel);
+      }
+      // A model the group pins in the app's own family, as on the page path.
+      const pinnedModel = translation ? undefined : swap ? swap.dstModel : sessionProvider?.modelOverride;
+      if (pinnedModel && body && !bodyEncoding) {
+        try {
+          translatedBody = rewriteRequestModel({ dstProviderId: effectiveProviderId, dstModel: pinnedModel, url }, body);
+        } catch (err) {
+          bridgeProxyPort?.postMessage({
+            type: 'proxy_http_error',
+            requestId,
+            status: 400,
+            code: err instanceof TranslationError ? err.code : 'ROUTING_UNSUPPORTED',
+            error: err instanceof Error ? err.message : `This app's model can't serve the request`,
+          });
+          return;
         }
-      } else if (sessionProvider?.modelOverride && body && !bodyEncoding) {
-        // Direct path, same provider, but the group pins a model. The
-        // group's model is the strongest force — override the SDK's choice.
-        translatedBody = rewriteModelInJsonBody(body, sessionProvider.modelOverride);
       }
 
       const realHeaders = buildHeaders(effectiveProviderId, headers, apiKey, credential.authMethod);
@@ -3079,23 +3100,6 @@ export default defineBackground(() => {
       return parsed.stream === true;
     } catch {
       return false;
-    }
-  }
-
-  /**
-   * Surgically rewrite the top-level `model` field of a JSON request body to
-   * `newModel`. Returns the original body unchanged if parsing fails — we'd
-   * rather pass through and let the destination return a real error than
-   * silently corrupt the request. Used by the same-family swap path when
-   * the group pins a destination model.
-   */
-  function rewriteModelInJsonBody(body: string, newModel: string): string {
-    try {
-      const parsed = JSON.parse(body) as Record<string, unknown>;
-      parsed.model = newModel;
-      return JSON.stringify(parsed);
-    } catch {
-      return body;
     }
   }
 
