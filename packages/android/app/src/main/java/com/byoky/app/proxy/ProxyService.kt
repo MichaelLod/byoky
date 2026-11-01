@@ -54,20 +54,11 @@ class ProxyService(
         appContext?.let { TranslationEngine.get(it) }
     }
 
-    // Redirects are never followed: OkHttp would carry x-api-key /
-    // x-goog-api-key / api-key to whatever host the Location names. A 3xx
-    // goes back to the app as is.
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
-        .followRedirects(false)
-        .followSslRedirects(false)
-        .build()
+    private val client = newUpstreamClient()
 
     /**
      * Receives one proxied response. [onMeta] is called once, then any number
-     * of [onChunk] calls, then [onDone]. Methods run on the calling thread;
+     * of [onChunk] (text) or [onBytes] (binary) calls, then [onDone]. Methods run on the calling thread;
      * throwing from any of them aborts the transfer and closes the upstream
      * connection.
      */
@@ -76,11 +67,16 @@ class ProxyService(
         fun onCall(call: Call) {}
         fun onMeta(status: Int, statusText: String, headers: Map<String, String>)
         fun onChunk(chunk: String)
+        /** Raw bytes of a binary (non-text, see [ResponseChunks.isText]) response. */
+        fun onBytes(chunk: ByteArray)
         fun onDone()
     }
 
-    /** A request that was rejected before reaching the provider. */
-    class ProxyError(val code: String, message: String, val status: Int) : IllegalStateException(message)
+    /**
+     * A request that was rejected before reaching the provider. The status
+     * follows the code, as the extension and iOS send it ([statusFor]).
+     */
+    class ProxyError(val code: String, message: String, val status: Int = statusFor(code)) : IllegalStateException(message)
 
     /**
      * Forward one request. `url` is the full provider URL the app asked for;
@@ -106,22 +102,21 @@ class ProxyService(
         binaryBody: Boolean = false,
     ) {
         wallet.noteActivity()
-        val provider = Provider.find(providerId)
-            ?: throw ProxyError("NO_PROVIDER", "Unknown provider: $providerId", 400)
+        val provider = Provider.find(providerId) ?: throw unknownProvider(providerId)
 
         val parsedUrl = url.toHttpUrlOrNull()
-            ?: throw ProxyError("INVALID_URL", "URL doesn't parse", 400)
+            ?: throw ProxyError("INVALID_URL", "URL doesn't parse")
         // Host-only check for now; for providers without a fixed host the
         // URL is checked against the credential routing picks (forwardDirect).
         if (!UpstreamPolicy.requestUrlAllowed(provider, parsedUrl)) {
-            throw ProxyError("INVALID_URL", "URL doesn't match provider $providerId", 400)
+            throw ProxyError("INVALID_URL", "URL doesn't match provider $providerId")
         }
         if (!EndpointPolicy.isAllowed(method, url)) throw endpointNotAllowed()
 
         // Admitting reserves an estimate, so parallel requests can't all pass
         // the check against the same remaining allowance.
         val reservation = when (val admission = wallet.admitRequest(appOrigin, providerId, body, binaryBody)) {
-            is UsageLedger.Admission.Denied -> throw ProxyError("QUOTA_EXCEEDED", admission.reason, 429)
+            is UsageLedger.Admission.Denied -> throw ProxyError("QUOTA_EXCEEDED", admission.reason)
             is UsageLedger.Admission.Allowed -> admission.reservation
         }
         val group = wallet.groupForOrigin(appOrigin)
@@ -130,7 +125,7 @@ class ProxyService(
         try {
             val credentials = wallet.credentials.value
             val decision = resolveRouting(providerId, parsedUrl, body, group, credentials)
-                ?: throw ProxyError("PROVIDER_UNAVAILABLE", noCredentialMessage(providerId, credentials, group), 403)
+                ?: throw ProxyError("PROVIDER_UNAVAILABLE", noCredentialMessage(providerId, credentials, group))
             routing = decision
             val upstreamProviderId = decision.translation?.dstProviderId ?: decision.swapToProviderId ?: providerId
             if (decision.translation != null || decision.swapToProviderId != null) {
@@ -141,12 +136,11 @@ class ProxyService(
                     throw ProxyError(
                         "ROUTING_UNSUPPORTED",
                         "This app is routed to $upstreamProviderId, and only chat requests can be routed to another provider",
-                        400,
                     )
                 }
             }
             if (decision.translation != null && binaryBody) {
-                throw ProxyError("TRANSLATION_NOT_SUPPORTED", "Cross-family routing does not support binary request bodies.", 400)
+                throw ProxyError("TRANSLATION_NOT_SUPPORTED", "Cross-family routing does not support binary request bodies.")
             }
 
             // Usage is read in the dialect of the provider actually called.
@@ -284,13 +278,14 @@ class ProxyService(
             var status = 0
             var statusText = ""
             var headers: Map<String, String> = emptyMap()
-            val text = StringBuilder()
+            val received = java.io.ByteArrayOutputStream()
             override fun onMeta(status: Int, statusText: String, headers: Map<String, String>) {
                 this.status = status
                 this.statusText = statusText
                 this.headers = headers
             }
-            override fun onChunk(chunk: String) { text.append(chunk) }
+            override fun onChunk(chunk: String) { received.write(chunk.toByteArray(Charsets.UTF_8)) }
+            override fun onBytes(chunk: ByteArray) { received.write(chunk) }
             override fun onDone() {}
         }
         forward(appOrigin, providerId, url, method, headers, body, collected)
@@ -302,7 +297,7 @@ class ProxyService(
             .code(collected.status)
             .message(collected.statusText)
             .headers(collected.headers.toHeaders())
-            .body(collected.text.toString().toResponseBody(contentType.toMediaTypeOrNull()))
+            .body(collected.received.toByteArray().toResponseBody(contentType.toMediaTypeOrNull()))
             .build()
     }
 
@@ -353,13 +348,7 @@ class ProxyService(
      */
     private fun apiKey(credential: Credential, providerName: String): String {
         val key = wallet.decryptKey(credential)
-        if (!ApiKeyFormat.isValid(key)) {
-            throw ProxyError(
-                "INVALID_KEY",
-                "The $providerName key \"${credential.label}\" contains a character providers don't accept. Remove it and add it again.",
-                400,
-            )
-        }
+        if (!ApiKeyFormat.isValid(key)) throw unusableKey(providerName, credential.label)
         return key
     }
 
@@ -367,9 +356,9 @@ class ProxyService(
     private fun allowedTarget(provider: Provider, url: HttpUrl, credential: Credential): String =
         when (val t = UpstreamPolicy.target(provider, url, credential.baseUrl)) {
             is UpstreamPolicy.Target.Allowed -> t.url
-            UpstreamPolicy.Target.MissingBaseUrl -> throw missingBaseUrl(provider, credential)
+            UpstreamPolicy.Target.MissingBaseUrl -> throw missingBaseUrl(provider.name, credential.label)
             UpstreamPolicy.Target.WrongHost ->
-                throw ProxyError("INVALID_URL", "URL doesn't match the server registered for the ${provider.name} key \"${credential.label}\"", 400)
+                throw ProxyError("INVALID_URL", "URL doesn't match the server registered for the ${provider.name} key \"${credential.label}\"")
         }
 
     /** Base URL for rewriteProxyUrl: none for fixed-host providers, else the credential's own. */
@@ -378,7 +367,7 @@ class ProxyService(
             UpstreamPolicy.Override.None -> null
             is UpstreamPolicy.Override.Base -> o.baseUrl
             UpstreamPolicy.Override.MissingBaseUrl ->
-                throw missingBaseUrl(Provider.find(dstProviderId) ?: Provider(dstProviderId, dstProviderId, ""), credential)
+                throw missingBaseUrl(Provider.find(dstProviderId)?.name ?: dstProviderId, credential.label)
         }
 
     /**
@@ -387,19 +376,14 @@ class ProxyService(
      */
     private fun checkedRewrite(dstProviderId: String, rewritten: String?, credential: Credential, method: String, code: String): String {
         val provider = Provider.find(dstProviderId)
-            ?: throw ProxyError(code, "Unknown destination provider $dstProviderId", 500)
+            ?: throw ProxyError(code, "Unknown destination provider $dstProviderId")
         val parsed = rewritten?.toHttpUrlOrNull()
-            ?: throw ProxyError(code, "No upstream URL for $dstProviderId", 500)
+            ?: throw ProxyError(code, "No upstream URL for $dstProviderId")
         // The rewrite can carry the app's model into the path (Azure deployments).
         if (!EndpointPolicy.isAllowed(method, rewritten)) throw endpointNotAllowed()
         return allowedTarget(provider, parsed, credential)
     }
 
-    private fun missingBaseUrl(provider: Provider, credential: Credential) = ProxyError(
-        "NO_BASE_URL",
-        "The ${provider.name} key \"${credential.label}\" has no server URL. Remove it and add it again with its endpoint.",
-        400,
-    )
 
     // ──────────────────────────────────────────────────────────────────────
     // Paths
@@ -445,6 +429,7 @@ class ProxyService(
             sink.onMeta(response.code, statusText(response), responseHeaders(response))
             val rewriter = if (toolNameMap.isNotEmpty() && engine != null && response.isSuccessful) engine else null
             when {
+                !ResponseChunks.isText(response.header("content-type")) -> streamBytes(response, meter) { sink.onBytes(it) }
                 rewriter == null -> streamText(response, meter) { text -> sink.onChunk(text) }
                 isEventStream(response) -> {
                     val handle = rewriter.createClaudeCodeSSERewriter(toolNameMap)
@@ -474,7 +459,8 @@ class ProxyService(
      * Cross-family translation: the group (or auto-routing) sends this app's
      * requests to a provider that speaks a different dialect. The body is
      * translated src→dst, the response dst→src, so the app sees its own
-     * dialect. Error responses pass through untranslated.
+     * dialect. A provider error is translated too when core can parse it
+     * (translateErrorResponse), and otherwise passed on as sent.
      */
     private fun forwardTranslated(
         url: HttpUrl,
@@ -488,7 +474,7 @@ class ProxyService(
     ) {
         val meter = exchange.meter
         val engine = translationEngine
-            ?: throw ProxyError("TRANSLATION_FAILED", "Translation engine unavailable", 500)
+            ?: throw ProxyError("TRANSLATION_FAILED", "Translation engine unavailable")
         val isStreaming = RoutingResolver.isStreamingRequest(translation.srcProviderId, url, body)
 
         val ctxJson = engine.buildTranslationContext(
@@ -530,7 +516,11 @@ class ProxyService(
         exchange.execute(client.newCall(request), upstreamUrl, sink).use { response ->
             sink.onMeta(response.code, statusText(response), responseHeaders(response))
             when {
-                !response.isSuccessful -> streamText(response, meter) { text -> sink.onChunk(text) }
+                !response.isSuccessful -> {
+                    val full = readText(response, meter)
+                    val translated = if (full.length <= MAX_TRANSLATED_ERROR_CHARS) engine.translateErrorResponse(ctxJson, full) else null
+                    sink.onChunk(translated ?: full)
+                }
                 isStreaming -> {
                     val handle = engine.createStreamTranslator(ctxJson)
                     val aliasHandle = unalias?.let { engine.createClaudeCodeSSERewriter(it) }
@@ -589,7 +579,7 @@ class ProxyService(
     ) {
         val meter = exchange.meter
         val engine = translationEngine
-            ?: throw ProxyError("SWAP_FAILED", "Translation engine unavailable", 500)
+            ?: throw ProxyError("SWAP_FAILED", "Translation engine unavailable")
         val isStreaming = RoutingResolver.isStreamingRequest(originalProviderId, url, body)
         // rewriteProxyUrl needs a non-empty model even though most
         // openai-family providers read it from the body.
@@ -611,7 +601,11 @@ class ProxyService(
         val request = buildRequest(upstreamUrl, method, outHeaders, outBody)
         exchange.execute(client.newCall(request), upstreamUrl, sink).use { response ->
             sink.onMeta(response.code, statusText(response), responseHeaders(response))
-            streamText(response, meter) { text -> sink.onChunk(text) }
+            if (ResponseChunks.isText(response.header("content-type"))) {
+                streamText(response, meter) { text -> sink.onChunk(text) }
+            } else {
+                streamBytes(response, meter) { sink.onBytes(it) }
+            }
             sink.onDone()
         }
     }
@@ -694,6 +688,21 @@ class ProxyService(
         if (tail.isNotEmpty()) onText(tail)
     }
 
+    /**
+     * Read a binary body as it arrives, unchanged. Usage isn't parsed from
+     * it (only JSON and SSE carry usage); the meter only learns it ended.
+     */
+    private fun streamBytes(response: Response, meter: UsageMeter, onBytes: (ByteArray) -> Unit) {
+        val source = response.body?.source() ?: return
+        val buffer = ByteArray(8192)
+        while (true) {
+            val read = source.read(buffer)
+            if (read == -1) break
+            if (read > 0) onBytes(buffer.copyOf(read))
+        }
+        meter.complete = true
+    }
+
     private fun readText(response: Response, meter: UsageMeter): String {
         val sb = StringBuilder()
         streamText(response, meter) { sb.append(it) }
@@ -770,6 +779,56 @@ class ProxyService(
 
         /** Logged for requests the app cancelled before any response (nginx's "client closed request"). */
         private const val CANCELLED_STATUS = 499
+
+        /**
+         * How long the upstream may go without sending data. Non-streaming
+         * replies send their headers only once generation ends, which for
+         * long outputs and reasoning models often takes minutes; the provider
+         * SDKs allow 10.
+         */
+        const val UPSTREAM_READ_TIMEOUT_SECONDS = 600L
+
+        /** Largest error body handed to core for translation into the app's dialect. */
+        private const val MAX_TRANSLATED_ERROR_CHARS = 1_000_000
+
+        /**
+         * The upstream client. Redirects are never followed: OkHttp would
+         * carry x-api-key / x-goog-api-key / api-key to whatever host the
+         * Location names. A 3xx goes back to the app as is.
+         */
+        fun newUpstreamClient(): OkHttpClient = OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(UPSTREAM_READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .followRedirects(false)
+            .followSslRedirects(false)
+            .build()
+
+        /** HTTP status of a proxy error code, as the extension and iOS send it. */
+        fun statusFor(code: String): Int = when (code) {
+            "SESSION_EXPIRED" -> 401
+            "PROVIDER_UNAVAILABLE", "INVALID_URL", EndpointPolicy.ERROR_CODE -> 403
+            "TRANSLATION_NOT_SUPPORTED", "ROUTING_UNSUPPORTED" -> 400
+            "QUOTA_EXCEEDED" -> 429
+            "PROXY_ERROR", "TRANSLATION_FAILED", "SWAP_FAILED" -> 502
+            else -> 500
+        }
+
+        /** The app asked for a provider this wallet doesn't know. */
+        fun unknownProvider(providerId: String) =
+            ProxyError("PROVIDER_UNAVAILABLE", "Unknown provider: $providerId")
+
+        /** A stored key with a character providers reject (added before the format check). */
+        fun unusableKey(providerName: String, label: String) = ProxyError(
+            "PROVIDER_UNAVAILABLE",
+            "The $providerName key \"$label\" contains a character providers don't accept. Remove it and add it again.",
+        )
+
+        /** A key of a provider without a fixed host (Azure, Ollama, LM Studio) that has no usable server URL. */
+        fun missingBaseUrl(providerName: String, label: String) = ProxyError(
+            "PROVIDER_UNAVAILABLE",
+            "The $providerName key \"$label\" has no server URL. Tap the key in your wallet to add its endpoint.",
+        )
 
         fun endpointNotAllowed() = ProxyError(EndpointPolicy.ERROR_CODE, EndpointPolicy.ERROR_MESSAGE, EndpointPolicy.ERROR_STATUS)
 

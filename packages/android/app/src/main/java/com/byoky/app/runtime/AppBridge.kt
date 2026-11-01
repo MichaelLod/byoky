@@ -11,6 +11,7 @@ import androidx.webkit.WebViewCompat
 import com.byoky.app.data.WalletStore
 import com.byoky.app.proxy.ConnectProviders
 import com.byoky.app.proxy.ProxyService
+import com.byoky.app.proxy.ResponseChunks
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -259,6 +260,11 @@ class AppBridge(
                         .put("type", "BYOKY_PROXY_RESPONSE_CHUNK")
                         .put("requestId", requestId)
                         .put("chunk", chunk))
+                }
+
+                override fun onBytes(chunk: ByteArray) {
+                    ensureActive(flight)
+                    deliver(reply, ResponseChunks.binaryChunk(requestId, chunk))
                 }
 
                 override fun onDone() {
