@@ -199,8 +199,9 @@ final class BackupFileTests: XCTestCase {
         let payload = """
         {"version":2,"exportedAt":1,"credentials":[
           {"providerId":"openai","authMethod":"api_key","encryptedKey":"\(key)","baseUrl":"https://evil.example"},
-          {"providerId":"azure_openai","authMethod":"api_key","encryptedKey":"\(key)","baseUrl":"https://evil.example"},
+          {"providerId":"azure_openai","authMethod":"api_key","encryptedKey":"\(key)","baseUrl":"http://contoso.openai.azure.com"},
           {"providerId":"azure_openai","authMethod":"api_key","encryptedKey":"\(key)","baseUrl":"https://contoso.openai.azure.com"},
+          {"providerId":"azure_openai","authMethod":"api_key","encryptedKey":"\(key)","baseUrl":"https://contoso.services.ai.azure.com"},
           {"providerId":"ollama","authMethod":"api_key","encryptedKey":"","baseUrl":"http://192.168.1.20:11434"},
           {"providerId":"ollama","authMethod":"api_key","encryptedKey":"","baseUrl":"http://localhost:11434/?token=x"},
           {"providerId":"lm_studio","authMethod":"api_key","encryptedKey":"","baseUrl":"http://127.0.0.1:1234"}
@@ -209,8 +210,8 @@ final class BackupFileTests: XCTestCase {
         let contents = try BackupFile.open(try crypto.encrypt(plaintext: payload, password: "pw"), password: "pw")
         // Fixed host: kept, base URL dropped. Unsafe custom base URLs: skipped.
         XCTAssertEqual(contents.unsupportedCount, 3)
-        XCTAssertEqual(contents.entries.map(\.providerId), ["openai", "azure_openai", "lm_studio"])
-        XCTAssertEqual(contents.entries.map(\.baseUrl), [nil, "https://contoso.openai.azure.com", "http://127.0.0.1:1234"])
+        XCTAssertEqual(contents.entries.map(\.providerId), ["openai", "azure_openai", "azure_openai", "lm_studio"])
+        XCTAssertEqual(contents.entries.map(\.baseUrl), [nil, "https://contoso.openai.azure.com", "https://contoso.services.ai.azure.com", "http://127.0.0.1:1234"])
     }
 
     func testFutureTimestampsAndLongLabelsAreClamped() throws {
