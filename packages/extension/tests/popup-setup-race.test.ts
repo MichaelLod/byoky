@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { bg, mount, run, type Mounted } from './helpers/popup-harness';
 
 type Store = typeof import('../entrypoints/popup/store');
@@ -57,6 +57,34 @@ describe('setup racing another wallet view (F120)', () => {
     expect(container.querySelector('.loading')).toBeNull();
     expect(useWalletStore.getState().currentPage).toBe('unlock');
     expect(container.querySelector('.error')?.textContent).toContain('could not be unlocked');
+  });
+
+  it('ignores the setup broadcast its own setup causes', async () => {
+    const hold = { release: () => {} };
+    bg.handlers.setupWallet = () => {
+      bg.state.initialized = true;
+      return { success: true };
+    };
+    bg.handlers.unlock = () => new Promise((resolve) => {
+      hold.release = () => {
+        bg.state.unlocked = true;
+        resolve({ success: true });
+      };
+    });
+    view = await mount(App);
+    const setup = useWalletStore.getState().setup('Another-Strong-Pass-42');
+    // Hashing the password takes real time; wait for the unlock to be asked.
+    await vi.waitFor(() => expect(bg.actions()).toContain('unlock'), { timeout: 4000 });
+    // The background announces the new wallet while the unlock still runs.
+    await bg.broadcast('sessionChanged');
+    expect(useWalletStore.getState().currentPage).toBe('setup');
+    expect(bg.actions().filter((a) => a === 'isInitialized')).toHaveLength(1);
+
+    await run(async () => {
+      hold.release();
+      await setup;
+    });
+    expect(useWalletStore.getState().currentPage).toBe('dashboard');
   });
 
   it('leaves the setup screen when another view finishes setup', async () => {

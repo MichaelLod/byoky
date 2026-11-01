@@ -42,9 +42,10 @@ export default function App() {
         });
       } else if (msg.action === 'sessionChanged') {
         // Also sent when another view finishes setup: leave the setup
-        // screen, whose password would no longer be the wallet's.
+        // screen, whose password would no longer be the wallet's. Not while
+        // this view's own setup is running; it lands on its own.
         if (!useWalletStore.getState().isInitialized) {
-          useWalletStore.getState().init();
+          if (!useWalletStore.getState().submitting) useWalletStore.getState().init();
           return;
         }
         // Also sent on auto-lock: show the unlock screen rather than a
