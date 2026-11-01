@@ -1368,6 +1368,7 @@ code {
 .result-tag.ready { color: var(--signal); }
 .result-tag.missing { color: var(--amber); }
 .result-tag.missing.required { color: var(--alarm); }
+.result-tag.alarm { color: var(--alarm); }
 
 .approval-trust {
   display: flex;

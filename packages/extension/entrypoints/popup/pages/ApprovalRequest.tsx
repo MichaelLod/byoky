@@ -2,14 +2,7 @@ import { useState } from 'react';
 import { useWalletStore } from '../store';
 import { PROVIDERS, type PendingApproval } from '@byoky/core';
 import { Raven } from '../components/Raven';
-
-function formatHostname(origin: string): string {
-  try {
-    return new URL(origin).hostname;
-  } catch {
-    return origin;
-  }
-}
+import { describeOrigin } from '../utils/origin';
 
 export function ApprovalRequest() {
   const { pendingApprovals } = useWalletStore();
@@ -39,7 +32,8 @@ export function ApprovalRequest() {
 function ApprovalCard({ approval, queued }: { approval: PendingApproval; queued: number }) {
   const { credentials, approveConnect, rejectConnect } = useWalletStore();
   const [trust, setTrust] = useState(false);
-  const hostname = formatHostname(approval.appOrigin);
+  // Host and port, since trust is granted per full origin.
+  const origin = describeOrigin(approval.appOrigin);
 
   // Show which providers the app is requesting
   const requestedProviders =
@@ -58,7 +52,12 @@ function ApprovalCard({ approval, queued }: { approval: PendingApproval; queued:
       </div>
 
       <div className="approval-card">
-        <div className="approval-origin">{hostname}</div>
+        <div className="approval-origin">{origin.label}</div>
+        {origin.insecure && (
+          <span className="result-tag alarm" title="This page loads over plain http, so anyone on the network can pose as it.">
+            Not secure
+          </span>
+        )}
         <div className="approval-subtitle">wants to connect to your wallet</div>
       </div>
 

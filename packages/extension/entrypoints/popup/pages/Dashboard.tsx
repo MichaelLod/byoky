@@ -8,19 +8,12 @@ import {
 import { RetiredFeaturesNotice } from '../components/RetiredFeaturesNotice';
 import { TrustResetNotice } from '../components/TrustResetNotice';
 import { ProviderIcon } from '../components/ProviderIcon';
+import { describeOrigin } from '../utils/origin';
 
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
   return String(n);
-}
-
-function formatHostname(origin: string): string {
-  try {
-    return new URL(origin).hostname;
-  } catch {
-    return origin;
-  }
 }
 
 interface ProviderUsage {
@@ -397,8 +390,8 @@ function CredentialStats({ cred, requestLog }: { cred: CredentialMeta; requestLo
             <div key={a.origin} className="card usage-card">
               <div className="card-header" style={{ marginBottom: '0' }}>
                 <div style={{ minWidth: 0 }}>
-                  <span className="card-title mono" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 500 }}>
-                    {formatHostname(a.origin)}
+                  <span className="card-title mono" title={a.origin} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 500 }}>
+                    {describeOrigin(a.origin).label}
                   </span>
                   <div className="card-subtitle">{a.requests} request{a.requests !== 1 ? 's' : ''}</div>
                 </div>

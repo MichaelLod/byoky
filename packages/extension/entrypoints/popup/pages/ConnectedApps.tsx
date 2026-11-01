@@ -12,6 +12,7 @@ import {
   getModel,
   modelsForProvider,
 } from '@byoky/core';
+import { describeOrigin } from '../utils/origin';
 
 function timeAgo(timestamp: number): string {
   const seconds = Math.floor((Date.now() - timestamp) / 1000);
@@ -25,11 +26,7 @@ function timeAgo(timestamp: number): string {
 }
 
 function formatOrigin(origin: string): string {
-  try {
-    return new URL(origin).hostname;
-  } catch {
-    return origin;
-  }
+  return describeOrigin(origin).label;
 }
 
 function formatTokens(n: number): string {
@@ -312,7 +309,7 @@ export function ConnectedApps() {
                           {formatOrigin(session.appOrigin).charAt(0).toUpperCase()}
                         </div>
                         <div style={{ minWidth: 0 }}>
-                          <span className="card-title" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <span className="card-title" title={session.appOrigin} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {formatOrigin(session.appOrigin)}
                           </span>
                           <div className="card-subtitle mono">
@@ -412,7 +409,7 @@ export function ConnectedApps() {
             <div key={site.origin} className="card">
               <div className="card-header">
                 <div style={{ minWidth: 0 }}>
-                  <span className="card-title" style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span className="card-title" title={site.origin} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {formatOrigin(site.origin)}
                   </span>
                   <div className="card-subtitle mono">

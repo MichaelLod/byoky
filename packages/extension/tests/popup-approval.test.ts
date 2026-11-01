@@ -80,3 +80,20 @@ describe('trust checkbox is per request (F011)', () => {
     expect(trustBox(container).checked).toBe(false);
   });
 });
+
+describe('approval headline names the full origin (F093)', () => {
+  it('keeps the port and flags plain http', async () => {
+    bg.state.approvals = [approval('a1', 'http://example.com:8080')];
+    view = await mount(App);
+    const { container } = view;
+    expect(container.querySelector('.approval-origin')?.textContent).toBe('example.com:8080');
+    expect(container.querySelector('.result-tag.alarm')?.textContent?.trim()).toBe('Not secure');
+  });
+
+  it('does not flag a loopback app', async () => {
+    bg.state.approvals = [approval('a1', 'http://localhost:3000')];
+    view = await mount(App);
+    expect(view.container.querySelector('.approval-origin')?.textContent).toBe('localhost:3000');
+    expect(view.container.querySelector('.result-tag.alarm')).toBeNull();
+  });
+});
