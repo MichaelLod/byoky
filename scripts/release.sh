@@ -180,10 +180,21 @@ release_notes() {
 STORE_RESULTS=()
 store_result() { STORE_RESULTS+=("$1: $2"); }
 
-# Uploads an .ipa (ios) or .pkg (macos) to App Store Connect.
+# Uploads an .ipa (ios) or .pkg (macos) to App Store Connect, and notes the
+# upload in build/asc-uploads/: App Store Connect lists a build only some
+# minutes after the upload, and refuses a second upload of the same build
+# number, so retry waits for a build it finds noted instead of uploading it
+# again.
+ASC_UPLOADS="$ROOT/build/asc-uploads"
 asc_upload() {
   xcrun altool --upload-app --file "$1" --type "$2" \
-    --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" 2>&1
+    --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID" 2>&1 || return 1
+  mkdir -p "$ASC_UPLOADS"
+  cksum < "$1" > "$ASC_UPLOADS/$(basename "$1")"
+}
+# Whether this very file went up to App Store Connect before.
+asc_uploaded() {
+  [ -f "$ASC_UPLOADS/$(basename "$1")" ] && [ "$(cksum < "$1")" = "$(cat "$ASC_UPLOADS/$(basename "$1")")" ]
 }
 
 # Runs submit-appstore.mjs <platform> <version> [minutes to wait for the
@@ -217,10 +228,12 @@ fi
 # ============================================================
 if [ "${1:-}" = "retry" ]; then
   ALLOW_PENDING=false
+  HOLD_MACOS=false
   for arg in "${@:2}"; do
     case "$arg" in
       --allow-pending) ALLOW_PENDING=true ;;
-      *) echo "Usage: ./scripts/release.sh retry [--allow-pending]"; exit 1 ;;
+      --hold-macos) HOLD_MACOS=true ;;
+      *) echo "Usage: ./scripts/release.sh retry [--allow-pending] [--hold-macos]"; exit 1 ;;
     esac
   done
 
@@ -355,7 +368,8 @@ if [ "${1:-}" = "retry" ]; then
   fi
 
   # App Store (iOS + macOS): a quick look first; a build App Store Connect
-  # never got is uploaded again, and one still processing is waited for.
+  # never got is uploaded again, and one still processing, or uploaded but
+  # not listed yet, is waited for.
   if [ -n "${ASC_KEY_ID:-}" ] && [ -n "${ASC_ISSUER_ID:-}" ]; then
     for platform in IOS MAC_OS; do
       if [ "$platform" = IOS ]; then
@@ -363,9 +377,20 @@ if [ "${1:-}" = "retry" ]; then
       else
         label="App Store (macOS)"; file="dist/byoky-macos-v${CURRENT}.pkg"; type=macos
       fi
+      if [ "$platform" = MAC_OS ] && [ "$HOLD_MACOS" = true ]; then
+        echo "${label}: held (--hold-macos); nothing asked or uploaded"
+        store_result "$label" "held (--hold-macos)"
+        continue
+      fi
       echo "${label}: checking..."
       appstore_submit "$platform" "$NATIVE_VERSION" 0
-      if [ "$ASC_CODE" -eq 3 ] && [ ! -f "$file" ]; then
+      if [ "$ASC_CODE" -eq 3 ] && [ -f "$file" ] && asc_uploaded "$file"; then
+        echo "${label}: ${file} was uploaded already; waiting for App Store Connect to list the build..."
+        appstore_submit "$platform" "$NATIVE_VERSION"
+        if [ "$ASC_CODE" -eq 3 ]; then
+          ASC_RESULT="NO BUILD in App Store Connect, although ${file} was uploaded; see App Store Connect and Apple's email about that build"
+        fi
+      elif [ "$ASC_CODE" -eq 3 ] && [ ! -f "$file" ]; then
         ASC_RESULT="NO BUILD in App Store Connect, and no ${file} to upload"
       elif [ "$ASC_CODE" -eq 3 ]; then
         echo "${label}: uploading ${file} again..."
@@ -426,6 +451,7 @@ SKIP_MOBILE=false
 SKIP_STORE_UPLOADS=false
 ASSUME_YES=false
 ALLOW_PENDING=false
+HOLD_MACOS=false
 ALLOW_BRANCH=false
 ALLOW_DIRTY=false
 SKIP_NATIVE_TESTS=false
@@ -438,6 +464,7 @@ for arg in "$@"; do
     --skip-store-uploads) SKIP_STORE_UPLOADS=true ;;
     --yes)     ASSUME_YES=true ;;
     --allow-pending) ALLOW_PENDING=true ;;
+    --hold-macos) HOLD_MACOS=true ;;
     --allow-branch) ALLOW_BRANCH=true ;;
     --allow-dirty) ALLOW_DIRTY=true ;;
     --skip-native-tests) SKIP_NATIVE_TESTS=true ;;
@@ -448,10 +475,10 @@ done
 if [ -z "$NEW_VERSION" ]; then
   CURRENT=$(node -p "require('./package.json').version")
   echo "Usage: ./scripts/release.sh <new-version> [--dry] [--skip-mobile] [--skip-store-uploads] [--yes]"
-  echo "                                           [--allow-pending] [--allow-branch] [--allow-dirty]"
-  echo "                                           [--skip-native-tests]"
+  echo "                                           [--allow-pending] [--hold-macos] [--allow-branch]"
+  echo "                                           [--allow-dirty] [--skip-native-tests]"
   echo "       ./scripts/release.sh status"
-  echo "       ./scripts/release.sh retry [--allow-pending]"
+  echo "       ./scripts/release.sh retry [--allow-pending] [--hold-macos]"
   echo ""
   echo "  --dry                  Run the checks and the tests and print the plan; nothing"
   echo "                         is bumped or published, and signing is only checked"
@@ -462,6 +489,12 @@ if [ -z "$NEW_VERSION" ]; then
   echo "  --allow-pending        Release although a store has a review pending, or its"
   echo "                         review state can't be read (an upload restarts a pending"
   echo "                         review; --yes doesn't imply it)"
+  echo "  --hold-macos           Ship everything but the Mac app: macOS is built but not"
+  echo "                         uploaded or submitted, and only its pending review is"
+  echo "                         ignored (other stores' reviews still stop the release)."
+  echo "                         retry uploads and submits it later; App Store Connect"
+  echo "                         takes it once the macOS version in review is through."
+  echo "                         With retry: leave macOS out of that run"
   echo "  --allow-branch         Release from a branch other than main (e.g. a worktree);"
   echo "                         HEAD must contain origin/main, and the release commit is"
   echo "                         pushed to main all the same"
@@ -475,6 +508,8 @@ if [ -z "$NEW_VERSION" ]; then
   echo "retry finishes a release that stopped after the push: it publishes the npm"
   echo "packages and the GitHub release that are missing and uploads to the stores that"
   echo "are behind. A run that stopped earlier says how to undo its version bump."
+  echo "While another macOS version is in review, retry neither uploads nor submits the"
+  echo "Mac app (App Store Connect refuses a second version); a later retry does."
   echo ""
   echo "Current version: $CURRENT"
   exit 1
@@ -605,6 +640,10 @@ STORES_SKIPPED=()
   && STORES_CONFIGURED+=("Google Play") \
   || STORES_SKIPPED+=("Google Play (GOOGLE_PLAY_SERVICE_ACCOUNT_JSON)")
 
+if [ "$HOLD_MACOS" = true ] && [ "$SKIP_IOS" = false ] && [ "$SKIP_STORE_UPLOADS" = false ]; then
+  WARNINGS+=("--hold-macos: the Mac app is built but not uploaded or submitted; ./scripts/release.sh retry does that once the macOS version in review is through")
+fi
+
 # No store credentials at all usually means .env / .env.local didn't load
 # (e.g. a worktree): the release would publish to npm and upload nothing.
 if [ ${#STORES_CONFIGURED[@]} -eq 0 ] && [ "$SKIP_STORE_UPLOADS" = false ]; then
@@ -685,7 +724,10 @@ fi
 # review state couldn't be read counts the same (store-status.mjs exit 3).
 echo "==> Checking store statuses..."
 STATUS_CODE=0
-node scripts/store-status.mjs || STATUS_CODE=$?
+STATUS_ARGS=()
+# The held Mac app isn't uploaded, so its review doesn't hold the rest up.
+if [ "$HOLD_MACOS" = true ]; then STATUS_ARGS+=(--ignore=appstore-macos); fi
+node scripts/store-status.mjs ${STATUS_ARGS[@]+"${STATUS_ARGS[@]}"} || STATUS_CODE=$?
 echo ""
 if [ "$STATUS_CODE" -eq 3 ] && [ "$ALLOW_PENDING" = true ]; then
   echo "  WARN: a review is pending, or a store's review state is unknown (above); --allow-pending releases anyway."
@@ -743,7 +785,11 @@ echo "│    3. Create dist artifacts"
 echo "│    4. Git commit + tag v${NEW_VERSION}, push both to origin main"
 echo "│    5. Publish npm packages"
 echo "│    6. Upload to extension stores"
-[ "$SKIP_IOS" = false ] && echo "│    7. Archive + upload iOS & macOS to App Store"
+if [ "$SKIP_IOS" = false ] && [ "$HOLD_MACOS" = true ]; then
+  echo "│    7. Archive iOS & macOS, upload iOS to App Store (macOS held for retry)"
+elif [ "$SKIP_IOS" = false ]; then
+  echo "│    7. Archive + upload iOS & macOS to App Store"
+fi
 [ "$SKIP_ANDROID" = false ] && echo "│    8. Upload Android AAB to Google Play"
 echo "│    9. Create GitHub release with release notes"
 echo "└──────────────────────────────────────────────────────┘"
@@ -1138,6 +1184,11 @@ elif [ "$SKIP_IOS" = false ] && [ -n "${ASC_KEY_ID:-}" ] && [ -n "${ASC_ISSUER_I
     if [ ! -f "$file" ]; then
       echo "  Skipping ${label}: the export produced no ${file}"
       store_result "$label" "FAILED: no ${file} to upload"
+      continue
+    fi
+    if [ "$platform" = MAC_OS ] && [ "$HOLD_MACOS" = true ]; then
+      echo "  Holding ${label} (--hold-macos): ${file} is built, not uploaded"
+      store_result "$label" "HELD (--hold-macos): ${file} not uploaded; ./scripts/release.sh retry uploads and submits it once the macOS version in review is through"
       continue
     fi
     echo "  Uploading ${label}..."
