@@ -386,6 +386,94 @@ describe('ByokyServer', () => {
     });
   });
 
+  describe('abort', () => {
+    async function connectClient() {
+      const clientPromise = server.handleConnection(ws);
+      ws.simulateMessage({ type: 'relay:hello', sessionId: 'sess-1', providers: {} });
+      return clientPromise;
+    }
+    const sent = () => ws.sentMessages.map((m) => JSON.parse(m));
+    const cancels = () => sent().filter((m) => m.type === 'relay:cancel');
+    const lastRequestId = () => sent().filter((m) => m.type === 'relay:request').pop().requestId;
+
+    it('rejects at once and sends nothing for an already aborted signal', async () => {
+      const client = await connectClient();
+      const controller = new AbortController();
+      controller.abort();
+      await expect(client.createFetch('openai')('https://api.openai.com/v1/models', { signal: controller.signal }))
+        .rejects.toMatchObject({ name: 'AbortError' });
+      expect(sent()).toEqual([]);
+    });
+
+    it('rejects and sends relay:cancel when aborted before the headers', async () => {
+      const client = await connectClient();
+      const controller = new AbortController();
+      const responsePromise = client.createFetch('openai')('https://api.openai.com/v1/chat/completions', { signal: controller.signal });
+      await new Promise((r) => setTimeout(r, 10));
+      const requestId = lastRequestId();
+
+      controller.abort();
+      await expect(responsePromise).rejects.toMatchObject({ name: 'AbortError' });
+      expect(cancels()).toEqual([{ type: 'relay:cancel', requestId }]);
+
+      // A late answer from the browser is ignored.
+      expect(() => ws.simulateMessage({ type: 'relay:response:meta', requestId, status: 200, statusText: 'OK', headers: {} })).not.toThrow();
+    });
+
+    it('errors the body and sends relay:cancel when aborted mid-stream', async () => {
+      const client = await connectClient();
+      const controller = new AbortController();
+      const responsePromise = client.createFetch('openai')('https://api.openai.com/v1/chat/completions', { signal: controller.signal });
+      await new Promise((r) => setTimeout(r, 10));
+      const requestId = lastRequestId();
+      ws.simulateMessage({ type: 'relay:response:meta', requestId, status: 200, statusText: 'OK', headers: {} });
+      ws.simulateMessage({ type: 'relay:response:chunk', requestId, chunk: 'data: 1\n\n' });
+      const response = await responsePromise;
+
+      controller.abort();
+      await expect(response.text()).rejects.toMatchObject({ name: 'AbortError' });
+      expect(cancels()).toEqual([{ type: 'relay:cancel', requestId }]);
+    });
+
+    it('sends relay:cancel when the app cancels the body', async () => {
+      const client = await connectClient();
+      const responsePromise = client.createFetch('openai')('https://api.openai.com/v1/chat/completions');
+      await new Promise((r) => setTimeout(r, 10));
+      const requestId = lastRequestId();
+      ws.simulateMessage({ type: 'relay:response:meta', requestId, status: 200, statusText: 'OK', headers: {} });
+      const response = await responsePromise;
+
+      await response.body!.cancel();
+      expect(cancels()).toEqual([{ type: 'relay:cancel', requestId }]);
+    });
+
+    it('sends nothing for an abort after the response finished', async () => {
+      const client = await connectClient();
+      const controller = new AbortController();
+      const responsePromise = client.createFetch('openai')('https://api.openai.com/v1/models', { signal: controller.signal });
+      await new Promise((r) => setTimeout(r, 10));
+      const requestId = lastRequestId();
+      ws.simulateMessage({ type: 'relay:response:meta', requestId, status: 200, statusText: 'OK', headers: {} });
+      ws.simulateMessage({ type: 'relay:response:chunk', requestId, chunk: '{}' });
+      ws.simulateMessage({ type: 'relay:response:done', requestId });
+      const response = await responsePromise;
+
+      controller.abort();
+      expect(await response.text()).toBe('{}');
+      expect(cancels()).toEqual([]);
+    });
+
+    it('sends relay:cancel when a request times out', async () => {
+      const server = new ByokyServer({ pingInterval: 0, requestTimeout: 30 });
+      const clientPromise = server.handleConnection(ws);
+      ws.simulateMessage({ type: 'relay:hello', sessionId: 'sess-1', providers: {} });
+      const client = await clientPromise;
+
+      await expect(client.createFetch('openai')('https://api.openai.com/v1/models')).rejects.toThrow('timed out');
+      expect(cancels()).toHaveLength(1);
+    });
+  });
+
   describe('malformed messages from the client', () => {
     async function connectAndRequest() {
       const clientPromise = server.handleConnection(ws);

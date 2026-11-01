@@ -5,9 +5,17 @@ import { MAX_RELAY_MESSAGE_SIZE, parseRelayMessage, WS_READY_STATE } from '@byok
 const upstreamBody = vi.hoisted(() => ({ current: '' as BodyInit, contentType: undefined as string | undefined }));
 const proxyCalls = vi.hoisted(() => [] as Array<{ url: string; init?: RequestInit }>);
 
+const upstreamHang = vi.hoisted(() => ({ current: false }));
+
 vi.mock('../src/proxy-fetch.js', () => ({
   createProxyFetch: () => async (url: string, init?: RequestInit) => {
     proxyCalls.push({ url, init });
+    if (upstreamHang.current) {
+      // Like the real proxy fetch: never answers, rejects on abort.
+      return new Promise<Response>((_, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+      });
+    }
     const headers = upstreamBody.contentType ? { 'content-type': upstreamBody.contentType } : undefined;
     return new Response(upstreamBody.current, { status: 200, headers });
   },
@@ -38,6 +46,7 @@ describe('createRelayClient', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     upstreamBody.contentType = undefined;
+    upstreamHang.current = false;
   });
 
   it('announces its relayId in relay:hello instead of the session key', () => {
@@ -198,5 +207,28 @@ describe('createRelayClient', () => {
       expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
       relay.close();
     });
+  });
+
+  it('aborts the call when the backend sends relay:cancel, and answers nothing more', async () => {
+    upstreamHang.current = true;
+    proxyCalls.length = 0;
+    const relay = createRelayClient('ws://localhost:3001/ws/relay', 'byk_secret_session', {});
+    const ws = MockWebSocket.last;
+    ws.open();
+    ws.onmessage?.({
+      data: JSON.stringify({
+        type: 'relay:request', requestId: 'req-stop', providerId: 'openai',
+        url: 'https://api.openai.com/v1/chat/completions', method: 'POST', headers: {}, body: '{}',
+      }),
+    });
+    await vi.waitFor(() => expect(proxyCalls).toHaveLength(1));
+    const signal = proxyCalls[0].init!.signal!;
+    expect(signal.aborted).toBe(false);
+
+    ws.onmessage?.({ data: JSON.stringify({ type: 'relay:cancel', requestId: 'req-stop' }) });
+    expect(signal.aborted).toBe(true);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(ws.sent.filter((m) => m.includes('req-stop'))).toEqual([]);
+    relay.close();
   });
 });

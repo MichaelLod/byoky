@@ -103,6 +103,10 @@ export function createRelayClient(
       case 'relay:request':
         handleRequest(msg);
         break;
+      case 'relay:cancel':
+        // The backend gave up: abort the call, which stops the upstream one.
+        inFlight.get(msg.requestId)?.abort();
+        break;
       case 'relay:ping':
         ws.send(JSON.stringify({ type: 'relay:pong', ts: msg.ts }));
         break;
@@ -158,7 +162,7 @@ export function createRelayClient(
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          if (controller.signal.aborted) break;
+          if (controller.signal.aborted) return;
 
           if (binary) {
             for (let i = 0; i < value.length; i += MAX_BINARY_CHUNK_BYTES) {
@@ -177,6 +181,8 @@ export function createRelayClient(
 
       send({ type: 'relay:response:done', requestId });
     } catch (err) {
+      // Cancelled by the backend, or the relay closed: nobody is waiting.
+      if (controller.signal.aborted) return;
       send({
         type: 'relay:response:error',
         requestId,

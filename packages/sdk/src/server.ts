@@ -187,9 +187,11 @@ export class ByokyServer {
         return async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
           if (!connected) throw ByokyError.relayDisconnected();
 
-          const { url, method, headers, body: rawBody } = await fetchParts(input, init);
+          const { url, method, headers, signal, body: rawBody } = await fetchParts(input, init);
+          if (signal?.aborted) throw abortReason(signal);
           const encoded = rawBody ? await encodeBody(rawBody, headers['content-type']) : undefined;
           if (encoded?.contentType && !headers['content-type']) headers['content-type'] = encoded.contentType;
+          if (signal?.aborted) throw abortReason(signal);
           // The socket may have closed while the body was read.
           if (!connected) throw ByokyError.relayDisconnected();
 
@@ -224,7 +226,33 @@ export class ByokyServer {
 
             const stream = new ReadableStream<Uint8Array>({
               start(c) { controller = c; },
+              // The app cancelled the body: stop the generation as well.
+              cancel() { giveUp(); },
             });
+
+            // Ends the request: it fails before the headers, or its body
+            // errors after them.
+            const settle = (reason: unknown) => {
+              clearTimeout(idleTimer);
+              signal?.removeEventListener('abort', onAbort);
+              try { controller.error(reason); } catch {}
+              if (!metaResolved) {
+                metaResolved = true;
+                rejectFetch(reason);
+              }
+            };
+
+            // The backend gave up on the request (abort, timeout, a broken
+            // response). Forget it and have the browser stop the call, or it
+            // keeps generating and billing.
+            const giveUp = (reason?: unknown) => {
+              if (pendingRequests.get(requestId) !== pending) return;
+              pendingRequests.delete(requestId);
+              sendRelayMessage(ws, { type: 'relay:cancel', requestId });
+              settle(reason);
+            };
+
+            const onAbort = () => giveUp(abortReason(signal!));
 
             // Idle timeout: catches a browser that dropped the request or
             // stalled mid-stream, without cutting off long streams.
@@ -232,8 +260,7 @@ export class ByokyServer {
               if (self.requestTimeout <= 0) return;
               clearTimeout(idleTimer);
               idleTimer = setTimeout(() => {
-                pendingRequests.delete(requestId);
-                pending.error(new ByokyError(
+                giveUp(new ByokyError(
                   ByokyErrorCode.PROXY_ERROR,
                   `Relay request timed out (no response from the browser for ${Math.round(self.requestTimeout / 1000)}s)`,
                 ));
@@ -247,8 +274,7 @@ export class ByokyServer {
                 try {
                   response = buildResponse(stream, meta);
                 } catch {
-                  pendingRequests.delete(requestId);
-                  pending.error(new ByokyError(ByokyErrorCode.PROXY_ERROR, 'Invalid relay response'));
+                  giveUp(new ByokyError(ByokyErrorCode.PROXY_ERROR, 'Invalid relay response'));
                   return;
                 }
                 metaResolved = true;
@@ -260,8 +286,7 @@ export class ByokyServer {
                 try {
                   bytes = chunkEncoding === 'base64' ? base64ToBytes(chunk) : encoder.encode(chunk);
                 } catch {
-                  pendingRequests.delete(requestId);
-                  pending.error(new ByokyError(ByokyErrorCode.PROXY_ERROR, 'Invalid relay response'));
+                  giveUp(new ByokyError(ByokyErrorCode.PROXY_ERROR, 'Invalid relay response'));
                   return;
                 }
                 touch();
@@ -269,18 +294,13 @@ export class ByokyServer {
               },
               done: () => {
                 clearTimeout(idleTimer);
+                signal?.removeEventListener('abort', onAbort);
                 try { controller.close(); } catch {}
               },
-              error: (err: Error) => {
-                clearTimeout(idleTimer);
-                try { controller.error(err); } catch {}
-                if (!metaResolved) {
-                  metaResolved = true;
-                  rejectFetch(err);
-                }
-              },
+              error: (err: Error) => settle(err),
             };
             pendingRequests.set(requestId, pending);
+            signal?.addEventListener('abort', onAbort);
             touch();
 
             // Send the request to the frontend
@@ -306,6 +326,11 @@ export class ByokyServer {
 
     });
   }
+}
+
+/** What fetch rejects with on abort: the signal's reason, an AbortError by default. */
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
 }
 
 // Statuses whose Response must have a null body.
