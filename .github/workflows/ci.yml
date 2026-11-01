@@ -69,8 +69,69 @@ jobs:
       - name: Build extension
         run: pnpm --filter @byoky/extension build
 
+      # After the extension build, which generates the .wxt types it needs.
+      - name: Typecheck
+        run: pnpm typecheck
+
       - name: Build landing page
         run: pnpm --filter @byoky/web build
+
+  # The npm packages that CI otherwise never builds: the bridge, the OpenClaw
+  # plugin (which inlines the bridge's dist) and the scaffolder.
+  packages:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@02f6c237bd2518259fed6c71566509edfb3f2b74 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build core, sdk, bridge, OpenClaw plugin and create-byoky-app
+        run: |
+          pnpm --filter @byoky/core build
+          pnpm --filter @byoky/sdk build
+          pnpm --filter @byoky/bridge build
+          pnpm --filter @byoky/openclaw-plugin build
+          pnpm --filter create-byoky-app build
+
+      - name: Typecheck create-byoky-app
+        run: pnpm --filter create-byoky-app typecheck
+
+      # OpenClaw's own install-time scanner on the plugin as it would be
+      # published; a critical finding makes OpenClaw flag or refuse it.
+      - name: OpenClaw install scan
+        run: node scripts/scan-openclaw-plugin.mjs
+
+      - name: Plugin dist checks
+        run: npx vitest run packages/openclaw-plugin/tests
+
+  # Fake-provider Playwright run: the real extension, headless, no keys.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@02f6c237bd2518259fed6c71566509edfb3f2b74 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Build and run e2e
+        run: pnpm test:e2e
+      - name: Upload traces
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-test-results
+          path: test-results/
+          retention-days: 7
 
   android-unit:
     runs-on: ubuntu-latest
