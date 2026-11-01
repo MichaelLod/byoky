@@ -284,7 +284,7 @@ private fun RenameCredentialDialog(
             RetroTextField(
                 value = draft,
                 onValueChange = { draft = it },
-                label = null,
+                label = "Credential name",
                 modifier = Modifier.fillMaxWidth(),
             )
         },

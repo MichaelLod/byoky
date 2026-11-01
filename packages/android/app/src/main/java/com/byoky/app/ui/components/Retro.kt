@@ -442,15 +442,18 @@ fun RetroTextField(
         disabledPlaceholderColor = Dim,
     )
 
-    // One semantics node for label and field, as a floating-label field has.
-    Column(modifier.semantics(mergeDescendants = true) {}) {
+    Column(modifier) {
         if (label != null) {
+            // Screen readers get the label from the field itself (below), so
+            // the visible caption stays out of the accessibility tree.
             SectionLabel(
                 label,
                 color = if (isError) Alarm else Fog,
-                modifier = Modifier.pointerInput(enabled) {
-                    detectTapGestures { if (enabled) focusRequester.requestFocus() }
-                },
+                modifier = Modifier
+                    .clearAndSetSemantics {}
+                    .pointerInput(enabled) {
+                        detectTapGestures { if (enabled) focusRequester.requestFocus() }
+                    },
             )
             Spacer(Modifier.height(6.dp))
         }
@@ -460,6 +463,9 @@ fun RetroTextField(
             modifier = fieldModifier
                 .fillMaxWidth()
                 .heightIn(min = 48.dp)
+                // The text field is its own accessibility node; without this
+                // TalkBack announced every field as an unnamed edit box.
+                .semantics { if (label != null) contentDescription = label }
                 .focusRequester(focusRequester)
                 .drawBehind {
                     if (focused && !isError) {
