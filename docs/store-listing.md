@@ -8,7 +8,7 @@ Listing text for the local-only Byoky. Store consoles don't read this file. Past
 
 ## Shared long description
 
-Use it as-is for the Chrome Web Store and Firefox Add-ons. The App Store and Google Play versions below swap in the mobile-specific bullets.
+Use it as-is for Firefox Add-ons. The Chrome Web Store has its own version without the provider list (see below). The App Store and Google Play versions below swap in the mobile-specific bullets.
 
 ```
 Byoky is a wallet for your AI API keys.
@@ -50,7 +50,37 @@ Add "Connect with Byoky" to your app in two lines with @byoky/sdk and keep using
 Keep your AI API keys in one encrypted wallet. Apps connect to it and never see the key. No account, no cloud, open source.
 ```
 
-**Description:** the shared long description above.
+**Description:** this Chrome-only version, not the shared one. On 2026-10-29 Chrome review rejected the shared description for keyword spam (violation "Yellow Argon"), quoting its provider list. Here every list of provider or tool names is gone: the intro names three providers once as a compatibility fact, and the full list lives on byoky.com/docs. Don't add the list back. Repeat violations can lead to the item or the developer account being suspended.
+
+```
+Byoky is a wallet for your AI API keys.
+
+Stop pasting API keys into every app. Byoky keeps your OpenAI, Anthropic, Gemini and other AI keys in one encrypted wallet. Apps connect to the wallet, you approve, and Byoky makes the API calls for them. The app never sees your key.
+
+ONE WALLET FOR ALL YOUR KEYS
+Add API keys and setup tokens from the major AI providers, or any OpenAI-compatible endpoint. The supported providers are listed at byoky.com/docs.
+
+YOU STAY IN CONTROL
+• Every app asks before it connects. Approve once, or trust a site.
+• See every connected app and every request it makes.
+• Set token allowances per app and per provider.
+• Revoke access with one click.
+
+GROUPS AND CROSS-PROVIDER ROUTING
+Put apps in groups ("Work", "Personal") and pin each group to a key. Move an app to a group that uses another provider, and Byoky translates its requests and streaming responses on the fly. The app doesn't change a line.
+
+WORKS WITH YOUR TOOLS
+The open-source Byoky bridge lets command-line coding tools use your wallet through a localhost proxy. Your keys stay in the extension.
+
+NO SERVERS
+No account. No cloud. No telemetry. Keys are encrypted on your device with AES-256-GCM, using a key derived from your password. Requests go straight from your wallet to the provider. To move keys to another device, export a password-protected .byoky file.
+
+OPEN SOURCE
+Every line is MIT-licensed on GitHub: github.com/MichaelLod/byoky
+
+FOR DEVELOPERS
+Add "Connect with Byoky" to your app in two lines with @byoky/sdk and keep using your provider's official SDK. byoky.com/docs
+```
 
 **Privacy practices tab**
 - Single purpose: "Store the user's AI API keys locally and proxy API requests from apps the user approves, so apps never receive the keys."
