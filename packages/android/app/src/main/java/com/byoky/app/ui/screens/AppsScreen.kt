@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -20,6 +21,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
@@ -603,48 +607,53 @@ private fun MoveToGroupSheet(
             Spacer(Modifier.height(16.dp))
             SectionLabel("Move to group")
             Spacer(Modifier.height(8.dp))
-            groups.forEach { group ->
-                val provider = Provider.find(group.providerId)
-                val current = group.id == currentGroupId
-                Surface(
-                    onClick = { onSelect(group.id) },
-                    color = if (current) VioletSoft else Color.Transparent,
-                    shape = RectangleShape,
-                    border = BorderStroke(1.dp, if (current) Violet else Seam),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 3.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+            // A radio choice, so TalkBack announces the app's current group.
+            Column(Modifier.selectableGroup()) {
+                groups.forEach { group ->
+                    val provider = Provider.find(group.providerId)
+                    val current = group.id == currentGroupId
+                    Surface(
+                        selected = current,
+                        onClick = { onSelect(group.id) },
+                        color = if (current) VioletSoft else Color.Transparent,
+                        shape = RectangleShape,
+                        border = BorderStroke(1.dp, if (current) Violet else Seam),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 3.dp)
+                            .semantics { role = Role.RadioButton },
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                group.name,
-                                fontWeight = FontWeight.Medium,
-                                color = Bone,
-                                fontSize = 14.sp,
-                            )
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    if (group.providerId.isEmpty()) "No routing"
-                                    else provider?.name ?: group.providerId,
-                                    color = Fog,
-                                    fontSize = 12.sp,
+                                    group.name,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Bone,
+                                    fontSize = 14.sp,
                                 )
-                                if (!group.model.isNullOrEmpty()) {
-                                    Text(" · ", color = Fog, fontSize = 12.sp)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
-                                        group.model!!,
+                                        if (group.providerId.isEmpty()) "No routing"
+                                        else provider?.name ?: group.providerId,
                                         color = Fog,
-                                        style = MonoStyle,
+                                        fontSize = 12.sp,
                                     )
+                                    if (!group.model.isNullOrEmpty()) {
+                                        Text(" · ", color = Fog, fontSize = 12.sp)
+                                        Text(
+                                            group.model!!,
+                                            color = Fog,
+                                            style = MonoStyle,
+                                        )
+                                    }
                                 }
                             }
-                        }
-                        if (current) {
-                            Icon(Icons.Default.Check, null, tint = Phosphor)
+                            if (current) {
+                                Icon(Icons.Default.Check, null, tint = Phosphor)
+                            }
                         }
                     }
                 }

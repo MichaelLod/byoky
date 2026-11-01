@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -17,6 +18,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -491,12 +495,17 @@ internal fun AddCredentialSheet(wallet: WalletStore, onDismiss: () -> Unit) {
             Spacer(Modifier.height(8.dp))
 
             LazyColumn(
-                modifier = Modifier.heightIn(max = 220.dp),
+                modifier = Modifier
+                    .heightIn(max = 220.dp)
+                    .selectableGroup(),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 items(Provider.all) { provider ->
                     val selected = selectedProvider?.id == provider.id
+                    // A radio choice, so TalkBack announces which provider is picked.
                     Surface(
+                        selected = selected,
+                        modifier = Modifier.semantics { role = Role.RadioButton },
                         onClick = {
                             selectedProvider = provider
                             autoFilledLabel(label, labelIsAuto, provider.name)?.let {
