@@ -224,10 +224,10 @@ export const useWalletStore = create<WalletState>((set, get) => ({
       const unlockResult = await sendInternal('unlock', { password });
       if (unlockResult.success) {
         set({ isUnlocked: true, currentPage: 'dashboard', submitting: false, lockedUntil: null });
+        // Requests that waited for the unlock come next: the background
+        // approves trusted sites on its own, then sends newPendingApproval
+        // for the rest, which opens the approval page.
         await get().refreshData();
-        // Requests that waited for the unlock (trusted sites are approved on
-        // their own) go straight to review.
-        if (get().pendingApprovals.length > 0) set({ currentPage: 'approval' });
         return true;
       }
       // During the lockout the background refuses even the right password and

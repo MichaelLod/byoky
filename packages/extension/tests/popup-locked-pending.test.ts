@@ -73,7 +73,7 @@ describe('a locked wallet says an app is waiting (F119)', () => {
     expect(view.container.querySelector('.unlock-pending')).toBeNull();
   });
 
-  it('goes to the request right after unlocking', async () => {
+  it('goes to the request once the background reports it after the unlock', async () => {
     bg.state.approvals = [req('a1', 'https://app.example')];
     bg.handlers.unlock = () => {
       bg.state.unlocked = true;
@@ -83,6 +83,8 @@ describe('a locked wallet says an app is waiting (F119)', () => {
     typeInto(view.container.querySelector<HTMLInputElement>('#password')!, 'right');
     await run(() => {});
     await run(() => view!.container.querySelector<HTMLButtonElement>('button[type=submit]')!.click());
+    // processPendingAfterUnlock approves trusted sites, then reports the rest.
+    await bg.broadcast('newPendingApproval');
     expect(useWalletStore.getState().currentPage).toBe('approval');
     expect(view.container.querySelector('.approval-origin')?.textContent).toBe('app.example');
   });
