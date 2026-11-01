@@ -470,7 +470,7 @@ if [ -z "$NEW_VERSION" ]; then
   echo "                         review state can't be read (an upload restarts a pending"
   echo "                         review; --yes doesn't imply it)"
   echo "  --hold-macos           Ship everything but the Mac app: macOS is built but not"
-  echo "                         uploaded or submitted, and only its pending review is"
+  echo "                         uploaded or submitted, and only its review state is"
   echo "                         ignored (other stores' reviews still stop the release)."
   echo "                         retry uploads and submits it later; App Store Connect"
   echo "                         takes it once the macOS version in review is through."
