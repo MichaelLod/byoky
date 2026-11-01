@@ -5,7 +5,7 @@ import type {
   RelayRequest,
   WebSocketLike,
 } from '@byoky/core';
-import { encodeBody, fetchParts } from './body.js';
+import { base64ToBytes, encodeBody, fetchParts } from './body.js';
 import {
   ByokyError,
   ByokyErrorCode,
@@ -61,7 +61,7 @@ export class ByokyServer {
       const closeCallbacks = new Set<() => void>();
       const pendingRequests = new Map<string, {
         resolveMeta: (value: { status: number; statusText: string; headers: Record<string, string> }) => void;
-        pushChunk: (chunk: string) => void;
+        pushChunk: (chunk: string, chunkEncoding?: 'base64') => void;
         done: () => void;
         error: (err: Error) => void;
       }>();
@@ -107,7 +107,7 @@ export class ByokyServer {
           }
           case 'relay:response:chunk': {
             const pending = pendingRequests.get(msg.requestId);
-            if (pending) pending.pushChunk(msg.chunk);
+            if (pending) pending.pushChunk(msg.chunk, msg.chunkEncoding);
             break;
           }
           case 'relay:response:done': {
@@ -254,9 +254,17 @@ export class ByokyServer {
                 touch();
                 resolveFetch(response);
               },
-              pushChunk: (chunk: string) => {
+              pushChunk: (chunk: string, chunkEncoding?: 'base64') => {
+                let bytes: Uint8Array;
+                try {
+                  bytes = chunkEncoding === 'base64' ? base64ToBytes(chunk) : encoder.encode(chunk);
+                } catch {
+                  pendingRequests.delete(requestId);
+                  pending.error(new ByokyError(ByokyErrorCode.PROXY_ERROR, 'Invalid relay response'));
+                  return;
+                }
                 touch();
-                try { controller.enqueue(encoder.encode(chunk)); } catch {}
+                try { controller.enqueue(bytes); } catch {}
               },
               done: () => {
                 clearTimeout(idleTimer);

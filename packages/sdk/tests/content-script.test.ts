@@ -141,6 +141,22 @@ describe('SDK ↔ content script', () => {
       expect(proxyPort.disconnected).toBe(true);
     });
 
+    it('passes base64 response chunks through to the app byte-exact', async () => {
+      const session = await connect('byk_audio');
+      const pending = session.createFetch('anthropic')('https://api.anthropic.com/v1/messages', { method: 'POST', body: '{}' });
+      await tick();
+
+      const proxyPort = portsNamed('byoky-proxy')[0];
+      const requestId = proxyPort.posted[0].requestId;
+      const bytes = new Uint8Array([0xff, 0xfb, 0x90, 0x64, 0x00, 0x80]);
+      proxyPort.emit({ type: 'BYOKY_PROXY_RESPONSE_META', requestId, status: 200, statusText: 'OK', headers: { 'content-type': 'audio/mpeg' } });
+      proxyPort.emit({ type: 'BYOKY_PROXY_RESPONSE_CHUNK', requestId, chunk: btoa(String.fromCharCode(...bytes)), chunkEncoding: 'base64' });
+      proxyPort.emit({ type: 'BYOKY_PROXY_RESPONSE_DONE', requestId });
+
+      const response = await pending;
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
+    });
+
     it('a dropped proxy port after the headers fails the body', async () => {
       const session = await connect('byk_drop');
 

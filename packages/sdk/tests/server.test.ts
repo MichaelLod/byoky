@@ -330,6 +330,41 @@ describe('ByokyServer', () => {
     });
   });
 
+  describe('binary responses', () => {
+    it('decodes base64 chunks into the exact bytes', async () => {
+      const bytes = Uint8Array.from({ length: 256 }, (_, i) => i);
+      const clientPromise = server.handleConnection(ws);
+      ws.simulateMessage({ type: 'relay:hello', sessionId: 'sess-1', providers: {} });
+      const client = await clientPromise;
+      const responsePromise = client.createFetch('openai')('https://api.openai.com/v1/audio/speech', { method: 'POST', body: '{}' });
+      await new Promise((r) => setTimeout(r, 10));
+      const { requestId } = JSON.parse(ws.sentMessages[ws.sentMessages.length - 1]);
+
+      ws.simulateMessage({ type: 'relay:response:meta', requestId, status: 200, statusText: 'OK', headers: { 'content-type': 'audio/mpeg' } });
+      for (const part of [bytes.slice(0, 100), bytes.slice(100)]) {
+        ws.simulateMessage({ type: 'relay:response:chunk', requestId, chunk: btoa(String.fromCharCode(...part)), chunkEncoding: 'base64' });
+      }
+      ws.simulateMessage({ type: 'relay:response:done', requestId });
+
+      const response = await responsePromise;
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
+    });
+
+    it('fails the request on a chunk that is not base64', async () => {
+      const clientPromise = server.handleConnection(ws);
+      ws.simulateMessage({ type: 'relay:hello', sessionId: 'sess-1', providers: {} });
+      const client = await clientPromise;
+      const responsePromise = client.createFetch('openai')('https://api.openai.com/v1/audio/speech', { method: 'POST', body: '{}' });
+      await new Promise((r) => setTimeout(r, 10));
+      const { requestId } = JSON.parse(ws.sentMessages[ws.sentMessages.length - 1]);
+
+      ws.simulateMessage({ type: 'relay:response:meta', requestId, status: 200, statusText: 'OK', headers: {} });
+      const response = await responsePromise;
+      expect(() => ws.simulateMessage({ type: 'relay:response:chunk', requestId, chunk: '%%%', chunkEncoding: 'base64' })).not.toThrow();
+      await expect(response.arrayBuffer()).rejects.toMatchObject({ code: 'PROXY_ERROR' });
+    });
+  });
+
   describe('malformed messages from the client', () => {
     async function connectAndRequest() {
       const clientPromise = server.handleConnection(ws);

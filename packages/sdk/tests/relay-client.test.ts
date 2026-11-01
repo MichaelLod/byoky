@@ -2,17 +2,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { MAX_RELAY_MESSAGE_SIZE, parseRelayMessage, WS_READY_STATE } from '@byoky/core';
 
-const upstreamBody = vi.hoisted(() => ({ current: '' }));
+const upstreamBody = vi.hoisted(() => ({ current: '' as BodyInit, contentType: undefined as string | undefined }));
 const proxyCalls = vi.hoisted(() => [] as Array<{ url: string; init?: RequestInit }>);
 
 vi.mock('../src/proxy-fetch.js', () => ({
   createProxyFetch: () => async (url: string, init?: RequestInit) => {
     proxyCalls.push({ url, init });
-    return new Response(upstreamBody.current, { status: 200 });
+    const headers = upstreamBody.contentType ? { 'content-type': upstreamBody.contentType } : undefined;
+    return new Response(upstreamBody.current, { status: 200, headers });
   },
 }));
 
 import { createRelayClient } from '../src/relay-client.js';
+import { ByokyServer } from '../src/server.js';
 
 class MockWebSocket {
   static last: MockWebSocket;
@@ -35,6 +37,7 @@ describe('createRelayClient', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    upstreamBody.contentType = undefined;
   });
 
   it('announces its relayId in relay:hello instead of the session key', () => {
@@ -83,7 +86,7 @@ describe('createRelayClient', () => {
       expect(parsed?.type).toBe('relay:response:chunk');
       return (parsed as { chunk: string }).chunk;
     });
-    expect(chunks.join('')).toBe(upstreamBody.current);
+    expect(chunks.join('')).toBe(upstreamBody.current as string);
     // No chunk may end on half a surrogate pair.
     for (const chunk of chunks) {
       const last = chunk.charCodeAt(chunk.length - 1);
@@ -136,6 +139,63 @@ describe('createRelayClient', () => {
       expect(file.name).toBe('speech.mp3');
       expect(file.type).toBe('audio/mpeg');
       expect(Array.from(new Uint8Array(await file.arrayBuffer()))).toEqual([0xff, 0xfb]);
+      relay.close();
+    });
+  });
+
+  describe('binary responses', () => {
+    function relayAudio(bytes: Uint8Array) {
+      upstreamBody.current = bytes as Uint8Array<ArrayBuffer>;
+      upstreamBody.contentType = 'audio/mpeg';
+      const relay = createRelayClient('ws://localhost:3001/ws/relay', 'byk_secret_session', {});
+      const ws = MockWebSocket.last;
+      ws.open();
+      ws.onmessage?.({
+        data: JSON.stringify({
+          type: 'relay:request', requestId: 'req-tts', providerId: 'openai',
+          url: 'https://api.openai.com/v1/audio/speech', method: 'POST', headers: {}, body: '{}',
+        }),
+      });
+      return { relay, ws };
+    }
+
+    it('sends a non-text response as base64 chunks, each under the size limit', async () => {
+      const bytes = Uint8Array.from({ length: 300_000 }, (_, i) => (i * 7) % 256);
+      const { relay, ws } = relayAudio(bytes);
+      await vi.waitFor(() => expect(ws.sent.some((m) => m.includes('relay:response:done'))).toBe(true));
+
+      const chunks = ws.sent.filter((m) => m.includes('relay:response:chunk')).map((m) => {
+        expect(m.length).toBeLessThanOrEqual(MAX_RELAY_MESSAGE_SIZE);
+        return parseRelayMessage(m) as { chunk: string; chunkEncoding?: string };
+      });
+      expect(chunks.length).toBeGreaterThan(1);
+      expect(chunks.every((c) => c.chunkEncoding === 'base64')).toBe(true);
+      const received = chunks.flatMap((c) => Array.from(atob(c.chunk), (ch) => ch.charCodeAt(0)));
+      expect(received).toEqual(Array.from(bytes));
+      relay.close();
+    });
+
+    it('arrives byte-exact at the backend', async () => {
+      const bytes = Uint8Array.from({ length: 256 }, (_, i) => i);
+      const { relay, ws } = relayAudio(bytes);
+
+      // Feed what the relay client sent into a real ByokyServer.
+      const serverWs = {
+        readyState: WS_READY_STATE.OPEN,
+        send: (data: string) => { ws.onmessage?.({ data }); },
+        close() {},
+        onopen: null, onmessage: null as ((e: { data: unknown }) => void) | null, onclose: null, onerror: null,
+      };
+      const clientPromise = new ByokyServer({ pingInterval: 0 }).handleConnection(serverWs);
+      const forward = (data: string) => serverWs.onmessage?.({ data });
+      ws.sent.splice(0).forEach(forward);
+      ws.send = (data: string) => forward(data);
+      const client = await clientPromise;
+
+      upstreamBody.current = bytes as Uint8Array<ArrayBuffer>;
+      const response = await client.createFetch('openai')('https://api.openai.com/v1/audio/speech', { method: 'POST', body: '{}' });
+      expect(response.headers.get('content-type')).toBe('audio/mpeg');
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
       relay.close();
     });
   });

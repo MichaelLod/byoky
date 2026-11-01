@@ -343,6 +343,46 @@ describe('createProxyFetch', () => {
     });
   });
 
+  describe('binary responses', () => {
+    const allBytes = Uint8Array.from({ length: 256 }, (_, i) => i);
+    // An MP3 frame header: every frame starts with the 0xFF sync byte,
+    // which can never appear in UTF-8.
+    const mp3 = new Uint8Array([0xff, 0xfb, 0x90, 0x64, 0x00, 0x0f, 0xf0, 0x00]);
+    const b64 = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes));
+
+    it.each([
+      ['bytes 0..255', allBytes],
+      ['an MP3 frame header', mp3],
+    ])('passes %s through byte-exact', async (_label, bytes) => {
+      const proxyFetch = createProxyFetch('openai', { current: 'byk_session' });
+      const fetchPromise = proxyFetch('https://api.openai.com/v1/audio/speech', { method: 'POST', body: '{}' });
+      await new Promise((r) => setTimeout(r, 10));
+      const requestId = postedMessages[0].data.requestId as string;
+
+      simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_META', requestId, status: 200, statusText: 'OK', headers: { 'content-type': 'audio/mpeg' } });
+      // Split at an odd offset: each chunk is base64 of its own bytes.
+      simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_CHUNK', requestId, chunk: b64(bytes.slice(0, 5)), chunkEncoding: 'base64' });
+      simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_CHUNK', requestId, chunk: b64(bytes.slice(5)), chunkEncoding: 'base64' });
+      simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_DONE', requestId });
+
+      const response = await fetchPromise;
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
+    });
+
+    it('errors the body on a chunk that is not base64', async () => {
+      const proxyFetch = createProxyFetch('openai', { current: 'byk_session' });
+      const fetchPromise = proxyFetch('https://api.openai.com/v1/audio/speech', { method: 'POST', body: '{}' });
+      await new Promise((r) => setTimeout(r, 10));
+      const requestId = postedMessages[0].data.requestId as string;
+
+      simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_META', requestId, status: 200, statusText: 'OK', headers: { 'content-type': 'audio/mpeg' } });
+      simulateResponse({ type: 'BYOKY_PROXY_RESPONSE_CHUNK', requestId, chunk: '%%%', chunkEncoding: 'base64' });
+
+      const response = await fetchPromise;
+      await expect(response.arrayBuffer()).rejects.toMatchObject({ code: 'PROXY_ERROR' });
+    });
+  });
+
   describe('abort signal', () => {
     function cancelMessages() {
       return postedMessages.filter((m) => m.data.type === 'BYOKY_PROXY_CANCEL');

@@ -5,11 +5,12 @@ import type {
 } from '@byoky/core';
 import {
   ByokyError,
+  isTextContentType,
   MAX_RELAY_MESSAGE_SIZE,
   parseRelayMessage,
   WS_READY_STATE,
 } from '@byoky/core';
-import { decodeBody } from './body.js';
+import { bytesToBase64, decodeBody } from './body.js';
 import { createProxyFetch } from './proxy-fetch.js';
 import { randomId } from './id.js';
 
@@ -147,9 +148,11 @@ export function createRelayClient(
         headers: responseHeaders,
       });
 
-      // Stream the body
+      // Stream the body. Text goes as text; anything else (audio, images)
+      // as base64, which a text decoder can't corrupt.
       if (response.body) {
         const reader = response.body.getReader();
+        const binary = !isTextContentType(response.headers.get('content-type'));
         const decoder = new TextDecoder();
 
         while (true) {
@@ -157,10 +160,19 @@ export function createRelayClient(
           if (done) break;
           if (controller.signal.aborted) break;
 
-          for (const chunk of splitChunk(decoder.decode(value, { stream: true }))) {
-            send({ type: 'relay:response:chunk', requestId, chunk });
+          if (binary) {
+            for (let i = 0; i < value.length; i += MAX_BINARY_CHUNK_BYTES) {
+              const chunk = bytesToBase64(value.subarray(i, i + MAX_BINARY_CHUNK_BYTES));
+              send({ type: 'relay:response:chunk', requestId, chunk, chunkEncoding: 'base64' });
+            }
+          } else {
+            for (const chunk of splitChunk(decoder.decode(value, { stream: true }))) {
+              send({ type: 'relay:response:chunk', requestId, chunk });
+            }
           }
         }
+        const tail = binary ? '' : decoder.decode();
+        if (tail) send({ type: 'relay:response:chunk', requestId, chunk: tail });
       }
 
       send({ type: 'relay:response:done', requestId });
@@ -220,6 +232,9 @@ export function createRelayClient(
 // stall the response. JSON escaping can grow a string up to 6x (\u00XX), so
 // pieces of an eighth of the limit always fit, envelope included.
 const MAX_CHUNK_LENGTH = Math.floor(MAX_RELAY_MESSAGE_SIZE / 8);
+// Base64 needs no escaping and each piece must decode on its own, so binary
+// chunks are cut into byte runs whose base64 is MAX_CHUNK_LENGTH long.
+const MAX_BINARY_CHUNK_BYTES = (MAX_CHUNK_LENGTH / 4) * 3;
 
 function splitChunk(text: string): string[] {
   if (text.length <= MAX_CHUNK_LENGTH) return [text];

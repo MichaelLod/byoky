@@ -1,5 +1,5 @@
 import { ByokyError, ByokyErrorCode } from '@byoky/core';
-import { encodeBody, fetchParts } from './body.js';
+import { base64ToBytes, encodeBody, fetchParts } from './body.js';
 import { resolveMessageTarget } from './detect.js';
 import { randomId } from './id.js';
 
@@ -67,9 +67,21 @@ export function createProxyFetch(
             break;
           }
 
-          case 'BYOKY_PROXY_RESPONSE_CHUNK':
-            writer.write(encoder.encode(data.chunk)).catch(() => {});
+          case 'BYOKY_PROXY_RESPONSE_CHUNK': {
+            // A non-text response (audio, for one) arrives as base64 bytes;
+            // a text decoder would turn every byte that isn't UTF-8 into U+FFFD.
+            let bytes: Uint8Array;
+            try {
+              bytes = data.chunkEncoding === 'base64' ? base64ToBytes(data.chunk) : encoder.encode(data.chunk);
+            } catch {
+              writer.abort(new ByokyError(ByokyErrorCode.PROXY_ERROR, 'Invalid response chunk from the wallet')).catch(() => {});
+              cleanup();
+              cancel();
+              break;
+            }
+            writer.write(bytes).catch(() => {});
             break;
+          }
 
           case 'BYOKY_PROXY_RESPONSE_DONE':
             writer.close().catch(() => {});
