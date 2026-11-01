@@ -17,7 +17,9 @@ final class ProviderURLTests: XCTestCase {
     func testLocalProvidersAllowLoopbackHttpOnly() {
         XCTAssertNotNil(Provider.customBaseUrl(for: "ollama", credentialBaseUrl: "http://localhost:11434"))
         XCTAssertNotNil(Provider.customBaseUrl(for: "lm_studio", credentialBaseUrl: "http://127.0.0.1:1234"))
-        XCTAssertNotNil(Provider.customBaseUrl(for: "ollama", credentialBaseUrl: "http://[::1]:11434"))
+        // IPv6 loopback isn't accepted, as on Android: a backup opens with
+        // the same credentials on both.
+        XCTAssertNil(Provider.customBaseUrl(for: "ollama", credentialBaseUrl: "http://[::1]:11434"))
         XCTAssertNotNil(Provider.customBaseUrl(for: "ollama", credentialBaseUrl: "https://ollama.lan:11434"))
         XCTAssertNil(Provider.customBaseUrl(for: "ollama", credentialBaseUrl: "http://192.168.1.20:11434"))
         XCTAssertNil(Provider.customBaseUrl(for: "ollama", credentialBaseUrl: "http://user:pw@localhost:11434"))

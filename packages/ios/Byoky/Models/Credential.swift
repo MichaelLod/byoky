@@ -162,8 +162,11 @@ struct Provider: Identifiable, Hashable {
         providerId == "ollama" || providerId == "lm_studio"
     }
 
+    /// `localhost` and `127.0.0.1`, as on Android, whose network security
+    /// config allows cleartext to those two only. Ollama and LM Studio listen
+    /// on IPv4 loopback by default; `localhost` reaches them either way.
     static func isLoopbackHost(_ host: String) -> Bool {
-        ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host.lowercased())
+        ["localhost", "127.0.0.1"].contains(host.lowercased())
     }
 
     /// https always; plain http only to a loopback host for local providers.
