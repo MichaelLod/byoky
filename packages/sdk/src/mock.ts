@@ -109,8 +109,16 @@ function makeMockFetch(
 }
 
 export function createMockSession(options: MockConnectOptions = {}): ByokySession {
-  const isProd =
-    typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'production';
+  // Written so bundlers can inline it: they replace process.env.NODE_ENV
+  // with a literal, but leave `typeof process` alone, which made the old
+  // `typeof process !== 'undefined' && ...` false in every browser bundle.
+  // Without a bundler, a page has no `process` and the read throws.
+  let isProd = false;
+  try {
+    isProd = process.env.NODE_ENV === 'production';
+  } catch {
+    // No process: not a production build we can detect.
+  }
   if (isProd) {
     throw new ByokyError(
       ByokyErrorCode.UNKNOWN,
