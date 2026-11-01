@@ -111,8 +111,8 @@ jobs:
             FAIL=1
           fi
 
-          # 4. No wildcard CORS headers in bridge or plugin
-          if grep -q "Access-Control-Allow-Origin.*\*" packages/bridge/src/proxy-server.ts packages/openclaw-plugin/src/index.ts 2>/dev/null; then
+          # 4. No wildcard CORS headers anywhere in bridge or plugin sources
+          if grep -rniE 'Access-Control-Allow-Origin.*\*' packages/bridge/src packages/openclaw-plugin/src; then
             echo "::error::Wildcard CORS header found in bridge or plugin"
             FAIL=1
           fi
