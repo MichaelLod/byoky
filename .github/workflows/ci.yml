@@ -6,12 +6,25 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # A newer push to a PR supersedes its run; branch pushes each get a
+  # full run.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
+      fail-fast: false
       matrix:
-        node-version: [20, 22]
+        # Active and maintenance LTS. Node 20 reached end of life on
+        # 2026-04-30; the published packages require >=22.
+        node-version: [22, 24]
 
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
