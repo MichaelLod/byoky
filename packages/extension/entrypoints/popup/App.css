@@ -1369,6 +1369,8 @@ code {
 .result-tag.missing { color: var(--amber); }
 .result-tag.missing.required { color: var(--alarm); }
 .result-tag.alarm { color: var(--alarm); }
+/* Served with another provider's key: may wrap in a narrow popup. */
+.result-tag.routed { color: var(--phosphor); white-space: normal; text-align: right; }
 
 .approval-trust {
   display: flex;

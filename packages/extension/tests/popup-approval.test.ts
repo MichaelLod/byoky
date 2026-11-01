@@ -143,3 +143,46 @@ describe('a malformed request or record does not blank the popup (F076)', () => 
     expect(useWalletStore.getState().currentPage).toBe('unlock');
   });
 });
+
+describe('approval says which key will serve each provider (F092)', () => {
+  function tags(container: HTMLElement) {
+    return [...container.querySelectorAll('.approval-provider-row')].map((row) => [
+      row.querySelector('span')?.textContent,
+      row.querySelector('.result-tag')?.textContent,
+    ]);
+  }
+
+  it('an anthropic-only wallet asked for openai says the Anthropic key is used', async () => {
+    bg.state.approvals = [approval('a1', 'https://app.example', [{ id: 'openai' }, { id: 'anthropic' }, { id: 'ollama' }])];
+    view = await mount(App);
+    expect(tags(view.container)).toEqual([
+      ['OpenAI', 'Uses your Anthropic key (translated)'],
+      ['Anthropic', 'Key ready'],
+      ['Ollama (local)', 'No key'],
+    ]);
+  });
+
+  it('names a same-family swap set by the app\'s group', async () => {
+    bg.state.credentials = [{ id: 'o1', providerId: 'openai', label: 'Work', authMethod: 'api_key', createdAt: 1 }];
+    bg.state.groups = [
+      { id: 'default', name: 'Default', providerId: '', createdAt: 1 },
+      { id: 'g1', name: 'Cheap', providerId: 'openai', createdAt: 2 },
+    ];
+    bg.state.appGroups = { 'https://app.example': 'g1' };
+    bg.state.approvals = [approval('a1', 'https://app.example', [{ id: 'groq', required: true }])];
+    view = await mount(App);
+    expect(tags(view.container)).toEqual([['Groq', 'Routed to OpenAI · required']]);
+  });
+
+  it('says No key when the app\'s group binds a provider without a key', async () => {
+    bg.state.groups = [
+      { id: 'default', name: 'Default', providerId: '', createdAt: 1 },
+      { id: 'g1', name: 'Gemini only', providerId: 'gemini', model: 'gemini-2.5-pro', createdAt: 2 },
+    ];
+    bg.state.appGroups = { 'https://app.example': 'g1' };
+    bg.state.approvals = [approval('a1', 'https://app.example', [{ id: 'openai' }])];
+    view = await mount(App);
+    // A group is explicit routing intent: no silent fallback to the Anthropic key.
+    expect(tags(view.container)).toEqual([['OpenAI', 'No key']]);
+  });
+});
