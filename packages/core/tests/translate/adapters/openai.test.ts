@@ -45,14 +45,17 @@ describe('openaiAdapter.parseRequest', () => {
     expect(ir.messages).toEqual([{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }]);
   });
 
-  it('ignores stop: null and blank stop strings', () => {
+  it('ignores stop: null and empty stop strings', () => {
     const parse = (stop: unknown) =>
       openaiAdapter.parseRequest(JSON.stringify({ messages: [{ role: 'user', content: 'hi' }], stop }));
     expect(parse(null).stopSequences).toBeUndefined();
     expect(parse('').stopSequences).toBeUndefined();
-    expect(parse([null, '  ']).stopSequences).toBeUndefined();
+    expect(parse([null, '']).stopSequences).toBeUndefined();
     expect(parse([null, 'x']).stopSequences).toEqual(['x']);
     expect(parse('END').stopSequences).toEqual(['END']);
+    // Whitespace-only stops are real ones for every family but Anthropic,
+    // whose serializer drops them (R2-03).
+    expect(parse(['\n', '  ']).stopSequences).toEqual(['\n', '  ']);
   });
 
   it('keeps system and developer messages in their original order', () => {

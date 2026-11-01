@@ -188,9 +188,11 @@ function parseRequest(body: string): IRRequest {
   if (typeof parsed.top_p === 'number') ir.topP = parsed.top_p;
   if (parsed.stop != null) {
     // Hand-built bodies send `stop: null` or `""`; neither is a stop sequence,
-    // and the other families reject null or blank entries.
+    // and the other families reject null or empty entries. Whitespace-only
+    // ones such as "\n" are kept: only Anthropic refuses those, and its
+    // serializer leaves them out.
     const raw: unknown[] = Array.isArray(parsed.stop) ? parsed.stop : [parsed.stop];
-    const stops = raw.filter((s): s is string => typeof s === 'string' && s.trim().length > 0);
+    const stops = raw.filter((s): s is string => typeof s === 'string' && s.length > 0);
     if (stops.length > 0) ir.stopSequences = stops;
   }
   if (typeof parsed.stream === 'boolean') ir.stream = parsed.stream;

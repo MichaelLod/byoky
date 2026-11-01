@@ -327,6 +327,47 @@ describe('cross-family dispatch — OpenAI stop: null', () => {
   });
 });
 
+// R2-03: whitespace-only stop sequences are refused by Anthropic only; the
+// other families take them, so they are dropped for Anthropic alone.
+describe('cross-family dispatch — whitespace-only stop sequences', () => {
+  const body = (stop: unknown) =>
+    JSON.stringify({ model: 'gpt-5.5', stop, messages: [{ role: 'user', content: 'Hello' }] });
+
+  it('openai → gemini keeps "\\n"', () => {
+    const out = JSON.parse(translateRequest(ctx('openai', 'gemini'), body(['\n', 'END']))) as {
+      generationConfig?: Record<string, unknown>;
+    };
+    expect(out.generationConfig?.stopSequences).toEqual(['\n', 'END']);
+  });
+
+  it('openai → cohere keeps "\\n"', () => {
+    const out = JSON.parse(translateRequest(ctx('openai', 'cohere'), body('\n'))) as Record<string, unknown>;
+    expect(out.stop_sequences).toEqual(['\n']);
+  });
+
+  it('openai → anthropic drops whitespace-only entries and keeps the rest', () => {
+    const out = JSON.parse(translateRequest(ctx('openai', 'anthropic'), body(['\n', ' \t', 'END']))) as Record<string, unknown>;
+    expect(out.stop_sequences).toEqual(['END']);
+  });
+
+  it('openai → anthropic with only whitespace stops sends no stop_sequences', () => {
+    const out = JSON.parse(translateRequest(ctx('openai', 'anthropic'), body('\n'))) as Record<string, unknown>;
+    expect(out).not.toHaveProperty('stop_sequences');
+  });
+
+  it('gemini and cohere → anthropic drop them too', () => {
+    const gemini = JSON.stringify({
+      contents: [{ role: 'user', parts: [{ text: 'Hello' }] }],
+      generationConfig: { stopSequences: ['\n\n', 'END'] },
+    });
+    const fromGemini = JSON.parse(translateRequest(ctx('gemini', 'anthropic'), gemini)) as Record<string, unknown>;
+    expect(fromGemini.stop_sequences).toEqual(['END']);
+    const cohere = JSON.stringify({ model: 'command-a-03-2025', messages: [{ role: 'user', content: 'Hello' }], stop_sequences: ['\n'] });
+    const fromCohere = JSON.parse(translateRequest(ctx('cohere', 'anthropic'), cohere)) as Record<string, unknown>;
+    expect(fromCohere).not.toHaveProperty('stop_sequences');
+  });
+});
+
 describe('cross-family dispatch — JSON Schema reaches Gemini in its JSON Schema fields', () => {
   it('anthropic → gemini moves a Claude Code tool schema to parametersJsonSchema', () => {
     const body = JSON.stringify({
