@@ -240,7 +240,10 @@ private fun MainScreen(wallet: WalletStore, resumeAppId: String?, onAppShown: (S
                 AppRuntimeScreen(
                     wallet = wallet,
                     appId = entry.arguments?.getString("appId").orEmpty(),
-                    onClose = { navController.popBackStack() },
+                    // Pops this app off and nothing else: a second tap (or a
+                    // renderer crash) mid-animation finds no app to pop
+                    // instead of popping the tab under it to a blank screen.
+                    onClose = { navController.popBackStack(APP_RUNTIME_ROUTE, inclusive = true) },
                 )
             }
             composable("settings") {

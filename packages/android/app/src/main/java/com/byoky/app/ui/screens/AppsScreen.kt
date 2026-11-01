@@ -272,9 +272,15 @@ fun AppsScreen(wallet: WalletStore) {
         )
     }
 
-    if (confirmDisconnectAll) {
+    // Every app's session ended while the prompt was open: nothing is left
+    // to disconnect, so it closes rather than asking about 0 apps.
+    val disconnectAllPrompt = disconnectAllTitle(sessions.size)
+    LaunchedEffect(disconnectAllPrompt == null) {
+        if (disconnectAllPrompt == null) confirmDisconnectAll = false
+    }
+    if (confirmDisconnectAll && disconnectAllPrompt != null) {
         ConfirmDestructiveDialog(
-            title = "Disconnect ${sessions.size} app${if (sessions.size == 1) "" else "s"}?",
+            title = disconnectAllPrompt,
             body = "They lose access to your keys. Open an app again from the Apps tab to reconnect it.",
             confirmLabel = "Disconnect all",
             onConfirm = {
@@ -330,6 +336,13 @@ fun AppsScreen(wallet: WalletStore) {
 
 private fun displayHostOf(origin: String): String =
     try { java.net.URL(origin).host ?: origin } catch (_: Exception) { origin }
+
+/** The Disconnect all prompt's title, or null when no app is left to disconnect. */
+internal fun disconnectAllTitle(sessionCount: Int): String? = when {
+    sessionCount <= 0 -> null
+    sessionCount == 1 -> "Disconnect 1 app?"
+    else -> "Disconnect $sessionCount apps?"
+}
 
 /** Asked before disconnecting apps or deleting a group. */
 @Composable
