@@ -100,7 +100,7 @@ const session = await byoky.connect({
 
 | Option | Type | Description |
 |--------|------|-------------|
-| `providers` | `ProviderRequirement[]` | Providers to request access to |
+| `providers` | `ProviderRequirement[]` | Providers to request access to. `required: true` is a hint the wallet shows in the approval prompt; the connection succeeds without that provider, so check `session.providers[id]?.available` |
 | `modal` | `boolean \| ModalOptions` | Show built-in connect UI |
 
 ### `byoky.tryReconnect()`
@@ -116,7 +116,7 @@ const session = await byoky.tryReconnect();
 | Property / Method | Description |
 |-------------------|-------------|
 | `sessionKey` | Unique session identifier |
-| `providers` | Map of available providers with auth method |
+| `providers` | Map of providers: `available` (the wallet can serve it, directly or by routing) and `authMethod` |
 | `createFetch(providerId)` | Create a proxied `fetch` function for the provider's inference and model-list endpoints (Files, Batches, Assistants and admin APIs get 403 `ENDPOINT_NOT_ALLOWED`) |
 | `listModels(providerId)` | Discover models available to the user's credential (live, per provider) |
 | `createRelay(wsUrl)` | Open a WebSocket relay to your backend |

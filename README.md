@@ -113,7 +113,7 @@ Your backend ←WebSocket (your server)→ User's browser ←→ Byoky extension
 
 ```typescript
 // Frontend — open a relay so the backend can make LLM calls
-const session = await new Byoky().connect({ providers: [{ id: 'anthropic' }], modal: true });
+const session = await new Byoky().connect({ providers: [{ id: 'anthropic', required: true }], modal: true });
 const relay = session.createRelay('wss://your-app.com/ws/relay');
 ```
 
