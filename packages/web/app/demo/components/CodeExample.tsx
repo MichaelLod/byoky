@@ -7,7 +7,7 @@ const examples = [
     label: 'Native SDK',
     filename: 'native-sdk.ts',
     description:
-      'Use any provider SDK as-is. Just swap in createFetch — full API compatibility, including streaming.',
+      'Use any provider SDK as-is. Just swap in createFetch — inference API compatibility, including streaming.',
     code: `import Anthropic from '@anthropic-ai/sdk';
 import { Byoky } from '@byoky/sdk';
 
@@ -157,7 +157,7 @@ const response = await client.messages.create({
     label: 'Vision',
     filename: 'vision.ts',
     description:
-      'Analyze images with Claude or GPT-4o. File uploads go through the proxy — the API never sees your key.',
+      'Analyze images with Claude or GPT. The image goes inline through the proxy — your app never sees the key.',
     code: `import Anthropic from '@anthropic-ai/sdk';
 import { Byoky } from '@byoky/sdk';
 

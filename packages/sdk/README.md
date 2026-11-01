@@ -117,7 +117,7 @@ const session = await byoky.tryReconnect();
 |-------------------|-------------|
 | `sessionKey` | Unique session identifier |
 | `providers` | Map of available providers with auth method |
-| `createFetch(providerId)` | Create a proxied `fetch` function |
+| `createFetch(providerId)` | Create a proxied `fetch` function for the provider's inference and model-list endpoints (Files, Batches, Assistants and admin APIs get 403 `ENDPOINT_NOT_ALLOWED`) |
 | `listModels(providerId)` | Discover models available to the user's credential (live, per provider) |
 | `createRelay(wsUrl)` | Open a WebSocket relay to your backend |
 | `disconnect()` | End the session |

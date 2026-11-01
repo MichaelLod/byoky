@@ -49,7 +49,7 @@ const msg = await client.messages.create({
 
 # Session API
 
-- \`session.createFetch(providerId)\` — drop-in \`fetch\` for any provider SDK. Streaming, vision, and file uploads all work unchanged.
+- \`session.createFetch(providerId)\` — drop-in \`fetch\` for any provider SDK's inference calls. Streaming, vision, tool use and multipart uploads to inference endpoints (e.g. audio transcription) work unchanged. Only inference and model-list endpoints are allowed: no Files, Batches, Assistants, fine-tuning or admin APIs (403 \`ENDPOINT_NOT_ALLOWED\`), so send images and PDFs inline in the request.
 - \`session.listModels(providerId)\` — discover models the user's credential can access (live per provider, including local Ollama / LM Studio installs). Returns \`{ id, displayName?, contextWindow?, capabilities?, raw }[]\`. Throws \`PROVIDER_UNAVAILABLE\` for providers without a discovery endpoint (xAI); returns a hardcoded list for Perplexity.
 - \`session.createRelay(wsUrl)\` — open a WebSocket so a backend server can make LLM calls through this session.
 - \`session.getUsage()\` — returns { requests, inputTokens, outputTokens, byProvider }.
@@ -239,8 +239,10 @@ function Overview() {
 
       <p>
         Pass the session&apos;s <code>fetch</code> and key to the provider SDK you already use; the
-        rest of your code stays the same. Full API compatibility. Streaming, file uploads, and
-        vision all work. Sessions auto-reconnect if the extension restarts.
+        rest of your code stays the same. Streaming, vision, tool use and inline images and PDFs
+        all work through the wallet. Apps can call inference and model-list endpoints only (see{' '}
+        <a href="#allowed-endpoints" style={{ color: 'var(--phosphor)' }}>Allowed endpoints</a>).
+        Sessions auto-reconnect if the extension restarts.
       </p>
 
       <p>
@@ -396,8 +398,9 @@ const message = await client.messages.create({
 });`}</Code>
 
       <p>
-        That&apos;s it. Full API compatibility &mdash; streaming, file uploads, and vision all work
-        unchanged.
+        That&apos;s it. Streaming, vision, tool use and multipart uploads to inference endpoints
+        work unchanged. Storage APIs such as Files and Batches are blocked; see{' '}
+        <a href="#allowed-endpoints" style={{ color: 'var(--phosphor)' }}>Allowed endpoints</a>.
       </p>
 
       <h3>Why dangerouslyAllowBrowser?</h3>
@@ -1312,6 +1315,35 @@ function Limits() {
         <code>Retry-After</code> header preserved.
       </p>
 
+      <h3 id="allowed-endpoints">Allowed endpoints</h3>
+      <p>
+        An app that connects with the SDK, in the page or through a backend relay, can only make
+        inference calls through the wallet. This keeps one app from reading what another app
+        stored under the same key. Every wallet (extension, iOS, Android) applies the same rule:
+      </p>
+      <ul>
+        <li>
+          <strong>POST</strong> to inference endpoints: chat completions, completions, responses,
+          messages (and token counting), embeddings, moderations, audio speech, transcription and
+          translation, image generation, edits and variations, Gemini&apos;s <code>generateContent</code>,{' '}
+          <code>streamGenerateContent</code>, <code>countTokens</code> and embedding actions,
+          Cohere&apos;s chat, embed and rerank, and Ollama&apos;s generate, chat and show.
+        </li>
+        <li>
+          <strong>GET</strong> for model lists only (<code>/models</code> and{' '}
+          <code>/models/&#123;id&#125;</code>), plus Ollama&apos;s <code>/api/tags</code> and{' '}
+          <code>/api/version</code>.
+        </li>
+      </ul>
+      <p>
+        Everything else gets HTTP 403 with <code>code: &apos;ENDPOINT_NOT_ALLOWED&apos;</code>: the
+        Files and Uploads APIs, Batches, fine-tuning, Assistants, Threads, Vector stores,
+        Gemini&apos;s <code>cachedContents</code>, Realtime, and organization, project and key
+        management, as well as any <code>DELETE</code>, <code>PUT</code> or <code>PATCH</code>.
+        Send images, PDFs and other content inline (base64) in the inference request instead of
+        uploading them first. The bridge for CLI tools doesn&apos;t apply this rule.
+      </p>
+
       <h3>Session lifetime</h3>
       <ul>
         <li>
@@ -1867,6 +1899,7 @@ const docsStyles = `
   margin-top: 28px;
   margin-bottom: 10px;
   color: var(--bone);
+  scroll-margin-top: 80px;
 }
 
 .docs-section-body {
