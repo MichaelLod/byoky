@@ -2,7 +2,9 @@ import { useState, useRef, useEffect } from 'react';
 import type { ByokySession } from '@byoky/sdk';
 import { ByokyServer } from '@byoky/sdk/server';
 import { createMockWebSocketPair } from './mock-ws';
+import { CHAT_ENDPOINTS, cohereResponseText } from '../../components/chat-providers';
 
+// Every id here needs an entry in CHAT_ENDPOINTS.
 const PROVIDER_NAMES: Record<string, string> = {
   anthropic: 'Anthropic', openai: 'OpenAI', gemini: 'Google Gemini',
   mistral: 'Mistral', cohere: 'Cohere', xai: 'xAI (Grok)',
@@ -157,25 +159,23 @@ export function BackendRelay({ session }: Props) {
       // Now make an LLM call from the "backend"
       const fetchFn = client.createFetch(provider);
 
-      const apiUrl = provider === 'anthropic'
-        ? 'https://api.anthropic.com/v1/messages'
-        : provider === 'openai'
-        ? 'https://api.openai.com/v1/chat/completions'
-        : provider === 'gemini'
-        ? `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent`
-        : `https://api.${provider}.com/v1/chat/completions`;
+      const apiUrl = provider === 'gemini'
+        ? `${CHAT_ENDPOINTS.gemini}/${currentModel}:generateContent`
+        : CHAT_ENDPOINTS[provider];
 
-      const reqBody = provider === 'anthropic'
-        ? {
-            model: currentModel,
-            max_tokens: 512,
-            messages: [{ role: 'user', content: prompt }],
-          }
-        : provider === 'gemini'
+      const reqBody = provider === 'gemini'
         ? {
             contents: [{ parts: [{ text: prompt }] }],
           }
+        : provider === 'openai'
+        ? {
+            // OpenAI's reasoning models (gpt-5.x) reject max_tokens.
+            model: currentModel,
+            messages: [{ role: 'user', content: prompt }],
+            max_completion_tokens: 512,
+          }
         : {
+            // Anthropic, Cohere v2 and the OpenAI-compatible providers.
             model: currentModel,
             messages: [{ role: 'user', content: prompt }],
             max_tokens: 512,
@@ -203,6 +203,8 @@ export function BackendRelay({ session }: Props) {
           setResponse(parsed.content?.[0]?.text ?? text);
         } else if (provider === 'gemini') {
           setResponse(parsed.candidates?.[0]?.content?.parts?.[0]?.text ?? text);
+        } else if (provider === 'cohere') {
+          setResponse(cohereResponseText(parsed) ?? text);
         } else {
           setResponse(parsed.choices?.[0]?.message?.content ?? text);
         }
