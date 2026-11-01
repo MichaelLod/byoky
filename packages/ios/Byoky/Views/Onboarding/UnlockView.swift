@@ -108,9 +108,12 @@ struct UnlockView: View {
                         Image(systemName: showPassword ? "eye.slash" : "eye")
                             .font(.system(size: 15))
                             .foregroundStyle(Theme.dim)
-                            .frame(width: 24, height: 24)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    // A 44pt target; the glyph stays where the 24pt one was.
+                    .padding(.trailing, -10)
                     .accessibilityLabel(showPassword ? "Hide password" : "Show password")
                     .disabled(isLockedOut)
                 }

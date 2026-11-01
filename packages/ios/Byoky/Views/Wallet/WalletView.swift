@@ -18,6 +18,7 @@ struct WalletView: View {
     @State private var renamingCredential: Credential?
     @State private var editingEndpointFor: Credential?
     @State private var renameDraft: String = ""
+    @State private var renameError: String?
     @State private var removingCredential: Credential?
     @State private var removeTitle = ""
     @State private var greetings = 0
@@ -36,6 +37,7 @@ struct WalletView: View {
                         .padding(.horizontal, 16)
                         .padding(.bottom, 24)
                     }
+                    .contentMargins(.bottom, FloatingActionMenu.clearance, for: .scrollContent)
                 } else {
                     List {
                         header
@@ -46,6 +48,7 @@ struct WalletView: View {
                     }
                     .listStyle(.plain)
                     .scrollContentBackground(.hidden)
+                    .contentMargins(.bottom, FloatingActionMenu.clearance, for: .scrollContent)
                 }
             }
             .background(ScreenBackground())
@@ -59,6 +62,7 @@ struct WalletView: View {
                     } label: {
                         Image(systemName: "gearshape")
                     }
+                    .accessibilityLabel("Settings")
                     .accessibilityIdentifier("wallet.settings")
                 }
             }
@@ -88,12 +92,28 @@ struct WalletView: View {
                 TextField("Label", text: $renameDraft)
                     .accessibilityIdentifier("wallet.renameCredential.field")
                 Button("Save") {
-                    try? wallet.updateCredentialLabel(id: credential.id, newLabel: renameDraft)
                     renamingCredential = nil
+                    do {
+                        try wallet.updateCredentialLabel(id: credential.id, newLabel: renameDraft)
+                    } catch WalletError.invalidInput {
+                        renameError = "The label can't be empty."
+                    } catch {
+                        renameError = error.localizedDescription
+                    }
                 }
+                .disabled(renameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityIdentifier("wallet.renameCredential.save")
                 Button("Cancel", role: .cancel) {
                     renamingCredential = nil
                 }
+            }
+            .alert("Couldn't rename", isPresented: Binding(
+                get: { renameError != nil },
+                set: { if !$0 { renameError = nil } }
+            )) {
+                Button("OK", role: .cancel) { renameError = nil }
+            } message: {
+                Text(renameError ?? "")
             }
             .alert(removeTitle, isPresented: Binding(
                 get: { removingCredential != nil },
@@ -232,9 +252,12 @@ private struct RetiredFeaturesBanner: View {
                 Image(systemName: "xmark")
                     .font(.caption)
                     .foregroundStyle(Theme.dim)
-                    .frame(width: 24, height: 24)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            // A 44pt target over the card's padding; the glyph stays put.
+            .padding(-10)
             .accessibilityLabel("Dismiss")
             .accessibilityIdentifier("wallet.retiredNotice.dismiss")
         }
@@ -272,7 +295,7 @@ struct EndpointEditorView: View {
         NavigationStack {
             List {
                 Section {
-                    TextField(isAzure ? "https://<resource>.openai.azure.com" : "http://localhost:11434", text: $endpoint)
+                    TextField(isAzure ? "https://<resource>.openai.azure.com" : Provider.localServerPlaceholder, text: $endpoint)
                         .keyboardType(.URL)
                         .textContentType(.URL)
                         .textInputAutocapitalization(.never)
@@ -282,7 +305,7 @@ struct EndpointEditorView: View {
                     if !endpoint.trimmingCharacters(in: .whitespaces).isEmpty && !isValid {
                         Text(isAzure
                              ? "Use your resource endpoint, like https://contoso.openai.azure.com"
-                             : "Use http://localhost:<port>, http://127.0.0.1:<port>, or an https:// address")
+                             : Provider.localServerURLError)
                             .font(.caption)
                             .foregroundStyle(Theme.alarm)
                     }
@@ -339,6 +362,10 @@ struct CredentialRow: View {
     let onEditEndpoint: () -> Void
     let onRename: () -> Void
 
+    /// At accessibility text sizes the card stacks its parts instead of
+    /// squeezing them side by side (which broke words mid-way).
+    @Environment(\.dynamicTypeSize) private var typeSize
+
     private var needsEndpoint: Bool {
         Provider.find(credential.providerId)?.requiresCustomBaseUrl == true
     }
@@ -349,37 +376,26 @@ struct CredentialRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 14) {
-                ProviderTile(providerId: credential.providerId, size: 40)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(credential.label)
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(Theme.bone)
-                    Text(Provider.find(credential.providerId)?.name ?? credential.providerId)
-                        .font(.mono(12, relativeTo: .caption))
-                        .foregroundStyle(Theme.dim)
+            if typeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        ProviderTile(providerId: credential.providerId, size: 40)
+                        Spacer()
+                        renameButton
+                    }
+                    titles
+                    badge
                 }
-
-                Spacer()
-
-                Button {
-                    onRename()
-                } label: {
-                    Image(systemName: "pencil")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(Theme.dim)
-                        .frame(width: 28, height: 28)
+            } else {
+                HStack(spacing: 14) {
+                    ProviderTile(providerId: credential.providerId, size: 40)
+                    titles
+                    Spacer()
+                    renameButton
+                        // A 44pt target in the 28pt slot the pencil had.
+                        .padding(-8)
+                    badge
                 }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("Rename credential")
-                .accessibilityIdentifier("wallet.credential.rename")
-
-                Text(credential.authMethod == .apiKey ? "API Key" : "OAuth")
-                    .uppercaseDisplay()
-                    .font(.mono(11, relativeTo: .caption2))
-                    .tracking(0.8)
-                    .foregroundStyle(credential.authMethod == .apiKey ? Theme.fog : Theme.phosphor)
             }
 
             if needsEndpoint {
@@ -413,12 +429,27 @@ struct CredentialRow: View {
             VStack(alignment: .leading, spacing: 8) {
                 SectionLabel("Last 7 days")
 
-                HStack(spacing: 16) {
-                    statColumn(value: "\(usage.requests)", label: "requests")
-                    statColumn(value: formatWalletTokens(usage.inputTokens), label: "input")
-                    statColumn(value: formatWalletTokens(usage.outputTokens), label: "output")
+                if typeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 6) {
+                        statRow(value: "\(usage.requests)", label: "requests", spoken: "requests")
+                        statRow(value: formatTokenCount(usage.inputTokens), label: "input", spoken: "input tokens")
+                        statRow(value: formatTokenCount(usage.outputTokens), label: "output", spoken: "output tokens")
+                    }
+                } else {
+                    HStack(spacing: 16) {
+                        statColumn(value: "\(usage.requests)", label: "requests", spoken: "requests")
+                        statColumn(value: formatTokenCount(usage.inputTokens), label: "input", spoken: "input tokens")
+                        statColumn(value: formatTokenCount(usage.outputTokens), label: "output", spoken: "output tokens")
+                    }
                 }
             }
+            // The whole card opens the stats; for VoiceOver the usage block
+            // is that button, read as one sentence.
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint("Shows usage")
+            .accessibilityAction { onOpenStats() }
+            .accessibilityIdentifier("wallet.credential.usage")
         }
         .padding(14)
         .retroCard()
@@ -426,7 +457,61 @@ struct CredentialRow: View {
         .onTapGesture { onOpenStats() }
     }
 
-    private func statColumn(value: String, label: String) -> some View {
+    private var titles: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(credential.label)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(Theme.bone)
+            Text(Provider.find(credential.providerId)?.name ?? credential.providerId)
+                .font(.mono(12, relativeTo: .caption))
+                .foregroundStyle(Theme.dim)
+        }
+    }
+
+    private var renameButton: some View {
+        Button {
+            onRename()
+        } label: {
+            Image(systemName: "pencil")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Theme.dim)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("Rename credential")
+        .accessibilityIdentifier("wallet.credential.rename")
+    }
+
+    /// Named as in Add Credential and the backup preview.
+    private var badge: some View {
+        Text(credential.authMethod == .apiKey ? "API Key" : "Setup Token")
+            .uppercaseDisplay()
+            .font(.mono(11, relativeTo: .caption2))
+            .tracking(0.8)
+            .foregroundStyle(credential.authMethod == .apiKey ? Theme.fog : Theme.phosphor)
+            .lineLimit(1)
+            .fixedSize()
+    }
+
+    /// One usage figure as a label/value row, for accessibility text sizes.
+    private func statRow(value: String, label: String, spoken: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label)
+                .uppercaseDisplay()
+                .font(.mono(10, relativeTo: .caption2))
+                .tracking(1)
+                .foregroundStyle(Theme.dim)
+            Spacer(minLength: 8)
+            Text(value)
+                .font(.mono(17, weight: .medium, relativeTo: .headline))
+                .foregroundStyle(Theme.bone)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(value) \(spoken)")
+    }
+
+    private func statColumn(value: String, label: String, spoken: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(value)
                 .font(.mono(17, weight: .medium, relativeTo: .headline))
@@ -438,11 +523,15 @@ struct CredentialRow: View {
                 .foregroundStyle(Theme.dim)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(value) \(spoken)")
     }
 }
 
-func formatWalletTokens(_ n: Int) -> String {
-    if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
+/// A token count as the wallet shows it everywhere: 950, 3.6K, 1.3M (as
+/// in the extension). Counts that would round up to "1000.0K" show as M.
+func formatTokenCount(_ n: Int) -> String {
+    if n >= 999_950 { return String(format: "%.1fM", Double(n) / 1_000_000) }
     if n >= 1_000 { return String(format: "%.1fK", Double(n) / 1_000) }
     return "\(n)"
 }

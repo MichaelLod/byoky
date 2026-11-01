@@ -375,11 +375,13 @@ struct ProviderIcon: View {
 
     var body: some View {
         if let provider = Provider.find(providerId), UIImage(named: provider.icon) != nil {
-            Image(provider.icon)
+            Image(decorative: provider.icon)
                 .resizable()
                 .renderingMode(.template)
                 .aspectRatio(contentMode: .fit)
                 .frame(width: size, height: size)
+                // The provider's name is always next to its mark.
+                .accessibilityHidden(true)
         } else if let provider = Provider.find(providerId) {
             Text(String(provider.name.prefix(2)).uppercased())
                 .font(.mono(size * 0.72, weight: .medium))
@@ -390,6 +392,7 @@ struct ProviderIcon: View {
         } else {
             Image(systemName: "key")
                 .font(.system(size: size))
+                .accessibilityHidden(true)
         }
     }
 }

@@ -7,6 +7,7 @@ struct MainTabView: View {
     @State private var showAddApp = false
     @State private var justAdded: InstalledApp?
     @State private var launchingApp: InstalledApp?
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     private static let appsTabIndex = 1
     private static let connectedTabIndex = 2
@@ -41,9 +42,8 @@ struct MainTabView: View {
                 onAddCredential: { showAddCredential = true },
                 onAddApp: { showAddApp = true }
             )
-            // Lift above the tab bar (49pt standard + safe-area inset).
             .padding(.trailing, 18)
-            .padding(.bottom, 70)
+            .padding(.bottom, fabLift)
         }
         .sheet(isPresented: $showAddCredential) {
             AddCredentialView()
@@ -67,7 +67,23 @@ struct MainTabView: View {
     }
 }
 
+extension MainTabView {
+    /// Lifts the + button above the tab bar at the bottom. iPadOS 18 and
+    /// later put the tab bar at the top in regular width, so there the
+    /// button sits near the bottom edge.
+    private var fabLift: CGFloat {
+        if #available(iOS 18, *), UIDevice.current.userInterfaceIdiom == .pad, sizeClass == .regular {
+            return 18
+        }
+        return 70
+    }
+}
+
 struct FloatingActionMenu: View {
+    /// Room scrolling content leaves at its end so the last rows can scroll
+    /// out from under the + button (64pt with its halo, plus a gap).
+    static let clearance: CGFloat = 88
+
     let onAddCredential: () -> Void
     let onAddApp: () -> Void
 
@@ -80,10 +96,13 @@ struct FloatingActionMenu: View {
             }
             .accessibilityIdentifier("fab.menu.addCredential")
 
+            // The Apps tab's symbol. A menu item with square.grid.2x2.fill
+            // is read by its symbol name, "Large Grid", whatever its title
+            // or accessibilityLabel says.
             Button {
                 onAddApp()
             } label: {
-                Label("Add app", systemImage: "square.grid.2x2.fill")
+                Label("Add app", systemImage: "square.grid.2x2")
             }
             .accessibilityIdentifier("fab.menu.addApp")
         } label: {

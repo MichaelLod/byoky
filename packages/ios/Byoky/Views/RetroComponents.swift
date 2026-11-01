@@ -108,6 +108,8 @@ struct PromptLine: View {
 struct StatusLabel: View {
     let text: String
     var color: Color = Theme.signal
+    /// Grows with the text, which it sits on the first line of.
+    @ScaledMetric(relativeTo: .caption2) private var dot: CGFloat = 6
 
     init(_ text: String, color: Color = Theme.signal) {
         self.text = text
@@ -115,10 +117,10 @@ struct StatusLabel: View {
     }
 
     var body: some View {
-        HStack(spacing: 7) {
+        HStack(alignment: .firstTextBaseline, spacing: 7) {
             Rectangle()
                 .fill(color)
-                .frame(width: 6, height: 6)
+                .frame(width: dot, height: dot)
             Text(text)
                 .uppercaseDisplay()
         }
@@ -224,6 +226,8 @@ struct ProviderTile: View {
             .frame(width: size, height: size)
             .background(Theme.ink)
             .overlay(Rectangle().strokeBorder(Theme.seamStrong, lineWidth: 1))
+            // Decorative: the provider's name is always shown beside it.
+            .accessibilityHidden(true)
     }
 }
 

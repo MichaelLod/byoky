@@ -3,6 +3,9 @@ import SwiftUI
 struct InstalledAppsGrid: View {
     @EnvironmentObject var wallet: WalletStore
     let onAddApp: () -> Void
+    /// Opens an app in the in-wallet browser.
+    let onOpenApp: (InstalledApp) -> Void
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     private var enabledApps: [InstalledApp] { wallet.installedApps.filter(\.enabled) }
     private var disabledApps: [InstalledApp] { wallet.installedApps.filter { !$0.enabled } }
@@ -34,6 +37,7 @@ struct InstalledAppsGrid: View {
             .padding(.top, 4)
             .padding(.bottom, 24)
         }
+        .contentMargins(.bottom, FloatingActionMenu.clearance, for: .scrollContent)
     }
 
     private var emptyState: some View {
@@ -56,9 +60,12 @@ struct InstalledAppsGrid: View {
     }
 
     private func appGrid(apps: [InstalledApp]) -> some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 20) {
+        // At accessibility text sizes the apps become rows, icon and name
+        // side by side, so names aren't cut to one letter.
+        let columns = typeSize.isAccessibilitySize ? 1 : 4
+        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: columns), spacing: 20) {
             ForEach(apps) { app in
-                AppIconView(app: app)
+                AppIconView(app: app, onOpen: onOpenApp)
             }
         }
         .padding(.horizontal)
@@ -67,39 +74,33 @@ struct InstalledAppsGrid: View {
 
 struct AppIconView: View {
     let app: InstalledApp
+    let onOpen: (InstalledApp) -> Void
     @EnvironmentObject var wallet: WalletStore
-    @State private var openRequest: InstalledApp?
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @State private var showDisabledOptions = false
 
     var body: some View {
-        VStack(spacing: 6) {
-            Button {
-                if app.enabled { openRequest = app }
-            } label: {
-                AsyncImage(url: URL(string: app.icon)) { image in
-                    image.resizable().aspectRatio(contentMode: .fill)
-                } placeholder: {
-                    Rectangle()
-                        .fill(Theme.violetSoft)
-                        .overlay {
-                            Text(String(app.name.prefix(1)))
-                                .uppercaseDisplay()
-                                .font(.display(24, relativeTo: .title2))
-                                .foregroundStyle(Theme.lilac)
-                        }
+        SwiftUI.Group {
+            if typeSize.isAccessibilitySize {
+                // A row: the whole row opens the app.
+                openButton {
+                    HStack(spacing: 14) {
+                        icon
+                        name
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .contentShape(Rectangle())
                 }
-                .frame(width: 56, height: 56)
-                .background(Theme.ink)
-                .clipped()
-                .overlay(Rectangle().strokeBorder(Theme.seamStrong, lineWidth: 1))
+            } else {
+                VStack(spacing: 6) {
+                    openButton { icon }
+                    name
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                }
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(app.name)
-
-            Text(app.name)
-                .font(.mono(10.5, relativeTo: .caption2))
-                .foregroundStyle(Theme.fog)
-                .lineLimit(1)
-                .frame(maxWidth: 70)
         }
         .contextMenu {
             Button {
@@ -113,6 +114,60 @@ struct AppIconView: View {
                 Label("Remove", systemImage: "trash")
             }
         }
-        .opensInstalledApp($openRequest)
+        .confirmationDialog("\(app.name) is disabled", isPresented: $showDisabledOptions, titleVisibility: .visible) {
+            Button("Enable and Open") {
+                wallet.toggleApp(app.id)
+                var enabled = app
+                enabled.enabled = true
+                onOpen(enabled)
+            }
+            Button("Enable") {
+                wallet.toggleApp(app.id)
+            }
+            Button("Remove", role: .destructive) {
+                wallet.uninstallApp(app.id)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Disabled apps stay in your list but don't open.")
+        }
+    }
+
+    private func openButton<Label: View>(@ViewBuilder label: () -> Label) -> some View {
+        Button {
+            // A disabled app doesn't open, but says why and how to fix it.
+            if app.enabled { onOpen(app) } else { showDisabledOptions = true }
+        } label: {
+            label()
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(app.name)
+        .accessibilityValue(app.enabled ? "" : "Disabled")
+        .accessibilityHint(app.enabled ? "Opens the app" : "Shows options to enable it")
+    }
+
+    private var icon: some View {
+        AsyncImage(url: URL(string: app.icon)) { image in
+            image.resizable().aspectRatio(contentMode: .fill)
+        } placeholder: {
+            Rectangle()
+                .fill(Theme.violetSoft)
+                .overlay {
+                    Text(String(app.name.prefix(1)))
+                        .uppercaseDisplay()
+                        .font(.display(24, relativeTo: .title2))
+                        .foregroundStyle(Theme.lilac)
+                }
+        }
+        .frame(width: 56, height: 56)
+        .background(Theme.ink)
+        .clipped()
+        .overlay(Rectangle().strokeBorder(Theme.seamStrong, lineWidth: 1))
+    }
+
+    private var name: some View {
+        Text(app.name)
+            .font(.mono(10.5, relativeTo: .caption2))
+            .foregroundStyle(Theme.fog)
     }
 }

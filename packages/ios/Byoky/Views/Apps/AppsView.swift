@@ -13,6 +13,8 @@ struct AppsView: View {
     @State private var editingAllowanceFor: Session?
     @State private var editingGroup: Group?
     @State private var showCreateGroup = false
+    @State private var deletingGroup: Group?
+    @State private var confirmDisconnectAll = false
 
     private var orderedGroups: [Group] {
         let def = wallet.groups.filter { $0.id == defaultGroupId }
@@ -61,6 +63,7 @@ struct AppsView: View {
                 }
             }
             .retroList()
+            .contentMargins(.bottom, FloatingActionMenu.clearance, for: .scrollContent)
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
@@ -68,9 +71,7 @@ struct AppsView: View {
                     ToolbarItem(placement: .topBarLeading) {
                         Menu {
                             Button(role: .destructive) {
-                                for session in wallet.sessions {
-                                    try? wallet.revokeSession(session)
-                                }
+                                confirmDisconnectAll = true
                             } label: {
                                 Label("Disconnect all", systemImage: "xmark.circle")
                             }
@@ -99,6 +100,34 @@ struct AppsView: View {
             .sheet(item: $editingGroup) { group in
                 GroupEditorSheet(mode: .edit(group))
                     .environmentObject(wallet)
+            }
+            .alert(
+                deletingGroup.map { "Delete group \"\($0.name)\"?" } ?? "",
+                isPresented: Binding(
+                    get: { deletingGroup != nil },
+                    set: { if !$0 { deletingGroup = nil } }
+                ),
+                presenting: deletingGroup
+            ) { group in
+                Button("Delete", role: .destructive) {
+                    try? wallet.deleteGroup(id: group.id)
+                    deletingGroup = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    deletingGroup = nil
+                }
+            } message: { _ in
+                Text("Apps in this group move back to Default.")
+            }
+            .alert("Disconnect all apps?", isPresented: $confirmDisconnectAll) {
+                Button("Disconnect all", role: .destructive) {
+                    for session in wallet.sessions {
+                        try? wallet.revokeSession(session)
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Every connected app loses access to your keys until you open it again and reconnect.")
             }
         }
     }
@@ -149,6 +178,9 @@ struct AppsView: View {
                             } label: {
                                 Label("Disconnect", systemImage: "xmark.circle")
                             }
+                            // The tab view's lilac tint would win over the
+                            // destructive red.
+                            .tint(Theme.alarm)
                         }
                         .swipeActions(edge: .leading) {
                             Button {
@@ -196,7 +228,7 @@ struct AppsView: View {
                             Label("Edit", systemImage: "pencil")
                         }
                         Button(role: .destructive) {
-                            try? wallet.deleteGroup(id: group.id)
+                            deletingGroup = group
                         } label: {
                             Label("Delete", systemImage: "trash")
                         }
@@ -204,10 +236,18 @@ struct AppsView: View {
                         Image(systemName: "ellipsis.circle")
                             .font(.callout)
                             .foregroundStyle(Theme.phosphor)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
                     }
+                    .accessibilityLabel("Options for \(group.name)")
+                    // The glyph keeps its place at the card's edge.
+                    .padding(.trailing, -12)
                 }
             }
-            .listRowInsets(EdgeInsets(top: 18, leading: RetroRowBackground.inset, bottom: 6, trailing: RetroRowBackground.inset))
+            // Every header is as tall as the 44pt options button, so the
+            // Default group's lines up with the others.
+            .frame(minHeight: 44)
+            .listRowInsets(EdgeInsets(top: 4, leading: RetroRowBackground.inset, bottom: 0, trailing: RetroRowBackground.inset))
         } footer: {
             ListFooter {
                 if group.providerId.isEmpty {
@@ -276,12 +316,12 @@ private struct AppSessionRow: View {
                     HStack(spacing: 8) {
                         ProgressView(value: min(Double(tokensUsed) / Double(limit), 1.0))
                             .tint(Double(tokensUsed) / Double(limit) >= 0.8 ? Theme.amber : Theme.violet)
-                        Text("\(formatTokens(tokensUsed)) / \(formatTokens(limit))")
+                        Text("\(formatTokenCount(tokensUsed)) / \(formatTokenCount(limit))")
                             .font(.mono(11, relativeTo: .caption2))
                             .foregroundStyle(Theme.fog)
                     }
                 } else {
-                    Text("\(formatTokens(tokensUsed)) tokens used")
+                    Text("\(formatTokenCount(tokensUsed)) tokens used")
                         .font(.mono(11, relativeTo: .caption2))
                         .foregroundStyle(Theme.dim)
                 }
@@ -834,15 +874,4 @@ struct AllowanceFormView: View {
         wallet.setAllowance(parsed)
         dismiss()
     }
-}
-
-// MARK: - Helpers
-
-private func formatTokens(_ count: Int) -> String {
-    if count >= 1_000_000 {
-        return String(format: "%.1fM", Double(count) / 1_000_000)
-    } else if count >= 1_000 {
-        return String(format: "%.0fK", Double(count) / 1_000)
-    }
-    return "\(count)"
 }

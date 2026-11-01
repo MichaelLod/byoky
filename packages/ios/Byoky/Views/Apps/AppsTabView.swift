@@ -10,7 +10,7 @@ struct AppsTabView: View {
 
     var body: some View {
         NavigationStack {
-            InstalledAppsGrid(onAddApp: { showAddApp = true })
+            InstalledAppsGrid(onAddApp: { showAddApp = true }, onOpenApp: { launchingApp = $0 })
                 .background(ScreenBackground())
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbarBackground(.hidden, for: .navigationBar)

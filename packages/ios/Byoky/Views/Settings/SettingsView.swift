@@ -16,6 +16,7 @@ struct SettingsView: View {
             List {
                 backupSection
                 securitySection
+                safariExtensionSection
                 #if DEBUG
                 translationDebugSection
                 #endif
@@ -101,7 +102,7 @@ struct SettingsView: View {
         } footer: {
             ListFooter(wallet.credentials.isEmpty
                 ? "Add a key before exporting. You can import a .byoky backup from the Byoky extension or another device."
-                : "Keys live only on this device. Export an encrypted .byoky file to back them up or move them to another device — the Byoky extension and Android app can import it too.")
+                : "Keys in this app live only on this device. Export an encrypted .byoky file to back them up or move them to another device — the Byoky extension (also in Safari) and Android app can import it too.")
         }
         .retroRow()
     }
@@ -185,6 +186,42 @@ struct SettingsView: View {
             ListHeader("Security")
         }
         .retroRow()
+    }
+
+    /// The Safari extension that ships with the app is a wallet of its own:
+    /// how to turn it on, and how to get these keys into it.
+    private var safariExtensionSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Use Byoky in Safari", systemImage: "safari")
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(Theme.bone)
+                SwiftUI.Group {
+                    Text("1. Open \(Self.safariExtensionsPath).")
+                    Text("2. Turn on Byoky and allow it on the sites you use.")
+                    Text("3. In Safari, open Byoky from the extensions menu and set up its wallet.")
+                }
+                .font(.callout)
+                .foregroundStyle(Theme.fog)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, 4)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("settings.safariExtension")
+        } header: {
+            ListHeader("Safari extension")
+        } footer: {
+            ListFooter("The Safari extension is a separate wallet with its own password and keys; keys in this app aren't available there. To use them in Safari, Export Backup here and import the .byoky file in the extension's settings.")
+        }
+        .retroRow()
+    }
+
+    /// Where iOS keeps Safari's extension switches.
+    private static var safariExtensionsPath: String {
+        if #available(iOS 18, *) {
+            return "Settings > Apps > Safari > Extensions"
+        }
+        return "Settings > Safari > Extensions"
     }
 
     private var aboutSection: some View {
