@@ -10,8 +10,10 @@
  * adapter.ts) and register it below. No pair-specific code.
  */
 
+import type { ProviderId } from '../types.js';
 import type { TranslationContext } from './types.js';
-import { getAdapter } from './adapter.js';
+import { getAdapter, hasAdapter } from './adapter.js';
+import { familyOf } from './families.js';
 import type { IRResponseOrError, IRStreamEvent } from './ir.js';
 import { isIRError } from './ir.js';
 import { registerAdapter } from './adapter.js';
@@ -44,6 +46,43 @@ export function translateRequest(ctx: TranslationContext, body: string): string 
   // body carries no flag; the caller's context does.
   if (ctx.isStreaming) ir.stream = true;
   return dst.serializeRequest(ctx, ir);
+}
+
+/**
+ * Point a request at the model a group pins within the app's own family
+ * (a model override or same-family swap: nothing is translated). Sets
+ * `model` and, for the family's chat endpoint, fits the request to that
+ * model's rules, the ones translation applies (e.g. no sampling parameters
+ * or forced tool choice on Claude Sonnet 5.5, max_completion_tokens on
+ * OpenAI reasoning models). Every other field stays as the app sent it.
+ *
+ * A body that already names the model, or isn't a JSON object, is returned
+ * as it was. Throws TranslationError when the model can't serve the
+ * request at all.
+ *
+ * `url` is the URL the app called; `dstProviderId` the provider the request
+ * goes to (the same family as the app's).
+ */
+export function rewriteRequestModel(
+  ctx: { dstProviderId: ProviderId; dstModel: string; url: string },
+  body: string,
+): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return body;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return body;
+  const request = parsed as Record<string, unknown>;
+  if (request.model === ctx.dstModel) return body;
+  request.model = ctx.dstModel;
+  const family = familyOf(ctx.dstProviderId);
+  const adapter = family && hasAdapter(family) ? getAdapter(family) : undefined;
+  if (adapter?.shapeRequestForModel && adapter.matchesChatEndpoint(ctx.url)) {
+    adapter.shapeRequestForModel(request, { dstModel: ctx.dstModel, dstProviderId: ctx.dstProviderId });
+  }
+  return JSON.stringify(request);
 }
 
 /**

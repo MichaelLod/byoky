@@ -1,4 +1,4 @@
-import type { TranslationContext } from '../types.js';
+import type { ModelShapingContext, TranslationContext } from '../types.js';
 import { TranslationError } from '../types.js';
 import { getModel } from '../../models.js';
 import type { FamilyAdapter, IRStreamParser, IRStreamSerializer } from '../adapter.js';
@@ -53,6 +53,7 @@ export const openaiAdapter: FamilyAdapter = {
 
   parseRequest,
   serializeRequest,
+  shapeRequestForModel,
   parseResponse,
   serializeResponse,
   createStreamParser,
@@ -76,6 +77,7 @@ interface OpenAIRequest {
   response_format?: { type: string; json_schema?: { schema?: unknown; name?: string } };
   tools?: OpenAITool[];
   tool_choice?: OpenAIToolChoice;
+  reasoning_effort?: string;
 }
 
 type OpenAIMessage =
@@ -410,23 +412,28 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
     }
   }
 
-  // Sampling params. OpenAI reasoning models reject max_tokens and
-  // temperature/top_p — use max_completion_tokens and drop the sampling
-  // overrides. OpenAI itself takes max_completion_tokens for every model
-  // (max_tokens is deprecated there); the other hosts of this dialect
-  // (DeepSeek, Mistral, OpenRouter, ...) document max_tokens.
+  // Sampling params. OpenAI reasoning models reject max_tokens and, unless
+  // their reasoning is off, temperature/top_p — use max_completion_tokens
+  // and drop the sampling overrides. OpenAI itself takes
+  // max_completion_tokens for every model (max_tokens is deprecated there);
+  // the other hosts of this dialect (DeepSeek, Mistral, OpenRouter, ...)
+  // document max_tokens.
   const isReasoningDst = isOpenAIReasoningModel(ctx.dstModel);
-  const useMaxCompletionTokens =
-    ctx.dstProviderId === 'openai' ||
-    (isReasoningDst && (ctx.dstProviderId == null || ctx.dstProviderId === 'azure_openai'));
+  // Tools on a model that calls them on Chat Completions only with its
+  // reasoning off: the tool calls are what the app's code relies on.
+  const reasoningOff =
+    isReasoningDst &&
+    !!ir.tools && ir.tools.length > 0 &&
+    reasoningOffForTools(ctx.dstModel, ctx.dstProviderId);
+  if (reasoningOff) out.reasoning_effort = 'none';
   if (typeof ir.maxTokens === 'number') {
-    if (useMaxCompletionTokens) out.max_completion_tokens = ir.maxTokens;
+    if (usesMaxCompletionTokens(isReasoningDst, ctx.dstProviderId)) out.max_completion_tokens = ir.maxTokens;
     else out.max_tokens = ir.maxTokens;
   }
-  if (typeof ir.temperature === 'number' && !isReasoningDst) {
+  if (typeof ir.temperature === 'number' && (!isReasoningDst || reasoningOff)) {
     out.temperature = ir.temperature;
   }
-  if (typeof ir.topP === 'number' && !isReasoningDst) out.top_p = ir.topP;
+  if (typeof ir.topP === 'number' && (!isReasoningDst || reasoningOff)) out.top_p = ir.topP;
   // top_k has no OpenAI equivalent — drop.
 
   if (ir.stopSequences && ir.stopSequences.length > 0) out.stop = ir.stopSequences.slice();
@@ -485,15 +492,89 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
 }
 
 /**
- * True for OpenAI reasoning models (o-series, GPT-5 family), which reject
- * max_tokens and non-default temperature/top_p. Groups accept any model id,
- * so besides the registry this matches the id itself, also behind
- * OpenRouter's `openai/` prefix.
+ * Fit an OpenAI Chat Completions request written for another model of the
+ * dialect to `ctx.dstModel`, in place (a group pins the model; nothing is
+ * translated): the reasoning-model rules serializeRequest follows, applied
+ * to the app's own body so every field they don't cover is kept.
+ */
+function shapeRequestForModel(body: Record<string, unknown>, ctx: ModelShapingContext): void {
+  if (!isOpenAIReasoningModel(ctx.dstModel)) return;
+  if (Array.isArray(body.tools) && body.tools.length > 0 && reasoningOffForTools(ctx.dstModel, ctx.dstProviderId)) {
+    body.reasoning_effort = 'none';
+  }
+  if (typeof body.max_tokens === 'number' && usesMaxCompletionTokens(true, ctx.dstProviderId)) {
+    if (typeof body.max_completion_tokens !== 'number') body.max_completion_tokens = body.max_tokens;
+    delete body.max_tokens;
+  }
+  // OpenAI: "When reasoning effort is not none, remove temperature, top_p,
+  // and top_logprobs. For Chat Completions, also remove logprobs."
+  if (body.reasoning_effort !== 'none') {
+    delete body.temperature;
+    delete body.top_p;
+    delete body.logprobs;
+    delete body.top_logprobs;
+  }
+}
+
+/**
+ * Whether a request's output cap goes in max_completion_tokens: always on
+ * OpenAI, and for reasoning models on Azure OpenAI and unknown hosts (which
+ * reject max_tokens). Other hosts of the dialect document max_tokens.
+ */
+function usesMaxCompletionTokens(isReasoning: boolean, providerId: string | undefined): boolean {
+  return providerId === 'openai' || (isReasoning && (providerId == null || providerId === 'azure_openai'));
+}
+
+/**
+ * True for OpenAI reasoning models (the o-series and GPT-5 onward), which
+ * reject max_tokens and, unless their reasoning is off, temperature/top_p.
+ * A registry entry decides for its own id. Groups accept any model id, so
+ * other ids are matched by name (also behind OpenRouter's `openai/`
+ * prefix): every GPT from 5 on reasons, GPT-6 included.
  */
 function isOpenAIReasoningModel(model: string): boolean {
   const entry = getModel(model);
-  if (entry?.family === 'openai' && entry.capabilities.reasoning) return true;
-  return /^(?:o\d|gpt-5)/i.test(model.replace(/^openai\//i, ''));
+  if (entry?.family === 'openai') return entry.capabilities.reasoning;
+  const id = model.replace(/^openai\//i, '');
+  if (/^o\d/i.test(id)) return true;
+  const gpt = /^gpt-(\d+)/i.exec(id);
+  return !!gpt && Number(gpt[1]) >= 5;
+}
+
+/**
+ * OpenAI models with no reasoning_effort 'none' ("GPT-6 Astra and GPT-6.1
+ * Sol do not support the none reasoning effort", OpenAI's latest-model
+ * guide, checked 2026-11-01; both answer 400 to it).
+ */
+const ALWAYS_REASONING = [/^gpt-6-astra(?![a-z0-9])/i, /^gpt-6\.1-sol(?![a-z0-9])/i];
+
+/**
+ * Whether a request with tools must turn `model`'s reasoning off. From
+ * GPT-5.6 on, OpenAI's Chat Completions takes function tools only with
+ * reasoning_effort 'none' (gpt-6-luna model page: "Chat Completions
+ * supports function calling only with reasoning_effort set to none"; the
+ * same 400 from gpt-5.6-luna, gpt-6-sol, gpt-6.1-terra, checked live
+ * 2026-11-01); reasoning with tools needs the Responses API, which Byoky
+ * doesn't speak. Models that can't turn reasoning off can't take tools there
+ * at all: that is a TranslationError rather than the upstream's 400. Only
+ * OpenAI's own API (and Azure's, and unknown hosts) are held to this; other
+ * hosts serve these models their own way.
+ */
+function reasoningOffForTools(model: string, providerId: string | undefined): boolean {
+  if (providerId != null && providerId !== 'openai' && providerId !== 'azure_openai') return false;
+  const id = model.replace(/^openai\//i, '');
+  const version = /^gpt-(\d+)(?:\.(\d+))?/i.exec(id);
+  if (!version) return false;
+  const major = Number(version[1]);
+  const minor = Number(version[2] ?? 0);
+  if (major < 5 || (major === 5 && minor < 6)) return false;
+  if (ALWAYS_REASONING.some((re) => re.test(id))) {
+    throw new TranslationError(
+      'UNSUPPORTED_FEATURE',
+      `OpenAI's Chat Completions API doesn't take tools for ${model} (only its Responses API does). Pin this app to a model that does, such as gpt-5.5 or gpt-6-luna.`,
+    );
+  }
+  return true;
 }
 
 /**

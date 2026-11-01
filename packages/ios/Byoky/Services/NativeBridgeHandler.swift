@@ -410,7 +410,10 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
         // forwarding, even though no translation/swap is needed.
         var forwardedBody = body
         if let override = routing?.modelOverride, !override.isEmpty, let text = body?.asText {
-            forwardedBody = rewriteModelInJsonBody(text, to: override).map(ProxyBody.text)
+            guard let pinned = pinModel(text, to: override, providerId: providerId, url: urlString, requestId: requestId) else {
+                return 0
+            }
+            forwardedBody = .text(pinned)
         }
 
         return await proxyDirect(
@@ -765,7 +768,10 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
             if let text = body?.asText {
                 var forwarded: String? = text
                 if let dstModel = swapDstModel, !dstModel.isEmpty {
-                    forwarded = rewriteModelInJsonBody(forwarded, to: dstModel)
+                    guard let pinned = pinModel(text, to: dstModel, providerId: swapToProviderId, url: sourceUrl, requestId: requestId) else {
+                        return 0
+                    }
+                    forwarded = pinned
                 }
                 outboundBody = injectStreamUsageOptions(providerId: swapToProviderId, body: forwarded).map(ProxyBody.text)
             }
@@ -1077,6 +1083,23 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
     }
 
     // MARK: - Helpers
+
+    /// `text` with the group's pinned `model` (a model of the app's own
+    /// family, sent to `providerId`), fitted by core to that model's request
+    /// rules for a chat request to `url`. Nil after delivering the error for
+    /// a request the model can't serve. Only renames the model when the
+    /// engine can't help (an older bundle).
+    private func pinModel(_ text: String, to model: String, providerId: String, url: String, requestId: String) -> String? {
+        switch TranslationEngine.shared.rewriteRequestModel(dstProviderId: providerId, url: url, body: text, model: model) {
+        case .body(let body):
+            return body
+        case .refused(let code, let message):
+            deliverProxyError(requestId: requestId, code: code, message: message, status: 400)
+            return nil
+        case nil:
+            return rewriteModelInJsonBody(text, to: model) ?? text
+        }
+    }
 
     private func rewriteModelInJsonBody(_ body: String?, to newModel: String) -> String? {
         guard let body, let data = body.data(using: .utf8),

@@ -93,6 +93,33 @@ final class TranslationEngineTests: XCTestCase {
         XCTAssertNoThrow(try TranslationEngine.shared.translateRequest(contextJson: anthropicToOpenaiCtx, body: anthropicReqBody))
     }
 
+    /// A group pinning another model of the app's family gets that model's
+    /// request rules through the bundle (R3-05). Needs core's
+    /// rewriteRequestModel in the bundled mobile.js.
+    func testRewriteRequestModelFitsTheRequestToThePinnedModel() throws {
+        let engine = TranslationEngine.shared
+        let url = "https://api.openai.com/v1/chat/completions"
+        let rewrite = engine.rewriteRequestModel(
+            dstProviderId: "openai", url: url,
+            body: #"{"model":"gpt-4.1","max_tokens":64,"temperature":0.5,"messages":[]}"#, model: "gpt-5.5"
+        )
+        try XCTSkipIf(rewrite == nil, "the bundled mobile.js has no rewriteRequestModel yet")
+        guard case .body(let body) = rewrite else { return XCTFail("unexpected \(String(describing: rewrite))") }
+        let sent = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any])
+        XCTAssertEqual(sent["model"] as? String, "gpt-5.5")
+        XCTAssertEqual(sent["max_completion_tokens"] as? Int, 64)
+        XCTAssertNil(sent["max_tokens"])
+        XCTAssertNil(sent["temperature"])
+
+        let refused = engine.rewriteRequestModel(
+            dstProviderId: "openai", url: url,
+            body: #"{"model":"gpt-5.5","messages":[],"tools":[{"type":"function","function":{"name":"f"}}]}"#, model: "gpt-6-astra"
+        )
+        guard case .refused(let code, let message) = refused else { return XCTFail("unexpected \(String(describing: refused))") }
+        XCTAssertEqual(code, "UNSUPPORTED_FEATURE")
+        XCTAssertTrue(message.contains("gpt-6-astra"), message)
+    }
+
     func testSpecialCharactersInBodyHandled() throws {
         let body = """
         {"model":"claude-sonnet-4-5","max_tokens":1,\

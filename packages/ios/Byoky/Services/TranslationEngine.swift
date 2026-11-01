@@ -356,6 +356,41 @@ final class TranslationEngine {
         }
     }
 
+    /// What `rewriteRequestModel` made of a request.
+    enum ModelRewrite: Equatable {
+        /// The body with the pinned model, fitted to that model's request rules.
+        case body(String)
+        /// The model can't serve the request; `message` is written for the app.
+        case refused(code: String, message: String)
+    }
+
+    /// Point a request at the model a group pins within the app's own family
+    /// and fit it to that model's request rules (core `rewriteRequestModel`).
+    /// Nil on errors, including a bundle without the export: the caller then
+    /// only renames the model.
+    func rewriteRequestModel(dstProviderId: String, url: String, body: String, model: String) -> ModelRewrite? {
+        do {
+            return try queue.sync {
+                try ensureLoadedLocked()
+                guard let bridge = self.bridge,
+                      let fn = bridge.objectForKeyedSubscript("rewriteRequestModel"), !fn.isUndefined else { return nil }
+                context?.exception = nil
+                let result = bridge.invokeMethod("rewriteRequestModel", withArguments: [dstProviderId, url, body, model])
+                if pendingException() != nil { return nil }
+                guard let result, result.isString, let json = result.toString(),
+                      let answer = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any] else { return nil }
+                if let body = answer["body"] as? String { return .body(body) }
+                if let error = answer["error"] as? [String: Any],
+                   let code = error["code"] as? String, let message = error["message"] as? String {
+                    return .refused(code: code, message: message)
+                }
+                return nil
+            }
+        } catch {
+            return nil
+        }
+    }
+
     /// True iff `url` is the chat endpoint of `providerId`'s family: the only
     /// request shape a translation or same-family swap can carry, since both
     /// rewrite the request onto the destination's chat endpoint. False on

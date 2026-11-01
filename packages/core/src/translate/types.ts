@@ -31,6 +31,18 @@ export interface TranslationContext {
 }
 
 /**
+ * Where a same-family model rewrite sends a request: a group pins another
+ * model of the app's own family, so the request keeps its dialect and only
+ * has to fit that model's rules (see rewriteRequestModel).
+ */
+export interface ModelShapingContext {
+  /** The model the group pins. */
+  dstModel: string;
+  /** The provider the request goes to, when known (as in TranslationContext). */
+  dstProviderId?: string;
+}
+
+/**
  * Errors raised inside the translation pipeline. Caught at the proxy boundary
  * and turned into a 502 response in the source dialect with code
  * TRANSLATION_FAILED.

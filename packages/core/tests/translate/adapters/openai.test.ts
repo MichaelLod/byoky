@@ -357,6 +357,88 @@ describe('openaiAdapter.serializeRequest — reasoning models and max_completion
     expect(out.max_tokens).toBe(1024);
     expect(out.temperature).toBe(0.3);
   });
+
+  // R3-06: the name fallback stopped at gpt-5, so the GPT-5.6 and GPT-6
+  // models (in OpenAI's model list, not in the registry) got max_tokens and
+  // temperature, which they reject.
+  it.each(['gpt-6-astra', 'gpt-6-luna', 'gpt-6-sol', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-5.6-luna', 'gpt-7', 'openai/gpt-6-luna'])(
+    '%s is a reasoning model: max_completion_tokens and no sampling overrides',
+    (dstModel) => {
+      const out = serialize({ dstModel, dstProviderId: 'openai' });
+      expect(out.max_completion_tokens).toBe(1024);
+      expect(out).not.toHaveProperty('max_tokens');
+      expect(out).not.toHaveProperty('temperature');
+      expect(out).not.toHaveProperty('top_p');
+    },
+  );
+
+  it.each(['gpt-4.1', 'gpt-4o', 'gpt-4.1-mini'])('%s keeps its sampling overrides', (dstModel) => {
+    const out = serialize({ dstModel, dstProviderId: 'openai' });
+    expect(out.temperature).toBe(0.3);
+    expect(out.top_p).toBe(0.9);
+  });
+
+  it('gpt-oss on Groq is not held to the OpenAI reasoning rules', () => {
+    const out = serialize({ dstModel: 'openai/gpt-oss-120b', dstProviderId: 'groq' });
+    expect(out.max_tokens).toBe(1024);
+    expect(out.temperature).toBe(0.3);
+  });
+});
+
+describe('openaiAdapter.serializeRequest — tools on models that reason', () => {
+  const tools: IRRequest['tools'] = [{ name: 'get_weather', parameters: { type: 'object', properties: {} } }];
+  const ir: IRRequest = {
+    system: [],
+    messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+    maxTokens: 64,
+    temperature: 0.3,
+    tools,
+  };
+  const serialize = (overrides: Partial<TranslationContext>, request: IRRequest = ir) =>
+    JSON.parse(openaiAdapter.serializeRequest(ctx(overrides), request)) as Record<string, unknown>;
+
+  // OpenAI's Chat Completions takes function tools from GPT-5.6 on only with
+  // reasoning_effort 'none' (live: 400 "Function tools with reasoning_effort
+  // are not supported for gpt-6-luna in /v1/chat/completions" without it).
+  it.each(['gpt-6-luna', 'gpt-6-sol', 'gpt-6.1-terra', 'gpt-5.6-luna'])(
+    '%s gets reasoning_effort none, and with it its sampling overrides',
+    (dstModel) => {
+      for (const dstProviderId of ['openai', 'azure_openai', undefined]) {
+        const out = serialize({ dstModel, dstProviderId });
+        expect(out.reasoning_effort).toBe('none');
+        expect(out.temperature).toBe(0.3);
+        expect(out.max_completion_tokens).toBe(64);
+        expect(out.tools).toHaveLength(1);
+      }
+    },
+  );
+
+  it('leaves the reasoning of a GPT-6 model alone without tools', () => {
+    const out = serialize({ dstModel: 'gpt-6-luna', dstProviderId: 'openai' }, { ...ir, tools: undefined });
+    expect(out).not.toHaveProperty('reasoning_effort');
+    expect(out).not.toHaveProperty('temperature');
+  });
+
+  it('leaves gpt-5.5 reasoning with tools (it takes both)', () => {
+    const out = serialize({ dstModel: 'gpt-5.5', dstProviderId: 'openai' });
+    expect(out).not.toHaveProperty('reasoning_effort');
+    expect(out).not.toHaveProperty('temperature');
+  });
+
+  it.each(['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-astra-2026-09-01'])(
+    'refuses tools for %s, which has no reasoning_effort none, with a clear error',
+    (dstModel) => {
+      expect(() => serialize({ dstModel, dstProviderId: 'openai' })).toThrow(
+        expect.objectContaining({ name: 'TranslationError', code: 'UNSUPPORTED_FEATURE', message: expect.stringContaining('Responses API') }),
+      );
+    },
+  );
+
+  it('does not hold other hosts to OpenAI\'s Chat Completions rule', () => {
+    const out = serialize({ dstModel: 'openai/gpt-6-astra', dstProviderId: 'openrouter' });
+    expect(out).not.toHaveProperty('reasoning_effort');
+    expect(out.tools).toHaveLength(1);
+  });
 });
 
 describe('openaiAdapter — refusals', () => {

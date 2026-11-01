@@ -1,0 +1,224 @@
+import { describe, it, expect } from 'vitest';
+import { rewriteRequestModel } from '../../src/translate/index.js';
+
+/**
+ * R3-05: a group that pins another model of the app's own family used to
+ * change only `model`, so the destination model's request rules (applied
+ * on cross-family translation) were skipped and the request got a 400
+ * (temperature or a forced tool choice to Claude Sonnet 5.5, max_tokens or
+ * temperature to an OpenAI reasoning model). The expected 400s were checked
+ * live on 2026-11-01.
+ */
+
+const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
+const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
+
+const WEATHER_TOOL = {
+  name: 'get_weather',
+  description: 'Weather for a city',
+  input_schema: { type: 'object', properties: { city: { type: 'string' } } },
+};
+const OPENAI_TOOL = {
+  type: 'function',
+  function: { name: 'get_weather', parameters: { type: 'object', properties: { city: { type: 'string' } } } },
+};
+const USER = [{ role: 'user', content: 'Weather in Vienna?' }];
+
+function rewrite(dstProviderId: string, dstModel: string, body: Record<string, unknown>, url?: string) {
+  const out = rewriteRequestModel(
+    { dstProviderId, dstModel, url: url ?? (dstProviderId === 'anthropic' ? ANTHROPIC_URL : OPENAI_URL) },
+    JSON.stringify(body),
+  );
+  return JSON.parse(out) as Record<string, unknown>;
+}
+
+describe('rewriteRequestModel — what it leaves alone', () => {
+  it('returns a request that already names the model byte for byte, rules and all', () => {
+    const body = '{ "model": "claude-sonnet-5-5", "max_tokens": 8, "temperature": 0.5, "messages": [] }';
+    expect(rewriteRequestModel({ dstProviderId: 'anthropic', dstModel: 'claude-sonnet-5-5', url: ANTHROPIC_URL }, body)).toBe(body);
+  });
+
+  it('returns a body that is not a JSON object as it was', () => {
+    for (const body of ['not json', '[1,2]', '"text"', 'null']) {
+      expect(rewriteRequestModel({ dstProviderId: 'openai', dstModel: 'gpt-5.5', url: OPENAI_URL }, body)).toBe(body);
+    }
+  });
+
+  it('only sets the model of a request to another endpoint', () => {
+    const responses = rewrite('openai', 'gpt-5.5', { model: 'gpt-4.1', max_output_tokens: 64, temperature: 0.5, input: 'hi' },
+      'https://api.openai.com/v1/responses');
+    expect(responses).toEqual({ model: 'gpt-5.5', max_output_tokens: 64, temperature: 0.5, input: 'hi' });
+    const count = rewrite('anthropic', 'claude-sonnet-5-5', { model: 'claude-sonnet-4-6', temperature: 0.5, messages: USER },
+      'https://api.anthropic.com/v1/messages/count_tokens');
+    expect(count.temperature).toBe(0.5);
+  });
+
+  it('only sets the model for families without per-model rules', () => {
+    const body = { contents: [{ parts: [{ text: 'hi' }] }], generationConfig: { temperature: 0.5 } };
+    expect(rewrite('gemini', 'gemini-3.8-flash', body, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent'))
+      .toEqual({ ...body, model: 'gemini-3.8-flash' });
+    expect(rewrite('cohere', 'command-a-03-2025', { model: 'command-r', temperature: 0.5, messages: USER }, 'https://api.cohere.com/v2/chat'))
+      .toEqual({ model: 'command-a-03-2025', temperature: 0.5, messages: USER });
+  });
+
+  it('keeps every field the rules do not cover', () => {
+    const body = {
+      model: 'claude-sonnet-4-6',
+      max_tokens: 64,
+      stream: true,
+      metadata: { user_id: 'u1' },
+      output_config: { effort: 'low' },
+      system: [{ type: 'text', text: 'Be terse.', cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'hi', cache_control: { type: 'ephemeral' } }] }],
+      something_new: { kept: true },
+    };
+    expect(rewrite('anthropic', 'claude-sonnet-5-5', body)).toEqual({ ...body, model: 'claude-sonnet-5-5' });
+  });
+});
+
+describe('rewriteRequestModel — Claude', () => {
+  it('drops sampling parameters for a model that rejects them', () => {
+    // Live: claude-sonnet-5-5 answers 400 "`temperature` is deprecated for this model."
+    const out = rewrite('anthropic', 'claude-sonnet-5-5', { model: 'claude-sonnet-4-6', max_tokens: 64, temperature: 0.5, top_p: 0.9, top_k: 5, messages: USER });
+    expect(out).toEqual({ model: 'claude-sonnet-5-5', max_tokens: 64, messages: USER });
+  });
+
+  it('turns a forced tool choice into auto plus an instruction on a model that rejects one', () => {
+    // Live: 400 "tool_choice: type "tool" and "any" are not supported for this model."
+    const out = rewrite('anthropic', 'claude-sonnet-5-5', {
+      model: 'claude-sonnet-4-6', max_tokens: 64, system: 'Be terse.', messages: USER,
+      tools: [WEATHER_TOOL], tool_choice: { type: 'tool', name: 'get_weather', disable_parallel_tool_use: true },
+    });
+    expect(out.tool_choice).toEqual({ type: 'auto', disable_parallel_tool_use: true });
+    expect(out.system).toBe('Be terse.\n\nYou must call the get_weather tool in this response. Start your response with that tool call.');
+    expect(out.tools).toEqual([WEATHER_TOOL]);
+  });
+
+  it('adds the instruction to a system prompt in blocks, or as the system prompt', () => {
+    const cached = { type: 'text', text: 'Be terse.', cache_control: { type: 'ephemeral' } };
+    const blocks = rewrite('anthropic', 'claude-opus-5-5', {
+      model: 'claude-opus-4-7', max_tokens: 64, system: [cached], messages: USER, tools: [WEATHER_TOOL], tool_choice: { type: 'any' },
+    });
+    expect(blocks.system).toEqual([cached, { type: 'text', text: 'You must call one of the provided tools in this response. Start your response with a tool call.' }]);
+    expect(blocks.tool_choice).toEqual({ type: 'auto' });
+    const none = rewrite('anthropic', 'claude-fable-5-1', {
+      model: 'claude-opus-4-7', max_tokens: 64, messages: USER, tools: [WEATHER_TOOL], tool_choice: { type: 'tool', name: 'get_weather' },
+    });
+    expect(none.system).toBe('You must call the get_weather tool in this response. Start your response with that tool call.');
+  });
+
+  it('adds no instruction for a forced choice without tools', () => {
+    const out = rewrite('anthropic', 'claude-sonnet-5-5', { model: 'claude-sonnet-4-6', max_tokens: 64, messages: USER, tool_choice: { type: 'any' } });
+    expect(out.tool_choice).toEqual({ type: 'auto' });
+    expect(out).not.toHaveProperty('system');
+  });
+
+  it('keeps a forced tool choice for a model that takes one, and drops thinking for it', () => {
+    const out = rewrite('anthropic', 'claude-haiku-5-5', {
+      model: 'claude-sonnet-4-6', max_tokens: 4096, messages: USER, tools: [WEATHER_TOOL],
+      tool_choice: { type: 'tool', name: 'get_weather' }, thinking: { type: 'enabled', budget_tokens: 2048 },
+    });
+    expect(out.tool_choice).toEqual({ type: 'tool', name: 'get_weather' });
+    expect(out).not.toHaveProperty('thinking');
+    expect(out).not.toHaveProperty('system');
+  });
+
+  it('turns a thinking budget into adaptive thinking for a model that only thinks adaptively', () => {
+    // Live: 400 ""thinking.type.enabled" is not supported for this model."
+    const out = rewrite('anthropic', 'claude-sonnet-5-5', {
+      model: 'claude-sonnet-4-6', max_tokens: 4096, messages: USER, thinking: { type: 'enabled', budget_tokens: 2048, display: 'summarized' },
+    });
+    expect(out.thinking).toEqual({ type: 'adaptive', display: 'summarized' });
+  });
+
+  it('keeps a thinking budget, and holds sampling to thinking\'s limits, on Claude 4.6', () => {
+    const out = rewrite('anthropic', 'claude-sonnet-4-6', {
+      model: 'claude-haiku-4-5', max_tokens: 4096, messages: USER, thinking: { type: 'enabled', budget_tokens: 2048 },
+      temperature: 0.5, top_k: 5, top_p: 0.97,
+    });
+    expect(out.thinking).toEqual({ type: 'enabled', budget_tokens: 2048 });
+    expect(out).not.toHaveProperty('temperature');
+    expect(out).not.toHaveProperty('top_k');
+    expect(out.top_p).toBe(0.97);
+    const low = rewrite('anthropic', 'claude-sonnet-4-6', {
+      model: 'claude-haiku-4-5', max_tokens: 4096, messages: USER, thinking: { type: 'adaptive' }, top_p: 0.5,
+    });
+    expect(low.thinking).toEqual({ type: 'adaptive' });
+    expect(low).not.toHaveProperty('top_p');
+  });
+
+  it('keeps temperature or top_p, not both, on a model that takes sampling', () => {
+    const out = rewrite('anthropic', 'claude-sonnet-4-6', { model: 'claude-opus-4-7', max_tokens: 64, messages: USER, temperature: 0.5, top_p: 0.9 });
+    expect(out.temperature).toBe(0.5);
+    expect(out).not.toHaveProperty('top_p');
+  });
+
+  it('drops adaptive thinking for a model that only takes a budget', () => {
+    const out = rewrite('anthropic', 'claude-haiku-4-5-20251001', {
+      model: 'claude-sonnet-4-6', max_tokens: 64, messages: USER, thinking: { type: 'adaptive' }, temperature: 0.5,
+    });
+    expect(out).not.toHaveProperty('thinking');
+    // No thinking left, so the temperature stays.
+    expect(out.temperature).toBe(0.5);
+  });
+});
+
+describe('rewriteRequestModel — OpenAI reasoning models', () => {
+  it('moves max_tokens to max_completion_tokens and drops sampling for gpt-5.5', () => {
+    // Live: 400 "Unsupported parameter: 'max_tokens' ..." and "'temperature' does not support 0.5 with this model".
+    const out = rewrite('openai', 'gpt-5.5', {
+      model: 'gpt-4.1', max_tokens: 64, temperature: 0.5, top_p: 0.9, logprobs: true, top_logprobs: 2, stream: true, messages: USER,
+    });
+    expect(out).toEqual({ model: 'gpt-5.5', max_completion_tokens: 64, stream: true, messages: USER });
+  });
+
+  it('keeps an explicit max_completion_tokens', () => {
+    const out = rewrite('openai', 'gpt-5.5', { model: 'gpt-4.1', max_tokens: 64, max_completion_tokens: 128, messages: USER });
+    expect(out.max_completion_tokens).toBe(128);
+    expect(out).not.toHaveProperty('max_tokens');
+  });
+
+  it('keeps sampling when the request turns reasoning off', () => {
+    const out = rewrite('openai', 'gpt-5.5', { model: 'gpt-4.1', reasoning_effort: 'none', temperature: 0.5, messages: USER });
+    expect(out.temperature).toBe(0.5);
+  });
+
+  it('leaves tools and reasoning alone on gpt-5.5', () => {
+    const out = rewrite('openai', 'gpt-5.5', { model: 'gpt-4.1', max_completion_tokens: 64, tools: [OPENAI_TOOL], tool_choice: 'required', messages: USER });
+    expect(out).toEqual({ model: 'gpt-5.5', max_completion_tokens: 64, tools: [OPENAI_TOOL], tool_choice: 'required', messages: USER });
+  });
+
+  it('turns reasoning off for tools on a GPT-6 model that calls them only that way', () => {
+    const out = rewrite('openai', 'gpt-6-luna', {
+      model: 'gpt-5.5', max_tokens: 64, temperature: 0.5, reasoning_effort: 'high', tools: [OPENAI_TOOL], messages: USER,
+    });
+    expect(out).toEqual({
+      model: 'gpt-6-luna', max_completion_tokens: 64, temperature: 0.5, reasoning_effort: 'none', tools: [OPENAI_TOOL], messages: USER,
+    });
+  });
+
+  it('refuses tools for a GPT-6 model that can\'t turn reasoning off', () => {
+    expect(() => rewrite('openai', 'gpt-6-astra', { model: 'gpt-5.5', tools: [OPENAI_TOOL], messages: USER }))
+      .toThrow(expect.objectContaining({ code: 'UNSUPPORTED_FEATURE', message: expect.stringContaining('gpt-6-astra') }));
+    // Without tools it is served.
+    expect(rewrite('openai', 'gpt-6-astra', { model: 'gpt-5.5', max_tokens: 64, messages: USER }))
+      .toEqual({ model: 'gpt-6-astra', max_completion_tokens: 64, messages: USER });
+  });
+
+  it('leaves a non-reasoning model\'s request as the app wrote it', () => {
+    const out = rewrite('openai', 'gpt-4.1', { model: 'gpt-5.5', max_tokens: 64, temperature: 0.5, messages: USER });
+    expect(out).toEqual({ model: 'gpt-4.1', max_tokens: 64, temperature: 0.5, messages: USER });
+  });
+
+  it('keeps max_tokens on hosts that document it, still dropping sampling', () => {
+    const out = rewrite('openrouter', 'openai/gpt-5.5', { model: 'anthropic/claude-sonnet-4.6', max_tokens: 64, temperature: 0.5, messages: USER },
+      'https://openrouter.ai/api/v1/chat/completions');
+    expect(out).toEqual({ model: 'openai/gpt-5.5', max_tokens: 64, messages: USER });
+  });
+
+  it('applies to a same-family swap onto Azure OpenAI', () => {
+    const out = rewrite('azure_openai', 'gpt-5.5', { model: 'llama-3.3-70b-versatile', max_tokens: 64, temperature: 0.5, messages: USER },
+      'https://api.groq.com/openai/v1/chat/completions');
+    expect(out).toEqual({ model: 'gpt-5.5', max_completion_tokens: 64, messages: USER });
+  });
+});

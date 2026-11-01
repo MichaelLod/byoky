@@ -411,7 +411,7 @@ class ProxyService(
 
         // The group is the strongest routing force: a pinned model wins over
         // the app's choice even when no translation or swap is needed.
-        var outBody = modelOverride?.let { rewriteModel(body, it) } ?: body
+        var outBody = modelOverride?.let { pinModel(body, it, providerId, url) } ?: body
 
         // Anthropic setup tokens only accept Claude-Code-shaped requests; the
         // tool-alias map is applied in reverse on the response.
@@ -601,7 +601,7 @@ class ProxyService(
         val dstApiKey = apiKey(credential, Provider.find(swapToProviderId)?.name ?: swapToProviderId)
         val outHeaders = HeaderPolicy.forwardedHeaders(headers, HeaderPolicy.ROUTED_EXCLUDED)
         ProviderAuth.apply(outHeaders, swapToProviderId, credential.authMethod, dstApiKey)
-        val swappedBody = if (!swapDstModel.isNullOrEmpty()) rewriteModel(body, swapDstModel) else body
+        val swappedBody = if (!swapDstModel.isNullOrEmpty()) pinModel(body, swapDstModel, swapToProviderId, url) else body
         val outBody = injectStreamUsageOptions(swapToProviderId, swappedBody)
 
         val request = buildRequest(upstreamUrl, method, outHeaders, outBody)
@@ -713,6 +713,25 @@ class ProxyService(
         val sb = StringBuilder()
         streamText(response, meter) { sb.append(it) }
         return sb.toString()
+    }
+
+    /**
+     * [body] with the group's pinned [model] (a model of the app's own
+     * family, sent to [providerId]), fitted by core to that model's request
+     * rules for a chat request to [url]. Throws a [ProxyError] for a request
+     * the model can't serve. Only renames the model when the engine can't
+     * help (no JavaScriptSandbox, an older bundle, a body too large for it).
+     */
+    private fun pinModel(body: ByteArray?, model: String, providerId: String, url: HttpUrl): ByteArray? {
+        if (body == null) return null
+        val engine = translationEngine?.takeIf { it.isSupported }
+        val text = body.toString(Charsets.UTF_8)
+        return when (val rewrite = engine?.rewriteRequestModel(providerId, url.toString(), text, model)) {
+            // A body core left as it was (not JSON, already the model) keeps its bytes.
+            is ModelRewrite.Body -> if (rewrite.body == text) body else rewrite.body.toByteArray(Charsets.UTF_8)
+            is ModelRewrite.Refused -> throw ProxyError(rewrite.code, rewrite.message, 400)
+            null -> rewriteModel(body, model)
+        }
     }
 
     /** Rewrite the top-level `model` of a JSON body; unparseable bodies pass through untouched. */

@@ -356,6 +356,25 @@ class TranslationEngineInstrumentedTest {
         assertEquals("gpt-4o", parsed.optString("model"))
     }
 
+    /** A group pinning another model of the app's family gets that model's request rules (R3-05). */
+    @Test
+    fun rewriteRequestModelFitsTheRequestToThePinnedModel() {
+        val url = "https://api.openai.com/v1/chat/completions"
+        val rewrite = engine.rewriteRequestModel(
+            "openai", url, """{"model":"gpt-4.1","max_tokens":64,"temperature":0.5,"messages":[]}""", "gpt-5.5",
+        )
+        assertNotNull("the bundled mobile.js needs rewriteRequestModel", rewrite)
+        val body = JSONObject((rewrite as ModelRewrite.Body).body)
+        assertEquals("gpt-5.5", body.getString("model"))
+        assertEquals(64, body.getInt("max_completion_tokens"))
+        assertTrue(!body.has("max_tokens") && !body.has("temperature"))
+
+        val refused = engine.rewriteRequestModel(
+            "openai", url, """{"model":"gpt-5.5","messages":[],"tools":[{"type":"function","function":{"name":"f"}}]}""", "gpt-6-astra",
+        )
+        assertEquals("UNSUPPORTED_FEATURE", (refused as ModelRewrite.Refused).code)
+    }
+
     // ──────────────────────────────────────────────────────────────────────
     // Helpers
     // ──────────────────────────────────────────────────────────────────────

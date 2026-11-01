@@ -264,6 +264,46 @@ final class NativeBridgeE2ETests: XCTestCase {
         XCTAssertNil(providers["openai"])
     }
 
+    // MARK: - Pinned model (R3-05)
+
+    /// A group pinning another OpenAI model fits the app's request to it.
+    @MainActor
+    func testPinnedModelGetsItsRequestRules() async throws {
+        try XCTSkipIf(
+            TranslationEngine.shared.rewriteRequestModel(dstProviderId: "openai", url: Self.chatURL, body: "{}", model: "gpt-5.5") == nil,
+            "the bundled mobile.js has no rewriteRequestModel yet"
+        )
+        let h = try await BridgeHarness.make(self, pinnedModel: "gpt-5.5")
+        StubUpstream.script(.init(chunks: [Data("{}".utf8)]))
+
+        let replies = try await h.proxy(body: #"{"model":"gpt-4.1","max_tokens":64,"temperature":0.5,"messages":[]}"#)
+
+        XCTAssertEqual(replies.last?.type, "BYOKY_PROXY_RESPONSE_DONE")
+        let sent = try XCTUnwrap(try JSONSerialization.jsonObject(with: StubUpstream.bodies.first ?? Data()) as? [String: Any])
+        XCTAssertEqual(sent["model"] as? String, "gpt-5.5")
+        XCTAssertEqual(sent["max_completion_tokens"] as? Int, 64)
+        XCTAssertNil(sent["max_tokens"])
+        XCTAssertNil(sent["temperature"])
+    }
+
+    /// A request the pinned model can't serve gets a clear error and goes nowhere.
+    @MainActor
+    func testPinnedModelRefusesWhatItCantServe() async throws {
+        try XCTSkipIf(
+            TranslationEngine.shared.rewriteRequestModel(dstProviderId: "openai", url: Self.chatURL, body: "{}", model: "gpt-5.5") == nil,
+            "the bundled mobile.js has no rewriteRequestModel yet"
+        )
+        let h = try await BridgeHarness.make(self, pinnedModel: "gpt-6-astra")
+
+        let replies = try await h.proxy(body: #"{"model":"gpt-5.5","messages":[],"tools":[{"type":"function","function":{"name":"f"}}]}"#)
+
+        let last = try XCTUnwrap(replies.last)
+        XCTAssertEqual(last.type, "BYOKY_PROXY_RESPONSE_ERROR")
+        XCTAssertEqual(last["status"] as? Int, 400)
+        XCTAssertEqual((last["error"] as? [String: Any])?["code"] as? String, "UNSUPPORTED_FEATURE")
+        XCTAssertTrue(StubUpstream.requests.isEmpty)
+    }
+
     // MARK: - Translation
 
     /// An OpenAI app routed to Anthropic gets OpenAI-shaped replies.
@@ -387,9 +427,11 @@ final class BridgeHarness: NSObject, WKNavigationDelegate {
 
     /// A wallet with one `provider` key and, for providers other than
     /// OpenAI, a group routing the app to it (cross-family translation).
+    /// `pinnedModel` puts the app in a group on `provider` pinning that model.
     static func make(
         _ test: XCTestCase,
         provider: String = "openai",
+        pinnedModel: String? = nil,
         maxTranslatedErrorBytes: Int = NativeBridgeHandler.defaultMaxTranslatedErrorBytes
     ) async throws -> BridgeHarness {
         let wallet = WalletStore.shared
@@ -404,7 +446,10 @@ final class BridgeHarness: NSObject, WKNavigationDelegate {
             StubUpstream.reset()
         }
         try wallet.addCredential(providerId: provider, label: "Test", apiKey: apiKey)
-        if provider == "anthropic" {
+        if let pinnedModel {
+            let group = try wallet.createGroup(name: "Pinned", providerId: provider, model: pinnedModel)
+            try wallet.setAppGroup(origin: origin, groupId: group.id)
+        } else if provider == "anthropic" {
             let group = try wallet.createGroup(name: "To Claude", providerId: "anthropic", model: "claude-sonnet-4-6")
             try wallet.setAppGroup(origin: origin, groupId: group.id)
         }
