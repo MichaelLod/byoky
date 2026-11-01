@@ -243,14 +243,92 @@ describe('SDK ↔ content script', () => {
       expect(send(listener, { type: 'BYOKY_DISCONNECT', id: 'd1', requestId: 'd1', payload: { sessionKey: 'byk' } })).toEqual([]);
     });
 
-    it('tells registered SDKs when the notify port drops for good', () => {
-      const listener = startContentScript();
-      const sdkPort = fakeSdkPort();
-      listener({ source: window, data: { type: 'BYOKY_REGISTER_NOTIFY' }, ports: [sdkPort] });
+    describe('notify port', () => {
+      beforeEach(() => { vi.useFakeTimers(); });
+      afterEach(() => { vi.useRealTimers(); });
 
-      orphan('no-id');
-      portsNamed('byoky-notify')[0].drop();
-      expect(sdkPort.postMessage).toHaveBeenCalledWith({ type: 'BYOKY_WALLET_RELOADED' });
+      function registerSdk(listener: ContentListener) {
+        const sdkPort = fakeSdkPort();
+        listener({ source: window, data: { type: 'BYOKY_REGISTER_NOTIFY' }, ports: [sdkPort] });
+        return sdkPort;
+      }
+
+      // Chrome fires the notify port's onDisconnect while runtime.id is still
+      // set; the context is gone by the time the port is reopened.
+      it.each(['no-id', 'throws'] as const)('tells registered SDKs when the reopen fails (%s)', (how) => {
+        const listener = startContentScript();
+        const sdkPort = registerSdk(listener);
+
+        portsNamed('byoky-notify')[0].drop();
+        expect(sdkPort.postMessage).not.toHaveBeenCalled();
+
+        orphan(how);
+        vi.advanceTimersByTime(1_000);
+        expect(sdkPort.postMessage).toHaveBeenCalledTimes(1);
+        expect(sdkPort.postMessage).toHaveBeenCalledWith({ type: 'BYOKY_WALLET_RELOADED' });
+
+        // Nothing is left retrying.
+        vi.advanceTimersByTime(10 * 60_000);
+        expect(sdkPort.postMessage).toHaveBeenCalledTimes(1);
+      });
+
+      it('tells registered SDKs when runtime.id is already gone at the drop', () => {
+        const listener = startContentScript();
+        const sdkPort = registerSdk(listener);
+
+        orphan('no-id');
+        portsNamed('byoky-notify')[0].drop();
+        expect(sdkPort.postMessage).toHaveBeenCalledWith({ type: 'BYOKY_WALLET_RELOADED' });
+      });
+
+      it('tells an SDK that registers after the cut-off at once', () => {
+        const listener = startContentScript();
+        portsNamed('byoky-notify')[0].drop();
+
+        orphan('throws');
+        const sdkPort = registerSdk(listener);
+        expect(sdkPort.postMessage).toHaveBeenCalledWith({ type: 'BYOKY_WALLET_RELOADED' });
+      });
+
+      it('says nothing when the worker merely went idle', () => {
+        const listener = startContentScript();
+        const sdkPort = registerSdk(listener);
+
+        portsNamed('byoky-notify')[0].drop();
+        vi.advanceTimersByTime(10 * 60_000);
+        expect(portsNamed('byoky-notify')).toHaveLength(2);
+        expect(sdkPort.postMessage).not.toHaveBeenCalled();
+      });
+
+      it('ends the SDK session and frees its notify port, with no call made', async () => {
+        const listener = startContentScript();
+        vi.spyOn(window, 'postMessage').mockImplementation((...args: unknown[]) => {
+          const [data, , transfer] = args as [unknown, string, unknown[] | undefined];
+          setTimeout(() => listener({ source: window, data, ports: transfer ?? [] }), 0);
+        });
+        const pending = new Byoky().connect();
+        await vi.advanceTimersByTimeAsync(10);
+        const port = portsNamed('byoky-message')[0];
+        port.emit({
+          type: 'BYOKY_CONNECT_RESPONSE',
+          requestId: port.posted[0].requestId,
+          payload: { sessionKey: 'byk_live', proxyUrl: 'extension-proxy', providers: {} },
+        });
+        const session = await pending;
+        await vi.advanceTimersByTimeAsync(10);
+        const onDisconnect = vi.fn();
+        session.onDisconnect(onDisconnect);
+
+        const unregister = vi.spyOn(MessagePort.prototype, 'postMessage');
+        portsNamed('byoky-notify')[0].drop();
+        orphan('no-id');
+        await vi.advanceTimersByTimeAsync(1_000);
+
+        expect(onDisconnect).toHaveBeenCalledTimes(1);
+        expect(unregister).toHaveBeenCalledWith({ type: 'BYOKY_UNREGISTER_NOTIFY' });
+        // The saved session is kept for after the reload.
+        expect(sessionStorage.getItem('byoky:session')).not.toBeNull();
+      });
     });
 
     describe('with the SDK', () => {

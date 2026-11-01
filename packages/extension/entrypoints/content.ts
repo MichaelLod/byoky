@@ -267,15 +267,19 @@ export default defineContentScript({
     function connectNotifyPort() {
       notifyRetryTimer = null;
       const port = connectToBackground('byoky-notify');
-      if (!port) return;
+      if (!port) {
+        announceWalletReloaded();
+        return;
+      }
       notifyPort = port;
       const connectedAt = Date.now();
       port.onMessage.addListener(forwardNotification);
       port.onDisconnect.addListener(() => {
         notifyPort = null;
+        // Chrome usually reports the drop while runtime.id is still set, so
+        // a reload mostly shows up only when the reopen fails (above).
         if (!extensionAlive()) {
-          // Byoky was updated or reloaded: the SDKs' sessions here are gone.
-          forwardNotification({ type: 'BYOKY_WALLET_RELOADED' });
+          announceWalletReloaded();
           return;
         }
         if (Date.now() - connectedAt >= NOTIFY_STABLE_MS) notifyRetryMs = NOTIFY_RETRY_MIN_MS;
@@ -285,9 +289,21 @@ export default defineContentScript({
 
     function scheduleNotifyReconnect() {
       if (notifyPort || notifyRetryTimer || notifyPorts.size === 0) return;
-      if (!extensionAlive()) return;
+      if (!extensionAlive()) {
+        announceWalletReloaded();
+        return;
+      }
       notifyRetryTimer = setTimeout(connectNotifyPort, notifyRetryMs);
       notifyRetryMs = Math.min(notifyRetryMs * 2, NOTIFY_RETRY_MAX_MS);
+    }
+
+    // Byoky was updated or reloaded, so the sessions of the SDKs in this
+    // frame are gone. Like a proxy request that can't open its port, this
+    // counts a notify port that can't be opened as cut off. Each SDK ends
+    // its session and hands its port back (BYOKY_UNREGISTER_NOTIFY).
+    function announceWalletReloaded() {
+      if (notifyPorts.size === 0) return;
+      forwardNotification({ type: 'BYOKY_WALLET_RELOADED' });
     }
 
     connectNotifyPort();
