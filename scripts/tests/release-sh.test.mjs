@@ -122,3 +122,23 @@ test('a failed retry upload is not counted and fails the run', (t) => {
   assert.match(r.out, /Nothing retried/)
   assert.match(r.out, /Chrome Web Store: FAILED/)
 })
+
+// --- dry run ---
+
+test('--dry only checks signing (ios-signing.sh --check), and a failed check is a warning', (t) => {
+  const s = sandbox()
+  t.after(s.cleanup)
+  const ok = s.run(['1.1.2', '--dry'])
+  assert.equal(ok.code, 0, ok.out)
+  assert.match(ok.calls, /^ios-signing\.sh --check$/m)
+  assert.match(ok.out, /DRY RUN/)
+
+  const notReady = s.run(['1.1.2', '--dry'], { STUB_SIGNING_EXIT: '1' })
+  assert.equal(notReady.code, 0, notReady.out)
+  assert.match(notReady.out, /WARN: iOS\/macOS signing isn't ready/)
+
+  // A real run prepares signing (and may create certificates): no --check.
+  const real = s.run(['1.1.2'], { STUB_SIGNING_EXIT: '1' })
+  assert.equal(real.code, 1, real.out)
+  assert.match(real.calls, /^ios-signing\.sh $/m)
+})

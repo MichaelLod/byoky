@@ -10,7 +10,18 @@
 #
 # Idempotent: creates only what's missing. scripts/release.sh runs it before
 # any version bump; run it by hand on a new Mac or after a certificate expired.
+#
+# --check (release.sh --dry) changes nothing: no key file, keychain, .env.local
+# entry, certificate or profile is written. It lists what a real run would
+# create and exits 1 if there is anything.
 set -euo pipefail
+
+CHECK=false
+case "${1:-}" in
+  --check) CHECK=true ;;
+  "") ;;
+  *) echo "Usage: scripts/ios-signing.sh [--check]"; exit 1 ;;
+esac
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -28,6 +39,42 @@ done
 SIGNING_KEYCHAIN="$HOME/Library/Keychains/byoky-signing.keychain-db"
 LOGIN_KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
 ASC_KEY_FILE="$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+
+# SHA-1s of the Apple Distribution identities in the signing keychain, comma
+# separated: the profiles are made for the certificate one of them belongs to.
+distribution_sha1s() {
+  security find-identity -v -p codesigning "$SIGNING_KEYCHAIN" \
+    | awk '/"Apple Distribution:/ {print $2}' | paste -sd, - || true
+}
+
+if [ "$CHECK" = true ]; then
+  MISSING=()
+  [ -f "$ASC_KEY_FILE" ] || MISSING+=("the App Store Connect key file $ASC_KEY_FILE")
+  if [ ! -f "$SIGNING_KEYCHAIN" ]; then
+    MISSING+=("the signing keychain $SIGNING_KEYCHAIN, and its three identities")
+  elif [ -z "${BYOKY_SIGNING_KEYCHAIN_PASSWORD:-}" ]; then
+    MISSING+=("BYOKY_SIGNING_KEYCHAIN_PASSWORD in .env.local")
+  elif ! security unlock-keychain -p "$BYOKY_SIGNING_KEYCHAIN_PASSWORD" "$SIGNING_KEYCHAIN"; then
+    MISSING+=("a BYOKY_SIGNING_KEYCHAIN_PASSWORD that unlocks $SIGNING_KEYCHAIN")
+  else
+    for identity in "Apple Development:|codesigning" "Apple Distribution:|codesigning" "3rd Party Mac Developer Installer:|basic"; do
+      if ! security find-identity -v -p "${identity#*|}" "$SIGNING_KEYCHAIN" | grep -q "\"${identity%|*}"; then
+        MISSING+=("a valid \"${identity%|*}\" identity (a real run creates a new certificate)")
+      fi
+    done
+  fi
+  SHA1S=""
+  [ -f "$SIGNING_KEYCHAIN" ] && SHA1S=$(distribution_sha1s)
+  if ! node scripts/ios-signing.mjs profiles --check "$SHA1S"; then
+    MISSING+=("App Store profiles (see above)")
+  fi
+  if [ ${#MISSING[@]} -gt 0 ]; then
+    for m in "${MISSING[@]}"; do echo "  missing: $m"; done
+    exit 1
+  fi
+  echo "  Signing ready ($SIGNING_KEYCHAIN), nothing to create"
+  exit 0
+fi
 
 umask 077
 WORK="$(mktemp -d)"
@@ -79,8 +126,8 @@ if [ "$CREATED" = true ]; then
   security set-key-partition-list -S apple-tool:,apple: -s -k "$BYOKY_SIGNING_KEYCHAIN_PASSWORD" "$SIGNING_KEYCHAIN" >/dev/null
 fi
 
-# --- App Store profiles for the current Apple Distribution certificate ---
-node scripts/ios-signing.mjs profiles
+# --- App Store profiles for the Apple Distribution certificate in this keychain ---
+node scripts/ios-signing.mjs profiles "$(distribution_sha1s)"
 
 # --- Smoke test: codesign must work without a prompt ---
 cp /usr/bin/true "$WORK/signtest"
