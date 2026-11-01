@@ -476,3 +476,78 @@ describe('anthropicAdapter.serializeRequest — thinking', () => {
     expect(ir.thinking).toBeUndefined();
   });
 });
+
+describe('anthropicAdapter.serializeRequest — forced tool choice per model', () => {
+  // Claude Opus 5.5, Sonnet 5.5, Fable 5.1 and Mythos 5.1 answer tool_choice
+  // `any` / `tool` with a 400 ("tool_choice: type "tool" and "any" are not
+  // supported for this model."). Anthropic's migration advice is `auto` plus
+  // an instruction naming the tool.
+  const tools = [{ name: 'get_weather', parameters: { type: 'object', properties: {} } }];
+  const user: IRRequest['messages'] = [{ role: 'user', content: [{ type: 'text', text: 'x' }] }];
+  const serialize = (dstModel: string, ir: Partial<IRRequest>) =>
+    JSON.parse(
+      anthropicAdapter.serializeRequest(ctx({ dstModel }), { system: [], messages: user, maxTokens: 1000, ...ir }),
+    ) as { tool_choice?: unknown; system?: string; thinking?: unknown };
+
+  it.each([
+    'claude-opus-5-5',
+    'claude-sonnet-5-5',
+    'claude-fable-5-1',
+    'claude-mythos-5-1',
+    'claude-opus-6',
+    'anthropic.claude-sonnet-5-5',
+  ])('%s gets auto and an instruction naming the tool', (model) => {
+    const named = serialize(model, { tools, toolChoice: { type: 'tool', name: 'get_weather' } });
+    expect(named.tool_choice).toEqual({ type: 'auto' });
+    expect(named.system).toContain('You must call the get_weather tool in this response.');
+
+    const any = serialize(model, { tools, toolChoice: { type: 'any' } });
+    expect(any.tool_choice).toEqual({ type: 'auto' });
+    expect(any.system).toContain('You must call one of the provided tools in this response.');
+  });
+
+  it('keeps the app\'s system prompt ahead of the instruction', () => {
+    const out = serialize('claude-opus-5-5', {
+      system: [{ text: 'Be terse.' }],
+      tools,
+      toolChoice: { type: 'any' },
+    });
+    expect(out.system).toBe(
+      'Be terse.\n\nYou must call one of the provided tools in this response. Start your response with a tool call.',
+    );
+  });
+
+  it('keeps requested thinking, since no forced choice is sent', () => {
+    const out = serialize('claude-opus-5-5', { tools, toolChoice: { type: 'any' }, thinking: { enabled: true } });
+    expect(out.thinking).toEqual({ type: 'adaptive' });
+  });
+
+  it('adds no instruction when there are no tools to call', () => {
+    const out = serialize('claude-sonnet-5-5', { toolChoice: { type: 'any' } });
+    expect(out.tool_choice).toEqual({ type: 'auto' });
+    expect(out).not.toHaveProperty('system');
+  });
+
+  it.each(['claude-opus-5-5', 'claude-fable-5-1'])('%s keeps auto and none as they are', (model) => {
+    expect(serialize(model, { tools, toolChoice: { type: 'auto' } })).toMatchObject({ tool_choice: { type: 'auto' } });
+    const none = serialize(model, { tools, toolChoice: { type: 'none' } });
+    expect(none.tool_choice).toEqual({ type: 'none' });
+    expect(none).not.toHaveProperty('system');
+  });
+
+  it.each([
+    'claude-haiku-5-5',
+    'claude-opus-5',
+    'claude-sonnet-5',
+    'claude-fable-5',
+    'claude-mythos-5',
+    'claude-opus-4-8',
+    'claude-sonnet-4-6',
+    'claude-haiku-4-5-20251001',
+  ])('%s keeps the forced choice', (model) => {
+    const named = serialize(model, { tools, toolChoice: { type: 'tool', name: 'get_weather' } });
+    expect(named.tool_choice).toEqual({ type: 'tool', name: 'get_weather' });
+    expect(named).not.toHaveProperty('system');
+    expect(serialize(model, { tools, toolChoice: { type: 'any' } }).tool_choice).toEqual({ type: 'any' });
+  });
+});
