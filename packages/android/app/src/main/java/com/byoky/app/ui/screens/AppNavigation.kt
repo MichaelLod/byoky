@@ -7,6 +7,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -41,19 +42,37 @@ import com.byoky.app.ui.theme.*
 
 private const val APP_RUNTIME_ROUTE = "app/{appId}"
 
+/**
+ * The installed app to reopen after unlocking: the one on screen when the
+ * wallet locked, if it is still installed and enabled and opens without
+ * asking (a revoked origin goes through the reconnect prompt instead).
+ */
+internal fun appToResume(
+    appId: String?,
+    apps: List<InstalledApp>,
+    decide: (InstalledApp) -> AppOpenGate.Decision,
+): InstalledApp? {
+    val app = apps.firstOrNull { it.id == appId } ?: return null
+    if (!app.enabled) return null
+    return app.takeIf { decide(it) == AppOpenGate.Decision.Open }
+}
+
 @Composable
 fun AppNavigation(wallet: WalletStore) {
     val status by wallet.status.collectAsState()
+    // The in-wallet app on screen, kept above the lock so that unlocking
+    // after an auto-lock goes back to it instead of the Wallet tab.
+    var resumeAppId by rememberSaveable { mutableStateOf<String?>(null) }
 
     when (status) {
         WalletStatus.UNINITIALIZED -> OnboardingScreen(wallet)
         WalletStatus.LOCKED -> UnlockScreen(wallet)
-        WalletStatus.UNLOCKED -> MainScreen(wallet)
+        WalletStatus.UNLOCKED -> MainScreen(wallet, resumeAppId = resumeAppId, onAppShown = { resumeAppId = it })
     }
 }
 
 @Composable
-private fun MainScreen(wallet: WalletStore) {
+private fun MainScreen(wallet: WalletStore, resumeAppId: String?, onAppShown: (String?) -> Unit) {
     val navController = rememberNavController()
     var fabMenuOpen by remember { mutableStateOf(false) }
     var showAddCredential by remember { mutableStateOf(false) }
@@ -72,6 +91,17 @@ private fun MainScreen(wallet: WalletStore) {
     val selectedTab = tabs.indexOfFirst { it.third == currentRoute }
         .takeIf { it >= 0 } ?: if (currentRoute == "settings") 0 else -1
     val showFab = !inAppRuntime && currentRoute != "settings"
+
+    // Reopen the app that was on screen when the wallet locked (the page
+    // itself reloads: the WebView doesn't outlive the lock). Read once, as
+    // the tracking below clears it as soon as the Wallet tab shows.
+    val reopenAppId = remember { resumeAppId }
+    LaunchedEffect(Unit) {
+        val app = appToResume(reopenAppId, wallet.installedApps.value, wallet::openDecision) ?: return@LaunchedEffect
+        navController.navigate("app/${app.id}") { launchSingleTop = true }
+    }
+    val shownAppId = if (inAppRuntime) backStackEntry?.arguments?.getString("appId") else null
+    LaunchedEffect(shownAppId) { onAppShown(shownAppId) }
 
     // Muninn nods once in the wallet header when the wallet has just been unlocked.
     var unlockNodPending by remember { mutableStateOf(true) }
