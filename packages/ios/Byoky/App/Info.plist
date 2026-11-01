@@ -44,6 +44,8 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Apps you open in Byoky's browser can ask for a photo, for example to attach an image to a chat. Byoky itself never uses the camera.</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>ChakraPetch-SemiBold.ttf</string>
