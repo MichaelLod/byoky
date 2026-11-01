@@ -504,3 +504,34 @@ describe('cross-family dispatch — sampling parameters per destination', () => 
     expect(out.p).toBe(0.99);
   });
 });
+
+describe('cross-family dispatch — Gemini snake_case body', () => {
+  // The body byoky.com/chat builds for Gemini (packages/web/app/chat/ChatApp.tsx).
+  const body = JSON.stringify({
+    system_instruction: { parts: [{ text: 'You are terse.' }] },
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          { inline_data: { mime_type: 'image/png', data: TINY_PNG_B64 } },
+          { text: 'Describe this image.' },
+        ],
+      },
+    ],
+    generation_config: { max_output_tokens: 256 },
+  });
+
+  it('gemini → anthropic keeps the system prompt, the image and max_tokens', () => {
+    const out = JSON.parse(translateRequest(ctx('gemini', 'anthropic'), body)) as {
+      system?: string;
+      max_tokens: number;
+      messages: Array<{ content: Array<{ type: string; source?: { data: string } }> }>;
+    };
+    expect(out.system).toBe('You are terse.');
+    expect(out.max_tokens).toBe(256);
+    expect(out.messages[0].content[0]).toEqual({
+      type: 'image',
+      source: { type: 'base64', media_type: 'image/png', data: TINY_PNG_B64 },
+    });
+  });
+});

@@ -474,3 +474,100 @@ describe('geminiAdapter.parseRequest — thinkingBudget', () => {
     expect(parse(4096).thinking).toEqual({ enabled: true, budgetTokens: 4096 });
   });
 });
+
+describe('geminiAdapter.parseRequest — snake_case bodies (Google REST docs style)', () => {
+  const camel = {
+    systemInstruction: { parts: [{ text: 'You are a cat.' }] },
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          { text: 'What is in this picture?' },
+          { inlineData: { mimeType: 'image/png', data: 'AAAA' } },
+          { fileData: { mimeType: 'image/jpeg', fileUri: 'https://example.com/cat.jpg' } },
+        ],
+      },
+      { role: 'model', parts: [{ functionCall: { name: 'get_weather', args: { city_name: 'Paris' } } }] },
+      { role: 'user', parts: [{ functionResponse: { name: 'get_weather', response: { temp_c: 21 } } }] },
+    ],
+    generationConfig: {
+      maxOutputTokens: 256,
+      temperature: 0.2,
+      topP: 0.9,
+      topK: 20,
+      stopSequences: ['END'],
+      thinkingConfig: { thinkingBudget: 2048 },
+    },
+    tools: [
+      {
+        functionDeclarations: [
+          {
+            name: 'get_weather',
+            parameters: { type: 'object', properties: { city_name: { type: 'string' } } },
+          },
+        ],
+      },
+    ],
+    toolConfig: { functionCallingConfig: { mode: 'ANY', allowedFunctionNames: ['get_weather'] } },
+  };
+  const snake = {
+    system_instruction: { parts: [{ text: 'You are a cat.' }] },
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          { text: 'What is in this picture?' },
+          { inline_data: { mime_type: 'image/png', data: 'AAAA' } },
+          { file_data: { mime_type: 'image/jpeg', file_uri: 'https://example.com/cat.jpg' } },
+        ],
+      },
+      { role: 'model', parts: [{ function_call: { name: 'get_weather', args: { city_name: 'Paris' } } }] },
+      { role: 'user', parts: [{ function_response: { name: 'get_weather', response: { temp_c: 21 } } }] },
+    ],
+    generation_config: {
+      max_output_tokens: 256,
+      temperature: 0.2,
+      top_p: 0.9,
+      top_k: 20,
+      stop_sequences: ['END'],
+      thinking_config: { thinking_budget: 2048 },
+    },
+    tools: [
+      {
+        function_declarations: [
+          {
+            name: 'get_weather',
+            parameters: { type: 'object', properties: { city_name: { type: 'string' } } },
+          },
+        ],
+      },
+    ],
+    tool_config: { function_calling_config: { mode: 'ANY', allowed_function_names: ['get_weather'] } },
+  };
+
+  it('parses a snake_case body into the same IR as its camelCase twin', () => {
+    const fromCamel = geminiAdapter.parseRequest(JSON.stringify(camel));
+    const fromSnake = geminiAdapter.parseRequest(JSON.stringify(snake));
+    expect(fromSnake).toEqual(fromCamel);
+    expect(fromSnake.system).toEqual([{ text: 'You are a cat.' }]);
+    expect(fromSnake.maxTokens).toBe(256);
+    expect(fromSnake.toolChoice).toEqual({ type: 'tool', name: 'get_weather' });
+  });
+
+  it('leaves keys inside schemas, args and responses alone', () => {
+    const ir = geminiAdapter.parseRequest(JSON.stringify(snake));
+    expect(ir.tools?.[0].parameters).toEqual({ type: 'object', properties: { city_name: { type: 'string' } } });
+    expect(ir.messages[1].content[0]).toMatchObject({ type: 'tool_use', input: { city_name: 'Paris' } });
+  });
+
+  it('camelCase wins when a body carries both spellings', () => {
+    const ir = geminiAdapter.parseRequest(
+      JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: 'x' }] }],
+        generationConfig: { maxOutputTokens: 100 },
+        generation_config: { max_output_tokens: 999 },
+      }),
+    );
+    expect(ir.maxTokens).toBe(100);
+  });
+});

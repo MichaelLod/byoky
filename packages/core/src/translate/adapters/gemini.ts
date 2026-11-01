@@ -163,6 +163,7 @@ function parseRequest(body: string): IRRequest {
       `Gemini request body is not valid JSON: ${(err as Error).message}`,
     );
   }
+  normalizeSnakeCase(parsed);
 
   const ir: IRRequest = {
     system: parseSystemInstruction(parsed.systemInstruction),
@@ -239,6 +240,85 @@ function parseRequest(body: string): IRRequest {
   }
 
   return ir;
+}
+
+type JsonObject = Record<string, unknown>;
+
+function isJsonObject(v: unknown): v is JsonObject {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+/** Copy each snake_case key present to its camelCase name; camelCase wins. */
+function camelizeKeys(obj: unknown, keys: Record<string, string>): void {
+  if (!isJsonObject(obj)) return;
+  for (const [snake, camel] of Object.entries(keys)) {
+    if (snake in obj && !(camel in obj)) obj[camel] = obj[snake];
+  }
+}
+
+/**
+ * The Gemini REST API takes proto field names in snake_case as well as
+ * camelCase, and Google's curl examples use snake_case (system_instruction,
+ * inline_data/mime_type, generation_config, function_declarations, ...).
+ * Only the known request fields are renamed, level by level, never the
+ * keys inside a schema, args object or function response.
+ */
+function normalizeSnakeCase(req: GeminiRequest): void {
+  const r = req as unknown as JsonObject;
+  if (!isJsonObject(r)) return;
+  camelizeKeys(r, {
+    system_instruction: 'systemInstruction',
+    generation_config: 'generationConfig',
+    tool_config: 'toolConfig',
+    safety_settings: 'safetySettings',
+  });
+  camelizeKeys(r.generationConfig, {
+    max_output_tokens: 'maxOutputTokens',
+    top_p: 'topP',
+    top_k: 'topK',
+    stop_sequences: 'stopSequences',
+    candidate_count: 'candidateCount',
+    response_mime_type: 'responseMimeType',
+    response_schema: 'responseSchema',
+    response_json_schema: 'responseJsonSchema',
+    thinking_config: 'thinkingConfig',
+  });
+  if (isJsonObject(r.generationConfig)) {
+    camelizeKeys(r.generationConfig.thinkingConfig, {
+      thinking_budget: 'thinkingBudget',
+      include_thoughts: 'includeThoughts',
+    });
+  }
+  camelizeKeys(r.toolConfig, { function_calling_config: 'functionCallingConfig' });
+  if (isJsonObject(r.toolConfig)) {
+    camelizeKeys(r.toolConfig.functionCallingConfig, { allowed_function_names: 'allowedFunctionNames' });
+  }
+  if (Array.isArray(r.tools)) {
+    for (const group of r.tools) {
+      camelizeKeys(group, { function_declarations: 'functionDeclarations' });
+      if (isJsonObject(group) && Array.isArray(group.functionDeclarations)) {
+        for (const fn of group.functionDeclarations) {
+          camelizeKeys(fn, { parameters_json_schema: 'parametersJsonSchema' });
+        }
+      }
+    }
+  }
+  const withParts = [...(Array.isArray(r.contents) ? r.contents : []), r.systemInstruction];
+  for (const content of withParts) {
+    if (!isJsonObject(content) || !Array.isArray(content.parts)) continue;
+    for (const part of content.parts) {
+      camelizeKeys(part, {
+        inline_data: 'inlineData',
+        file_data: 'fileData',
+        function_call: 'functionCall',
+        function_response: 'functionResponse',
+        thought_signature: 'thoughtSignature',
+      });
+      if (!isJsonObject(part)) continue;
+      camelizeKeys(part.inlineData, { mime_type: 'mimeType' });
+      camelizeKeys(part.fileData, { mime_type: 'mimeType', file_uri: 'fileUri' });
+    }
+  }
 }
 
 function parseSystemInstruction(si: GeminiRequest['systemInstruction']): IRRequest['system'] {
