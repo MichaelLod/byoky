@@ -109,6 +109,59 @@ jobs:
       - name: Plugin dist checks
         run: npx vitest run packages/openclaw-plugin/tests
 
+  # Every create-byoky-app template, scaffolded by the CLI against this
+  # commit's SDK, must install, build and typecheck. Needs the scaffolder's
+  # --template flag (non-interactive).
+  templates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        template: [chat, multi-provider, backend-relay]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@02f6c237bd2518259fed6c71566509edfb3f2b74 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build the scaffolder; pack core and sdk as they would publish
+        run: |
+          pnpm --filter @byoky/core build
+          pnpm --filter @byoky/sdk build
+          pnpm --filter create-byoky-app build
+          mkdir -p "$RUNNER_TEMP/pkgs"
+          (cd packages/core && pnpm pack --pack-destination "$RUNNER_TEMP/pkgs")
+          (cd packages/sdk && pnpm pack --pack-destination "$RUNNER_TEMP/pkgs")
+
+      - name: Scaffold ${{ matrix.template }}
+        working-directory: ${{ runner.temp }}
+        run: node "$GITHUB_WORKSPACE/packages/create-byoky-app/dist/index.js" smoke-app --template "${{ matrix.template }}" < /dev/null
+
+      - name: Point the app at this commit's SDK
+        working-directory: ${{ runner.temp }}/smoke-app
+        run: |
+          node -e '
+            const fs = require("fs");
+            const dir = process.env.RUNNER_TEMP + "/pkgs";
+            const tgz = (prefix) => "file:" + dir + "/" + fs.readdirSync(dir).find((f) => f.startsWith(prefix) && f.endsWith(".tgz"));
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            pkg.dependencies["@byoky/sdk"] = tgz("byoky-sdk-");
+            pkg.overrides = { ...pkg.overrides, "@byoky/core": tgz("byoky-core-") };
+            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
+          '
+
+      - name: Install, build and typecheck
+        working-directory: ${{ runner.temp }}/smoke-app
+        run: |
+          npm install --no-audit --no-fund
+          npm run build --if-present
+          npm run build:client --if-present
+          npx tsc --noEmit
+
   # Fake-provider Playwright run: the real extension, headless, no keys.
   e2e:
     runs-on: ubuntu-latest
