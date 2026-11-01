@@ -100,6 +100,11 @@ fun AppsScreen(wallet: WalletStore) {
     var editingGroup by remember { mutableStateOf<Group?>(null) }
     var creatingGroup by remember { mutableStateOf(false) }
     var pendingMove by remember { mutableStateOf<PendingCapabilityMove?>(null) }
+    // Destructive actions wait for a confirmation.
+    var confirmDisconnect by remember { mutableStateOf<Session?>(null) }
+    var confirmDisconnectAll by remember { mutableStateOf(false) }
+    var confirmDeleteGroup by remember { mutableStateOf<Group?>(null) }
+    var menuOpen by remember { mutableStateOf(false) }
 
     val orderedGroups = remember(groups) {
         val def = groups.filter { it.id == DEFAULT_GROUP_ID }
@@ -116,10 +121,20 @@ fun AppsScreen(wallet: WalletStore) {
                 title = "Connected",
                 actions = {
                     if (sessions.size > 1) {
-                        IconButton(onClick = {
-                            sessions.forEach { wallet.revokeSession(it) }
-                        }) {
-                            Icon(Icons.Default.Close, "Disconnect all", tint = Alarm)
+                        Box {
+                            IconButton(onClick = { menuOpen = true }) {
+                                Icon(Icons.Default.MoreVert, "More options")
+                            }
+                            RetroDropdownMenu(
+                                expanded = menuOpen,
+                                onDismissRequest = { menuOpen = false },
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Disconnect all", color = Alarm) },
+                                    onClick = { menuOpen = false; confirmDisconnectAll = true },
+                                    leadingIcon = { Icon(Icons.Default.LinkOff, null, tint = Alarm) },
+                                )
+                            }
                         }
                     }
                 },
@@ -151,9 +166,8 @@ fun AppsScreen(wallet: WalletStore) {
                     onMove = { movingApp = it },
                     onEditAllowance = { editingAllowanceFor = it },
                     onEditGroup = { editingGroup = group },
-                    onDeleteGroup = {
-                        try { wallet.deleteGroup(group.id) } catch (_: Throwable) {}
-                    },
+                    onDeleteGroup = { confirmDeleteGroup = group },
+                    onRevoke = { confirmDisconnect = it },
                 )
             }
 
@@ -247,6 +261,44 @@ fun AppsScreen(wallet: WalletStore) {
         )
     }
 
+    confirmDisconnect?.let { session ->
+        val host = displayHostOf(session.appOrigin)
+        ConfirmDestructiveDialog(
+            title = "Disconnect $host?",
+            body = "It loses access to your keys. Open it again from the Apps tab to reconnect.",
+            confirmLabel = "Disconnect",
+            onConfirm = { wallet.revokeSession(session); confirmDisconnect = null },
+            onDismiss = { confirmDisconnect = null },
+        )
+    }
+
+    if (confirmDisconnectAll) {
+        ConfirmDestructiveDialog(
+            title = "Disconnect ${sessions.size} apps?",
+            body = "They lose access to your keys. Open an app again from the Apps tab to reconnect it.",
+            confirmLabel = "Disconnect all",
+            onConfirm = {
+                sessions.forEach { wallet.revokeSession(it) }
+                confirmDisconnectAll = false
+            },
+            onDismiss = { confirmDisconnectAll = false },
+        )
+    }
+
+    confirmDeleteGroup?.let { group ->
+        // The extension's wording.
+        ConfirmDestructiveDialog(
+            title = "Delete group \"${group.name}\"?",
+            body = "Apps in this group will move back to Default.",
+            confirmLabel = "Delete",
+            onConfirm = {
+                try { wallet.deleteGroup(group.id) } catch (_: Throwable) {}
+                confirmDeleteGroup = null
+            },
+            onDismiss = { confirmDeleteGroup = null },
+        )
+    }
+
     editingAllowanceFor?.let { session ->
         val allowance = allowances.firstOrNull { it.origin == session.appOrigin }
         AllowanceDialog(
@@ -276,6 +328,27 @@ fun AppsScreen(wallet: WalletStore) {
     }
 }
 
+private fun displayHostOf(origin: String): String =
+    try { java.net.URL(origin).host ?: origin } catch (_: Exception) { origin }
+
+/** Asked before disconnecting apps or deleting a group. */
+@Composable
+private fun ConfirmDestructiveDialog(
+    title: String,
+    body: String,
+    confirmLabel: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    RetroDialog(
+        onDismissRequest = onDismiss,
+        title = title,
+        text = { Text(body, fontSize = 13.sp) },
+        confirmButton = { DialogButton(confirmLabel, onClick = onConfirm, color = Alarm) },
+        dismissButton = { DialogButton("Cancel", onClick = onDismiss, color = Fog) },
+    )
+}
+
 /**
  * One group with its assigned apps. Header shows the group name + provider/model
  * pin, body lists the connected apps, footer is empty placeholder when nothing's
@@ -291,6 +364,7 @@ private fun GroupBucket(
     onEditAllowance: (Session) -> Unit,
     onEditGroup: () -> Unit,
     onDeleteGroup: () -> Unit,
+    onRevoke: (Session) -> Unit,
 ) {
     val isDefault = group.id == DEFAULT_GROUP_ID
     val provider = Provider.find(group.providerId)
@@ -407,7 +481,7 @@ private fun GroupBucket(
                         tokensUsed = wallet.tokenUsage(session.appOrigin),
                         onMove = { onMove(session) },
                         onEditAllowance = { onEditAllowance(session) },
-                        onRevoke = { wallet.revokeSession(session) },
+                        onRevoke = { onRevoke(session) },
                     )
                 }
             }
