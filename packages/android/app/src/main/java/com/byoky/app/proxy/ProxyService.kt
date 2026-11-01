@@ -527,7 +527,7 @@ class ProxyService(
                         val now = errorBody.append(text)
                         if (now.isNotEmpty()) sink.onChunk(now)
                     }
-                    val rest = errorBody.finish { engine.translateErrorResponse(ctxJson, it) }
+                    val rest = errorBody.finish { engine.translateErrorResponse(ctxJson, it, response.code) }
                     if (rest.isNotEmpty()) sink.onChunk(rest)
                 }
                 isStreaming -> {

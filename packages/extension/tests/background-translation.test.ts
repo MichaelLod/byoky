@@ -64,6 +64,35 @@ describe('background: upstream errors on translated requests', () => {
     expect(JSON.parse(r.text)).toMatchObject({ type: 'error', error: { message: 'Incorrect API key provided' } });
   });
 
+  // R4-04: the error's type is the app dialect's for the HTTP status, not
+  // the upstream's (OpenAI calls a bad key invalid_request_error).
+  it('gives a translated error the app dialect\'s type for its status', async () => {
+    const { h, sessionKey } = await routedApp();
+    h.fetch.mockImplementation(async () => jsonResponse(
+      { error: { message: 'Incorrect API key provided', type: 'invalid_request_error', code: 'invalid_api_key' } },
+      401,
+    ));
+    const r = await h.proxy(APP, { sessionKey, ...ANTHROPIC_CHAT }).result;
+    expect(r.meta.status).toBe(401);
+    expect(JSON.parse(r.text)).toEqual({ type: 'error', error: { type: 'authentication_error', message: 'Incorrect API key provided' } });
+  });
+
+  it('does so on the bridge HTTP path too', async () => {
+    const { h, sessionKey } = await routedApp();
+    h.nativeHost = (msg, conn) => {
+      if (msg.type === 'ping') conn.reply({ type: 'pong' });
+      if (msg.type === 'start-proxy') conn.reply({ type: 'proxy-started' });
+    };
+    expect((await h.internal('startBridgeProxy', { sessionKey, port: 19280 }, senderFor(APP))).success).toBe(true);
+    const bridge = h.nativeConnections.find((c) => c.fromExtension.some((m) => m.type === 'start-proxy'))!;
+    h.fetch.mockImplementation(async () => jsonResponse({ error: { message: 'Rate limit reached', type: 'requests', code: 'rate_limit_exceeded' } }, 429));
+    bridge.reply({ type: 'proxy_http', requestId: 'r1', sessionKey, method: 'POST', headers: {}, ...ANTHROPIC_CHAT });
+    await h.until(() => bridge.fromExtension.some((m) => m.requestId === 'r1' && (m.type === 'proxy_http_response_done' || m.type === 'proxy_http_error')), 5_000, 'the end of the response');
+    const replies = bridge.fromExtension.filter((m) => m.requestId === 'r1');
+    expect(replies[0]).toMatchObject({ type: 'proxy_http_response_meta', status: 429 });
+    expect(JSON.parse(replies[1].chunk as string)).toEqual({ type: 'error', error: { type: 'rate_limit_error', message: 'Rate limit reached' } });
+  });
+
   it('passes a non-JSON error body through on the bridge HTTP path', async () => {
     const { h, sessionKey } = await routedApp();
     h.nativeHost = (msg, conn) => {

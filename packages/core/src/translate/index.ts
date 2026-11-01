@@ -155,14 +155,18 @@ export function translateResponse(ctx: TranslationContext, body: string): string
 
 /**
  * Translate an upstream error body (a non-2xx response) from the destination
- * dialect into the source dialect, so the app's SDK can read it.
+ * dialect into the source dialect, so the app's SDK can read it. The error
+ * type is the source dialect's for `status`, the response's HTTP status
+ * (which the caller keeps): a Gemini 429 reaches an Anthropic app as
+ * rate_limit_error, not RESOURCE_EXHAUSTED. Without a status it is read
+ * from the upstream's own type.
  *
  * Returns null when the body isn't an error the destination adapter
  * recognises (not JSON, an HTML page from a proxy or CDN, or a shape that
  * parses as a success); the caller then passes the raw body through rather
  * than failing the request.
  */
-export function translateErrorResponse(ctx: TranslationContext, body: string): string | null {
+export function translateErrorResponse(ctx: TranslationContext, body: string, status?: number): string | null {
   const dst = getAdapter(ctx.dstFamily);
   const src = getAdapter(ctx.srcFamily);
   let ir: IRResponseOrError;
@@ -172,6 +176,9 @@ export function translateErrorResponse(ctx: TranslationContext, body: string): s
     return null;
   }
   if (!isIRError(ir)) return null;
+  if (typeof status === 'number' && Number.isInteger(status) && status >= 400 && status <= 599) {
+    ir = { error: { ...ir.error, status } };
+  }
   return src.serializeResponse(ctx, ir);
 }
 

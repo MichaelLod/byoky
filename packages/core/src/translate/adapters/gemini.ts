@@ -14,6 +14,7 @@ import type {
   IRToolResultContent,
 } from '../ir.js';
 import { isIRError } from '../ir.js';
+import { geminiError } from '../errors.js';
 
 /**
  * Google Gemini (Generative Language v1beta) adapter.
@@ -739,7 +740,7 @@ function parseResponse(body: string): IRResponseOrError {
       error: {
         type: parsed.error.status ?? 'api_error',
         message: parsed.error.message ?? 'Gemini API error',
-        ...(typeof parsed.error.code === 'number' ? { code: String(parsed.error.code) } : {}),
+        ...(typeof parsed.error.code === 'number' ? { code: String(parsed.error.code), status: parsed.error.code } : {}),
       },
     };
   }
@@ -810,13 +811,8 @@ function upstreamCallId(responseId: string | undefined, index: number): string {
 
 function serializeResponse(ctx: TranslationContext, ir: IRResponseOrError): string {
   if (isIRError(ir)) {
-    return JSON.stringify({
-      error: {
-        code: ir.error.code ? Number(ir.error.code) || 500 : 500,
-        message: ir.error.message,
-        status: ir.error.type,
-      },
-    });
+    const { code, status } = geminiError(ir.error);
+    return JSON.stringify({ error: { code, message: ir.error.message, status } });
   }
 
   const parts: GeminiPart[] = [];
@@ -1006,6 +1002,7 @@ function processGeminiFrame(
       error: {
         type: data.error.status ?? 'api_error',
         message: data.error.message ?? 'Gemini stream error',
+        ...(typeof data.error.code === 'number' ? { status: data.error.code } : {}),
       },
     });
     return;
@@ -1221,13 +1218,7 @@ function createStreamSerializer(ctx: TranslationContext): IRStreamSerializer {
             state.done = true;
             break;
           case 'error':
-            out += emitFrame({
-              error: {
-                code: 500,
-                message: event.error.message,
-                status: event.error.type,
-              },
-            });
+            out += emitFrame({ error: { ...geminiError(event.error), message: event.error.message } });
             state.done = true;
             break;
         }

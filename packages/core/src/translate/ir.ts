@@ -188,9 +188,12 @@ export interface IRUsage {
 }
 
 export interface IRError {
+  /** The upstream's own error type (e.g. rate_limit_error, RESOURCE_EXHAUSTED). */
   type: string;
   message: string;
   code?: string;
+  /** The HTTP status, when the body or the caller says (see errors.ts). */
+  status?: number;
 }
 
 /** Parsed response is either a success envelope or an error envelope. */

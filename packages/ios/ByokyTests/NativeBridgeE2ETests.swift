@@ -361,7 +361,31 @@ final class NativeBridgeE2ETests: XCTestCase {
         let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(BridgeHarness.text(of: replies).utf8)) as? [String: Any])
         let inner = try XCTUnwrap(body["error"] as? [String: Any])
         XCTAssertEqual(inner["message"] as? String, "invalid x-api-key")
+        // R4-04: OpenAI's type for a 401, not Anthropic's authentication_error.
+        XCTAssertEqual(inner["type"] as? String, "invalid_request_error")
         XCTAssertNil(body["type"], "an OpenAI error has no top-level type")
+    }
+
+    /// R4-04: the type follows the HTTP status, which the handler passes on.
+    @MainActor
+    func testTranslatedProviderErrorTypeFollowsTheStatus() async throws {
+        let h = try await BridgeHarness.make(self, provider: "anthropic")
+        let error = #"{"type":"error","error":{"type":"api_error","message":"Service unavailable"}}"#
+        try XCTSkipIf(
+            TranslationEngine.shared.translateErrorResponse(contextJson: try TranslationEngine.shared.buildTranslationContext(
+                srcProviderId: "openai", dstProviderId: "anthropic", srcModel: "gpt-5.5",
+                dstModel: "claude-sonnet-4-6", isStreaming: false, requestId: "probe"
+            ), body: error) == nil,
+            "the bundled mobile.js has no translateErrorResponse yet"
+        )
+        StubUpstream.script(.init(status: 503, chunks: [Data(error.utf8)]))
+
+        let replies = try await h.proxy(body: #"{"model":"gpt-5.5","messages":[{"role":"user","content":"hi"}]}"#)
+
+        XCTAssertEqual(replies.first?["status"] as? Int, 503)
+        let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(BridgeHarness.text(of: replies).utf8)) as? [String: Any])
+        let inner = try XCTUnwrap(body["error"] as? [String: Any])
+        XCTAssertEqual(inner["type"] as? String, "service_unavailable_error")
     }
 
     /// A routed request's error body past the translation limit is passed

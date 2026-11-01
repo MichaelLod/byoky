@@ -633,7 +633,9 @@ final class NativeBridgeHandler: NSObject, WKScriptMessageHandler {
                 meter.consume(chunk)
                 meter.markComplete()
                 deliverChunk(requestId, errorBody.append(chunk))
-                deliverChunk(requestId, errorBody.finish { engine.translateErrorResponse(contextJson: ctxJson, body: $0) })
+                deliverChunk(requestId, errorBody.finish {
+                    engine.translateErrorResponse(contextJson: ctxJson, body: $0, status: httpResponse.statusCode)
+                })
             } else if isEventStream(httpResponse) {
                 // Undo tool renames on the Anthropic stream first, then
                 // translate it back to the app's dialect.

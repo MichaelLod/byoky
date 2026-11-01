@@ -16,6 +16,7 @@ import type {
   IRDocumentSource,
 } from '../ir.js';
 import { isIRError } from '../ir.js';
+import { anthropicErrorType } from '../errors.js';
 
 /**
  * Anthropic Messages API adapter.
@@ -916,7 +917,7 @@ function serializeResponse(ctx: TranslationContext, ir: IRResponseOrError): stri
   if (isIRError(ir)) {
     return JSON.stringify({
       type: 'error',
-      error: { type: ir.error.type, message: ir.error.message },
+      error: { type: anthropicErrorType(ir.error), message: ir.error.message },
     });
   }
 
@@ -1306,7 +1307,7 @@ function handleEvent(
       state.done = true;
       return emitFrame('error', {
         type: 'error',
-        error: { type: event.error.type, message: event.error.message },
+        error: { type: anthropicErrorType(event.error), message: event.error.message },
       });
   }
 }

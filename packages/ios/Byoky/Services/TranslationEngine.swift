@@ -224,18 +224,20 @@ final class TranslationEngine {
     }
 
     /// A provider's error body (a non-2xx reply to a translated request) in
-    /// the app's dialect, via core's `translateErrorResponse`. Nil when the
-    /// body isn't an error core can parse (an HTML gateway page, say), on any
-    /// failure, and when the bundle predates that export: the caller then
-    /// passes the body on as sent.
-    func translateErrorResponse(contextJson: String, body: String) -> String? {
+    /// the app's dialect, via core's `translateErrorResponse`, with the app
+    /// dialect's error type for `status` (the HTTP status, which the app
+    /// gets unchanged). Nil when the body isn't an error core can parse (an
+    /// HTML gateway page, say), on any failure, and when the bundle predates
+    /// that export: the caller then passes the body on as sent.
+    func translateErrorResponse(contextJson: String, body: String, status: Int? = nil) -> String? {
         do {
             return try queue.sync {
                 try ensureLoadedLocked()
                 guard let bridge = self.bridge,
                       let fn = bridge.objectForKeyedSubscript("translateErrorResponse"), !fn.isUndefined else { return nil }
                 context?.exception = nil
-                let result = bridge.invokeMethod("translateErrorResponse", withArguments: [contextJson, body])
+                let args: [Any] = status.map { [contextJson, body, $0] } ?? [contextJson, body]
+                let result = bridge.invokeMethod("translateErrorResponse", withArguments: args)
                 if pendingException() != nil { return nil }
                 guard let result, result.isString, let translated = result.toString(), !translated.isEmpty else { return nil }
                 return translated

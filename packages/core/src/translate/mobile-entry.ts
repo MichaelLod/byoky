@@ -211,11 +211,13 @@ interface MobileBridge {
   rewriteClaudeCodeJSONBody(mapJson: string, body: string): string;
 
   /**
-   * Translate an upstream error body (non-2xx) into the app's dialect.
+   * Translate an upstream error body (non-2xx) into the app's dialect,
+   * with the error type the app's dialect uses for `status`, the HTTP
+   * status the native side passes on unchanged.
    * Returns null when the body isn't a recognisable error (e.g. an HTML 502
    * page); the caller then delivers the raw body.
    */
-  translateErrorResponse(ctxJson: string, body: string): string | null;
+  translateErrorResponse(ctxJson: string, body: string, status?: number): string | null;
 
   /**
    * The model routing names for `providerId` when nothing else does (the
@@ -366,9 +368,9 @@ const bridge: MobileBridge = {
     const map = JSON.parse(mapJson) as Record<string, string>;
     return _rewriteToolNamesInJSONBody(body, map);
   },
-  translateErrorResponse(ctxJson, body) {
+  translateErrorResponse(ctxJson, body, status) {
     const ctx = JSON.parse(ctxJson) as TranslationContext;
-    return _translateErrorResponse(ctx, body);
+    return _translateErrorResponse(ctx, body, typeof status === 'number' ? status : undefined);
   },
   autoRouteModelFor(providerId) {
     return _autoRouteModelFor(providerId) ?? null;

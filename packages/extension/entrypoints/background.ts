@@ -1121,7 +1121,7 @@ export default defineBackground(() => {
           try {
             const translatedResponse = responseStatus >= 200 && responseStatus < 300
               ? applyResponseTranslation(translation, msg.body, msg.requestId, chunks.join(''), msg.url)
-              : translateErrorBody(translation, msg.body, msg.requestId, chunks.join(''), msg.url);
+              : translateErrorBody(translation, msg.body, msg.requestId, chunks.join(''), msg.url, responseStatus);
             send({
               type: 'BYOKY_PROXY_RESPONSE_CHUNK',
               requestId: msg.requestId,
@@ -2208,13 +2208,9 @@ export default defineBackground(() => {
               }
             } else {
               try {
-                const translated = (status >= 200 && status < 300 ? applyResponseTranslation : translateErrorBody)(
-                  translationCtx.translation,
-                  translationCtx.originalBody,
-                  msg.requestId,
-                  chunks.join(''),
-                  appRequest.url,
-                );
+                const translated = status >= 200 && status < 300
+                  ? applyResponseTranslation(translationCtx.translation, translationCtx.originalBody, msg.requestId, chunks.join(''), appRequest.url)
+                  : translateErrorBody(translationCtx.translation, translationCtx.originalBody, msg.requestId, chunks.join(''), appRequest.url, status);
                 send({
                   type: 'BYOKY_PROXY_RESPONSE_CHUNK',
                   requestId: msg.requestId,
@@ -2897,7 +2893,7 @@ export default defineBackground(() => {
           try {
             const translatedResponse = responseStatus >= 200 && responseStatus < 300
               ? applyResponseTranslation(translation, body, requestId, chunks.join(''), url)
-              : translateErrorBody(translation, body, requestId, chunks.join(''), url);
+              : translateErrorBody(translation, body, requestId, chunks.join(''), url, responseStatus);
             bridgeProxyPort?.postMessage({
               type: 'proxy_http_response_chunk',
               requestId,
@@ -3160,20 +3156,23 @@ export default defineBackground(() => {
   /**
    * A translated request's upstream error body, for the app: in the app's
    * dialect when the destination's error parses as one (so its SDK can
-   * read it), otherwise as it came. An HTML 502 from a CDN or a plain-text
-   * error is passed through rather than failing the response.
+   * read it), with that dialect's error type for `status` (the response's
+   * HTTP status, which the app gets unchanged), otherwise as it came. An
+   * HTML 502 from a CDN or a plain-text error is passed through rather than
+   * failing the response.
    */
   function translateErrorBody(
     translation: SessionTranslation,
     requestBody: string | undefined,
     requestId: string,
     responseBody: string,
-    requestUrl?: string,
+    requestUrl: string | undefined,
+    status: number,
   ): string {
     const ctx = buildTranslationContext(translation, requestBody, requestId, requestUrl);
     if (!ctx) return responseBody;
     try {
-      return translateErrorResponse(ctx, responseBody) ?? responseBody;
+      return translateErrorResponse(ctx, responseBody, status) ?? responseBody;
     } catch {
       return responseBody;
     }
