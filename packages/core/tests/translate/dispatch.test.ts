@@ -446,3 +446,61 @@ describe('cross-family dispatch — Cohere reasoning in Anthropic history', () =
     ]);
   });
 });
+
+describe('cross-family dispatch — Gemini thinkingConfig to Anthropic and Cohere', () => {
+  const gemini = (generationConfig: Record<string, unknown>) =>
+    JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'Hello.' }] }], generationConfig });
+
+  it('gemini → anthropic: budget 0 leaves thinking off', () => {
+    const out = JSON.parse(translateRequest(ctx('gemini', 'anthropic'), gemini({ thinkingConfig: { thinkingBudget: 0 } })));
+    expect(out).not.toHaveProperty('thinking');
+  });
+
+  it('gemini → anthropic: budget -1 gives valid thinking', () => {
+    const out = JSON.parse(translateRequest(ctx('gemini', 'anthropic'), gemini({ thinkingConfig: { thinkingBudget: -1 } })));
+    expect(out.thinking).toEqual({ type: 'adaptive' });
+  });
+
+  it('gemini → anthropic (budget model): a large budget fits under max_tokens and drops temperature', () => {
+    const out = JSON.parse(
+      translateRequest(
+        { ...ctx('gemini', 'anthropic'), dstModel: 'claude-haiku-4-5-20251001' },
+        gemini({ temperature: 0.4, thinkingConfig: { thinkingBudget: 8192 } }),
+      ),
+    ) as { max_tokens: number; thinking: { budget_tokens: number }; temperature?: number };
+    expect(out.thinking.budget_tokens).toBe(8192);
+    expect(out.max_tokens).toBeGreaterThan(out.thinking.budget_tokens);
+    expect(out).not.toHaveProperty('temperature');
+  });
+
+  it('gemini → cohere: budget 0 leaves thinking off', () => {
+    const out = JSON.parse(translateRequest(ctx('gemini', 'cohere'), gemini({ thinkingConfig: { thinkingBudget: 0 } })));
+    expect(out).not.toHaveProperty('thinking');
+  });
+});
+
+describe('cross-family dispatch — sampling parameters per destination', () => {
+  const body = JSON.stringify({
+    model: 'gpt-5.5',
+    temperature: 0.7,
+    top_p: 1,
+    messages: [{ role: 'user', content: 'Hello' }],
+  });
+
+  it('openai → anthropic (sonnet-4-6) sends temperature only', () => {
+    const out = JSON.parse(translateRequest(ctx('openai', 'anthropic'), body));
+    expect(out.temperature).toBe(0.7);
+    expect(out).not.toHaveProperty('top_p');
+  });
+
+  it('openai → anthropic (opus-4-7) sends no sampling parameters', () => {
+    const out = JSON.parse(translateRequest({ ...ctx('openai', 'anthropic'), dstModel: 'claude-opus-4-7' }, body));
+    expect(out).not.toHaveProperty('temperature');
+    expect(out).not.toHaveProperty('top_p');
+  });
+
+  it('openai → cohere sends p within range', () => {
+    const out = JSON.parse(translateRequest(ctx('openai', 'cohere'), body));
+    expect(out.p).toBe(0.99);
+  });
+});

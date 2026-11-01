@@ -403,8 +403,10 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
 
   if (typeof ir.maxTokens === 'number') out.max_tokens = ir.maxTokens;
   if (typeof ir.temperature === 'number') out.temperature = ir.temperature;
-  if (typeof ir.topP === 'number') out.p = ir.topP;
-  if (typeof ir.topK === 'number') out.k = ir.topK;
+  // Cohere documents p as 0.01–0.99 (so the common top_p: 1 is out of
+  // range) and k as an integer 0–500.
+  if (typeof ir.topP === 'number') out.p = Math.min(0.99, Math.max(0.01, ir.topP));
+  if (typeof ir.topK === 'number') out.k = Math.min(500, Math.max(0, Math.round(ir.topK)));
   if (ir.stopSequences && ir.stopSequences.length > 0) out.stop_sequences = ir.stopSequences.slice();
   if (typeof ir.stream === 'boolean') out.stream = ir.stream;
 
@@ -449,7 +451,7 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
   if (ir.thinking?.enabled) {
     out.thinking = {
       type: 'enabled',
-      ...(typeof ir.thinking.budgetTokens === 'number'
+      ...(typeof ir.thinking.budgetTokens === 'number' && ir.thinking.budgetTokens > 0
         ? { token_budget: ir.thinking.budgetTokens }
         : {}),
     };

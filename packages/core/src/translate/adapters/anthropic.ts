@@ -66,7 +66,7 @@ interface AnthropicRequest {
   metadata?: { user_id?: string };
   tools?: AnthropicTool[];
   tool_choice?: AnthropicToolChoice;
-  thinking?: { type?: 'enabled'; budget_tokens?: number };
+  thinking?: { type?: 'enabled' | 'adaptive'; budget_tokens?: number };
 }
 
 interface AnthropicSystemBlock {
@@ -192,7 +192,7 @@ function parseRequest(body: string): IRRequest {
     }
   }
 
-  if (parsed.thinking && parsed.thinking.type === 'enabled') {
+  if (parsed.thinking && (parsed.thinking.type === 'enabled' || parsed.thinking.type === 'adaptive')) {
     ir.thinking = {
       enabled: true,
       ...(typeof parsed.thinking.budget_tokens === 'number'
@@ -332,13 +332,29 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
     });
   }
 
+  const rules = claudeRequestRules(ctx.dstModel);
+  // Extended thinking can't be combined with a forced tool choice. The
+  // forced tool is what the app's code relies on; thinking only shapes the
+  // answer, so it gives way.
+  const forcedTool = ir.toolChoice?.type === 'any' || ir.toolChoice?.type === 'tool';
+  const wantsThinking = ir.thinking?.enabled === true && !forcedTool;
+  const requestedBudget = ir.thinking?.budgetTokens;
+
   // Anthropic requires max_tokens. Default to the destination model's max
-  // output, capped at 4096, if the source omitted it.
+  // output, capped at 4096 (plus room for thinking), if the source omitted it.
+  const dst = getModel(ctx.dstModel);
   let maxTokens = ir.maxTokens;
   if (typeof maxTokens !== 'number') {
-    const dst = getModel(ctx.dstModel);
-    maxTokens = Math.min(dst?.maxOutput ?? 4096, 4096);
+    maxTokens = wantsThinking
+      ? Math.min(
+          dst?.maxOutput ?? 32_000,
+          Math.max(MIN_THINKING_BUDGET, requestedBudget ?? DEFAULT_THINKING_BUDGET) + 4096,
+        )
+      : Math.min(dst?.maxOutput ?? 4096, 4096);
   }
+  const thinking = wantsThinking
+    ? anthropicThinking(rules.thinking, requestedBudget, maxTokens)
+    : undefined;
 
   const out: AnthropicRequest = {
     model: ctx.dstModel,
@@ -350,12 +366,26 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
     out.system = systemParts.map((p) => p.text).join('\n\n');
   }
 
-  if (typeof ir.temperature === 'number') {
-    // Anthropic clamps temperature to [0, 1]; OpenAI accepts up to 2.
-    out.temperature = Math.max(0, Math.min(1, ir.temperature));
+  let temperature = ir.temperature;
+  let topP = ir.topP;
+  let topK = ir.topK;
+  if (rules.sampling === 'none') {
+    temperature = topP = topK = undefined;
+  } else {
+    if (thinking) {
+      // With thinking: no temperature or top_k change, top_p only in [0.95, 1].
+      temperature = topK = undefined;
+      if (typeof topP === 'number' && (topP < 0.95 || topP > 1)) topP = undefined;
+    }
+    // Claude 4 models take temperature or top_p, not both.
+    if (typeof temperature === 'number') topP = undefined;
   }
-  if (typeof ir.topP === 'number') out.top_p = ir.topP;
-  if (typeof ir.topK === 'number') out.top_k = ir.topK;
+  if (typeof temperature === 'number') {
+    // Anthropic clamps temperature to [0, 1]; OpenAI accepts up to 2.
+    out.temperature = Math.max(0, Math.min(1, temperature));
+  }
+  if (typeof topP === 'number') out.top_p = topP;
+  if (typeof topK === 'number') out.top_k = topK;
   if (ir.stopSequences && ir.stopSequences.length > 0) out.stop_sequences = ir.stopSequences.slice();
   if (typeof ir.stream === 'boolean') out.stream = ir.stream;
   if (ir.userId) out.metadata = { user_id: ir.userId };
@@ -385,16 +415,64 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
     }
   }
 
-  if (ir.thinking?.enabled) {
-    out.thinking = {
-      type: 'enabled',
-      ...(typeof ir.thinking.budgetTokens === 'number'
-        ? { budget_tokens: ir.thinking.budgetTokens }
-        : {}),
-    };
-  }
+  if (thinking) out.thinking = thinking;
 
   return JSON.stringify(out);
+}
+
+const MIN_THINKING_BUDGET = 1024;
+const DEFAULT_THINKING_BUDGET = 8192;
+
+type ClaudeSamplingRule = 'none' | 'single';
+/** adaptive: thinking:{type:'adaptive'} only; budget: {type:'enabled',
+ *  budget_tokens} only; either: adaptive, or a budget when one is asked for. */
+type ClaudeThinkingRule = 'adaptive' | 'either' | 'budget';
+
+/**
+ * What a Claude model accepts, read from its id (groups accept any id, so
+ * the registry can't be the only source):
+ *  - Opus 4.7 and later, every 5.x model, Fable and Mythos reject
+ *    temperature/top_p/top_k and budget_tokens; they think adaptively.
+ *  - Claude 4.6 takes temperature or top_p (not both) and either form of
+ *    thinking (budget_tokens is deprecated there).
+ *  - Earlier models take temperature or top_p and a thinking budget.
+ * An id that doesn't parse is treated like a current model on sampling and
+ * gets adaptive thinking.
+ */
+function claudeRequestRules(model: string): { sampling: ClaudeSamplingRule; thinking: ClaudeThinkingRule } {
+  const id = model.toLowerCase();
+  const named = /claude-(opus|sonnet|haiku|fable|mythos)-(\d+)(?:[-.](\d{1,2})(?!\d))?/.exec(id);
+  const legacy = named ? null : /claude-(\d+)(?:[-.](\d)(?!\d))?-(?:opus|sonnet|haiku)/.exec(id);
+  if (named && (named[1] === 'fable' || named[1] === 'mythos')) {
+    return { sampling: 'none', thinking: 'adaptive' };
+  }
+  const version = named ? [named[2], named[3]] : legacy ? [legacy[1], legacy[2]] : null;
+  if (!version) return { sampling: 'single', thinking: 'adaptive' };
+  const major = Number(version[0]);
+  const minor = Number(version[1] ?? 0);
+  if (major > 4 || (major === 4 && minor >= 7)) return { sampling: 'none', thinking: 'adaptive' };
+  if (major === 4 && minor === 6) return { sampling: 'single', thinking: 'either' };
+  return { sampling: 'single', thinking: 'budget' };
+}
+
+/**
+ * Anthropic thinking config for the destination. A budget is at least 1024
+ * tokens and below max_tokens; when max_tokens leaves no room for that,
+ * thinking is left off.
+ */
+function anthropicThinking(
+  rule: ClaudeThinkingRule,
+  requestedBudget: number | undefined,
+  maxTokens: number,
+): AnthropicRequest['thinking'] | undefined {
+  const useBudget = rule === 'budget' || (rule === 'either' && typeof requestedBudget === 'number');
+  if (!useBudget) return { type: 'adaptive' };
+  const budget = Math.min(
+    Math.max(MIN_THINKING_BUDGET, requestedBudget ?? DEFAULT_THINKING_BUDGET),
+    maxTokens - 1,
+  );
+  if (budget < MIN_THINKING_BUDGET) return undefined;
+  return { type: 'enabled', budget_tokens: budget };
 }
 
 function serializeMessagesToAnthropic(messages: IRMessage[]): AnthropicMessage[] {

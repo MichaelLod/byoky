@@ -452,3 +452,25 @@ describe('geminiAdapter — JSON Schema fields', () => {
     expect(ir.responseFormat).toEqual({ type: 'json_schema', schema: { type: 'STRING' } });
   });
 });
+
+describe('geminiAdapter.parseRequest — thinkingBudget', () => {
+  const parse = (thinkingBudget: number) =>
+    geminiAdapter.parseRequest(
+      JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: 'x' }] }],
+        generationConfig: { thinkingConfig: { thinkingBudget } },
+      }),
+    );
+
+  it('0 turns thinking off', () => {
+    expect(parse(0).thinking).toBeUndefined();
+  });
+
+  it('-1 asks for thinking without a budget', () => {
+    expect(parse(-1).thinking).toEqual({ enabled: true });
+  });
+
+  it('a positive budget is kept', () => {
+    expect(parse(4096).thinking).toEqual({ enabled: true, budgetTokens: 4096 });
+  });
+});

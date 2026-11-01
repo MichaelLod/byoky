@@ -193,8 +193,11 @@ function parseRequest(body: string): IRRequest {
         ir.responseFormat = { type: 'json' };
       }
     }
-    if (gc.thinkingConfig && typeof gc.thinkingConfig.thinkingBudget === 'number') {
-      ir.thinking = { enabled: true, budgetTokens: gc.thinkingConfig.thinkingBudget };
+    // thinkingBudget: 0 turns thinking off, -1 asks for dynamic thinking.
+    const budget = gc.thinkingConfig?.thinkingBudget;
+    if (typeof budget === 'number') {
+      if (budget > 0) ir.thinking = { enabled: true, budgetTokens: budget };
+      else if (budget === -1) ir.thinking = { enabled: true };
     }
   }
 
