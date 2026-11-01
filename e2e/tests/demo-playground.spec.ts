@@ -1,5 +1,6 @@
 import { LIVE, test, expect, type Wallet } from '../fixtures';
 import http from 'http';
+import { COLOR_PROMPT, RED_PNG_B64 } from '../../packages/core/tests/translate/live/red-image';
 
 /**
  * Interactive demo-playground e2e — desktop only.
@@ -13,31 +14,40 @@ import http from 'http';
  *   Leg 2 — Chat tab: streaming text across anthropic + openai (SSE
  *           chunks must traverse chrome.runtime.Port intact) and
  *           non-streaming for gemini.
- *   Leg 3 — Chat tab: vision — upload a 1×1 PNG, assert the model
- *           answers about the image, for anthropic + openai + gemini.
+ *   Leg 3 — Chat tab: vision — upload a solid red PNG, assert the model
+ *           says it is red, for anthropic + openai + gemini.
  *   Leg 4 — Tool Use tab: full agentic loop with get_weather +
  *           convert_temperature across anthropic + openai.
  *   Leg 5 — Structured Output tab: json_schema (openai strict) and
- *           json_object (gemini via cross-family group) produce valid
- *           JSON with the expected top-level keys.
+ *           free-form JSON (anthropic) produce valid JSON with the
+ *           expected top-level keys.
  *   Leg 6 — Backend Relay tab: the in-browser ByokyServer handles a
  *           real provider call via the mock WebSocket pair and the
  *           protocol log shows the expected hello→request→chunk→done
  *           sequence.
  *
+ * Every check waits for the run it started and reads that run's output:
+ * the demo shows a failed call as an "Error: ..." chat bubble or a
+ * .demo-error box, and keeps the previous run on screen until the next
+ * one replaces it, so "some output is visible" proves nothing.
+ *
  * Orchestration: none needed beyond `pnpm -C packages/web dev` in
  * another terminal (or the full-stack wrapper script that boots it).
  * Fails fast with a helpful message if the demo URL isn't reachable.
+ * BYOKY_DEMO_GEMINI_MODEL picks the Chat tab's Gemini model (one from its
+ * model list) instead of the demo's default, e.g. when the key's free-tier
+ * daily cap for the default is used up.
  */
 
 const DEMO_URL = process.env.BYOKY_DEMO_URL ?? 'http://localhost:3000/demo';
+const GEMINI_MODEL = process.env.BYOKY_DEMO_GEMINI_MODEL;
 const PASSWORD = 'DemoPlayground1234!';
 
-// Smallest possible PNG: 1×1 transparent pixel.
-const TEST_IMAGE_BUFFER = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
-  'base64',
-);
+const REPLY_TIMEOUT = 90_000;
+// Gemini 3.8 Flash, the demo's default, can take a couple of minutes.
+const GEMINI_REPLY_TIMEOUT = 240_000;
+
+const TEST_IMAGE = { name: 'red.png', mimeType: 'image/png', buffer: Buffer.from(RED_PNG_B64, 'base64') };
 
 async function checkDemoReachable(url: string): Promise<void> {
   await new Promise<void>((resolve, reject) => {
@@ -114,6 +124,77 @@ async function selectProvider(w: Wallet, selector: string, providerId: string) {
   await w.page.locator(selector).first().selectOption(providerId);
 }
 
+async function selectChatProvider(w: Wallet, providerId: string) {
+  await selectProvider(w, '.provider-select select', providerId);
+  if (providerId === 'gemini' && GEMINI_MODEL) {
+    await w.page.locator('.provider-select select').nth(1).selectOption(GEMINI_MODEL);
+  }
+}
+
+/**
+ * Sends one Chat turn and returns the reply. The reply is the bubble this
+ * send adds (the previous turn's stays on screen), read once it has
+ * stopped streaming; a failed call shows as an "Error: ..." bubble.
+ */
+async function sendChat(
+  w: Wallet,
+  prompt: string,
+  opts: { image?: boolean; timeout?: number } = {},
+): Promise<string> {
+  const bubbles = w.page.locator('.message-assistant');
+  const before = await bubbles.count();
+  if (opts.image) {
+    await w.page.setInputFiles('.chat-input input[type="file"]', TEST_IMAGE);
+    await expect(w.page.locator('.chat-attachment-name')).toHaveText(TEST_IMAGE.name, { timeout: 5_000 });
+  }
+  await w.page.fill('.chat-input input[type="text"]', prompt);
+  await w.page.click('.chat-input button[type="submit"]');
+
+  await expect(bubbles).toHaveCount(before + 1, { timeout: 15_000 });
+  const reply = bubbles.nth(before);
+  await expect(reply).not.toHaveClass(/message-streaming/, { timeout: opts.timeout ?? REPLY_TIMEOUT });
+  const text = (await reply.locator('.message-content').innerText()).trim();
+  expect(text, 'the call failed').not.toMatch(/^Error:/);
+  return text;
+}
+
+/**
+ * Runs the Tool Use tab once and checks the loop: an example button clears
+ * the previous run first, and the run is over when the button reads "Run"
+ * again.
+ */
+async function runToolUse(w: Wallet, prompt: string): Promise<void> {
+  const panel = w.page.locator('.demo-panel:has(h3:has-text("Tool Use"))');
+  await panel.locator('.demo-sample-btn').first().click();
+  await expect(panel.locator('.tool-step')).toHaveCount(0);
+  await panel.locator('.demo-textarea').fill(prompt);
+  await panel.getByRole('button', { name: 'Run', exact: true }).click();
+  // The run's first step is the prompt; it shows with "Running...".
+  await expect(panel.locator('.tool-step-user')).toContainText(prompt, { timeout: 15_000 });
+  await expect(panel.getByRole('button', { name: 'Run', exact: true })).toBeVisible({ timeout: 180_000 });
+  await expect(panel.locator('.demo-error')).toHaveCount(0);
+
+  const toolCalls = await panel.locator('.tool-step-tool_call').allInnerTexts();
+  expect(toolCalls.some((c) => c.includes('get_weather')), `tool calls: ${toolCalls.join(' | ')}`).toBe(true);
+  await expect(panel.locator('.tool-step-tool_result')).not.toHaveCount(0);
+  // The loop ends with the model's answer.
+  const last = panel.locator('.tool-step').last();
+  await expect(last).toHaveClass(/tool-step-assistant/);
+  expect((await last.locator('.tool-step-content').innerText()).trim().length).toBeGreaterThan(0);
+}
+
+/** Runs Structured Output's Extract once and returns the parsed JSON. */
+async function runExtract(w: Wallet): Promise<Record<string, unknown>> {
+  const panel = w.page.locator('.demo-panel:has(h3:has-text("Structured Output"))');
+  // A sample button clears the previous result, so the JSON read below is this run's.
+  await panel.locator('.demo-sample-btn').first().click();
+  await expect(panel.locator('.demo-result')).toHaveCount(0);
+  await panel.getByRole('button', { name: 'Extract', exact: true }).click();
+  await expect(panel.locator('.demo-result pre').or(panel.locator('.demo-error'))).toBeVisible({ timeout: REPLY_TIMEOUT });
+  await expect(panel.locator('.demo-error')).toHaveCount(0);
+  return JSON.parse(await panel.locator('.demo-result pre').innerText()) as Record<string, unknown>;
+}
+
 test.describe.configure({ mode: 'serial' });
 
 test.describe('Interactive demo playground — desktop full matrix', () => {
@@ -155,161 +236,63 @@ test.describe('Interactive demo playground — desktop full matrix', () => {
   test('Leg 2a: Chat tab streams anthropic via SSE', async ({ walletA }) => {
     await walletA.page.bringToFront();
     await walletA.page.click('.playground-tab:has-text("Chat")');
-    await selectProvider(walletA, '.provider-select select', 'anthropic');
-    await walletA.page.fill('.chat-input input[type="text"]', 'Reply with exactly the word OK.');
-    await walletA.page.click('.chat-input button[type="submit"]');
-
-    // Wait for the streaming message to arrive. A non-empty assistant bubble
-    // with streaming=undefined (i.e. no `message-streaming` class) means the
-    // SSE loop completed — that's our evidence chunks traversed the port.
-    const assistant = walletA.page.locator('.message-assistant').last();
-    await expect(assistant).toBeVisible({ timeout: 15_000 });
-    await expect(async () => {
-      const text = (await assistant.locator('.message-content').innerText()).trim();
-      expect(text.length).toBeGreaterThan(0);
-      const stillStreaming = await assistant.evaluate((el) => el.classList.contains('message-streaming'));
-      expect(stillStreaming).toBe(false);
-    }).toPass({ timeout: 60_000 });
-
-    const body = (await assistant.locator('.message-content').innerText()).trim();
-    expect(body.toLowerCase()).toContain('ok');
+    await selectChatProvider(walletA, 'anthropic');
+    // The bubble stops streaming once the SSE loop is done: the chunks
+    // traversed the port.
+    expect(await sendChat(walletA, 'Reply with exactly the word OK.')).toMatch(/\bok\b/i);
   });
 
   test('Leg 2b: Chat tab streams openai via SSE', async ({ walletA }) => {
     await walletA.page.bringToFront();
-    await selectProvider(walletA, '.provider-select select', 'openai');
-    await walletA.page.fill('.chat-input input[type="text"]', 'Reply with exactly the word OK.');
-    await walletA.page.click('.chat-input button[type="submit"]');
-
-    const assistant = walletA.page.locator('.message-assistant').last();
-    await expect(async () => {
-      const text = (await assistant.locator('.message-content').innerText()).trim();
-      expect(text.length).toBeGreaterThan(0);
-      const stillStreaming = await assistant.evaluate((el) => el.classList.contains('message-streaming'));
-      expect(stillStreaming).toBe(false);
-    }).toPass({ timeout: 60_000 });
-
-    const body = (await assistant.locator('.message-content').innerText()).trim();
-    expect(body.toLowerCase()).toContain('ok');
+    await selectChatProvider(walletA, 'openai');
+    expect(await sendChat(walletA, 'Reply with exactly the word OK.')).toMatch(/\bok\b/i);
   });
 
   test('Leg 2c: Chat tab completes gemini (non-stream path)', async ({ walletA }) => {
+    test.setTimeout(GEMINI_REPLY_TIMEOUT + 60_000);
     await walletA.page.bringToFront();
-    await selectProvider(walletA, '.provider-select select', 'gemini');
-    await walletA.page.fill('.chat-input input[type="text"]', 'Reply with exactly the word OK.');
-    await walletA.page.click('.chat-input button[type="submit"]');
-
-    const assistant = walletA.page.locator('.message-assistant').last();
-    await expect(async () => {
-      const text = (await assistant.locator('.message-content').innerText()).trim();
-      expect(text.length).toBeGreaterThan(0);
-    }).toPass({ timeout: 60_000 });
+    await selectChatProvider(walletA, 'gemini');
+    expect(await sendChat(walletA, 'Reply with exactly the word OK.', { timeout: GEMINI_REPLY_TIMEOUT })).toMatch(/\bok\b/i);
   });
 
-  test('Leg 3a: Chat tab vision — anthropic describes the 1×1 png', async ({ walletA }) => {
+  test('Leg 3a: Chat tab vision — anthropic names the colour of the png', async ({ walletA }) => {
     await walletA.page.bringToFront();
-    await selectProvider(walletA, '.provider-select select', 'anthropic');
-    await walletA.page.setInputFiles('.chat-input input[type="file"]', {
-      name: 'pixel.png',
-      mimeType: 'image/png',
-      buffer: TEST_IMAGE_BUFFER,
-    });
-    await expect(walletA.page.locator('.chat-attachment-name')).toHaveText('pixel.png', { timeout: 5_000 });
-    await walletA.page.fill('.chat-input input[type="text"]', 'What do you see? Answer in one short sentence.');
-    await walletA.page.click('.chat-input button[type="submit"]');
-
-    const assistant = walletA.page.locator('.message-assistant').last();
-    await expect(async () => {
-      const text = (await assistant.locator('.message-content').innerText()).trim();
-      expect(text.length).toBeGreaterThan(10);
-      const stillStreaming = await assistant.evaluate((el) => el.classList.contains('message-streaming'));
-      expect(stillStreaming).toBe(false);
-    }).toPass({ timeout: 90_000 });
+    await selectChatProvider(walletA, 'anthropic');
+    expect(await sendChat(walletA, COLOR_PROMPT, { image: true })).toMatch(/red/i);
   });
 
   test('Leg 3b: Chat tab vision — openai', async ({ walletA }) => {
     await walletA.page.bringToFront();
-    await selectProvider(walletA, '.provider-select select', 'openai');
-    await walletA.page.setInputFiles('.chat-input input[type="file"]', {
-      name: 'pixel.png',
-      mimeType: 'image/png',
-      buffer: TEST_IMAGE_BUFFER,
-    });
-    await expect(walletA.page.locator('.chat-attachment-name')).toHaveText('pixel.png', { timeout: 5_000 });
-    await walletA.page.fill('.chat-input input[type="text"]', 'What do you see? One short sentence.');
-    await walletA.page.click('.chat-input button[type="submit"]');
-
-    const assistant = walletA.page.locator('.message-assistant').last();
-    await expect(async () => {
-      const text = (await assistant.locator('.message-content').innerText()).trim();
-      expect(text.length).toBeGreaterThan(10);
-    }).toPass({ timeout: 90_000 });
+    await selectChatProvider(walletA, 'openai');
+    expect(await sendChat(walletA, COLOR_PROMPT, { image: true })).toMatch(/red/i);
   });
 
   test('Leg 3c: Chat tab vision — gemini', async ({ walletA }) => {
+    test.setTimeout(GEMINI_REPLY_TIMEOUT + 60_000);
     await walletA.page.bringToFront();
-    await selectProvider(walletA, '.provider-select select', 'gemini');
-    await walletA.page.setInputFiles('.chat-input input[type="file"]', {
-      name: 'pixel.png',
-      mimeType: 'image/png',
-      buffer: TEST_IMAGE_BUFFER,
-    });
-    await expect(walletA.page.locator('.chat-attachment-name')).toHaveText('pixel.png', { timeout: 5_000 });
-    await walletA.page.fill('.chat-input input[type="text"]', 'What do you see? One short sentence.');
-    await walletA.page.click('.chat-input button[type="submit"]');
-
-    const assistant = walletA.page.locator('.message-assistant').last();
-    await expect(async () => {
-      const text = (await assistant.locator('.message-content').innerText()).trim();
-      expect(text.length).toBeGreaterThan(10);
-    }).toPass({ timeout: 90_000 });
+    await selectChatProvider(walletA, 'gemini');
+    expect(await sendChat(walletA, COLOR_PROMPT, { image: true, timeout: GEMINI_REPLY_TIMEOUT })).toMatch(/red/i);
   });
 
   test('Leg 4a: Tool Use tab — anthropic agentic loop', async ({ walletA }) => {
     await walletA.page.bringToFront();
     await walletA.page.click('.playground-tab:has-text("Tool Use")');
     await selectProvider(walletA, '.demo-panel:has(h3:has-text("Tool Use")) .demo-provider-select', 'anthropic');
-    // Use a prompt that requires both tools — forces multi-turn.
-    await walletA.page.locator('.demo-panel:has(h3:has-text("Tool Use")) .demo-textarea').fill(
-      'Look up the weather in London, then convert 20°C to Fahrenheit.',
-    );
-    await walletA.page.click('.demo-panel:has(h3:has-text("Tool Use")) button:has-text("Run")');
-
-    // At least one tool_call + one tool_result should render.
-    await expect(walletA.page.locator('.tool-step-tool_call').first()).toBeVisible({ timeout: 60_000 });
-    await expect(walletA.page.locator('.tool-step-tool_result').first()).toBeVisible({ timeout: 60_000 });
-    await expect(walletA.page.locator('.tool-step-assistant').last()).toBeVisible({ timeout: 90_000 });
-
-    const toolCalls = await walletA.page.locator('.tool-step-tool_call').allInnerTexts();
-    expect(toolCalls.some((c) => c.includes('get_weather'))).toBe(true);
+    // A prompt that needs both tools forces more than one turn.
+    await runToolUse(walletA, 'Look up the weather in London, then convert 20°C to Fahrenheit.');
   });
 
   test('Leg 4b: Tool Use tab — openai agentic loop', async ({ walletA }) => {
     await walletA.page.bringToFront();
     await selectProvider(walletA, '.demo-panel:has(h3:has-text("Tool Use")) .demo-provider-select', 'openai');
-    await walletA.page.locator('.demo-panel:has(h3:has-text("Tool Use")) .demo-textarea').fill(
-      'What\'s the weather like in Tokyo and New York right now?',
-    );
-    await walletA.page.click('.demo-panel:has(h3:has-text("Tool Use")) button:has-text("Run")');
-
-    await expect(walletA.page.locator('.tool-step-tool_call').first()).toBeVisible({ timeout: 60_000 });
-    await expect(walletA.page.locator('.tool-step-tool_result').first()).toBeVisible({ timeout: 60_000 });
-    await expect(walletA.page.locator('.tool-step-assistant').last()).toBeVisible({ timeout: 90_000 });
-
-    const toolCalls = await walletA.page.locator('.tool-step-tool_call').allInnerTexts();
-    expect(toolCalls.some((c) => c.includes('get_weather'))).toBe(true);
+    await runToolUse(walletA, 'What\'s the weather like in Tokyo and New York right now?');
   });
 
   test('Leg 5a: Structured Output — openai json_schema strict', async ({ walletA }) => {
     await walletA.page.bringToFront();
     await walletA.page.click('.playground-tab:has-text("Structured Output")');
     await selectProvider(walletA, '.demo-panel:has(h3:has-text("Structured Output")) .demo-provider-select', 'openai');
-    await walletA.page.click('.demo-panel:has(h3:has-text("Structured Output")) button:has-text("Extract")');
-
-    await expect(walletA.page.locator('.demo-panel:has(h3:has-text("Structured Output")) .demo-result pre'))
-      .toBeVisible({ timeout: 60_000 });
-    const raw = await walletA.page.locator('.demo-panel:has(h3:has-text("Structured Output")) .demo-result pre').innerText();
-    const parsed = JSON.parse(raw);
+    const parsed = await runExtract(walletA);
     expect(parsed).toHaveProperty('people');
     expect(parsed).toHaveProperty('amounts');
     expect(parsed).toHaveProperty('dates');
@@ -319,13 +302,9 @@ test.describe('Interactive demo playground — desktop full matrix', () => {
   test('Leg 5b: Structured Output — anthropic free-form JSON', async ({ walletA }) => {
     await walletA.page.bringToFront();
     await selectProvider(walletA, '.demo-panel:has(h3:has-text("Structured Output")) .demo-provider-select', 'anthropic');
-    await walletA.page.click('.demo-panel:has(h3:has-text("Structured Output")) button:has-text("Extract")');
-
-    await expect(walletA.page.locator('.demo-panel:has(h3:has-text("Structured Output")) .demo-result pre'))
-      .toBeVisible({ timeout: 60_000 });
-    const raw = await walletA.page.locator('.demo-panel:has(h3:has-text("Structured Output")) .demo-result pre').innerText();
-    const parsed = JSON.parse(raw);
+    const parsed = await runExtract(walletA);
     expect(parsed).toHaveProperty('people');
+    expect(Array.isArray(parsed.people)).toBe(true);
   });
 
   test('Leg 6: Backend Relay — mock WebSocket pair round-trips a real call', async ({ walletA }) => {
