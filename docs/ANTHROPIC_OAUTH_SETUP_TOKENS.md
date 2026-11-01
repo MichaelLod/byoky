@@ -49,10 +49,12 @@ Authorization: Bearer <token>
 Content-Type: application/json
 anthropic-version: 2023-06-01
 anthropic-beta: claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14
-user-agent: claude-cli/2.1.76
+user-agent: claude-cli/2.1.316
 x-app: cli
 anthropic-dangerous-direct-browser-access: true
 ```
+
+The `user-agent` names a Claude Code release, and Anthropic refuses newer models to older ones with a 400 ("Claude Code 2.1.76 does not support this model; version 2.1.280 or newer is required" for `claude-opus-5-5`, 2026-11-01). Byoky sends `CLAUDE_CLI_USER_AGENT` (packages/core/src/proxy-utils.ts, and the same value in the iOS and Android apps); raise it to a current Claude Code release when a new model gets that 400.
 
 ### Required System Prompt
 
@@ -139,7 +141,7 @@ The extension detects credential type and handles auth internally:
 if (credential.authMethod === 'oauth') {
   // Setup Token or OAuth Token — same handling
   headers['authorization'] = `Bearer ${decryptedToken}`;
-  headers['user-agent'] = 'claude-cli/2.1.76';
+  headers['user-agent'] = 'claude-cli/2.1.316'; // CLAUDE_CLI_USER_AGENT
   headers['x-app'] = 'cli';
   headers['anthropic-dangerous-direct-browser-access'] = 'true';
   headers['anthropic-beta'] = 'claude-code-20250219,oauth-2025-04-20,...';
