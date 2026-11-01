@@ -516,8 +516,10 @@ const byoky = new Byoky({
 });`}</Code>
 
       <Prop name="providers" type="ProviderRequirement[]">
-        List of providers your app needs. <code>required: true</code> means connection fails if the
-        user doesn&apos;t have that provider.
+        List of providers your app needs. <code>required: true</code> marks one your app can&apos;t
+        work without: the wallet points it out in the approval prompt, but the connection still
+        succeeds when the user has no key for it. After connecting, check{' '}
+        <code>session.providers[id]?.available</code>.
       </Prop>
       <Prop name="capabilities" type="string[]">
         Optional list of capabilities your app intends to use, passed through to the wallet with the
@@ -675,19 +677,22 @@ session.proxyUrl    // deprecated — internal transport marker, don't rely on i
 session.providers   // Record<ProviderId, ProviderStatus>
 
 interface ProviderStatus {
-  // true: the wallet has a working credential for this provider
-  //       and will hit the provider directly.
-  // false: your app can still call createFetch(id) — the wallet may route
-  //        it through another provider via cross-provider translation.
+  // true: the wallet can serve this provider, with a credential of its
+  //       own or by routing it to another provider the user set up.
+  // false: it can't right now; createFetch(id) requests will fail.
   available: boolean;
 
   // How the credential authenticates upstream.
   authMethod: 'api_key' | 'oauth';
 }`}</Code>
       <p>
-        Check <code>providers[id].available</code> before assuming direct access. A provider marked{' '}
-        <code>available: false</code> may still work if the user has set up cross-provider routing.
-        See <a href="#cross-provider" style={{ color: 'var(--phosphor)' }}>Cross-Provider Routing</a>.
+        Check <code>session.providers[id]?.available</code> before calling a provider, and use{' '}
+        <code>?.</code>: a provider the wallet can&apos;t serve may be missing from the record.{' '}
+        <code>available: true</code> doesn&apos;t mean a direct key: the user may route your app to
+        another provider (see{' '}
+        <a href="#cross-provider" style={{ color: 'var(--phosphor)' }}>Cross-Provider Routing</a>).
+        When the user adds a credential or changes routing, <code>onProvidersUpdated</code> fires
+        with the new record.
       </p>
     </Section>
   );
@@ -1413,7 +1418,7 @@ function BackendRelay() {
       <Code lang="typescript" demo="relay" provider="anthropic">{`import { Byoky } from '@byoky/sdk';
 
 const session = await new Byoky().connect({
-  providers: [{ id: 'anthropic' }],
+  providers: [{ id: 'anthropic', required: true }],
   modal: true,
 });
 
