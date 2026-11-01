@@ -367,3 +367,88 @@ describe('geminiAdapter.serializeRequest — functionResponse.response is always
     ).toEqual({ result: [1, 2] });
   });
 });
+
+describe('geminiAdapter — JSON Schema fields', () => {
+  const claudeCodeSchema = {
+    $schema: 'http://json-schema.org/draft-07/schema#',
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      file_path: { type: 'string' },
+      limit: { type: 'number', exclusiveMinimum: 0 },
+    },
+    required: ['file_path'],
+  };
+
+  it('sends tool schemas as parametersJsonSchema, without the $schema marker', () => {
+    const ir: IRRequest = {
+      system: [],
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'x' }] }],
+      tools: [{ name: 'Read', parameters: claudeCodeSchema }],
+    };
+    const out = JSON.parse(geminiAdapter.serializeRequest(ctx(), ir)) as {
+      tools: Array<{ functionDeclarations: Array<Record<string, unknown>> }>;
+    };
+    const fn = out.tools[0].functionDeclarations[0];
+    expect(fn).not.toHaveProperty('parameters');
+    const { $schema: _omitted, ...expected } = claudeCodeSchema;
+    void _omitted;
+    expect(fn.parametersJsonSchema).toEqual(expected);
+  });
+
+  it('leaves the parameters unset for a tool that takes none', () => {
+    const ir: IRRequest = {
+      system: [],
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'x' }] }],
+      tools: [{ name: 'now', parameters: { type: 'object', properties: {} } }],
+    };
+    const out = JSON.parse(geminiAdapter.serializeRequest(ctx(), ir)) as {
+      tools: Array<{ functionDeclarations: Array<Record<string, unknown>> }>;
+    };
+    expect(out.tools[0].functionDeclarations[0]).toEqual({ name: 'now' });
+  });
+
+  it('sends a json_schema response format as responseJsonSchema', () => {
+    const schema = {
+      type: 'object',
+      additionalProperties: false,
+      properties: { answer: { type: 'string' } },
+      required: ['answer'],
+    };
+    const ir: IRRequest = {
+      system: [],
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'x' }] }],
+      responseFormat: { type: 'json_schema', schema },
+    };
+    const out = JSON.parse(geminiAdapter.serializeRequest(ctx(), ir)) as {
+      generationConfig: Record<string, unknown>;
+    };
+    expect(out.generationConfig.responseMimeType).toBe('application/json');
+    expect(out.generationConfig).not.toHaveProperty('responseSchema');
+    expect(out.generationConfig.responseJsonSchema).toEqual(schema);
+  });
+
+  it('parses parametersJsonSchema and responseJsonSchema back into the IR', () => {
+    const ir = geminiAdapter.parseRequest(
+      JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: 'x' }] }],
+        tools: [{ functionDeclarations: [{ name: 'Read', parametersJsonSchema: claudeCodeSchema }] }],
+        generationConfig: { responseMimeType: 'application/json', responseJsonSchema: { type: 'object' } },
+      }),
+    );
+    expect(ir.tools).toEqual([{ name: 'Read', parameters: claudeCodeSchema }]);
+    expect(ir.responseFormat).toEqual({ type: 'json_schema', schema: { type: 'object' } });
+  });
+
+  it('still parses the OpenAPI parameters and responseSchema fields', () => {
+    const ir = geminiAdapter.parseRequest(
+      JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: 'x' }] }],
+        tools: [{ functionDeclarations: [{ name: 'f', parameters: { type: 'OBJECT' } }] }],
+        generationConfig: { responseMimeType: 'application/json', responseSchema: { type: 'STRING' } },
+      }),
+    );
+    expect(ir.tools?.[0].parameters).toEqual({ type: 'OBJECT' });
+    expect(ir.responseFormat).toEqual({ type: 'json_schema', schema: { type: 'STRING' } });
+  });
+});

@@ -95,7 +95,10 @@ interface GeminiToolGroup {
   functionDeclarations: Array<{
     name: string;
     description?: string;
+    /** Gemini's restricted OpenAPI Schema; rejects unknown keywords. */
     parameters?: unknown;
+    /** Standard JSON Schema; mutually exclusive with `parameters`. */
+    parametersJsonSchema?: unknown;
   }>;
 }
 
@@ -107,7 +110,10 @@ interface GeminiGenerationConfig {
   stopSequences?: string[];
   candidateCount?: number;
   responseMimeType?: string;
+  /** Gemini's restricted OpenAPI Schema; rejects unknown keywords. */
   responseSchema?: unknown;
+  /** Standard JSON Schema; the alternative to `responseSchema`. */
+  responseJsonSchema?: unknown;
   thinkingConfig?: { thinkingBudget?: number; includeThoughts?: boolean };
 }
 
@@ -180,8 +186,9 @@ function parseRequest(body: string): IRRequest {
       ir.stopSequences = gc.stopSequences.slice();
     }
     if (gc.responseMimeType === 'application/json') {
-      if (gc.responseSchema) {
-        ir.responseFormat = { type: 'json_schema', schema: gc.responseSchema };
+      const schema = gc.responseJsonSchema ?? gc.responseSchema;
+      if (schema) {
+        ir.responseFormat = { type: 'json_schema', schema };
       } else {
         ir.responseFormat = { type: 'json' };
       }
@@ -199,7 +206,7 @@ function parseRequest(body: string): IRRequest {
         flat.push({
           name: fn.name,
           ...(fn.description ? { description: fn.description } : {}),
-          parameters: fn.parameters ?? { type: 'object', properties: {} },
+          parameters: fn.parametersJsonSchema ?? fn.parameters ?? { type: 'object', properties: {} },
         });
       }
     }
@@ -338,7 +345,10 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
     gc.responseMimeType = 'application/json';
   } else if (ir.responseFormat?.type === 'json_schema') {
     gc.responseMimeType = 'application/json';
-    gc.responseSchema = ir.responseFormat.schema;
+    // The other families speak JSON Schema ($schema, additionalProperties,
+    // exclusiveMinimum, ...). responseSchema is Gemini's restricted OpenAPI
+    // subset and rejects those keywords; responseJsonSchema takes them.
+    gc.responseJsonSchema = toGeminiJsonSchema(ir.responseFormat.schema);
   }
   if (ir.thinking?.enabled) {
     gc.thinkingConfig = {
@@ -352,10 +362,13 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
   if (ir.tools && ir.tools.length > 0) {
     out.tools = [
       {
+        // parametersJsonSchema, not parameters: see responseJsonSchema above.
         functionDeclarations: ir.tools.map((t) => ({
           name: t.name,
           ...(t.description ? { description: t.description } : {}),
-          parameters: t.parameters ?? { type: 'object', properties: {} },
+          ...(isEmptyObjectSchema(t.parameters)
+            ? {}
+            : { parametersJsonSchema: toGeminiJsonSchema(t.parameters) }),
         })),
       },
     ];
@@ -390,6 +403,36 @@ function serializeRequest(ctx: TranslationContext, ir: IRRequest): string {
   void ctx;
 
   return JSON.stringify(out);
+}
+
+/** Drop the top-level `$schema` dialect marker, which Gemini doesn't need. */
+function toGeminiJsonSchema(schema: unknown): unknown {
+  if (schema === null || typeof schema !== 'object' || Array.isArray(schema)) return schema;
+  const rest: Record<string, unknown> = { ...(schema as Record<string, unknown>) };
+  delete rest.$schema;
+  return rest;
+}
+
+/**
+ * True for a missing schema or an object schema that declares no
+ * parameters. Gemini wants the parameters field left unset for a function
+ * that takes none.
+ */
+function isEmptyObjectSchema(schema: unknown): boolean {
+  if (schema == null) return true;
+  if (typeof schema !== 'object' || Array.isArray(schema)) return false;
+  for (const [key, value] of Object.entries(schema as Record<string, unknown>)) {
+    if (key === '$schema' || key === 'additionalProperties' || key === 'description') continue;
+    if (key === 'type' && value === 'object') continue;
+    if (key === 'properties' && isEmptyRecord(value)) continue;
+    if (key === 'required' && Array.isArray(value) && value.length === 0) continue;
+    return false;
+  }
+  return true;
+}
+
+function isEmptyRecord(value: unknown): boolean {
+  return value !== null && typeof value === 'object' && Object.keys(value).length === 0;
 }
 
 function serializeMessageToGemini(

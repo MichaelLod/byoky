@@ -326,3 +326,54 @@ describe('cross-family dispatch — OpenAI stop: null', () => {
     expect(out).not.toHaveProperty('stop_sequences');
   });
 });
+
+describe('cross-family dispatch — JSON Schema reaches Gemini in its JSON Schema fields', () => {
+  it('anthropic → gemini moves a Claude Code tool schema to parametersJsonSchema', () => {
+    const body = JSON.stringify({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 100,
+      messages: [{ role: 'user', content: 'read it' }],
+      tools: [
+        {
+          name: 'Read',
+          input_schema: {
+            $schema: 'http://json-schema.org/draft-07/schema#',
+            type: 'object',
+            additionalProperties: false,
+            properties: { file_path: { type: 'string' } },
+          },
+        },
+      ],
+    });
+    const out = JSON.parse(translateRequest(ctx('anthropic', 'gemini'), body)) as {
+      tools: Array<{ functionDeclarations: Array<Record<string, unknown>> }>;
+    };
+    expect(out.tools[0].functionDeclarations[0]).toEqual({
+      name: 'Read',
+      parametersJsonSchema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: { file_path: { type: 'string' } },
+      },
+    });
+  });
+
+  it('openai → gemini moves a strict json_schema to responseJsonSchema', () => {
+    const schema = {
+      type: 'object',
+      additionalProperties: false,
+      properties: { answer: { type: 'string' } },
+      required: ['answer'],
+    };
+    const body = JSON.stringify({
+      model: 'gpt-5.5',
+      messages: [{ role: 'user', content: 'x' }],
+      response_format: { type: 'json_schema', json_schema: { name: 'r', strict: true, schema } },
+    });
+    const out = JSON.parse(translateRequest(ctx('openai', 'gemini'), body)) as {
+      generationConfig: Record<string, unknown>;
+    };
+    expect(out.generationConfig.responseJsonSchema).toEqual(schema);
+    expect(out.generationConfig).not.toHaveProperty('responseSchema');
+  });
+});
