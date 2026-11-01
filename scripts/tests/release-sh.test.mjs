@@ -121,7 +121,7 @@ echo "npm $*" >> "$CALLS"
     rmSync(calls, { force: true })
     return { code: res.status, out: res.stdout + res.stderr, calls: log }
   }
-  const origin = (...args) => execFileSync('git', ['-C', join(base, 'origin.git'), ...args], { encoding: 'utf8' })
+  const origin = (...args) => execFileSync('git', ['-C', join(base, 'origin.git'), ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
   return { base, work, git, origin, run, cleanup: () => rmSync(base, { recursive: true, force: true }) }
 }
 
