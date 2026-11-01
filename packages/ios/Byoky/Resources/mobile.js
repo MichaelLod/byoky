@@ -16,6 +16,11 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
     return ADAPTERS.has(family);
   }
 
+  // src/translate/ir.ts
+  function isIRError(x) {
+    return x.error != null;
+  }
+
   // src/translate/types.ts
   var TranslationError = class extends Error {
     code;
@@ -143,16 +148,17 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
       }
     }
   ];
+  var DEFAULT_MODELS = {
+    anthropic: "claude-sonnet-4-6",
+    openai: "gpt-5.5",
+    gemini: "gemini-2.5-pro",
+    cohere: "command-a-03-2025"
+  };
   function getModel(id) {
     return MODELS.find((m) => m.id === id);
   }
   function modelsForProvider(providerId) {
     return MODELS.filter((m) => m.providerId === providerId);
-  }
-
-  // src/translate/ir.ts
-  function isIRError(x) {
-    return x.error != null;
   }
 
   // src/translate/adapters/anthropic.ts
@@ -271,6 +277,16 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
         const irSrc = parseAnthropicImageSource(src);
         return irSrc ? { type: "image", source: irSrc } : null;
       }
+      case "document": {
+        const doc = block;
+        const irSrc = parseAnthropicDocumentSource(doc.source);
+        if (!irSrc) return null;
+        return {
+          type: "document",
+          source: irSrc,
+          ...typeof doc.title === "string" && doc.title ? { title: doc.title } : {}
+        };
+      }
       case "tool_use": {
         const tu = block;
         return { type: "tool_use", id: tu.id, name: tu.name, input: tu.input ?? {} };
@@ -307,6 +323,19 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
     }
     return null;
   }
+  function parseAnthropicDocumentSource(src) {
+    if (!src || typeof src !== "object") return null;
+    if (src.type === "base64" && typeof src.media_type === "string" && typeof src.data === "string") {
+      return { kind: "base64", mediaType: src.media_type, data: src.data };
+    }
+    if (src.type === "url" && typeof src.url === "string") {
+      return { kind: "url", url: src.url, mediaType: "application/pdf" };
+    }
+    if (src.type === "text" && typeof src.data === "string") {
+      return { kind: "text", text: src.data };
+    }
+    return null;
+  }
   function parseAnthropicToolResultContent(content) {
     if (content == null) return { kind: "text", text: "" };
     if (typeof content === "string") return { kind: "text", text: content };
@@ -337,24 +366,44 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
         text: "Respond with valid JSON only. Do not include any prose outside the JSON object."
       });
     }
+    const rules = claudeRequestRules(ctx.dstModel);
+    const forcedTool = ir.toolChoice?.type === "any" || ir.toolChoice?.type === "tool";
+    const wantsThinking = ir.thinking?.enabled === true && !forcedTool;
+    const requestedBudget = ir.thinking?.budgetTokens;
+    const dst = getModel(ctx.dstModel);
     let maxTokens = ir.maxTokens;
     if (typeof maxTokens !== "number") {
-      const dst = getModel(ctx.dstModel);
-      maxTokens = Math.min(dst?.maxOutput ?? 4096, 4096);
+      maxTokens = wantsThinking ? Math.min(
+        dst?.maxOutput ?? 32e3,
+        Math.max(MIN_THINKING_BUDGET, requestedBudget ?? DEFAULT_THINKING_BUDGET) + 4096
+      ) : Math.min(dst?.maxOutput ?? 4096, 4096);
     }
+    const thinking = wantsThinking ? anthropicThinking(rules.thinking, requestedBudget, maxTokens) : void 0;
     const out = {
       model: ctx.dstModel,
       max_tokens: maxTokens,
-      messages: ir.messages.map(serializeMessageToAnthropic)
+      messages: serializeMessagesToAnthropic(ir.messages)
     };
     if (systemParts.length > 0) {
       out.system = systemParts.map((p) => p.text).join("\n\n");
     }
-    if (typeof ir.temperature === "number") {
-      out.temperature = Math.max(0, Math.min(1, ir.temperature));
+    let temperature = ir.temperature;
+    let topP = ir.topP;
+    let topK = ir.topK;
+    if (rules.sampling === "none") {
+      temperature = topP = topK = void 0;
+    } else {
+      if (thinking) {
+        temperature = topK = void 0;
+        if (typeof topP === "number" && (topP < 0.95 || topP > 1)) topP = void 0;
+      }
+      if (typeof temperature === "number") topP = void 0;
     }
-    if (typeof ir.topP === "number") out.top_p = ir.topP;
-    if (typeof ir.topK === "number") out.top_k = ir.topK;
+    if (typeof temperature === "number") {
+      out.temperature = Math.max(0, Math.min(1, temperature));
+    }
+    if (typeof topP === "number") out.top_p = topP;
+    if (typeof topK === "number") out.top_k = topK;
     if (ir.stopSequences && ir.stopSequences.length > 0) out.stop_sequences = ir.stopSequences.slice();
     if (typeof ir.stream === "boolean") out.stream = ir.stream;
     if (ir.userId) out.metadata = { user_id: ir.userId };
@@ -381,13 +430,43 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
           break;
       }
     }
-    if (ir.thinking?.enabled) {
-      out.thinking = {
-        type: "enabled",
-        ...typeof ir.thinking.budgetTokens === "number" ? { budget_tokens: ir.thinking.budgetTokens } : {}
-      };
-    }
+    if (thinking) out.thinking = thinking;
     return JSON.stringify(out);
+  }
+  var MIN_THINKING_BUDGET = 1024;
+  var DEFAULT_THINKING_BUDGET = 8192;
+  function claudeRequestRules(model) {
+    const id = model.toLowerCase();
+    const named = /claude-(opus|sonnet|haiku|fable|mythos)-(\d+)(?:[-.](\d{1,2})(?!\d))?/.exec(id);
+    const legacy = named ? null : /claude-(\d+)(?:[-.](\d)(?!\d))?-(?:opus|sonnet|haiku)/.exec(id);
+    if (named && (named[1] === "fable" || named[1] === "mythos")) {
+      return { sampling: "none", thinking: "adaptive" };
+    }
+    const version = named ? [named[2], named[3]] : legacy ? [legacy[1], legacy[2]] : null;
+    if (!version) return { sampling: "single", thinking: "adaptive" };
+    const major = Number(version[0]);
+    const minor = Number(version[1] ?? 0);
+    if (major > 4 || major === 4 && minor >= 7) return { sampling: "none", thinking: "adaptive" };
+    if (major === 4 && minor === 6) return { sampling: "single", thinking: "either" };
+    return { sampling: "single", thinking: "budget" };
+  }
+  function anthropicThinking(rule, requestedBudget, maxTokens) {
+    const useBudget = rule === "budget" || rule === "either" && typeof requestedBudget === "number";
+    if (!useBudget) return { type: "adaptive" };
+    const budget = Math.min(
+      Math.max(MIN_THINKING_BUDGET, requestedBudget ?? DEFAULT_THINKING_BUDGET),
+      maxTokens - 1
+    );
+    if (budget < MIN_THINKING_BUDGET) return void 0;
+    return { type: "enabled", budget_tokens: budget };
+  }
+  function serializeMessagesToAnthropic(messages) {
+    const out = [];
+    for (const msg of messages) {
+      const wire = serializeMessageToAnthropic(msg);
+      if (wire) out.push(wire);
+    }
+    return out;
   }
   function serializeMessageToAnthropic(msg) {
     const blocks = [];
@@ -395,6 +474,7 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
       const wire = serializeContentBlockToAnthropic(b);
       if (wire) blocks.push(wire);
     }
+    if (blocks.length === 0 && msg.content.length > 0) return null;
     if (blocks.length === 1 && blocks[0].type === "text") {
       return { role: msg.role, content: blocks[0].text };
     }
@@ -409,6 +489,12 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
         return { type: "text", text: block.text };
       case "image":
         return { type: "image", source: irImageSourceToAnthropic(block.source) };
+      case "document":
+        return {
+          type: "document",
+          source: irDocumentSourceToAnthropic(block.source),
+          ...block.title ? { title: block.title } : {}
+        };
       case "tool_use":
         return { type: "tool_use", id: block.id, name: block.name, input: block.input };
       case "tool_result": {
@@ -431,12 +517,21 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
         };
       }
       case "thinking":
-        return {
-          type: "thinking",
-          thinking: block.text,
-          ...block.signature ? { signature: block.signature } : {}
-        };
+        if (!block.signature) return null;
+        return { type: "thinking", thinking: block.text, signature: block.signature };
     }
+  }
+  function irDocumentSourceToAnthropic(source) {
+    if (source.kind === "text") return { type: "text", media_type: "text/plain", data: source.text };
+    const mediaType = source.kind === "base64" ? source.mediaType : source.mediaType ?? "application/pdf";
+    if (mediaType !== "application/pdf") {
+      throw new TranslationError(
+        "UNSUPPORTED_FEATURE",
+        `Anthropic accepts PDF and plain-text documents only, not ${mediaType}.`
+      );
+    }
+    if (source.kind === "base64") return { type: "base64", media_type: mediaType, data: source.data };
+    return { type: "url", url: source.url };
   }
   function irImageSourceToAnthropic(source) {
     if (source.kind === "base64") {
@@ -696,6 +791,9 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
     const state = {
       messageId: `msg_${ctx.requestId}`,
       model: ctx.srcModel ?? ctx.dstModel,
+      // The app's own model is echoed back, as serializeResponse does; the
+      // upstream model only fills in when the app's is unknown.
+      modelPinned: ctx.srcModel != null,
       inputTokens: 0,
       outputTokens: 0,
       started: false,
@@ -736,7 +834,7 @@ var BYOKY_TRANSLATE_BUNDLE = (() => {
       case "message_start": {
         state.started = true;
         if (event.id) state.messageId = event.id;
-        if (event.model) state.model = event.model;
+        if (event.model && !state.modelPinned) state.model = event.model;
         if (typeof event.usage.inputTokens === "number") state.inputTokens = event.usage.inputTokens;
         if (typeof event.usage.outputTokens === "number") state.outputTokens = event.usage.outputTokens;
         return emitFrame("message_start", {
@@ -873,7 +971,7 @@ data: ${JSON.stringify(data)}
     const conversation = [];
     if (Array.isArray(parsed.messages)) {
       for (const m of parsed.messages) {
-        if (m && m.role === "system") {
+        if (m && (m.role === "system" || m.role === "developer")) {
           const text = flattenOpenAIContent(m.content);
           if (text) ir.system.push({ text });
         } else if (m) {
@@ -889,8 +987,10 @@ data: ${JSON.stringify(data)}
     }
     if (typeof parsed.temperature === "number") ir.temperature = parsed.temperature;
     if (typeof parsed.top_p === "number") ir.topP = parsed.top_p;
-    if (parsed.stop !== void 0) {
-      ir.stopSequences = Array.isArray(parsed.stop) ? parsed.stop : [parsed.stop];
+    if (parsed.stop != null) {
+      const raw = Array.isArray(parsed.stop) ? parsed.stop : [parsed.stop];
+      const stops = raw.filter((s) => typeof s === "string" && s.trim().length > 0);
+      if (stops.length > 0) ir.stopSequences = stops;
     }
     if (typeof parsed.stream === "boolean") ir.stream = parsed.stream;
     if (typeof parsed.user === "string") ir.userId = parsed.user;
@@ -984,9 +1084,19 @@ data: ${JSON.stringify(data)}
         const url = extractOpenAIImageUrl(part.image_url);
         const source = parseImageUrl(url);
         if (source) out.push({ type: "image", source });
+      } else if (part.type === "file") {
+        const doc = parseOpenAIFilePart(part.file);
+        if (doc) out.push(doc);
       }
     }
     return out;
+  }
+  function parseOpenAIFilePart(file) {
+    if (!file || typeof file.file_data !== "string" || !file.file_data) return null;
+    const title = typeof file.filename === "string" && file.filename ? { title: file.filename } : {};
+    const match = /^data:([^;,]+);base64,(.+)$/.exec(file.file_data);
+    const source = match ? { kind: "base64", mediaType: match[1], data: match[2] } : { kind: "base64", mediaType: "application/pdf", data: file.file_data };
+    return { type: "document", source, ...title };
   }
   function parseOpenAIAssistantMessage(m) {
     const blocks = [];
@@ -1045,15 +1155,16 @@ data: ${JSON.stringify(data)}
       const text = ir.system.map((p) => p.text).join("\n\n");
       if (text) out.messages.push({ role: "system", content: text });
     }
+    const acceptsImages = openAIAcceptsImages(ctx.dstModel);
     for (const msg of ir.messages) {
-      for (const wire of serializeMessageToOpenAI(msg)) {
+      for (const wire of serializeMessageToOpenAI(msg, ctx.dstModel, acceptsImages)) {
         out.messages.push(wire);
       }
     }
-    const dst = getModel(ctx.dstModel);
-    const isReasoningDst = dst?.capabilities.reasoning === true;
+    const isReasoningDst = isOpenAIReasoningModel(ctx.dstModel);
+    const useMaxCompletionTokens = ctx.dstProviderId === "openai" || isReasoningDst && (ctx.dstProviderId == null || ctx.dstProviderId === "azure_openai");
     if (typeof ir.maxTokens === "number") {
-      if (isReasoningDst) out.max_completion_tokens = ir.maxTokens;
+      if (useMaxCompletionTokens) out.max_completion_tokens = ir.maxTokens;
       else out.max_tokens = ir.maxTokens;
     }
     if (typeof ir.temperature === "number" && !isReasoningDst) {
@@ -1105,13 +1216,22 @@ data: ${JSON.stringify(data)}
     }
     return JSON.stringify(out);
   }
-  function serializeMessageToOpenAI(msg) {
-    if (msg.role === "user") return serializeUserMessageToOpenAI(msg);
+  function isOpenAIReasoningModel(model) {
+    const entry = getModel(model);
+    if (entry?.family === "openai" && entry.capabilities.reasoning) return true;
+    return /^(?:o\d|gpt-5)/i.test(model.replace(/^openai\//i, ""));
+  }
+  function serializeMessageToOpenAI(msg, model, acceptsImages) {
+    if (msg.role === "user") return serializeUserMessageToOpenAI(msg, model, acceptsImages);
     return serializeAssistantMessageToOpenAI(msg);
   }
-  function serializeUserMessageToOpenAI(msg) {
+  function openAIAcceptsImages(model) {
+    return getModel(model)?.capabilities.vision !== false;
+  }
+  function serializeUserMessageToOpenAI(msg, model, acceptsImages) {
     const out = [];
     const userParts = [];
+    const toolAttachments = [];
     for (const block of msg.content) {
       switch (block.type) {
         case "text":
@@ -1122,18 +1242,45 @@ data: ${JSON.stringify(data)}
           if (url) userParts.push({ type: "image_url", image_url: { url } });
           break;
         }
-        case "tool_result":
-          out.push({
-            role: "tool",
-            tool_call_id: block.toolUseId,
-            content: flattenIRToolResultContent(block.content)
-          });
+        case "document":
+          userParts.push(irDocumentToOpenAIPart(block));
           break;
+        case "tool_result": {
+          const attachments = [];
+          const omitted = [];
+          if (block.content.kind === "blocks") {
+            for (const inner of block.content.blocks) {
+              if (inner.type === "image") {
+                if (acceptsImages) {
+                  attachments.push({ type: "image_url", image_url: { url: irImageSourceToDataUrl(inner.source) } });
+                } else {
+                  omitted.push(`[image omitted: ${model} does not accept images]`);
+                }
+              } else if (inner.type === "document" && inner.source.kind !== "text") {
+                if (!acceptsImages) {
+                  omitted.push(`[document omitted: ${model} does not accept files]`);
+                } else if (inner.source.kind === "url") {
+                  omitted.push("[document omitted: chat completions cannot read a document by URL]");
+                } else {
+                  attachments.push(irDocumentToOpenAIPart(inner));
+                }
+              }
+            }
+          }
+          let text = [flattenIRToolResultContent(block.content), ...omitted].filter((t) => t.length > 0).join("\n");
+          if (attachments.length > 0) {
+            if (!text) text = TOOL_ATTACHMENTS_NOTE;
+            toolAttachments.push({ type: "text", text: `Attachments from tool call ${block.toolUseId}:` }, ...attachments);
+          }
+          out.push({ role: "tool", tool_call_id: block.toolUseId, content: text });
+          break;
+        }
         // thinking/tool_use inside a user message — drop (invalid for user role)
         default:
           break;
       }
     }
+    userParts.unshift(...toolAttachments);
     if (userParts.length > 0) {
       if (userParts.every((p) => p.type === "text")) {
         out.push({
@@ -1171,9 +1318,22 @@ data: ${JSON.stringify(data)}
     }
     return source.url;
   }
+  var TOOL_ATTACHMENTS_NOTE = "[The tool returned attachments; they follow in the next user message.]";
+  function irDocumentToOpenAIPart(doc) {
+    const { source } = doc;
+    if (source.kind === "text") return { type: "text", text: source.text };
+    if (source.kind === "url") {
+      throw new TranslationError(
+        "UNSUPPORTED_FEATURE",
+        "OpenAI chat completions cannot read a document by URL; send it inline."
+      );
+    }
+    const filename = doc.title ?? (source.mediaType === "application/pdf" ? "document.pdf" : "document");
+    return { type: "file", file: { filename, file_data: `data:${source.mediaType};base64,${source.data}` } };
+  }
   function flattenIRToolResultContent(content) {
     if (content.kind === "text") return content.text;
-    return content.blocks.map((b) => b.type === "text" ? b.text : "").filter((s) => s.length > 0).join("\n");
+    return content.blocks.map((b) => b.type === "text" ? b.text : b.type === "document" && b.source.kind === "text" ? b.source.text : "").filter((s) => s.length > 0).join("\n");
   }
   function parseResponse2(body) {
     let parsed;
@@ -1185,20 +1345,42 @@ data: ${JSON.stringify(data)}
         `OpenAI response body is not valid JSON: ${err.message}`
       );
     }
+    if (typeof parsed.error === "string") {
+      return {
+        error: {
+          type: "api_error",
+          message: parsed.error,
+          ...typeof parsed.code === "string" && parsed.code ? { code: parsed.code } : {}
+        }
+      };
+    }
     if (parsed.error) {
       return {
         error: {
           type: parsed.error.type ?? "api_error",
           message: parsed.error.message ?? "OpenAI API error",
-          ...parsed.error.code ? { code: parsed.error.code } : {}
+          ...parsed.error.code != null && parsed.error.code !== "" ? { code: String(parsed.error.code) } : {}
         }
       };
+    }
+    if (!Array.isArray(parsed.choices)) {
+      const detail = parsed.message ?? parsed.detail;
+      if (detail != null) {
+        return {
+          error: {
+            type: typeof parsed.type === "string" && parsed.type ? parsed.type : "api_error",
+            message: typeof detail === "string" ? detail : JSON.stringify(detail)
+          }
+        };
+      }
     }
     const choice = parsed.choices?.[0];
     const message = choice?.message;
     const blocks = [];
     const text = flattenOpenAIContent(message?.content ?? null);
     if (text) blocks.push({ type: "text", text });
+    const refusal = typeof message?.refusal === "string" && message.refusal.length > 0 ? message.refusal : null;
+    if (refusal && !text) blocks.push({ type: "text", text: refusal });
     if (Array.isArray(message?.tool_calls)) {
       for (const tc of message.tool_calls) {
         if (!tc || tc.type !== "function" || !tc.function) continue;
@@ -1215,7 +1397,7 @@ data: ${JSON.stringify(data)}
       id: parsed.id,
       model: parsed.model,
       content: blocks,
-      stopReason: mapOpenAIFinishToIR(choice?.finish_reason ?? null),
+      stopReason: refusal ? "refusal" : mapOpenAIFinishToIR(choice?.finish_reason ?? null),
       stopSequence: null,
       usage: {
         inputTokens: parsed.usage?.prompt_tokens ?? 0,
@@ -1311,6 +1493,7 @@ data: ${JSON.stringify(data)}
       textBlockOpen: false,
       toolCalls: /* @__PURE__ */ new Map(),
       pendingFinish: null,
+      sawRefusal: false,
       inputTokens: 0,
       outputTokens: 0,
       messageId: "",
@@ -1336,7 +1519,7 @@ data: ${JSON.stringify(data)}
         if (state.started) {
           events.push({
             type: "message_delta",
-            stopReason: state.pendingFinish ?? "end_turn",
+            stopReason: finalStopReason(state),
             usage: { inputTokens: state.inputTokens, outputTokens: state.outputTokens }
           });
           events.push({ type: "message_stop" });
@@ -1355,7 +1538,7 @@ data: ${JSON.stringify(data)}
       if (state.started) {
         events.push({
           type: "message_delta",
-          stopReason: state.pendingFinish ?? "end_turn",
+          stopReason: finalStopReason(state),
           usage: { inputTokens: state.inputTokens, outputTokens: state.outputTokens }
         });
         events.push({ type: "message_stop" });
@@ -1403,6 +1586,10 @@ data: ${JSON.stringify(data)}
       if (typeof delta.content === "string" && delta.content.length > 0) {
         handleTextDelta(state, events, delta.content);
       }
+      if (typeof delta.refusal === "string" && delta.refusal.length > 0) {
+        handleTextDelta(state, events, delta.refusal);
+        state.sawRefusal = true;
+      }
       if (Array.isArray(delta.tool_calls)) {
         for (const tc of delta.tool_calls) {
           handleToolCallDelta(state, events, tc);
@@ -1412,6 +1599,9 @@ data: ${JSON.stringify(data)}
     if (choice.finish_reason) {
       state.pendingFinish = mapOpenAIFinishToIR(choice.finish_reason);
     }
+  }
+  function finalStopReason(state) {
+    return state.sawRefusal ? "refusal" : state.pendingFinish ?? "end_turn";
   }
   function extractOpenAIDataLine(frame) {
     const lines = frame.split("\n");
@@ -1673,15 +1863,17 @@ data: [DONE]
         `Gemini request body is not valid JSON: ${err.message}`
       );
     }
+    normalizeSnakeCase(parsed);
     const ir = {
       system: parseSystemInstruction(parsed.systemInstruction),
       messages: []
     };
     if (Array.isArray(parsed.contents)) {
-      for (const c of parsed.contents) {
-        const msg = parseGeminiContent(c);
+      const pairing = { calls: [] };
+      parsed.contents.forEach((c, i) => {
+        const msg = parseGeminiContent(c, i, pairing);
         if (msg) ir.messages.push(msg);
-      }
+      });
     }
     const gc = parsed.generationConfig;
     if (gc) {
@@ -1693,14 +1885,17 @@ data: [DONE]
         ir.stopSequences = gc.stopSequences.slice();
       }
       if (gc.responseMimeType === "application/json") {
-        if (gc.responseSchema) {
-          ir.responseFormat = { type: "json_schema", schema: gc.responseSchema };
+        const schema = gc.responseJsonSchema ?? gc.responseSchema;
+        if (schema) {
+          ir.responseFormat = { type: "json_schema", schema };
         } else {
           ir.responseFormat = { type: "json" };
         }
       }
-      if (gc.thinkingConfig && typeof gc.thinkingConfig.thinkingBudget === "number") {
-        ir.thinking = { enabled: true, budgetTokens: gc.thinkingConfig.thinkingBudget };
+      const budget = gc.thinkingConfig?.thinkingBudget;
+      if (typeof budget === "number") {
+        if (budget > 0) ir.thinking = { enabled: true, budgetTokens: budget };
+        else if (budget === -1) ir.thinking = { enabled: true };
       }
     }
     if (Array.isArray(parsed.tools) && parsed.tools.length > 0) {
@@ -1711,7 +1906,7 @@ data: [DONE]
           flat.push({
             name: fn.name,
             ...fn.description ? { description: fn.description } : {},
-            parameters: fn.parameters ?? { type: "object", properties: {} }
+            parameters: fn.parametersJsonSchema ?? fn.parameters ?? { type: "object", properties: {} }
           });
         }
       }
@@ -1740,6 +1935,71 @@ data: [DONE]
     }
     return ir;
   }
+  function isJsonObject(v) {
+    return v !== null && typeof v === "object" && !Array.isArray(v);
+  }
+  function camelizeKeys(obj, keys) {
+    if (!isJsonObject(obj)) return;
+    for (const [snake, camel] of Object.entries(keys)) {
+      if (snake in obj && !(camel in obj)) obj[camel] = obj[snake];
+    }
+  }
+  function normalizeSnakeCase(req) {
+    const r = req;
+    if (!isJsonObject(r)) return;
+    camelizeKeys(r, {
+      system_instruction: "systemInstruction",
+      generation_config: "generationConfig",
+      tool_config: "toolConfig",
+      safety_settings: "safetySettings"
+    });
+    camelizeKeys(r.generationConfig, {
+      max_output_tokens: "maxOutputTokens",
+      top_p: "topP",
+      top_k: "topK",
+      stop_sequences: "stopSequences",
+      candidate_count: "candidateCount",
+      response_mime_type: "responseMimeType",
+      response_schema: "responseSchema",
+      response_json_schema: "responseJsonSchema",
+      thinking_config: "thinkingConfig"
+    });
+    if (isJsonObject(r.generationConfig)) {
+      camelizeKeys(r.generationConfig.thinkingConfig, {
+        thinking_budget: "thinkingBudget",
+        include_thoughts: "includeThoughts"
+      });
+    }
+    camelizeKeys(r.toolConfig, { function_calling_config: "functionCallingConfig" });
+    if (isJsonObject(r.toolConfig)) {
+      camelizeKeys(r.toolConfig.functionCallingConfig, { allowed_function_names: "allowedFunctionNames" });
+    }
+    if (Array.isArray(r.tools)) {
+      for (const group of r.tools) {
+        camelizeKeys(group, { function_declarations: "functionDeclarations" });
+        if (isJsonObject(group) && Array.isArray(group.functionDeclarations)) {
+          for (const fn of group.functionDeclarations) {
+            camelizeKeys(fn, { parameters_json_schema: "parametersJsonSchema" });
+          }
+        }
+      }
+    }
+    const withParts = [...Array.isArray(r.contents) ? r.contents : [], r.systemInstruction];
+    for (const content of withParts) {
+      if (!isJsonObject(content) || !Array.isArray(content.parts)) continue;
+      for (const part of content.parts) {
+        camelizeKeys(part, {
+          inline_data: "inlineData",
+          file_data: "fileData",
+          function_call: "functionCall",
+          function_response: "functionResponse"
+        });
+        if (!isJsonObject(part)) continue;
+        camelizeKeys(part.inlineData, { mime_type: "mimeType" });
+        camelizeKeys(part.fileData, { mime_type: "mimeType", file_uri: "fileUri" });
+      }
+    }
+  }
   function parseSystemInstruction(si) {
     if (!si || !Array.isArray(si.parts)) return [];
     const out = [];
@@ -1750,30 +2010,39 @@ data: [DONE]
     }
     return out;
   }
-  function parseGeminiContent(c) {
+  function pairToolResultId(fr, pairing) {
+    const pending = pairing.calls.filter((c) => !c.used);
+    const match = (fr.id ? pending.find((c) => c.id === fr.id) : void 0) ?? pending.find((c) => c.name === fr.name) ?? pending[0];
+    if (!match) return fr.id ?? fr.name;
+    match.used = true;
+    return match.id;
+  }
+  function parseGeminiContent(c, contentIndex, pairing) {
     if (!c || !Array.isArray(c.parts)) return null;
     const role = c.role === "model" ? "assistant" : "user";
     const blocks = [];
-    for (const part of c.parts) {
+    if (role === "assistant") pairing.calls = [];
+    for (const [partIndex, part] of c.parts.entries()) {
       if (!part || typeof part !== "object") continue;
       if ("text" in part && typeof part.text === "string") {
         blocks.push({ type: "text", text: part.text });
       } else if ("inlineData" in part && part.inlineData) {
-        blocks.push({
-          type: "image",
-          source: {
-            kind: "base64",
-            mediaType: part.inlineData.mimeType,
-            data: part.inlineData.data
-          }
-        });
+        const { mimeType, data } = part.inlineData;
+        blocks.push(
+          isNonImageType(mimeType) ? { type: "document", source: { kind: "base64", mediaType: mimeType, data } } : { type: "image", source: { kind: "base64", mediaType: mimeType, data } }
+        );
       } else if ("fileData" in part && part.fileData) {
-        blocks.push({ type: "image", source: { kind: "url", url: part.fileData.fileUri } });
+        const { mimeType, fileUri } = part.fileData;
+        blocks.push(
+          isNonImageType(mimeType) ? { type: "document", source: { kind: "url", url: fileUri, ...mimeType ? { mediaType: mimeType } : {} } } : { type: "image", source: { kind: "url", url: fileUri } }
+        );
       } else if ("functionCall" in part && part.functionCall) {
         const fc = part.functionCall;
+        const id = fc.id ?? `fc_${contentIndex}_${partIndex}`;
+        if (role === "assistant") pairing.calls.push({ id, name: fc.name, used: false });
         blocks.push({
           type: "tool_use",
-          id: fc.id ?? fc.name,
+          id,
           name: fc.name,
           input: fc.args ?? {}
         });
@@ -1781,7 +2050,7 @@ data: [DONE]
         const fr = part.functionResponse;
         blocks.push({
           type: "tool_result",
-          toolUseId: fr.id ?? fr.name,
+          toolUseId: pairToolResultId(fr, pairing),
           content: { kind: "text", text: JSON.stringify(fr.response ?? {}) }
         });
       }
@@ -1792,7 +2061,7 @@ data: [DONE]
     if (ir.tools && ir.tools.length > 0 && ir.responseFormat) {
       throw new TranslationError(
         "UNSUPPORTED_FEATURE",
-        "Gemini does not support combining tools with JSON response format on the 2.5 series."
+        "Combining tools with JSON response format is not supported when translating to Gemini."
       );
     }
     if (typeof ir.n === "number" && ir.n > 1) {
@@ -1809,7 +2078,7 @@ data: [DONE]
     }
     const contents = [];
     for (const msg of ir.messages) {
-      const c = serializeMessageToGemini(msg, toolUseNames);
+      const c = serializeMessageToGemini(msg, toolUseNames, signsFunctionCalls(ctx.dstModel));
       if (c) contents.push(c);
     }
     const out = {
@@ -1830,7 +2099,7 @@ data: [DONE]
       gc.responseMimeType = "application/json";
     } else if (ir.responseFormat?.type === "json_schema") {
       gc.responseMimeType = "application/json";
-      gc.responseSchema = ir.responseFormat.schema;
+      gc.responseJsonSchema = toGeminiJsonSchema(ir.responseFormat.schema);
     }
     if (ir.thinking?.enabled) {
       gc.thinkingConfig = {
@@ -1841,10 +2110,11 @@ data: [DONE]
     if (ir.tools && ir.tools.length > 0) {
       out.tools = [
         {
+          // parametersJsonSchema, not parameters: see responseJsonSchema above.
           functionDeclarations: ir.tools.map((t) => ({
             name: t.name,
             ...t.description ? { description: t.description } : {},
-            parameters: t.parameters ?? { type: "object", properties: {} }
+            ...isEmptyObjectSchema(t.parameters) ? {} : { parametersJsonSchema: toGeminiJsonSchema(t.parameters) }
           }))
         }
       ];
@@ -1873,11 +2143,50 @@ data: [DONE]
     void ctx;
     return JSON.stringify(out);
   }
-  function serializeMessageToGemini(msg, toolUseNames) {
+  function toGeminiJsonSchema(schema) {
+    if (schema === null || typeof schema !== "object" || Array.isArray(schema)) return schema;
+    const rest = { ...schema };
+    delete rest.$schema;
+    return rest;
+  }
+  function isEmptyObjectSchema(schema) {
+    if (schema == null) return true;
+    if (typeof schema !== "object" || Array.isArray(schema)) return false;
+    for (const [key, value] of Object.entries(schema)) {
+      if (key === "$schema" || key === "additionalProperties" || key === "description") continue;
+      if (key === "type" && value === "object") continue;
+      if (key === "properties" && isEmptyRecord(value)) continue;
+      if (key === "required" && Array.isArray(value) && value.length === 0) continue;
+      return false;
+    }
+    return true;
+  }
+  function isEmptyRecord(value) {
+    return value !== null && typeof value === "object" && Object.keys(value).length === 0;
+  }
+  var THOUGHT_SIGNATURE_SKIP = "skip_thought_signature_validator";
+  function signsFunctionCalls(model) {
+    return !/(?:^|\/)gemini-[12](?:[.-]|$)/i.test(model);
+  }
+  function serializeMessageToGemini(msg, toolUseNames, signFunctionCalls) {
     const parts = [];
+    let signed = false;
     for (const block of msg.content) {
       const wire = serializeBlockToGemini(block, toolUseNames);
-      if (wire) parts.push(wire);
+      if (!wire) continue;
+      if (signFunctionCalls && msg.role === "assistant" && !signed && "functionCall" in wire) {
+        wire.thoughtSignature = THOUGHT_SIGNATURE_SKIP;
+        signed = true;
+      }
+      parts.push(wire);
+      if (block.type === "tool_result" && block.content.kind === "blocks") {
+        for (const inner of block.content.blocks) {
+          if (inner.type === "image") parts.push(irImageToGeminiPart(inner.source));
+          else if (inner.type === "document" && inner.source.kind !== "text") {
+            parts.push(irDocumentToGeminiPart(inner.source));
+          }
+        }
+      }
     }
     if (parts.length === 0) return null;
     return {
@@ -1891,6 +2200,8 @@ data: [DONE]
         return { text: block.text };
       case "image":
         return irImageToGeminiPart(block.source);
+      case "document":
+        return irDocumentToGeminiPart(block.source);
       case "tool_use":
         return {
           functionCall: {
@@ -1919,20 +2230,34 @@ data: [DONE]
     }
     return { fileData: { fileUri: source.url } };
   }
-  function parseToolResultForGemini(content) {
-    if (content.kind === "text") {
-      try {
-        return JSON.parse(content.text);
-      } catch {
-        return { result: content.text };
-      }
+  function irDocumentToGeminiPart(source) {
+    if (source.kind === "base64") {
+      return { inlineData: { mimeType: source.mediaType, data: source.data } };
     }
-    const text = content.blocks.map((b) => b.type === "text" ? b.text : "").filter((s) => s.length > 0).join("\n");
+    if (source.kind === "url") {
+      return { fileData: { ...source.mediaType ? { mimeType: source.mediaType } : {}, fileUri: source.url } };
+    }
+    return { text: source.text };
+  }
+  function isNonImageType(mimeType) {
+    return typeof mimeType === "string" && mimeType.length > 0 && !mimeType.startsWith("image/");
+  }
+  function parseToolResultForGemini(content) {
+    if (content.kind === "text") return toStruct(content.text);
+    const text = content.blocks.map((b) => b.type === "text" ? b.text : b.type === "document" && b.source.kind === "text" ? b.source.text : "").filter((s) => s.length > 0).join("\n");
+    return toStruct(text);
+  }
+  function toStruct(text) {
+    let parsed;
     try {
-      return JSON.parse(text);
+      parsed = JSON.parse(text);
     } catch {
       return { result: text };
     }
+    if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed;
+    }
+    return { result: parsed };
   }
   function parseResponse3(body) {
     let parsed;
@@ -1956,6 +2281,9 @@ data: [DONE]
     const candidate = parsed.candidates?.[0];
     const blocks = [];
     let hasToolUse = false;
+    let toolCallIndex = 0;
+    const blocked = !candidate ? promptBlockedText(parsed.promptFeedback) : null;
+    if (blocked) blocks.push({ type: "text", text: blocked });
     if (candidate?.content?.parts) {
       for (const part of candidate.content.parts) {
         if (!part || typeof part !== "object") continue;
@@ -1965,7 +2293,7 @@ data: [DONE]
           hasToolUse = true;
           blocks.push({
             type: "tool_use",
-            id: part.functionCall.id ?? part.functionCall.name,
+            id: part.functionCall.id ?? upstreamCallId(parsed.responseId, toolCallIndex++),
             name: part.functionCall.name,
             input: part.functionCall.args ?? {}
           });
@@ -1979,13 +2307,24 @@ data: [DONE]
       id: parsed.responseId,
       model: parsed.modelVersion,
       content: blocks,
-      stopReason: mapGeminiFinishToIR(candidate?.finishReason, hasToolUse),
+      stopReason: blocked ? "refusal" : mapGeminiFinishToIR(candidate?.finishReason, hasToolUse),
       stopSequence: null,
       usage: {
         inputTokens,
         outputTokens: candidateTokens + thoughtsTokens
       }
     };
+  }
+  function promptBlockedText(feedback) {
+    if (!feedback?.blockReason) return null;
+    return feedback.blockReasonMessage || `Prompt blocked: ${feedback.blockReason}`;
+  }
+  var upstreamCallCounter = 0;
+  function upstreamCallId(responseId, index) {
+    const suffix = `_${index}`;
+    const base = (responseId ?? "").replace(/[^A-Za-z0-9_-]/g, "");
+    if (base) return `call_${base.slice(0, 40 - 5 - suffix.length)}${suffix}`;
+    return `call_${Date.now().toString(36)}_${(upstreamCallCounter++).toString(36)}${suffix}`;
   }
   function serializeResponse3(ctx, ir) {
     if (isIRError(ir)) {
@@ -2081,7 +2420,8 @@ data: [DONE]
       pendingFinish: null,
       messageId: "",
       model: void 0,
-      hasToolUse: false
+      hasToolUse: false,
+      toolCallCount: 0
     };
     return {
       process(chunk) {
@@ -2156,7 +2496,19 @@ data: [DONE]
       if (cand > 0 || thoughts > 0) state.outputTokens = cand + thoughts;
     }
     const candidate = data.candidates?.[0];
-    if (!candidate) return;
+    if (!candidate) {
+      const blocked = promptBlockedText(data.promptFeedback);
+      if (blocked) {
+        if (!state.textBlockOpen) {
+          state.textBlockIndex = state.nextBlockIndex++;
+          state.textBlockOpen = true;
+          events.push({ type: "content_block_start", index: state.textBlockIndex, block: { type: "text" } });
+        }
+        events.push({ type: "text_delta", index: state.textBlockIndex, text: blocked });
+        state.pendingFinish = "refusal";
+      }
+      return;
+    }
     if (Array.isArray(candidate.content?.parts)) {
       for (const part of candidate.content.parts) {
         if (!part || typeof part !== "object") continue;
@@ -2183,7 +2535,11 @@ data: [DONE]
           events.push({
             type: "content_block_start",
             index: blockIdx,
-            block: { type: "tool_use", id: fc.id ?? fc.name, name: fc.name }
+            block: {
+              type: "tool_use",
+              id: fc.id ?? upstreamCallId(state.messageId || data.responseId, state.toolCallCount++),
+              name: fc.name
+            }
           });
           events.push({
             type: "tool_input_delta",
@@ -2229,7 +2585,7 @@ data: [DONE]
           switch (event.type) {
             case "message_start":
               if (event.id) state.responseId = event.id;
-              if (event.model) state.model = event.model;
+              if (event.model && ctx.srcModel == null) state.model = event.model;
               if (typeof event.usage.inputTokens === "number") state.inputTokens = event.usage.inputTokens;
               if (typeof event.usage.outputTokens === "number") state.outputTokens = event.usage.outputTokens;
               break;
@@ -2553,8 +2909,9 @@ data: [DONE]
       const text = ir.system.map((p) => p.text).join("\n\n");
       if (text) messages.push({ role: "system", content: text });
     }
+    const acceptsImages = cohereAcceptsImages(ctx.dstModel);
     for (const msg of ir.messages) {
-      for (const wire of serializeMessageToCohere(msg)) {
+      for (const wire of serializeMessageToCohere(msg, ctx.dstModel, acceptsImages)) {
         messages.push(wire);
       }
     }
@@ -2564,8 +2921,8 @@ data: [DONE]
     };
     if (typeof ir.maxTokens === "number") out.max_tokens = ir.maxTokens;
     if (typeof ir.temperature === "number") out.temperature = ir.temperature;
-    if (typeof ir.topP === "number") out.p = ir.topP;
-    if (typeof ir.topK === "number") out.k = ir.topK;
+    if (typeof ir.topP === "number") out.p = Math.min(0.99, Math.max(0.01, ir.topP));
+    if (typeof ir.topK === "number") out.k = Math.min(500, Math.max(0, Math.round(ir.topK)));
     if (ir.stopSequences && ir.stopSequences.length > 0) out.stop_sequences = ir.stopSequences.slice();
     if (typeof ir.stream === "boolean") out.stream = ir.stream;
     if (ir.responseFormat?.type === "json") {
@@ -2598,21 +2955,23 @@ data: [DONE]
           break;
       }
     }
-    if (ir.thinking?.enabled) {
-      out.thinking = {
-        type: "enabled",
-        ...typeof ir.thinking.budgetTokens === "number" ? { token_budget: ir.thinking.budgetTokens } : {}
-      };
+    const budget = ir.thinking?.enabled ? ir.thinking.budgetTokens : void 0;
+    if (typeof budget === "number" && budget > 0) {
+      out.thinking = { type: "enabled", token_budget: budget };
     }
     return JSON.stringify(out);
   }
-  function serializeMessageToCohere(msg) {
-    if (msg.role === "user") return serializeUserMessageToCohere(msg);
+  function serializeMessageToCohere(msg, model, acceptsImages) {
+    if (msg.role === "user") return serializeUserMessageToCohere(msg, model, acceptsImages);
     return serializeAssistantMessageToCohere(msg);
   }
-  function serializeUserMessageToCohere(msg) {
+  function cohereAcceptsImages(model) {
+    return getModel(model)?.capabilities.vision ?? /vision/i.test(model);
+  }
+  function serializeUserMessageToCohere(msg, model, acceptsImages) {
     const out = [];
     const userParts = [];
+    const toolAttachments = [];
     for (const block of msg.content) {
       switch (block.type) {
         case "text":
@@ -2623,17 +2982,38 @@ data: [DONE]
           if (url) userParts.push({ type: "image_url", image_url: { url } });
           break;
         }
-        case "tool_result":
-          out.push({
-            role: "tool",
-            tool_call_id: block.toolUseId,
-            content: flattenIRToolResultContent2(block.content)
-          });
+        case "document":
+          userParts.push({ type: "text", text: documentText(block.source) });
           break;
+        case "tool_result": {
+          const images = [];
+          const omitted = [];
+          if (block.content.kind === "blocks") {
+            for (const inner of block.content.blocks) {
+              if (inner.type === "image") {
+                if (acceptsImages) {
+                  images.push({ type: "image_url", image_url: { url: irImageSourceToUrl(inner.source) } });
+                } else {
+                  omitted.push(`[image omitted: ${model} does not accept images]`);
+                }
+              } else if (inner.type === "document" && inner.source.kind !== "text") {
+                omitted.push("[document omitted: Cohere does not accept PDF or other binary documents]");
+              }
+            }
+          }
+          let text = [flattenIRToolResultContent2(block.content), ...omitted].filter((t) => t.length > 0).join("\n");
+          if (images.length > 0) {
+            if (!text) text = TOOL_ATTACHMENTS_NOTE2;
+            toolAttachments.push({ type: "text", text: `Attachments from tool call ${block.toolUseId}:` }, ...images);
+          }
+          out.push({ role: "tool", tool_call_id: block.toolUseId, content: text });
+          break;
+        }
         default:
           break;
       }
     }
+    userParts.unshift(...toolAttachments);
     if (userParts.length > 0) {
       if (userParts.every((p) => p.type === "text")) {
         out.push({
@@ -2681,9 +3061,20 @@ data: [DONE]
     }
     return source.url;
   }
+  var TOOL_ATTACHMENTS_NOTE2 = "[The tool returned images; they follow in the next user message.]";
+  function documentText(source) {
+    if (source.kind === "text") return source.text;
+    throw binaryDocumentError();
+  }
+  function binaryDocumentError() {
+    return new TranslationError(
+      "UNSUPPORTED_FEATURE",
+      "Cohere does not accept PDF or other binary documents; only plain-text documents can be translated."
+    );
+  }
   function flattenIRToolResultContent2(content) {
     if (content.kind === "text") return content.text;
-    return content.blocks.map((b) => b.type === "text" ? b.text : "").filter((s) => s.length > 0).join("\n");
+    return content.blocks.map((b) => b.type === "text" ? b.text : b.type === "document" && b.source.kind === "text" ? b.source.text : "").filter((s) => s.length > 0).join("\n");
   }
   function parseResponse4(body) {
     let parsed;
@@ -3237,6 +3628,9 @@ data: [DONE]
       // Placeholder — each tenant has its own `<resource>.openai.azure.com`.
       // The real host is stored on the credential row and used at proxy time.
       baseUrl: "https://YOUR_RESOURCE.openai.azure.com",
+      // The credential holds the resource root; Azure's v1 API serves chat
+      // under /openai/v1 (the model field names the deployment).
+      chatPath: "/openai/v1/chat/completions",
       requiresCustomBaseUrl: true
     },
     ollama: {
@@ -3459,6 +3853,10 @@ ${systemText}
       }
       return t;
     });
+    const toolChoice = parsed.tool_choice;
+    if (toolChoice?.type === "tool" && typeof toolChoice.name === "string" && forward[toolChoice.name]) {
+      parsed.tool_choice = { ...toolChoice, name: forward[toolChoice.name] };
+    }
     const messages = parsed.messages;
     if (Array.isArray(messages)) {
       for (const msg of messages) {
@@ -3564,7 +3962,13 @@ ${systemText}
       "perplexity",
       "fireworks",
       "openrouter",
-      "mistral"
+      "mistral",
+      // Local OpenAI-compatible servers. They work as routing destinations
+      // (the credential's loopback base URL is used, see rewriteProxyUrl), but
+      // auto-routing never picks them: there is no model routing could name
+      // for them (see autoRouteModelFor in routing.ts).
+      "ollama",
+      "lm_studio"
     ]),
     gemini: /* @__PURE__ */ new Set(["gemini"]),
     cohere: /* @__PURE__ */ new Set(["cohere"])
@@ -3621,6 +4025,18 @@ ${systemText}
     const dst = getAdapter(ctx.dstFamily);
     const src = getAdapter(ctx.srcFamily);
     const ir = dst.parseResponse(body);
+    return src.serializeResponse(ctx, ir);
+  }
+  function translateErrorResponse(ctx, body) {
+    const dst = getAdapter(ctx.dstFamily);
+    const src = getAdapter(ctx.srcFamily);
+    let ir;
+    try {
+      ir = dst.parseResponse(body);
+    } catch {
+      return null;
+    }
+    if (!isIRError(ir)) return null;
     return src.serializeResponse(ctx, ir);
   }
   function createStreamTranslator(ctx) {
@@ -3857,6 +4273,19 @@ ${systemText}
     return true;
   }
 
+  // src/routing.ts
+  var AUTO_ROUTE_MODELS = {
+    anthropic: DEFAULT_MODELS.anthropic,
+    openai: DEFAULT_MODELS.openai,
+    gemini: DEFAULT_MODELS.gemini,
+    cohere: DEFAULT_MODELS.cohere,
+    // OpenRouter names OpenAI's models with an `openai/` prefix.
+    openrouter: `openai/${DEFAULT_MODELS.openai}`
+  };
+  function autoRouteModelFor(providerId) {
+    return Object.prototype.hasOwnProperty.call(AUTO_ROUTE_MODELS, providerId) ? AUTO_ROUTE_MODELS[providerId] : void 0;
+  }
+
   // src/translate/mobile-entry.ts
   var urlImpl = installURLFallback() ? "fallback" : "native";
   var streams = /* @__PURE__ */ new Map();
@@ -3908,6 +4337,7 @@ ${systemText}
         dstFamily,
         srcModel,
         dstModel,
+        dstProviderId,
         isStreaming,
         requestId
       };
@@ -3976,6 +4406,13 @@ ${systemText}
     rewriteClaudeCodeJSONBody(mapJson, body) {
       const map = JSON.parse(mapJson);
       return rewriteToolNamesInJSONBody(body, map);
+    },
+    translateErrorResponse(ctxJson, body) {
+      const ctx = JSON.parse(ctxJson);
+      return translateErrorResponse(ctx, body);
+    },
+    autoRouteModelFor(providerId) {
+      return autoRouteModelFor(providerId) ?? null;
     },
     version: "0.5.3",
     urlImpl
