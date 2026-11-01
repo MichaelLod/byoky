@@ -65,6 +65,15 @@
       }
     },
     {
+      "name": "a forced tool_choice is renamed with the tools",
+      "body": "{\"model\":\"m\",\"max_tokens\":64,\"system\":\"Sys\",\"tools\":[{\"name\":\"get_weather\",\"input_schema\":{\"type\":\"object\"}},{\"name\":\"Bash\",\"input_schema\":{\"type\":\"object\"}}],\"tool_choice\":{\"type\":\"tool\",\"name\":\"get_weather\",\"disable_parallel_tool_use\":true},\"messages\":[{\"role\":\"user\",\"content\":\"weather in Vienna?\"}]}",
+      "expected": "{\"model\":\"m\",\"max_tokens\":64,\"system\":\"You are Claude Code, Anthropic's official CLI for Claude.\",\"tools\":[{\"name\":\"GetWeather\",\"input_schema\":{\"type\":\"object\"}},{\"name\":\"Bash\",\"input_schema\":{\"type\":\"object\"}}],\"tool_choice\":{\"type\":\"tool\",\"name\":\"GetWeather\",\"disable_parallel_tool_use\":true},\"messages\":[{\"role\":\"user\",\"content\":\"<system_context>\\nSys\\n</system_context>\\n\\nweather in Vienna?\"}]}",
+      "toolNameMap": {
+        "GetWeather": "get_weather",
+        "Bash": "Bash"
+      }
+    },
+    {
       "name": "colliding names get distinct aliases",
       "body": "{\"model\":\"m\",\"tools\":[{\"name\":\"read_file\"},{\"name\":\"read-file\"}],\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
       "expected": "{\"model\":\"m\",\"tools\":[{\"name\":\"ReadFile\"},{\"name\":\"ReadFile2\"}],\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"system\":\"You are Claude Code, Anthropic's official CLI for Claude.\"}",
