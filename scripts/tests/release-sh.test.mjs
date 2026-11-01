@@ -142,3 +142,76 @@ test('--dry only checks signing (ios-signing.sh --check), and a failed check is 
   assert.equal(real.code, 1, real.out)
   assert.match(real.calls, /^ios-signing\.sh $/m)
 })
+
+// --- branch, origin and tags ---
+
+test('a branch other than main is an error unless --allow-branch', (t) => {
+  const s = sandbox()
+  t.after(s.cleanup)
+  s.git('checkout', '-q', '-b', 'release/1.1.2')
+  const r = s.run(['1.1.2', '--dry', '--yes'])
+  assert.equal(r.code, 1, r.out)
+  assert.match(r.out, /ERROR: On 'release\/1\.1\.2', not main/)
+
+  const allowed = s.run(['1.1.2', '--dry', '--allow-branch'])
+  assert.equal(allowed.code, 0, allowed.out)
+  assert.match(allowed.out, /WARN: On 'release\/1\.1\.2', not main \(--allow-branch\)/)
+})
+
+test('HEAD has to contain origin/main', (t) => {
+  const s = sandbox()
+  t.after(s.cleanup)
+  // Someone else pushed to main; this checkout is one commit behind.
+  s.git('commit', '-q', '--allow-empty', '-m', 'elsewhere')
+  s.git('push', '-q', 'origin', 'main')
+  s.git('reset', '-q', '--hard', 'HEAD~1')
+  const r = s.run(['1.1.2', '--dry'])
+  assert.equal(r.code, 1, r.out)
+  assert.match(r.out, /ERROR: HEAD doesn't contain origin\/main/)
+})
+
+test('an existing tag for the new version is an error', (t) => {
+  const s = sandbox()
+  t.after(s.cleanup)
+  s.git('tag', 'v1.1.2')
+  const r = s.run(['1.1.2', '--dry'])
+  assert.equal(r.code, 1, r.out)
+  assert.match(r.out, /ERROR: Tag v1\.1\.2 already exists/)
+})
+
+test('a release tag newer than the tree (its bump missing from HEAD) is an error', (t) => {
+  const s = sandbox()
+  t.after(s.cleanup)
+  // v1.1.2 was released from a branch that never reached main.
+  s.git('checkout', '-q', '-b', 'side')
+  s.git('commit', '-q', '--allow-empty', '-m', 'Bump to v1.1.2')
+  s.git('tag', 'v1.1.2')
+  s.git('push', '-q', 'origin', 'v1.1.2')
+  s.git('checkout', '-q', 'main')
+  const r = s.run(['1.1.3', '--dry'])
+  assert.equal(r.code, 1, r.out)
+  assert.match(r.out, /ERROR: v1\.1\.2 is newer than this tree's 1\.1\.1/)
+})
+
+test('the new build number is above the one in the latest tag', (t) => {
+  const s = sandbox({ versionCode: 31 })
+  t.after(s.cleanup)
+  // The tree's versionCode fell behind the tagged release's.
+  const gradle = join(s.work, 'packages/android/app/build.gradle.kts')
+  writeFileSync(gradle, readFileSync(gradle, 'utf8').replace('versionCode = 31', 'versionCode = 30'))
+  s.git('commit', '-q', '-am', 'versionCode back to 30')
+  s.git('push', '-q', 'origin', 'main')
+  const r = s.run(['1.1.2', '--dry'])
+  assert.equal(r.code, 0, r.out)
+  assert.match(r.out, /\(code 30 → 32\)/)
+})
+
+test('no store credentials is an error unless --skip-store-uploads', (t) => {
+  const s = sandbox()
+  t.after(s.cleanup)
+  const none = { CHROME_EXTENSION_ID: '', CHROME_CLIENT_ID: '' }
+  const r = s.run(['1.1.2', '--dry'], none)
+  assert.equal(r.code, 1, r.out)
+  assert.match(r.out, /ERROR: No store credentials/)
+  assert.equal(s.run(['1.1.2', '--dry', '--skip-store-uploads'], none).code, 0)
+})

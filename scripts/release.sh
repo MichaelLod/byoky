@@ -240,6 +240,7 @@ SKIP_MOBILE=false
 SKIP_STORE_UPLOADS=false
 ASSUME_YES=false
 ALLOW_PENDING=false
+ALLOW_BRANCH=false
 NEW_VERSION=""
 
 for arg in "$@"; do
@@ -249,13 +250,15 @@ for arg in "$@"; do
     --skip-store-uploads) SKIP_STORE_UPLOADS=true ;;
     --yes)     ASSUME_YES=true ;;
     --allow-pending) ALLOW_PENDING=true ;;
+    --allow-branch) ALLOW_BRANCH=true ;;
     *)         NEW_VERSION="$arg" ;;
   esac
 done
 
 if [ -z "$NEW_VERSION" ]; then
   CURRENT=$(node -p "require('./package.json').version")
-  echo "Usage: ./scripts/release.sh <new-version> [--dry] [--skip-mobile] [--skip-store-uploads] [--yes] [--allow-pending]"
+  echo "Usage: ./scripts/release.sh <new-version> [--dry] [--skip-mobile] [--skip-store-uploads] [--yes]"
+  echo "                                           [--allow-pending] [--allow-branch]"
   echo "       ./scripts/release.sh status"
   echo "       ./scripts/release.sh retry [--allow-pending]"
   echo ""
@@ -267,6 +270,12 @@ if [ -z "$NEW_VERSION" ]; then
   echo "  --yes                  Don't ask before starting (non-interactive runs)"
   echo "  --allow-pending        Release although a store has a review pending"
   echo "                         (an upload restarts that review; --yes doesn't imply it)"
+  echo "  --allow-branch         Release from a branch other than main (e.g. a worktree);"
+  echo "                         HEAD must contain origin/main, and the release commit is"
+  echo "                         pushed to main all the same"
+  echo ""
+  echo "Releases go out from main: fast-forward main to the work, release from the main"
+  echo "checkout. The release commit and tag v<version> are pushed to origin main."
   echo ""
   echo "Current version: $CURRENT"
   exit 1
@@ -321,12 +330,46 @@ else
   SKIP_ANDROID=true
 fi
 
+# Check git state
+if ! git diff --quiet HEAD 2>/dev/null; then
+  WARNINGS+=("Working tree has uncommitted changes — they will be included in the release commit")
+fi
+
+# The release commit and tag go to main, on top of what origin has. A release
+# from another branch left main without the bump, and the next release from
+# main reused that build number, which the stores refuse.
+CURRENT_BRANCH=$(git branch --show-current)
+if [ "$CURRENT_BRANCH" != "main" ] && [ "$ALLOW_BRANCH" = true ]; then
+  WARNINGS+=("On '${CURRENT_BRANCH:-a detached HEAD}', not main (--allow-branch): the release commit is pushed to main")
+elif [ "$CURRENT_BRANCH" != "main" ]; then
+  ERRORS+=("On '${CURRENT_BRANCH:-a detached HEAD}', not main. Fast-forward main to it and release from the main checkout, or pass --allow-branch (the release commit then goes to main)")
+fi
+
+if ! git fetch --quiet origin main --tags; then
+  ERRORS+=("Couldn't fetch main and the tags from origin")
+elif ! git merge-base --is-ancestor origin/main HEAD; then
+  ERRORS+=("HEAD doesn't contain origin/main: merge or rebase onto it first")
+fi
+
+if git rev-parse -q --verify "refs/tags/v${NEW_VERSION}" >/dev/null || \
+   [ -n "$(git ls-remote --tags origin "refs/tags/v${NEW_VERSION}" 2>/dev/null)" ]; then
+  ERRORS+=("Tag v${NEW_VERSION} already exists. If a run of v${NEW_VERSION} stopped after tagging, push what origin lacks (git push --atomic origin HEAD:main v${NEW_VERSION}), then finish with ./scripts/release.sh retry")
+fi
+
+LATEST_TAG=$(git tag --list 'v[0-9]*' --sort=-version:refname | head -1)
+if [ -n "$LATEST_TAG" ] && [ "${LATEST_TAG#v}" != "$OLD_VERSION" ] && \
+   [ "$(printf '%s\n%s\n' "${LATEST_TAG#v}" "$OLD_VERSION" | sort -V | tail -1)" = "${LATEST_TAG#v}" ]; then
+  ERRORS+=("${LATEST_TAG} is newer than this tree's ${OLD_VERSION}: HEAD is missing that release's version bump")
+fi
+
 # Signing is prepared before anything is bumped, so a missing certificate or
 # profile stops the release while the tree is still clean. See ios-signing.sh.
 # A dry run only checks: preparing can create certificates and replace the
-# team's App Store profiles.
+# team's App Store profiles. Nothing is prepared while another check failed.
 SIGNING_KEYCHAIN="$HOME/Library/Keychains/byoky-signing.keychain-db"
-if [ "$SKIP_IOS" = false ] && [ "$DRY_RUN" = true ]; then
+if [ ${#ERRORS[@]} -gt 0 ]; then
+  :
+elif [ "$SKIP_IOS" = false ] && [ "$DRY_RUN" = true ]; then
   echo "  Checking iOS/macOS signing (read-only)..."
   if ! bash scripts/ios-signing.sh --check; then
     WARNINGS+=("iOS/macOS signing isn't ready (see above); a real run prepares it or stops here")
@@ -336,16 +379,6 @@ elif [ "$SKIP_IOS" = false ]; then
   if ! bash scripts/ios-signing.sh; then
     ERRORS+=("iOS/macOS signing isn't ready (see above); fix it or pass --skip-mobile")
   fi
-fi
-
-# Check git state
-if ! git diff --quiet HEAD 2>/dev/null; then
-  WARNINGS+=("Working tree has uncommitted changes — they will be included in the release commit")
-fi
-
-CURRENT_BRANCH=$(git branch --show-current)
-if [ "$CURRENT_BRANCH" != "main" ]; then
-  WARNINGS+=("On branch '$CURRENT_BRANCH' (expected main)")
 fi
 
 # Store credentials check
@@ -367,6 +400,12 @@ STORES_SKIPPED=()
 [ -n "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ] \
   && STORES_CONFIGURED+=("Google Play") \
   || STORES_SKIPPED+=("Google Play (GOOGLE_PLAY_SERVICE_ACCOUNT_JSON)")
+
+# No store credentials at all usually means .env / .env.local didn't load
+# (e.g. a worktree): the release would publish to npm and upload nothing.
+if [ ${#STORES_CONFIGURED[@]} -eq 0 ] && [ "$SKIP_STORE_UPLOADS" = false ]; then
+  ERRORS+=("No store credentials (.env / .env.local); pass --skip-store-uploads for an npm + GitHub-only release")
+fi
 
 [ -n "${DISCORD_WEBHOOK_URL:-}" ] \
   && STORES_CONFIGURED+=("Discord") \
@@ -390,7 +429,18 @@ echo ""
 # --- Derive native versions ---
 ANDROID_GRADLE="$ROOT/packages/android/app/build.gradle.kts"
 OLD_VERSION_CODE=$(grep 'versionCode = ' "$ANDROID_GRADLE" | head -1 | sed 's/[^0-9]//g')
-NEW_VERSION_CODE=$((OLD_VERSION_CODE + 1))
+# Build numbers must keep rising in every store, also past a release whose
+# bump never reached this tree.
+TAG_VERSION_CODE=""
+if [ -n "$LATEST_TAG" ]; then
+  TAG_VERSION_CODE=$(git show "${LATEST_TAG}:packages/android/app/build.gradle.kts" 2>/dev/null \
+    | grep 'versionCode = ' | head -1 | sed 's/[^0-9]//g' || true)
+fi
+BASE_VERSION_CODE=$OLD_VERSION_CODE
+if [ -n "$TAG_VERSION_CODE" ] && [ "$TAG_VERSION_CODE" -gt "$BASE_VERSION_CODE" ]; then
+  BASE_VERSION_CODE=$TAG_VERSION_CODE
+fi
+NEW_VERSION_CODE=$((BASE_VERSION_CODE + 1))
 
 OLD_NATIVE_VERSION=$(grep 'versionName = ' "$ANDROID_GRADLE" | head -1 | sed 's/.*"\(.*\)".*/\1/')
 # One version for everything (since 1.1.0). The stores only accept a higher
@@ -431,7 +481,7 @@ echo "│  Steps:"
 echo "│    1. Bump versions across all packages"
 echo "│    2. Build everything (packages, extensions, mobile)"
 echo "│    3. Create dist artifacts"
-echo "│    4. Git commit + tag v${NEW_VERSION}"
+echo "│    4. Git commit + tag v${NEW_VERSION}, push both to origin main"
 echo "│    5. Publish npm packages"
 echo "│    6. Upload to extension stores"
 [ "$SKIP_IOS" = false ] && echo "│    7. Archive + upload iOS & macOS to App Store"
@@ -679,10 +729,10 @@ git tag "v${NEW_VERSION}"
 
 echo "  Committed and tagged v${NEW_VERSION}"
 
-# Push commit + tag
-echo "  Pushing to origin..."
-git push origin "$CURRENT_BRANCH"
-git push origin "v${NEW_VERSION}"
+# Push commit + tag to main, together or not at all. HEAD contains
+# origin/main (pre-flight), so this is a fast-forward from any branch.
+echo "  Pushing to origin main..."
+git push --atomic origin HEAD:main "refs/tags/v${NEW_VERSION}"
 
 # ============================================================
 # 5. Generate release notes
@@ -905,7 +955,7 @@ echo "╚═══════════════════════�
 echo ""
 echo "  Version:   v${NEW_VERSION}"
 echo "  Native:    ${NEW_NATIVE_VERSION} (${NEW_VERSION_CODE})"
-echo "  Git:       $(git rev-parse --short HEAD) on ${CURRENT_BRANCH}"
+echo "  Git:       $(git rev-parse --short HEAD), pushed to main"
 echo "  Tag:       v${NEW_VERSION}"
 echo ""
 echo "  npm:"
