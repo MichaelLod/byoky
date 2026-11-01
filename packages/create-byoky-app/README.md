@@ -20,15 +20,15 @@ The CLI prompts you to pick a template, then generates the project and prints ne
 
 ### AI Chat (Next.js)
 
-Multi-provider streaming chat app. Uses the Anthropic SDK with Byoky's proxied fetch.
+Streaming chat built on the Anthropic SDK with Byoky's proxied fetch.
 
 - Next.js 15 + React
 - Streaming responses via `client.messages.stream()`
-- Provider selection, usage stats, connected status
+- Connection status and disconnect
 
 ### Multi-Provider (Vite)
 
-Minimal setup showing how to connect multiple providers with fallback.
+Minimal setup showing how to connect several providers at once.
 
 - Vite + vanilla TypeScript
 - Requests Anthropic, OpenAI, and Gemini (all optional)
@@ -41,7 +41,7 @@ Server-side LLM calls through the user's wallet. The server never sees API keys.
 - Express + Vite (dual server)
 - `ByokyServer` handles WebSocket relay
 - `/api/generate` endpoint for proxied LLM requests
-- Supports Anthropic, OpenAI, and Gemini
+- Requests Anthropic, OpenAI, and Gemini (all optional); the server calls the first one available
 
 ## What You Get
 

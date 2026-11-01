@@ -12,12 +12,12 @@ const TEMPLATES = [
   {
     id: 'chat',
     name: 'AI Chat (Next.js)',
-    description: 'Multi-provider chat with streaming',
+    description: 'Streaming chat (Anthropic SDK)',
   },
   {
     id: 'multi-provider',
     name: 'Multi-Provider (Vite)',
-    description: 'Use multiple AI providers with fallback',
+    description: 'Anthropic, OpenAI and Gemini side by side',
   },
   {
     id: 'backend-relay',
