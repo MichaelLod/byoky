@@ -52,6 +52,7 @@ import type { Runtime } from 'wxt/browser';
 import { exportVaultFile, importVaultFile } from '../lib/vault-file';
 import { KEYLESS_PROVIDERS, openCredentialSecret, upgradeWallet } from '../lib/wallet-upgrade';
 import { isProviderIdList, parseProviderRequirements } from '../lib/connect-request';
+import { MAX_BINARY_CHUNK_BYTES, bytesToBase64, isTextContentType } from '../lib/binary-body';
 import {
   REVOKED_ORIGINS_KEY,
   TRUST_RESET_NOTICE_KEY,
@@ -973,6 +974,10 @@ export default defineBackground(() => {
           ? buildResponseStreamRewriter(translation, msg.requestId, msg.body, msg.url)
           : undefined;
 
+        // A binary reply (audio, images) goes to the app as base64: decoded
+        // as text, every byte that isn't valid UTF-8 would be lost. Only
+        // text is kept for usage accounting.
+        const binaryResponse = !translation && !isTextContentType(responseContentType);
         const chunks: string[] = [];
         responseChunks = chunks;
         if (response.body) {
@@ -982,6 +987,15 @@ export default defineBackground(() => {
           for (;;) {
             const { done, value } = await reader.read();
             if (done) break;
+            if (binaryResponse) {
+              send({
+                type: 'BYOKY_PROXY_RESPONSE_CHUNK',
+                requestId: msg.requestId,
+                chunk: bytesToBase64(value),
+                chunkEncoding: 'base64',
+              });
+              continue;
+            }
             const text = decoder.decode(value, { stream: true });
             chunks.push(text);
             if (sseRewriter) {
@@ -2031,7 +2045,7 @@ export default defineBackground(() => {
       };
 
       nativePort.onMessage.addListener((raw: unknown) => {
-        const response = raw as { type: string; requestId: string; status?: number; headers?: Record<string, string>; chunk?: string; error?: string };
+        const response = raw as { type: string; requestId: string; status?: number; headers?: Record<string, string>; chunk?: string; chunkEncoding?: string; error?: string };
         if (response.requestId !== msg.requestId) return;
 
         if (response.type === 'proxy_response_meta') {
@@ -2049,6 +2063,13 @@ export default defineBackground(() => {
           });
           logEntry = logRequest(session, appRequest, status);
         } else if (response.type === 'proxy_response_chunk') {
+          // The bridge sends a binary body as base64 (F025): passed on as
+          // such, and not counted as text.
+          const binary = response.chunkEncoding === 'base64';
+          if (binary && !translationCtx) {
+            send({ type: 'BYOKY_PROXY_RESPONSE_CHUNK', requestId: msg.requestId, chunk: response.chunk, chunkEncoding: 'base64' });
+            return;
+          }
           chunks.push(response.chunk ?? '');
           // Translation: route chunks through the SSE rewriter when
           // streaming, otherwise buffer for one-shot translation at done.
@@ -2308,7 +2329,8 @@ export default defineBackground(() => {
     if (typeof msg.requestId !== 'string' || typeof msg.sessionKey !== 'string' ||
         typeof msg.providerId !== 'string' || typeof msg.url !== 'string' ||
         typeof msg.method !== 'string' || typeof msg.headers !== 'object' || !msg.headers ||
-        (msg.body !== undefined && typeof msg.body !== 'string')) {
+        (msg.body !== undefined && typeof msg.body !== 'string') ||
+        (msg.bodyEncoding !== undefined && msg.bodyEncoding !== 'base64')) {
       return;
     }
     const requestId = msg.requestId;
@@ -2318,6 +2340,10 @@ export default defineBackground(() => {
     const method = msg.method;
     const headers = msg.headers as Record<string, string>;
     const body = msg.body as string | undefined;
+    // A body that isn't UTF-8 text (an audio upload) arrives as base64 (F025).
+    const bodyEncoding = msg.bodyEncoding as 'base64' | undefined;
+    // The bridge can take a binary response as base64 chunks.
+    const acceptsBinaryChunks = msg.acceptsBinaryChunks === true;
 
     // CLI traffic via the bridge counts as wallet activity. Without this the
     // 20-min idle auto-lock fires mid-Hermes/Claude-Code session even though
@@ -2458,8 +2484,21 @@ export default defineBackground(() => {
       return;
     }
 
-    // The app's request as the log and allowance helpers expect it.
-    const appRequest = { providerId, url, method, body } as ProxyRequest;
+    // Routing rewrites a JSON body; a binary one can't be.
+    if (bodyEncoding && (translation || swap)) {
+      bridgeProxyPort?.postMessage({
+        type: 'proxy_http_error',
+        requestId,
+        status: 400,
+        code: 'ROUTING_UNSUPPORTED',
+        error: `This app is routed to ${effectiveProviderId}, and a binary request body can't be routed to another provider`,
+      });
+      return;
+    }
+
+    // The app's request as the log and allowance helpers expect it (which
+    // leave an encoded body uncounted and unparsed).
+    const appRequest = { providerId, url, method, body, bodyEncoding } as ProxyRequest;
 
     try {
       const apiKey = await decryptCredentialKey(credential);
@@ -2505,7 +2544,7 @@ export default defineBackground(() => {
         if (swap.dstModel && body) {
           translatedBody = rewriteModelInJsonBody(body, swap.dstModel);
         }
-      } else if (sessionProvider?.modelOverride && body) {
+      } else if (sessionProvider?.modelOverride && body && !bodyEncoding) {
         // Direct path, same provider, but the group pins a model. The
         // group's model is the strongest force — override the SDK's choice.
         translatedBody = rewriteModelInJsonBody(body, sessionProvider.modelOverride);
@@ -2529,6 +2568,16 @@ export default defineBackground(() => {
             type: 'proxy_http_error',
             requestId,
             error: 'Cross-family translation is not supported on the bridge OAuth path. Bind this app to an Anthropic credential or remove the OAuth requirement.',
+          });
+          return;
+        }
+        // The setup-token request is rewritten as JSON (tool names, system prompt).
+        if (bodyEncoding) {
+          bridgeProxyPort.postMessage({
+            type: 'proxy_http_error',
+            requestId,
+            status: 400,
+            error: 'A Claude setup token can only be used with a JSON request body',
           });
           return;
         }
@@ -2623,7 +2672,9 @@ export default defineBackground(() => {
         return;
       }
 
-      const bridgeBody = injectStreamUsageOptions(effectiveProviderId, translatedBody);
+      const bridgeBody = bodyEncoding
+        ? reconstructBody(translatedBody, bodyEncoding).body
+        : injectStreamUsageOptions(effectiveProviderId, translatedBody);
       // Check the allowance and hold what this request may use in one step,
       // as on the page path.
       const reservation = await checkAndReserveAllowance(session.appOrigin, providerId, appRequest);
@@ -2669,6 +2720,9 @@ export default defineBackground(() => {
         const sseRewriter = translation && isStreamingResponse
           ? buildResponseStreamRewriter(translation, requestId, body, url)
           : undefined;
+        // A binary reply goes to a bridge that takes it as base64 slices
+        // (as on the page path); an older bridge gets text, as before.
+        const binaryResponse = acceptsBinaryChunks && !translation && !isTextContentType(responseContentType);
 
         if (response.body) {
           const reader = response.body.getReader();
@@ -2676,6 +2730,17 @@ export default defineBackground(() => {
           for (;;) {
             const { done, value } = await reader.read();
             if (done) break;
+            if (binaryResponse) {
+              for (let i = 0; i < value.length; i += MAX_BINARY_CHUNK_BYTES) {
+                bridgeProxyPort?.postMessage({
+                  type: 'proxy_http_response_chunk',
+                  requestId,
+                  chunk: bytesToBase64(value.subarray(i, i + MAX_BINARY_CHUNK_BYTES)),
+                  chunkEncoding: 'base64',
+                });
+              }
+              continue;
+            }
             const text = decoder.decode(value, { stream: true });
             chunks.push(text);
             if (sseRewriter) {
@@ -3274,7 +3339,8 @@ export default defineBackground(() => {
     // images, audio, token counting and model lists aren't estimated. Same
     // rule on iOS and Android.
     if (ok && shouldEstimateUsage(upstreamProviderId, req.url, contentType) && (!parsed || !complete)) {
-      if (!inputTokens) inputTokens = Math.ceil((req.body?.length ?? 0) / 4);
+      // An encoded (binary) body's length says nothing about its tokens.
+      if (!inputTokens && !req.bodyEncoding) inputTokens = Math.ceil((req.body?.length ?? 0) / 4);
       if (!outputTokens) outputTokens = Math.ceil(responseText.length / 4);
     }
     if (inputTokens != null || outputTokens != null || model) {
