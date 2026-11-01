@@ -57,6 +57,21 @@ describe('MODELS', () => {
     }
   });
 
+  it('has GPT-6 Astra and Luna as OpenAI documents them', () => {
+    // Model pages checked 2026-11-01: 1,050,000 context, 128K output, text and
+    // image in; both answered a Chat Completions call (Luna with an image).
+    for (const id of ['gpt-6-astra', 'gpt-6-luna']) {
+      const m = getModel(id);
+      expect(m, id).toMatchObject({ providerId: 'openai', family: 'openai', contextWindow: 1_050_000, maxOutput: 128_000 });
+      expect(m?.capabilities, id).toMatchObject({ reasoning: true, vision: true, streaming: true, structuredOutput: true });
+    }
+    // Chat Completions takes Luna's tools with reasoning off; Astra's only
+    // through the Responses API, which Byoky doesn't speak.
+    expect(getModel('gpt-6-luna')?.capabilities.tools).toBe(true);
+    expect(getModel('gpt-6-astra')?.capabilities).toMatchObject({ tools: false, toolChoice: false, parallelToolCalls: false });
+    expect(capabilityGaps({ ...EMPTY_CAPABILITY_SET, tools: true }, getModel('gpt-6-astra')!)).toEqual(['tools']);
+  });
+
   it('marks the Claude models that reject a forced tool choice', () => {
     expect(getModel('claude-opus-5-5')?.capabilities.toolChoice).toBe(false);
     expect(getModel('claude-sonnet-5-5')?.capabilities.toolChoice).toBe(false);

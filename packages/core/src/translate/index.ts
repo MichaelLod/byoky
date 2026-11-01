@@ -57,8 +57,9 @@ export function translateRequest(ctx: TranslationContext, body: string): string 
  * OpenAI reasoning models). Every other field stays as the app sent it.
  *
  * A body that already names the model, or isn't a JSON object, is returned
- * as it was. Throws TranslationError when the model can't serve the
- * request at all.
+ * as it was, as is the body of a call whose URL names the model (Gemini's
+ * generateContent; see rewriteRequestUrl). Throws TranslationError when the
+ * model can't serve the request at all.
  *
  * `url` is the URL the app called; `dstProviderId` the provider the request
  * goes to (the same family as the app's).
@@ -76,13 +77,70 @@ export function rewriteRequestModel(
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return body;
   const request = parsed as Record<string, unknown>;
   if (request.model === ctx.dstModel) return body;
-  request.model = ctx.dstModel;
   const family = familyOf(ctx.dstProviderId);
   const adapter = family && hasAdapter(family) ? getAdapter(family) : undefined;
+  // A URL that names the model (Gemini's generateContent and the like) is
+  // where the pin goes (rewriteRequestUrl); the body has none. Other URLs of
+  // such a family name it in the body as usual, e.g. Gemini's
+  // OpenAI-compatible /v1beta/openai/chat/completions.
+  if (adapter?.rewriteUrlModel?.(ctx.url, ctx.dstModel) != null) return body;
+  request.model = ctx.dstModel;
   if (adapter?.shapeRequestForModel && adapter.matchesChatEndpoint(ctx.url)) {
     adapter.shapeRequestForModel(request, { dstModel: ctx.dstModel, dstProviderId: ctx.dstProviderId });
   }
   return JSON.stringify(request);
+}
+
+/**
+ * The URL a request goes to when a group pins `dstModel` in the app's own
+ * family: for a family that names the model in the URL path (Gemini's
+ * generateContent, streamGenerateContent and countTokens), `url` naming
+ * the pinned model; otherwise `url` as it is (the model is in the body,
+ * see rewriteRequestModel).
+ */
+export function rewriteRequestUrl(ctx: { dstProviderId: ProviderId; dstModel: string; url: string }): string {
+  const family = familyOf(ctx.dstProviderId);
+  const adapter = family && hasAdapter(family) ? getAdapter(family) : undefined;
+  return adapter?.rewriteUrlModel?.(ctx.url, ctx.dstModel) ?? ctx.url;
+}
+
+/**
+ * Fit a request to the rules of the model it already names, where it would
+ * certainly be refused otherwise: what rewriteRequestModel does for a
+ * pinned model, for a request nothing reroutes. Byoky uses it for requests
+ * from local tools (the bridge), whose request shapes the user can't fix,
+ * such as OpenClaw sending a thinking budget to a Claude model that only
+ * thinks adaptively.
+ *
+ * Applies only to a family's chat endpoint and to a model whose rules the
+ * family knows for certain (today: Claude ids). Anything else, a request
+ * that already fits, a body that isn't a JSON object, or one the model
+ * can't serve at all (left for the provider to answer) is returned byte
+ * for byte.
+ *
+ * `providerId` is the provider the request goes to, `url` the URL called.
+ */
+export function fitRequestToModel(ctx: { providerId: ProviderId; url: string }, body: string): string {
+  const family = familyOf(ctx.providerId);
+  const adapter = family && hasAdapter(family) ? getAdapter(family) : undefined;
+  if (!adapter?.shapeRequestForModel || !adapter.recognizesModel || !adapter.matchesChatEndpoint(ctx.url)) return body;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return body;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return body;
+  const request = parsed as Record<string, unknown>;
+  if (typeof request.model !== 'string' || !adapter.recognizesModel(request.model)) return body;
+  const before = JSON.stringify(request);
+  try {
+    adapter.shapeRequestForModel(request, { dstModel: request.model, dstProviderId: ctx.providerId });
+  } catch {
+    return body;
+  }
+  const after = JSON.stringify(request);
+  return after === before ? body : after;
 }
 
 /**
@@ -100,14 +158,18 @@ export function translateResponse(ctx: TranslationContext, body: string): string
 
 /**
  * Translate an upstream error body (a non-2xx response) from the destination
- * dialect into the source dialect, so the app's SDK can read it.
+ * dialect into the source dialect, so the app's SDK can read it. The error
+ * type is the source dialect's for `status`, the response's HTTP status
+ * (which the caller keeps): a Gemini 429 reaches an Anthropic app as
+ * rate_limit_error, not RESOURCE_EXHAUSTED. Without a status it is read
+ * from the upstream's own type.
  *
  * Returns null when the body isn't an error the destination adapter
  * recognises (not JSON, an HTML page from a proxy or CDN, or a shape that
  * parses as a success); the caller then passes the raw body through rather
  * than failing the request.
  */
-export function translateErrorResponse(ctx: TranslationContext, body: string): string | null {
+export function translateErrorResponse(ctx: TranslationContext, body: string, status?: number): string | null {
   const dst = getAdapter(ctx.dstFamily);
   const src = getAdapter(ctx.srcFamily);
   let ir: IRResponseOrError;
@@ -117,6 +179,9 @@ export function translateErrorResponse(ctx: TranslationContext, body: string): s
     return null;
   }
   if (!isIRError(ir)) return null;
+  if (typeof status === 'number' && Number.isInteger(status) && status >= 400 && status <= 599) {
+    ir = { error: { ...ir.error, status } };
+  }
   return src.serializeResponse(ctx, ir);
 }
 

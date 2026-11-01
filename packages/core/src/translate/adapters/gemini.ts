@@ -14,6 +14,7 @@ import type {
   IRToolResultContent,
 } from '../ir.js';
 import { isIRError } from '../ir.js';
+import { geminiError } from '../errors.js';
 
 /**
  * Google Gemini (Generative Language v1beta) adapter.
@@ -59,6 +60,8 @@ export const geminiAdapter: FamilyAdapter = {
     return `${b}/v1beta/models/${encodeURIComponent(model)}:${method}${suffix}`;
   },
 
+  rewriteUrlModel,
+
   parseRequest,
   serializeRequest,
   parseResponse,
@@ -66,6 +69,24 @@ export const geminiAdapter: FamilyAdapter = {
   createStreamParser,
   createStreamSerializer,
 };
+
+/**
+ * `url` with the model of a generateContent, streamGenerateContent or
+ * countTokens call (`…/models/{model}:{method}`) replaced by `model`; null
+ * for any other URL (embeddings, model lists, tuned models). Gemini takes
+ * the model from the path alone: a `model` field in the body is ignored
+ * (live 2026-11-01: a call to models/gemini-2.5-flash with body model
+ * gemini-3.5-flash-lite answered as gemini-2.5-flash). String surgery
+ * rather than URL, so the query (?alt=sse) stays byte for byte.
+ */
+function rewriteUrlModel(url: string, model: string): string | null {
+  const end = url.search(/[?#]/);
+  const path = end < 0 ? url : url.slice(0, end);
+  const rest = end < 0 ? '' : url.slice(end);
+  const match = /^(https?:\/\/[^/?#]+(?:\/[^?#]*)?\/models\/)[^/?#:]+(:(?:streamGenerateContent|generateContent|countTokens))$/.exec(path);
+  if (!match) return null;
+  return `${match[1]}${encodeURIComponent(model)}${match[2]}${rest}`;
+}
 
 // ─── Wire shapes ──────────────────────────────────────────────────────────
 
@@ -719,7 +740,7 @@ function parseResponse(body: string): IRResponseOrError {
       error: {
         type: parsed.error.status ?? 'api_error',
         message: parsed.error.message ?? 'Gemini API error',
-        ...(typeof parsed.error.code === 'number' ? { code: String(parsed.error.code) } : {}),
+        ...(typeof parsed.error.code === 'number' ? { code: String(parsed.error.code), status: parsed.error.code } : {}),
       },
     };
   }
@@ -790,13 +811,8 @@ function upstreamCallId(responseId: string | undefined, index: number): string {
 
 function serializeResponse(ctx: TranslationContext, ir: IRResponseOrError): string {
   if (isIRError(ir)) {
-    return JSON.stringify({
-      error: {
-        code: ir.error.code ? Number(ir.error.code) || 500 : 500,
-        message: ir.error.message,
-        status: ir.error.type,
-      },
-    });
+    const { code, status } = geminiError(ir.error);
+    return JSON.stringify({ error: { code, message: ir.error.message, status } });
   }
 
   const parts: GeminiPart[] = [];
@@ -986,6 +1002,7 @@ function processGeminiFrame(
       error: {
         type: data.error.status ?? 'api_error',
         message: data.error.message ?? 'Gemini stream error',
+        ...(typeof data.error.code === 'number' ? { status: data.error.code } : {}),
       },
     });
     return;
@@ -1201,13 +1218,7 @@ function createStreamSerializer(ctx: TranslationContext): IRStreamSerializer {
             state.done = true;
             break;
           case 'error':
-            out += emitFrame({
-              error: {
-                code: 500,
-                message: event.error.message,
-                status: event.error.type,
-              },
-            });
+            out += emitFrame({ error: { ...geminiError(event.error), message: event.error.message } });
             state.done = true;
             break;
         }

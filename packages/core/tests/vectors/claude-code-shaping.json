@@ -102,7 +102,7 @@
         "anthropic-beta": "tools-2024-04-04,claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14",
         "content-type": "application/json",
         "authorization": "Bearer sk-ant-oat01-T",
-        "user-agent": "claude-cli/2.1.76",
+        "user-agent": "claude-cli/2.1.316",
         "x-app": "cli",
         "accept": "application/json",
         "anthropic-version": "2023-06-01",
@@ -121,7 +121,7 @@
         "accept": "text/event-stream",
         "anthropic-version": "2024-01-01",
         "authorization": "Bearer sk-ant-oat01-T",
-        "user-agent": "claude-cli/2.1.76",
+        "user-agent": "claude-cli/2.1.316",
         "x-app": "cli",
         "anthropic-beta": "claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14",
         "anthropic-dangerous-direct-browser-access": "true"
@@ -134,7 +134,7 @@
       "headers": {},
       "expected": {
         "authorization": "Bearer sk-ant-oat01-T",
-        "user-agent": "claude-cli/2.1.76",
+        "user-agent": "claude-cli/2.1.316",
         "x-app": "cli",
         "accept": "application/json",
         "anthropic-beta": "claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14",

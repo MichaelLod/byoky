@@ -354,6 +354,31 @@ struct RoutingResolver {
         return model.isEmpty ? nil : String(model)
     }
 
+    /// `url` naming `model` instead of the app's in a Gemini
+    /// generateContent, streamGenerateContent or countTokens call
+    /// (`…/models/{model}:{method}`). Gemini takes the model from the path
+    /// and ignores a `model` in the body, so a group's pinned model goes
+    /// here. Nil for any other URL. The query stays as it was. Mirrors core
+    /// `rewriteRequestUrl`.
+    static func geminiURL(_ url: String, pinning model: String) -> String? {
+        let end = url.firstIndex(where: { $0 == "?" || $0 == "#" }) ?? url.endIndex
+        let path = url[..<end]
+        guard let models = path.range(of: "/models/", options: .backwards) else { return nil }
+        let segment = path[models.upperBound...]
+        guard let colon = segment.firstIndex(of: ":") else { return nil }
+        let current = segment[..<colon]
+        let method = segment[segment.index(after: colon)...]
+        guard !current.isEmpty, !current.contains("/"),
+              ["generateContent", "streamGenerateContent", "countTokens"].contains(String(method)),
+              let encoded = model.addingPercentEncoding(withAllowedCharacters: uriComponentAllowed) else { return nil }
+        return String(path[..<models.upperBound]) + encoded + ":" + String(method) + String(url[end...])
+    }
+
+    /// What JavaScript's encodeURIComponent leaves as it is.
+    private static let uriComponentAllowed = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.!~*'()"
+    )
+
     /// Detect whether a request asked for a streaming response. The bridge
     /// needs this to pick request vs stream translator paths. Gemini says so
     /// in the URL (`:streamGenerateContent`, `?alt=sse`), the other dialects

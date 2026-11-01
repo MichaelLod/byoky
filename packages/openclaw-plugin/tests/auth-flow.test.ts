@@ -147,7 +147,11 @@ describe('login', () => {
 
     for (const providerId of ['anthropic', 'openai', 'gemini'] as const) {
       const catalog = providers[`byoky-${providerId}`].models;
-      const registry = modelsForProvider(providerId);
+      // OpenClaw's agent turns always send tools, and Chat Completions (its
+      // OpenAI API) takes none for GPT-6 Astra and takes them for GPT-6 Luna
+      // only with reasoning_effort 'none', which OpenClaw never sends (both
+      // 400, checked live 2026-11-01). The catalog leaves them out.
+      const registry = modelsForProvider(providerId).filter((m) => m.id !== 'gpt-6-astra' && m.id !== 'gpt-6-luna');
       // The registry drops shut-down models, so nothing here is one.
       expect(catalog.map((m) => m.id).sort(), providerId).toEqual(registry.map((m) => m.id).sort());
       for (const m of catalog) {

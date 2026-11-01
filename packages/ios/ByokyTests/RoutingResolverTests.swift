@@ -62,6 +62,23 @@ final class RoutingResolverTests: XCTestCase {
         XCTAssertNil(RoutingResolver.geminiModel(fromURL: "https://generativelanguage.googleapis.com/v1beta/models/:generateContent"))
     }
 
+    // R4-03: Gemini takes the model from the URL and ignores a body `model`,
+    // so a group's pinned model has to go into the URL.
+    func testGeminiURLNamesThePinnedModel() {
+        let base = "https://generativelanguage.googleapis.com/v1beta/models/"
+        XCTAssertEqual(RoutingResolver.geminiURL(base + "gemini-2.5-flash:generateContent", pinning: "gemini-3.8-flash"),
+                       base + "gemini-3.8-flash:generateContent")
+        XCTAssertEqual(RoutingResolver.geminiURL(base + "gemini-2.5-flash:streamGenerateContent?alt=sse", pinning: "gemini-3.8-flash"),
+                       base + "gemini-3.8-flash:streamGenerateContent?alt=sse")
+        XCTAssertEqual(RoutingResolver.geminiURL(base + "gemini-2.5-pro:countTokens", pinning: "tuned model"),
+                       base + "tuned%20model:countTokens")
+        XCTAssertNil(RoutingResolver.geminiURL(base + "text-embedding-004:embedContent", pinning: "gemini-3.8-flash"))
+        XCTAssertNil(RoutingResolver.geminiURL("https://generativelanguage.googleapis.com/v1beta/models", pinning: "gemini-3.8-flash"))
+        XCTAssertNil(RoutingResolver.geminiURL(base + ":generateContent", pinning: "gemini-3.8-flash"))
+        // The OpenAI-compatible endpoint names the model in the body: the pin goes there.
+        XCTAssertNil(RoutingResolver.geminiURL("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", pinning: "gemini-3.8-flash"))
+    }
+
     func testGeminiStreamingIsReadFromTheURL() {
         let base = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro"
         XCTAssertTrue(RoutingResolver.isStreamingRequest(body: Data(#"{"contents":[]}"#.utf8), url: base + ":streamGenerateContent?alt=sse"))

@@ -16,6 +16,7 @@ import type {
   IRToolResultContent,
 } from '../ir.js';
 import { isIRError } from '../ir.js';
+import { openaiErrorCode, openaiErrorType } from '../errors.js';
 
 /**
  * OpenAI Chat Completions API adapter.
@@ -127,6 +128,8 @@ interface OpenAIResponse {
   // message as a string with a top-level `code`.
   error?: { message?: string; type?: string; code?: string | number | null } | string;
   code?: unknown;
+  /** OpenAI repeats the HTTP status here (`"status": 401`). */
+  status?: unknown;
   // Mistral errors carry a top-level message (string or object) or detail.
   message?: unknown;
   detail?: unknown;
@@ -769,6 +772,7 @@ function parseResponse(body: string): IRResponseOrError {
         type: parsed.error.type ?? 'api_error',
         message: parsed.error.message ?? 'OpenAI API error',
         ...(parsed.error.code != null && parsed.error.code !== '' ? { code: String(parsed.error.code) } : {}),
+        ...(typeof parsed.status === 'number' ? { status: parsed.status } : {}),
       },
     };
   }
@@ -828,8 +832,8 @@ function serializeResponse(ctx: TranslationContext, ir: IRResponseOrError): stri
     return JSON.stringify({
       error: {
         message: ir.error.message,
-        type: ir.error.type,
-        code: ir.error.code ?? null,
+        type: openaiErrorType(ir.error),
+        code: openaiErrorCode(ir.error),
       },
     });
   }
@@ -1336,8 +1340,8 @@ function handleSerializeEvent(
       const errChunk = {
         error: {
           message: event.error.message,
-          type: event.error.type,
-          code: event.error.code ?? null,
+          type: openaiErrorType(event.error),
+          code: openaiErrorCode(event.error),
         },
       };
       return `data: ${JSON.stringify(errChunk)}\n\ndata: [DONE]\n\n`;

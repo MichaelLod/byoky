@@ -59,6 +59,21 @@ export interface FamilyAdapter {
    */
   shapeRequestForModel?(body: Record<string, unknown>, ctx: ModelShapingContext): void;
 
+  /**
+   * For a family that names the model in the URL path rather than the body
+   * (Gemini: /v1beta/models/{model}:generateContent), `url` naming `model`
+   * instead, or null when `url` names no model this way. Absent for
+   * families that name it in the body.
+   */
+  rewriteUrlModel?(url: string, model: string): string | null;
+
+  /**
+   * True when this family knows `model`'s request rules for certain (not
+   * by a guess for an id it can't read), so shapeRequestForModel changes
+   * only what that model would reject. Absent: never.
+   */
+  recognizesModel?(model: string): boolean;
+
   // ─── Response (non-streaming) ───────────────────────────────────────────
 
   /** Parse a family-native response body (success or error) into IR. */

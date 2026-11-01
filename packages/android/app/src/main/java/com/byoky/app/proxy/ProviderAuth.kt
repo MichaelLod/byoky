@@ -23,7 +23,11 @@ object ProviderAuth {
     )
 
     const val ANTHROPIC_VERSION = "2023-06-01"
-    const val CLAUDE_CLI_USER_AGENT = "claude-cli/2.1.76"
+    /**
+     * A current Claude Code release: Anthropic refuses newer models
+     * (claude-opus-5-5) to older ones with a 400. Core sends the same.
+     */
+    const val CLAUDE_CLI_USER_AGENT = "claude-cli/2.1.316"
 
     fun apply(headers: MutableMap<String, String>, providerId: String, authMethod: AuthMethod, apiKey: String) {
         when (providerId) {

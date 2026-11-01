@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { rewriteRequestModel } from '../../src/translate/index.js';
+import { rewriteRequestModel, rewriteRequestUrl } from '../../src/translate/index.js';
 
 /**
  * R3-05: a group that pins another model of the app's own family used to
@@ -53,10 +53,25 @@ describe('rewriteRequestModel — what it leaves alone', () => {
     expect(count.temperature).toBe(0.5);
   });
 
+  it('leaves a Gemini body as it is: the model is in the URL (rewriteRequestUrl)', () => {
+    // R4-03: Gemini ignores a body `model` (live 2026-11-01: models/gemini-2.5-flash
+    // with body model gemini-3.5-flash-lite answered as gemini-2.5-flash).
+    const body = JSON.stringify({ contents: [{ parts: [{ text: 'hi' }] }], generationConfig: { temperature: 0.5 } });
+    expect(rewriteRequestModel({
+      dstProviderId: 'gemini', dstModel: 'gemini-3.8-flash',
+      url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
+    }, body)).toBe(body);
+  });
+
+  it('sets the model of a Gemini call whose URL names none (the OpenAI-compatible endpoint)', () => {
+    // Byoky's OpenClaw plugin sends byoky-gemini requests there; the model is
+    // in the body and rewriteRequestUrl leaves the URL alone.
+    expect(rewrite('gemini', 'gemini-3.8-flash', { model: 'gemini-2.5-flash', temperature: 0.5, messages: USER },
+      'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'))
+      .toEqual({ model: 'gemini-3.8-flash', temperature: 0.5, messages: USER });
+  });
+
   it('only sets the model for families without per-model rules', () => {
-    const body = { contents: [{ parts: [{ text: 'hi' }] }], generationConfig: { temperature: 0.5 } };
-    expect(rewrite('gemini', 'gemini-3.8-flash', body, 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent'))
-      .toEqual({ ...body, model: 'gemini-3.8-flash' });
     expect(rewrite('cohere', 'command-a-03-2025', { model: 'command-r', temperature: 0.5, messages: USER }, 'https://api.cohere.com/v2/chat'))
       .toEqual({ model: 'command-a-03-2025', temperature: 0.5, messages: USER });
   });
@@ -73,6 +88,32 @@ describe('rewriteRequestModel — what it leaves alone', () => {
       something_new: { kept: true },
     };
     expect(rewrite('anthropic', 'claude-sonnet-5-5', body)).toEqual({ ...body, model: 'claude-sonnet-5-5' });
+  });
+});
+
+describe('rewriteRequestUrl — Gemini names the model in the URL', () => {
+  const GEMINI = 'https://generativelanguage.googleapis.com/v1beta/models';
+  const pin = (url: string, dstModel = 'gemini-3.8-flash', dstProviderId = 'gemini') => rewriteRequestUrl({ dstProviderId, dstModel, url });
+
+  it('names the pinned model in a generateContent, streaming or countTokens URL', () => {
+    expect(pin(`${GEMINI}/gemini-2.5-flash:generateContent`)).toBe(`${GEMINI}/gemini-3.8-flash:generateContent`);
+    expect(pin(`${GEMINI}/gemini-2.5-flash:streamGenerateContent?alt=sse`)).toBe(`${GEMINI}/gemini-3.8-flash:streamGenerateContent?alt=sse`);
+    expect(pin(`${GEMINI}/gemini-2.5-pro:countTokens`)).toBe(`${GEMINI}/gemini-3.8-flash:countTokens`);
+    expect(pin('https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent'))
+      .toBe('https://generativelanguage.googleapis.com/v1/models/gemini-3.8-flash:generateContent');
+  });
+
+  it('keeps the query as it was and encodes the model like the URL builder', () => {
+    expect(pin(`${GEMINI}/gemini-2.5-flash:streamGenerateContent?alt=sse&x=a%20b`, 'tuned model'))
+      .toBe(`${GEMINI}/tuned%20model:streamGenerateContent?alt=sse&x=a%20b`);
+  });
+
+  it('leaves other Gemini endpoints and other families alone', () => {
+    for (const url of [`${GEMINI}/text-embedding-004:embedContent`, `${GEMINI}`, `${GEMINI}/gemini-2.5-flash`, 'not a url']) {
+      expect(pin(url), url).toBe(url);
+    }
+    expect(pin('https://api.openai.com/v1/chat/completions', 'gpt-5.5', 'openai')).toBe('https://api.openai.com/v1/chat/completions');
+    expect(pin('https://api.anthropic.com/v1/messages', 'claude-opus-5-5', 'anthropic')).toBe('https://api.anthropic.com/v1/messages');
   });
 });
 
@@ -160,6 +201,91 @@ describe('rewriteRequestModel — Claude', () => {
     expect(out).not.toHaveProperty('thinking');
     // No thinking left, so the temperature stays.
     expect(out.temperature).toBe(0.5);
+  });
+});
+
+/**
+ * R4-02: thinking turned off and the effort level have per-model rules too
+ * (each 400 checked live on 2026-11-01 with the message quoted).
+ */
+describe('rewriteRequestModel — Claude thinking off and effort', () => {
+  it('leaves thinking out for a model that always thinks', () => {
+    // Opus 5.5 and Fable 5.1: 400 ""thinking.type.disabled" is not supported for this model."
+    for (const model of ['claude-opus-5-5', 'claude-fable-5-1', 'claude-fable-5', 'claude-mythos-5-1']) {
+      const out = rewrite('anthropic', model, { model: 'claude-opus-4-7', max_tokens: 64, messages: USER, thinking: { type: 'disabled' } });
+      expect(out, model).toEqual({ model, max_tokens: 64, messages: USER });
+    }
+  });
+
+  it('turns thinking off with between_tools on Sonnet 5.5', () => {
+    // 400 "To turn thinking off on this model, send "thinking": {"type": "between_tools"} instead of {"type": "disabled"}."
+    const out = rewrite('anthropic', 'claude-sonnet-5-5', { model: 'claude-sonnet-4-6', max_tokens: 64, messages: USER, thinking: { type: 'disabled' } });
+    expect(out.thinking).toEqual({ type: 'between_tools' });
+  });
+
+  it('turns between_tools back into disabled on a model that takes that', () => {
+    for (const model of ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001', 'claude-opus-5', 'claude-haiku-5-5']) {
+      const out = rewrite('anthropic', model, { model: 'claude-sonnet-5-5', max_tokens: 64, messages: USER, thinking: { type: 'between_tools' } });
+      expect(out.thinking, model).toEqual({ type: 'disabled' });
+    }
+    const always = rewrite('anthropic', 'claude-opus-5-5', { model: 'claude-sonnet-5-5', max_tokens: 64, messages: USER, thinking: { type: 'between_tools' } });
+    expect(always).not.toHaveProperty('thinking');
+  });
+
+  it('keeps thinking off as it is where the model takes it', () => {
+    for (const model of ['claude-opus-4-7', 'claude-opus-5', 'claude-sonnet-5', 'claude-haiku-5-5']) {
+      const out = rewrite('anthropic', model, { model: 'claude-opus-5-5', max_tokens: 64, messages: USER, thinking: { type: 'disabled' } });
+      expect(out.thinking, model).toEqual({ type: 'disabled' });
+    }
+  });
+
+  it('holds effort to high while thinking is off on models that turn it off only that far', () => {
+    // Opus 5: 400 "output_config.effort 'xhigh' is not supported when thinking is disabled on this model."
+    const opus5 = rewrite('anthropic', 'claude-opus-5', {
+      model: 'claude-opus-4-8', max_tokens: 64, messages: USER, thinking: { type: 'disabled' }, output_config: { effort: 'xhigh' },
+    });
+    expect(opus5.thinking).toEqual({ type: 'disabled' });
+    expect(opus5.output_config).toEqual({ effort: 'high' });
+    const sonnet = rewrite('anthropic', 'claude-sonnet-5-5', {
+      model: 'claude-opus-4-8', max_tokens: 64, messages: USER, thinking: { type: 'disabled' }, output_config: { effort: 'max', format: { type: 'json_schema' } },
+    });
+    expect(sonnet.thinking).toEqual({ type: 'between_tools' });
+    expect(sonnet.output_config).toEqual({ effort: 'high', format: { type: 'json_schema' } });
+    // With thinking on, every level is taken.
+    const on = rewrite('anthropic', 'claude-opus-5', { model: 'claude-opus-4-8', max_tokens: 64, messages: USER, output_config: { effort: 'max' } });
+    expect(on.output_config).toEqual({ effort: 'max' });
+  });
+
+  it('drops effort for a model that takes none, keeping the rest of output_config', () => {
+    // Haiku 4.5, Sonnet 4.5: 400 "This model does not support the effort parameter."
+    for (const model of ['claude-haiku-4-5-20251001', 'claude-sonnet-4-5']) {
+      const out = rewrite('anthropic', model, { model: 'claude-sonnet-4-6', max_tokens: 64, messages: USER, output_config: { effort: 'low' } });
+      expect(out, model).not.toHaveProperty('output_config');
+      const format = { type: 'json_schema', schema: { type: 'object' } };
+      const withFormat = rewrite('anthropic', model, { model: 'claude-sonnet-4-6', max_tokens: 64, messages: USER, output_config: { effort: 'low', format } });
+      expect(withFormat.output_config, model).toEqual({ format });
+    }
+  });
+
+  it('lowers an effort level the model lacks to the nearest one it has', () => {
+    // Opus 4.6: 400 "This model does not support effort level 'xhigh'. Supported levels: high, low, max, medium."
+    const fourSix = rewrite('anthropic', 'claude-opus-4-6', { model: 'claude-opus-4-7', max_tokens: 64, messages: USER, output_config: { effort: 'xhigh' } });
+    expect(fourSix.output_config).toEqual({ effort: 'high' });
+    expect(rewrite('anthropic', 'claude-sonnet-4-6', { model: 'claude-opus-4-7', max_tokens: 64, messages: USER, output_config: { effort: 'max' } }).output_config)
+      .toEqual({ effort: 'max' });
+    // Opus 4.5: 400 "This model does not support effort level 'max'. Supported levels: high, low, medium."
+    const fourFive = rewrite('anthropic', 'claude-opus-4-5', { model: 'claude-opus-4-7', max_tokens: 64, messages: USER, output_config: { effort: 'max' } });
+    expect(fourFive.output_config).toEqual({ effort: 'high' });
+    expect(rewrite('anthropic', 'claude-opus-4-5', { model: 'claude-opus-4-7', max_tokens: 64, messages: USER, output_config: { effort: 'medium' } }).output_config)
+      .toEqual({ effort: 'medium' });
+  });
+
+  it('leaves effort and thinking off alone for an id it can\'t read', () => {
+    const out = rewrite('anthropic', 'claude-next', {
+      model: 'claude-opus-4-7', max_tokens: 64, messages: USER, thinking: { type: 'between_tools' }, output_config: { effort: 'turbo' },
+    });
+    expect(out.thinking).toEqual({ type: 'between_tools' });
+    expect(out.output_config).toEqual({ effort: 'turbo' });
   });
 });
 

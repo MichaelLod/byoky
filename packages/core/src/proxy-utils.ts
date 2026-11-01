@@ -244,6 +244,15 @@ function hasControlChars(value: string): boolean {
 }
 
 /**
+ * The Claude Code release a setup-token request presents as. Anthropic
+ * refuses newer models to older releases with a 400 ("Claude Code 2.1.76
+ * does not support this model; version 2.1.280 or newer is required" for
+ * claude-opus-5-5, 2026-11-01), so this follows a current release
+ * (2.1.316, which Opus 5.5 accepts). The mobile apps send the same value.
+ */
+export const CLAUDE_CLI_USER_AGENT = 'claude-cli/2.1.316';
+
+/**
  * Build the real auth headers for a provider API request.
  * Strips any fake session-key headers and injects the real API key.
  */
@@ -289,7 +298,7 @@ export function buildHeaders(
 
     if (authMethod === 'oauth') {
       headers['authorization'] = `Bearer ${apiKey}`;
-      headers['user-agent'] = 'claude-cli/2.1.76';
+      headers['user-agent'] = CLAUDE_CLI_USER_AGENT;
       headers['x-app'] = 'cli';
       headers['accept'] = headers['accept'] ?? 'application/json';
       const oauthBeta = ['claude-code-20250219', 'oauth-2025-04-20', 'fine-grained-tool-streaming-2025-05-14', 'interleaved-thinking-2025-05-14'];

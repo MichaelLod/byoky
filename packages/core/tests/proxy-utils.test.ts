@@ -267,7 +267,8 @@ describe('buildHeaders', () => {
     const headers = buildHeaders('anthropic', { 'content-type': 'application/json' }, 'sk-ant-oat01-abc', 'oauth');
     expect(headers['authorization']).toBe('Bearer sk-ant-oat01-abc');
     expect(headers['x-api-key']).toBeUndefined();
-    expect(headers['user-agent']).toBe('claude-cli/2.1.76');
+    // A release Claude Opus 5.5 accepts (2.1.76 got a 400 asking for 2.1.280 or newer).
+    expect(headers['user-agent']).toBe('claude-cli/2.1.316');
     expect(headers['x-app']).toBe('cli');
     expect(headers['anthropic-beta']).toContain('claude-code-20250219');
     expect(headers['anthropic-beta']).toContain('oauth-2025-04-20');

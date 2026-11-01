@@ -44,7 +44,7 @@ describe('mobile bridge buildTranslationContext', () => {
 });
 
 describe('mobile bridge translateErrorResponse', () => {
-  const b = bridge as unknown as Bridge & { translateErrorResponse(ctxJson: string, body: string): string | null };
+  const b = bridge as unknown as Bridge & { translateErrorResponse(ctxJson: string, body: string, status?: number): string | null };
 
   it('translates an OpenAI 401 for an Anthropic app', () => {
     const ctxJson = b.buildTranslationContext('anthropic', 'openai', 'claude-sonnet-4-6', 'gpt-5.5', false, 'r1');
@@ -56,6 +56,19 @@ describe('mobile bridge translateErrorResponse', () => {
       type: 'error',
       error: { type: 'invalid_request_error', message: 'Incorrect API key provided' },
     });
+  });
+
+  it('gives the error the app dialect\'s type for the HTTP status the native side passes', () => {
+    const ctxJson = b.buildTranslationContext('anthropic', 'gemini', 'claude-sonnet-4-6', 'gemini-3.8-flash', false, 'r1');
+    const out = b.translateErrorResponse(
+      ctxJson,
+      JSON.stringify({ error: { code: 429, message: 'Resource has been exhausted', status: 'RESOURCE_EXHAUSTED' } }),
+      429,
+    );
+    expect(JSON.parse(out!)).toEqual({ type: 'error', error: { type: 'rate_limit_error', message: 'Resource has been exhausted' } });
+    const openai = b.buildTranslationContext('anthropic', 'openai', 'claude-sonnet-4-6', 'gpt-5.5', false, 'r1');
+    const badKey = JSON.stringify({ error: { message: 'Incorrect API key provided', type: 'invalid_request_error', code: 'invalid_api_key' } });
+    expect(JSON.parse(b.translateErrorResponse(openai, badKey, 401)!).error.type).toBe('authentication_error');
   });
 
   it('returns null for a non-JSON body', () => {

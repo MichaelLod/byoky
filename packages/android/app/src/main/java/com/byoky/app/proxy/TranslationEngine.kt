@@ -158,15 +158,18 @@ class TranslationEngine private constructor(private val appContext: Context) {
 
     /**
      * A provider's error body (a non-2xx reply to a translated request) in
-     * the app's dialect, via core's `translateErrorResponse`. Null when the
+     * the app's dialect, via core's `translateErrorResponse`, with the app
+     * dialect's error type for [status] (the HTTP status, which the app gets
+     * unchanged). Null when the
      * body isn't an error core can parse (an HTML gateway page, say), on any
      * failure, and when the bundle predates that export: the caller then
      * passes the body on as sent.
      */
-    fun translateErrorResponse(contextJson: String, body: String): String? {
+    fun translateErrorResponse(contextJson: String, body: String, status: Int? = null): String? {
         return try {
+            val statusArg = status?.let { ", $it" } ?: ""
             val expr = "(function(){var b=BYOKY_TRANSLATE;if(typeof b.translateErrorResponse!=='function')return '';" +
-                "var r=b.translateErrorResponse(${jsLiteral(contextJson)}, ${jsLiteral(body)});return r==null?'':String(r);})()"
+                "var r=b.translateErrorResponse(${jsLiteral(contextJson)}, ${jsLiteral(body)}$statusArg);return r==null?'':String(r);})()"
             evalSync(expr).ifEmpty { null }
         } catch (_: Throwable) {
             null

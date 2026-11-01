@@ -27,7 +27,7 @@ class ProviderAuthTest {
                 "anthropic-beta" to "tools-2024-04-04,claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14,interleaved-thinking-2025-05-14",
                 "content-type" to "application/json",
                 "authorization" to "Bearer sk-ant-oat01-T",
-                "user-agent" to "claude-cli/2.1.76",
+                "user-agent" to "claude-cli/2.1.316",
                 "x-app" to "cli",
                 "accept" to "application/json",
                 "anthropic-version" to "2023-06-01",
