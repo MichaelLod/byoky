@@ -34,6 +34,48 @@ status_field() {
   ' "$STATUS_JSON" "$1" "$2"
 }
 
+# How AMO's reviewers rebuild the add-on; BUILD-FIREFOX.md in the source zip.
+amo_build_note() {
+  cat <<'EOF'
+# Building the Byoky Firefox add-on from this source
+
+Requirements: Node.js 20 or newer and pnpm 9.15.9 (`corepack enable` picks the
+version up from package.json), on macOS or Linux.
+
+    pnpm install --frozen-lockfile
+    pnpm build:core
+    pnpm build:sdk
+    pnpm --filter @byoky/extension build:firefox
+
+The add-on is then in packages/extension/.output/firefox-mv2, file for file
+the same as the submitted package.
+EOF
+}
+
+# Unzips the AMO source zip into a temporary directory, builds the add-on
+# there as BUILD-FIREFOX.md says and compares the result with the build that
+# gets uploaded. AMO's reviewers must be able to do exactly that.
+check_source_zip() {
+  local zip="$1" dir log="$ROOT/build/source-zip-check.log" rc=0
+  mkdir -p "$ROOT/build"
+  dir=$(mktemp -d)
+  {
+    unzip -q "$zip" -d "$dir" &&
+      (cd "$dir" &&
+        pnpm install --frozen-lockfile --prefer-offline &&
+        pnpm build:core &&
+        pnpm build:sdk &&
+        pnpm --filter @byoky/extension build:firefox) &&
+      diff -rq "$dir/packages/extension/.output/firefox-mv2" "$ROOT/packages/extension/.output/firefox-mv2"
+  } > "$log" 2>&1 || rc=$?
+  rm -rf "$dir"
+  if [ "$rc" -ne 0 ]; then
+    echo "  The source zip doesn't rebuild the uploaded add-on (full log: $log):"
+    tail -15 "$log" | sed 's/^/    /'
+  fi
+  return "$rc"
+}
+
 # The iOS unit tests (ByokyTests) on a simulator of their own, deleted
 # afterwards. Ad-hoc signing, not CODE_SIGNING_ALLOWED=NO: the keychain tests
 # need their entitlements.
@@ -180,7 +222,12 @@ if [ "${1:-}" = "retry" ]; then
     elif skip_pending firefox; then
       echo "Firefox: $(pending_note firefox)"
       store_result "Firefox Add-ons" "$(pending_note firefox)"
-    elif [ -d "packages/extension/.output/firefox-mv2" ]; then
+    elif [ "$(node -p "require('./packages/extension/.output/firefox-mv2/manifest.json').version" 2>/dev/null)" != "$CURRENT" ]; then
+      echo "Firefox: packages/extension/.output/firefox-mv2 isn't a v${CURRENT} build"
+      store_result "Firefox Add-ons" "FAILED: no v${CURRENT} build in packages/extension/.output/firefox-mv2"
+    elif ! check_source_zip "dist/byoky-source-v${CURRENT}.zip"; then
+      store_result "Firefox Add-ons" "FAILED: dist/byoky-source-v${CURRENT}.zip doesn't rebuild the add-on"
+    else
       echo "Firefox: v${AMO_LIVE} → v${CURRENT}"
       if npx web-ext sign \
         --source-dir packages/extension/.output/firefox-mv2 \
@@ -779,10 +826,26 @@ if [ "$SKIP_IOS" = false ]; then
   fi
 fi
 
-zip -r "dist/byoky-source-v${NEW_VERSION}.zip" \
-  package.json pnpm-lock.yaml pnpm-workspace.yaml README.md \
+# Source for AMO, whose reviewers rebuild the add-on from it: the workspace
+# files the build reads (all three packages extend tsconfig.base.json) and
+# BUILD-FIREFOX.md. The add-on goes to AMO only if the zip rebuilds it.
+SOURCE_ZIP="dist/byoky-source-v${NEW_VERSION}.zip"
+rm -f "$SOURCE_ZIP"
+zip -r "$SOURCE_ZIP" \
+  package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json README.md \
   packages/core packages/sdk packages/extension \
-  -x "*/node_modules/*" "*/dist/*" "*/.output/*"
+  -x "*/node_modules/*" "*/dist/*" "*/.output/*" "*/.wxt/*" "*.DS_Store"
+NOTE_DIR=$(mktemp -d)
+amo_build_note > "$NOTE_DIR/BUILD-FIREFOX.md"
+zip -j "$SOURCE_ZIP" "$NOTE_DIR/BUILD-FIREFOX.md"
+rm -rf "$NOTE_DIR"
+echo "  Rebuilding the Firefox add-on from the source zip..."
+if check_source_zip "$SOURCE_ZIP"; then
+  AMO_SOURCE_OK=true
+else
+  AMO_SOURCE_OK=false
+  echo "  WARN: the Firefox add-on won't be uploaded to AMO with source that doesn't rebuild it"
+fi
 
 echo "  Artifacts:"
 ls -lh dist/byoky-*-v${NEW_VERSION}.* 2>/dev/null | awk '{print "    " $NF " (" $5 ")"}'
@@ -904,6 +967,9 @@ fi
 if [ "$SKIP_STORE_UPLOADS" = true ]; then
   echo "  Skipping Firefox Add-ons (--skip-store-uploads)"
   store_result "Firefox Add-ons" "skipped (--skip-store-uploads)"
+elif [ "$AMO_SOURCE_OK" = false ] && [ -n "${AMO_API_KEY:-}" ]; then
+  echo "  Skipping Firefox Add-ons: the source zip doesn't rebuild the add-on (step 3)"
+  store_result "Firefox Add-ons" "NOT UPLOADED: the source zip doesn't rebuild the add-on; fix it, then ./scripts/release.sh retry"
 elif [ -n "${AMO_API_KEY:-}" ] && [ -n "${AMO_API_SECRET:-}" ]; then
   echo "  Uploading to Firefox Add-ons..."
   if npx web-ext sign \
