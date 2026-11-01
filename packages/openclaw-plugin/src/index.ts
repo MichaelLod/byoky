@@ -66,19 +66,64 @@ export const CALLBACK_PORT = 19282;
 const CALLBACK_TIMEOUT_MS = 180_000;
 
 // --- Model catalogs per provider ---
+//
+// The anthropic, openai and gemini lists follow @byoky/core's model
+// registry (models.ts): the same ids, context windows and output limits.
+// Prices are per million tokens, from the providers' pricing pages
+// (checked 2026-11-01); cacheWrite is the 5-minute write, and 0 where the
+// provider bills cache storage by the hour instead. The first model of a
+// provider is the default OpenClaw sets when you connect it alone.
 
 // Native max_tokens per model. Overwritten at auth time by
 // `plugins.entries.byoky.config.anthropicMaxTokens` (default 4096) so
 // Tier-1 keys aren't pre-rejected by Anthropic's OTPM gate.
 const ANTHROPIC_MODELS: ModelDef[] = [
   {
+    id: 'claude-opus-5-5',
+    name: 'Claude Opus 5.5',
+    reasoning: true,
+    input: ['text', 'image'],
+    cost: { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 },
+    contextWindow: 1_000_000,
+    maxTokens: 128_000,
+  },
+  {
+    id: 'claude-sonnet-5-5',
+    name: 'Claude Sonnet 5.5',
+    reasoning: true,
+    input: ['text', 'image'],
+    cost: { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 },
+    contextWindow: 1_000_000,
+    maxTokens: 128_000,
+  },
+  {
+    // Prompts over 100K tokens cost $0.50 / $2.50 (cache $0.05 / $0.625).
+    // OpenClaw's model config takes one price per model, so the lower one.
+    id: 'claude-haiku-5-5',
+    name: 'Claude Haiku 5.5',
+    reasoning: true,
+    input: ['text', 'image'],
+    cost: { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
+    contextWindow: 1_000_000,
+    maxTokens: 128_000,
+  },
+  {
+    id: 'claude-fable-5-1',
+    name: 'Claude Fable 5.1',
+    reasoning: true,
+    input: ['text', 'image'],
+    cost: { input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5 },
+    contextWindow: 1_000_000,
+    maxTokens: 128_000,
+  },
+  {
     id: 'claude-opus-4-7',
     name: 'Claude Opus 4.7',
     reasoning: true,
     input: ['text', 'image'],
     cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
-    contextWindow: 200_000,
-    maxTokens: 32_000,
+    contextWindow: 1_000_000,
+    maxTokens: 128_000,
   },
   {
     id: 'claude-sonnet-4-6',
@@ -86,8 +131,8 @@ const ANTHROPIC_MODELS: ModelDef[] = [
     reasoning: true,
     input: ['text', 'image'],
     cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
-    contextWindow: 200_000,
-    maxTokens: 16_000,
+    contextWindow: 1_000_000,
+    maxTokens: 128_000,
   },
   {
     id: 'claude-haiku-4-5-20251001',
@@ -96,10 +141,12 @@ const ANTHROPIC_MODELS: ModelDef[] = [
     input: ['text', 'image'],
     cost: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
     contextWindow: 200_000,
-    maxTokens: 8_192,
+    maxTokens: 64_000,
   },
 ];
 
+// GPT-5.5 and GPT-5.4 bill prompts over 272K tokens at twice the input and
+// 1.5 times the output price.
 const OPENAI_MODELS: ModelDef[] = [
   {
     id: 'gpt-5.5',
@@ -141,11 +188,24 @@ const OPENAI_MODELS: ModelDef[] = [
 
 const GEMINI_MODELS: ModelDef[] = [
   {
+    // Google's prices for 3.8 Flash double on 2027-01-01 ($1.50 / $7.50,
+    // cache $0.15).
+    id: 'gemini-3.8-flash',
+    name: 'Gemini 3.8 Flash',
+    reasoning: true,
+    input: ['text', 'image'],
+    cost: { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0 },
+    contextWindow: 1_048_576,
+    maxTokens: 65_536,
+  },
+  // Google serves the 2.5 models only to projects that used them before.
+  {
+    // Prompts over 200K tokens cost $2.50 / $15 (cache $0.25).
     id: 'gemini-2.5-pro',
     name: 'Gemini 2.5 Pro',
     reasoning: true,
     input: ['text', 'image'],
-    cost: { input: 1.25, output: 10, cacheRead: 0.315, cacheWrite: 0 },
+    cost: { input: 1.25, output: 10, cacheRead: 0.125, cacheWrite: 0 },
     contextWindow: 1_048_576,
     maxTokens: 65_536,
   },
@@ -154,7 +214,7 @@ const GEMINI_MODELS: ModelDef[] = [
     name: 'Gemini 2.5 Flash',
     reasoning: true,
     input: ['text', 'image'],
-    cost: { input: 0.15, output: 0.6, cacheRead: 0.0375, cacheWrite: 0 },
+    cost: { input: 0.3, output: 2.5, cacheRead: 0.03, cacheWrite: 0 },
     contextWindow: 1_048_576,
     maxTokens: 65_536,
   },
