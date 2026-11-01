@@ -58,6 +58,9 @@
   --font-body: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
+  /* Widest the wallet column gets; a wider side panel centers it. */
+  --column-max: 420px;
+
   --dot-grid: radial-gradient(circle at 1px 1px, rgba(167, 139, 250, 0.08) 1px, transparent 0);
   --scanlines: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.2) 0 1px, transparent 1px 3px);
 }
@@ -69,7 +72,8 @@ html {
 body {
   width: 100%;
   min-width: 320px;
-  max-width: 420px;
+  max-width: var(--column-max);
+  margin: 0 auto;
   min-height: 100vh;
   font-family: var(--font-body);
   background: var(--bg);
@@ -2129,7 +2133,8 @@ html.popup .app {
 
 .fab-root {
   position: fixed;
-  right: 20px;
+  /* Fixed to the viewport, so line it up with the centered column. */
+  right: max(20px, calc((100vw - var(--column-max)) / 2 + 20px));
   bottom: 20px;
   z-index: 50;
   display: flex;
@@ -2248,7 +2253,7 @@ html.popup .app {
 
 .modal-sheet {
   width: 100%;
-  max-width: 420px;
+  max-width: var(--column-max);
   max-height: 90vh;
   background: var(--bg-raised);
   border-top: 1px solid var(--seam-strong);

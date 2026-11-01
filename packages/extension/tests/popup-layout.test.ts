@@ -35,3 +35,17 @@ describe('popup.html sizing as a toolbar popup (F006)', () => {
     expect(read('main.tsx')).toMatch(/has\('window'\)[\s\S]*classList\.remove\('popup'\)/);
   });
 });
+
+describe('wide side panel keeps one centered column (F126)', () => {
+  // body, the add sheet and the + button share one column width. The sheet
+  // and the button are fixed to the viewport, so the column is centered and
+  // the button follows its right edge (measured at 560x900 in Chrome: body,
+  // sheet 70..490, + button right edge at 470).
+  it('centers the column and lines the + button up with it', () => {
+    const css = read('App.css');
+    expect(rule(css, 'body')).toMatch(/max-width: var\(--column-max\);/);
+    expect(rule(css, 'body')).toMatch(/margin: 0 auto;/);
+    expect(rule(css, '.modal-sheet')).toMatch(/max-width: var\(--column-max\);/);
+    expect(rule(css, '.fab-root')).toMatch(/right: max\(20px, calc\(\(100vw - var\(--column-max\)\) \/ 2 \+ 20px\)\);/);
+  });
+});
