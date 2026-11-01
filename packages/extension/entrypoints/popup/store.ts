@@ -81,9 +81,13 @@ interface WalletState {
   approveConnect: (approvalId: string, trust: boolean) => Promise<void>;
   rejectConnect: (approvalId: string) => Promise<void>;
   removeTrustedSite: (origin: string) => Promise<void>;
-  setAllowance: (allowance: TokenAllowance) => Promise<void>;
-  removeAllowance: (origin: string) => Promise<void>;
-  resetAppUsage: (origin: string) => Promise<void>;
+  /**
+   * Edits of an app's limit and usage. False when the background refused
+   * the edit (the wallet locked, say); `error` says why.
+   */
+  setAllowance: (allowance: TokenAllowance) => Promise<boolean>;
+  removeAllowance: (origin: string) => Promise<boolean>;
+  resetAppUsage: (origin: string) => Promise<boolean>;
   /** Let apps through again after checking limits and usage. */
   resumeApps: () => Promise<void>;
   createGroup: (input: { name: string; providerId: string; credentialId?: string; model?: string }) => Promise<string | null>;
@@ -388,19 +392,31 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     await get().refreshData();
   },
 
+  // The background refuses these while the wallet is locked, and an
+  // allowance that doesn't parse. Either way the popup shows what is
+  // actually stored afterwards.
   setAllowance: async (allowance: TokenAllowance) => {
-    await sendInternal('setAllowance', { allowance });
+    set({ error: null });
+    const result = await sendInternal('setAllowance', { allowance });
+    if (result?.error) set({ error: result.error as string });
     await get().refreshData();
+    return !result?.error;
   },
 
   removeAllowance: async (origin: string) => {
-    await sendInternal('removeAllowance', { origin });
+    set({ error: null });
+    const result = await sendInternal('removeAllowance', { origin });
+    if (result?.error) set({ error: result.error as string });
     await get().refreshData();
+    return !result?.error;
   },
 
   resetAppUsage: async (origin: string) => {
-    await sendInternal('resetAppUsage', { origin });
+    set({ error: null });
+    const result = await sendInternal('resetAppUsage', { origin });
+    if (result?.error) set({ error: result.error as string });
     await get().refreshData();
+    return !result?.error;
   },
 
   resumeApps: async () => {
