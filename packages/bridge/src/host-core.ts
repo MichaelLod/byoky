@@ -108,6 +108,17 @@ export function stripIncompatibleBetas(url: string, headers: Record<string, stri
 const FETCH_FIRST_BYTE_TIMEOUT_MS = 600_000;
 const FETCH_IDLE_TIMEOUT_MS = 120_000;
 
+/** Whether a response body can be passed on as text; no type counts as text. */
+function isTextContentType(contentType: string): boolean {
+  if (!contentType) return true;
+  const lower = contentType.toLowerCase();
+  return lower.startsWith('text/') ||
+    lower.includes('json') ||
+    lower.includes('xml') ||
+    lower.includes('urlencoded') ||
+    lower.includes('javascript');
+}
+
 interface FetchOutcome {
   /** Upstream status, or 502 when no response arrived. */
   status: number;
@@ -294,12 +305,28 @@ export function createHost(opts: HostOptions): Host {
       // Decide between streaming and one-shot rewrite paths based on the
       // response Content-Type. Streaming SSE → use the SSE rewriter chunk by
       // chunk. JSON body → buffer everything, then rewrite once at the end.
-      const isStreaming = (resHeaders['content-type'] ?? '').includes('text/event-stream');
+      const contentType = resHeaders['content-type'] ?? '';
+      const isStreaming = contentType.includes('text/event-stream');
 
       if (res.body) {
         const reader = (res.body as ReadableStream<Uint8Array>).getReader();
         const decoder = new TextDecoder();
-        if (isStreaming) {
+        if (mode === 'proxy_http' && !isTextContentType(contentType)) {
+          // Binary (audio, an image, a file) goes on as bytes: decoding it
+          // as text would corrupt it. There are no tool names in it to
+          // rewrite and no usage to read.
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            timer.refresh();
+            send({
+              type: `${prefix}_chunk`,
+              requestId,
+              chunk: Buffer.from(value).toString('base64'),
+              chunkEncoding: 'base64',
+            });
+          }
+        } else if (isStreaming) {
           for (;;) {
             const { done, value } = await reader.read();
             if (done) break;

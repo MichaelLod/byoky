@@ -31,12 +31,13 @@ interface Reply {
   status: number;
   headers: IncomingHttpHeaders;
   body: string;
+  raw: Buffer;
 }
 
 function send(
   port: number,
   path: string,
-  opts: { method?: string; headers?: Record<string, string>; body?: string } = {},
+  opts: { method?: string; headers?: Record<string, string>; body?: string | Buffer } = {},
 ): Promise<Reply> {
   return new Promise((resolve, reject) => {
     const req = request(
@@ -48,6 +49,7 @@ function send(
           status: res.statusCode ?? 0,
           headers: res.headers,
           body: Buffer.concat(chunks).toString(),
+          raw: Buffer.concat(chunks),
         }));
       },
     );
@@ -55,6 +57,9 @@ function send(
     req.end(opts.body);
   });
 }
+
+// Every byte value, starting like an MP3 frame (0xff 0xfb is not UTF-8).
+const BINARY = Buffer.concat([Buffer.from([0xff, 0xfb, 0x90, 0x64]), Buffer.from(Array.from({ length: 256 }, (_, i) => i))]);
 
 // Stands in for the extension: records what the bridge sends over native
 // messaging and answers each request with a small JSON body.
@@ -65,6 +70,24 @@ function fakeExtension(msg: ProxyMessageOut): void {
   if (msg.type !== 'proxy_http') return;
   // The provider is still thinking: no headers yet.
   if (msg.url.endsWith('/v1/silent')) return;
+  if (msg.url.endsWith('/v1/audio/speech')) {
+    handleProxyResponse({
+      type: 'proxy_http_response_meta',
+      requestId: msg.requestId,
+      status: 200,
+      headers: { 'content-type': 'audio/mpeg' },
+    });
+    for (const part of [BINARY.subarray(0, 100), BINARY.subarray(100)]) {
+      handleProxyResponse({
+        type: 'proxy_http_response_chunk',
+        requestId: msg.requestId,
+        chunk: part.toString('base64'),
+        chunkEncoding: 'base64',
+      });
+    }
+    handleProxyResponse({ type: 'proxy_http_response_done', requestId: msg.requestId });
+    return;
+  }
   if (msg.url.endsWith('/v1/stream')) {
     // A stream that never finishes on its own.
     handleProxyResponse({
@@ -320,6 +343,47 @@ describe('large request bodies', () => {
       const last = slice.charCodeAt(slice.length - 1);
       expect(last >= 0xd800 && last <= 0xdbff).toBe(false);
     }
+  });
+});
+
+describe('binary bodies', () => {
+  const multipart = Buffer.concat([
+    Buffer.from('--b\r\nContent-Disposition: form-data; name="file"; filename="a.mp3"\r\n\r\n'),
+    BINARY,
+    Buffer.from('\r\n--b--\r\n'),
+  ]);
+
+  it('sends a body that is not UTF-8 as base64, byte for byte', async () => {
+    await send(port, '/anthropic/v1/messages', {
+      headers: { 'x-api-key': TOKEN, 'content-type': 'multipart/form-data; boundary=b' },
+      body: multipart,
+    });
+    const forwarded = sent[0] as ProxyRequestOut;
+    expect(forwarded.bodyEncoding).toBe('base64');
+    expect(Buffer.from(forwarded.body!, 'base64').equals(multipart)).toBe(true);
+  });
+
+  it('keeps a large binary body base64 across body chunks', async () => {
+    const big = Buffer.concat(Array.from({ length: 5_000 }, () => BINARY));
+    await send(port, '/anthropic/v1/messages', { headers: { 'x-api-key': TOKEN }, body: big });
+    const last = sent[sent.length - 1] as ProxyRequestOut;
+    expect(last).toMatchObject({ bodyChunked: true, bodyEncoding: 'base64' });
+    const joined = (sent.slice(0, -1) as ProxyBodyChunkOut[]).map((c) => c.chunk).join('');
+    expect(Buffer.from(joined, 'base64').equals(big)).toBe(true);
+  });
+
+  it('sends UTF-8 text as it is and says it takes binary replies', async () => {
+    await send(port, '/anthropic/v1/messages', { headers: { 'x-api-key': TOKEN }, body: '{"q":"äöü 🦅"}' });
+    const forwarded = sent[0] as ProxyRequestOut;
+    expect(forwarded.body).toBe('{"q":"äöü 🦅"}');
+    expect(forwarded.bodyEncoding).toBeUndefined();
+    expect(forwarded.acceptsBinaryChunks).toBe(true);
+  });
+
+  it('writes base64 response chunks to the client as bytes', async () => {
+    const res = await send(port, '/anthropic/v1/audio/speech', { headers: { 'x-api-key': TOKEN }, body: '{}' });
+    expect(res.headers['content-type']).toBe('audio/mpeg');
+    expect(res.raw.equals(BINARY)).toBe(true);
   });
 });
 

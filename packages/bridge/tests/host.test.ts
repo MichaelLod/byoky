@@ -28,6 +28,9 @@ function listen(handler: (req: IncomingMessage, res: ServerResponse) => void): P
 
 type Msg = Record<string, unknown> & { type: string };
 
+// Starts like an MP3 frame; 0xff never occurs in UTF-8.
+const AUDIO = Buffer.from([0xff, 0xfb, 0x90, 0x64, 0x00, 0xc3, 0x28, 0xa0, 0xa1, 0xe2, 0x28, 0xa1, 0xf0]);
+
 const SSE_TOOL_FRAME =
   'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"t1","name":"Bash","input":{}}}\n\n';
 
@@ -69,6 +72,10 @@ beforeAll(async () => {
     } else if (url === '/limited') {
       res.writeHead(429, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: 'rate limited', usage: { input_tokens: 10, output_tokens: 5 } }));
+    } else if (url === '/audio') {
+      res.writeHead(200, { 'content-type': 'audio/mpeg' });
+      res.write(AUDIO.subarray(0, 3));
+      res.end(AUDIO.subarray(3));
     } else if (url === '/slow-headers') {
       // A non-streaming reply: headers only once the model has finished.
       setTimeout(() => {
@@ -274,6 +281,30 @@ describe('start-proxy', () => {
     await host.handleMessage({ type: 'start-proxy', port, sessionKey: 's', providers: ['anthropic'] });
     await host.handleMessage({ type: 'start-proxy', port, sessionKey: 's', providers: ['anthropic'] });
     expect(messages).toEqual([{ type: 'proxy-started', port }, { type: 'proxy-started', port }]);
+  });
+
+  it('passes a binary reply through byte for byte', async () => {
+    const port = await freePort();
+    await host.handleMessage({ type: 'start-proxy', port, sessionKey: 's', providers: ['anthropic'] });
+    const received = new Promise<Buffer>((resolve, reject) => {
+      const client = request({
+        host: '127.0.0.1', port, path: '/anthropic/v1/files/f1/content', method: 'GET',
+        headers: { 'x-api-key': TOKEN },
+      }, (res) => {
+        const parts: Buffer[] = [];
+        res.on('data', (c: Buffer) => parts.push(c));
+        res.on('end', () => resolve(Buffer.concat(parts)));
+      });
+      client.on('error', reject);
+      client.end();
+    });
+    await expect.poll(() => ofType('proxy_http').length).toBe(1);
+    await host.handleMessage({
+      type: 'proxy_direct_fetch', requestId: ofType('proxy_http')[0].requestId, url: `${base}/audio`,
+      method: 'GET', headers: {}, providerId: 'anthropic',
+    });
+    expect((await received).equals(AUDIO)).toBe(true);
+    expect(ofType('proxy_direct_done')[0]).toMatchObject({ status: 200, complete: true });
   });
 
   it('stops a direct fetch when the client hangs up', async () => {

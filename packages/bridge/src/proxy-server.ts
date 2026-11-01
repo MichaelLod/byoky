@@ -25,6 +25,8 @@ export interface ProxyRequestOut {
   method: string;
   headers: Record<string, string>;
   body?: string;
+  /** The body is not UTF-8 text (an audio upload, say) and is sent as base64. */
+  bodyEncoding?: 'base64';
   /** The body was sent ahead in `proxy_http_body_chunk` messages. */
   bodyChunked?: true;
   /**
@@ -32,6 +34,8 @@ export interface ProxyRequestOut {
    * the extension can wait for the real status and usage before logging.
    */
   reportsDirectFetch: true;
+  /** A binary response may come back as base64 chunks (`chunkEncoding`). */
+  acceptsBinaryChunks: true;
 }
 
 export interface ProxyBodyChunkOut {
@@ -60,6 +64,8 @@ export interface ProxyResponseChunkIn {
   type: 'proxy_http_response_chunk';
   requestId: string;
   chunk: string;
+  /** `chunk` holds base64 bytes of a binary response, not text. */
+  chunkEncoding?: 'base64';
 }
 
 export interface ProxyResponseDoneIn {
@@ -225,7 +231,7 @@ export function handleProxyResponse(msg: ProxyResponseMessage): void {
     clearTimeout(pending.timeout);
     pending.timeout = setTimeout(pending.onTimeout, IDLE_TIMEOUT_MS);
   } else if (msg.type === 'proxy_http_response_chunk') {
-    pending.res.write(msg.chunk);
+    pending.res.write(msg.chunkEncoding === 'base64' ? Buffer.from(msg.chunk, 'base64') : msg.chunk);
     pending.timeout.refresh();
   } else if (msg.type === 'proxy_http_response_done') {
     pending.res.end();
@@ -368,7 +374,7 @@ export function startProxyServer(config: ProxyConfig): Promise<Server> {
     // MAX_BODY_SIZE — which a chunked request slips past the Content-Length
     // pre-check above. Left unhandled, that rejection escapes this async
     // listener and takes the whole bridge process down.
-    let body: string;
+    let body: Buffer;
     try {
       body = await readBody(req);
     } catch {
@@ -429,8 +435,9 @@ export function startProxyServer(config: ProxyConfig): Promise<Server> {
       url: realUrl,
       method: req.method || 'GET',
       headers,
-      body: body || undefined,
+      ...encodeBody(body),
       reportsDirectFetch: true,
+      acceptsBinaryChunks: true,
     };
 
     if (pendingRequests.size >= MAX_PENDING_REQUESTS) {
@@ -491,9 +498,21 @@ export function startProxyServer(config: ProxyConfig): Promise<Server> {
 const MAX_BODY_SIZE = 10 * 1024 * 1024; // 10 MB
 const MAX_URI_LENGTH = 8192;
 
-function readBody(req: IncomingMessage): Promise<string> {
+/**
+ * A native message carries text only. A body that is not valid UTF-8
+ * (multipart audio, an image) would have every invalid byte turned into
+ * U+FFFD, so it goes as base64 instead.
+ */
+function encodeBody(body: Buffer): Pick<ProxyRequestOut, 'body' | 'bodyEncoding'> {
+  if (body.length === 0) return {};
+  // Decode once, at the end: a multi-byte character can straddle chunks.
+  const text = body.toString('utf-8');
+  if (Buffer.from(text, 'utf-8').equals(body)) return { body: text };
+  return { body: body.toString('base64'), bodyEncoding: 'base64' };
+}
+
+function readBody(req: IncomingMessage): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    // Decode once at the end: a multi-byte character can straddle chunks.
     const chunks: Buffer[] = [];
     let size = 0;
     req.on('data', (chunk: Buffer) => {
@@ -505,7 +524,7 @@ function readBody(req: IncomingMessage): Promise<string> {
       }
       chunks.push(chunk);
     });
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
   });
 }
