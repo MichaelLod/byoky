@@ -5,20 +5,8 @@
  * replace every invalid byte with U+FFFD.
  */
 
-/**
- * Whether a response with this content type is text. The SDK decides the
- * same way for request bodies (sdk/src/proxy-fetch.ts); no content type
- * counts as text, as before. Moves into @byoky/core with F023.
- */
-export function isTextContentType(contentType: string | undefined): boolean {
-  if (!contentType) return true;
-  const lower = contentType.toLowerCase();
-  return lower.startsWith('text/')
-    || lower.includes('json')
-    || lower.includes('xml')
-    || lower.includes('urlencoded')
-    || lower.includes('javascript');
-}
+// Which content types count as text is core's isTextContentType, shared
+// with the SDK, the bridge and the mobile wallets.
 
 export function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';

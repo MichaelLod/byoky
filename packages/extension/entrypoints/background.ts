@@ -42,8 +42,8 @@ import {
   translateRequest,
   translateResponse,
   createStreamTranslator,
-  getAdapter,
-  isIRError,
+  translateErrorResponse,
+  isTextContentType,
   TranslationError,
   resolveRoute,
   buildNoCredentialMessage,
@@ -52,7 +52,7 @@ import type { Runtime } from 'wxt/browser';
 import { exportVaultFile, importVaultFile } from '../lib/vault-file';
 import { KEYLESS_PROVIDERS, openCredentialSecret, upgradeWallet } from '../lib/wallet-upgrade';
 import { isProviderIdList, parseProviderRequirements } from '../lib/connect-request';
-import { MAX_BINARY_CHUNK_BYTES, bytesToBase64, isTextContentType } from '../lib/binary-body';
+import { MAX_BINARY_CHUNK_BYTES, bytesToBase64 } from '../lib/binary-body';
 import {
   REVOKED_ORIGINS_KEY,
   TRUST_RESET_NOTICE_KEY,
@@ -2929,10 +2929,8 @@ export default defineBackground(() => {
     const dstFamily = familyOf(translation.dstProviderId);
     if (!srcFamily || !dstFamily) return null;
     // dstProviderId lets an adapter tell providers of one family apart (the
-    // OpenAI API itself wants max_completion_tokens). The field joins
-    // TranslationContext in core (F037); until then the intersection keeps
-    // this literal type-checked.
-    const ctx: TranslationContext & { dstProviderId?: string } = {
+    // OpenAI API itself wants max_completion_tokens).
+    const ctx: TranslationContext = {
       srcFamily: srcFamily as ModelFamily,
       dstFamily: dstFamily as ModelFamily,
       srcModel: (requestBody ? parseModel(requestBody) : undefined) ?? modelFromUrl(requestUrl),
@@ -3085,8 +3083,7 @@ export default defineBackground(() => {
     const ctx = buildTranslationContext(translation, requestBody, requestId, requestUrl);
     if (!ctx) return responseBody;
     try {
-      const ir = getAdapter(ctx.dstFamily).parseResponse(responseBody);
-      return isIRError(ir) ? getAdapter(ctx.srcFamily).serializeResponse(ctx, ir) : responseBody;
+      return translateErrorResponse(ctx, responseBody) ?? responseBody;
     } catch {
       return responseBody;
     }

@@ -8,7 +8,8 @@ import {
   type FakeNativeConnection,
   type Harness,
 } from './helpers/background-harness';
-import { bytesToBase64, isTextContentType } from '../lib/binary-body';
+import { isTextContentType } from '@byoky/core';
+import { bytesToBase64 } from '../lib/binary-body';
 
 // F024: every upstream body went through TextDecoder, and the bridge's
 // request body was taken as text, so audio (and any other bytes that

@@ -20,7 +20,7 @@ import {
   sliceForNativeMessaging,
   type ProxyResponseMessage,
 } from './proxy-server.js';
-import { createToolNameSSERewriter, parseUsage, rewriteToolNamesInJSONBody } from '@byoky/core';
+import { createToolNameSSERewriter, isTextContentType, parseUsage, rewriteToolNamesInJSONBody } from '@byoky/core';
 
 interface BridgeRequest {
   type: 'proxy';
@@ -109,17 +109,6 @@ export function stripIncompatibleBetas(url: string, headers: Record<string, stri
 // once the model has finished), then idle between chunks.
 const FETCH_FIRST_BYTE_TIMEOUT_MS = 600_000;
 const FETCH_IDLE_TIMEOUT_MS = 120_000;
-
-/** Whether a response body can be passed on as text; no type counts as text. */
-function isTextContentType(contentType: string): boolean {
-  if (!contentType) return true;
-  const lower = contentType.toLowerCase();
-  return lower.startsWith('text/') ||
-    lower.includes('json') ||
-    lower.includes('xml') ||
-    lower.includes('urlencoded') ||
-    lower.includes('javascript');
-}
 
 interface FetchOutcome {
   /** Upstream status, or 502 when no response arrived. */
