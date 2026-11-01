@@ -17,7 +17,10 @@ export default function App() {
   const {
     currentPage, modal, sessions, credentials, pendingApprovals, loading, isUnlocked, approvedAt, init, closeModal,
   } = useWalletStore();
-  const justUnlocked = useJustUnlocked(currentPage, loading);
+  const unlockedAt = useUnlockedAt(currentPage, loading);
+  // What the status-strip raven nods for: the latest unlock or approval.
+  const nodFor = Math.max(unlockedAt ?? 0, approvedAt ?? 0) || null;
+  const noddedFor = useRef<number | null>(null);
   useActivityPing(isUnlocked);
 
   useEffect(() => {
@@ -152,15 +155,9 @@ export default function App() {
             <span className="status-dot" />
             Unlocked · {credentials.length} {credentials.length === 1 ? 'key' : 'keys'}
           </span>
-          {/* Nods once after an unlock and after each approval: a new
-              approval remounts it. */}
-          <Raven
-            key={approvedAt ?? 'unlocked'}
-            view="head"
-            size={42}
-            state={justUnlocked || approvedAt ? 'nod-then-watching' : 'watching'}
-            label="Muninn is awake"
-          />
+          {/* Nods once after an unlock and after each approval: a new one
+              remounts it. */}
+          <StatusRaven key={nodFor ?? 'none'} nodFor={nodFor} noddedFor={noddedFor} />
         </div>
       )}
       <main className={`content ${showFab ? 'has-fab' : ''}`}>
@@ -260,24 +257,38 @@ function useActivityPing(unlocked: boolean) {
 }
 
 /**
- * True once the wallet goes from the setup or unlock page to an unlocked
+ * When the wallet last went from the setup or unlock page to an unlocked
  * page, so the raven in the status strip can nod. Pages shown while the
  * popup is still loading don't count: they aren't a real locked state.
  */
-function useJustUnlocked(currentPage: string, loading: boolean): boolean {
+function useUnlockedAt(currentPage: string, loading: boolean): number | null {
   const wasLocked = useRef(false);
-  const [justUnlocked, setJustUnlocked] = useState(false);
+  const [unlockedAt, setUnlockedAt] = useState<number | null>(null);
 
   useEffect(() => {
     if (loading) return;
     if (currentPage === 'setup' || currentPage === 'unlock') {
       wasLocked.current = true;
-      setJustUnlocked(false);
     } else if (wasLocked.current) {
       wasLocked.current = false;
-      setJustUnlocked(true);
+      setUnlockedAt(Date.now());
     }
   }, [currentPage, loading]);
 
-  return justUnlocked;
+  return unlockedAt;
+}
+
+/**
+ * The status strip's raven. It nods for `nodFor` (an unlock or approval
+ * time) on the first mount for it, not when the strip is shown again for
+ * the same one (after the approval page, say); `noddedFor` remembers which
+ * one it nodded for across those mounts. Decided once per mount, so a
+ * re-render mid-nod doesn't cut it short.
+ */
+function StatusRaven({ nodFor, noddedFor }: { nodFor: number | null; noddedFor: { current: number | null } }) {
+  const [nod] = useState(() => nodFor !== null && nodFor !== noddedFor.current);
+  useEffect(() => {
+    noddedFor.current = nodFor;
+  }, [nodFor, noddedFor]);
+  return <Raven view="head" size={42} state={nod ? 'nod-then-watching' : 'watching'} label="Muninn is awake" />;
 }
