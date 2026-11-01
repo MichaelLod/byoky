@@ -20,7 +20,8 @@ import path from 'node:path';
 //     unless BYOKY_OPENCLAW_PLUGIN names another spec or tarball
 //   - openclaw installed globally
 //   - ANTHROPIC_SETUP_TOKEN in .env.local (sk-ant-oat01-..., from
-//     `claude setup-token`); one agent call counts against its subscription
+//     `claude setup-token`); two agent calls (Haiku 4.5, Opus 5.5) count
+//     against its subscription
 
 const PASSWORD = 'MyStr0ng!P@ssw0rd';
 
@@ -322,5 +323,28 @@ test.describe('OpenClaw + byoky extension + bridge full flow', () => {
     expect(out).not.toMatch(/HTTP 4\d{2}|HTTP 5\d{2}/);
     expect(out.length).toBeGreaterThan(0);
     process.stdout.write(`[agent output]\n${out}\n`);
+  });
+
+  // The catalog's default Anthropic model. OpenClaw's Anthropic client sends
+  // it a thinking budget, which Opus 5.5 refuses (400) unless the bridge
+  // fits the request to the model's rules (adaptive thinking).
+  test('openclaw agent on Claude Opus 5.5 with thinking on gets an answer', async () => {
+    openclawSync([
+      'agents', 'add', 'byoky-opus',
+      '--workspace', path.join(openclawHome, 'ws-opus'),
+      '--model', 'byoky-anthropic/claude-opus-5-5',
+      '--non-interactive',
+    ]);
+    const out = openclawSync([
+      'agent',
+      '--agent', 'byoky-opus',
+      '--message', 'Reply with a single word: ready',
+      '--thinking', 'low',
+      '--local',
+      '--timeout', '120',
+    ]);
+    process.stdout.write(`[agent output, Opus 5.5]\n${out}\n`);
+    expect(out).not.toMatch(/HTTP 4\d{2}|HTTP 5\d{2}/);
+    expect(out.toLowerCase()).toContain('ready');
   });
 });
