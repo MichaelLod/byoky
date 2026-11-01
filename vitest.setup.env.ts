@@ -1,23 +1,32 @@
 /**
- * Live test env loader.
+ * Live test env loader (vitest.config.live.ts only).
  *
- * Reads `.env.local` at repo root and populates `process.env` with any
- * KEY=VALUE entries it finds, without overwriting variables that are
- * already set in the shell.
+ * Reads `.env.local` and then `.env.test.local` at repo root and populates
+ * `process.env` with any KEY=VALUE entries it finds, without overwriting
+ * variables that are already set in the shell (or by the earlier file).
  *
  * This file runs once before any live test executes, so live tests can
  * read API keys via `process.env.OPENAI_API_KEY` etc. The file is
  * intentionally dependency-free — no dotenv import — so live tests don't
  * pull a new package into the dev dependencies just for this.
  *
- * `.env.local` is gitignored.
+ * Both files are gitignored; .env.local.example lists the keys.
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-try {
-  const path = resolve(process.cwd(), '.env.local');
-  const content = readFileSync(path, 'utf8');
+for (const file of ['.env.local', '.env.test.local']) {
+  loadEnvFile(resolve(process.cwd(), file));
+}
+
+function loadEnvFile(path: string): void {
+  let content: string;
+  try {
+    content = readFileSync(path, 'utf8');
+  } catch {
+    // A missing file is fine — tests will simply skip via skipIf().
+    return;
+  }
   for (const rawLine of content.split('\n')) {
     const line = rawLine.trim();
     if (!line || line.startsWith('#')) continue;
@@ -33,6 +42,4 @@ try {
     }
     process.env[key] = value;
   }
-} catch {
-  // .env.local missing is fine — tests will simply skip via skipIf().
 }

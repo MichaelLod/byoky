@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { launchWallet, loadApiKeys, startServer, type Wallet } from '../fixtures';
+import { LIVE, bridgeBin, launchWallet, loadApiKeys, startServer, type Wallet } from '../fixtures';
 import { execSync } from 'node:child_process';
 import { spawn as spawnPty, type IPty } from '@lydell/node-pty';
 import fs from 'node:fs';
@@ -13,9 +13,11 @@ import path from 'node:path';
 // the request traverses OpenClaw → HTTP :19280 → byoky-bridge → native messaging
 // → extension background → api.anthropic.com, then back.
 //
-// Prereqs already satisfied by the host dev env:
-//   - @byoky/bridge globally installed (fixtures.ts:installBridgeManifest)
-//   - openclaw globally installed
+// Live only (pnpm test:e2e:live). Prereqs:
+//   - the workspace bridge and plugin built (test:e2e:live does it); the
+//     plugin is installed from a `pnpm pack` of packages/openclaw-plugin
+//     unless BYOKY_OPENCLAW_PLUGIN names another spec or tarball
+//   - openclaw installed globally
 //   - ANTHROPIC_API_KEY in .env.local starting with sk-ant-oat01-
 
 const PASSWORD = 'MyStr0ng!P@ssw0rd';
@@ -102,7 +104,21 @@ async function waitForFile(filePath: string, timeoutMs: number): Promise<void> {
 
 test.describe.configure({ mode: 'serial' });
 
+function packWorkspacePlugin(): string {
+  const pluginDir = path.resolve(__dirname, '../../packages/openclaw-plugin');
+  if (!fs.existsSync(path.join(pluginDir, 'dist', 'index.js'))) {
+    throw new Error('packages/openclaw-plugin is not built — run: pnpm --filter @byoky/openclaw-plugin build');
+  }
+  const dest = fs.mkdtempSync(path.join(os.tmpdir(), 'byoky-openclaw-plugin-'));
+  execSync(`pnpm pack --pack-destination ${JSON.stringify(dest)}`, { cwd: pluginDir, stdio: 'inherit' });
+  const tarball = fs.readdirSync(dest).find((f) => f.endsWith('.tgz'));
+  if (!tarball) throw new Error('pnpm pack produced no tarball');
+  return path.join(dest, tarball);
+}
+
 test.describe('OpenClaw + byoky extension + bridge full flow', () => {
+  test.skip(!LIVE, 'live only: needs a real setup token, OpenClaw and api.anthropic.com (pnpm test:e2e:live)');
+
   test.beforeAll(async () => {
     // Isolated HOME so `openclaw plugins install` and the per-agent state
     // don't touch the dev's real ~/.openclaw.
@@ -112,7 +128,7 @@ test.describe('OpenClaw + byoky extension + bridge full flow', () => {
 
     // Register the native-messaging manifest inside the isolated HOME so
     // openclaw's preflight doesn't hit the interactive "register?" prompt.
-    execSync('byoky-bridge install', {
+    execSync(`${JSON.stringify(process.execPath)} ${JSON.stringify(bridgeBin())} install`, {
       env: { ...process.env, HOME: openclawHome },
       stdio: 'inherit',
     });
@@ -123,10 +139,11 @@ test.describe('OpenClaw + byoky extension + bridge full flow', () => {
     fs.mkdirSync(bridgeDir, { recursive: true, mode: 0o700 });
     fs.symlinkSync(bridgeDir, path.join(openclawHome, '.byoky-bridge'));
 
-    // Install @byoky/openclaw-plugin into the isolated openclaw config.
-    // --force makes the step idempotent across reruns. Set
-    // BYOKY_OPENCLAW_PLUGIN to a packed tarball to test an unreleased build.
-    const pluginSpec = process.env.BYOKY_OPENCLAW_PLUGIN ?? '@byoky/openclaw-plugin';
+    // Install the workspace @byoky/openclaw-plugin into the isolated
+    // openclaw config. --force makes the step idempotent across reruns. Set
+    // BYOKY_OPENCLAW_PLUGIN to test another build (e.g. @byoky/openclaw-plugin
+    // for the published one).
+    const pluginSpec = process.env.BYOKY_OPENCLAW_PLUGIN ?? packWorkspacePlugin();
     execSync(`openclaw plugins install ${JSON.stringify(pluginSpec)} --force`, {
       env: openclawEnv(),
       stdio: 'inherit',

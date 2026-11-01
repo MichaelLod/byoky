@@ -9,7 +9,7 @@ export default defineConfig([
     format: ['esm'],
     dts: true,
     clean: true,
-    target: 'node20',
+    target: 'node22',
   },
   {
     // Browser IIFE bundle served to the connect page at /auth-sdk.js.

@@ -116,16 +116,18 @@ async function sendInternalFromPopup<T = Record<string, unknown>>(
 
 test.describe.configure({ mode: 'serial' });
 
-test.describe('Byoky live end-to-end flow', () => {
+// Runs against the fake providers by default and against the real ones with
+// BYOKY_E2E_LIVE=1 (fixtures.ts). The flow is the same either way.
+test.describe('Byoky end-to-end flow', () => {
   // ── Wallet setup ───────────────────────────────────────
 
   test('wallet A — create wallet', async ({ walletA }) => {
     await setupWallet(walletA);
   });
 
-  // ── Import real keys from .env.local ───────────────────
+  // ── Import keys (.env.local in live mode, fakes otherwise) ──
 
-  test('wallet A — import real Anthropic, OpenAI, Gemini keys', async ({ walletA, apiKeys }) => {
+  test('wallet A — import Anthropic, OpenAI, Gemini keys', async ({ walletA, apiKeys }) => {
     await addCredential(walletA, 'anthropic', 'Live Anthropic A', apiKeys.anthropic);
     await addCredential(walletA, 'openai', 'Live OpenAI A', apiKeys.openai);
     await addCredential(walletA, 'gemini', 'Live Gemini A', apiKeys.gemini);
@@ -155,7 +157,7 @@ test.describe('Byoky live end-to-end flow', () => {
     expect(err.code).toBe('USER_REJECTED');
   });
 
-  // ── Real proxy flow (wallet A → real APIs) ─────────────
+  // ── Proxy flow (wallet A → provider APIs) ──────────────
 
   test('wallet A — connect demo page with all providers', async ({ walletA }) => {
     await connectFromPage(walletA, ['anthropic', 'openai', 'gemini']);
@@ -163,7 +165,7 @@ test.describe('Byoky live end-to-end flow', () => {
     expect(demoOrigin).toMatch(/^http:\/\/localhost:\d+$/);
   });
 
-  test('wallet A — real Anthropic call returns real text', async ({ walletA }) => {
+  test('wallet A — Anthropic call returns text', async ({ walletA }) => {
     const { response, proxyError } = await sendFromPage(walletA, 'sendAnthropic');
     expect(proxyError, `anthropic proxy error: ${JSON.stringify(proxyError)}`).toBeNull();
     const body = response as { content?: Array<{ text?: string }> };
@@ -171,21 +173,21 @@ test.describe('Byoky live end-to-end flow', () => {
     expect(body.content![0].text!.length).toBeGreaterThan(0);
   });
 
-  test('wallet A — real OpenAI call returns real text', async ({ walletA }) => {
+  test('wallet A — OpenAI call returns text', async ({ walletA }) => {
     const { response, proxyError } = await sendFromPage(walletA, 'sendOpenAI');
     expect(proxyError, `openai proxy error: ${JSON.stringify(proxyError)}`).toBeNull();
     const body = response as { choices?: Array<{ message?: { content?: string } }> };
     expect(body.choices?.[0]?.message?.content).toBeTruthy();
   });
 
-  test('wallet A — real Gemini call returns real text', async ({ walletA }) => {
+  test('wallet A — Gemini call returns text', async ({ walletA }) => {
     const { response, proxyError } = await sendFromPage(walletA, 'sendGemini');
     expect(proxyError, `gemini proxy error: ${JSON.stringify(proxyError)}`).toBeNull();
     const body = response as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
     expect(body.candidates?.[0]?.content?.parts?.[0]?.text).toBeTruthy();
   });
 
-  test('wallet A — real Anthropic streaming (SSE) returns text_delta events', async ({ walletA }) => {
+  test('wallet A — Anthropic streaming (SSE) returns text_delta events', async ({ walletA }) => {
     // Streaming uses a distinct code path — TransformStream in the background,
     // SSE rewriter for tool-name translation. Must be exercised separately.
     await walletA.page.bringToFront();
@@ -213,7 +215,7 @@ test.describe('Byoky live end-to-end flow', () => {
     expect(state.streamed!.text.length).toBeGreaterThan(0);
   });
 
-  test('wallet A — session usage reports real token counts', async ({ walletA }) => {
+  test('wallet A — session usage reports token counts', async ({ walletA }) => {
     await walletA.page.bringToFront();
     await walletA.page.evaluate(() => {
       (window as unknown as { _testState: { usage: null } })._testState.usage = null;
@@ -231,6 +233,24 @@ test.describe('Byoky live end-to-end flow', () => {
     expect(usage.requests).toBeGreaterThanOrEqual(3);
     expect(usage.inputTokens).toBeGreaterThan(0);
     expect(usage.outputTokens).toBeGreaterThan(0);
+  });
+
+  test('wallet A — providers got the wallet keys, never the app session key', async ({ walletA, apiKeys }) => {
+    test.skip(!walletA.fakes, 'needs the fake providers (default mode)');
+    const seen = walletA.fakes!.requests;
+    const sessionKey = await walletA.page.evaluate(
+      () => (window as unknown as { _testState: { session: { sessionKey: string } | null } })._testState.session?.sessionKey,
+    );
+    expect(sessionKey, 'the page should hold a session key').toBeTruthy();
+    for (const provider of ['anthropic', 'openai', 'gemini'] as const) {
+      expect(seen.some((r) => r.provider === provider), `${provider} was never called`).toBe(true);
+    }
+    for (const r of seen) {
+      expect(JSON.stringify({ headers: r.headers, body: r.body }), `${r.method} ${r.url}`).not.toContain(sessionKey!);
+    }
+    expect(seen.filter((r) => r.provider === 'anthropic').every((r) => r.headers['x-api-key'] === apiKeys.anthropic)).toBe(true);
+    expect(seen.filter((r) => r.provider === 'openai').every((r) => r.headers['authorization'] === `Bearer ${apiKeys.openai}`)).toBe(true);
+    expect(seen.filter((r) => r.provider === 'gemini').every((r) => r.headers['x-goog-api-key'] === apiKeys.gemini)).toBe(true);
   });
 
   // ── Groups + cross-family translation (wallet A) ───────

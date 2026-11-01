@@ -97,6 +97,33 @@ class ClaudeCodeShapingTest {
         assertSameJson(stringSystem.expected.body, failing.body)
     }
 
+    /**
+     * packages/core/tests/vectors/claude-code-shaping.json, "body". The JVM
+     * has no JS sandbox, so only the cases where no tool is renamed run here
+     * (shape() then takes the native prefix path); the renamed ones come from
+     * the bundled core and are covered by the iOS run of the same file.
+     */
+    @Test
+    fun matchesTheSharedVectorsWithoutRenames() {
+        val vectors = SharedVectors.load("claude-code-shaping.json").getJSONArray("body")
+        var checked = 0
+        for (i in 0 until vectors.length()) {
+            val v = vectors.getJSONObject(i)
+            if (v.getJSONObject("toolNameMap").length() > 0) continue
+            val shaped = ClaudeCodeShaping.shape(v.getString("body"), prepare = null)
+            val expected = v.getString("expected")
+            val name = v.getString("name")
+            if (expected.trimStart().startsWith("{")) {
+                assertTrue("$name\nexpected\n$expected\nactual\n${shaped.body}", JSONObject(expected).similar(JSONObject(shaped.body)))
+            } else {
+                assertEquals(name, expected, shaped.body)
+            }
+            assertTrue(name, shaped.toolNameMap.isEmpty())
+            checked++
+        }
+        assertTrue("no shared vectors without renames", checked > 0)
+    }
+
     @Test
     fun prefixHandlesEverySystemShapeLikeCore() {
         // Expected values from core injectClaudeCodeSystemPrompt(body).

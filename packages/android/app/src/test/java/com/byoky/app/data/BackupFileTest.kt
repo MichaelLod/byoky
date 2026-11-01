@@ -16,8 +16,8 @@ import java.io.File
 /**
  * `.byoky` compatibility with the extension and with itself.
  *
- * `backup/extension-v2.byoky` was produced outside this repo by a Node script
- * that imports packages/core/dist/index.js and calls the real core
+ * `backup/extension-v2.byoky` is written by scripts/gen-backup-fixtures.mjs,
+ * which imports packages/core/dist/index.js and calls the real core
  * `encrypt()` (WebCrypto, PBKDF2-SHA256 600k, AES-256-GCM) for every secret
  * and for the envelope, in the payload shape of
  * packages/extension/lib/vault-file.ts. It also carries the legacy `gifts` /

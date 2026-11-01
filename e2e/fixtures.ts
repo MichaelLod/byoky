@@ -3,17 +3,40 @@ import path from 'path';
 import http from 'http';
 import fs from 'fs';
 import os from 'os';
-import { execSync } from 'child_process';
+import { installFakeProviders, type FakeProviders } from './fake-providers';
 
 const EXTENSION_PATH = path.resolve(__dirname, '../packages/extension/.output/chrome-mv3');
 const TEST_PAGE_DIR = path.resolve(__dirname, 'test-page');
 const ENV_LOCAL_PATH = path.resolve(__dirname, '../.env.local');
+const BRIDGE_DIR = path.resolve(__dirname, '../packages/bridge');
+
+/**
+ * Two modes:
+ * - default: every provider is faked (fake-providers.ts) and every other
+ *   host is blackholed, so the run needs no keys, costs nothing and is safe
+ *   in CI. `pnpm test:e2e`.
+ * - BYOKY_E2E_LIVE=1: the real keys from .env.local against the real
+ *   providers, plus the specs that need them (OpenClaw, demo playground).
+ *   `pnpm test:e2e:live`.
+ * Both run headless; BYOKY_E2E_HEADED=1 shows the windows.
+ */
+export const LIVE = process.env.BYOKY_E2E_LIVE === '1';
+const HEADED = process.env.BYOKY_E2E_HEADED === '1';
+
+// Shaped like real keys; only the fakes ever see them.
+const FAKE_KEYS: ApiKeys = {
+  anthropic: 'sk-ant-api03-e2e-fake-anthropic-key',
+  openai: 'sk-proj-e2e-fake-openai-key',
+  gemini: 'AIza-e2e-fake-gemini-key',
+};
 
 export interface Wallet {
   ctx: BrowserContext;
   popup: Page;
   page: Page;
   extensionId: string;
+  /** The fake providers' request log; null in live mode. */
+  fakes: FakeProviders | null;
 }
 
 export interface ApiKeys {
@@ -34,7 +57,7 @@ let serverPort = 0;
 
 // Exported so a spec (openclaw-flow.spec.ts) can stand up its own fresh
 // wallet without touching the shared fixture state.
-export { launchWallet, loadApiKeys, startServer };
+export { launchWallet, loadApiKeys, startServer, bridgeBin };
 
 function parseEnvFile(filePath: string): Record<string, string> {
   const out: Record<string, string> = {};
@@ -55,14 +78,16 @@ function parseEnvFile(filePath: string): Record<string, string> {
   return out;
 }
 
+/** Live mode: the real keys from .env.local. Default mode: fake keys. */
 function loadApiKeys(): ApiKeys {
+  if (!LIVE) return FAKE_KEYS;
   const env = parseEnvFile(ENV_LOCAL_PATH);
   const anthropic = env.ANTHROPIC_API_KEY;
   const openai = env.OPENAI_API_KEY;
   const gemini = env.GEMINI_API_KEY;
   if (!anthropic || !openai || !gemini) {
     throw new Error(
-      'Missing API keys in .env.local — need ANTHROPIC_API_KEY, OPENAI_API_KEY, and GEMINI_API_KEY for live e2e',
+      'Missing API keys in .env.local — need ANTHROPIC_API_KEY, OPENAI_API_KEY, and GEMINI_API_KEY for live e2e (see .env.local.example)',
     );
   }
   return { anthropic, openai, gemini };
@@ -106,22 +131,34 @@ function startServer(): Promise<number> {
 }
 
 /**
+ * The bridge CLI under test: the workspace build, so a run checks the
+ * bridge that ships with this extension, not whatever is installed
+ * globally. BYOKY_E2E_BRIDGE points at another byoky-bridge.js.
+ */
+function bridgeBin(): string {
+  const override = process.env.BYOKY_E2E_BRIDGE;
+  if (override) {
+    if (!fs.existsSync(override)) throw new Error(`BYOKY_E2E_BRIDGE=${override} does not exist`);
+    return path.resolve(override);
+  }
+  if (!fs.existsSync(path.join(BRIDGE_DIR, 'dist', 'host.js'))) {
+    throw new Error('packages/bridge is not built — run: pnpm --filter @byoky/bridge build (pnpm test:e2e does)');
+  }
+  return path.join(BRIDGE_DIR, 'bin', 'byoky-bridge.js');
+}
+
+/**
  * Write a native-messaging manifest into <user_data_dir>/NativeMessagingHosts/
  * so the extension can spawn the Byoky Bridge. Playwright's bundled Chromium
  * does NOT pick up the system-wide manifest at
  * ~/Library/Application Support/Chromium/NativeMessagingHosts/ when launched
  * with a custom user-data-dir, so we install a per-profile copy that points
- * at the globally-installed byoky-bridge CLI via a shell wrapper (Chrome
- * spawns native hosts with a minimal PATH, which is why we need the wrapper
- * to set PATH and call node with an absolute path).
+ * at the workspace byoky-bridge CLI via a shell wrapper (Chrome spawns
+ * native hosts with a minimal PATH, which is why we need the wrapper to set
+ * PATH and call node with an absolute path).
  */
 function installBridgeManifest(userDataDir: string, extensionId: string): void {
-  let bridgeBin: string;
-  try {
-    bridgeBin = execSync('which byoky-bridge', { encoding: 'utf-8' }).trim();
-  } catch {
-    throw new Error('byoky-bridge CLI not found on PATH — install with: pnpm --filter @byoky/bridge build && npm link (or npm i -g @byoky/bridge)');
-  }
+  const bin = bridgeBin();
   const nodeBin = process.execPath;
   const nodeDir = path.dirname(nodeBin);
 
@@ -132,7 +169,7 @@ function installBridgeManifest(userDataDir: string, extensionId: string): void {
   const wrapper = [
     '#!/bin/bash',
     `export PATH='${nodeDir}:/usr/local/bin:/usr/bin:/bin'`,
-    `exec '${nodeBin}' '${bridgeBin}' host "$@"`,
+    `exec '${nodeBin}' '${bin}' host "$@"`,
     '',
   ].join('\n');
   fs.writeFileSync(wrapperPath, wrapper);
@@ -165,9 +202,10 @@ async function launchWallet(label: string, port: number): Promise<Wallet> {
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), `byoky-e2e-${label}-`));
   installBridgeManifest(userDataDir, EXPECTED_EXTENSION_ID);
 
-  // BYOKY_E2E_HEADLESS=1 uses Chromium's new headless mode, which still loads
-  // extensions, for machines without a usable display (locked, lid closed).
-  const headless = process.env.BYOKY_E2E_HEADLESS === '1';
+  // Headless uses Chromium's new headless mode (channel 'chromium'), which
+  // still loads extensions and needs no display. The config's `headless`
+  // and `--headed` don't apply to a persistent context launched here.
+  const headless = !HEADED;
   const ctx = await chromium.launchPersistentContext(userDataDir, {
     headless,
     ...(headless ? { channel: 'chromium' } : {}),
@@ -176,8 +214,15 @@ async function launchWallet(label: string, port: number): Promise<Wallet> {
       `--load-extension=${EXTENSION_PATH}`,
       '--no-first-run',
       '--disable-default-apps',
+      // Never touch the macOS login keychain (it would prompt the user).
+      '--use-mock-keychain',
+      '--password-store=basic',
+      // Default mode: nothing leaves the machine. The fakes answer the
+      // provider hosts before DNS; anything they don't cover fails here.
+      ...(LIVE ? [] : ['--host-resolver-rules=MAP * 127.0.0.1:9, EXCLUDE localhost']),
     ],
   });
+  const fakes = LIVE ? null : await installFakeProviders(ctx, FAKE_KEYS);
 
   let extensionId = '';
   const workers = ctx.serviceWorkers();
@@ -208,7 +253,7 @@ async function launchWallet(label: string, port: number): Promise<Wallet> {
   await popup.evaluate((l) => { document.title = `[${l}] popup`; }, label);
   await page.evaluate((l) => { document.title = `[${l}] page`; }, label);
 
-  return { ctx, popup, page, extensionId };
+  return { ctx, popup, page, extensionId, fakes };
 }
 
 async function ensureWallet() {

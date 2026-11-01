@@ -110,6 +110,51 @@ final class ClaudeCodeShapingTests: XCTestCase {
         XCTAssertEqual(request.value(forHTTPHeaderField: "anthropic-version"), "2023-06-01")
     }
 
+    // MARK: - Shared vectors
+
+    /// packages/core/tests/vectors/claude-code-shaping.json, computed by core
+    /// the way the extension shapes setup-token requests. Runs the bundled
+    /// mobile.js, so it also catches a stale bundle.
+    func testBodiesMatchTheSharedVectors() throws {
+        let vectors = try XCTUnwrap(try SharedVectors.load("claude-code-shaping")["body"] as? [[String: Any]])
+        XCTAssertFalse(vectors.isEmpty)
+        for v in vectors {
+            let name = try XCTUnwrap(v["name"] as? String)
+            let input = try XCTUnwrap(v["body"] as? String)
+            let expected = try XCTUnwrap(v["expected"] as? String)
+            let map = try XCTUnwrap(v["toolNameMap"] as? [String: String])
+            let shaped = ClaudeCodeShaping.shape(body: input)
+            XCTAssertEqual(shaped.toolNameMap, map, name)
+            if let expectedObject = try? JSONSerialization.jsonObject(with: Data(expected.utf8)) as? NSDictionary {
+                let actualObject = try JSONSerialization.jsonObject(with: Data(try XCTUnwrap(shaped.body, name).utf8)) as? NSDictionary
+                XCTAssertEqual(actualObject, expectedObject, name)
+            } else {
+                XCTAssertEqual(shaped.body, expected, name)
+            }
+        }
+    }
+
+    func testHeadersMatchTheSharedVectors() throws {
+        let vectors = try XCTUnwrap(try SharedVectors.load("claude-code-shaping")["headers"] as? [[String: Any]])
+        XCTAssertFalse(vectors.isEmpty)
+        for v in vectors {
+            let name = try XCTUnwrap(v["name"] as? String)
+            let authMethod: AuthMethod
+            switch try XCTUnwrap(v["authMethod"] as? String) {
+            case "oauth": authMethod = .oauth
+            case "api_key": authMethod = .apiKey
+            case let other: return XCTFail("\(name): unknown authMethod \(other)")
+            }
+            var request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
+            for (key, value) in try XCTUnwrap(v["headers"] as? [String: String]) {
+                request.setValue(value, forHTTPHeaderField: key)
+            }
+            Credential.applyAuth(to: &request, providerId: "anthropic", authMethod: authMethod, apiKey: try XCTUnwrap(v["apiKey"] as? String))
+            let actual = Dictionary(uniqueKeysWithValues: (request.allHTTPHeaderFields ?? [:]).map { ($0.key.lowercased(), $0.value) })
+            XCTAssertEqual(actual, try XCTUnwrap(v["expected"] as? [String: String]), name)
+        }
+    }
+
     // MARK: - Helpers
 
     private func assertJSON(_ actual: String?, equals expected: String, file: StaticString = #filePath, line: UInt = #line) throws {
