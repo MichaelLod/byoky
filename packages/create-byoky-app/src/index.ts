@@ -26,7 +26,19 @@ const TEMPLATES = [
   },
 ] as const;
 
-type TemplateId = (typeof TEMPLATES)[number]['id'];
+type Template = (typeof TEMPLATES)[number];
+
+const USAGE = `
+  Usage: create-byoky-app [project-name] [options]
+
+  Options:
+    -t, --template <name>  ${TEMPLATES.map((t) => t.id).join(', ')}
+    -h, --help             Show this help
+    -v, --version          Show the version
+
+  Example:
+    npx create-byoky-app my-app --template chat
+`;
 
 function printBanner(): void {
   console.log();
@@ -37,16 +49,116 @@ function printBanner(): void {
   console.log();
 }
 
-function ask(rl: readline.Interface, question: string): Promise<string> {
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      resolve(answer.trim());
-    });
-  });
+function fail(message: string): never {
+  console.error(`\n  Error: ${message}\n`);
+  process.exit(1);
 }
 
+interface CliOptions {
+  projectName?: string;
+  template?: string;
+}
+
+type CliArgs = { kind: 'help' } | { kind: 'version' } | ({ kind: 'run' } & CliOptions);
+
+function parseArgs(argv: readonly string[]): CliArgs {
+  const options: CliOptions = {};
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '-h' || arg === '--help') return { kind: 'help' };
+    if (arg === '-v' || arg === '--version') return { kind: 'version' };
+    if (arg === '-t' || arg === '--template' || arg.startsWith('--template=')) {
+      const value = arg.startsWith('--template=') ? arg.slice('--template='.length) : argv[++i];
+      if (!value || value.startsWith('-')) fail(`--template needs a template name.\n${USAGE}`);
+      options.template = value;
+    } else if (arg.startsWith('-')) {
+      fail(`Unknown option "${arg}".\n${USAGE}`);
+    } else if (options.projectName === undefined) {
+      options.projectName = arg;
+    } else {
+      fail(`Unexpected argument "${arg}": give one project name.\n${USAGE}`);
+    }
+  }
+  return { kind: 'run', ...options };
+}
+
+/** Looks a template up by id or by its number in the menu. */
+function findTemplate(choice: string): Template | undefined {
+  if (/^\d+$/.test(choice)) return TEMPLATES[Number(choice) - 1];
+  return TEMPLATES.find((t) => t.id === choice);
+}
+
+interface Prompter {
+  /** Resolves to the trimmed answer, or null once input has ended. */
+  ask(question: string): Promise<string | null>;
+  close(): void;
+}
+
+// readline's question() only sees a line that arrives while that question is
+// open. With piped answers every later line was dropped, and when stdin ended
+// node exited 0 without creating anything. This queues lines as they arrive
+// and reports the end of input, so the caller can fail instead. stdin is only
+// opened on the first question.
+function createPrompter(): Prompter {
+  const lines: string[] = [];
+  let waiting: ((line: string | null) => void) | undefined;
+  let ended = false;
+  let rl: readline.Interface | undefined;
+
+  const open = (): readline.Interface => {
+    const iface = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+      terminal: Boolean(process.stdin.isTTY && process.stdout.isTTY),
+    });
+    iface.on('line', (line) => {
+      const deliver = waiting;
+      waiting = undefined;
+      if (deliver) deliver(line);
+      else lines.push(line);
+    });
+    iface.on('close', () => {
+      ended = true;
+      const deliver = waiting;
+      waiting = undefined;
+      deliver?.(null);
+    });
+    rl = iface;
+    return iface;
+  };
+
+  return {
+    ask(question) {
+      const iface = rl ?? open();
+      if (ended) {
+        process.stdout.write(question);
+      } else {
+        iface.setPrompt(question);
+        iface.prompt();
+      }
+      return new Promise((resolve) => {
+        const answer = (line: string | null): void => {
+          // Typed answers are echoed by the terminal; piped ones are not.
+          if (line !== null && !process.stdin.isTTY) process.stdout.write(`${line}\n`);
+          resolve(line === null ? null : line.trim());
+        };
+        const queued = lines.shift();
+        if (queued !== undefined) answer(queued);
+        else if (ended) answer(null);
+        else waiting = answer;
+      });
+    },
+    close() {
+      rl?.close();
+    },
+  };
+}
+
+// The project name becomes the package name, so it follows npm's main rules:
+// lowercase, at most 214 characters, starting with a letter or digit. That
+// also keeps it from reading as an option or a path.
 function isValidProjectName(name: string): boolean {
-  return /^[a-zA-Z0-9_-]+$/.test(name) && name.length > 0;
+  return name.length <= 214 && /^[a-z0-9][a-z0-9._-]*$/.test(name);
 }
 
 function getTemplatesDir(): string {
@@ -73,9 +185,11 @@ function copyTemplateDir(srcDir: string, destDir: string, projectName: string): 
 
   for (const entry of entries) {
     const srcPath = path.join(srcDir, entry.name);
-    const destName = entry.name.endsWith('.tpl')
+    const baseName = entry.name.endsWith('.tpl')
       ? entry.name.slice(0, -4)
       : entry.name;
+    // npm does not publish files named .gitignore, so templates ship it as "gitignore".
+    const destName = baseName === 'gitignore' ? '.gitignore' : baseName;
     const destPath = path.join(destDir, destName);
 
     if (entry.isDirectory()) {
@@ -91,56 +205,70 @@ function copyTemplateDir(srcDir: string, destDir: string, projectName: string): 
 }
 
 async function main(): Promise<void> {
-  const command = process.argv[2];
+  const args = parseArgs(process.argv.slice(2));
+  if (args.kind === 'help') {
+    console.log(USAGE);
+    return;
+  }
+  if (args.kind === 'version') {
+    console.log(SDK_VERSION);
+    return;
+  }
+
+  const presetTemplate = args.template === undefined ? undefined : findTemplate(args.template);
+  if (args.template !== undefined && !presetTemplate) {
+    fail(`Unknown template "${args.template}". Choose one of: ${TEMPLATES.map((t) => t.id).join(', ')}.`);
+  }
 
   printBanner();
 
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
+  const prompter = createPrompter();
+  const ask = async (question: string, what: string): Promise<string> => {
+    const answer = await prompter.ask(question);
+    if (answer === null) {
+      fail(
+        `Input ended before ${what} was given.\n` +
+          '  To run without prompts: npx create-byoky-app my-app --template chat',
+      );
+    }
+    return answer;
+  };
 
   try {
-    let projectName = command;
+    const projectName = args.projectName ?? (await ask('  Project name: ', 'a project name'));
 
     if (!projectName) {
-      projectName = await ask(rl, '  Project name: ');
-    }
-
-    if (!projectName) {
-      console.error('\n  Error: Project name is required.\n');
-      process.exit(1);
+      fail('Project name is required.');
     }
 
     if (!isValidProjectName(projectName)) {
-      console.error('\n  Error: Project name can only contain letters, numbers, hyphens, and underscores.\n');
-      process.exit(1);
+      fail(
+        'Project name must be lowercase letters, numbers, ".", "-" or "_", ' +
+          'start with a letter or number, and be at most 214 characters.',
+      );
     }
 
     const targetDir = path.resolve(process.cwd(), projectName);
 
     if (fs.existsSync(targetDir)) {
-      console.error(`\n  Error: Directory "${projectName}" already exists.\n`);
-      process.exit(1);
+      fail(`Directory "${projectName}" already exists.`);
     }
 
-    console.log('\n  Choose a template:\n');
-    for (let i = 0; i < TEMPLATES.length; i++) {
-      const t = TEMPLATES[i];
-      console.log(`    ${i + 1}. ${t.name}`);
-      console.log(`       ${t.description}\n`);
+    let template = presetTemplate;
+    if (!template) {
+      console.log('\n  Choose a template:\n');
+      for (let i = 0; i < TEMPLATES.length; i++) {
+        const t = TEMPLATES[i];
+        console.log(`    ${i + 1}. ${t.name}`);
+        console.log(`       ${t.description}\n`);
+      }
+
+      template = findTemplate(await ask(`  Template (1-${TEMPLATES.length}): `, 'a template choice'));
+      if (!template) {
+        fail('Invalid template choice.');
+      }
     }
-
-    const choice = await ask(rl, '  Template (1-3): ');
-    const choiceNum = parseInt(choice, 10);
-
-    if (isNaN(choiceNum) || choiceNum < 1 || choiceNum > TEMPLATES.length) {
-      console.error('\n  Error: Invalid template choice.\n');
-      process.exit(1);
-    }
-
-    const template = TEMPLATES[choiceNum - 1];
-    const templateId: TemplateId = template.id;
+    const templateId = template.id;
 
     console.log(`\n  Creating ${projectName} with ${template.name}...\n`);
 
@@ -148,8 +276,7 @@ async function main(): Promise<void> {
     const templateDir = path.join(templatesDir, templateId);
 
     if (!fs.existsSync(templateDir)) {
-      console.error(`\n  Error: Template "${templateId}" not found.\n`);
-      process.exit(1);
+      fail(`Template "${templateId}" not found.`);
     }
 
     fs.mkdirSync(targetDir, { recursive: true });
@@ -179,7 +306,7 @@ async function main(): Promise<void> {
     }
     process.exit(1);
   } finally {
-    rl.close();
+    prompter.close();
   }
 }
 

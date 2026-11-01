@@ -8,13 +8,15 @@ Scaffold a new app powered by [Byoky](https://byoky.com). Choose a template, get
 npx create-byoky-app
 ```
 
-Or with a project name:
+The CLI asks for a project name and a template, then generates the project and prints next steps.
+
+Pass both to skip the prompts (for scripts and CI):
 
 ```bash
-npx create-byoky-app my-ai-app
+npx create-byoky-app my-ai-app --template chat
 ```
 
-The CLI prompts you to pick a template, then generates the project and prints next steps.
+Templates: `chat`, `multi-provider`, `backend-relay`. Run `npx create-byoky-app --help` for all options.
 
 ## Templates
 
@@ -47,6 +49,7 @@ Server-side LLM calls through the user's wallet. The server never sees API keys.
 
 ```
 my-ai-app/
+  .gitignore
   package.json
   tsconfig.json
   src/
