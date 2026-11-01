@@ -76,7 +76,12 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.focused
+import androidx.compose.ui.semantics.requestFocus
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.text
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -393,7 +398,9 @@ fun Modifier.bottomSeam(color: Color = Seam): Modifier =
  * Text input: void background and a 1px seam-strong border that turns violet
  * with a focus ring. The label sits above the field in mono capitals; tapping
  * it focuses the field. Secrets, keys and URLs pass [mono] for IBM Plex Mono.
- * [fieldModifier] goes on the field itself (an exposed dropdown's menuAnchor).
+ * [fieldModifier] goes on the field itself (an exposed dropdown's menuAnchor),
+ * or for a [readOnly] field, which is such a dropdown, on caption and field
+ * together: TalkBack reads its label and value and calls it a drop-down list.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -458,11 +465,50 @@ fun RetroTextField(
         disabledPlaceholderColor = Dim,
     )
 
-    Column(modifier.bringIntoViewRequester(bringIntoView)) {
+    // The caption above the box. Tapping it focuses the field and leaves the
+    // cursor where it was; the tap is consumed here, so the field doesn't
+    // move the cursor to it.
+    val caption: @Composable () -> Unit = {
+        if (label != null) {
+            SectionLabel(
+                label,
+                color = if (isError) Alarm else Fog,
+                modifier = Modifier.pointerInput(enabled) {
+                    detectTapGestures { if (enabled) focusRequester.requestFocus() }
+                },
+            )
+            Spacer(Modifier.height(6.dp))
+        }
+    }
+    // A read-only field is a picker: an exposed dropdown's anchor, which
+    // menuAnchor in [fieldModifier] gives the drop-down list role. Compose
+    // hands TalkBack a role (as android.widget.Spinner here) only for a node
+    // without children, and a text field has them: its caption, and the
+    // magnifier's node whenever it has focus, as it does once the menu has
+    // opened. With either, the picker read as an edit box. So a picker puts
+    // [fieldModifier] on the whole column and replaces what's inside with
+    // one description of caption and value. TalkBack reads a description
+    // instead of the text of anything that isn't editable, and Compose drops
+    // a state description from a text field.
+    val pickerModifier = if (readOnly) {
+        fieldModifier.clearAndSetSemantics {
+            contentDescription = listOfNotNull(label, value, supportingText).joinToString(", ")
+            text = AnnotatedString(value)
+            // The field inside still takes focus, from a keyboard too.
+            this.focused = focused
+            requestFocus { focusRequester.requestFocus(); true }
+            if (!enabled) disabled()
+        }
+    } else {
+        Modifier
+    }
+
+    Column(modifier.bringIntoViewRequester(bringIntoView).then(pickerModifier)) {
+        if (readOnly) caption()
         BasicTextField(
             value = value,
             onValueChange = onValueChange,
-            modifier = fieldModifier
+            modifier = (if (readOnly) Modifier else fieldModifier)
                 .fillMaxWidth()
                 .focusRequester(focusRequester),
             enabled = enabled,
@@ -483,25 +529,13 @@ fun RetroTextField(
             interactionSource = interactionSource,
             cursorBrush = SolidColor(if (isError) Alarm else Phosphor),
             decorationBox = { innerTextField ->
-                // The caption is drawn inside the field, as Material's
+                // An editable field draws its caption inside, as Material's
                 // OutlinedTextField does with its label: the field's node
                 // merges it, so TalkBack names the field and still reads what
                 // was typed. A contentDescription on an editable field can be
                 // read instead of its text.
                 Column {
-                    if (label != null) {
-                        SectionLabel(
-                            label,
-                            color = if (isError) Alarm else Fog,
-                            // Tapping the caption focuses the field and leaves
-                            // the cursor where it was; the tap is consumed
-                            // here, so the field doesn't move the cursor to it.
-                            modifier = Modifier.pointerInput(enabled) {
-                                detectTapGestures { if (enabled) focusRequester.requestFocus() }
-                            },
-                        )
-                        Spacer(Modifier.height(6.dp))
-                    }
+                    if (!readOnly) caption()
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
